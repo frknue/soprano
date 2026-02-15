@@ -1,0 +1,18 @@
+:root {
+  --bg-base: #1e1e2e;
+  --bg-panel: #181825;
+  --bg-raised: #11111b;
+  --bg-overlay: #313244;
+  --text-primary: #cdd6f4;
+  --text-muted: #a6adc8;
+  --accent: #cba6f7;
+  --accent-strong: #f5c2e7;
+  --border-subtle: #313244;
+  --border-strong: #45475a;
+  --success: #a6e3a1;
+  --danger: #f38ba8;
+  --shadow-xl: 0 16px 42px rgb(0 0 0 / 42%);
+  --status-height: 28px;
+  --activity-bar-width: 48px;
+  --sidebar-panel-width: 260px;
+}

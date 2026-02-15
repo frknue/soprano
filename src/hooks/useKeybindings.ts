@@ -1,0 +1,173 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { loadKeybindingConfig } from "../config/keybindings";
+import { KeyBinding, KeyBindingConfig } from "../types/keybinding";
+import { AgentManager } from "./useAgentManager";
+
+export type KeybindingMode = "NORMAL" | "PREFIX";
+
+function stopEvent(event: KeyboardEvent): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+interface KeybindingOptions {
+  onSaveSession?: () => void;
+  onToggleSidebar?: () => void;
+  onOpenSettings?: () => void;
+}
+
+function matchDirectBinding(event: KeyboardEvent, binding: KeyBinding): boolean {
+  return (
+    event.key.toLowerCase() === binding.key &&
+    event.ctrlKey === !!binding.ctrl &&
+    event.metaKey === !!binding.meta &&
+    event.shiftKey === !!binding.shift
+  );
+}
+
+export function useKeybindings(
+  agentManager: AgentManager,
+  callbacks: KeybindingOptions = {},
+): {
+  mode: KeybindingMode;
+  isPaletteOpen: boolean;
+  togglePalette: () => void;
+  config: KeyBindingConfig;
+  updateConfig: (config: KeyBindingConfig) => void;
+} {
+  const [config, setConfig] = useState<KeyBindingConfig>(() => loadKeybindingConfig());
+  const [mode, setMode] = useState<KeybindingMode>("NORMAL");
+  const [isPaletteOpen, setPaletteOpen] = useState(false);
+  const prefixTimerRef = useRef<number | null>(null);
+  const modeRef = useRef<KeybindingMode>("NORMAL");
+
+  const agentManagerRef = useRef(agentManager);
+  agentManagerRef.current = agentManager;
+
+  const callbacksRef = useRef(callbacks);
+  callbacksRef.current = callbacks;
+
+  const togglePalette = useCallback((): void => {
+    setPaletteOpen((prev) => !prev);
+  }, []);
+
+  const togglePaletteRef = useRef(togglePalette);
+  togglePaletteRef.current = togglePalette;
+
+  useEffect(() => {
+    const clearPrefixMode = (): void => {
+      modeRef.current = "NORMAL";
+      setMode("NORMAL");
+      if (prefixTimerRef.current !== null) {
+        window.clearTimeout(prefixTimerRef.current);
+        prefixTimerRef.current = null;
+      }
+    };
+
+    const startPrefixMode = (): void => {
+      modeRef.current = "PREFIX";
+      setMode("PREFIX");
+      if (prefixTimerRef.current !== null) {
+        window.clearTimeout(prefixTimerRef.current);
+      }
+
+      prefixTimerRef.current = window.setTimeout(() => {
+        modeRef.current = "NORMAL";
+        setMode("NORMAL");
+        prefixTimerRef.current = null;
+      }, config.prefixTimeoutMs);
+    };
+
+    const executeBinding = (binding: KeyBinding): void => {
+      const mgr = agentManagerRef.current;
+      const cbs = callbacksRef.current;
+
+      const actions: Record<string, () => void> = {
+         "nav-left": () => mgr.navigateToPane("left"),
+         "nav-right": () => mgr.navigateToPane("right"),
+         "nav-up": () => mgr.navigateToPane("up"),
+         "nav-down": () => mgr.navigateToPane("down"),
+         "resize-left": () => mgr.resizePane("left", config.resizeTickPercent),
+         "resize-right": () => mgr.resizePane("right", config.resizeTickPercent),
+         "resize-up": () => mgr.resizePane("up", config.resizeTickPercent),
+         "resize-down": () => mgr.resizePane("down", config.resizeTickPercent),
+         "split-horizontal": () => mgr.splitPane("column", mgr.activePaneId),
+         "split-vertical": () => mgr.splitPane("row", mgr.activePaneId),
+         "close-pane": () => mgr.closePane(mgr.activePaneId),
+         "kill-pane": () => mgr.closePane(mgr.activePaneId),
+         "new-pane-tab": () => mgr.addTabToPane(mgr.activePaneId, "terminal"),
+         "next-pane-tab": () => mgr.nextTab(mgr.activePaneId),
+         "prev-pane-tab": () => mgr.prevTab(mgr.activePaneId),
+         "close-pane-tab": () => {
+           const pane = mgr.panes.get(mgr.activePaneId);
+           if (pane && pane.tabs.length > 0) {
+             const tab = pane.tabs[pane.activeTabIndex];
+             if (tab) mgr.removeTabFromPane(mgr.activePaneId, tab.id);
+           }
+         },
+         "launch-codex": () => mgr.spawnAgent("codex"),
+         "launch-claude-code": () => mgr.spawnAgent("claude-code"),
+         "launch-opencode": () => mgr.spawnAgent("opencode"),
+         "launch-openclaw": () => mgr.spawnAgent("openclaw"),
+         "command-palette": () => togglePaletteRef.current(),
+         "new-terminal": () => mgr.spawnTerminal(),
+         "new-browser": () => mgr.spawnBrowser(),
+         "close-active": () => mgr.closePane(mgr.activePaneId),
+         "save-session": () => cbs.onSaveSession?.(),
+         "toggle-sidebar": () => cbs.onToggleSidebar?.(),
+         "open-settings": () => cbs.onOpenSettings?.(),
+       };
+
+      const action = actions[binding.id];
+      if (action) {
+        action();
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      const normalizedKey = event.key.toLowerCase();
+      const isPrefixActivation =
+        event.ctrlKey && normalizedKey === config.prefixKey && !event.metaKey && !event.shiftKey;
+
+      if (isPrefixActivation) {
+        stopEvent(event);
+        startPrefixMode();
+        return;
+      }
+
+      if (modeRef.current === "PREFIX") {
+        stopEvent(event);
+        const prefixBinding = config.bindings.find(
+          (binding) => binding.mode === "prefix" && binding.key === normalizedKey,
+        );
+        if (prefixBinding) {
+          executeBinding(prefixBinding);
+        }
+        clearPrefixMode();
+        return;
+      }
+
+      const directBinding = config.bindings.find(
+        (binding) => binding.mode === "direct" && matchDirectBinding(event, binding),
+      );
+      if (!directBinding) {
+        return;
+      }
+
+      stopEvent(event);
+      executeBinding(directBinding);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
+      if (prefixTimerRef.current !== null) {
+        window.clearTimeout(prefixTimerRef.current);
+        prefixTimerRef.current = null;
+      }
+    };
+  }, [config]);
+
+  return { mode, isPaletteOpen, togglePalette, config, updateConfig: setConfig };
+}
