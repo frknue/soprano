@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { MosaicDirection, MosaicNode } from "react-mosaic-component";
 import { getAgentById } from "../config/agents";
+import { SavedWorkspace } from "../config/settings";
 import { activeTab, AgentProfile, AgentStatus, PaneState, PaneTab, PaneType } from "../types/agent";
 
 interface AgentManagerState {
@@ -321,10 +322,57 @@ function adjustSplitAtPath(
   return updateNode(root, 0);
 }
 
-export function useAgentManager(): AgentManager {
+function buildStateFromSaved(saved: SavedWorkspace): { state: AgentManagerState; maxId: number } {
+  const panes = new Map<string, PaneState>();
+  let maxId = 1;
+
+  for (const p of saved.panes) {
+    const num = parseIdNumber(p.id);
+    if (num !== null) maxId = Math.max(maxId, num);
+
+    const tabs = p.tabs.map((t) => {
+      const tNum = parseIdNumber(t.id);
+      if (tNum !== null) maxId = Math.max(maxId, tNum);
+      return createPaneTab(t.id, t.type, t.profileId);
+    });
+
+    if (tabs.length === 0) {
+      maxId += 1;
+      tabs.push(createPaneTab(`tab-${maxId}`, "terminal"));
+    }
+
+    panes.set(p.id, {
+      id: p.id,
+      tabs,
+      activeTabIndex: clampTabIndex(p.activeTabIndex ?? 0, tabs.length),
+    });
+  }
+
+  const layout = saved.layout ?? saved.panes[0]?.id ?? null;
+  const firstLeaf = layout ? getFirstLeaf(layout) : null;
+  const activePaneId =
+    saved.activePaneId && panes.has(saved.activePaneId)
+      ? saved.activePaneId
+      : firstLeaf && panes.has(firstLeaf)
+        ? firstLeaf
+        : saved.panes[0]?.id ?? "pane-1";
+
+  return {
+    state: { panes, activePaneId, layout },
+    maxId,
+  };
+}
+
+export function useAgentManager(initialWorkspace?: SavedWorkspace | null): AgentManager {
   const nextIdRef = useRef(2);
 
   const [state, setState] = useState<AgentManagerState>(() => {
+    if (initialWorkspace && initialWorkspace.panes.length > 0) {
+      const { state: restored, maxId } = buildStateFromSaved(initialWorkspace);
+      nextIdRef.current = maxId;
+      return restored;
+    }
+
     const initialPaneId = "pane-1";
     const initialPane = createPaneState(initialPaneId, "tab-2", "terminal");
 

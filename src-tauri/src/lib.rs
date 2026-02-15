@@ -24,6 +24,27 @@ struct McpServerInfo {
     running: bool,
 }
 
+fn kill_stale_process_on_port(port: u16) {
+    if let Ok(output) = Command::new("lsof")
+        .args(["-ti", &format!(":{}", port)])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+    {
+        let pids = String::from_utf8_lossy(&output.stdout);
+        for pid in pids.lines() {
+            let pid = pid.trim();
+            if !pid.is_empty() {
+                let _ = Command::new("kill").args(["-9", pid]).output();
+            }
+        }
+
+        if !pids.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+    }
+}
+
 #[tauri::command]
 fn spawn_mcp_server(
     state: State<'_, McpPoolState>,
@@ -39,6 +60,8 @@ fn spawn_mcp_server(
     if pool.servers.contains_key(&id) {
         return Err(format!("Server '{}' is already running", id));
     }
+
+    kill_stale_process_on_port(port);
 
     let child = if transport == "stdio" {
         let stdio_cmd = if args.is_empty() {
