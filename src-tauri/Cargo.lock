@@ -3151,6 +3151,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-os",
  "tauri-plugin-pty",
+ "toml 0.8.2",
  "url",
 ]
 
