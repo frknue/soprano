@@ -291,7 +291,7 @@ function McpServersTab({ mcpManager }: { mcpManager: McpManager }) {
       id: name.toLowerCase().replace(/\s+/g, "-"),
       name,
       icon: "plug",
-      color: "#94e2d5",
+      color: "#8ec07c",
       command,
       args: newArgs.trim() ? newArgs.trim().split(/\s+/) : [],
       transport: newTransport,

@@ -14,7 +14,7 @@
   min-height: 48px;
   padding: 0 20px;
   border-bottom: 1px solid var(--border-subtle);
-  background: linear-gradient(180deg, rgb(30 30 46 / 80%), rgb(24 24 37 / 95%));
+  background: linear-gradient(180deg, rgb(40 40 40 / 80%), rgb(29 32 33 / 95%));
 }
 
 .settings-page-title-row {
@@ -47,7 +47,7 @@
 
 .settings-close-btn:hover {
   border-color: var(--border-subtle);
-  background: rgb(49 50 68 / 40%);
+  background: rgb(60 56 54 / 40%);
   color: var(--text-primary);
 }
 
@@ -56,7 +56,7 @@
   gap: 0;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-subtle);
-  background: rgb(24 24 37 / 60%);
+  background: rgb(29 32 33 / 60%);
 }
 
 .settings-tab-btn {
@@ -88,7 +88,7 @@
   overflow-y: auto;
   padding: 24px 32px 48px;
   scrollbar-width: thin;
-  scrollbar-color: rgb(69 71 90 / 50%) transparent;
+  scrollbar-color: rgb(102 92 84 / 50%) transparent;
 }
 
 .settings-page-content::-webkit-scrollbar {
@@ -101,7 +101,7 @@
 
 .settings-page-content::-webkit-scrollbar-thumb {
   border-radius: 4px;
-  background: rgb(69 71 90 / 50%);
+  background: rgb(102 92 84 / 50%);
 }
 
 .settings-section {
@@ -146,7 +146,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0 10px;
-  background: rgb(17 17 27 / 80%);
+  background: rgb(29 32 33 / 80%);
   color: var(--text-primary);
   font-family: inherit;
   font-size: 13px;
@@ -155,8 +155,8 @@
 
 .settings-input:focus {
   outline: none;
-  border-color: rgb(203 166 247 / 70%);
-  box-shadow: 0 0 0 2px rgb(203 166 247 / 14%);
+  border-color: rgb(254 128 25 / 70%);
+  box-shadow: 0 0 0 2px rgb(254 128 25 / 14%);
 }
 
 .settings-input-sm {
@@ -202,13 +202,13 @@
   gap: 12px;
   align-items: center;
   padding: 8px;
-  border-bottom: 1px solid rgb(49 50 68 / 20%);
+  border-bottom: 1px solid rgb(60 56 54 / 20%);
   border-radius: 4px;
   transition: background 80ms ease;
 }
 
 .settings-keybinding-row:hover {
-  background: rgb(49 50 68 / 20%);
+  background: rgb(60 56 54 / 20%);
 }
 
 .settings-keybinding-action {
@@ -249,7 +249,7 @@
   padding: 16px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: linear-gradient(160deg, rgb(24 24 37 / 70%), rgb(17 17 27 / 90%));
+  background: linear-gradient(160deg, rgb(29 32 33 / 70%), rgb(29 32 33 / 90%));
   transition: border-color 120ms ease;
 }
 
@@ -337,7 +337,7 @@
   display: flex;
   align-items: center;
   padding: 8px 0;
-  border-bottom: 1px solid rgb(49 50 68 / 25%);
+  border-bottom: 1px solid rgb(60 56 54 / 25%);
 }
 
 .settings-about-label {
@@ -400,7 +400,7 @@
   width: 36px;
   height: 20px;
   border-radius: 10px;
-  background: rgb(88 91 112 / 50%);
+  background: rgb(102 92 84 / 50%);
   transition: background 150ms ease;
 }
 
@@ -417,7 +417,7 @@
 }
 
 .settings-toggle input:checked + .settings-toggle-track {
-  background: rgb(203 166 247 / 40%);
+  background: rgb(254 128 25 / 40%);
 }
 
 .settings-toggle input:checked + .settings-toggle-track::after {
@@ -448,7 +448,7 @@
   padding: 6px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(49 50 68 / 80%), rgb(30 30 46 / 95%));
+  background: linear-gradient(180deg, rgb(60 56 54 / 80%), rgb(40 40 40 / 95%));
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
@@ -458,7 +458,7 @@
 }
 
 .mcp-add-btn:hover {
-  border-color: rgb(203 166 247 / 70%);
+  border-color: rgb(254 128 25 / 70%);
 }
 
 .mcp-add-form {
@@ -466,7 +466,7 @@
   margin-bottom: 20px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: linear-gradient(160deg, rgb(24 24 37 / 70%), rgb(17 17 27 / 90%));
+  background: linear-gradient(160deg, rgb(29 32 33 / 70%), rgb(29 32 33 / 90%));
 }
 
 .mcp-form-row {
@@ -515,9 +515,9 @@
 
 .mcp-form-submit {
   padding: 6px 14px;
-  border: 1px solid rgb(203 166 247 / 50%);
+  border: 1px solid rgb(254 128 25 / 50%);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(203 166 247 / 20%), rgb(203 166 247 / 8%));
+  background: linear-gradient(180deg, rgb(254 128 25 / 20%), rgb(254 128 25 / 8%));
   color: var(--accent);
   font-family: inherit;
   font-size: 12px;
@@ -527,7 +527,7 @@
 }
 
 .mcp-form-submit:hover:not(:disabled) {
-  background: linear-gradient(180deg, rgb(203 166 247 / 30%), rgb(203 166 247 / 14%));
+  background: linear-gradient(180deg, rgb(254 128 25 / 30%), rgb(254 128 25 / 14%));
   border-color: var(--accent);
 }
 
@@ -546,7 +546,7 @@
   padding: 16px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: linear-gradient(160deg, rgb(24 24 37 / 70%), rgb(17 17 27 / 90%));
+  background: linear-gradient(160deg, rgb(29 32 33 / 70%), rgb(29 32 33 / 90%));
   transition: border-color 120ms ease;
 }
 
@@ -576,23 +576,23 @@
 }
 
 .mcp-status-badge.stopped {
-  background: rgb(88 91 112 / 30%);
+  background: rgb(102 92 84 / 30%);
   color: var(--text-muted);
 }
 
 .mcp-status-badge.starting {
-  background: rgb(249 226 175 / 20%);
-  color: #f9e2af;
+  background: rgb(250 189 47 / 20%);
+  color: #fabd2f;
 }
 
 .mcp-status-badge.running {
-  background: rgb(166 227 161 / 20%);
-  color: #a6e3a1;
+  background: rgb(184 187 38 / 20%);
+  color: #b8bb26;
 }
 
 .mcp-status-badge.error {
-  background: rgb(243 139 168 / 20%);
-  color: #f38ba8;
+  background: rgb(251 73 52 / 20%);
+  color: #fb4934;
 }
 
 .mcp-server-card-details {
@@ -628,14 +628,14 @@
 }
 
 .mcp-error-text {
-  color: #f38ba8;
+  color: #fb4934;
 }
 
 .mcp-server-card-actions {
   display: flex;
   gap: 6px;
   padding-top: 12px;
-  border-top: 1px solid rgb(49 50 68 / 25%);
+  border-top: 1px solid rgb(60 56 54 / 25%);
 }
 
 .mcp-action-btn {
@@ -654,18 +654,18 @@
 
 .mcp-action-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: rgb(49 50 68 / 40%);
+  background: rgb(60 56 54 / 40%);
   color: var(--text-primary);
 }
 
 .mcp-action-btn.success:hover:not(:disabled) {
-  border-color: rgb(166 227 161 / 50%);
-  color: #a6e3a1;
+  border-color: rgb(184 187 38 / 50%);
+  color: #b8bb26;
 }
 
 .mcp-action-btn.danger:hover:not(:disabled) {
-  border-color: rgb(243 139 168 / 50%);
-  color: #f38ba8;
+  border-color: rgb(251 73 52 / 50%);
+  color: #fb4934;
 }
 
 .mcp-action-btn:disabled {

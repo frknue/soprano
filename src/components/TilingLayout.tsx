@@ -66,6 +66,49 @@ export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, not
     }
   };
 
+  const maximizedPane = maximizedPaneId ? agentManager.panes.get(maximizedPaneId) : undefined;
+
+  const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => (
+    <div className="pane-tab-panels">
+      {pane.tabs.map((tab, index) => (
+        <div
+          className={`pane-tab-panel ${index === pane.activeTabIndex ? "" : "hidden"}`}
+          key={tab.id}
+        >
+          {tab.type === "browser" ? (
+            <BrowserPane
+              isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
+              isVisible={index === pane.activeTabIndex}
+              paneId={tab.id}
+            />
+          ) : (
+            <TerminalPane
+              isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
+              onStatusChange={(status) => handleStatusChange(paneId, status)}
+              onTerminalReady={(terminal) =>
+                outputMonitor.attachTerminal(tab.id, terminal, paneId, tab.agent?.profileId)
+              }
+              paneId={tab.id}
+              profileId={tab.agent?.profileId}
+              ref={(handle) => {
+                if (!handle) {
+                  terminalRefs.current.delete(tab.id);
+                  outputMonitor.detachTerminal(tab.id);
+                  return;
+                }
+
+                terminalRefs.current.set(tab.id, {
+                  restart: handle.restart,
+                  stop: handle.stop,
+                });
+              }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
   return (
     <div className="tiling-layout">
       <Mosaic<string>
@@ -103,49 +146,12 @@ export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, not
               }
             >
               <div
-                className={`pane-body ${maximizedPaneId === paneId ? "pane-maximized" : ""}`}
+                className="pane-body"
                 onMouseDown={() => agentManager.focusPane(paneId)}
                 onFocus={() => agentManager.focusPane(paneId)}
                 role="presentation"
               >
-                <div className="pane-tab-panels">
-                  {pane.tabs.map((tab, index) => (
-                    <div
-                      className={`pane-tab-panel ${index === pane.activeTabIndex ? "" : "hidden"}`}
-                      key={tab.id}
-                    >
-                      {tab.type === "browser" ? (
-                        <BrowserPane
-                          isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
-                          isVisible={index === pane.activeTabIndex}
-                          paneId={tab.id}
-                        />
-                      ) : (
-                        <TerminalPane
-                          isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
-                          onStatusChange={(status) => handleStatusChange(paneId, status)}
-                          onTerminalReady={(terminal) =>
-                            outputMonitor.attachTerminal(tab.id, terminal, paneId, tab.agent?.profileId)
-                          }
-                          paneId={tab.id}
-                          profileId={tab.agent?.profileId}
-                          ref={(handle) => {
-                            if (!handle) {
-                              terminalRefs.current.delete(tab.id);
-                              outputMonitor.detachTerminal(tab.id);
-                              return;
-                            }
-
-                            terminalRefs.current.set(tab.id, {
-                              restart: handle.restart,
-                              stop: handle.stop,
-                            });
-                          }}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {renderPaneBody(paneId, pane)}
                 {pane.tabs.length > 1 && (
                   <PaneTabBar
                     activeIndex={pane.activeTabIndex}
@@ -160,6 +166,25 @@ export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, not
         }}
         value={agentManager.layout}
       />
+
+      {maximizedPane && maximizedPaneId && (
+        <div
+          className="pane-body pane-maximized"
+          onMouseDown={() => agentManager.focusPane(maximizedPaneId)}
+          onFocus={() => agentManager.focusPane(maximizedPaneId)}
+          role="presentation"
+        >
+          {renderPaneBody(maximizedPaneId, maximizedPane)}
+          {maximizedPane.tabs.length > 1 && (
+            <PaneTabBar
+              activeIndex={maximizedPane.activeTabIndex}
+              onClose={(tabId) => agentManager.removeTabFromPane(maximizedPaneId, tabId)}
+              onSwitch={(index) => agentManager.switchTab(maximizedPaneId, index)}
+              tabs={maximizedPane.tabs}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

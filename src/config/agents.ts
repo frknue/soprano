@@ -76,7 +76,7 @@ const plainTerminal: AgentProfile = {
   id: "terminal",
   name: "Terminal",
   icon: "terminal",
-  color: "#cba6f7",
+  color: "#fe8019",
   description: "Plain system login shell",
   command: shellByPlatform[platform()] ?? "bash",
   args: ["--login"],
