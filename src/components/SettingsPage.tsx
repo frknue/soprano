@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
+  Check,
+  ChevronDown,
   CirclePlay,
   CircleStop,
   Info,
@@ -14,6 +16,7 @@ import {
 } from "lucide-react";
 import { DEFAULT_AGENTS } from "../config/agents";
 import { AppSettings } from "../config/settings";
+import { THEMES } from "../config/themes";
 import { AgentIcon } from "./AgentIcon";
 import { KeyBindingConfig } from "../types/keybinding";
 import { saveKeybindingConfig } from "../config/keybindings";
@@ -39,6 +42,57 @@ const TABS: Array<{ id: SettingsTab; label: string; Icon: typeof SettingsIcon }>
   { id: "about", Icon: Info, label: "About" },
 ];
 
+function ThemeDropdown({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selected = THEMES.find((t) => t.id === value);
+
+  const close = useCallback(() => setOpen(false), []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        close();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, close]);
+
+  return (
+    <div className="theme-dropdown" ref={containerRef}>
+      <button
+        className="theme-dropdown-trigger"
+        onClick={() => setOpen((p) => !p)}
+        type="button"
+      >
+        <span className="theme-dropdown-value">{selected?.name ?? value}</span>
+        <ChevronDown className={`theme-dropdown-chevron ${open ? "open" : ""}`} size={14} />
+      </button>
+      {open && (
+        <div className="theme-dropdown-menu">
+          {THEMES.map((t) => (
+            <button
+              className={`theme-dropdown-item ${t.id === value ? "active" : ""}`}
+              key={t.id}
+              onClick={() => { onChange(t.id); close(); }}
+              type="button"
+            >
+              <span
+                className="theme-dropdown-swatch"
+                style={{ background: t.colors["--accent"] }}
+              />
+              <span className="theme-dropdown-item-label">{t.name}</span>
+              {t.id === value && <Check className="theme-dropdown-check" size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GeneralTab({
   appSettings,
   config,
@@ -61,6 +115,21 @@ function GeneralTab({
 
   return (
     <div className="settings-section">
+      <h3 className="settings-section-title">Appearance</h3>
+
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <label className="settings-label">Theme</label>
+          <span className="settings-hint">
+            Color scheme for the entire application and terminals
+          </span>
+        </div>
+        <ThemeDropdown
+          onChange={(id) => onAppSettingsChange({ ...appSettings, themeId: id })}
+          value={appSettings.themeId}
+        />
+      </div>
+
       <h3 className="settings-section-title">Session</h3>
 
       <div className="settings-field">

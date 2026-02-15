@@ -18,13 +18,17 @@ import { useMcpManager } from "./hooks/useMcpManager";
 import { useNotifications } from "./hooks/useNotifications";
 import { useOutputMonitor } from "./hooks/useOutputMonitor";
 import { useSessionManager } from "./hooks/useSessionManager";
+import { useTheme, applyThemeSync } from "./hooks/useTheme";
 
 const initialSettings = loadAppSettings();
 const initialWorkspace = initialSettings.restoreLastSession ? loadLastSession() : null;
 
+applyThemeSync(initialSettings.themeId);
+
 export default function App() {
   const agentManager = useAgentManager(initialWorkspace);
   const mcpManager = useMcpManager();
+  const themeManager = useTheme(initialSettings.themeId);
   const [appSettings, setAppSettings] = useState<AppSettings>(initialSettings);
   const outputMonitor = useOutputMonitor(agentManager);
   const sessionManager = useSessionManager(agentManager);
@@ -43,7 +47,8 @@ export default function App() {
   const updateAppSettings = useCallback((next: AppSettings) => {
     setAppSettings(next);
     saveAppSettings(next);
-  }, []);
+    themeManager.setThemeId(next.themeId);
+  }, [themeManager.setThemeId]);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -129,7 +134,7 @@ export default function App() {
               onConfigChange={updateConfig}
             />
           ) : (
-            <TilingLayout agentManager={agentManager} maximizedPaneId={maximizedPaneId} notifications={notifications} outputMonitor={outputMonitor} />
+            <TilingLayout agentManager={agentManager} maximizedPaneId={maximizedPaneId} notifications={notifications} outputMonitor={outputMonitor} theme={themeManager.theme} />
           )}
         </main>
       </div>

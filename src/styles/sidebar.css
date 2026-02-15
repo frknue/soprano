@@ -45,7 +45,7 @@
 }
 
 .activity-button:hover {
-  background: rgb(60 56 54 / 50%);
+  background: rgb(var(--bg-overlay-rgb) / 50%);
   color: var(--text-primary);
 }
 
@@ -69,8 +69,8 @@
 .sidebar-panel {
   display: flex;
   flex-direction: column;
-  width: var(--sidebar-panel-width);
-  min-width: var(--sidebar-panel-width);
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
   padding-bottom: var(--status-height);
   background: var(--bg-panel);
   border-right: 1px solid var(--border-subtle);
@@ -98,7 +98,7 @@
   overflow-y: auto;
   padding: 8px;
   scrollbar-width: thin;
-  scrollbar-color: rgb(102 92 84 / 50%) transparent;
+  scrollbar-color: rgb(var(--gray-rgb) / 50%) transparent;
 }
 
 .sidebar-content::-webkit-scrollbar {
@@ -111,7 +111,7 @@
 
 .sidebar-content::-webkit-scrollbar-thumb {
   border-radius: 3px;
-  background: rgb(102 92 84 / 50%);
+  background: rgb(var(--gray-rgb) / 50%);
 }
 
 /* ── Section Labels ──────────────────────────────────────── */
@@ -155,7 +155,7 @@
 }
 
 .sidebar-agent-item:hover {
-  background: rgb(60 56 54 / 40%);
+  background: rgb(var(--bg-overlay-rgb) / 40%);
 }
 
 .sidebar-agent-icon {
@@ -199,11 +199,11 @@
 }
 
 .sidebar-pane-item:hover {
-  background: rgb(60 56 54 / 40%);
+  background: rgb(var(--bg-overlay-rgb) / 40%);
 }
 
 .sidebar-pane-item.active {
-  background: rgb(254 128 25 / 12%);
+  background: rgb(var(--accent-rgb) / 12%);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -243,7 +243,7 @@
 }
 
 .sidebar-pane-close:hover {
-  background: rgb(251 73 52 / 20%);
+  background: rgb(var(--danger-rgb) / 20%);
   color: var(--danger);
 }
 
@@ -262,7 +262,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0 8px;
-  background: rgb(29 32 33 / 96%);
+  background: rgb(var(--bg-panel-rgb) / 96%);
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
@@ -270,8 +270,8 @@
 
 .sidebar-input:focus {
   outline: none;
-  border-color: rgb(254 128 25 / 70%);
-  box-shadow: 0 0 0 2px rgb(254 128 25 / 14%);
+  border-color: rgb(var(--accent-rgb) / 70%);
+  box-shadow: 0 0 0 2px rgb(var(--accent-rgb) / 14%);
 }
 
 .sidebar-save-btn {
@@ -279,7 +279,7 @@
   padding: 0 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(60 56 54 / 80%), rgb(40 40 40 / 95%));
+  background: linear-gradient(180deg, rgb(var(--bg-overlay-rgb) / 80%), rgb(var(--bg-base-rgb) / 95%));
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
@@ -290,7 +290,7 @@
 }
 
 .sidebar-save-btn:hover:not(:disabled) {
-  border-color: rgb(254 128 25 / 70%);
+  border-color: rgb(var(--accent-rgb) / 70%);
 }
 
 .sidebar-save-btn:disabled {
@@ -309,7 +309,7 @@
 }
 
 .sidebar-session-item:hover {
-  background: rgb(60 56 54 / 40%);
+  background: rgb(var(--bg-overlay-rgb) / 40%);
 }
 
 .sidebar-session-info {
@@ -358,12 +358,12 @@
 }
 
 .sidebar-action-btn:hover {
-  background: rgb(60 56 54 / 60%);
+  background: rgb(var(--bg-overlay-rgb) / 60%);
   color: var(--text-primary);
 }
 
 .sidebar-action-btn.danger:hover {
-  background: rgb(251 73 52 / 20%);
+  background: rgb(var(--danger-rgb) / 20%);
   color: var(--danger);
 }
 
@@ -407,7 +407,7 @@
   overflow-y: auto;
   padding: 8px;
   scrollbar-width: thin;
-  scrollbar-color: rgb(102 92 84 / 50%) transparent;
+  scrollbar-color: rgb(var(--gray-rgb) / 50%) transparent;
 }
 
 .settings-content::-webkit-scrollbar {
@@ -420,7 +420,7 @@
 
 .settings-content::-webkit-scrollbar-thumb {
   border-radius: 3px;
-  background: rgb(102 92 84 / 50%);
+  background: rgb(var(--gray-rgb) / 50%);
 }
 
 /* ── Keybinding List ─────────────────────────────────────── */
@@ -439,7 +439,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 5px 4px;
-  border-bottom: 1px solid rgb(60 56 54 / 25%);
+  border-bottom: 1px solid rgb(var(--bg-overlay-rgb) / 25%);
 }
 
 .keybinding-label {
@@ -467,7 +467,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   margin-bottom: 8px;
-  background: rgb(29 32 33 / 40%);
+  background: rgb(var(--bg-panel-rgb) / 40%);
 }
 
 .agent-profile-header {
@@ -503,7 +503,7 @@
 .agent-profile-cmd {
   padding: 4px 8px;
   border-radius: 4px;
-  background: rgb(29 32 33 / 80%);
+  background: rgb(var(--bg-panel-rgb) / 80%);
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -524,7 +524,7 @@
 }
 
 .sidebar-mcp-item:hover {
-  background: rgb(60 56 54 / 40%);
+  background: rgb(var(--bg-overlay-rgb) / 40%);
 }
 
 .sidebar-mcp-icon {
@@ -554,16 +554,16 @@
 }
 
 .mcp-status-dot.starting {
-  background: #fabd2f;
+  background: var(--yellow);
   animation: mcpPulse 1s ease-in-out infinite;
 }
 
 .mcp-status-dot.running {
-  background: #b8bb26;
+  background: var(--success);
 }
 
 .mcp-status-dot.error {
-  background: #fb4934;
+  background: var(--danger);
 }
 
 @keyframes mcpPulse {
@@ -591,7 +591,7 @@
 }
 
 .sidebar-mcp-action:hover {
-  background: rgb(60 56 54 / 60%);
+  background: rgb(var(--bg-overlay-rgb) / 60%);
   color: var(--text-primary);
 }
 

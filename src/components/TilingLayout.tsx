@@ -8,12 +8,14 @@ import { useNotifications } from "../hooks/useNotifications";
 import { useOutputMonitor } from "../hooks/useOutputMonitor";
 import { AgentManager } from "../hooks/useAgentManager";
 import { getAgentById } from "../config/agents";
+import { AppTheme } from "../config/themes";
 import { activeTab, AgentStatus, PaneTab } from "../types/agent";
 import "react-mosaic-component/react-mosaic-component.css";
 
 interface TilingLayoutProps {
   agentManager: AgentManager;
   maximizedPaneId: string | null;
+  theme: AppTheme;
   outputMonitor: ReturnType<typeof useOutputMonitor>;
   notifications: ReturnType<typeof useNotifications>;
 }
@@ -23,7 +25,7 @@ interface TerminalHandle {
   stop: () => void;
 }
 
-export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, notifications }: TilingLayoutProps) {
+export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonitor, notifications }: TilingLayoutProps) {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
   useEffect(() => {
@@ -90,6 +92,7 @@ export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, not
               }
               paneId={tab.id}
               profileId={tab.agent?.profileId}
+              terminalTheme={theme.terminal}
               ref={(handle) => {
                 if (!handle) {
                   terminalRefs.current.delete(tab.id);
