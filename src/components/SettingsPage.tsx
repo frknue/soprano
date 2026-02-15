@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { DEFAULT_AGENTS } from "../config/agents";
+import { AppSettings } from "../config/settings";
 import { AgentIcon } from "./AgentIcon";
 import { KeyBindingConfig } from "../types/keybinding";
 import { saveKeybindingConfig } from "../config/keybindings";
@@ -22,8 +23,10 @@ import { McpServerConfig, McpTransport } from "../types/mcp";
 type SettingsTab = "general" | "shortcuts" | "agents" | "mcp" | "about";
 
 interface SettingsPageProps {
+  appSettings: AppSettings;
   config: KeyBindingConfig;
   mcpManager: McpManager;
+  onAppSettingsChange: (settings: AppSettings) => void;
   onClose: () => void;
   onConfigChange: (config: KeyBindingConfig) => void;
 }
@@ -37,10 +40,14 @@ const TABS: Array<{ id: SettingsTab; label: string; Icon: typeof SettingsIcon }>
 ];
 
 function GeneralTab({
+  appSettings,
   config,
+  onAppSettingsChange,
   onConfigChange,
 }: {
+  appSettings: AppSettings;
   config: KeyBindingConfig;
+  onAppSettingsChange: (settings: AppSettings) => void;
   onConfigChange: (config: KeyBindingConfig) => void;
 }) {
   const updateField = <K extends keyof KeyBindingConfig>(
@@ -54,6 +61,28 @@ function GeneralTab({
 
   return (
     <div className="settings-section">
+      <h3 className="settings-section-title">Session</h3>
+
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <label className="settings-label" htmlFor="restore-session">Restore Last Session</label>
+          <span className="settings-hint">
+            Save workspace layout on close and restore it when the app reopens
+          </span>
+        </div>
+        <label className="settings-toggle">
+          <input
+            checked={appSettings.restoreLastSession}
+            id="restore-session"
+            onChange={(e) =>
+              onAppSettingsChange({ ...appSettings, restoreLastSession: e.target.checked })
+            }
+            type="checkbox"
+          />
+          <span className="settings-toggle-track" />
+        </label>
+      </div>
+
       <h3 className="settings-section-title">Keybinding Behavior</h3>
 
       <div className="settings-field">
@@ -533,7 +562,7 @@ function AboutTab() {
   );
 }
 
-export function SettingsPage({ config, mcpManager, onClose, onConfigChange }: SettingsPageProps) {
+export function SettingsPage({ appSettings, config, mcpManager, onAppSettingsChange, onClose, onConfigChange }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   return (
@@ -569,7 +598,7 @@ export function SettingsPage({ config, mcpManager, onClose, onConfigChange }: Se
 
       <div className="settings-page-content">
         {activeTab === "general" ? (
-          <GeneralTab config={config} onConfigChange={onConfigChange} />
+          <GeneralTab appSettings={appSettings} config={config} onAppSettingsChange={onAppSettingsChange} onConfigChange={onConfigChange} />
         ) : null}
         {activeTab === "shortcuts" ? <ShortcutsTab config={config} /> : null}
         {activeTab === "agents" ? <AgentsTab /> : null}

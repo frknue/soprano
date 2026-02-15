@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar, SidebarSection } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TilingLayout } from "./components/TilingLayout";
+import {
+  AppSettings,
+  loadAppSettings,
+  loadLastSession,
+  saveAppSettings,
+  saveLastSession,
+  SavedWorkspace,
+} from "./config/settings";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useAgentManager } from "./hooks/useAgentManager";
 import { useMcpManager } from "./hooks/useMcpManager";
@@ -11,9 +19,13 @@ import { useNotifications } from "./hooks/useNotifications";
 import { useOutputMonitor } from "./hooks/useOutputMonitor";
 import { useSessionManager } from "./hooks/useSessionManager";
 
+const initialSettings = loadAppSettings();
+const initialWorkspace = initialSettings.restoreLastSession ? loadLastSession() : null;
+
 export default function App() {
-  const agentManager = useAgentManager();
+  const agentManager = useAgentManager(initialWorkspace);
   const mcpManager = useMcpManager();
+  const [appSettings, setAppSettings] = useState<AppSettings>(initialSettings);
   const outputMonitor = useOutputMonitor(agentManager);
   const sessionManager = useSessionManager(agentManager);
   const notifications = useNotifications();
@@ -24,6 +36,54 @@ export default function App() {
   const toggleSettings = useCallback(() => {
     setShowSettings((prev) => !prev);
   }, []);
+
+  const appSettingsRef = useRef(appSettings);
+  appSettingsRef.current = appSettings;
+
+  const updateAppSettings = useCallback((next: AppSettings) => {
+    setAppSettings(next);
+    saveAppSettings(next);
+  }, []);
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!appSettingsRef.current.restoreLastSession) return;
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(() => {
+      const workspace: SavedWorkspace = {
+        layout: agentManager.layout,
+        activePaneId: agentManager.activePaneId,
+        panes: [...agentManager.panes.values()].map((pane) => ({
+          id: pane.id,
+          activeTabIndex: pane.activeTabIndex,
+          tabs: pane.tabs.map((tab) => ({
+            id: tab.id,
+            type: tab.type,
+            profileId: tab.agent?.profileId,
+          })),
+        })),
+        runningMcpServers: mcpManager.pool
+          .filter((e) => e.instance.status === "running")
+          .map((e) => e.config.id),
+        savedAt: Date.now(),
+      };
+      saveLastSession(workspace);
+    }, 800);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [agentManager.layout, agentManager.panes, agentManager.activePaneId, mcpManager.pool]);
+
+  useEffect(() => {
+    if (!initialWorkspace?.runningMcpServers?.length) return;
+    for (const serverId of initialWorkspace.runningMcpServers) {
+      mcpManager.startServer(serverId);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { mode, isPaletteOpen, togglePalette, config, updateConfig } = useKeybindings(agentManager, {
     onSaveSession: () => {
@@ -61,8 +121,10 @@ export default function App() {
         <main className="app-main">
           {showSettings ? (
             <SettingsPage
+              appSettings={appSettings}
               config={config}
               mcpManager={mcpManager}
+              onAppSettingsChange={updateAppSettings}
               onClose={() => setShowSettings(false)}
               onConfigChange={updateConfig}
             />
