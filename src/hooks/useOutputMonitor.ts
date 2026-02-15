@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { IDisposable, Terminal } from "@xterm/xterm";
 import { getAgentById } from "../config/agents";
 import { AgentManager } from "./useAgentManager";
@@ -17,6 +17,8 @@ export function useOutputMonitor(agentManager: AgentManager): {
 } {
   const subscriptionsRef = useRef<Map<string, IDisposable>>(new Map());
   const buffersRef = useRef<Map<string, string>>(new Map());
+  const agentManagerRef = useRef(agentManager);
+  agentManagerRef.current = agentManager;
 
   const detachTerminal = useCallback((id: string): void => {
     const subscription = subscriptionsRef.current.get(id);
@@ -41,7 +43,7 @@ export function useOutputMonitor(agentManager: AgentManager): {
 
         const patterns = profile.patterns;
         if (matchesAny(next, patterns?.error)) {
-          agentManager.updateAgentStatus(paneId, "error");
+          agentManagerRef.current.updateAgentStatus(paneId, "error");
           return;
         }
 
@@ -52,27 +54,27 @@ export function useOutputMonitor(agentManager: AgentManager): {
             });
           } catch {
           }
-          agentManager.updateAgentStatus(paneId, "idle");
+          agentManagerRef.current.updateAgentStatus(paneId, "idle");
           return;
         }
 
         if (matchesAny(next, patterns?.ready)) {
-          agentManager.updateAgentStatus(paneId, "running");
+          agentManagerRef.current.updateAgentStatus(paneId, "running");
           return;
         }
 
         if (matchesAny(next, patterns?.idle)) {
-          agentManager.updateAgentStatus(paneId, "idle");
+          agentManagerRef.current.updateAgentStatus(paneId, "idle");
         }
       });
 
       subscriptionsRef.current.set(id, disposable);
     },
-    [agentManager, detachTerminal],
+    [detachTerminal],
   );
 
-  return {
+  return useMemo(() => ({
     attachTerminal,
     detachTerminal,
-  };
+  }), [attachTerminal, detachTerminal]);
 }

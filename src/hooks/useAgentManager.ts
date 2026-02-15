@@ -4,6 +4,8 @@ import { getAgentById } from "../config/agents";
 import { SavedWorkspace } from "../config/settings";
 import { activeTab, AgentProfile, AgentStatus, PaneState, PaneTab, PaneType } from "../types/agent";
 
+const MAX_TABS_PER_PANE = 10;
+
 interface AgentManagerState {
   panes: Map<string, PaneState>;
   activePaneId: string;
@@ -653,7 +655,8 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
 
   const addTabToPane = useCallback(
     (paneId: string, type: PaneType, profileId?: string): string | null => {
-      if (!state.panes.has(paneId)) {
+      const pane = state.panes.get(paneId);
+      if (!pane || pane.tabs.length >= MAX_TABS_PER_PANE) {
         return null;
       }
 
@@ -661,16 +664,16 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
       const tab = createPaneTab(tabId, type, profileId);
 
       setState((prev) => {
-        const pane = prev.panes.get(paneId);
-        if (!pane) {
+        const currentPane = prev.panes.get(paneId);
+        if (!currentPane || currentPane.tabs.length >= MAX_TABS_PER_PANE) {
           return prev;
         }
 
         const nextPanes = new Map(prev.panes);
         nextPanes.set(paneId, {
-          ...pane,
-          tabs: [...pane.tabs, tab],
-          activeTabIndex: pane.tabs.length,
+          ...currentPane,
+          tabs: [...currentPane.tabs, tab],
+          activeTabIndex: currentPane.tabs.length,
         });
 
         return {
