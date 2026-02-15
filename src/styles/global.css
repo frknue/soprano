@@ -53,6 +53,16 @@ body {
   height: 100%;
 }
 
+.pane-body.pane-maximized {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: var(--status-height);
+  left: 0;
+  z-index: 90;
+  background: var(--bg-base);
+}
+
 .pane {
   display: flex;
   width: 100%;
@@ -86,7 +96,7 @@ body {
 
 .browser-toolbar {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto auto;
   gap: 6px;
   align-items: center;
   padding: 6px;
@@ -131,11 +141,11 @@ body {
   box-shadow: 0 0 0 2px rgb(203 166 247 / 18%);
 }
 
-.browser-frame {
+.browser-viewport {
+  flex: 1;
   width: 100%;
-  height: 100%;
-  border: 0;
-  background: #fff;
+  min-height: 0;
+  background: rgb(30 30 46);
 }
 
 .status-bar {

@@ -1,9 +1,11 @@
-import { memo, useMemo, useRef, useState } from "react";
-import { ArrowRight, ChevronLeft, RefreshCw } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { ArrowRight, ChevronLeft, RefreshCw, SquareTerminal } from "lucide-react";
 
 interface BrowserPaneProps {
   paneId: string;
   isActive: boolean;
+  isVisible: boolean;
   initialUrl?: string;
 }
 
@@ -18,34 +20,122 @@ function normalizeUrl(value: string): string {
 export const BrowserPane = memo(function BrowserPane({
   paneId,
   isActive,
+  isVisible,
   initialUrl = "https://www.google.com",
 }: BrowserPaneProps) {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [urlInput, setUrlInput] = useState(initialUrl);
-  const [url, setUrl] = useState(initialUrl);
-  const [reloadToken, setReloadToken] = useState(0);
+  const createdRef = useRef(false);
+  const webviewLabel = `browser-${paneId.replace(/[^a-zA-Z0-9-_]/g, "-")}`;
 
-  const iframeKey = useMemo(() => `${paneId}-${reloadToken}-${url}`, [paneId, reloadToken, url]);
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) {
+      return;
+    }
+
+    const rect = el.getBoundingClientRect();
+    invoke("create_browser", {
+      label: webviewLabel,
+      url: initialUrl,
+      x: rect.width > 0 ? rect.x : -10000,
+      y: rect.height > 0 ? rect.y : -10000,
+      width: Math.max(rect.width, 1),
+      height: Math.max(rect.height, 1),
+    })
+      .then(() => {
+        createdRef.current = true;
+      })
+      .catch(() => {});
+
+    return () => {
+      createdRef.current = false;
+      invoke("close_browser", { label: webviewLabel }).catch(() => {});
+    };
+  }, [webviewLabel, initialUrl]);
+
+  useEffect(() => {
+    if (!createdRef.current) {
+      return;
+    }
+
+    if (!isVisible) {
+      invoke("resize_browser", {
+        label: webviewLabel,
+        x: -10000,
+        y: -10000,
+        width: 1,
+        height: 1,
+      }).catch(() => {});
+      return;
+    }
+
+    const el = viewportRef.current;
+    if (!el) {
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      invoke("resize_browser", {
+        label: webviewLabel,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      }).catch(() => {});
+    }
+  }, [isVisible, webviewLabel]);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!createdRef.current || !isVisible) {
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return;
+      }
+      invoke("resize_browser", {
+        label: webviewLabel,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      }).catch(() => {});
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [webviewLabel, isVisible]);
 
   const navigate = (): void => {
-    const nextUrl = normalizeUrl(urlInput.trim());
-    setUrlInput(nextUrl);
-    setUrl(nextUrl);
+    const next = normalizeUrl(urlInput.trim());
+    setUrlInput(next);
+    if (createdRef.current) {
+      invoke("navigate_browser", { label: webviewLabel, url: next }).catch(() => {});
+    }
   };
 
   const goBack = (): void => {
-    try {
-      iframeRef.current?.contentWindow?.history.back();
-    } catch {
-      setReloadToken((prev) => prev + 1);
+    if (createdRef.current) {
+      invoke("browser_go_back", { label: webviewLabel }).catch(() => {});
     }
   };
 
   const refresh = (): void => {
-    try {
-      iframeRef.current?.contentWindow?.location.reload();
-    } catch {
-      setReloadToken((prev) => prev + 1);
+    if (createdRef.current) {
+      invoke("browser_refresh", { label: webviewLabel }).catch(() => {});
+    }
+  };
+
+  const toggleDevtools = (): void => {
+    if (createdRef.current) {
+      invoke("browser_devtools", { label: webviewLabel }).catch(() => {});
     }
   };
 
@@ -73,15 +163,11 @@ export const BrowserPane = memo(function BrowserPane({
         <button className="browser-button browser-go" onClick={navigate} title="Navigate" type="button">
           <ArrowRight size={14} />
         </button>
+        <button className="browser-button" onClick={toggleDevtools} title="Toggle DevTools" type="button">
+          <SquareTerminal size={14} />
+        </button>
       </div>
-      <iframe
-        className="browser-frame"
-        key={iframeKey}
-        ref={iframeRef}
-        sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
-        src={url}
-        title={`Browser ${paneId}`}
-      />
+      <div className="browser-viewport" ref={viewportRef} />
     </div>
   );
 });

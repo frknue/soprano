@@ -14,6 +14,7 @@ interface KeybindingOptions {
   onSaveSession?: () => void;
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
+  onToggleMaximize?: () => void;
 }
 
 function matchDirectBinding(event: KeyboardEvent, binding: KeyBinding): boolean {
@@ -115,7 +116,11 @@ export function useKeybindings(
          "close-active": () => mgr.closePane(mgr.activePaneId),
          "save-session": () => cbs.onSaveSession?.(),
          "toggle-sidebar": () => cbs.onToggleSidebar?.(),
-         "open-settings": () => cbs.onOpenSettings?.(),
+          "open-settings": () => cbs.onOpenSettings?.(),
+           "maximize-pane": () => cbs.onToggleMaximize?.(),
+           "zoom-in": () => window.dispatchEvent(new CustomEvent("soprano-zoom", { detail: { delta: 1 } })),
+          "zoom-out": () => window.dispatchEvent(new CustomEvent("soprano-zoom", { detail: { delta: -1 } })),
+          "zoom-reset": () => window.dispatchEvent(new CustomEvent("soprano-zoom", { detail: { reset: true } } )),
        };
 
       const action = actions[binding.id];
@@ -124,8 +129,18 @@ export function useKeybindings(
       }
     };
 
+    const isTextInput = (): boolean => {
+      return document.activeElement instanceof HTMLInputElement;
+    };
+
     const handleKeyDown = (event: KeyboardEvent): void => {
       const normalizedKey = event.key.toLowerCase();
+      const inputFocused = isTextInput();
+
+      if (inputFocused && !event.metaKey) {
+        return;
+      }
+
       const isPrefixActivation =
         event.ctrlKey && normalizedKey === config.prefixKey && !event.metaKey && !event.shiftKey;
 
