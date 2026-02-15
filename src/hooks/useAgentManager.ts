@@ -324,11 +324,30 @@ function adjustSplitAtPath(
   return updateNode(root, 0);
 }
 
+function collectLeafIds(node: MosaicNode<string> | null): Set<string> {
+  const ids = new Set<string>();
+  if (node === null) return ids;
+  if (typeof node === "string") {
+    ids.add(node);
+    return ids;
+  }
+  for (const id of collectLeafIds(node.first)) ids.add(id);
+  for (const id of collectLeafIds(node.second)) ids.add(id);
+  return ids;
+}
+
 function buildStateFromSaved(saved: SavedWorkspace): { state: AgentManagerState; maxId: number } {
   const panes = new Map<string, PaneState>();
   let maxId = 1;
 
+  const layout = saved.layout ?? saved.panes[0]?.id ?? null;
+  const layoutIds = collectLeafIds(layout);
+
   for (const p of saved.panes) {
+    if (layoutIds.size > 0 && !layoutIds.has(p.id)) {
+      continue;
+    }
+
     const num = parseIdNumber(p.id);
     if (num !== null) maxId = Math.max(maxId, num);
 
@@ -350,7 +369,6 @@ function buildStateFromSaved(saved: SavedWorkspace): { state: AgentManagerState;
     });
   }
 
-  const layout = saved.layout ?? saved.panes[0]?.id ?? null;
   const firstLeaf = layout ? getFirstLeaf(layout) : null;
   const activePaneId =
     saved.activePaneId && panes.has(saved.activePaneId)
@@ -940,8 +958,14 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
 
       const nextPanes = new Map<string, PaneState>();
       let maxId = 1;
+      const effectiveLayout = layout ?? panes[0].id;
+      const layoutIds = collectLeafIds(effectiveLayout);
 
       panes.forEach((pane) => {
+        if (layoutIds.size > 0 && !layoutIds.has(pane.id)) {
+          return;
+        }
+
         const paneNumber = parseIdNumber(pane.id);
         if (paneNumber !== null) {
           maxId = Math.max(maxId, paneNumber);
@@ -970,7 +994,6 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
 
       nextIdRef.current = maxId;
 
-      const effectiveLayout = layout ?? panes[0].id;
       const firstLeaf = getFirstLeaf(effectiveLayout);
 
       setState({
