@@ -243,6 +243,26 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     }, [paneId, profileId]);
 
     useEffect(() => {
+      const handler = (e: Event): void => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        const detail = (e as CustomEvent).detail;
+        if (detail.reset) {
+          terminal.options.fontSize = 14;
+        } else {
+          const current = terminal.options.fontSize ?? 14;
+          terminal.options.fontSize = Math.min(32, Math.max(8, current + detail.delta));
+        }
+        fitAddonRef.current?.fit();
+        if (ptyRef.current) {
+          ptyRef.current.resize(terminal.cols, terminal.rows);
+        }
+      };
+      window.addEventListener("soprano-zoom", handler);
+      return () => window.removeEventListener("soprano-zoom", handler);
+    }, []);
+
+    useEffect(() => {
       if (isActive) {
         terminalRef.current?.focus();
       }

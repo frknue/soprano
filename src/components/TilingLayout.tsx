@@ -13,6 +13,7 @@ import "react-mosaic-component/react-mosaic-component.css";
 
 interface TilingLayoutProps {
   agentManager: AgentManager;
+  maximizedPaneId: string | null;
   outputMonitor: ReturnType<typeof useOutputMonitor>;
   notifications: ReturnType<typeof useNotifications>;
 }
@@ -22,7 +23,7 @@ interface TerminalHandle {
   stop: () => void;
 }
 
-export function TilingLayout({ agentManager, outputMonitor, notifications }: TilingLayoutProps) {
+export function TilingLayout({ agentManager, maximizedPaneId, outputMonitor, notifications }: TilingLayoutProps) {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
   useEffect(() => {
@@ -102,7 +103,7 @@ export function TilingLayout({ agentManager, outputMonitor, notifications }: Til
               }
             >
               <div
-                className="pane-body"
+                className={`pane-body ${maximizedPaneId === paneId ? "pane-maximized" : ""}`}
                 onMouseDown={() => agentManager.focusPane(paneId)}
                 onFocus={() => agentManager.focusPane(paneId)}
                 role="presentation"
@@ -116,6 +117,7 @@ export function TilingLayout({ agentManager, outputMonitor, notifications }: Til
                       {tab.type === "browser" ? (
                         <BrowserPane
                           isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
+                          isVisible={index === pane.activeTabIndex}
                           paneId={tab.id}
                         />
                       ) : (

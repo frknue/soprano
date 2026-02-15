@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar, SidebarSection } from "./components/Sidebar";
@@ -17,6 +17,7 @@ export default function App() {
   const notifications = useNotifications();
   const [sidebarSection, setSidebarSection] = useState<SidebarSection | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
 
   const toggleSettings = useCallback(() => {
     setShowSettings((prev) => !prev);
@@ -32,7 +33,16 @@ export default function App() {
       setSidebarSection((prev) => (prev === null ? "agents" : null));
     },
     onOpenSettings: toggleSettings,
+    onToggleMaximize: () => {
+      setMaximizedPaneId((prev) => (prev ? null : agentManager.activePaneId));
+    },
   });
+
+  useEffect(() => {
+    if (maximizedPaneId && agentManager.activePaneId !== maximizedPaneId) {
+      setMaximizedPaneId(null);
+    }
+  }, [agentManager.activePaneId, maximizedPaneId]);
 
   return (
     <div className="app-shell">
@@ -53,7 +63,7 @@ export default function App() {
               onConfigChange={updateConfig}
             />
           ) : (
-            <TilingLayout agentManager={agentManager} notifications={notifications} outputMonitor={outputMonitor} />
+            <TilingLayout agentManager={agentManager} maximizedPaneId={maximizedPaneId} notifications={notifications} outputMonitor={outputMonitor} />
           )}
         </main>
       </div>

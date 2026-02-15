@@ -23,6 +23,7 @@ export const DEFAULT_KEYBINDING_CONFIG: KeyBindingConfig = {
      { id: "next-pane-tab", label: "Next Tab", description: "Switch to next tab in the active pane", category: "layout", defaultKeys: "Ctrl+A → N", mode: "prefix", key: "n" },
      { id: "prev-pane-tab", label: "Previous Tab", description: "Switch to previous tab in the active pane", category: "layout", defaultKeys: "Ctrl+A → P", mode: "prefix", key: "p" },
      { id: "close-pane-tab", label: "Close Tab", description: "Close the active tab in the active pane", category: "layout", defaultKeys: "Ctrl+A → W", mode: "prefix", key: "w" },
+     { id: "maximize-pane", label: "Maximize Pane", description: "Toggle maximize the active pane", category: "layout", defaultKeys: "Ctrl+A → M", mode: "prefix", key: "m" },
     { id: "launch-codex", label: "Launch Codex", description: "Start Codex agent", category: "agents", defaultKeys: "⌘1", mode: "direct", key: "1", meta: true },
     { id: "launch-claude-code", label: "Launch Claude Code", description: "Start Claude Code agent", category: "agents", defaultKeys: "⌘2", mode: "direct", key: "2", meta: true },
     { id: "launch-opencode", label: "Launch OpenCode", description: "Start OpenCode agent", category: "agents", defaultKeys: "⌘3", mode: "direct", key: "3", meta: true },
@@ -34,6 +35,9 @@ export const DEFAULT_KEYBINDING_CONFIG: KeyBindingConfig = {
     { id: "save-session", label: "Save Session", description: "Save current workspace session", category: "general", defaultKeys: "⌘⇧S", mode: "direct", key: "s", meta: true, shift: true },
     { id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar panel", category: "general", defaultKeys: "⌘E", mode: "direct", key: "e", meta: true },
     { id: "open-settings", label: "Open Settings", description: "Open the settings page", category: "general", defaultKeys: "⌘,", mode: "direct", key: ",", meta: true },
+    { id: "zoom-in", label: "Zoom In", description: "Increase terminal font size", category: "general", defaultKeys: "⌘=", mode: "direct", key: "=", meta: true },
+    { id: "zoom-out", label: "Zoom Out", description: "Decrease terminal font size", category: "general", defaultKeys: "⌘-", mode: "direct", key: "-", meta: true },
+    { id: "zoom-reset", label: "Reset Zoom", description: "Reset terminal font size to default", category: "general", defaultKeys: "⌘0", mode: "direct", key: "0", meta: true },
   ],
 };
 
