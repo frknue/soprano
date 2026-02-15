@@ -9,7 +9,7 @@ import { platform } from "@tauri-apps/plugin-os";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { IDisposable, Terminal } from "@xterm/xterm";
+import { IDisposable, ITheme, Terminal } from "@xterm/xterm";
 import { IPty, spawn } from "tauri-pty";
 import { getAgentById } from "../config/agents";
 import { AgentStatus } from "../types/agent";
@@ -29,12 +29,13 @@ interface TerminalPaneProps {
   paneId: string;
   isActive: boolean;
   profileId?: string;
+  terminalTheme?: ITheme;
   onStatusChange?: (status: AgentStatus) => void;
   onTerminalReady?: (terminal: Terminal) => void;
 }
 
 const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
-  ({ paneId, isActive, profileId, onStatusChange, onTerminalReady }, ref) => {
+  ({ paneId, isActive, profileId, terminalTheme, onStatusChange, onTerminalReady }, ref) => {
     const hostRef = useRef<HTMLDivElement | null>(null);
     const terminalRef = useRef<Terminal | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
@@ -43,6 +44,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     const activeRef = useRef(isActive);
     const statusChangeRef = useRef(onStatusChange);
     const terminalReadyRef = useRef(onTerminalReady);
+    const terminalThemeRef = useRef(terminalTheme);
 
     const profile = profileId ? getAgentById(profileId) : undefined;
 
@@ -57,6 +59,13 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     useEffect(() => {
       terminalReadyRef.current = onTerminalReady;
     }, [onTerminalReady]);
+
+    useEffect(() => {
+      terminalThemeRef.current = terminalTheme;
+      if (terminalRef.current && terminalTheme) {
+        terminalRef.current.options.theme = terminalTheme;
+      }
+    }, [terminalTheme]);
 
     const disposePty = (): void => {
       ptyDisposablesRef.current.forEach((disposable) => {
@@ -194,29 +203,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
           fontSize: 14,
           allowProposedApi: true,
           fontFamily: TERM_FONT_FAMILY,
-          theme: {
-            background: "#282828",
-            foreground: "#ebdbb2",
-            cursor: "#ebdbb2",
-            cursorAccent: "#282828",
-            selectionBackground: "#50494599",
-            black: "#282828",
-            red: "#cc241d",
-            green: "#98971a",
-            yellow: "#d79921",
-            blue: "#458588",
-            magenta: "#b16286",
-            cyan: "#689d6a",
-            white: "#a89984",
-            brightBlack: "#928374",
-            brightRed: "#fb4934",
-            brightGreen: "#b8bb26",
-            brightYellow: "#fabd2f",
-            brightBlue: "#83a598",
-            brightMagenta: "#d3869b",
-            brightCyan: "#8ec07c",
-            brightWhite: "#ebdbb2",
-          },
+          theme: terminalThemeRef.current ?? undefined,
         });
 
         terminalRef.current = terminal;
