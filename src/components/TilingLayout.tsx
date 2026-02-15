@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Mosaic, MosaicPath, MosaicWindow } from "react-mosaic-component";
 import { AgentHeader } from "./AgentHeader";
 import { BrowserPane } from "./BrowserPane";
 import { PaneTabBar } from "./PaneTabBar";
-import { TerminalPane } from "./TerminalPane";
+import { TerminalPane, TerminalRef } from "./TerminalPane";
 import { useNotifications } from "../hooks/useNotifications";
 import { useOutputMonitor } from "../hooks/useOutputMonitor";
 import { AgentManager } from "../hooks/useAgentManager";
@@ -20,13 +20,19 @@ interface TilingLayoutProps {
   notifications: ReturnType<typeof useNotifications>;
 }
 
-interface TerminalHandle {
-  restart: () => void;
-  stop: () => void;
-}
+type TerminalHandle = TerminalRef;
 
 export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonitor, notifications }: TilingLayoutProps) {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  const agentManagerRef = useRef(agentManager);
+  const outputMonitorRef = useRef(outputMonitor);
+  const notificationsRef = useRef(notifications);
+  const themeRef = useRef(theme);
+
+  agentManagerRef.current = agentManager;
+  outputMonitorRef.current = outputMonitor;
+  notificationsRef.current = notifications;
+  themeRef.current = theme;
 
   useEffect(() => {
     const known = terminalRefs.current;
@@ -42,9 +48,10 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
     });
   }, [agentManager.panes, outputMonitor]);
 
-  const handleStatusChange = (paneId: string, status: AgentStatus): void => {
-    agentManager.updateAgentStatus(paneId, status);
-    const pane = agentManager.panes.get(paneId);
+  const handleStatusChange = useCallback((paneId: string, status: AgentStatus): void => {
+    const am = agentManagerRef.current;
+    am.updateAgentStatus(paneId, status);
+    const pane = am.panes.get(paneId);
     if (!pane) {
       return;
     }
@@ -55,62 +62,68 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
       return;
     }
 
+    const n = notificationsRef.current;
     if (status === "error") {
-      notifications.notify(`${profile.name} error`, `${profile.name} reported an error`, "error", paneId);
+      n.notify(`${profile.name} error`, `${profile.name} reported an error`, "error", paneId);
     }
 
     if (status === "idle") {
-      notifications.notify(`${profile.name} idle`, `${profile.name} is waiting for input`, "info", paneId);
+      n.notify(`${profile.name} idle`, `${profile.name} is waiting for input`, "info", paneId);
     }
 
     if (status === "stopped") {
-      notifications.notify(`${profile.name} stopped`, `${profile.name} process exited`, "warning", paneId);
+      n.notify(`${profile.name} stopped`, `${profile.name} process exited`, "warning", paneId);
     }
-  };
+  }, []);
+
+  const handleTerminalReady = useCallback((tabId: string, paneId: string, profileId: string | undefined, terminal: import("@xterm/xterm").Terminal): void => {
+    outputMonitorRef.current.attachTerminal(tabId, terminal, paneId, profileId);
+  }, []);
+
+  const handleTerminalRef = useCallback((tabId: string, handle: TerminalRef | null): void => {
+    if (!handle) {
+      terminalRefs.current.delete(tabId);
+      return;
+    }
+    terminalRefs.current.set(tabId, handle);
+  }, []);
 
   const maximizedPane = maximizedPaneId ? agentManager.panes.get(maximizedPaneId) : undefined;
 
-  const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => (
-    <div className="pane-tab-panels">
-      {pane.tabs.map((tab, index) => (
-        <div
-          className={`pane-tab-panel ${index === pane.activeTabIndex ? "" : "hidden"}`}
-          key={tab.id}
-        >
+  const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => {
+    const tab = pane.tabs[pane.activeTabIndex];
+    if (!tab) {
+      return <div className="pane-tab-panels" />;
+    }
+
+    const isPaneActive = agentManager.activePaneId === paneId;
+
+    return (
+      <div className="pane-tab-panels">
+        <div className="pane-tab-panel" key={tab.id}>
           {tab.type === "browser" ? (
             <BrowserPane
-              isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
-              isVisible={index === pane.activeTabIndex}
+              isActive={isPaneActive}
+              isVisible={true}
               paneId={tab.id}
             />
           ) : (
             <TerminalPane
-              isActive={agentManager.activePaneId === paneId && index === pane.activeTabIndex}
+              isActive={isPaneActive}
               onStatusChange={(status) => handleStatusChange(paneId, status)}
               onTerminalReady={(terminal) =>
-                outputMonitor.attachTerminal(tab.id, terminal, paneId, tab.agent?.profileId)
+                handleTerminalReady(tab.id, paneId, tab.agent?.profileId, terminal)
               }
               paneId={tab.id}
               profileId={tab.agent?.profileId}
               terminalTheme={theme.terminal}
-              ref={(handle) => {
-                if (!handle) {
-                  terminalRefs.current.delete(tab.id);
-                  outputMonitor.detachTerminal(tab.id);
-                  return;
-                }
-
-                terminalRefs.current.set(tab.id, {
-                  restart: handle.restart,
-                  stop: handle.stop,
-                });
-              }}
+              ref={(handle) => handleTerminalRef(tab.id, handle)}
             />
           )}
         </div>
-      ))}
-    </div>
-  );
+      </div>
+    );
+  };
 
   return (
     <div className="tiling-layout">

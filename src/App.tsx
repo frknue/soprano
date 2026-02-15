@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MosaicNode } from "react-mosaic-component";
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar, SidebarSection } from "./components/Sidebar";
@@ -19,6 +20,18 @@ import { useNotifications } from "./hooks/useNotifications";
 import { useOutputMonitor } from "./hooks/useOutputMonitor";
 import { useSessionManager } from "./hooks/useSessionManager";
 import { useTheme, applyThemeSync } from "./hooks/useTheme";
+
+function collectLayoutPaneIds(node: MosaicNode<string> | null): Set<string> {
+  const ids = new Set<string>();
+  if (node === null) return ids;
+  if (typeof node === "string") {
+    ids.add(node);
+    return ids;
+  }
+  for (const id of collectLayoutPaneIds(node.first)) ids.add(id);
+  for (const id of collectLayoutPaneIds(node.second)) ids.add(id);
+  return ids;
+}
 
 const initialSettings = loadAppSettings();
 const initialWorkspace = initialSettings.restoreLastSession ? loadLastSession() : null;
@@ -58,18 +71,21 @@ export default function App() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     saveTimerRef.current = setTimeout(() => {
+      const layoutPaneIds = collectLayoutPaneIds(agentManager.layout);
       const workspace: SavedWorkspace = {
         layout: agentManager.layout,
         activePaneId: agentManager.activePaneId,
-        panes: [...agentManager.panes.values()].map((pane) => ({
-          id: pane.id,
-          activeTabIndex: pane.activeTabIndex,
-          tabs: pane.tabs.map((tab) => ({
-            id: tab.id,
-            type: tab.type,
-            profileId: tab.agent?.profileId,
+        panes: [...agentManager.panes.values()]
+          .filter((pane) => layoutPaneIds.has(pane.id))
+          .map((pane) => ({
+            id: pane.id,
+            activeTabIndex: pane.activeTabIndex,
+            tabs: pane.tabs.map((tab) => ({
+              id: tab.id,
+              type: tab.type,
+              profileId: tab.agent?.profileId,
+            })),
           })),
-        })),
         runningMcpServers: mcpManager.pool
           .filter((e) => e.instance.status === "running")
           .map((e) => e.config.id),

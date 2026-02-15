@@ -8,7 +8,6 @@ import {
 import { platform } from "@tauri-apps/plugin-os";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { IDisposable, ITheme, Terminal } from "@xterm/xterm";
 import { IPty, spawn } from "tauri-pty";
 import { getAgentById } from "../config/agents";
@@ -16,6 +15,17 @@ import { AgentStatus } from "../types/agent";
 import "@xterm/xterm/css/xterm.css";
 
 const TERM_FONT_FAMILY = "'MesloLGS NF', monospace";
+const PTY_HEALTH_TIMEOUT_MS = 3000;
+const PTY_MAX_RETRIES = 2;
+
+let fontsReady = false;
+const fontReadyPromise = document.fonts
+  .load(`14px ${TERM_FONT_FAMILY}`)
+  .catch(() => {})
+  .then(() => document.fonts.ready)
+  .then(() => {
+    fontsReady = true;
+  });
 
 export interface TerminalRef {
   terminal: Terminal | null;
@@ -41,6 +51,9 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     const fitAddonRef = useRef<FitAddon | null>(null);
     const ptyRef = useRef<IPty | null>(null);
     const ptyDisposablesRef = useRef<IDisposable[]>([]);
+    const healthTimerRef = useRef<number | null>(null);
+    const retryCountRef = useRef(0);
+    const disposedRef = useRef(false);
     const activeRef = useRef(isActive);
     const statusChangeRef = useRef(onStatusChange);
     const terminalReadyRef = useRef(onTerminalReady);
@@ -67,7 +80,16 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       }
     }, [terminalTheme]);
 
+    const clearHealthTimer = (): void => {
+      if (healthTimerRef.current !== null) {
+        window.clearTimeout(healthTimerRef.current);
+        healthTimerRef.current = null;
+      }
+    };
+
     const disposePty = (): void => {
+      clearHealthTimer();
+
       ptyDisposablesRef.current.forEach((disposable) => {
         disposable.dispose();
       });
@@ -81,11 +103,15 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
 
     const spawnPty = (): void => {
       const terminal = terminalRef.current;
-      if (!terminal) {
+      if (!terminal || disposedRef.current) {
         return;
       }
 
       disposePty();
+      fitAddonRef.current?.fit();
+
+      const cols = Math.max(1, terminal.cols);
+      const rows = Math.max(1, terminal.rows);
 
       const baseEnv = {
         TERM: "xterm-256color",
@@ -102,34 +128,81 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
             ? "powershell.exe"
             : "bash";
 
-      const pty = profile
-        ? profile.launchScript
-          ? spawn("bash", ["-c", profile.launchScript], {
-              cols: terminal.cols,
-              rows: terminal.rows,
+      let pty: IPty;
+      try {
+        pty = profile
+          ? profile.launchScript
+            ? spawn("bash", ["-c", profile.launchScript], {
+                cols,
+                rows,
+                env: baseEnv,
+                cwd: profile.cwd,
+              })
+            : spawn(profile.command, profile.args, {
+                cols,
+                rows,
+                env: baseEnv,
+                cwd: profile.cwd,
+              })
+          : spawn(defaultShell, ["--login"], {
+              cols,
+              rows,
               env: baseEnv,
-              cwd: profile.cwd,
-            })
-          : spawn(profile.command, profile.args, {
-              cols: terminal.cols,
-              rows: terminal.rows,
-              env: baseEnv,
-              cwd: profile.cwd,
-            })
-        : spawn(defaultShell, ["--login"], {
-            cols: terminal.cols,
-            rows: terminal.rows,
-            env: baseEnv,
-          });
+            });
+      } catch (err) {
+        terminal.writeln(`\r\n\x1b[31m[failed to spawn shell: ${err}]\x1b[0m`);
+        statusChangeRef.current?.("error");
+        return;
+      }
 
       ptyRef.current = pty;
       statusChangeRef.current?.("running");
 
+      let receivedData = false;
+
+      const initPromise = (pty as unknown as { _init?: Promise<unknown> })._init;
+      if (initPromise && typeof initPromise.catch === "function") {
+        initPromise.catch((err: unknown) => {
+          if (disposedRef.current || ptyRef.current !== pty) return;
+          clearHealthTimer();
+          terminal.writeln(`\r\n\x1b[31m[PTY spawn failed: ${err}]\x1b[0m`);
+          statusChangeRef.current?.("error");
+          ptyRef.current = null;
+
+          if (retryCountRef.current < PTY_MAX_RETRIES) {
+            retryCountRef.current += 1;
+            terminal.writeln(`\x1b[33m[retrying... (${retryCountRef.current}/${PTY_MAX_RETRIES})]\x1b[0m`);
+            window.setTimeout(() => {
+              if (!disposedRef.current) spawnPty();
+            }, 500);
+          }
+        });
+      }
+
+      healthTimerRef.current = window.setTimeout(() => {
+        if (!receivedData && !disposedRef.current && ptyRef.current === pty) {
+          if (retryCountRef.current < PTY_MAX_RETRIES) {
+            retryCountRef.current += 1;
+            terminal.writeln(`\r\n\x1b[33m[shell not responding — retry ${retryCountRef.current}/${PTY_MAX_RETRIES}]\x1b[0m`);
+            spawnPty();
+          } else {
+            terminal.writeln(`\r\n\x1b[31m[shell failed after ${PTY_MAX_RETRIES} retries]\x1b[0m`);
+            statusChangeRef.current?.("error");
+          }
+        }
+      }, PTY_HEALTH_TIMEOUT_MS);
+
       const ptyDataDisposable = pty.onData((data) => {
+        if (!receivedData) {
+          receivedData = true;
+          clearHealthTimer();
+          retryCountRef.current = 0;
+        }
         terminal.write(data);
       });
 
       const ptyExitDisposable = pty.onExit(({ exitCode }) => {
+        clearHealthTimer();
         terminal.writeln(`\r\n[process exited with code ${exitCode}]`);
         statusChangeRef.current?.("stopped");
       });
@@ -138,8 +211,8 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         pty.write(data);
       });
 
-      const termResizeDisposable = terminal.onResize(({ cols, rows }) => {
-        pty.resize(cols, rows);
+      const termResizeDisposable = terminal.onResize(({ cols: c, rows: r }) => {
+        pty.resize(c, r);
       });
 
       ptyDisposablesRef.current = [
@@ -153,7 +226,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         fitAddonRef.current?.fit();
         pty.resize(terminal.cols, terminal.rows);
         if (activeRef.current) {
-          terminal.focus();
+          focusTerminal();
         }
       });
     };
@@ -169,6 +242,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
           terminalRef.current?.focus();
         },
         restart: () => {
+          retryCountRef.current = 0;
           spawnPty();
         },
         stop: () => {
@@ -184,19 +258,19 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         return undefined;
       }
 
-      let disposed = false;
+      disposedRef.current = false;
+      retryCountRef.current = 0;
+      let cancelled = false;
       let terminal: Terminal | null = null;
       let resizeObserver: ResizeObserver | null = null;
       const host = hostRef.current;
 
       const init = async (): Promise<void> => {
-        try {
-          await document.fonts.load(`14px ${TERM_FONT_FAMILY}`);
-        } catch {
+        if (!fontsReady) {
+          await fontReadyPromise;
         }
-        await document.fonts.ready;
 
-        if (disposed) return;
+        if (cancelled) return;
 
         terminal = new Terminal({
           cursorBlink: true,
@@ -216,12 +290,6 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         terminal.loadAddon(linksAddon);
         terminal.open(host);
 
-        try {
-          const webglAddon = new WebglAddon();
-          terminal.loadAddon(webglAddon);
-        } catch {
-        }
-
         terminalReadyRef.current?.(terminal);
 
         resizeObserver = new ResizeObserver(() => {
@@ -233,14 +301,18 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
 
         resizeObserver.observe(host);
         requestAnimationFrame(() => {
-          spawnPty();
+          if (!cancelled && !disposedRef.current) {
+            spawnPty();
+            if (activeRef.current) focusTerminal();
+          }
         });
       };
 
       init();
 
       return () => {
-        disposed = true;
+        cancelled = true;
+        disposedRef.current = true;
         resizeObserver?.disconnect();
         disposePty();
         terminal?.dispose();
@@ -269,16 +341,42 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       return () => window.removeEventListener("soprano-zoom", handler);
     }, []);
 
-    useEffect(() => {
-      if (isActive) {
-        terminalRef.current?.focus();
+    const focusTerminal = (): void => {
+      const term = terminalRef.current;
+      if (!term) return;
+      const ta = term.textarea;
+      if (ta) {
+        ta.focus();
+      } else {
+        term.focus();
       }
+    };
+
+    useEffect(() => {
+      if (!isActive) return undefined;
+
+      focusTerminal();
+      const rafId = requestAnimationFrame(focusTerminal);
+
+      const timerId = window.setTimeout(focusTerminal, 150);
+
+      return () => {
+        cancelAnimationFrame(rafId);
+        window.clearTimeout(timerId);
+      };
     }, [isActive]);
 
     return (
       <div
         className={`pane terminal-pane ${isActive ? "pane-active" : ""}`}
-        onMouseDown={() => terminalRef.current?.focus()}
+        tabIndex={-1}
+        onMouseDown={focusTerminal}
+        onFocus={(e) => {
+          const ta = terminalRef.current?.textarea;
+          if (ta && (e.target as HTMLElement) !== ta) {
+            ta.focus();
+          }
+        }}
       >
         <div className="terminal-host" ref={hostRef} />
       </div>
