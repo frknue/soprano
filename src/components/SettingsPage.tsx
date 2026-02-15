@@ -1,20 +1,29 @@
 import { useState } from "react";
 import {
   Bot,
+  CirclePlay,
+  CircleStop,
   Info,
   Keyboard,
+  Plug,
+  Plus,
+  RefreshCw,
   Settings as SettingsIcon,
+  Trash2,
   X,
 } from "lucide-react";
 import { DEFAULT_AGENTS } from "../config/agents";
 import { AgentIcon } from "./AgentIcon";
 import { KeyBindingConfig } from "../types/keybinding";
 import { saveKeybindingConfig } from "../config/keybindings";
+import { McpManager } from "../hooks/useMcpManager";
+import { McpServerConfig, McpTransport } from "../types/mcp";
 
-type SettingsTab = "general" | "shortcuts" | "agents" | "about";
+type SettingsTab = "general" | "shortcuts" | "agents" | "mcp" | "about";
 
 interface SettingsPageProps {
   config: KeyBindingConfig;
+  mcpManager: McpManager;
   onClose: () => void;
   onConfigChange: (config: KeyBindingConfig) => void;
 }
@@ -23,6 +32,7 @@ const TABS: Array<{ id: SettingsTab; label: string; Icon: typeof SettingsIcon }>
   { id: "general", Icon: SettingsIcon, label: "General" },
   { id: "shortcuts", Icon: Keyboard, label: "Keyboard Shortcuts" },
   { id: "agents", Icon: Bot, label: "Agent Profiles" },
+  { id: "mcp", Icon: Plug, label: "MCP Servers" },
   { id: "about", Icon: Info, label: "About" },
 ];
 
@@ -235,6 +245,241 @@ function AgentsTab() {
   );
 }
 
+function McpServersTab({ mcpManager }: { mcpManager: McpManager }) {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newCommand, setNewCommand] = useState("");
+  const [newArgs, setNewArgs] = useState("");
+  const [newTransport, setNewTransport] = useState<McpTransport>("stdio");
+  const [newPort, setNewPort] = useState("3200");
+
+  const handleAdd = (): void => {
+    const name = newName.trim();
+    const command = newCommand.trim();
+    if (!name || !command) return;
+
+    const config: McpServerConfig = {
+      id: name.toLowerCase().replace(/\s+/g, "-"),
+      name,
+      icon: "plug",
+      color: "#94e2d5",
+      command,
+      args: newArgs.trim() ? newArgs.trim().split(/\s+/) : [],
+      transport: newTransport,
+      port: Number.parseInt(newPort, 10) || 3200,
+      autoStart: false,
+    };
+
+    mcpManager.addServer(config);
+    setNewName("");
+    setNewCommand("");
+    setNewArgs("");
+    setNewTransport("stdio");
+    setNewPort("3200");
+    setShowAddForm(false);
+  };
+
+  const statusLabel = (status: string): string => {
+    switch (status) {
+      case "running": return "Running";
+      case "starting": return "Starting…";
+      case "error": return "Error";
+      default: return "Stopped";
+    }
+  };
+
+  return (
+    <div className="settings-section">
+      <div className="mcp-section-header">
+        <h3 className="settings-section-title" style={{ marginBottom: 0, borderBottom: "none", paddingBottom: 0 }}>
+          MCP Server Pool
+        </h3>
+        <button
+          className="mcp-add-btn"
+          onClick={() => setShowAddForm((prev) => !prev)}
+          type="button"
+        >
+          <Plus size={14} />
+          <span>Add Server</span>
+        </button>
+      </div>
+
+      <p className="mcp-description">
+        Shared MCP servers are spawned once and accessible by all agents.
+        Stdio servers are automatically proxied via supergateway for multi-client SSE access.
+      </p>
+
+      {showAddForm && (
+        <div className="mcp-add-form">
+          <div className="mcp-form-row">
+            <div className="mcp-form-field">
+              <label className="settings-label" htmlFor="mcp-name">Name</label>
+              <input
+                className="settings-input"
+                id="mcp-name"
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="My Server"
+                value={newName}
+              />
+            </div>
+            <div className="mcp-form-field">
+              <label className="settings-label" htmlFor="mcp-port">Port</label>
+              <input
+                className="settings-input settings-input-sm"
+                id="mcp-port"
+                onChange={(e) => setNewPort(e.target.value)}
+                type="number"
+                value={newPort}
+              />
+            </div>
+          </div>
+          <div className="mcp-form-row">
+            <div className="mcp-form-field" style={{ flex: 1 }}>
+              <label className="settings-label" htmlFor="mcp-command">Command</label>
+              <input
+                className="settings-input"
+                id="mcp-command"
+                onChange={(e) => setNewCommand(e.target.value)}
+                placeholder="npx"
+                style={{ width: "100%" }}
+                value={newCommand}
+              />
+            </div>
+          </div>
+          <div className="mcp-form-row">
+            <div className="mcp-form-field" style={{ flex: 1 }}>
+              <label className="settings-label" htmlFor="mcp-args">Arguments</label>
+              <input
+                className="settings-input"
+                id="mcp-args"
+                onChange={(e) => setNewArgs(e.target.value)}
+                placeholder="-y @modelcontextprotocol/server-example"
+                style={{ width: "100%" }}
+                value={newArgs}
+              />
+            </div>
+          </div>
+          <div className="mcp-form-row">
+            <div className="mcp-form-field">
+              <label className="settings-label" htmlFor="mcp-transport">Transport</label>
+              <select
+                className="settings-input mcp-select"
+                id="mcp-transport"
+                onChange={(e) => setNewTransport(e.target.value as McpTransport)}
+                value={newTransport}
+              >
+                <option value="stdio">stdio (proxied via supergateway)</option>
+                <option value="sse">SSE (native)</option>
+              </select>
+            </div>
+          </div>
+          <div className="mcp-form-actions">
+            <button className="mcp-form-cancel" onClick={() => setShowAddForm(false)} type="button">Cancel</button>
+            <button
+              className="mcp-form-submit"
+              disabled={!newName.trim() || !newCommand.trim()}
+              onClick={handleAdd}
+              type="button"
+            >
+              Add Server
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mcp-server-list">
+        {mcpManager.pool.map(({ config, instance }) => (
+          <div className="mcp-server-card" key={config.id}>
+            <div className="mcp-server-card-header">
+              <AgentIcon name={config.icon} size={20} style={{ color: config.color }} />
+              <span className="mcp-server-card-name">{config.name}</span>
+              <span className={`mcp-status-badge ${instance.status}`}>
+                {statusLabel(instance.status)}
+              </span>
+            </div>
+
+            <div className="mcp-server-card-details">
+              <div className="mcp-server-detail">
+                <span className="mcp-detail-label">Command</span>
+                <code className="mcp-detail-value">
+                  {`${config.command} ${config.args.join(" ")}`.trim()}
+                </code>
+              </div>
+              <div className="mcp-server-detail">
+                <span className="mcp-detail-label">Transport</span>
+                <span className="mcp-detail-value">{config.transport === "stdio" ? "stdio → SSE proxy" : "SSE native"}</span>
+              </div>
+              <div className="mcp-server-detail">
+                <span className="mcp-detail-label">Port</span>
+                <span className="mcp-detail-value">{config.port}</span>
+              </div>
+              {instance.url && (
+                <div className="mcp-server-detail">
+                  <span className="mcp-detail-label">URL</span>
+                  <code className="mcp-detail-value mcp-url">{instance.url}</code>
+                </div>
+              )}
+              {instance.error && (
+                <div className="mcp-server-detail">
+                  <span className="mcp-detail-label">Error</span>
+                  <span className="mcp-detail-value mcp-error-text">{instance.error}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mcp-server-card-actions">
+              {instance.status === "running" ? (
+                <>
+                  <button
+                    className="mcp-action-btn"
+                    onClick={() => mcpManager.restartServer(config.id)}
+                    title="Restart"
+                    type="button"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                  <button
+                    className="mcp-action-btn danger"
+                    onClick={() => mcpManager.stopServer(config.id)}
+                    title="Stop"
+                    type="button"
+                  >
+                    <CircleStop size={14} />
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="mcp-action-btn success"
+                  disabled={instance.status === "starting"}
+                  onClick={() => mcpManager.startServer(config.id)}
+                  title="Start"
+                  type="button"
+                >
+                  <CirclePlay size={14} />
+                </button>
+              )}
+              <button
+                className="mcp-action-btn danger"
+                onClick={() => mcpManager.removeServer(config.id)}
+                title="Remove"
+                type="button"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {mcpManager.pool.length === 0 && (
+          <div className="mcp-empty">
+            No MCP servers configured. Click "Add Server" to get started.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AboutTab() {
   return (
     <div className="settings-section">
@@ -288,7 +533,7 @@ function AboutTab() {
   );
 }
 
-export function SettingsPage({ config, onClose, onConfigChange }: SettingsPageProps) {
+export function SettingsPage({ config, mcpManager, onClose, onConfigChange }: SettingsPageProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   return (
@@ -328,6 +573,7 @@ export function SettingsPage({ config, onClose, onConfigChange }: SettingsPagePr
         ) : null}
         {activeTab === "shortcuts" ? <ShortcutsTab config={config} /> : null}
         {activeTab === "agents" ? <AgentsTab /> : null}
+        {activeTab === "mcp" ? <McpServersTab mcpManager={mcpManager} /> : null}
         {activeTab === "about" ? <AboutTab /> : null}
       </div>
     </div>

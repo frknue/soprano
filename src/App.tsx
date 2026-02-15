@@ -6,12 +6,14 @@ import { StatusBar } from "./components/StatusBar";
 import { TilingLayout } from "./components/TilingLayout";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useAgentManager } from "./hooks/useAgentManager";
+import { useMcpManager } from "./hooks/useMcpManager";
 import { useNotifications } from "./hooks/useNotifications";
 import { useOutputMonitor } from "./hooks/useOutputMonitor";
 import { useSessionManager } from "./hooks/useSessionManager";
 
 export default function App() {
   const agentManager = useAgentManager();
+  const mcpManager = useMcpManager();
   const outputMonitor = useOutputMonitor(agentManager);
   const sessionManager = useSessionManager(agentManager);
   const notifications = useNotifications();
@@ -50,6 +52,7 @@ export default function App() {
         <Sidebar
           activeSection={sidebarSection}
           agentManager={agentManager}
+          mcpManager={mcpManager}
           isSettingsOpen={showSettings}
           onOpenSettings={toggleSettings}
           onSectionChange={setSidebarSection}
@@ -59,6 +62,7 @@ export default function App() {
           {showSettings ? (
             <SettingsPage
               config={config}
+              mcpManager={mcpManager}
               onClose={() => setShowSettings(false)}
               onConfigChange={updateConfig}
             />

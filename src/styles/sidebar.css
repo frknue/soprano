@@ -512,6 +512,94 @@
   font-family: inherit;
 }
 
+.sidebar-mcp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 80ms ease;
+}
+
+.sidebar-mcp-item:hover {
+  background: rgb(49 50 68 / 40%);
+}
+
+.sidebar-mcp-icon {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.sidebar-mcp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mcp-status-dot.stopped {
+  background: var(--text-muted);
+  opacity: 0.3;
+}
+
+.mcp-status-dot.starting {
+  background: #f9e2af;
+  animation: mcpPulse 1s ease-in-out infinite;
+}
+
+.mcp-status-dot.running {
+  background: #a6e3a1;
+}
+
+.mcp-status-dot.error {
+  background: #f38ba8;
+}
+
+@keyframes mcpPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.sidebar-mcp-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease, background 80ms ease, color 80ms ease;
+}
+
+.sidebar-mcp-item:hover .sidebar-mcp-action {
+  opacity: 1;
+}
+
+.sidebar-mcp-action:hover {
+  background: rgb(49 50 68 / 60%);
+  color: var(--text-primary);
+}
+
+.sidebar-mcp-action:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .tooltip-content {
   z-index: 200;
   padding: 5px 10px;

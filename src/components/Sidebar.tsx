@@ -3,9 +3,12 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   ArrowUpRight,
   Bot,
+  CirclePlay,
+  CircleStop,
   Globe,
   History,
   LayoutGrid,
+  Plug,
   Settings,
   Terminal,
   Trash2,
@@ -15,13 +18,15 @@ import {
 import { DEFAULT_AGENTS, getAgentById } from "../config/agents";
 import { AgentIcon } from "./AgentIcon";
 import { AgentManager } from "../hooks/useAgentManager";
+import { McpManager } from "../hooks/useMcpManager";
 import { useSessionManager } from "../hooks/useSessionManager";
 import { activeTab } from "../types/agent";
 
-export type SidebarSection = "agents" | "panes" | "sessions" | "settings";
+export type SidebarSection = "agents" | "panes" | "mcp" | "sessions" | "settings";
 
 interface SidebarProps {
   agentManager: AgentManager;
+  mcpManager: McpManager;
   activeSection: SidebarSection | null;
   onSectionChange: (section: SidebarSection | null) => void;
   sessionManager: ReturnType<typeof useSessionManager>;
@@ -37,6 +42,7 @@ const SECTION_META: Array<{
 }> = [
   { id: "agents", Icon: Bot, label: "Agents" },
   { id: "panes", Icon: LayoutGrid, label: "Panes" },
+  { id: "mcp", Icon: Plug, label: "MCP Servers" },
   { id: "sessions", Icon: History, label: "Sessions" },
   { id: "settings", Icon: Settings, label: "Settings", bottom: true },
 ];
@@ -165,6 +171,48 @@ function ActivePanesPanel({ agentManager }: { agentManager: AgentManager }) {
    );
  }
 
+function McpPanel({ mcpManager }: { mcpManager: McpManager }) {
+  return (
+    <div>
+      <div className="sidebar-section-label">
+        {`Server Pool (${mcpManager.runningCount}/${mcpManager.pool.length})`}
+      </div>
+      {mcpManager.pool.map(({ config, instance }) => (
+        <div className="sidebar-mcp-item" key={config.id}>
+          <span className="sidebar-mcp-icon">
+            <AgentIcon name={config.icon} size={14} style={{ color: config.color }} />
+          </span>
+          <span className="sidebar-mcp-name">{config.name}</span>
+          <span className={`mcp-status-dot ${instance.status}`} />
+          {instance.status === "running" ? (
+            <button
+              className="sidebar-mcp-action"
+              onClick={() => mcpManager.stopServer(config.id)}
+              title="Stop server"
+              type="button"
+            >
+              <CircleStop size={12} />
+            </button>
+          ) : (
+            <button
+              className="sidebar-mcp-action"
+              disabled={instance.status === "starting"}
+              onClick={() => mcpManager.startServer(config.id)}
+              title="Start server"
+              type="button"
+            >
+              <CirclePlay size={12} />
+            </button>
+          )}
+        </div>
+      ))}
+      {mcpManager.pool.length === 0 && (
+        <div className="sidebar-empty">No MCP servers configured</div>
+      )}
+    </div>
+  );
+}
+
 function SessionsPanel({
   sessionManager,
 }: {
@@ -249,6 +297,7 @@ function SessionsPanel({
 
 export function Sidebar({
   agentManager,
+  mcpManager,
   activeSection,
   onSectionChange,
   sessionManager,
@@ -319,6 +368,9 @@ export function Sidebar({
             ) : null}
             {activeSection === "panes" ? (
               <ActivePanesPanel agentManager={agentManager} />
+            ) : null}
+            {activeSection === "mcp" ? (
+              <McpPanel mcpManager={mcpManager} />
             ) : null}
             {activeSection === "sessions" ? (
               <SessionsPanel sessionManager={sessionManager} />
