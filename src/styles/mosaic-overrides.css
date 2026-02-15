@@ -23,7 +23,7 @@
   min-height: 28px;
   height: 28px;
   padding: 0 6px;
-  background: linear-gradient(180deg, rgb(49 50 68 / 74%), rgb(24 24 37 / 96%));
+  background: linear-gradient(180deg, rgb(60 56 54 / 74%), rgb(29 32 33 / 96%));
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-primary);
   gap: 8px;
@@ -54,7 +54,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   padding: 0 6px;
-  background: rgb(17 17 27 / 70%);
+  background: rgb(29 32 33 / 70%);
   color: var(--text-muted);
   font-family: inherit;
   font-size: 11px;
@@ -62,26 +62,26 @@
 }
 
 .pane-toolbar-button:hover {
-  border-color: rgb(203 166 247 / 68%);
+  border-color: rgb(254 128 25 / 68%);
   color: var(--text-primary);
 }
 
 .agent-header .pane-toolbar-button:hover {
-  border-color: color-mix(in srgb, var(--agent-accent, #cba6f7) 68%, transparent);
+  border-color: color-mix(in srgb, var(--agent-accent, #fe8019) 68%, transparent);
 }
 
 .pane-toolbar-button.danger:hover {
-  border-color: rgb(243 139 168 / 82%);
+  border-color: rgb(251 73 52 / 82%);
   color: var(--danger);
 }
 
 .soprano-mosaic .mosaic-split {
-  background: rgb(49 50 68 / 50%);
+  background: rgb(60 56 54 / 50%);
   transition: background-color 110ms ease;
 }
 
 .soprano-mosaic .mosaic-split:hover {
-  background: rgb(203 166 247 / 60%);
+  background: rgb(254 128 25 / 60%);
 }
 
 .soprano-mosaic .mosaic-split.-row {
@@ -95,6 +95,6 @@
 }
 
 .soprano-mosaic .drop-target-container .drop-target {
-  border: 1px solid rgb(203 166 247 / 42%);
-  background: rgb(203 166 247 / 12%);
+  border: 1px solid rgb(254 128 25 / 42%);
+  background: rgb(254 128 25 / 12%);
 }

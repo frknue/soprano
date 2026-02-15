@@ -568,7 +568,7 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
 
   const focusPane = useCallback((paneId: string): void => {
     setState((prev) => {
-      if (!prev.panes.has(paneId)) {
+      if (!prev.panes.has(paneId) || prev.activePaneId === paneId) {
         return prev;
       }
 

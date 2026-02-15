@@ -44,8 +44,8 @@ body,
 
 body {
   background:
-    radial-gradient(circle at 20% -10%, rgb(203 166 247 / 14%), transparent 42%),
-    radial-gradient(circle at 85% 120%, rgb(148 226 213 / 8%), transparent 45%),
+    radial-gradient(circle at 20% -10%, rgb(254 128 25 / 14%), transparent 42%),
+    radial-gradient(circle at 85% 120%, rgb(142 192 124 / 8%), transparent 45%),
     var(--bg-base);
   color: var(--text-primary);
   font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
@@ -99,7 +99,7 @@ body {
   display: flex;
   width: 100%;
   height: 100%;
-  background: linear-gradient(160deg, rgb(24 24 37 / 92%), rgb(17 17 27 / 96%));
+  background: linear-gradient(160deg, rgb(29 32 33 / 92%), rgb(29 32 33 / 96%));
   border: 1px solid transparent;
   border-radius: 8px;
   overflow: hidden;
@@ -107,8 +107,8 @@ body {
 }
 
 .pane-active {
-  border-color: rgb(203 166 247 / 70%);
-  box-shadow: 0 0 0 1px rgb(203 166 247 / 24%), 0 0 24px rgb(203 166 247 / 14%);
+  border-color: rgb(254 128 25 / 70%);
+  box-shadow: 0 0 0 1px rgb(254 128 25 / 24%), 0 0 24px rgb(254 128 25 / 14%);
 }
 
 .terminal-pane,
@@ -132,7 +132,7 @@ body {
   gap: 6px;
   align-items: center;
   padding: 6px;
-  background: rgb(17 17 27 / 84%);
+  background: rgb(29 32 33 / 84%);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -140,7 +140,7 @@ body {
   height: 28px;
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: linear-gradient(180deg, rgb(49 50 68 / 80%), rgb(30 30 46 / 95%));
+  background: linear-gradient(180deg, rgb(60 56 54 / 80%), rgb(40 40 40 / 95%));
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
@@ -148,7 +148,7 @@ body {
 }
 
 .browser-button:hover {
-  border-color: rgb(203 166 247 / 70%);
+  border-color: rgb(254 128 25 / 70%);
 }
 
 .browser-go {
@@ -161,7 +161,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 0 10px;
-  background: rgb(17 17 27 / 96%);
+  background: rgb(29 32 33 / 96%);
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
@@ -169,15 +169,15 @@ body {
 
 .browser-input:focus {
   outline: none;
-  border-color: rgb(203 166 247 / 70%);
-  box-shadow: 0 0 0 2px rgb(203 166 247 / 18%);
+  border-color: rgb(254 128 25 / 70%);
+  box-shadow: 0 0 0 2px rgb(254 128 25 / 18%);
 }
 
 .browser-viewport {
   flex: 1;
   width: 100%;
   min-height: 0;
-  background: rgb(30 30 46);
+  background: rgb(40 40 40);
 }
 
 .status-bar {
@@ -193,7 +193,7 @@ body {
   height: var(--status-height);
   padding: 0 10px;
   border-top: 1px solid var(--border-subtle);
-  background: linear-gradient(180deg, rgb(30 30 46 / 95%), rgb(17 17 27 / 98%));
+  background: linear-gradient(180deg, rgb(40 40 40 / 95%), rgb(29 32 33 / 98%));
   box-shadow: 0 -8px 22px rgb(0 0 0 / 35%);
   font-size: 12px;
 }
@@ -225,7 +225,7 @@ body {
 
 .status-mode.normal {
   color: var(--text-muted);
-  background: rgb(49 50 68 / 40%);
+  background: rgb(60 56 54 / 40%);
 }
 
 .status-mode.prefix {
@@ -254,7 +254,7 @@ body {
   padding: 0 8px;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
-  background: rgb(49 50 68 / 26%);
+  background: rgb(60 56 54 / 26%);
   color: var(--text-muted);
   font-family: inherit;
   font-size: 11px;
@@ -263,8 +263,8 @@ body {
 }
 
 .status-tab.active {
-  border-color: rgb(203 166 247 / 65%);
-  background: rgb(203 166 247 / 20%);
+  border-color: rgb(254 128 25 / 65%);
+  background: rgb(254 128 25 / 20%);
   color: var(--text-primary);
 }
 
@@ -307,7 +307,7 @@ body {
 
 .command-palette-input:focus {
   outline: none;
-  box-shadow: inset 0 -2px 0 rgb(203 166 247 / 55%);
+  box-shadow: inset 0 -2px 0 rgb(254 128 25 / 55%);
 }
 
 .command-palette-results {
@@ -325,11 +325,11 @@ body {
 }
 
 .command-palette-item.selected {
-  background: rgb(203 166 247 / 12%);
+  background: rgb(254 128 25 / 12%);
 }
 
 .command-palette-item:hover {
-  background: rgb(203 166 247 / 8%);
+  background: rgb(254 128 25 / 8%);
 }
 
 .command-palette-item-icon {
@@ -395,24 +395,24 @@ body {
 }
 
 .agent-status-dot.starting {
-  background: #f9e2af;
+  background: #fabd2f;
   animation: pulse 1.5s infinite;
 }
 
 .agent-status-dot.running {
-  background: #a6e3a1;
+  background: #b8bb26;
 }
 
 .agent-status-dot.idle {
-  background: #89b4fa;
+  background: #83a598;
 }
 
 .agent-status-dot.error {
-  background: #f38ba8;
+  background: #fb4934;
 }
 
 .agent-status-dot.stopped {
-  background: #585b70;
+  background: #665c54;
 }
 
 @keyframes pulse {
@@ -481,7 +481,7 @@ body {
   height: 28px;
   padding: 0 4px;
   border-top: 1px solid var(--border-subtle);
-  background: rgb(17 17 27 / 84%);
+  background: rgb(29 32 33 / 84%);
   overflow-x: auto;
   scrollbar-width: none;
   flex-shrink: 0;
@@ -509,13 +509,13 @@ body {
 }
 
 .pane-tab.active {
-  border-color: rgb(203 166 247 / 50%);
-  background: rgb(203 166 247 / 14%);
+  border-color: rgb(254 128 25 / 50%);
+  background: rgb(254 128 25 / 14%);
   color: var(--text-primary);
 }
 
 .pane-tab:hover {
-  background: rgb(203 166 247 / 8%);
+  background: rgb(254 128 25 / 8%);
 }
 
 .pane-tab-title {
@@ -544,7 +544,7 @@ body {
 }
 
 .pane-tab-close:hover {
-  background: rgb(243 139 168 / 30%);
+  background: rgb(251 73 52 / 30%);
   color: var(--danger);
   opacity: 1;
 }
@@ -557,7 +557,7 @@ body {
   height: 16px;
   border-radius: 8px;
   padding: 0 4px;
-  background: rgb(203 166 247 / 20%);
+  background: rgb(254 128 25 / 20%);
   color: var(--accent);
   font-size: 10px;
   margin-left: auto;
