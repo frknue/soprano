@@ -5,6 +5,7 @@ import { SavedWorkspace } from "../config/settings";
 import { activeTab, AgentProfile, AgentStatus, PaneState, PaneTab, PaneType } from "../types/agent";
 
 const MAX_TABS_PER_PANE = 10;
+const MAX_PANES = 20;
 
 interface AgentManagerState {
   panes: Map<string, PaneState>;
@@ -436,6 +437,10 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
   const spawnPane = useCallback(
     (pane: PaneState): string => {
       setState((prev) => {
+        if (prev.panes.size >= MAX_PANES) {
+          return prev;
+        }
+
         const nextPanes = new Map(prev.panes);
         nextPanes.set(pane.id, pane);
 
@@ -915,6 +920,10 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
       }
 
       const agent = resolvedPane.tab.agent;
+      if (agent.status === status) {
+        return prev;
+      }
+
       const { pane: activePane, tab, index } = resolvedPane;
       const nextPanes = new Map(prev.panes);
       nextPanes.set(

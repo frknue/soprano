@@ -1,4 +1,4 @@
-import { ReactNode, useRef, useState } from "react";
+import { memo, ReactNode, useRef, useState } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   ArrowUpRight,
@@ -295,7 +295,7 @@ function SessionsPanel({
   );
 }
 
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   agentManager,
   mcpManager,
   activeSection,
@@ -381,4 +381,4 @@ export function Sidebar({
       ) : null}
     </>
   );
-}
+});

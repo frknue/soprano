@@ -6,6 +6,7 @@ import {
   useRef,
 } from "react";
 import { platform } from "@tauri-apps/plugin-os";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { IDisposable, ITheme, Terminal } from "@xterm/xterm";
@@ -251,6 +252,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
           fontSize: 14,
           allowProposedApi: true,
           fontFamily: TERM_FONT_FAMILY,
+          scrollback: 5000,
           theme: terminalThemeRef.current ?? undefined,
         });
 
@@ -263,6 +265,12 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         terminal.loadAddon(fitAddon);
         terminal.loadAddon(linksAddon);
         terminal.open(host);
+
+        try {
+          terminal.loadAddon(new CanvasAddon());
+        } catch {
+          // Canvas renderer unavailable — fall back to DOM renderer
+        }
 
         terminalReadyRef.current?.(terminal);
 

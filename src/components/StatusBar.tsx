@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { KeybindingMode } from "../hooks/useKeybindings";
 import { useNotifications } from "../hooks/useNotifications";
 import { AgentManager } from "../hooks/useAgentManager";
@@ -11,7 +12,7 @@ interface StatusBarProps {
   notifications: ReturnType<typeof useNotifications>;
 }
 
-export function StatusBar({ agentManager, mode, notifications }: StatusBarProps) {
+export const StatusBar = memo(function StatusBar({ agentManager, mode, notifications }: StatusBarProps) {
   const panes = [...agentManager.panes.values()];
   const activePane = agentManager.panes.get(agentManager.activePaneId);
   const activeTypeLabel = activePane ? activeTab(activePane).type.toUpperCase() : "NONE";
@@ -61,4 +62,4 @@ export function StatusBar({ agentManager, mode, notifications }: StatusBarProps)
       </div>
     </footer>
   );
-}
+});

@@ -92,25 +92,33 @@ export const BrowserPane = memo(function BrowserPane({
       return;
     }
 
+    let rafId: number | null = null;
     const observer = new ResizeObserver(() => {
       if (!createdRef.current || !isVisible) {
         return;
       }
-      const rect = el.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) {
-        return;
-      }
-      invoke("resize_browser", {
-        label: webviewLabel,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-      }).catch(() => {});
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          return;
+        }
+        invoke("resize_browser", {
+          label: webviewLabel,
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        }).catch(() => {});
+      });
     });
 
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, [webviewLabel, isVisible]);
 
   const navigate = (): void => {

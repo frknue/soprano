@@ -14,6 +14,15 @@ struct McpPool {
     servers: HashMap<String, McpProcess>,
 }
 
+impl Drop for McpPool {
+    fn drop(&mut self) {
+        for (_, server) in self.servers.iter_mut() {
+            let _ = server.child.kill();
+            let _ = server.child.wait();
+        }
+    }
+}
+
 type McpPoolState = Mutex<McpPool>;
 
 #[derive(serde::Serialize)]
@@ -55,10 +64,11 @@ fn spawn_mcp_server(
     transport: String,
     port: u16,
 ) -> Result<u32, String> {
-    let mut pool = state.lock().map_err(|e| e.to_string())?;
-
-    if pool.servers.contains_key(&id) {
-        return Err(format!("Server '{}' is already running", id));
+    {
+        let pool = state.lock().map_err(|e| e.to_string())?;
+        if pool.servers.contains_key(&id) {
+            return Err(format!("Server '{}' is already running", id));
+        }
     }
 
     kill_stale_process_on_port(port);
@@ -98,6 +108,14 @@ fn spawn_mcp_server(
     };
 
     let pid = child.id();
+    let mut pool = state.lock().map_err(|e| e.to_string())?;
+    if pool.servers.contains_key(&id) {
+        drop(pool);
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("Server '{}' is already running", id));
+    }
     pool.servers.insert(id, McpProcess { child, port });
     Ok(pid)
 }

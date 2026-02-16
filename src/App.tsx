@@ -64,6 +64,8 @@ export default function App() {
   }, [themeManager.setThemeId]);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mcpPoolRef = useRef(mcpManager.pool);
+  mcpPoolRef.current = mcpManager.pool;
 
   useEffect(() => {
     if (!appSettingsRef.current.restoreLastSession) return;
@@ -86,7 +88,7 @@ export default function App() {
               profileId: tab.agent?.profileId,
             })),
           })),
-        runningMcpServers: mcpManager.pool
+        runningMcpServers: mcpPoolRef.current
           .filter((e) => e.instance.status === "running")
           .map((e) => e.config.id),
         savedAt: Date.now(),
@@ -97,7 +99,7 @@ export default function App() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [agentManager.layout, agentManager.panes, agentManager.activePaneId, mcpManager.pool]);
+  }, [agentManager.layout, agentManager.panes, agentManager.activePaneId]);
 
   useEffect(() => {
     if (!initialWorkspace?.runningMcpServers?.length) return;
