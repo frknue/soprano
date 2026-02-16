@@ -129,6 +129,14 @@ export default function App() {
     }
   }, [agentManager.activePaneId, maximizedPaneId]);
 
+  const prevPaneCount = useRef(agentManager.panes.size);
+  useEffect(() => {
+    if (agentManager.panes.size > prevPaneCount.current && showSettings) {
+      setShowSettings(false);
+    }
+    prevPaneCount.current = agentManager.panes.size;
+  }, [agentManager.panes.size]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="app-shell">
       <div className="app-body">
