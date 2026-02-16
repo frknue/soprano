@@ -20,7 +20,7 @@ export interface AgentManager {
   paneCount: number;
   spawnAgent: (profileId: string) => string;
   spawnBrowser: () => string;
-  spawnTerminal: () => string;
+  spawnTerminal: (cwd?: string) => string;
   splitPane: (direction: MosaicDirection, paneId: string) => string | null;
   closePane: (paneId: string) => void;
   focusPane: (paneId: string) => void;
@@ -72,7 +72,7 @@ function createTitle(type: PaneType, id: string, profileId?: string): string {
   return `Terminal ${titleSuffix}`;
 }
 
-function createPaneTab(id: string, type: PaneType, profileId?: string): PaneTab {
+function createPaneTab(id: string, type: PaneType, profileId?: string, cwd?: string): PaneTab {
   if (type === "agent" && profileId) {
     return {
       id,
@@ -86,16 +86,18 @@ function createPaneTab(id: string, type: PaneType, profileId?: string): PaneTab 
         exitCode: null,
         restartCount: 0,
       },
+      cwd,
     };
   }
 
-  return { id, type, title: createTitle(type, id) };
+  const title = cwd ? cwd.split("/").pop() ?? createTitle(type, id) : createTitle(type, id);
+  return { id, type, title, cwd };
 }
 
-function createPaneState(paneId: string, tabId: string, type: PaneType, profileId?: string): PaneState {
+function createPaneState(paneId: string, tabId: string, type: PaneType, profileId?: string, cwd?: string): PaneState {
   return {
     id: paneId,
-    tabs: [createPaneTab(tabId, type, profileId)],
+    tabs: [createPaneTab(tabId, type, profileId, cwd)],
     activeTabIndex: 0,
   };
 }
@@ -497,9 +499,9 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
     return spawnPane(createPaneState(paneId, nextTabId(), "browser"));
   }, [nextPaneId, nextTabId, spawnPane]);
 
-  const spawnTerminal = useCallback((): string => {
+  const spawnTerminal = useCallback((cwd?: string): string => {
     const paneId = nextPaneId();
-    return spawnPane(createPaneState(paneId, nextTabId(), "terminal"));
+    return spawnPane(createPaneState(paneId, nextTabId(), "terminal", undefined, cwd));
   }, [nextPaneId, nextTabId, spawnPane]);
 
   const splitPane = useCallback(

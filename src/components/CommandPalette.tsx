@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Bot,
   Columns2,
@@ -16,16 +17,25 @@ import {
   PawPrint,
 } from "lucide-react";
 import { getBindingById } from "../config/keybindings";
+import { AppSettings } from "../config/settings";
 import { useSessionManager } from "../hooks/useSessionManager";
 import { AgentManager } from "../hooks/useAgentManager";
+import { PaletteMode } from "../hooks/useKeybindings";
 import { KeyBindingConfig } from "../types/keybinding";
+
+interface ProjectEntry {
+  name: string;
+  path: string;
+}
 
 interface CommandPaletteProps {
   isOpen: boolean;
+  initialMode: PaletteMode;
   onClose: () => void;
   agentManager: AgentManager;
   sessionManager: ReturnType<typeof useSessionManager>;
   config: KeyBindingConfig;
+  appSettings: AppSettings;
 }
 
 interface CommandItem {
@@ -41,13 +51,15 @@ function formatDate(timestamp: number): string {
   return new Date(timestamp).toLocaleString();
 }
 
-export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, config }: CommandPaletteProps) {
+export function CommandPalette({ isOpen, initialMode, onClose, agentManager, sessionManager, config, appSettings }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const saveInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isSaveMode, setIsSaveMode] = useState(false);
   const [sessionName, setSessionName] = useState("");
+  const [isProjectMode, setIsProjectMode] = useState(false);
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
 
   const commands = useMemo<CommandItem[]>(() => {
     const activePaneId = agentManager.activePaneId;
@@ -155,6 +167,23 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
       },
     ];
 
+    const projectCommands: CommandItem[] = appSettings.projectDirectories.length > 0
+      ? [{
+          id: "open-project",
+          icon: <FolderOpen size={18} />,
+          label: "Open Project...",
+          description: "Browse project directories and open a terminal",
+          execute: () => {
+            setIsProjectMode(true);
+            setQuery("");
+            setSelectedIndex(0);
+            invoke<ProjectEntry[]>("list_projects", { roots: appSettings.projectDirectories })
+              .then(setProjects)
+              .catch(() => setProjects([]));
+          },
+        }]
+      : [];
+
     const sessionCommands: CommandItem[] = [
       {
         id: "save-session",
@@ -185,8 +214,8 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
       },
     ];
 
-    return [...agentCommands, ...actionCommands, ...sessionCommands];
-  }, [agentManager, config, sessionManager]);
+    return [...agentCommands, ...projectCommands, ...actionCommands, ...sessionCommands];
+  }, [agentManager, config, sessionManager, appSettings.projectDirectories]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -205,7 +234,18 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
       setQuery("");
       setSelectedIndex(0);
       setIsSaveMode(false);
+      setIsProjectMode(false);
+      setProjects([]);
       return;
+    }
+
+    if (initialMode === "projects" && appSettings.projectDirectories.length > 0) {
+      setIsProjectMode(true);
+      setQuery("");
+      setSelectedIndex(0);
+      invoke<ProjectEntry[]>("list_projects", { roots: appSettings.projectDirectories })
+        .then(setProjects)
+        .catch(() => setProjects([]));
     }
 
     requestAnimationFrame(() => {
@@ -215,7 +255,7 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
         inputRef.current?.focus();
       }
     });
-  }, [isOpen, isSaveMode]);
+  }, [isOpen, isSaveMode, initialMode, appSettings.projectDirectories]);
 
   useEffect(() => {
     setSelectedIndex((prev) => {
@@ -230,13 +270,25 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
     node?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
+  const filteredProjects = useMemo(() => {
+    if (!isProjectMode) return [];
+    const term = query.trim().toLowerCase();
+    if (!term) return projects;
+    return projects.filter((p) => p.name.toLowerCase().includes(term));
+  }, [isProjectMode, projects, query]);
+
+  const openProject = useCallback((project: ProjectEntry): void => {
+    agentManager.spawnTerminal(project.path);
+    onClose();
+  }, [agentManager, onClose]);
+
   if (!isOpen) {
     return null;
   }
 
   const executeCommand = (command: CommandItem): void => {
     command.execute();
-    if (command.id !== "save-session") {
+    if (command.id !== "save-session" && command.id !== "open-project") {
       onClose();
     }
   };
@@ -277,11 +329,16 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
         ) : (
           <input
             className="command-palette-input"
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelectedIndex(0);
+            }}
             onKeyDown={(event) => {
+              const listLength = isProjectMode ? filteredProjects.length : filtered.length;
+
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, filtered.length - 1)));
+                setSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, listLength - 1)));
               }
 
               if (event.key === "ArrowUp") {
@@ -291,41 +348,70 @@ export function CommandPalette({ isOpen, onClose, agentManager, sessionManager, 
 
               if (event.key === "Enter") {
                 event.preventDefault();
-                const selected = filtered[selectedIndex];
-                if (selected) {
-                  executeCommand(selected);
+                if (isProjectMode) {
+                  const project = filteredProjects[selectedIndex];
+                  if (project) openProject(project);
+                } else {
+                  const selected = filtered[selectedIndex];
+                  if (selected) executeCommand(selected);
                 }
               }
 
               if (event.key === "Escape") {
                 event.preventDefault();
-                onClose();
+                if (isProjectMode) {
+                  setIsProjectMode(false);
+                  setProjects([]);
+                  setQuery("");
+                  setSelectedIndex(0);
+                } else {
+                  onClose();
+                }
               }
             }}
-            placeholder="Type a command..."
+            placeholder={isProjectMode ? "Search projects..." : "Type a command..."}
             ref={inputRef}
             value={query}
           />
         )}
 
         <div className="command-palette-results">
-          {filtered.map((command, index) => (
-            <div
-              className={`command-palette-item ${index === selectedIndex ? "selected" : ""}`}
-              key={command.id}
-              onClick={() => executeCommand(command)}
-              ref={index === selectedIndex ? selectedRef : undefined}
-              role="button"
-              tabIndex={0}
-            >
-              <span className="command-palette-item-icon">{command.icon}</span>
-              <div>
-                <div className="command-palette-item-label">{command.label}</div>
-                <div className="command-palette-item-desc">{command.description}</div>
+          {isProjectMode ? (
+            filteredProjects.map((project, index) => (
+              <div
+                className={`command-palette-item ${index === selectedIndex ? "selected" : ""}`}
+                key={project.path}
+                onClick={() => openProject(project)}
+                ref={index === selectedIndex ? selectedRef : undefined}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="command-palette-item-icon"><FolderOpen size={18} /></span>
+                <div>
+                  <div className="command-palette-item-label">{project.name}</div>
+                  <div className="command-palette-item-desc">{project.path}</div>
+                </div>
               </div>
-              {command.shortcut ? <span className="command-palette-item-shortcut">{command.shortcut}</span> : null}
-            </div>
-          ))}
+            ))
+          ) : (
+            filtered.map((command, index) => (
+              <div
+                className={`command-palette-item ${index === selectedIndex ? "selected" : ""}`}
+                key={command.id}
+                onClick={() => executeCommand(command)}
+                ref={index === selectedIndex ? selectedRef : undefined}
+                role="button"
+                tabIndex={0}
+              >
+                <span className="command-palette-item-icon">{command.icon}</span>
+                <div>
+                  <div className="command-palette-item-label">{command.label}</div>
+                  <div className="command-palette-item-desc">{command.description}</div>
+                </div>
+                {command.shortcut ? <span className="command-palette-item-shortcut">{command.shortcut}</span> : null}
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

@@ -37,6 +37,7 @@ export interface PaneTab {
   type: PaneType;
   title: string;
   agent?: AgentInstance;
+  cwd?: string;
 }
 
 export interface PaneState {

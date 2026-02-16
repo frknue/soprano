@@ -775,3 +775,60 @@
   flex-shrink: 0;
   color: var(--accent);
 }
+
+.settings-project-dirs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-project-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgb(var(--bg-panel-rgb) / 50%);
+  border: 1px solid var(--border-subtle);
+}
+
+.settings-project-dir-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.settings-project-dir-path {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-project-dir-remove {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.settings-project-dir-remove:hover {
+  color: var(--danger);
+  background: rgb(var(--danger-rgb, 204 36 29) / 15%);
+}
+
+.settings-project-dir-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.settings-project-dir-add .settings-input {
+  flex: 1;
+}

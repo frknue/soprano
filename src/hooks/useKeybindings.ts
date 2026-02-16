@@ -26,12 +26,15 @@ function matchDirectBinding(event: KeyboardEvent, binding: KeyBinding): boolean 
   );
 }
 
+export type PaletteMode = "commands" | "projects";
+
 export function useKeybindings(
   agentManager: AgentManager,
   callbacks: KeybindingOptions = {},
 ): {
   mode: KeybindingMode;
   isPaletteOpen: boolean;
+  paletteMode: PaletteMode;
   togglePalette: () => void;
   config: KeyBindingConfig;
   updateConfig: (config: KeyBindingConfig) => void;
@@ -39,6 +42,7 @@ export function useKeybindings(
   const [config, setConfig] = useState<KeyBindingConfig>(() => loadKeybindingConfig());
   const [mode, setMode] = useState<KeybindingMode>("NORMAL");
   const [isPaletteOpen, setPaletteOpen] = useState(false);
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>("commands");
   const prefixTimerRef = useRef<number | null>(null);
   const modeRef = useRef<KeybindingMode>("NORMAL");
 
@@ -49,11 +53,23 @@ export function useKeybindings(
   callbacksRef.current = callbacks;
 
   const togglePalette = useCallback((): void => {
-    setPaletteOpen((prev) => !prev);
+    setPaletteOpen((prev) => {
+      if (prev) setPaletteMode("commands");
+      return !prev;
+    });
   }, []);
 
   const togglePaletteRef = useRef(togglePalette);
   togglePaletteRef.current = togglePalette;
+
+  const openProjectSearchRef = useRef((): void => {
+    setPaletteMode("projects");
+    setPaletteOpen(true);
+  });
+  openProjectSearchRef.current = (): void => {
+    setPaletteMode("projects");
+    setPaletteOpen(true);
+  };
 
   useEffect(() => {
     const clearPrefixMode = (): void => {
@@ -111,6 +127,7 @@ export function useKeybindings(
          "launch-opencode": () => mgr.spawnAgent("opencode"),
          "launch-openclaw": () => mgr.spawnAgent("openclaw"),
          "command-palette": () => togglePaletteRef.current(),
+         "open-project": () => openProjectSearchRef.current(),
          "new-terminal": () => mgr.spawnTerminal(),
          "new-browser": () => mgr.spawnBrowser(),
          "close-active": () => mgr.closePane(mgr.activePaneId),
@@ -131,6 +148,10 @@ export function useKeybindings(
 
     const isTextInput = (): boolean => {
       return document.activeElement instanceof HTMLInputElement;
+    };
+
+    const isTerminalFocused = (): boolean => {
+      return !!document.activeElement?.closest(".terminal-host");
     };
 
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -162,6 +183,10 @@ export function useKeybindings(
         return;
       }
 
+      if (isTerminalFocused() && event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        return;
+      }
+
       const directBinding = config.bindings.find(
         (binding) => binding.mode === "direct" && matchDirectBinding(event, binding),
       );
@@ -184,5 +209,5 @@ export function useKeybindings(
     };
   }, [config]);
 
-  return { mode, isPaletteOpen, togglePalette, config, updateConfig: setConfig };
+  return { mode, isPaletteOpen, paletteMode, togglePalette, config, updateConfig: setConfig };
 }

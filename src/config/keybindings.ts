@@ -29,6 +29,7 @@ export const DEFAULT_KEYBINDING_CONFIG: KeyBindingConfig = {
     { id: "launch-opencode", label: "Launch OpenCode", description: "Start OpenCode agent", category: "agents", defaultKeys: "⌘3", mode: "direct", key: "3", meta: true },
     { id: "launch-openclaw", label: "Launch OpenClaw", description: "Start OpenClaw agent", category: "agents", defaultKeys: "⌘4", mode: "direct", key: "4", meta: true },
     { id: "command-palette", label: "Command Palette", description: "Open the command palette", category: "general", defaultKeys: "⌘P", mode: "direct", key: "p", meta: true },
+    { id: "open-project", label: "Open Project", description: "Search and open a project directory", category: "general", defaultKeys: "⌘⇧P", mode: "direct", key: "p", meta: true, shift: true },
     { id: "new-terminal", label: "New Terminal", description: "Open a plain terminal", category: "general", defaultKeys: "⌘T", mode: "direct", key: "t", meta: true },
     { id: "new-browser", label: "New Browser", description: "Open a browser pane", category: "general", defaultKeys: "⌘B", mode: "direct", key: "b", meta: true },
     { id: "close-active", label: "Close Active", description: "Close the active pane", category: "general", defaultKeys: "⌘W", mode: "direct", key: "w", meta: true },
@@ -86,11 +87,16 @@ export function loadKeybindingConfig(): KeyBindingConfig {
       })
       .map((binding) => ({ ...binding }));
 
+    const savedIds = new Set(sanitizedBindings.map((b) => b.id));
+    const missingDefaults = DEFAULT_KEYBINDING_CONFIG.bindings
+      .filter((b) => !savedIds.has(b.id))
+      .map((b) => ({ ...b }));
+
     return {
       prefixKey: parsed.prefixKey.toLowerCase(),
       prefixTimeoutMs: parsed.prefixTimeoutMs,
       resizeTickPercent: parsed.resizeTickPercent,
-      bindings: sanitizedBindings,
+      bindings: [...sanitizedBindings, ...missingDefaults],
     };
   } catch {
     return cloneDefaultConfig();
