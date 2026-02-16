@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useRef,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { platform } from "@tauri-apps/plugin-os";
 import { CanvasAddon } from "@xterm/addon-canvas";
 import { FitAddon } from "@xterm/addon-fit";
@@ -26,6 +27,11 @@ const fontReadyPromise = document.fonts
   .then(() => {
     fontsReady = true;
   });
+
+let parentEnv: Record<string, string> | null = null;
+const parentEnvPromise = invoke<Record<string, string>>("get_process_env")
+  .then((env) => { parentEnv = env; })
+  .catch(() => {});
 
 export interface TerminalRef {
   terminal: Terminal | null;
@@ -106,6 +112,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       const rows = Math.max(1, terminal.rows);
 
       const baseEnv = {
+        ...(parentEnv ?? {}),
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         LANG: "en_US.UTF-8",
@@ -245,6 +252,9 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       const init = async (): Promise<void> => {
         if (!fontsReady) {
           await fontReadyPromise;
+        }
+        if (!parentEnv) {
+          await parentEnvPromise;
         }
 
         if (cancelled) return;
