@@ -126,8 +126,7 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
   const maximizedPane = maximizedPaneId ? agentManager.panes.get(maximizedPaneId) : undefined;
 
   const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => {
-    const tab = pane.tabs[pane.activeTabIndex];
-    if (!tab) {
+    if (pane.tabs.length === 0) {
       return <div className="pane-tab-panels" />;
     }
 
@@ -136,25 +135,31 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
 
     return (
       <div className="pane-tab-panels">
-        <div className="pane-tab-panel" key={tab.id}>
-          {tab.type === "browser" ? (
-            <BrowserPane
-              isActive={isPaneActive}
-              isVisible={isBrowserVisible}
-              paneId={tab.id}
-            />
-          ) : (
-            <TerminalPane
-              isActive={isPaneActive}
-              onStatusChange={getStatusCb(paneId)}
-              onTerminalReady={getReadyCb(tab.id, paneId, tab.agent?.profileId)}
-              paneId={tab.id}
-              profileId={tab.agent?.profileId}
-              terminalTheme={theme.terminal}
-              ref={getRefCb(tab.id)}
-            />
-          )}
-        </div>
+        {pane.tabs.map((tab, index) => {
+          const isTabActive = index === pane.activeTabIndex;
+          return (
+            <div className={`pane-tab-panel${isTabActive ? "" : " hidden"}`} key={tab.id}>
+              {tab.type === "browser" ? (
+                <BrowserPane
+                  isActive={isPaneActive && isTabActive}
+                  isVisible={isBrowserVisible && isTabActive}
+                  paneId={tab.id}
+                />
+              ) : (
+                <TerminalPane
+                  isActive={isPaneActive && isTabActive}
+                  onStatusChange={getStatusCb(paneId)}
+                  onTerminalReady={getReadyCb(tab.id, paneId, tab.agent?.profileId)}
+                  paneId={tab.id}
+                  profileId={tab.agent?.profileId}
+                  cwd={tab.cwd}
+                  terminalTheme={theme.terminal}
+                  ref={getRefCb(tab.id)}
+                />
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };

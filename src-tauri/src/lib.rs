@@ -439,6 +439,41 @@ fn browser_devtools(app: AppHandle, label: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct ProjectEntry {
+    name: String,
+    path: String,
+}
+
+#[tauri::command]
+fn list_projects(roots: Vec<String>) -> Result<Vec<ProjectEntry>, String> {
+    let mut entries = Vec::new();
+    for root in &roots {
+        let root_path = PathBuf::from(root);
+        if !root_path.is_dir() {
+            continue;
+        }
+        let read = fs::read_dir(&root_path).map_err(|e| e.to_string())?;
+        for entry in read.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with('.') {
+                    continue;
+                }
+                entries.push(ProjectEntry {
+                    name: name.to_string(),
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -459,6 +494,7 @@ pub fn run() {
             stop_mcp_server,
             get_mcp_servers,
             sync_agent_mcp_configs,
+            list_projects,
         ])
         .run(tauri::generate_context!())
         .expect("error while running soprano");

@@ -40,13 +40,14 @@ interface TerminalPaneProps {
   paneId: string;
   isActive: boolean;
   profileId?: string;
+  cwd?: string;
   terminalTheme?: ITheme;
   onStatusChange?: (status: AgentStatus) => void;
   onTerminalReady?: (terminal: Terminal) => void;
 }
 
 const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
-  ({ paneId, isActive, profileId, terminalTheme, onStatusChange, onTerminalReady }, ref) => {
+  ({ paneId, isActive, profileId, cwd, terminalTheme, onStatusChange, onTerminalReady }, ref) => {
     const hostRef = useRef<HTMLDivElement | null>(null);
     const terminalRef = useRef<Terminal | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
@@ -139,6 +140,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
               cols,
               rows,
               env: baseEnv,
+              cwd: cwd || undefined,
             });
       } catch (err) {
         terminal.writeln(`\r\n\x1b[31m[failed to spawn shell: ${err}]\x1b[0m`);
@@ -337,8 +339,12 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     useEffect(() => {
       if (!isActive) return undefined;
 
+      fitAddonRef.current?.fit();
       focusTerminal();
-      const rafId = requestAnimationFrame(focusTerminal);
+      const rafId = requestAnimationFrame(() => {
+        fitAddonRef.current?.fit();
+        focusTerminal();
+      });
 
       const timerId = window.setTimeout(focusTerminal, 150);
 

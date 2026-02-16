@@ -4,6 +4,7 @@ import { PaneType } from "../types/agent";
 export interface AppSettings {
   restoreLastSession: boolean;
   themeId: string;
+  projectDirectories: string[];
 }
 
 export interface SavedWorkspace {
@@ -24,6 +25,7 @@ const LAST_SESSION_KEY = "soprano-last-session";
 const DEFAULT_SETTINGS: AppSettings = {
   restoreLastSession: true,
   themeId: "gruvbox-dark",
+  projectDirectories: [],
 };
 
 export function loadAppSettings(): AppSettings {

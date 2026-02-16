@@ -5,6 +5,7 @@ import {
   ChevronDown,
   CirclePlay,
   CircleStop,
+  FolderOpen,
   Info,
   Keyboard,
   Plug,
@@ -93,6 +94,39 @@ function ThemeDropdown({ value, onChange }: { value: string; onChange: (id: stri
   );
 }
 
+function ProjectDirAddRow({ onAdd }: { onAdd: (path: string) => void }) {
+  const [value, setValue] = useState("");
+  const handleAdd = (): void => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onAdd(trimmed);
+    setValue("");
+  };
+
+  return (
+    <div className="settings-project-dir-add">
+      <input
+        className="settings-input"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleAdd();
+        }}
+        placeholder="/path/to/projects"
+        value={value}
+      />
+      <button
+        className="mcp-form-submit"
+        disabled={!value.trim()}
+        onClick={handleAdd}
+        type="button"
+      >
+        <Plus size={14} />
+        <span>Add</span>
+      </button>
+    </div>
+  );
+}
+
 function GeneralTab({
   appSettings,
   config,
@@ -150,6 +184,46 @@ function GeneralTab({
           />
           <span className="settings-toggle-track" />
         </label>
+      </div>
+
+      <h3 className="settings-section-title">Project Directories</h3>
+
+      <div className="settings-field">
+        <div className="settings-field-header">
+          <label className="settings-label">Root Directories</label>
+          <span className="settings-hint">
+            Directories whose subfolders appear in the &quot;Open Project&quot; command palette
+          </span>
+        </div>
+        <div className="settings-project-dirs">
+          {appSettings.projectDirectories.map((dir) => (
+            <div className="settings-project-dir-item" key={dir}>
+              <FolderOpen size={14} className="settings-project-dir-icon" />
+              <code className="settings-project-dir-path">{dir}</code>
+              <button
+                className="settings-project-dir-remove"
+                onClick={() =>
+                  onAppSettingsChange({
+                    ...appSettings,
+                    projectDirectories: appSettings.projectDirectories.filter((d) => d !== dir),
+                  })
+                }
+                title="Remove directory"
+                type="button"
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
+          <ProjectDirAddRow
+            onAdd={(path) =>
+              onAppSettingsChange({
+                ...appSettings,
+                projectDirectories: [...appSettings.projectDirectories, path],
+              })
+            }
+          />
+        </div>
       </div>
 
       <h3 className="settings-section-title">Keybinding Behavior</h3>

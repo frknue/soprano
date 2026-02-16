@@ -108,7 +108,7 @@ export default function App() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { mode, isPaletteOpen, togglePalette, config, updateConfig } = useKeybindings(agentManager, {
+  const { mode, isPaletteOpen, paletteMode, togglePalette, config, updateConfig } = useKeybindings(agentManager, {
     onSaveSession: () => {
       const stamp = new Date().toLocaleString();
       sessionManager.saveSession(`Session ${stamp}`);
@@ -159,7 +159,9 @@ export default function App() {
       <StatusBar agentManager={agentManager} mode={mode} notifications={notifications} />
       <CommandPalette
         agentManager={agentManager}
+        appSettings={appSettings}
         config={config}
+        initialMode={paletteMode}
         isOpen={isPaletteOpen}
         onClose={togglePalette}
         sessionManager={sessionManager}
