@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Mosaic, MosaicPath, MosaicWindow } from "react-mosaic-component";
 import { AgentHeader } from "./AgentHeader";
 import { BrowserPane } from "./BrowserPane";
@@ -23,6 +23,7 @@ interface TilingLayoutProps {
 type TerminalHandle = TerminalRef;
 
 export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonitor, notifications }: TilingLayoutProps) {
+  const [menuOpenPaneId, setMenuOpenPaneId] = useState<string | null>(null);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
   const agentManagerRef = useRef(agentManager);
   const outputMonitorRef = useRef(outputMonitor);
@@ -97,6 +98,7 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
     }
 
     const isPaneActive = agentManager.activePaneId === paneId;
+    const isBrowserVisible = (!maximizedPaneId || maximizedPaneId === paneId) && menuOpenPaneId !== paneId;
 
     return (
       <div className="pane-tab-panels">
@@ -104,7 +106,7 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
           {tab.type === "browser" ? (
             <BrowserPane
               isActive={isPaneActive}
-              isVisible={true}
+              isVisible={isBrowserVisible}
               paneId={tab.id}
             />
           ) : (
@@ -157,6 +159,30 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
                     terminalRefs.current.get(currentTab.id)?.stop();
                     agentManager.stopAgent(paneId);
                   }}
+                  onDuplicate={() => {
+                    const tab = activeTab(pane);
+                    if (tab.type === "agent" && tab.agent) {
+                      agentManager.spawnAgent(tab.agent.profileId);
+                    } else if (tab.type === "browser") {
+                      agentManager.spawnBrowser();
+                    } else {
+                      agentManager.spawnTerminal();
+                    }
+                  }}
+                  onClose={() => agentManager.closePane(paneId)}
+                  onAddBrowser={() => agentManager.addTabToPane(paneId, "browser")}
+                  onAddTerminal={() => agentManager.addTabToPane(paneId, "terminal")}
+                  onChangeCwd={() => {
+                    const newCwd = window.prompt("Enter new working directory:");
+                    if (newCwd) {
+                      const term = terminalRefs.current.get(currentTab.id);
+                      if (term) {
+                        term.sendText(`cd "${newCwd}"\n`);
+                        term.focus();
+                      }
+                    }
+                  }}
+                  onMenuOpenChange={(open) => setMenuOpenPaneId(open ? paneId : null)}
                   pane={pane}
                 />
               }

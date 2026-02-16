@@ -15,8 +15,7 @@ import { AgentStatus } from "../types/agent";
 import "@xterm/xterm/css/xterm.css";
 
 const TERM_FONT_FAMILY = "'MesloLGS NF', monospace";
-const PTY_HEALTH_TIMEOUT_MS = 3000;
-const PTY_MAX_RETRIES = 2;
+const PTY_SPAWN_MAX_RETRIES = 2;
 
 let fontsReady = false;
 const fontReadyPromise = document.fonts
@@ -33,6 +32,7 @@ export interface TerminalRef {
   focus: () => void;
   restart: () => void;
   stop: () => void;
+  sendText: (text: string) => void;
 }
 
 interface TerminalPaneProps {
@@ -51,7 +51,6 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
     const fitAddonRef = useRef<FitAddon | null>(null);
     const ptyRef = useRef<IPty | null>(null);
     const ptyDisposablesRef = useRef<IDisposable[]>([]);
-    const healthTimerRef = useRef<number | null>(null);
     const retryCountRef = useRef(0);
     const disposedRef = useRef(false);
     const activeRef = useRef(isActive);
@@ -80,16 +79,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       }
     }, [terminalTheme]);
 
-    const clearHealthTimer = (): void => {
-      if (healthTimerRef.current !== null) {
-        window.clearTimeout(healthTimerRef.current);
-        healthTimerRef.current = null;
-      }
-    };
-
     const disposePty = (): void => {
-      clearHealthTimer();
-
       ptyDisposablesRef.current.forEach((disposable) => {
         disposable.dispose();
       });
@@ -158,20 +148,19 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       ptyRef.current = pty;
       statusChangeRef.current?.("running");
 
-      let receivedData = false;
-
       const initPromise = (pty as unknown as { _init?: Promise<unknown> })._init;
-      if (initPromise && typeof initPromise.catch === "function") {
-        initPromise.catch((err: unknown) => {
+      if (initPromise && typeof initPromise.then === "function") {
+        initPromise.then(() => {
+          retryCountRef.current = 0;
+        }).catch((err: unknown) => {
           if (disposedRef.current || ptyRef.current !== pty) return;
-          clearHealthTimer();
           terminal.writeln(`\r\n\x1b[31m[PTY spawn failed: ${err}]\x1b[0m`);
           statusChangeRef.current?.("error");
           ptyRef.current = null;
 
-          if (retryCountRef.current < PTY_MAX_RETRIES) {
+          if (retryCountRef.current < PTY_SPAWN_MAX_RETRIES) {
             retryCountRef.current += 1;
-            terminal.writeln(`\x1b[33m[retrying... (${retryCountRef.current}/${PTY_MAX_RETRIES})]\x1b[0m`);
+            terminal.writeln(`\x1b[33m[retrying... (${retryCountRef.current}/${PTY_SPAWN_MAX_RETRIES})]\x1b[0m`);
             window.setTimeout(() => {
               if (!disposedRef.current) spawnPty();
             }, 500);
@@ -179,30 +168,11 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         });
       }
 
-      healthTimerRef.current = window.setTimeout(() => {
-        if (!receivedData && !disposedRef.current && ptyRef.current === pty) {
-          if (retryCountRef.current < PTY_MAX_RETRIES) {
-            retryCountRef.current += 1;
-            terminal.writeln(`\r\n\x1b[33m[shell not responding — retry ${retryCountRef.current}/${PTY_MAX_RETRIES}]\x1b[0m`);
-            spawnPty();
-          } else {
-            terminal.writeln(`\r\n\x1b[31m[shell failed after ${PTY_MAX_RETRIES} retries]\x1b[0m`);
-            statusChangeRef.current?.("error");
-          }
-        }
-      }, PTY_HEALTH_TIMEOUT_MS);
-
       const ptyDataDisposable = pty.onData((data) => {
-        if (!receivedData) {
-          receivedData = true;
-          clearHealthTimer();
-          retryCountRef.current = 0;
-        }
         terminal.write(data);
       });
 
       const ptyExitDisposable = pty.onExit(({ exitCode }) => {
-        clearHealthTimer();
         terminal.writeln(`\r\n[process exited with code ${exitCode}]`);
         statusChangeRef.current?.("stopped");
       });
@@ -231,7 +201,7 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
       });
     };
 
-    useImperativeHandle(
+      useImperativeHandle(
       ref,
       () => ({
         terminal: terminalRef.current,
@@ -243,11 +213,15 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         },
         restart: () => {
           retryCountRef.current = 0;
+          terminalRef.current?.clear();
           spawnPty();
         },
         stop: () => {
           statusChangeRef.current?.("stopped");
           disposePty();
+        },
+        sendText: (text: string) => {
+          ptyRef.current?.write(text);
         },
       }),
       [profileId],
