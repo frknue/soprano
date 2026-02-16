@@ -150,10 +150,6 @@ export function useKeybindings(
       return document.activeElement instanceof HTMLInputElement;
     };
 
-    const isTerminalFocused = (): boolean => {
-      return !!document.activeElement?.closest(".terminal-host");
-    };
-
     const handleKeyDown = (event: KeyboardEvent): void => {
       const normalizedKey = event.key.toLowerCase();
       const inputFocused = isTextInput();
@@ -180,10 +176,6 @@ export function useKeybindings(
           executeBinding(prefixBinding);
         }
         clearPrefixMode();
-        return;
-      }
-
-      if (isTerminalFocused() && event.ctrlKey && !event.metaKey && !event.shiftKey) {
         return;
       }
 

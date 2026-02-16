@@ -85,14 +85,21 @@ body {
   height: 100%;
 }
 
-.pane-body.pane-maximized {
+.soprano-mosaic .mosaic-window-maximized.mosaic-window {
   position: fixed;
   top: 0;
   right: 0;
   bottom: var(--status-height);
   left: 0;
   z-index: 90;
-  background: var(--bg-base);
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+.soprano-mosaic .mosaic-window-hidden.mosaic-window {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .pane {

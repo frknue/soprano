@@ -123,8 +123,6 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
     return cb;
   }, [handleTerminalRef]);
 
-  const maximizedPane = maximizedPaneId ? agentManager.panes.get(maximizedPaneId) : undefined;
-
   const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => {
     if (pane.tabs.length === 0) {
       return <div className="pane-tab-panels" />;
@@ -180,9 +178,12 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
 
           const currentTab: PaneTab = activeTab(pane);
           const title = currentTab.title;
+          const isMaximized = maximizedPaneId === paneId;
+          const isHiddenByMaximize = maximizedPaneId !== null && !isMaximized;
 
           return (
             <MosaicWindow<string>
+              className={isMaximized ? "mosaic-window-maximized" : isHiddenByMaximize ? "mosaic-window-hidden" : ""}
               createNode={() => agentManager.createMosaicNode()}
               path={path}
               title={title}
@@ -245,25 +246,6 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
         }}
         value={agentManager.layout}
       />
-
-      {maximizedPane && maximizedPaneId && (
-        <div
-          className="pane-body pane-maximized"
-          onMouseDown={() => agentManager.focusPane(maximizedPaneId)}
-          onFocus={() => agentManager.focusPane(maximizedPaneId)}
-          role="presentation"
-        >
-          {renderPaneBody(maximizedPaneId, maximizedPane)}
-          {maximizedPane.tabs.length > 1 && (
-            <PaneTabBar
-              activeIndex={maximizedPane.activeTabIndex}
-              onClose={(tabId) => agentManager.removeTabFromPane(maximizedPaneId, tabId)}
-              onSwitch={(index) => agentManager.switchTab(maximizedPaneId, index)}
-              tabs={maximizedPane.tabs}
-            />
-          )}
-        </div>
-      )}
     </div>
   );
 }
