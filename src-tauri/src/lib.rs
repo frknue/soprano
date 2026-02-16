@@ -446,6 +446,11 @@ struct ProjectEntry {
 }
 
 #[tauri::command]
+fn get_process_env() -> HashMap<String, String> {
+    std::env::vars().collect()
+}
+
+#[tauri::command]
 fn list_projects(roots: Vec<String>) -> Result<Vec<ProjectEntry>, String> {
     let mut entries = Vec::new();
     for root in &roots {
@@ -495,6 +500,7 @@ pub fn run() {
             get_mcp_servers,
             sync_agent_mcp_configs,
             list_projects,
+            get_process_env,
         ])
         .run(tauri::generate_context!())
         .expect("error while running soprano");
