@@ -30,6 +30,10 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
   const notificationsRef = useRef(notifications);
   const themeRef = useRef(theme);
 
+  const statusCbCache = useRef<Map<string, (status: AgentStatus) => void>>(new Map());
+  const readyCbCache = useRef<Map<string, (terminal: import("@xterm/xterm").Terminal) => void>>(new Map());
+  const refCbCache = useRef<Map<string, (handle: TerminalRef | null) => void>>(new Map());
+
   agentManagerRef.current = agentManager;
   outputMonitorRef.current = outputMonitor;
   notificationsRef.current = notifications;
@@ -44,6 +48,9 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
     [...known.keys()].forEach((tabId) => {
       if (!liveTabIds.has(tabId)) {
         known.delete(tabId);
+        statusCbCache.current.delete(tabId);
+        readyCbCache.current.delete(tabId);
+        refCbCache.current.delete(tabId);
         outputMonitor.detachTerminal(tabId);
       }
     });
@@ -89,6 +96,33 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
     terminalRefs.current.set(tabId, handle);
   }, []);
 
+  const getStatusCb = useCallback((paneId: string): ((status: AgentStatus) => void) => {
+    let cb = statusCbCache.current.get(paneId);
+    if (!cb) {
+      cb = (status: AgentStatus) => handleStatusChange(paneId, status);
+      statusCbCache.current.set(paneId, cb);
+    }
+    return cb;
+  }, [handleStatusChange]);
+
+  const getReadyCb = useCallback((tabId: string, paneId: string, profileId: string | undefined): ((terminal: import("@xterm/xterm").Terminal) => void) => {
+    let cb = readyCbCache.current.get(tabId);
+    if (!cb) {
+      cb = (terminal: import("@xterm/xterm").Terminal) => handleTerminalReady(tabId, paneId, profileId, terminal);
+      readyCbCache.current.set(tabId, cb);
+    }
+    return cb;
+  }, [handleTerminalReady]);
+
+  const getRefCb = useCallback((tabId: string): ((handle: TerminalRef | null) => void) => {
+    let cb = refCbCache.current.get(tabId);
+    if (!cb) {
+      cb = (handle: TerminalRef | null) => handleTerminalRef(tabId, handle);
+      refCbCache.current.set(tabId, cb);
+    }
+    return cb;
+  }, [handleTerminalRef]);
+
   const maximizedPane = maximizedPaneId ? agentManager.panes.get(maximizedPaneId) : undefined;
 
   const renderPaneBody = (paneId: string, pane: ReturnType<typeof agentManager.panes.get> & object): JSX.Element => {
@@ -112,14 +146,12 @@ export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonit
           ) : (
             <TerminalPane
               isActive={isPaneActive}
-              onStatusChange={(status) => handleStatusChange(paneId, status)}
-              onTerminalReady={(terminal) =>
-                handleTerminalReady(tab.id, paneId, tab.agent?.profileId, terminal)
-              }
+              onStatusChange={getStatusCb(paneId)}
+              onTerminalReady={getReadyCb(tab.id, paneId, tab.agent?.profileId)}
               paneId={tab.id}
               profileId={tab.agent?.profileId}
               terminalTheme={theme.terminal}
-              ref={(handle) => handleTerminalRef(tab.id, handle)}
+              ref={getRefCb(tab.id)}
             />
           )}
         </div>

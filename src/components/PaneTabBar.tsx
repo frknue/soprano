@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Globe, Terminal, X } from "lucide-react";
 import { getAgentById } from "../config/agents";
 import { PaneTab } from "../types/agent";
@@ -23,7 +24,7 @@ function renderTabIcon(tab: PaneTab) {
   return <AgentIcon name={profile?.icon ?? "bot"} size={12} />;
 }
 
-export function PaneTabBar({ tabs, activeIndex, onSwitch, onClose }: PaneTabBarProps) {
+export const PaneTabBar = memo(function PaneTabBar({ tabs, activeIndex, onSwitch, onClose }: PaneTabBarProps) {
   return (
     <div className="pane-tab-bar">
       {tabs.map((tab, index) => (
@@ -56,4 +57,4 @@ export function PaneTabBar({ tabs, activeIndex, onSwitch, onClose }: PaneTabBarP
       ))}
     </div>
   );
-}
+});

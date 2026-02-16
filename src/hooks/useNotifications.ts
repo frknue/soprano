@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface AppNotification {
   id: string;
@@ -22,8 +22,22 @@ export function useNotifications(): {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const nextIdRef = useRef(0);
   const permissionRequestedRef = useRef(false);
+  const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((timer) => { clearTimeout(timer); });
+      timers.clear();
+    };
+  }, []);
 
   const dismiss = useCallback((id: string): void => {
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
     setNotifications((prev) =>
       prev.map((item) => {
         if (item.id !== id) {
@@ -39,6 +53,8 @@ export function useNotifications(): {
   }, []);
 
   const dismissAll = useCallback((): void => {
+    timersRef.current.forEach((timer) => { clearTimeout(timer); });
+    timersRef.current.clear();
     setNotifications((prev) => prev.map((item) => ({ ...item, dismissed: true })));
   }, []);
 
@@ -69,9 +85,11 @@ export function useNotifications(): {
         }
       }
 
-      window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
+        timersRef.current.delete(id);
         dismiss(id);
       }, AUTO_DISMISS_MS);
+      timersRef.current.set(id, timer);
     },
     [dismiss],
   );

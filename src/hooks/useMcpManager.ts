@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { loadMcpConfigs, saveMcpConfigs } from "../config/mcp";
 import {
@@ -263,12 +263,18 @@ export function useMcpManager(): McpManager {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pool: McpPoolEntry[] = configs.map((config) => ({
-    config,
-    instance: instances.get(config.id) ?? createInstance(config.id),
-  }));
+  const pool = useMemo<McpPoolEntry[]>(
+    () => configs.map((config) => ({
+      config,
+      instance: instances.get(config.id) ?? createInstance(config.id),
+    })),
+    [configs, instances],
+  );
 
-  const runningCount = pool.filter((e) => e.instance.status === "running").length;
+  const runningCount = useMemo(
+    () => pool.filter((e) => e.instance.status === "running").length,
+    [pool],
+  );
 
   return {
     pool,
