@@ -53,8 +53,12 @@ const openClaw: AgentProfile = {
   args: [],
   launchScript: `VPS="root@187.77.66.93"
 PORT="41856"
-ssh -fN -o ExitOnForwardFailure=yes -L \${PORT}:127.0.0.1:\${PORT} "\${VPS}" 2>/dev/null || true
-TOKEN="$(ssh "\${VPS}" "bash -lc 'openclaw config get gateway.auth.token'" 2>/dev/null)"
+SOCK="/tmp/soprano-ssh-\${PORT}"
+if ! ssh -o ControlPath="\${SOCK}" -O check "\${VPS}" 2>/dev/null; then
+  rm -f "\${SOCK}"
+  ssh -fN -o ControlMaster=yes -o ControlPath="\${SOCK}" -o ControlPersist=600 -L \${PORT}:127.0.0.1:\${PORT} "\${VPS}"
+fi
+TOKEN="$(ssh -o ControlPath="\${SOCK}" "\${VPS}" "bash -lc 'openclaw config get gateway.auth.token'")"
 if [ -z "\${TOKEN}" ]; then
   echo "❌ Could not fetch gateway token from VPS."
   exit 1
