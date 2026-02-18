@@ -431,11 +431,20 @@ fn browser_refresh(app: AppHandle, label: String) -> Result<(), String> {
 #[tauri::command]
 fn browser_devtools(app: AppHandle, label: String) -> Result<(), String> {
     let webview = app.get_webview(&label).ok_or("Webview not found")?;
-    if webview.is_devtools_open() {
-        webview.close_devtools();
-    } else {
-        webview.open_devtools();
+    #[cfg(debug_assertions)]
+    {
+        if webview.is_devtools_open() {
+            webview.close_devtools();
+        } else {
+            webview.open_devtools();
+        }
     }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = webview;
+        return Err("DevTools not available in release builds".into());
+    }
+    #[allow(unreachable_code)]
     Ok(())
 }
 
@@ -447,6 +456,23 @@ struct ProjectEntry {
 
 #[tauri::command]
 fn get_process_env() -> HashMap<String, String> {
+    if let Ok(output) = std::process::Command::new("/bin/zsh")
+        .args(["-l", "-c", "env"])
+        .output()
+    {
+        if output.status.success() {
+            let env_str = String::from_utf8_lossy(&output.stdout);
+            let mut env: HashMap<String, String> = HashMap::new();
+            for line in env_str.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    env.insert(key.to_string(), value.to_string());
+                }
+            }
+            if env.contains_key("PATH") {
+                return env;
+            }
+        }
+    }
     std::env::vars().collect()
 }
 
