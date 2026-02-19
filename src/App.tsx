@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { MosaicNode } from "react-mosaic-component";
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsPage } from "./components/SettingsPage";
 import { Sidebar, SidebarSection } from "./components/Sidebar";
 import { StatusBar } from "./components/StatusBar";
 import { TilingLayout } from "./components/TilingLayout";
+import { TerminalRef } from "./components/TerminalPane";
 import {
   AppSettings,
   loadAppSettings,
@@ -13,6 +15,7 @@ import {
   saveLastSession,
   SavedWorkspace,
 } from "./config/settings";
+import { activeTab } from "./types/agent";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { useAgentManager } from "./hooks/useAgentManager";
 import { useMcpManager } from "./hooks/useMcpManager";
@@ -49,6 +52,25 @@ export default function App() {
   const [sidebarSection, setSidebarSection] = useState<SidebarSection | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [maximizedPaneId, setMaximizedPaneId] = useState<string | null>(null);
+  const terminalRefsOut = useRef<Map<string, TerminalRef> | null>(null);
+
+  const getActiveCwd = useCallback(async (): Promise<string | undefined> => {
+    const pane = agentManager.panes.get(agentManager.activePaneId);
+    if (!pane) return undefined;
+    const tab = activeTab(pane);
+    if (tab.type === "browser") return undefined;
+    const refs = terminalRefsOut.current;
+    if (!refs) return undefined;
+    const termRef = refs.get(tab.id);
+    if (!termRef) return undefined;
+    const pid = termRef.getPid();
+    if (!pid) return undefined;
+    try {
+      return await invoke<string>("get_process_cwd", { pid });
+    } catch {
+      return undefined;
+    }
+  }, [agentManager.panes, agentManager.activePaneId]);
 
   const toggleSettings = useCallback(() => {
     setShowSettings((prev) => !prev);
@@ -121,6 +143,7 @@ export default function App() {
     onToggleMaximize: () => {
       setMaximizedPaneId((prev) => (prev ? null : agentManager.activePaneId));
     },
+    getActiveCwd,
   });
 
   useEffect(() => {
@@ -160,7 +183,7 @@ export default function App() {
               onConfigChange={updateConfig}
             />
           ) : (
-            <TilingLayout agentManager={agentManager} maximizedPaneId={maximizedPaneId} notifications={notifications} outputMonitor={outputMonitor} theme={themeManager.theme} />
+            <TilingLayout agentManager={agentManager} maximizedPaneId={maximizedPaneId} notifications={notifications} outputMonitor={outputMonitor} theme={themeManager.theme} terminalRefsOut={terminalRefsOut} />
           )}
         </main>
       </div>

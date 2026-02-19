@@ -40,6 +40,7 @@ export interface TerminalRef {
   restart: () => void;
   stop: () => void;
   sendText: (text: string) => void;
+  getPid: () => number | null;
 }
 
 interface TerminalPaneProps {
@@ -232,6 +233,9 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
         },
         sendText: (text: string) => {
           ptyRef.current?.write(text);
+        },
+        getPid: () => {
+          return ptyRef.current?.pid ?? null;
         },
       }),
       [profileId],

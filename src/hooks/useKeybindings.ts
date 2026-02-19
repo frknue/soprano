@@ -15,6 +15,7 @@ interface KeybindingOptions {
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
   onToggleMaximize?: () => void;
+  getActiveCwd?: () => Promise<string | undefined>;
 }
 
 function matchDirectBinding(event: KeyboardEvent, binding: KeyBinding): boolean {
@@ -95,6 +96,16 @@ export function useKeybindings(
       }, config.prefixTimeoutMs);
     };
 
+    const spawnTerminalWithCwd = (): void => {
+      const mgr = agentManagerRef.current;
+      const cbs = callbacksRef.current;
+      if (cbs.getActiveCwd) {
+        cbs.getActiveCwd().then((cwd) => mgr.spawnTerminal(cwd));
+      } else {
+        mgr.spawnTerminal();
+      }
+    };
+
     const executeBinding = (binding: KeyBinding): void => {
       const mgr = agentManagerRef.current;
       const cbs = callbacksRef.current;
@@ -128,7 +139,7 @@ export function useKeybindings(
          "launch-openclaw": () => mgr.spawnAgent("openclaw"),
          "command-palette": () => togglePaletteRef.current(),
          "open-project": () => openProjectSearchRef.current(),
-         "new-terminal": () => mgr.spawnTerminal(),
+         "new-terminal": spawnTerminalWithCwd,
          "new-browser": () => mgr.spawnBrowser(),
          "close-active": () => mgr.closePane(mgr.activePaneId),
          "save-session": () => cbs.onSaveSession?.(),
