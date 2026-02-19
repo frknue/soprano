@@ -18,13 +18,15 @@ interface TilingLayoutProps {
   theme: AppTheme;
   outputMonitor: ReturnType<typeof useOutputMonitor>;
   notifications: ReturnType<typeof useNotifications>;
+  terminalRefsOut?: React.MutableRefObject<Map<string, TerminalHandle> | null>;
 }
 
 type TerminalHandle = TerminalRef;
 
-export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonitor, notifications }: TilingLayoutProps) {
+export function TilingLayout({ agentManager, maximizedPaneId, theme, outputMonitor, notifications, terminalRefsOut }: TilingLayoutProps) {
   const [menuOpenPaneId, setMenuOpenPaneId] = useState<string | null>(null);
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
+  if (terminalRefsOut) terminalRefsOut.current = terminalRefs.current;
   const agentManagerRef = useRef(agentManager);
   const outputMonitorRef = useRef(outputMonitor);
   const notificationsRef = useRef(notifications);

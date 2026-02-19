@@ -455,6 +455,25 @@ struct ProjectEntry {
 }
 
 #[tauri::command]
+fn get_process_cwd(pid: u32) -> Result<String, String> {
+    let output = Command::new("lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| format!("Failed to run lsof: {}", e))?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix('n') {
+            return Ok(path.to_string());
+        }
+    }
+
+    Err("Could not determine cwd".to_string())
+}
+
+#[tauri::command]
 fn get_process_env() -> HashMap<String, String> {
     if let Ok(output) = std::process::Command::new("/bin/zsh")
         .args(["-l", "-c", "env"])
@@ -527,6 +546,7 @@ pub fn run() {
             sync_agent_mcp_configs,
             list_projects,
             get_process_env,
+            get_process_cwd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running soprano");
