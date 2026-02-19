@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0d0d1a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#a78bfa"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#34d399"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+    <clipPath id="roundedRect">
+      <rect width="1024" height="1024" rx="230" ry="230"/>
+    </clipPath>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="230" ry="230" fill="url(#bg)"/>
+
+  <!-- Subtle grid texture -->
+  <g clip-path="url(#roundedRect)" opacity="0.04">
+    <line x1="512" y1="0" x2="512" y2="1024" stroke="white" stroke-width="1"/>
+    <line x1="0" y1="512" x2="1024" y2="512" stroke="white" stroke-width="1"/>
+  </g>
+
+  <!-- Main terminal window frame -->
+  <rect x="130" y="180" width="764" height="620" rx="18" fill="#0f0f1a" stroke="#ffffff12" stroke-width="2"/>
+
+  <!-- Title bar -->
+  <rect x="130" y="180" width="764" height="52" rx="18" fill="#1a1a2e"/>
+  <rect x="130" y="206" width="764" height="26" fill="#1a1a2e"/>
+
+  <!-- Traffic lights -->
+  <circle cx="186" cy="206" r="12" fill="#ff5f57"/>
+  <circle cx="226" cy="206" r="12" fill="#febc2e"/>
+  <circle cx="266" cy="206" r="12" fill="#28c840"/>
+
+  <!-- Vertical divider (split pane) -->
+  <rect x="494" y="232" width="2" height="568" fill="#ffffff18"/>
+
+  <!-- Horizontal divider (right side split) -->
+  <rect x="494" y="516" width="400" height="2" fill="#ffffff18"/>
+
+  <!-- LEFT PANE – main terminal -->
+  <!-- Prompt line 1 -->
+  <rect x="162" y="272" width="28" height="14" rx="3" fill="url(#green)" opacity="0.9"/>
+  <rect x="198" y="272" width="120" height="14" rx="3" fill="#ffffff30"/>
+  <rect x="326" y="272" width="80" height="14" rx="3" fill="#a78bfa60"/>
+
+  <!-- Prompt line 2 -->
+  <rect x="162" y="308" width="28" height="14" rx="3" fill="url(#green)" opacity="0.9"/>
+  <rect x="198" y="308" width="180" height="14" rx="3" fill="#ffffff30"/>
+
+  <!-- Output lines -->
+  <rect x="162" y="344" width="220" height="10" rx="3" fill="#ffffff15"/>
+  <rect x="162" y="364" width="180" height="10" rx="3" fill="#ffffff10"/>
+  <rect x="162" y="384" width="200" height="10" rx="3" fill="#ffffff15"/>
+  <rect x="162" y="404" width="140" height="10" rx="3" fill="#ffffff10"/>
+  <rect x="162" y="424" width="260" height="10" rx="3" fill="#ffffff15"/>
+  <rect x="162" y="444" width="100" height="10" rx="3" fill="#a78bfa40"/>
+
+  <!-- Active prompt with cursor -->
+  <rect x="162" y="490" width="28" height="14" rx="3" fill="url(#accent)" filter="url(#glow)"/>
+  <rect x="198" y="490" width="60" height="14" rx="3" fill="#ffffff50"/>
+  <!-- Cursor blink block -->
+  <rect x="266" y="490" width="10" height="14" rx="2" fill="url(#accent)" opacity="0.9"/>
+
+  <!-- RIGHT TOP PANE -->
+  <rect x="526" y="260" width="28" height="14" rx="3" fill="url(#green)" opacity="0.7"/>
+  <rect x="562" y="260" width="100" height="14" rx="3" fill="#ffffff25"/>
+  <rect x="526" y="296" width="28" height="14" rx="3" fill="url(#green)" opacity="0.7"/>
+  <rect x="562" y="296" width="150" height="14" rx="3" fill="#ffffff25"/>
+  <rect x="526" y="332" width="220" height="10" rx="3" fill="#ffffff12"/>
+  <rect x="526" y="352" width="180" height="10" rx="3" fill="#ffffff08"/>
+  <rect x="526" y="372" width="200" height="10" rx="3" fill="#ffffff12"/>
+  <rect x="526" y="392" width="120" height="10" rx="3" fill="#34d39940"/>
+  <rect x="526" y="412" width="160" height="10" rx="3" fill="#ffffff08"/>
+  <rect x="526" y="452" width="28" height="14" rx="3" fill="url(#accent)" opacity="0.7" filter="url(#glow)"/>
+  <rect x="562" y="452" width="10" height="14" rx="2" fill="url(#accent)" opacity="0.7"/>
+
+  <!-- RIGHT BOTTOM PANE -->
+  <rect x="526" y="548" width="28" height="14" rx="3" fill="url(#green)" opacity="0.5"/>
+  <rect x="562" y="548" width="80" height="14" rx="3" fill="#ffffff20"/>
+  <rect x="526" y="584" width="160" height="10" rx="3" fill="#ffffff10"/>
+  <rect x="526" y="604" width="120" height="10" rx="3" fill="#ffffff08"/>
+  <rect x="526" y="624" width="200" height="10" rx="3" fill="#a78bfa25"/>
+  <rect x="526" y="644" width="140" height="10" rx="3" fill="#ffffff10"/>
+  <rect x="526" y="680" width="28" height="14" rx="3" fill="url(#accent)" opacity="0.5"/>
+  <rect x="562" y="680" width="10" height="14" rx="2" fill="url(#accent)" opacity="0.5"/>
+
+  <!-- Bottom glow line -->
+  <rect x="130" y="792" width="764" height="3" rx="2" fill="url(#accent)" opacity="0.4"/>
+</svg>
