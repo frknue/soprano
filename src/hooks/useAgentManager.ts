@@ -609,14 +609,18 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
         return prev;
       }
 
-      const adjacentPaneId = findAdjacentPane(prev.layout, prev.activePaneId, direction);
-      if (adjacentPaneId === null) {
+      let targetPaneId = findAdjacentPane(prev.layout, prev.activePaneId, direction);
+      if (targetPaneId === null) {
+        targetPaneId = selectBoundaryLeaf(prev.layout, direction);
+      }
+
+      if (targetPaneId === prev.activePaneId) {
         return prev;
       }
 
       return {
         ...prev,
-        activePaneId: adjacentPaneId,
+        activePaneId: targetPaneId,
       };
     });
   }, []);
