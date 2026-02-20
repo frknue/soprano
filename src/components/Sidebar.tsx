@@ -32,6 +32,7 @@ interface SidebarProps {
   sessionManager: ReturnType<typeof useSessionManager>;
   isSettingsOpen: boolean;
   onOpenSettings: () => void;
+  onLaunchAgent: (profileId: string) => void;
 }
 
 const SECTION_META: Array<{
@@ -60,7 +61,7 @@ function ActivityTooltip({ label, children }: { label: string; children: ReactNo
   );
 }
 
-function AgentLauncherPanel({ agentManager }: { agentManager: AgentManager }) {
+function AgentLauncherPanel({ onLaunchAgent }: { onLaunchAgent: (profileId: string) => void }) {
   const launchable = DEFAULT_AGENTS.filter((a) => a.id !== "terminal");
 
   return (
@@ -70,7 +71,7 @@ function AgentLauncherPanel({ agentManager }: { agentManager: AgentManager }) {
         <button
           className="sidebar-agent-item"
           key={agent.id}
-          onClick={() => agentManager.spawnAgent(agent.id)}
+          onClick={() => onLaunchAgent(agent.id)}
           title={agent.description}
           type="button"
         >
@@ -87,7 +88,7 @@ function AgentLauncherPanel({ agentManager }: { agentManager: AgentManager }) {
       <div className="sidebar-section-label spaced">Tools</div>
       <button
         className="sidebar-agent-item"
-        onClick={() => agentManager.spawnTerminal()}
+        onClick={() => onLaunchAgent("terminal")}
         type="button"
       >
         <span className="sidebar-agent-icon">
@@ -100,7 +101,7 @@ function AgentLauncherPanel({ agentManager }: { agentManager: AgentManager }) {
       </button>
       <button
         className="sidebar-agent-item"
-        onClick={() => agentManager.spawnBrowser()}
+        onClick={() => onLaunchAgent("browser")}
         type="button"
       >
         <span className="sidebar-agent-icon">
@@ -303,6 +304,7 @@ export const Sidebar = memo(function Sidebar({
   sessionManager,
   isSettingsOpen,
   onOpenSettings,
+  onLaunchAgent,
 }: SidebarProps) {
   const isOpen = activeSection !== null;
 
@@ -364,7 +366,7 @@ export const Sidebar = memo(function Sidebar({
           </div>
           <div className="sidebar-content">
             {activeSection === "agents" ? (
-              <AgentLauncherPanel agentManager={agentManager} />
+              <AgentLauncherPanel onLaunchAgent={onLaunchAgent} />
             ) : null}
             {activeSection === "panes" ? (
               <ActivePanesPanel agentManager={agentManager} />

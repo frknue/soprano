@@ -36,7 +36,9 @@ export function useKeybindings(
   mode: KeybindingMode;
   isPaletteOpen: boolean;
   paletteMode: PaletteMode;
+  pendingAgentId: string | null;
   togglePalette: () => void;
+  requestAgentLaunch: (profileId: string) => void;
   config: KeyBindingConfig;
   updateConfig: (config: KeyBindingConfig) => void;
 } {
@@ -44,6 +46,7 @@ export function useKeybindings(
   const [mode, setMode] = useState<KeybindingMode>("NORMAL");
   const [isPaletteOpen, setPaletteOpen] = useState(false);
   const [paletteMode, setPaletteMode] = useState<PaletteMode>("commands");
+  const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
   const prefixTimerRef = useRef<number | null>(null);
   const modeRef = useRef<KeybindingMode>("NORMAL");
 
@@ -55,19 +58,33 @@ export function useKeybindings(
 
   const togglePalette = useCallback((): void => {
     setPaletteOpen((prev) => {
-      if (prev) setPaletteMode("commands");
+      if (prev) {
+        setPaletteMode("commands");
+        setPendingAgentId(null);
+      }
       return !prev;
     });
+  }, []);
+
+  const requestAgentLaunch = useCallback((profileId: string): void => {
+    setPendingAgentId(profileId);
+    setPaletteMode("projects");
+    setPaletteOpen(true);
   }, []);
 
   const togglePaletteRef = useRef(togglePalette);
   togglePaletteRef.current = togglePalette;
 
+  const requestAgentLaunchRef = useRef(requestAgentLaunch);
+  requestAgentLaunchRef.current = requestAgentLaunch;
+
   const openProjectSearchRef = useRef((): void => {
+    setPendingAgentId(null);
     setPaletteMode("projects");
     setPaletteOpen(true);
   });
   openProjectSearchRef.current = (): void => {
+    setPendingAgentId(null);
     setPaletteMode("projects");
     setPaletteOpen(true);
   };
@@ -133,10 +150,10 @@ export function useKeybindings(
              if (tab) mgr.removeTabFromPane(mgr.activePaneId, tab.id);
            }
          },
-         "launch-codex": () => mgr.spawnAgent("codex"),
-         "launch-claude-code": () => mgr.spawnAgent("claude-code"),
-         "launch-opencode": () => mgr.spawnAgent("opencode"),
-         "launch-openclaw": () => mgr.spawnAgent("openclaw"),
+         "launch-codex": () => requestAgentLaunchRef.current("codex"),
+         "launch-claude-code": () => requestAgentLaunchRef.current("claude-code"),
+         "launch-opencode": () => requestAgentLaunchRef.current("opencode"),
+         "launch-openclaw": () => requestAgentLaunchRef.current("openclaw"),
          "command-palette": () => togglePaletteRef.current(),
          "open-project": () => openProjectSearchRef.current(),
          "new-terminal": spawnTerminalWithCwd,
@@ -212,5 +229,5 @@ export function useKeybindings(
     };
   }, [config]);
 
-  return { mode, isPaletteOpen, paletteMode, togglePalette, config, updateConfig: setConfig };
+  return { mode, isPaletteOpen, paletteMode, pendingAgentId, togglePalette, requestAgentLaunch, config, updateConfig: setConfig };
 }

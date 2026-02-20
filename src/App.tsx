@@ -108,6 +108,7 @@ export default function App() {
               id: tab.id,
               type: tab.type,
               profileId: tab.agent?.profileId,
+              cwd: tab.cwd,
             })),
           })),
         runningMcpServers: mcpPoolRef.current
@@ -130,7 +131,7 @@ export default function App() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { mode, isPaletteOpen, paletteMode, togglePalette, config, updateConfig } = useKeybindings(agentManager, {
+  const { mode, isPaletteOpen, paletteMode, pendingAgentId, togglePalette, requestAgentLaunch, config, updateConfig } = useKeybindings(agentManager, {
     onSaveSession: () => {
       const stamp = new Date().toLocaleString();
       sessionManager.saveSession(`Session ${stamp}`);
@@ -171,6 +172,15 @@ export default function App() {
           onOpenSettings={toggleSettings}
           onSectionChange={setSidebarSection}
           sessionManager={sessionManager}
+          onLaunchAgent={useCallback((profileId: string) => {
+            if (profileId === "terminal") {
+              agentManager.spawnTerminal();
+            } else if (profileId === "browser") {
+              agentManager.spawnBrowser();
+            } else {
+              requestAgentLaunch(profileId);
+            }
+          }, [agentManager, requestAgentLaunch])}
         />
         <main className="app-main">
           {showSettings ? (
@@ -193,8 +203,10 @@ export default function App() {
         appSettings={appSettings}
         config={config}
         initialMode={paletteMode}
+        pendingAgentId={pendingAgentId}
         isOpen={isPaletteOpen}
         onClose={togglePalette}
+        onRequestAgentLaunch={requestAgentLaunch}
         sessionManager={sessionManager}
       />
     </div>

@@ -128,6 +128,8 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
             ? "powershell.exe"
             : "bash";
 
+      const effectiveCwd = cwd || profile?.cwd || undefined;
+
       let pty: IPty;
       try {
         pty = profile
@@ -136,19 +138,19 @@ const TerminalPaneComponent = forwardRef<TerminalRef, TerminalPaneProps>(
                 cols,
                 rows,
                 env: baseEnv,
-                cwd: profile.cwd,
+                cwd: effectiveCwd,
               })
             : spawn(profile.command, profile.args, {
                 cols,
                 rows,
                 env: baseEnv,
-                cwd: profile.cwd,
+                cwd: effectiveCwd,
               })
           : spawn(defaultShell, ["--login"], {
               cols,
               rows,
               env: baseEnv,
-              cwd: cwd || undefined,
+              cwd: effectiveCwd,
             });
       } catch (err) {
         terminal.writeln(`\r\n\x1b[31m[failed to spawn shell: ${err}]\x1b[0m`);

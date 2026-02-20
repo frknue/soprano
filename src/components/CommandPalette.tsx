@@ -16,6 +16,7 @@ import {
   Zap,
   PawPrint,
 } from "lucide-react";
+import { getAgentById } from "../config/agents";
 import { getBindingById } from "../config/keybindings";
 import { AppSettings } from "../config/settings";
 import { useSessionManager } from "../hooks/useSessionManager";
@@ -31,7 +32,9 @@ interface ProjectEntry {
 interface CommandPaletteProps {
   isOpen: boolean;
   initialMode: PaletteMode;
+  pendingAgentId: string | null;
   onClose: () => void;
+  onRequestAgentLaunch: (profileId: string) => void;
   agentManager: AgentManager;
   sessionManager: ReturnType<typeof useSessionManager>;
   config: KeyBindingConfig;
@@ -51,7 +54,7 @@ function formatDate(timestamp: number): string {
   return new Date(timestamp).toLocaleString();
 }
 
-export function CommandPalette({ isOpen, initialMode, onClose, agentManager, sessionManager, config, appSettings }: CommandPaletteProps) {
+export function CommandPalette({ isOpen, initialMode, pendingAgentId, onClose, onRequestAgentLaunch, agentManager, sessionManager, config, appSettings }: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const saveInputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
@@ -72,7 +75,7 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
         label: "Launch Codex",
         description: "Start Codex AI agent",
         shortcut: getShortcut("launch-codex"),
-        execute: () => agentManager.spawnAgent("codex"),
+        execute: () => onRequestAgentLaunch("codex"),
       },
       {
         id: "launch-claude-code",
@@ -80,7 +83,7 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
         label: "Launch Claude Code",
         description: "Start Claude Code agent",
         shortcut: getShortcut("launch-claude-code"),
-        execute: () => agentManager.spawnAgent("claude-code"),
+        execute: () => onRequestAgentLaunch("claude-code"),
       },
       {
         id: "launch-opencode",
@@ -88,7 +91,7 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
         label: "Launch OpenCode",
         description: "Start OpenCode agent",
         shortcut: getShortcut("launch-opencode"),
-        execute: () => agentManager.spawnAgent("opencode"),
+        execute: () => onRequestAgentLaunch("opencode"),
       },
       {
         id: "launch-openclaw",
@@ -96,7 +99,7 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
         label: "Launch OpenClaw",
         description: "Start OpenClaw agent (with tunnel)",
         shortcut: getShortcut("launch-openclaw"),
-        execute: () => agentManager.spawnAgent("openclaw"),
+        execute: () => onRequestAgentLaunch("openclaw"),
       },
       {
         id: "new-terminal",
@@ -215,7 +218,7 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
     ];
 
     return [...agentCommands, ...projectCommands, ...actionCommands, ...sessionCommands];
-  }, [agentManager, config, sessionManager, appSettings.projectDirectories]);
+  }, [agentManager, config, sessionManager, appSettings.projectDirectories, onRequestAgentLaunch]);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -278,9 +281,13 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
   }, [isProjectMode, projects, query]);
 
   const openProject = useCallback((project: ProjectEntry): void => {
-    agentManager.spawnTerminal(project.path);
+    if (pendingAgentId) {
+      agentManager.spawnAgent(pendingAgentId, project.path);
+    } else {
+      agentManager.spawnTerminal(project.path);
+    }
     onClose();
-  }, [agentManager, onClose]);
+  }, [agentManager, pendingAgentId, onClose]);
 
   if (!isOpen) {
     return null;
@@ -288,7 +295,10 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
 
   const executeCommand = (command: CommandItem): void => {
     command.execute();
-    if (command.id !== "save-session" && command.id !== "open-project") {
+    const keepOpen = command.id === "save-session"
+      || command.id === "open-project"
+      || command.id.startsWith("launch-");
+    if (!keepOpen) {
       onClose();
     }
   };
@@ -369,7 +379,12 @@ export function CommandPalette({ isOpen, initialMode, onClose, agentManager, ses
                 }
               }
             }}
-            placeholder={isProjectMode ? "Search projects..." : "Type a command..."}
+            placeholder={isProjectMode
+              ? pendingAgentId
+                ? `Select project for ${getAgentById(pendingAgentId)?.name ?? "agent"}...`
+                : "Search projects..."
+              : "Type a command..."
+            }
             ref={inputRef}
             value={query}
           />
