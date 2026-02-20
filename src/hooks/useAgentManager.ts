@@ -18,7 +18,7 @@ export interface AgentManager {
   activePaneId: string;
   layout: MosaicNode<string> | null;
   paneCount: number;
-  spawnAgent: (profileId: string) => string;
+  spawnAgent: (profileId: string, cwd?: string) => string;
   spawnBrowser: () => string;
   spawnTerminal: (cwd?: string) => string;
   splitPane: (direction: MosaicDirection, paneId: string) => string | null;
@@ -38,7 +38,7 @@ export interface AgentManager {
   createMosaicNode: (profileId?: string) => string;
   getAgentProfile: (paneId: string) => AgentProfile | undefined;
   restoreWorkspace: (
-    panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string }> }>,
+    panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string; cwd?: string }> }>,
     layout: MosaicNode<string> | null,
   ) => void;
 }
@@ -74,10 +74,13 @@ function createTitle(type: PaneType, id: string, profileId?: string): string {
 
 function createPaneTab(id: string, type: PaneType, profileId?: string, cwd?: string): PaneTab {
   if (type === "agent" && profileId) {
+    const agentName = getAgentById(profileId)?.name ?? "Agent";
+    const dirName = cwd?.split("/").pop();
+    const title = dirName ? `${agentName}: ${dirName}` : createTitle(type, id, profileId);
     return {
       id,
       type,
-      title: createTitle(type, id, profileId),
+      title,
       agent: {
         id,
         profileId,
@@ -475,21 +478,21 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
   );
 
   const spawnAgent = useCallback(
-    (profileId: string): string => {
+    (profileId: string, cwd?: string): string => {
       const paneId = nextPaneId();
       const tabId = nextTabId();
 
       if (profileId === "terminal") {
-        return spawnPane(createPaneState(paneId, tabId, "terminal"));
+        return spawnPane(createPaneState(paneId, tabId, "terminal", undefined, cwd));
       }
 
       const profile = getAgentById(profileId);
 
       if (!profile) {
-        return spawnPane(createPaneState(paneId, tabId, "terminal"));
+        return spawnPane(createPaneState(paneId, tabId, "terminal", undefined, cwd));
       }
 
-      return spawnPane(createPaneState(paneId, tabId, "agent", profile.id));
+      return spawnPane(createPaneState(paneId, tabId, "agent", profile.id, cwd));
     },
     [nextPaneId, nextTabId, spawnPane],
   );
@@ -964,7 +967,7 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
 
   const restoreWorkspace = useCallback(
     (
-      panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string }> }>,
+      panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string; cwd?: string }> }>,
       layout: MosaicNode<string> | null,
     ): void => {
       if (panes.length === 0) {
@@ -992,7 +995,7 @@ export function useAgentManager(initialWorkspace?: SavedWorkspace | null): Agent
             maxId = Math.max(maxId, tabNumber);
           }
 
-          return createPaneTab(tab.id, tab.type, tab.profileId);
+          return createPaneTab(tab.id, tab.type, tab.profileId, tab.cwd);
         });
 
         if (tabs.length === 0) {

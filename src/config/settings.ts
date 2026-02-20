@@ -12,7 +12,7 @@ export interface SavedWorkspace {
   panes: Array<{
     id: string;
     activeTabIndex: number;
-    tabs: Array<{ id: string; type: PaneType; profileId?: string }>;
+    tabs: Array<{ id: string; type: PaneType; profileId?: string; cwd?: string }>;
   }>;
   activePaneId: string;
   runningMcpServers?: string[];

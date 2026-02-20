@@ -8,7 +8,7 @@ interface WorkspaceSession {
   name: string;
   savedAt: number;
   layout: MosaicNode<string> | null;
-  panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string }> }>;
+  panes: Array<{ id: string; tabs: Array<{ id: string; type: PaneType; profileId?: string; cwd?: string }> }>;
 }
 
 const SESSION_STORAGE_KEY = "soprano-sessions";
@@ -59,6 +59,7 @@ export function useSessionManager(agentManager: AgentManager): {
             id: tab.id,
             type: tab.type,
             profileId: tab.agent?.profileId,
+            cwd: tab.cwd,
           })),
         })),
       };
