@@ -475,20 +475,29 @@ fn get_process_cwd(pid: u32) -> Result<String, String> {
 
 #[tauri::command]
 fn get_process_env() -> HashMap<String, String> {
-    if let Ok(output) = std::process::Command::new("/bin/zsh")
-        .args(["-l", "-c", "env"])
-        .output()
-    {
-        if output.status.success() {
-            let env_str = String::from_utf8_lossy(&output.stdout);
-            let mut env: HashMap<String, String> = HashMap::new();
-            for line in env_str.lines() {
-                if let Some((key, value)) = line.split_once('=') {
-                    env.insert(key.to_string(), value.to_string());
+    // Try interactive login shell first (`-l -i`) to capture PATH entries
+    // added in .zshrc (e.g. opencode, pyenv, nvm). Many tools only modify
+    // .zshrc, which is not sourced by a non-interactive login shell.
+    // Fall back to login-only, then the process's own environment.
+    let shell_args_to_try: &[&[&str]] = &[&["-l", "-i", "-c", "env"], &["-l", "-c", "env"]];
+
+    for args in shell_args_to_try {
+        if let Ok(output) = std::process::Command::new("/bin/zsh")
+            .args(*args)
+            .stderr(std::process::Stdio::null())
+            .output()
+        {
+            if output.status.success() {
+                let env_str = String::from_utf8_lossy(&output.stdout);
+                let mut env: HashMap<String, String> = HashMap::new();
+                for line in env_str.lines() {
+                    if let Some((key, value)) = line.split_once('=') {
+                        env.insert(key.to_string(), value.to_string());
+                    }
                 }
-            }
-            if env.contains_key("PATH") {
-                return env;
+                if env.contains_key("PATH") {
+                    return env;
+                }
             }
         }
     }
