@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-
         GhosttyAppManager.shared.initialize()
 
         let settings = AppSettings.load()
@@ -29,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             themeManager: themeManager,
             settings: settings
         )
-        controller.showWindow(nil)
+        controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         mainWindowController = controller
         self.mcpManager = mcpManager
