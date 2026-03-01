@@ -1,7 +1,40 @@
-node_modules/
-dist/
-src-tauri/target/
-src-tauri/gen/
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xccheckout
+*.moved-aside
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+*.dSYM
+*.dSYM.zip
+
+# Archive of old Tauri/React code
+_archive/
+
+# GhosttyKit build artifacts
+GhosttyKit/
+
+# App bundle
+*.app
+*.dmg
+*.pkg
+
+# Misc
 *.log
 *.tsbuildinfo
-.DS_Store
+
+# Pre-built libghostty (rebuild from ghostty/ submodule)
+lib/

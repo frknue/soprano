@@ -1,0 +1,82 @@
+import AppKit
+
+/// Bottom status bar showing keybinding mode, pane list, and notification count.
+final class StatusBarView: NSView {
+    let agentManager: AgentManager
+    let themeManager: ThemeManager
+
+    private var brandLabel: NSTextField!
+    private var modeLabel: NSTextField!
+    private var paneCountLabel: NSTextField!
+
+    init(agentManager: AgentManager, themeManager: ThemeManager) {
+        self.agentManager = agentManager
+        self.themeManager = themeManager
+        super.init(frame: .zero)
+        wantsLayer = true
+        setupViews()
+
+        agentManager.addObserver(id: "StatusBarView") { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    private func setupViews() {
+        let theme = themeManager.currentTheme
+        layer?.backgroundColor = theme.colors.bgPanel.cgColor
+
+        // Brand label
+        brandLabel = NSTextField(labelWithString: "SOPRANO")
+        brandLabel.font = .systemFont(ofSize: 10, weight: .bold)
+        brandLabel.textColor = theme.colors.accent
+        brandLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(brandLabel)
+
+        // Mode label
+        modeLabel = NSTextField(labelWithString: "NORMAL")
+        modeLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        modeLabel.textColor = theme.colors.textMuted
+        modeLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(modeLabel)
+
+        // Pane count
+        paneCountLabel = NSTextField(labelWithString: "1 pane")
+        paneCountLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        paneCountLabel.textColor = theme.colors.textMuted
+        paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(paneCountLabel)
+
+        NSLayoutConstraint.activate([
+            brandLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            brandLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            modeLabel.leadingAnchor.constraint(equalTo: brandLabel.trailingAnchor, constant: 16),
+            modeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            paneCountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            paneCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    func setKeybindingMode(_ mode: KeybindingState) {
+        let theme = themeManager.currentTheme
+        switch mode {
+        case .normal:
+            modeLabel.stringValue = "NORMAL"
+            modeLabel.textColor = theme.colors.textMuted
+        case .prefix:
+            modeLabel.stringValue = "PREFIX"
+            modeLabel.textColor = theme.colors.accent
+        }
+    }
+
+    private func refresh() {
+        let count = agentManager.paneCount
+        paneCountLabel.stringValue = "\(count) pane\(count == 1 ? "" : "s")"
+    }
+}

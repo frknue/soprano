@@ -1,166 +1,155 @@
 # AGENTS.md — Soprano
 
-Soprano is a Tauri v2 desktop app for orchestrating AI coding agents (Claude Code, Codex, OpenCode, OpenClaw) in a tiling terminal layout. React + TypeScript frontend, Rust backend.
+Soprano is a native macOS desktop app for orchestrating AI coding agents (Codex, Claude Code, OpenCode, OpenClaw) in a tiling terminal layout. Swift + AppKit frontend with libghostty for terminal rendering.
 
 ## Build & Run Commands
 
 ```bash
-# Frontend only
-npm run dev              # Vite dev server on :1420
-npm run build            # tsc && vite build
+# Debug build
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
 
-# Full Tauri app (frontend + Rust backend)
-npm run tauri dev        # Dev mode with hot-reload
-npm run tauri build      # Production build
+# Run (debug)
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run
+# or directly:
+.build/debug/Soprano
 
-# Rust backend only (from src-tauri/)
-cargo build              # Debug build
-cargo build --release    # Release build
-cargo check              # Type-check without building
-cargo clippy             # Lint Rust code
+# Release build
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
 
-# TypeScript type-check only
-npx tsc --noEmit
+# Rebuild libghostty (from ghostty/ directory)
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer zig build -Dapp-runtime=none -Demit-xcframework=false -Doptimize=ReleaseFast
 ```
+
+**Important**: System CLT Swift has broken SPM — must use Homebrew Swift (`/opt/homebrew/opt/swift/bin`).
 
 ### Testing
 
-No test framework is currently configured. There are no test files. If adding tests:
-- Frontend: add vitest (`npm i -D vitest`) — matches the Vite toolchain
-- Rust: use built-in `cargo test` with `#[cfg(test)]` modules in `src-tauri/src/`
+No test framework is currently configured. If adding tests, use built-in `swift test` with `XCTest` or the Swift Testing framework.
 
 ### Linting & Formatting
 
-No ESLint, Prettier, or Biome is configured. No `.editorconfig`. TypeScript strict mode enforces type safety. If adding linting, prefer Biome (fast, zero-config).
+No SwiftLint or swift-format is configured. Swift strict concurrency checking is enabled via swift-tools-version 6.0.
 
 ## Project Structure
 
 ```
 soprano/
-├── src/                    # React frontend (TypeScript)
-│   ├── main.tsx            # Entry point, CSS imports
-│   ├── App.tsx             # Root component, wires managers together
-│   ├── components/         # React components (one per file)
-│   ├── hooks/              # Custom React hooks (useXxxManager pattern)
-│   ├── config/             # Static config & localStorage persistence
-│   ├── types/              # TypeScript type definitions
-│   └── styles/             # Plain CSS files (no CSS modules)
-├── src-tauri/              # Rust backend (Tauri v2)
-│   ├── src/lib.rs          # All Tauri commands (IPC handlers)
-│   ├── src/main.rs         # Entry point (calls lib::run)
-│   ├── Cargo.toml          # Rust dependencies
-│   └── tauri.conf.json     # Tauri app config
-├── package.json            # Node dependencies & scripts
-├── tsconfig.json           # TypeScript config (strict)
-└── vite.config.ts          # Vite bundler config
+├── Package.swift                     # SPM package (swift-tools-version: 6.0, macOS 14+)
+├── lib/libghostty.a                  # Pre-built ghostty static library (135MB)
+├── Sources/
+│   ├── Soprano/
+│   │   ├── main.swift                # Entry point (NSApp setup + activation policy)
+│   │   ├── App/
+│   │   │   ├── AppDelegate.swift     # NSApplicationDelegate, creates all managers
+│   │   │   ├── MainWindowController.swift  # NSWindowController, KeybindingDelegate, palette wiring
+│   │   │   └── MainContentViewController.swift  # Sidebar + split tree + status bar layout
+│   │   ├── Models/
+│   │   │   ├── AgentProfile.swift    # Static agent definition (command, args, patterns)
+│   │   │   ├── AgentInstance.swift   # Runtime agent state (status, PID)
+│   │   │   ├── PaneState.swift       # Pane model (tabs, active tab, type)
+│   │   │   ├── SplitNode.swift       # Binary tree tiling model (221 lines)
+│   │   │   ├── KeyBinding.swift      # Keybinding model + config
+│   │   │   ├── McpServerConfig.swift # MCP server config + runtime instance
+│   │   │   ├── AppSettings.swift     # App preferences (theme, restore, project dirs)
+│   │   │   └── WorkspaceSession.swift # Session save/restore model
+│   │   ├── Controllers/
+│   │   │   ├── AgentManager.swift    # Pane/tab/agent lifecycle, observer pattern (~535 lines)
+│   │   │   ├── KeybindingManager.swift # NSEvent monitor, prefix mode, action dispatch
+│   │   │   ├── McpManager.swift      # Process-based MCP server lifecycle
+│   │   │   ├── SessionManager.swift  # Named session save/load/delete
+│   │   │   └── ThemeManager.swift    # Theme switching + change notifications
+│   │   ├── Views/
+│   │   │   ├── SplitTreeView.swift   # Binary tree tiling with PaneContainerView caching (~415 lines)
+│   │   │   ├── SidebarView.swift     # Activity bar + expandable panels (~690 lines)
+│   │   │   ├── PaneHeaderView.swift  # Header bar with multi-tab support
+│   │   │   ├── StatusBarView.swift   # Bottom bar: brand + mode indicator + pane count
+│   │   │   ├── CommandPalettePanel.swift  # NSPanel command palette with fuzzy search
+│   │   │   ├── SettingsWindowController.swift  # Tabbed settings window (~1350 lines)
+│   │   │   └── BrowserPaneView.swift # WKWebView browser pane with nav bar
+│   │   ├── Config/
+│   │   │   ├── DefaultAgents.swift   # 5 built-in agent profiles
+│   │   │   ├── DefaultKeybindings.swift # 30+ keybindings with UserDefaults persistence
+│   │   │   ├── DefaultMcpServers.swift  # MCP server config persistence
+│   │   │   └── Theme.swift           # AppTheme, ThemeColors, TerminalColors, 2 themes
+│   │   ├── Terminal/
+│   │   │   ├── GhosttyAppManager.swift  # Singleton, ghostty init/config/callbacks/tick
+│   │   │   └── TerminalSurfaceView.swift # NSView + CAMetalLayer, surface lifecycle (~400 lines)
+│   │   └── Utilities/
+│   │       └── NSColor+Hex.swift     # Hex string to NSColor conversion
+│   └── GhosttyKit/
+│       ├── module.modulemap          # System library module map for libghostty
+│       └── include/ghostty.h         # libghostty C API header (1170 lines)
+├── ghostty/                          # Ghostty source (for rebuilding libghostty)
+└── _archive/                         # Old Tauri/React/Rust code (reference only)
 ```
 
-## TypeScript Configuration
-
-Strict mode is enabled with these enforced rules:
-- `strict: true` — all strict checks
-- `noUnusedLocals: true` — no dead variables
-- `noUnusedParameters: true` — no unused function params
-- `noFallthroughCasesInSwitch: true`
-- `forceConsistentCasingInFileNames: true`
-- Target: ES2021, module: ESNext, JSX: react-jsx
-
-## Code Style — TypeScript / React
+## Code Style — Swift
 
 ### Formatting
-- **Indentation**: 2 spaces
-- **Quotes**: double quotes everywhere (strings, imports, JSX attributes)
-- **Semicolons**: always
+- **Indentation**: 4 spaces (Swift standard)
+- **Line length**: no enforced limit, kept reasonable (~120)
 - **Trailing commas**: yes, in multi-line structures
-- **Line length**: no enforced limit, but lines are kept reasonable (~120)
+- **Braces**: opening brace on same line
 
 ### Naming Conventions
-- `PascalCase`: components, interfaces, types, type aliases
-- `camelCase`: functions, variables, hooks, config objects
-- `UPPER_SNAKE_CASE`: module-level constants (e.g., `STORAGE_KEY`, `PTY_MAX_RETRIES`)
-- `kebab-case`: CSS class names (BEM-like: `.sidebar-agent-item`, `.agent-status-dot`)
-- Hook files: `useXxx.ts` → exports `useXxx()` function
-- Component files: `PascalCase.tsx` → exports named `PascalCase` component
+- `PascalCase`: types, protocols, enums
+- `camelCase`: functions, variables, properties
+- `UPPER_SNAKE_CASE`: not used (Swift convention uses `static let` with camelCase)
+- File names match the primary type: `AgentManager.swift` → `class AgentManager`
 
-### Imports
-Order (no blank lines between groups):
-1. React hooks/utilities (`import { useState, useCallback } from "react"`)
-2. Third-party libraries (`@tauri-apps/api`, `react-mosaic-component`, `lucide-react`)
-3. Internal modules — relative paths only, no path aliases
-   - Config: `../config/agents`
-   - Hooks: `../hooks/useAgentManager`
-   - Types: `../types/agent`
-   - Components: `./ComponentName`
+### Class Patterns
+- `final class` for all concrete classes (views, controllers, managers)
+- `@available(*, unavailable) required init?(coder:)` on all NSView/NSViewController subclasses
+- No `@MainActor` annotations on classes — use `@unchecked Sendable` + main-thread-only pattern
+- Observer pattern: `addObserver(id:handler:)` with `notifyChange()` (see `AgentManager`)
 
-No barrel files (`index.ts`) exist. Import directly from the source file.
-
-### Components
-- **Named exports** for all components: `export function Sidebar(...)` — NOT default exports
-- Exception: `App.tsx` uses `export default function App()`
-- Functional components only, no class components
-- `forwardRef` + `memo` pattern for performance-critical components (see `TerminalPane.tsx`)
-- Set `.displayName` when using `forwardRef`
-- Props interfaces defined inline above the component or in the same file
-- Use `type="button"` on all `<button>` elements
-
-### Hooks
-- Custom hooks follow the `useXxxManager` pattern returning an interface
-- Define the return interface above the hook: `export interface AgentManager { ... }`
-- Use `useCallback` for all handler functions returned from hooks
-- Use `useRef` for values that shouldn't trigger re-renders (e.g., `configsRef`, `statusChangeRef`)
-- Prefer `useState` with functional updater: `setState((prev) => ...)` for state derived from previous state
+### View Construction (Programmatic AppKit)
+- No SwiftUI, no storyboards, no XIBs — all programmatic
+- `translatesAutoresizingMaskIntoConstraints = false` on all views
+- `NSLayoutConstraint.activate([...])` for layout
+- `wantsLayer = true` for views needing `layer` properties
+- Multi-class-per-file pattern for self-contained features (e.g., `CommandPalettePanel.swift` has panel + view controller + row view)
 
 ### Types
-- **Interfaces** for object shapes: `export interface McpServerConfig { ... }`
-- **Type aliases** for unions/literals: `export type AgentStatus = "idle" | "starting" | "running" | "error" | "stopped"`
-- Types live in `src/types/` — one file per domain (`agent.ts`, `mcp.ts`, `keybinding.ts`)
-- Config types can be co-located in `src/config/` files
-- Optional fields use `?`: `env?: Record<string, string>`
+- `struct` for data models: `struct AgentProfile: Identifiable, Codable, Hashable`
+- `final class` for stateful objects: `final class AgentManager`
+- `enum` with static members for namespaced constants: `enum DefaultAgents { static let all: [...] }`
+- `protocol` for delegates: `protocol KeybindingDelegate: AnyObject`
+
+### Imports
+Single `import AppKit` (or `import Foundation` for model-only files). No third-party Swift dependencies — the only external dependency is `libghostty` via C interop.
 
 ### Error Handling
-- `try/catch` with empty `catch` blocks are used in non-critical paths (localStorage reads)
-- For Tauri IPC: `.catch(() => {})` on fire-and-forget invocations
-- Critical errors: write to terminal with ANSI escape codes (`\x1b[31m[error message]\x1b[0m`)
+- Graceful fallbacks for persistence: `guard let data = ..., let decoded = try? ... else { return .defaults }`
+- No `try!` or force unwraps in production code
+- Fire-and-forget for non-critical operations
 
 ### State Persistence
-- Uses `localStorage` with `soprano-` prefixed keys
-- Pattern: `loadXxx()` / `saveXxx()` function pairs in `src/config/`
-- Always handle parse failures gracefully (return defaults)
-
-## Code Style — Rust
-
-### Formatting
-- Standard `rustfmt` defaults (4-space indent)
-- No `rustfmt.toml` or `clippy.toml` configured
-
-### Patterns
-- `#[tauri::command]` attribute on all IPC handler functions
-- Error type is `String` (`Result<T, String>`) — use `.map_err(|e| e.to_string())?`
-- `serde::Serialize` / `serde::Deserialize` for IPC data structures
-- State management: `Mutex<T>` wrapped in Tauri `State<'_>`
-- snake_case for functions and variables
-
-## CSS / Styling
-
-- **Plain CSS** files in `src/styles/` — no CSS modules, no CSS-in-JS
-- CSS custom properties for theming (defined in `theme.css`, applied via `var(--name)`)
-- RGB components pattern: `--accent-rgb` + `rgb(var(--accent-rgb) / 0.5)` for alpha
-- BEM-like class naming: `.component-element.modifier`
-- Global styles imported in `main.tsx`
-- Responsive breakpoint: `@media (width <= 900px)`
+- Uses `UserDefaults` with `soprano-` prefixed keys
+- Pattern: `static func load() -> T` / `func save()` on model structs
+- `Codable` for all persisted types
+- Always handle decode failures gracefully (return defaults)
 
 ## Key Architecture Decisions
 
-- **Manager pattern**: Core state lives in custom hooks (`useAgentManager`, `useMcpManager`, `useSessionManager`) that return interface objects passed as props
-- **No state library**: Pure React state with `useState`/`useCallback`/`useRef`
-- **Tiling layout**: Uses `react-mosaic-component` — layout is a binary tree of pane IDs
-- **Terminal**: `@xterm/xterm` + `tauri-pty` for native PTY support
-- **IPC**: Tauri `invoke()` for frontend→backend calls, all commands in `lib.rs`
-- **MCP servers**: Managed as child processes in Rust, exposed via SSE gateway
+- **Manager pattern**: Core state lives in manager classes (`AgentManager`, `McpManager`, `SessionManager`, `ThemeManager`) created in `AppDelegate` and threaded through constructors
+- **No state library**: Pure AppKit with observer callbacks (`addObserver`/`notifyChange`)
+- **Dependency threading**: `AppDelegate` → `MainWindowController` → `MainContentViewController` → views
+- **Tiling layout**: Custom `SplitNode` binary tree with `SplitTreeView` rendering + `PaneContainerView` caching
+- **Terminal**: `libghostty` static library via C interop — `GhosttyAppManager` singleton manages app-level state, `TerminalSurfaceView` manages per-terminal surfaces with `CAMetalLayer`
+- **Keybindings**: tmux-style prefix mode (`Ctrl+A`) via `NSEvent.addLocalMonitorForEvents`, with direct shortcuts (`Cmd+P`) handled separately
+- **MCP servers**: Managed as `Process` child processes in `McpManager`, health-checked via 5s timer
+- **Theming**: `AppTheme` structs with `ThemeColors` + `TerminalColors`, applied via `ThemeManager.onThemeChanged` callback
+- **Entry point**: Custom `main.swift` (not `@main`) to call `NSApp.setActivationPolicy(.regular)` before run loop — required for SPM binaries to appear as foreground apps
 
 ## Common Pitfalls
 
-- The `eslint-disable-line react-hooks/exhaustive-deps` comment appears on intentional mount-only effects — these are deliberate
-- `platform()` from `@tauri-apps/plugin-os` is called at module level in `config/agents.ts` — it's synchronous in Tauri v2
-- Browser panes use Tauri's `WebviewBuilder` child webviews, not iframes
-- Terminal font (`MesloLGS NF`) must be loaded before xterm init — see `fontReadyPromise` guard
+- **SPM binary activation**: Without `main.swift` calling `setActivationPolicy(.regular)`, the app runs as a background-only process with no visible window
+- **Homebrew Swift required**: System CLT Swift 6.2 has broken SPM; must use Homebrew Swift 6.2.3+ (`PATH="/opt/homebrew/opt/swift/bin:$PATH"`)
+- **libghostty build**: Requires `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and Xcode Metal Toolchain installed
+- **ghostty build.zig patched**: Skip xcframework/macOS-app init when `emit_xcframework=false` to avoid iOS SDK requirement
+- **`ghostty_surface_set_display_id()`**: Must be called during view reparenting or terminal appears frozen
+- **Surface userdata**: Clipboard callbacks receive surface userdata, not app userdata
+- **CAMetalLayer backing**: `TerminalSurfaceView.makeBackingLayer()` returns `CAMetalLayer()`
+- **`layoutGeneration` counter**: In `AgentManager`, tracks topology changes vs style-only changes for efficient view updates
+- **Settings window**: Single-instance pattern — `MainWindowController` stores `settingsController` reference, reuses on subsequent opens
