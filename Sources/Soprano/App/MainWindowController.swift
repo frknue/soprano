@@ -32,12 +32,16 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "Soprano"
-        window.center()
-        window.setFrameAutosaveName("SopranoMainWindow")
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.minSize = NSSize(width: 600, height: 400)
         window.isReleasedWhenClosed = false
+
+        // Restore saved frame or center on screen
+        if !window.setFrameUsingName("SopranoMainWindow") {
+            window.center()
+        }
+        window.setFrameAutosaveName("SopranoMainWindow")
 
         super.init(window: window)
 
