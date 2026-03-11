@@ -301,7 +301,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
 private final class CommandPaletteRowView: NSView {
     var onClick: (() -> Void)?
 
-    private let iconLabel = NSTextField(labelWithString: "")
+    private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let descriptionLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
@@ -323,9 +323,11 @@ private final class CommandPaletteRowView: NSView {
     }
 
     private func setupViews() {
-        iconLabel.font = .systemFont(ofSize: 18, weight: .regular)
-        iconLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconLabel)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        iconView.contentTintColor = theme.colors.textMuted
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(iconView)
 
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
@@ -350,9 +352,10 @@ private final class CommandPaletteRowView: NSView {
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 52),
 
-            iconLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            iconLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconLabel.widthAnchor.constraint(equalToConstant: 24),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
 
             shortcutContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             shortcutContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -362,7 +365,7 @@ private final class CommandPaletteRowView: NSView {
             shortcutLabel.trailingAnchor.constraint(equalTo: shortcutContainer.trailingAnchor, constant: -6),
             shortcutLabel.centerYAnchor.constraint(equalTo: shortcutContainer.centerYAnchor),
 
-            titleLabel.leadingAnchor.constraint(equalTo: iconLabel.trailingAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutContainer.leadingAnchor, constant: -8),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
 
@@ -376,12 +379,13 @@ private final class CommandPaletteRowView: NSView {
     }
 
     func configure(item: CommandItem, highlighted: Bool) {
-        iconLabel.stringValue = item.icon
+        iconView.image = NSImage(systemSymbolName: item.icon, accessibilityDescription: item.label)
         titleLabel.stringValue = item.label
         descriptionLabel.stringValue = item.description
         shortcutLabel.stringValue = item.shortcut ?? ""
         shortcutContainer.isHidden = item.shortcut == nil
 
+        iconView.contentTintColor = theme.colors.textMuted
         titleLabel.textColor = theme.colors.textPrimary
         descriptionLabel.textColor = theme.colors.textMuted
         shortcutLabel.textColor = theme.colors.textMuted

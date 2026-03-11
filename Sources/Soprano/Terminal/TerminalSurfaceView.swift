@@ -33,6 +33,7 @@ struct TerminalConfig {
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
+    var onFocusRequested: (() -> Void)?
     private let config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
@@ -300,6 +301,7 @@ final class TerminalSurfaceView: NSView {
             super.mouseDown(with: event)
             return
         }
+        onFocusRequested?()
         window?.makeFirstResponder(self)
         let pt = convert(event.locationInWindow, from: nil)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))

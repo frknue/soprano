@@ -5,6 +5,7 @@ final class PaneHeaderView: NSView {
     let paneId: String
     let agentManager: AgentManager
     let themeManager: ThemeManager
+    var onFocusRequested: (() -> Void)?
 
     private var titleLabel: NSTextField!
     private var statusDot: NSView!
@@ -92,6 +93,16 @@ final class PaneHeaderView: NSView {
         ])
 
         update()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if isInteractiveSubview(hitTest(point)) {
+            super.mouseDown(with: event)
+            return
+        }
+
+        onFocusRequested?()
     }
 
     func update() {
@@ -185,5 +196,16 @@ final class PaneHeaderView: NSView {
         case .error: return theme.colors.danger
         case .stopped: return theme.colors.gray
         }
+    }
+
+    private func isInteractiveSubview(_ view: NSView?) -> Bool {
+        var current = view
+        while let candidate = current, candidate !== self {
+            if candidate is NSControl {
+                return true
+            }
+            current = candidate.superview
+        }
+        return false
     }
 }
