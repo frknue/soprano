@@ -49,11 +49,11 @@ final class MainWindowController: NSWindowController {
             agentManager: agentManager,
             mcpManager: mcpManager,
             sessionManager: sessionManager,
-            themeManager: themeManager
+            themeManager: themeManager,
+            onSettingsRequested: { [weak self] in
+                self?.openSettingsWindow()
+            }
         )
-        contentVC.onSettingsRequested = { [weak self] in
-            self?.openSettingsWindow()
-        }
         window.contentViewController = contentVC
         self.mainContentVC = contentVC
 
@@ -102,7 +102,7 @@ final class MainWindowController: NSWindowController {
         [
             CommandItem(
                 id: "launch-codex",
-                icon: "🤖",
+                icon: "command.square",
                 label: "Launch Codex",
                 description: "Launch Codex agent",
                 shortcut: commandShortcut(for: "launch-codex"),
@@ -113,7 +113,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "launch-claude-code",
-                icon: "✨",
+                icon: "sparkles",
                 label: "Launch Claude Code",
                 description: "Launch Claude Code agent",
                 shortcut: commandShortcut(for: "launch-claude-code"),
@@ -124,7 +124,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "launch-opencode",
-                icon: "⚡",
+                icon: "chevron.left.forwardslash.chevron.right",
                 label: "Launch OpenCode",
                 description: "Launch OpenCode agent",
                 shortcut: commandShortcut(for: "launch-opencode"),
@@ -135,7 +135,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "launch-openclaw",
-                icon: "🐾",
+                icon: "pawprint",
                 label: "Launch OpenClaw",
                 description: "Launch OpenClaw agent",
                 shortcut: commandShortcut(for: "launch-openclaw"),
@@ -146,7 +146,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "new-terminal",
-                icon: "💻",
+                icon: "terminal",
                 label: "Open Terminal",
                 description: "Open a new terminal pane",
                 shortcut: commandShortcut(for: "new-terminal"),
@@ -157,7 +157,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "new-browser",
-                icon: "🌐",
+                icon: "globe",
                 label: "Open Browser",
                 description: "Open a new browser pane",
                 shortcut: commandShortcut(for: "new-browser"),
@@ -168,7 +168,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "split-horizontal",
-                icon: "═",
+                icon: "rectangle.split.2x1",
                 label: "Split Horizontal",
                 description: "Split the active pane horizontally",
                 shortcut: commandShortcut(for: "split-horizontal"),
@@ -179,7 +179,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "split-vertical",
-                icon: "║",
+                icon: "rectangle.split.1x2",
                 label: "Split Vertical",
                 description: "Split the active pane vertically",
                 shortcut: commandShortcut(for: "split-vertical"),
@@ -190,7 +190,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "close-pane",
-                icon: "✕",
+                icon: "xmark.square",
                 label: "Close Pane",
                 description: "Close the active pane",
                 shortcut: commandShortcut(for: "close-pane") ?? commandShortcut(for: "close-active"),
@@ -201,7 +201,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "restart-agent",
-                icon: "🔄",
+                icon: "arrow.clockwise",
                 label: "Restart Agent",
                 description: "Restart the active agent",
                 shortcut: nil,
@@ -212,7 +212,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "stop-agent",
-                icon: "⬜",
+                icon: "stop.square",
                 label: "Stop Agent",
                 description: "Stop the active agent",
                 shortcut: nil,
@@ -223,7 +223,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "save-session",
-                icon: "💾",
+                icon: "square.and.arrow.down",
                 label: "Save Session",
                 description: "Save the current workspace session",
                 shortcut: commandShortcut(for: "save-session"),
@@ -233,7 +233,7 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "toggle-sidebar",
-                icon: "📋",
+                icon: "sidebar.leading",
                 label: "Toggle Sidebar",
                 description: "Show or hide the sidebar",
                 shortcut: commandShortcut(for: "toggle-sidebar"),
@@ -299,7 +299,7 @@ private extension MainWindowController {
             settingsController = controller
         }
 
-        settingsController?.showSettingsWindow()
+        settingsController?.showSettingsWindow(relativeTo: window)
     }
 
     func reloadKeybindingManager() {

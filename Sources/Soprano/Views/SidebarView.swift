@@ -33,7 +33,6 @@ final class SidebarView: NSView {
     private var detailStack: NSStackView!
 
     private var sectionButtons: [SidebarSection: NSButton] = [:]
-    private var settingsButton: NSButton!
 
     init(agentManager: AgentManager, mcpManager: McpManager, sessionManager: SessionManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
@@ -82,7 +81,7 @@ final class SidebarView: NSView {
         topButtonStack.translatesAutoresizingMaskIntoConstraints = false
         activityBar.addSubview(topButtonStack)
 
-        for section in SidebarSection.allCases {
+        for section in SidebarSection.activitySections {
             let button = makeSectionButton(section)
             sectionButtons[section] = button
             topButtonStack.addArrangedSubview(button)
@@ -94,7 +93,8 @@ final class SidebarView: NSView {
         bottomButtonStack.translatesAutoresizingMaskIntoConstraints = false
         activityBar.addSubview(bottomButtonStack)
 
-        settingsButton = makeSettingsButton()
+        let settingsButton = makeSectionButton(.settings)
+        sectionButtons[.settings] = settingsButton
         bottomButtonStack.addArrangedSubview(settingsButton)
 
         detailPanel = NSView()
@@ -166,26 +166,18 @@ final class SidebarView: NSView {
     }
 
     private func makeSectionButton(_ section: SidebarSection) -> NSButton {
-        let button = NSButton(title: section.icon, target: self, action: #selector(sectionClicked(_:)))
+        let button = NSButton(title: "", target: self, action: #selector(sectionClicked(_:)))
         button.tag = section.rawValue
         button.isBordered = false
-        button.font = .systemFont(ofSize: 19)
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
+        button.image = NSImage(
+            systemSymbolName: section.symbolName,
+            accessibilityDescription: section.label
+        )?.withSymbolConfiguration(configuration)
+        button.imageScaling = .scaleProportionallyDown
+        button.imagePosition = .imageOnly
+        button.contentTintColor = themeManager.currentTheme.colors.textMuted
         button.toolTip = section.label
-        button.translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 36),
-            button.heightAnchor.constraint(equalToConstant: 36),
-        ])
-
-        return button
-    }
-
-    private func makeSettingsButton() -> NSButton {
-        let button = NSButton(title: "⚙️", target: self, action: #selector(settingsClicked))
-        button.isBordered = false
-        button.font = .systemFont(ofSize: 18)
-        button.toolTip = "Settings"
         button.translatesAutoresizingMaskIntoConstraints = false
 
         NSLayoutConstraint.activate([
@@ -198,11 +190,12 @@ final class SidebarView: NSView {
 
     @objc private func sectionClicked(_ sender: NSButton) {
         guard let section = SidebarSection(rawValue: sender.tag) else { return }
+        if section == .settings {
+            activeSection = nil
+            onSettingsRequested?()
+            return
+        }
         activeSection = activeSection == section ? nil : section
-    }
-
-    @objc private func settingsClicked() {
-        onSettingsRequested?()
     }
 
     private func refresh() {
@@ -212,11 +205,11 @@ final class SidebarView: NSView {
         activityBar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         detailPanel.layer?.backgroundColor = theme.colors.bgBase.cgColor
 
-        for section in SidebarSection.allCases {
+        for section in SidebarSection.activitySections {
             let isActive = activeSection == section
             sectionButtons[section]?.contentTintColor = isActive ? theme.colors.accent : theme.colors.textMuted
         }
-        settingsButton.contentTintColor = theme.colors.textMuted
+        sectionButtons[.settings]?.contentTintColor = theme.colors.textMuted
 
         detailPanel.isHidden = activeSection == nil
         guard let section = activeSection else {
@@ -240,6 +233,8 @@ final class SidebarView: NSView {
             buildMcpPanel()
         case .sessions:
             buildSessionsPanel()
+        case .settings:
+            break
         }
     }
 
@@ -662,8 +657,6 @@ private final class SidebarPaneRowView: NSView {
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: badgeContainer.leadingAnchor, constant: -6),
         ])
 
-        let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleSelect))
-        addGestureRecognizer(clickGesture)
     }
 
     func configure(
@@ -695,6 +688,27 @@ private final class SidebarPaneRowView: NSView {
     @objc private func handleClose() {
         onClose?()
     }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if isInteractiveSubview(hitTest(point)) {
+            super.mouseDown(with: event)
+            return
+        }
+
+        onSelect?()
+    }
+
+    private func isInteractiveSubview(_ view: NSView?) -> Bool {
+        var current = view
+        while let candidate = current, candidate !== self {
+            if candidate is NSControl {
+                return true
+            }
+            current = candidate.superview
+        }
+        return false
+    }
 }
 
 // MARK: - Sidebar Section
@@ -704,6 +718,11 @@ enum SidebarSection: Int, CaseIterable {
     case panes
     case mcpServers
     case sessions
+    case settings
+
+    static var activitySections: [SidebarSection] {
+        [.agents, .panes, .mcpServers, .sessions]
+    }
 
     var label: String {
         switch self {
@@ -711,15 +730,17 @@ enum SidebarSection: Int, CaseIterable {
         case .panes: return "Panes"
         case .mcpServers: return "MCP Servers"
         case .sessions: return "Sessions"
+        case .settings: return "Settings"
         }
     }
 
-    var icon: String {
+    var symbolName: String {
         switch self {
-        case .agents: return "🤖"
-        case .panes: return "⊞"
-        case .mcpServers: return "⚡"
-        case .sessions: return "💾"
+        case .agents: return "command.square"
+        case .panes: return "square.split.2x2"
+        case .mcpServers: return "bolt.horizontal.circle"
+        case .sessions: return "clock.arrow.trianglehead.counterclockwise.rotate.90"
+        case .settings: return "gearshape"
         }
     }
 }

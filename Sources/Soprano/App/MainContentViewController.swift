@@ -6,12 +6,7 @@ final class MainContentViewController: NSViewController {
     let mcpManager: McpManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
-
-    var onSettingsRequested: (() -> Void)? {
-        didSet {
-            sidebarView?.onSettingsRequested = onSettingsRequested
-        }
-    }
+    private let onSettingsRequested: (() -> Void)?
 
     private var sidebarView: SidebarView!
     private var splitTreeView: SplitTreeView!
@@ -21,11 +16,18 @@ final class MainContentViewController: NSViewController {
     private static let collapsedSidebarWidth: CGFloat = 48
     private static let expandedSidebarWidth: CGFloat = 248
 
-    init(agentManager: AgentManager, mcpManager: McpManager, sessionManager: SessionManager, themeManager: ThemeManager) {
+    init(
+        agentManager: AgentManager,
+        mcpManager: McpManager,
+        sessionManager: SessionManager,
+        themeManager: ThemeManager,
+        onSettingsRequested: (() -> Void)? = nil
+    ) {
         self.agentManager = agentManager
         self.mcpManager = mcpManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
+        self.onSettingsRequested = onSettingsRequested
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -37,6 +39,12 @@ final class MainContentViewController: NSViewController {
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
+        let safeArea = root.safeAreaLayoutGuide
+
+        // Split tree (tiling layout)
+        splitTreeView = SplitTreeView(agentManager: agentManager, themeManager: themeManager)
+        splitTreeView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(splitTreeView)
 
         // Sidebar
         sidebarView = SidebarView(agentManager: agentManager, mcpManager: mcpManager, sessionManager: sessionManager, themeManager: themeManager)
@@ -49,15 +57,11 @@ final class MainContentViewController: NSViewController {
                 self.sidebarWidthConstraint.animator().constant = expanded
                     ? Self.expandedSidebarWidth
                     : Self.collapsedSidebarWidth
+                self.view.layoutSubtreeIfNeeded()
             }
         }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(sidebarView)
-
-        // Split tree (tiling layout)
-        splitTreeView = SplitTreeView(agentManager: agentManager, themeManager: themeManager)
-        splitTreeView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(splitTreeView)
+        root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
 
         // Status bar
         statusBarView = StatusBarView(agentManager: agentManager, themeManager: themeManager)
@@ -70,16 +74,16 @@ final class MainContentViewController: NSViewController {
         )
 
         NSLayoutConstraint.activate([
-            // Sidebar: left edge, full height minus status bar
+            // Respect the window safe area so content stays out of the titlebar/traffic-light region.
             sidebarView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            sidebarView.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
             sidebarView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
             sidebarWidthConstraint,
 
             // Split tree: right of sidebar, above status bar
             splitTreeView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             splitTreeView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            splitTreeView.topAnchor.constraint(equalTo: root.topAnchor),
+            splitTreeView.topAnchor.constraint(equalTo: safeArea.topAnchor),
             splitTreeView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
 
             // Status bar: full width, bottom

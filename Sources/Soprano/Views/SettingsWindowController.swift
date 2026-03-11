@@ -32,6 +32,10 @@ final class SettingsWindowController: NSWindowController {
         window.minSize = NSSize(width: 700, height: 500)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)
+        if !window.setFrameUsingName("SopranoSettingsWindow") {
+            window.center()
+        }
+        window.setFrameAutosaveName("SopranoSettingsWindow")
 
         contentVC = SettingsViewController(
             themeManager: themeManager,
@@ -63,11 +67,15 @@ final class SettingsWindowController: NSWindowController {
         fatalError("init(coder:) is not supported")
     }
 
-    func showSettingsWindow() {
+    func showSettingsWindow(relativeTo parentWindow: NSWindow?) {
         guard let window else { return }
         applyTheme()
+        if !window.isVisible {
+            positionWindow(window, relativeTo: parentWindow)
+        }
         showWindow(nil)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -77,6 +85,31 @@ final class SettingsWindowController: NSWindowController {
         window.backgroundColor = theme.colors.bgBase
         window.appearance = NSAppearance(named: .darkAqua)
         contentVC.apply(theme: theme)
+    }
+
+    private func positionWindow(_ window: NSWindow, relativeTo parentWindow: NSWindow?) {
+        let referenceFrame = parentWindow?.screen?.visibleFrame
+            ?? parentWindow?.frame
+            ?? NSScreen.main?.visibleFrame
+
+        guard let referenceFrame else {
+            window.center()
+            return
+        }
+
+        var frame = window.frame
+        frame.size.width = min(frame.width, referenceFrame.width)
+        frame.size.height = min(frame.height, referenceFrame.height)
+
+        frame.origin.x = min(max(frame.origin.x, referenceFrame.minX), referenceFrame.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, referenceFrame.minY), referenceFrame.maxY - frame.height)
+
+        if !referenceFrame.contains(frame) {
+            frame.origin.x = referenceFrame.midX - frame.width / 2
+            frame.origin.y = referenceFrame.midY - frame.height / 2
+        }
+
+        window.setFrame(frame, display: false)
     }
 }
 
@@ -409,9 +442,15 @@ private final class SettingsViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             stack.topAnchor.constraint(equalTo: card.topAnchor),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-            card.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -36),
         ])
         return (card, stack)
+    }
+
+    private func addContentSubview(_ view: NSView, widthInset: CGFloat? = nil) {
+        contentStack.addArrangedSubview(view)
+        if let widthInset {
+            view.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: widthInset).isActive = true
+        }
     }
 
     private func makeFieldLabel(_ text: String) -> NSTextField {
@@ -486,7 +525,7 @@ private final class SettingsViewController: NSViewController {
         themeRow.addArrangedSubview(popup)
         popup.widthAnchor.constraint(equalToConstant: 230).isActive = true
         appearanceStack.addArrangedSubview(themeRow)
-        contentStack.addArrangedSubview(appearanceCard)
+        addContentSubview(appearanceCard, widthInset: -36)
 
         let (sessionCard, sessionStack) = makeSectionCard(title: "Session", subtitle: "Restore workspace state from the previous app launch.")
         let restoreButton = NSButton(checkboxWithTitle: "Restore Last Session", target: self, action: #selector(restoreSessionChanged(_:)))
@@ -494,7 +533,7 @@ private final class SettingsViewController: NSViewController {
         restoreButton.contentTintColor = currentTheme.colors.textPrimary
         restoreSessionButton = restoreButton
         sessionStack.addArrangedSubview(restoreButton)
-        contentStack.addArrangedSubview(sessionCard)
+        addContentSubview(sessionCard, widthInset: -36)
 
         let (projectCard, projectStack) = makeSectionCard(title: "Project Directories", subtitle: "Directories available to project-aware features.")
         let listStack = NSStackView()
@@ -522,7 +561,7 @@ private final class SettingsViewController: NSViewController {
         addRow.addArrangedSubview(addButton)
         projectStack.addArrangedSubview(addRow)
 
-        contentStack.addArrangedSubview(projectCard)
+        addContentSubview(projectCard, widthInset: -36)
 
         let (keybindingCard, keybindingStack) = makeSectionCard(title: "Keybinding Behavior", subtitle: "Adjust prefix trigger and pane resize granularity.")
         let grid = NSGridView(views: [
@@ -550,7 +589,7 @@ private final class SettingsViewController: NSViewController {
             resizeField.action = #selector(resizeStepCommitted(_:))
         }
 
-        contentStack.addArrangedSubview(keybindingCard)
+        addContentSubview(keybindingCard, widthInset: -36)
     }
 
     private func rebuildProjectDirectoriesList() {
@@ -590,6 +629,8 @@ private final class SettingsViewController: NSViewController {
             removeButton.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(removeButton)
 
+            list.addArrangedSubview(row)
+
             NSLayoutConstraint.activate([
                 row.widthAnchor.constraint(equalTo: list.widthAnchor),
                 row.heightAnchor.constraint(equalToConstant: 32),
@@ -602,7 +643,6 @@ private final class SettingsViewController: NSViewController {
                 removeButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             ])
 
-            list.addArrangedSubview(row)
         }
     }
 
@@ -726,6 +766,7 @@ private final class SettingsViewController: NSViewController {
                 isHeader: true
             )
             stack.addArrangedSubview(headerRow)
+            headerRow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
 
             for (index, binding) in bindings.enumerated() {
                 let row = makeShortcutRow(
@@ -737,8 +778,9 @@ private final class SettingsViewController: NSViewController {
                     isHeader: false
                 )
                 stack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
             }
-            contentStack.addArrangedSubview(card)
+            addContentSubview(card, widthInset: -36)
         }
     }
 
@@ -790,7 +832,6 @@ private final class SettingsViewController: NSViewController {
         row.addSubview(keyBadge)
 
         NSLayoutConstraint.activate([
-            row.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -60),
             row.heightAnchor.constraint(equalToConstant: 30),
 
             actionLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
@@ -826,7 +867,6 @@ private final class SettingsViewController: NSViewController {
         gridStack.alignment = .leading
         gridStack.spacing = 10
         gridStack.translatesAutoresizingMaskIntoConstraints = false
-        gridStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -36).isActive = true
 
         var currentRow: NSStackView?
         for (index, profile) in DefaultAgents.all.enumerated() {
@@ -846,7 +886,7 @@ private final class SettingsViewController: NSViewController {
             currentRow?.addArrangedSubview(card)
         }
 
-        contentStack.addArrangedSubview(gridStack)
+        addContentSubview(gridStack, widthInset: -36)
     }
 
     private func makeAgentCard(_ profile: AgentProfile) -> NSView {
@@ -930,27 +970,25 @@ private final class SettingsViewController: NSViewController {
         controls.alignment = .centerY
         controls.spacing = 8
         controls.translatesAutoresizingMaskIntoConstraints = false
-        controls.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -36).isActive = true
 
         let addButtonTitle = isAddServerFormVisible ? "Hide Add Form" : "Add Server"
         let addButton = makeActionButton(title: addButtonTitle, action: #selector(toggleAddServerForm))
         addServerButton = addButton
         controls.addArrangedSubview(addButton)
-        contentStack.addArrangedSubview(controls)
+        addContentSubview(controls, widthInset: -36)
 
         let form = buildAddServerForm()
         addServerFormContainer = form
         form.isHidden = !isAddServerFormVisible
-        contentStack.addArrangedSubview(form)
+        addContentSubview(form, widthInset: -36)
 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -36).isActive = true
         serverCardsStack = stack
-        contentStack.addArrangedSubview(stack)
+        addContentSubview(stack, widthInset: -36)
         rebuildMcpServerCards()
     }
 
@@ -1083,6 +1121,7 @@ private final class SettingsViewController: NSViewController {
         for entry in mcpManager.pool {
             let card = makeMcpServerCard(entry)
             stack.addArrangedSubview(card)
+            card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
     }
 
@@ -1094,7 +1133,6 @@ private final class SettingsViewController: NSViewController {
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
         card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -36).isActive = true
 
         let stack = NSStackView()
         stack.orientation = .vertical
@@ -1311,8 +1349,10 @@ private final class SettingsViewController: NSViewController {
             actionLabel.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(actionLabel)
 
+            quickRefStack.addArrangedSubview(row)
+
             NSLayoutConstraint.activate([
-                row.widthAnchor.constraint(equalTo: contentStack.widthAnchor, constant: -60),
+                row.widthAnchor.constraint(equalTo: quickRefStack.widthAnchor, constant: -24),
                 row.heightAnchor.constraint(equalToConstant: 28),
 
                 keyLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
@@ -1325,9 +1365,8 @@ private final class SettingsViewController: NSViewController {
                 actionLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
             ])
 
-            quickRefStack.addArrangedSubview(row)
         }
-        contentStack.addArrangedSubview(quickRefCard)
+        addContentSubview(quickRefCard, widthInset: -36)
     }
 
     private func quickReferenceBindings() -> [(String, String)] {

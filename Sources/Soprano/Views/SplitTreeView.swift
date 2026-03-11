@@ -18,6 +18,8 @@ final class SplitTreeView: NSView {
     /// Cached pane container views keyed by pane ID.
     /// These survive layout rebuilds — only removed when the pane itself is closed.
     private var paneContainers: [String: PaneContainerView] = [:]
+    /// Cached content views keyed by tab ID so tab switches don't leave stale responders/views mounted.
+    private var tabContentViews: [String: NSView] = [:]
 
     /// The root NSSplitView (or single pane view) currently displayed.
     private var rootView: NSView?
@@ -53,6 +55,8 @@ final class SplitTreeView: NSView {
     // MARK: - State Change Handler
 
     private func handleStateChange() {
+        pruneOrphanedTabContentViews()
+        syncVisiblePaneContents()
         let currentGen = agentManager.layoutGeneration
         if currentGen != lastLayoutGeneration {
             rebuildLayout()
@@ -125,26 +129,7 @@ final class SplitTreeView: NSView {
             agentManager: agentManager,
             themeManager: themeManager
         )
-        if let tab = agentManager.panes[paneId]?.activeTab, tab.type == .browser {
-            let browserView = BrowserPaneView(paneId: paneId)
-            container.setContentView(browserView)
-        } else {
-            let terminalConfig: TerminalConfig
-            if let tab = agentManager.panes[paneId]?.activeTab {
-                if tab.type == .agent,
-                   let agent = tab.agent,
-                   let profile = DefaultAgents.profile(for: agent.profileId)
-                {
-                    terminalConfig = .forAgent(profile, cwd: tab.cwd)
-                } else {
-                    terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
-                }
-            } else {
-                terminalConfig = .defaultShell
-            }
-            let terminalView = TerminalSurfaceView(paneId: paneId, config: terminalConfig)
-            container.setContentView(terminalView)
-        }
+        syncContainerContent(container, for: paneId)
         paneContainers[paneId] = container
         return container
     }
@@ -154,14 +139,77 @@ final class SplitTreeView: NSView {
         let activeIds = agentManager.layout?.leafIds ?? []
         let orphanIds = paneContainers.keys.filter { !activeIds.contains($0) }
         for id in orphanIds {
-            if let container = paneContainers[id],
-               let terminalView = findTerminalView(in: container)
-            {
-                terminalView.destroySurface()
+            if let container = paneContainers[id] {
+                clearFirstResponderIfNeeded(in: container)
+                if let terminalView = findTerminalView(in: container) {
+                    terminalView.destroySurface()
+                }
             }
             paneContainers[id]?.removeFromSuperview()
             paneContainers.removeValue(forKey: id)
         }
+    }
+
+    private func pruneOrphanedTabContentViews() {
+        let activeTabIds = Set(agentManager.panes.values.flatMap(\.tabs).map(\.id))
+        let orphanIds = tabContentViews.keys.filter { !activeTabIds.contains($0) }
+        for id in orphanIds {
+            if let view = tabContentViews[id] {
+                clearFirstResponderIfNeeded(in: view)
+                if let terminalView = findTerminalView(in: view) {
+                    terminalView.destroySurface()
+                }
+                view.removeFromSuperview()
+            }
+            tabContentViews.removeValue(forKey: id)
+        }
+    }
+
+    private func syncVisiblePaneContents() {
+        for (paneId, container) in paneContainers {
+            syncContainerContent(container, for: paneId)
+        }
+    }
+
+    private func syncContainerContent(_ container: PaneContainerView, for paneId: String) {
+        guard let tab = agentManager.panes[paneId]?.activeTab else {
+            container.setContentView(makePlaceholderContent(), tabId: nil)
+            return
+        }
+
+        let content = contentViewForTab(tab, paneId: paneId)
+        container.setContentView(content, tabId: tab.id)
+    }
+
+    private func contentViewForTab(_ tab: PaneTab, paneId: String) -> NSView {
+        if let existing = tabContentViews[tab.id] {
+            return existing
+        }
+
+        let view: NSView
+        switch tab.type {
+        case .browser:
+            view = BrowserPaneView(paneId: paneId)
+        case .terminal, .agent:
+            let terminalConfig: TerminalConfig
+            if tab.type == .agent,
+               let agent = tab.agent,
+               let profile = DefaultAgents.profile(for: agent.profileId)
+            {
+                terminalConfig = .forAgent(profile, cwd: tab.cwd)
+            } else {
+                terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
+            }
+
+            let terminalView = TerminalSurfaceView(paneId: paneId, config: terminalConfig)
+            terminalView.onFocusRequested = { [weak self] in
+                self?.agentManager.focusPane(paneId)
+            }
+            view = terminalView
+        }
+
+        tabContentViews[tab.id] = view
+        return view
     }
 
     private func findTerminalView(in view: NSView) -> TerminalSurfaceView? {
@@ -176,6 +224,17 @@ final class SplitTreeView: NSView {
         }
 
         return nil
+    }
+
+    private func clearFirstResponderIfNeeded(in container: NSView) {
+        guard let window = container.window,
+              let responderView = window.firstResponder as? NSView,
+              responderView.isDescendant(of: container)
+        else {
+            return
+        }
+
+        window.makeFirstResponder(nil)
     }
 
     // MARK: - Style Updates (No Rebuild)
@@ -221,6 +280,27 @@ final class SplitTreeView: NSView {
 
         return view
     }
+
+    private func makePlaceholderContent() -> NSView {
+        let theme = themeManager.currentTheme
+        let placeholder = NSView()
+        placeholder.wantsLayer = true
+        placeholder.layer?.backgroundColor = theme.colors.bgBase.cgColor
+
+        let label = NSTextField(labelWithString: "Empty")
+        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        label.textColor = theme.colors.textMuted
+        label.alignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: placeholder.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: placeholder.centerYAnchor),
+        ])
+
+        return placeholder
+    }
 }
 
 // MARK: - PaneContainerView
@@ -234,6 +314,7 @@ final class PaneContainerView: NSView {
 
     private var headerView: PaneHeaderView
     private var contentView: NSView
+    private var displayedTabId: String?
 
     init(paneId: String, agentManager: AgentManager, themeManager: ThemeManager) {
         self.paneId = paneId
@@ -245,34 +326,20 @@ final class PaneContainerView: NSView {
             agentManager: agentManager,
             themeManager: themeManager
         )
+        self.headerView.onFocusRequested = { [weak agentManager] in
+            agentManager?.focusPane(paneId)
+        }
 
-        // Content placeholder — will be replaced by TerminalPane/BrowserPane in Phase 4
-        let theme = themeManager.currentTheme
-        let pane = agentManager.panes[paneId]
         let placeholder = NSView()
         placeholder.wantsLayer = true
-        placeholder.layer?.backgroundColor = theme.colors.bgBase.cgColor
-
-        let label = NSTextField(labelWithString: pane?.activeTab?.title ?? "Empty")
-        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        label.textColor = theme.colors.textMuted
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-        placeholder.addSubview(label)
-
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: placeholder.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: placeholder.centerYAnchor),
-        ])
-
+        placeholder.layer?.backgroundColor = themeManager.currentTheme.colors.bgBase.cgColor
         self.contentView = placeholder
 
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = theme.panelColor.cgColor
+        layer?.backgroundColor = themeManager.currentTheme.panelColor.cgColor
 
         setupSubviews()
-        setupClickToFocus()
         update()
     }
 
@@ -282,9 +349,15 @@ final class PaneContainerView: NSView {
     }
 
     /// Replaces the content area (e.g., swapping placeholder for a terminal view).
-    func setContentView(_ newContent: NSView) {
+    func setContentView(_ newContent: NSView, tabId: String?) {
+        if contentView === newContent, displayedTabId == tabId {
+            return
+        }
+
+        clearFirstResponderIfNeeded(in: contentView)
         contentView.removeFromSuperview()
         contentView = newContent
+        displayedTabId = tabId
         newContent.translatesAutoresizingMaskIntoConstraints = false
         addSubview(newContent)
         NSLayoutConstraint.activate([
@@ -326,14 +399,17 @@ final class PaneContainerView: NSView {
         ])
     }
 
-    private func setupClickToFocus() {
-        let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
-        addGestureRecognizer(click)
+    private func clearFirstResponderIfNeeded(in view: NSView) {
+        guard let window,
+              let responderView = window.firstResponder as? NSView,
+              responderView.isDescendant(of: view)
+        else {
+            return
+        }
+
+        window.makeFirstResponder(nil)
     }
 
-    @objc private func handleClick() {
-        agentManager.focusPane(paneId)
-    }
 }
 
 // MARK: - ThemedSplitView
