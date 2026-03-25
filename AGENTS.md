@@ -1,6 +1,6 @@
 # AGENTS.md — Soprano
 
-Soprano is a native macOS desktop app for orchestrating AI coding agents (Codex, Claude Code, OpenCode, OpenClaw) in a tiling terminal layout. Swift + AppKit frontend with libghostty for terminal rendering.
+Soprano is a native macOS desktop app for orchestrating AI coding agents (Codex, Claude Code, OpenCode) in a tiling terminal layout. Swift + AppKit frontend with libghostty for terminal rendering.
 
 ## Build & Run Commands
 
@@ -49,13 +49,11 @@ soprano/
 │   │   │   ├── PaneState.swift       # Pane model (tabs, active tab, type)
 │   │   │   ├── SplitNode.swift       # Binary tree tiling model (221 lines)
 │   │   │   ├── KeyBinding.swift      # Keybinding model + config
-│   │   │   ├── McpServerConfig.swift # MCP server config + runtime instance
 │   │   │   ├── AppSettings.swift     # App preferences (theme, restore, project dirs)
 │   │   │   └── WorkspaceSession.swift # Session save/restore model
 │   │   ├── Controllers/
 │   │   │   ├── AgentManager.swift    # Pane/tab/agent lifecycle, observer pattern (~535 lines)
 │   │   │   ├── KeybindingManager.swift # NSEvent monitor, prefix mode, action dispatch
-│   │   │   ├── McpManager.swift      # Process-based MCP server lifecycle
 │   │   │   ├── SessionManager.swift  # Named session save/load/delete
 │   │   │   └── ThemeManager.swift    # Theme switching + change notifications
 │   │   ├── Views/
@@ -67,9 +65,8 @@ soprano/
 │   │   │   ├── SettingsWindowController.swift  # Tabbed settings window (~1350 lines)
 │   │   │   └── BrowserPaneView.swift # WKWebView browser pane with nav bar
 │   │   ├── Config/
-│   │   │   ├── DefaultAgents.swift   # 5 built-in agent profiles
-│   │   │   ├── DefaultKeybindings.swift # 30+ keybindings with UserDefaults persistence
-│   │   │   ├── DefaultMcpServers.swift  # MCP server config persistence
+│   │   │   ├── DefaultAgents.swift   # 4 built-in agent profiles
+│   │   │   ├── DefaultKeybindings.swift # 30 keybindings with UserDefaults persistence
 │   │   │   └── Theme.swift           # AppTheme, ThemeColors, TerminalColors, 2 themes
 │   │   ├── Terminal/
 │   │   │   ├── GhosttyAppManager.swift  # Singleton, ghostty init/config/callbacks/tick
@@ -132,13 +129,12 @@ Single `import AppKit` (or `import Foundation` for model-only files). No third-p
 
 ## Key Architecture Decisions
 
-- **Manager pattern**: Core state lives in manager classes (`AgentManager`, `McpManager`, `SessionManager`, `ThemeManager`) created in `AppDelegate` and threaded through constructors
+- **Manager pattern**: Core state lives in manager classes (`AgentManager`, `SessionManager`, `ThemeManager`) created in `AppDelegate` and threaded through constructors
 - **No state library**: Pure AppKit with observer callbacks (`addObserver`/`notifyChange`)
 - **Dependency threading**: `AppDelegate` → `MainWindowController` → `MainContentViewController` → views
 - **Tiling layout**: Custom `SplitNode` binary tree with `SplitTreeView` rendering + `PaneContainerView` caching
 - **Terminal**: `libghostty` static library via C interop — `GhosttyAppManager` singleton manages app-level state, `TerminalSurfaceView` manages per-terminal surfaces with `CAMetalLayer`
 - **Keybindings**: tmux-style prefix mode (`Ctrl+A`) via `NSEvent.addLocalMonitorForEvents`, with direct shortcuts (`Cmd+P`) handled separately
-- **MCP servers**: Managed as `Process` child processes in `McpManager`, health-checked via 5s timer
 - **Theming**: `AppTheme` structs with `ThemeColors` + `TerminalColors`, applied via `ThemeManager.onThemeChanged` callback
 - **Entry point**: Custom `main.swift` (not `@main`) to call `NSApp.setActivationPolicy(.regular)` before run loop — required for SPM binaries to appear as foreground apps
 

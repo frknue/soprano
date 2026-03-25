@@ -180,8 +180,6 @@ final class KeybindingManager: @unchecked Sendable {
             _ = agentManager.spawnAgent("claude-code")
         case "launch-opencode":
             _ = agentManager.spawnAgent("opencode")
-        case "launch-openclaw":
-            _ = agentManager.spawnAgent("openclaw")
 
         case "command-palette":
             invokeDelegate { $0.keybindingOpenCommandPalette() }

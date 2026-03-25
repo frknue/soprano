@@ -244,56 +244,34 @@ final class TerminalSurfaceView: NSView {
             return
         }
 
-        var keyEvent = ghostty_input_key_s()
-        keyEvent.action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
-        keyEvent.keycode = UInt32(event.keyCode)
-        keyEvent.mods = modsFromEvent(event)
-        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-        keyEvent.composing = false
-        keyEvent.unshifted_codepoint = 0
+        let translationEvent = translationEvent(for: event, surface: surface)
+        let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
+        let text = translationEvent.ghosttyCharacters
 
-        let text = event.characters ?? ""
-        if text.isEmpty {
-            keyEvent.text = nil
-            _ = ghostty_surface_key(surface, keyEvent)
-        } else {
-            text.withCString { ptr in
-                keyEvent.text = ptr
-                _ = ghostty_surface_key(surface, keyEvent)
-            }
-        }
+        sendKeyEvent(
+            action,
+            event: event,
+            translationEvent: translationEvent,
+            text: text
+        )
     }
 
     override func keyUp(with event: NSEvent) {
-        guard let surface else {
+        guard surface != nil else {
             super.keyUp(with: event)
             return
         }
 
-        var keyEvent = ghostty_input_key_s()
-        keyEvent.action = GHOSTTY_ACTION_RELEASE
-        keyEvent.keycode = UInt32(event.keyCode)
-        keyEvent.mods = modsFromEvent(event)
-        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-        keyEvent.composing = false
-        keyEvent.text = nil
-        _ = ghostty_surface_key(surface, keyEvent)
+        sendKeyEvent(GHOSTTY_ACTION_RELEASE, event: event)
     }
 
     override func flagsChanged(with event: NSEvent) {
-        guard let surface else {
+        guard surface != nil else {
             super.flagsChanged(with: event)
             return
         }
 
-        var keyEvent = ghostty_input_key_s()
-        keyEvent.action = GHOSTTY_ACTION_PRESS
-        keyEvent.keycode = UInt32(event.keyCode)
-        keyEvent.mods = modsFromEvent(event)
-        keyEvent.consumed_mods = GHOSTTY_MODS_NONE
-        keyEvent.composing = false
-        keyEvent.text = nil
-        _ = ghostty_surface_key(surface, keyEvent)
+        sendKeyEvent(GHOSTTY_ACTION_PRESS, event: event)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -375,6 +353,130 @@ final class TerminalSurfaceView: NSView {
         return ghostty_input_mods_e(rawValue: mods)
     }
 
+    private func sendKeyEvent(
+        _ action: ghostty_input_action_e,
+        event: NSEvent,
+        translationEvent: NSEvent? = nil,
+        text: String? = nil,
+        composing: Bool = false
+    ) {
+        guard let surface else { return }
+
+        var keyEvent = ghosttyKeyEvent(
+            action,
+            event: event,
+            translationEvent: translationEvent,
+            composing: composing
+        )
+
+        if let text, text.count > 0,
+           let codepoint = text.utf8.first, codepoint >= 0x20 {
+            text.withCString { ptr in
+                keyEvent.text = ptr
+                _ = ghostty_surface_key(surface, keyEvent)
+            }
+        } else {
+            _ = ghostty_surface_key(surface, keyEvent)
+        }
+    }
+
+    private func ghosttyKeyEvent(
+        _ action: ghostty_input_action_e,
+        event: NSEvent,
+        translationEvent: NSEvent? = nil,
+        composing: Bool = false
+    ) -> ghostty_input_key_s {
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.action = action
+        keyEvent.keycode = UInt32(event.keyCode)
+        keyEvent.mods = modsFromEvent(event)
+        keyEvent.consumed_mods = consumedMods(
+            originalFlags: event.modifierFlags,
+            translationFlags: translationEvent?.modifierFlags
+        )
+        keyEvent.text = nil
+        keyEvent.composing = composing
+        keyEvent.unshifted_codepoint = unshiftedCodepoint(for: event)
+        return keyEvent
+    }
+
+    private func consumedMods(
+        originalFlags: NSEvent.ModifierFlags,
+        translationFlags: NSEvent.ModifierFlags?
+    ) -> ghostty_input_mods_e {
+        let textFlags = (translationFlags ?? originalFlags).subtracting([.control, .command])
+        return modsFromFlags(textFlags)
+    }
+
+    private func modsFromFlags(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
+        var mods = GHOSTTY_MODS_NONE.rawValue
+        if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+        if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
+        if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
+        if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
+        return ghostty_input_mods_e(rawValue: mods)
+    }
+
+    private func unshiftedCodepoint(for event: NSEvent) -> UInt32 {
+        guard (event.type == .keyDown || event.type == .keyUp),
+              let chars = event.characters(byApplyingModifiers: []),
+              let codepoint = chars.unicodeScalars.first
+        else {
+            return 0
+        }
+
+        return codepoint.value
+    }
+
+    private func translationEvent(for event: NSEvent, surface: ghostty_surface_t) -> NSEvent {
+        let translatedGhosttyMods = ghostty_surface_key_translation_mods(surface, modsFromEvent(event))
+        let translatedFlags = mergeTranslationFlags(
+            event.modifierFlags,
+            translatedFlags: modifierFlags(from: translatedGhosttyMods)
+        )
+
+        if translatedFlags == event.modifierFlags {
+            return event
+        }
+
+        return NSEvent.keyEvent(
+            with: event.type,
+            location: event.locationInWindow,
+            modifierFlags: translatedFlags,
+            timestamp: event.timestamp,
+            windowNumber: event.windowNumber,
+            context: nil,
+            characters: event.characters(byApplyingModifiers: translatedFlags) ?? "",
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+            isARepeat: event.isARepeat,
+            keyCode: event.keyCode
+        ) ?? event
+    }
+
+    private func mergeTranslationFlags(
+        _ originalFlags: NSEvent.ModifierFlags,
+        translatedFlags: NSEvent.ModifierFlags
+    ) -> NSEvent.ModifierFlags {
+        var merged = originalFlags
+        for flag in [NSEvent.ModifierFlags.shift, .control, .option, .command] {
+            if translatedFlags.contains(flag) {
+                merged.insert(flag)
+            } else {
+                merged.remove(flag)
+            }
+        }
+        return merged
+    }
+
+    private func modifierFlags(from mods: ghostty_input_mods_e) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if mods.rawValue & GHOSTTY_MODS_SHIFT.rawValue != 0 { flags.insert(.shift) }
+        if mods.rawValue & GHOSTTY_MODS_CTRL.rawValue != 0 { flags.insert(.control) }
+        if mods.rawValue & GHOSTTY_MODS_ALT.rawValue != 0 { flags.insert(.option) }
+        if mods.rawValue & GHOSTTY_MODS_SUPER.rawValue != 0 { flags.insert(.command) }
+        return flags
+    }
+
     func destroySurface() {
         if let surface {
             ghostty_surface_free(surface)
@@ -407,5 +509,24 @@ extension NSScreen {
             return nil
         }
         return screenNumber.uint32Value
+    }
+}
+
+private extension NSEvent {
+    var ghosttyCharacters: String? {
+        guard let characters else { return nil }
+
+        if characters.count == 1,
+           let scalar = characters.unicodeScalars.first {
+            if scalar.value < 0x20 {
+                return self.characters(byApplyingModifiers: modifierFlags.subtracting(.control))
+            }
+
+            if scalar.value >= 0xF700 && scalar.value <= 0xF8FF {
+                return nil
+            }
+        }
+
+        return characters
     }
 }

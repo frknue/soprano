@@ -32,11 +32,10 @@ enum DefaultKeybindings {
             KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → P", mode: .prefix, key: "p"),
             KeyBinding(id: "close-pane-tab", label: "Close Tab", description: "Close the active tab", category: .layout, defaultKeys: "Prefix → W", mode: .prefix, key: "w"),
 
-            // Agents (direct: Cmd+1/2/3/4)
+            // Agents (direct: Cmd+1/2/3)
             KeyBinding(id: "launch-codex", label: "Launch Codex", description: "Launch Codex agent", category: .agents, defaultKeys: "⌘1", mode: .direct, key: "1", meta: true),
             KeyBinding(id: "launch-claude-code", label: "Launch Claude", description: "Launch Claude Code agent", category: .agents, defaultKeys: "⌘2", mode: .direct, key: "2", meta: true),
             KeyBinding(id: "launch-opencode", label: "Launch OpenCode", description: "Launch OpenCode agent", category: .agents, defaultKeys: "⌘3", mode: .direct, key: "3", meta: true),
-            KeyBinding(id: "launch-openclaw", label: "Launch OpenClaw", description: "Launch OpenClaw agent", category: .agents, defaultKeys: "⌘4", mode: .direct, key: "4", meta: true),
 
             // General (direct)
             KeyBinding(id: "command-palette", label: "Commands", description: "Open the command palette", category: .general, defaultKeys: "⌘P", mode: .direct, key: "p", meta: true),
@@ -63,7 +62,18 @@ enum DefaultKeybindings {
         else {
             return Self.config
         }
-        return config
+
+        let savedBindingsById = Dictionary(uniqueKeysWithValues: config.bindings.map { ($0.id, $0) })
+        let mergedBindings = Self.config.bindings.compactMap { defaultBinding in
+            savedBindingsById[defaultBinding.id] ?? defaultBinding
+        }
+
+        return KeyBindingConfig(
+            prefixKey: config.prefixKey,
+            prefixTimeoutMs: config.prefixTimeoutMs,
+            resizeTickPercent: config.resizeTickPercent,
+            bindings: mergedBindings
+        )
     }
 
     static func save(_ config: KeyBindingConfig) {

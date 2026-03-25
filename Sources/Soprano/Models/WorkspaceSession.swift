@@ -8,7 +8,6 @@ struct WorkspaceSession: Identifiable, Codable {
     var layout: SplitNode?
     var panes: [SavedPane]
     var activePaneId: String
-    var runningMcpServers: [String]?
 
     struct SavedPane: Codable {
         let id: String

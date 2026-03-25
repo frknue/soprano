@@ -2,7 +2,6 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
-    private var mcpManager: McpManager?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -14,7 +13,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = AppSettings.load()
         let themeManager = ThemeManager(themeId: settings.themeId)
         let agentManager = AgentManager()
-        let mcpManager = McpManager()
         let sessionManager = SessionManager(agentManager: agentManager)
 
         if settings.restoreLastSession, let workspace = WorkspaceSession.loadLast() {
@@ -23,7 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let controller = MainWindowController(
             agentManager: agentManager,
-            mcpManager: mcpManager,
             sessionManager: sessionManager,
             themeManager: themeManager,
             settings: settings
@@ -31,8 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         mainWindowController = controller
-        self.mcpManager = mcpManager
-        mcpManager.autoStartServers()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -41,6 +36,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         mainWindowController?.saveWorkspaceIfNeeded()
-        mcpManager?.stopAll()
     }
 }

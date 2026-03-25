@@ -134,7 +134,7 @@ soprano/
 │   │   ├── main.swift            # Entry point
 │   │   ├── App/                  # AppDelegate, MainWindowController, MainContentViewController
 │   │   ├── Models/               # Data types (AgentProfile, PaneState, SplitNode, etc.)
-│   │   ├── Controllers/          # AgentManager, KeybindingManager, McpManager, SessionManager
+│   │   ├── Controllers/          # AgentManager, KeybindingManager, SessionManager, ThemeManager
 │   │   ├── Views/                # All AppKit views (SplitTreeView, SidebarView, CommandPalette, etc.)
 │   │   ├── Config/               # Default configs, themes, keybindings
 │   │   ├── Terminal/             # GhosttyAppManager, TerminalSurfaceView
@@ -155,7 +155,7 @@ soprano/
 | `Ctrl+A` → `S` / `V` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |
 | `Ctrl+A` → `T` / `N` / `P` / `W` | New tab / next / prev / close tab |
-| `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude / OpenCode / OpenClaw |
+| `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |
 | `⌘B` | New browser pane |
 | `⌘P` | Command palette |
