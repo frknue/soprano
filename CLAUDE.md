@@ -27,7 +27,7 @@ cp zig-out/include/ghostty.h ../Sources/GhosttyKit/include/
 
 ## What This Is
 
-Soprano is a native macOS tiling terminal multiplexer for orchestrating AI coding agents (Codex, Claude Code, OpenCode, OpenClaw). Swift + AppKit + libghostty (C FFI via GhosttyKit system library target). No SwiftUI, no XIBs, no third-party Swift dependencies.
+Soprano is a native macOS tiling terminal multiplexer for orchestrating AI coding agents (Codex, Claude Code, OpenCode). Swift + AppKit + libghostty (C FFI via GhosttyKit system library target). No SwiftUI, no XIBs, no third-party Swift dependencies.
 
 ## Architecture
 
@@ -40,7 +40,6 @@ Soprano is a native macOS tiling terminal multiplexer for orchestrating AI codin
 Core state lives in manager classes created in AppDelegate and passed through constructors:
 - **AgentManager**: Pane/tab/agent lifecycle, layout topology, focus tracking. Exposes `layoutGeneration` counter to distinguish topology changes from style-only updates.
 - **KeybindingManager**: NSEvent local monitor, tmux-style prefix mode (Ctrl+A then action key), direct shortcuts (Cmd+P).
-- **McpManager**: Spawns MCP servers as `Process` children, health-checks via 5s timer.
 - **SessionManager**: Named workspace save/load/delete.
 - **ThemeManager**: Theme switching with `onThemeChanged` callback.
 

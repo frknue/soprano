@@ -3,7 +3,6 @@ import AppKit
 /// Root view controller managing the sidebar + tiling layout + status bar composition.
 final class MainContentViewController: NSViewController {
     let agentManager: AgentManager
-    let mcpManager: McpManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
     private let onSettingsRequested: (() -> Void)?
@@ -18,13 +17,11 @@ final class MainContentViewController: NSViewController {
 
     init(
         agentManager: AgentManager,
-        mcpManager: McpManager,
         sessionManager: SessionManager,
         themeManager: ThemeManager,
         onSettingsRequested: (() -> Void)? = nil
     ) {
         self.agentManager = agentManager
-        self.mcpManager = mcpManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
         self.onSettingsRequested = onSettingsRequested
@@ -47,7 +44,7 @@ final class MainContentViewController: NSViewController {
         root.addSubview(splitTreeView)
 
         // Sidebar
-        sidebarView = SidebarView(agentManager: agentManager, mcpManager: mcpManager, sessionManager: sessionManager, themeManager: themeManager)
+        sidebarView = SidebarView(agentManager: agentManager, sessionManager: sessionManager, themeManager: themeManager)
         sidebarView.onSettingsRequested = onSettingsRequested
         sidebarView.onExpandedChanged = { [weak self] expanded in
             guard let self else { return }

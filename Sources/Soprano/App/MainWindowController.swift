@@ -2,7 +2,6 @@ import AppKit
 
 final class MainWindowController: NSWindowController {
     let agentManager: AgentManager
-    let mcpManager: McpManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
     var settings: AppSettings
@@ -14,13 +13,11 @@ final class MainWindowController: NSWindowController {
 
     init(
         agentManager: AgentManager,
-        mcpManager: McpManager,
         sessionManager: SessionManager,
         themeManager: ThemeManager,
         settings: AppSettings
     ) {
         self.agentManager = agentManager
-        self.mcpManager = mcpManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
         self.settings = settings
@@ -47,7 +44,6 @@ final class MainWindowController: NSWindowController {
 
         let contentVC = MainContentViewController(
             agentManager: agentManager,
-            mcpManager: mcpManager,
             sessionManager: sessionManager,
             themeManager: themeManager,
             onSettingsRequested: { [weak self] in
@@ -131,17 +127,6 @@ final class MainWindowController: NSWindowController {
                 action: { [weak self] in
                     guard let self else { return }
                     _ = self.agentManager.spawnAgent("opencode")
-                }
-            ),
-            CommandItem(
-                id: "launch-openclaw",
-                icon: "pawprint",
-                label: "Launch OpenClaw",
-                description: "Launch OpenClaw agent",
-                shortcut: commandShortcut(for: "launch-openclaw"),
-                action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.spawnAgent("openclaw")
                 }
             ),
             CommandItem(
@@ -282,8 +267,7 @@ private extension MainWindowController {
             let controller = SettingsWindowController(
                 themeManager: themeManager,
                 settings: settings,
-                keybindingConfig: config,
-                mcpManager: mcpManager
+                keybindingConfig: config
             )
             controller.onSettingsChanged = { [weak self] updatedSettings in
                 guard let self else { return }

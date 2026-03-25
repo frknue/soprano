@@ -2,7 +2,6 @@ import AppKit
 
 final class SettingsWindowController: NSWindowController {
     private let themeManager: ThemeManager
-    private let mcpManager: McpManager
     private let contentVC: SettingsViewController
 
     private(set) var settings: AppSettings
@@ -14,13 +13,11 @@ final class SettingsWindowController: NSWindowController {
     init(
         themeManager: ThemeManager,
         settings: AppSettings,
-        keybindingConfig: KeyBindingConfig,
-        mcpManager: McpManager
+        keybindingConfig: KeyBindingConfig
     ) {
         self.themeManager = themeManager
         self.settings = settings
         self.keybindingConfig = keybindingConfig
-        self.mcpManager = mcpManager
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 820, height: 560),
@@ -40,8 +37,7 @@ final class SettingsWindowController: NSWindowController {
         contentVC = SettingsViewController(
             themeManager: themeManager,
             settings: settings,
-            keybindingConfig: keybindingConfig,
-            mcpManager: mcpManager
+            keybindingConfig: keybindingConfig
         )
 
         super.init(window: window)
@@ -117,7 +113,6 @@ private enum SettingsTab: Int, CaseIterable {
     case general
     case keyboardShortcuts
     case agentProfiles
-    case mcpServers
     case about
 
     var title: String {
@@ -125,7 +120,6 @@ private enum SettingsTab: Int, CaseIterable {
         case .general: return "General"
         case .keyboardShortcuts: return "Keyboard Shortcuts"
         case .agentProfiles: return "Agent Profiles"
-        case .mcpServers: return "MCP Servers"
         case .about: return "About"
         }
     }
@@ -135,7 +129,6 @@ private enum SettingsTab: Int, CaseIterable {
         case .general: return "gearshape"
         case .keyboardShortcuts: return "keyboard"
         case .agentProfiles: return "cpu"
-        case .mcpServers: return "network"
         case .about: return "info.circle"
         }
     }
@@ -143,7 +136,6 @@ private enum SettingsTab: Int, CaseIterable {
 
 private final class SettingsViewController: NSViewController {
     private let themeManager: ThemeManager
-    private let mcpManager: McpManager
     private var settings: AppSettings
     private var keybindingConfig: KeyBindingConfig
 
@@ -170,37 +162,16 @@ private final class SettingsViewController: NSViewController {
     private var prefixTimeoutField: NSTextField?
     private var resizeStepField: NSTextField?
 
-    private var addServerButton: NSButton?
-    private var serverCardsStack: NSStackView?
-    private var addServerFormContainer: NSView?
-    private var addServerNameField: NSTextField?
-    private var addServerCommandField: NSTextField?
-    private var addServerArgsField: NSTextField?
-    private var addServerTransportPopup: NSPopUpButton?
-    private var addServerPortField: NSTextField?
-    private var addServerAutoStartButton: NSButton?
-    private var isAddServerFormVisible = false
-
     init(
         themeManager: ThemeManager,
         settings: AppSettings,
-        keybindingConfig: KeyBindingConfig,
-        mcpManager: McpManager
+        keybindingConfig: KeyBindingConfig
     ) {
         self.themeManager = themeManager
         self.settings = settings
         self.keybindingConfig = keybindingConfig
-        self.mcpManager = mcpManager
         self.currentTheme = themeManager.currentTheme
         super.init(nibName: nil, bundle: nil)
-
-        mcpManager.addObserver(id: "SettingsViewController-mcp") { [weak self] in
-            self?.handleMcpChange()
-        }
-    }
-
-    deinit {
-        mcpManager.removeObserver(id: "SettingsViewController-mcp")
     }
 
     @available(*, unavailable)
@@ -369,8 +340,6 @@ private final class SettingsViewController: NSViewController {
             buildKeyboardShortcutsTab()
         case .agentProfiles:
             buildAgentProfilesTab()
-        case .mcpServers:
-            buildMcpServersTab()
         case .about:
             buildAboutTab()
         }
@@ -955,324 +924,6 @@ private final class SettingsViewController: NSViewController {
         ])
 
         return card
-    }
-
-    private func buildMcpServersTab() {
-        contentStack.addArrangedSubview(
-            makeTabHeader(
-                title: "MCP Servers",
-                subtitle: "Manage Model Context Protocol server pool and runtime status."
-            )
-        )
-
-        let controls = NSStackView()
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 8
-        controls.translatesAutoresizingMaskIntoConstraints = false
-
-        let addButtonTitle = isAddServerFormVisible ? "Hide Add Form" : "Add Server"
-        let addButton = makeActionButton(title: addButtonTitle, action: #selector(toggleAddServerForm))
-        addServerButton = addButton
-        controls.addArrangedSubview(addButton)
-        addContentSubview(controls, widthInset: -36)
-
-        let form = buildAddServerForm()
-        addServerFormContainer = form
-        form.isHidden = !isAddServerFormVisible
-        addContentSubview(form, widthInset: -36)
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        serverCardsStack = stack
-        addContentSubview(stack, widthInset: -36)
-        rebuildMcpServerCards()
-    }
-
-    private func buildAddServerForm() -> NSView {
-        let (card, stack) = makeSectionCard(title: "Add MCP Server")
-
-        let nameField = makeTextField(value: "")
-        nameField.placeholderString = "Name"
-        addServerNameField = nameField
-
-        let commandField = makeTextField(value: "")
-        commandField.placeholderString = "Command"
-        addServerCommandField = commandField
-
-        let argsField = makeTextField(value: "")
-        argsField.placeholderString = "Args (space separated)"
-        addServerArgsField = argsField
-
-        let transportPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-        transportPopup.addItems(withTitles: ["stdio", "sse"])
-        transportPopup.selectItem(withTitle: "stdio")
-        addServerTransportPopup = transportPopup
-
-        let portField = makeNumberField(value: "3000")
-        addServerPortField = portField
-
-        let autoStart = NSButton(checkboxWithTitle: "Auto-start", target: nil, action: nil)
-        autoStart.state = .off
-        addServerAutoStartButton = autoStart
-
-        let grid = NSGridView(views: [
-            [makeFieldLabel("Name"), nameField],
-            [makeFieldLabel("Command"), commandField],
-            [makeFieldLabel("Args"), argsField],
-            [makeFieldLabel("Transport"), transportPopup],
-            [makeFieldLabel("Port"), portField],
-            [makeFieldLabel("Auto-start"), autoStart],
-        ])
-        grid.rowSpacing = 8
-        grid.columnSpacing = 10
-        stack.addArrangedSubview(grid)
-
-        let actions = NSStackView()
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = 8
-
-        let add = makeActionButton(title: "Create Server", action: #selector(addServerCommitted))
-        actions.addArrangedSubview(add)
-
-        let cancel = makeActionButton(title: "Cancel", action: #selector(cancelAddServerForm))
-        actions.addArrangedSubview(cancel)
-
-        stack.addArrangedSubview(actions)
-        return card
-    }
-
-    @objc private func toggleAddServerForm() {
-        isAddServerFormVisible.toggle()
-        addServerButton?.title = isAddServerFormVisible ? "Hide Add Form" : "Add Server"
-        addServerFormContainer?.isHidden = !isAddServerFormVisible
-    }
-
-    @objc private func cancelAddServerForm() {
-        isAddServerFormVisible = false
-        addServerFormContainer?.isHidden = true
-        addServerButton?.title = "Add Server"
-    }
-
-    @objc private func addServerCommitted() {
-        guard let nameField = addServerNameField,
-              let commandField = addServerCommandField,
-              let argsField = addServerArgsField,
-              let transportPopup = addServerTransportPopup,
-              let portField = addServerPortField,
-              let autoStartButton = addServerAutoStartButton
-        else { return }
-
-        let name = nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let command = commandField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !command.isEmpty else { return }
-
-        let args = argsField.stringValue
-            .split(separator: " ")
-            .map(String.init)
-        let portValue = UInt16(Int(portField.stringValue) ?? 3000)
-        let transport: McpTransport = transportPopup.titleOfSelectedItem == "sse" ? .sse : .stdio
-
-        let config = McpServerConfig(
-            id: "mcp-\(UUID().uuidString.lowercased().prefix(8))",
-            name: name,
-            icon: "server",
-            color: "#58a6ff",
-            command: command,
-            args: args,
-            env: nil,
-            transport: transport,
-            port: portValue,
-            autoStart: autoStartButton.state == .on
-        )
-        mcpManager.addServer(config)
-
-        nameField.stringValue = ""
-        commandField.stringValue = ""
-        argsField.stringValue = ""
-        portField.stringValue = "3000"
-        autoStartButton.state = .off
-
-        isAddServerFormVisible = false
-        addServerFormContainer?.isHidden = true
-        addServerButton?.title = "Add Server"
-        rebuildMcpServerCards()
-    }
-
-    private func rebuildMcpServerCards() {
-        guard let stack = serverCardsStack else { return }
-        for subview in stack.arrangedSubviews {
-            stack.removeArrangedSubview(subview)
-            subview.removeFromSuperview()
-        }
-
-        if mcpManager.pool.isEmpty {
-            let empty = NSTextField(labelWithString: "No MCP servers configured")
-            empty.font = .systemFont(ofSize: 12, weight: .regular)
-            empty.textColor = currentTheme.colors.textMuted
-            stack.addArrangedSubview(empty)
-            return
-        }
-
-        for entry in mcpManager.pool {
-            let card = makeMcpServerCard(entry)
-            stack.addArrangedSubview(card)
-            card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-    }
-
-    private func makeMcpServerCard(_ entry: McpPoolEntry) -> NSView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.borderWidth = 1
-        card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
-        card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
-        card.translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-
-        let topRow = NSStackView()
-        topRow.orientation = .horizontal
-        topRow.alignment = .centerY
-        topRow.spacing = 8
-
-        let statusDot = NSView()
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        statusDot.widthAnchor.constraint(equalToConstant: 8).isActive = true
-        statusDot.heightAnchor.constraint(equalToConstant: 8).isActive = true
-        statusDot.layer?.backgroundColor = mcpStatusColor(entry.instance.status).cgColor
-        topRow.addArrangedSubview(statusDot)
-
-        let nameLabel = NSTextField(labelWithString: entry.config.name)
-        nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        nameLabel.textColor = currentTheme.colors.textPrimary
-        topRow.addArrangedSubview(nameLabel)
-
-        let statusText = NSTextField(labelWithString: mcpStatusText(entry.instance))
-        statusText.font = .systemFont(ofSize: 11, weight: .regular)
-        statusText.textColor = currentTheme.colors.textMuted
-        statusText.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        topRow.addArrangedSubview(statusText)
-        stack.addArrangedSubview(topRow)
-
-        let commandLabel = NSTextField(labelWithString: "Command: \(entry.config.command) \(entry.config.args.joined(separator: " "))")
-        commandLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        commandLabel.textColor = currentTheme.colors.textPrimary
-        commandLabel.lineBreakMode = .byTruncatingMiddle
-        stack.addArrangedSubview(commandLabel)
-
-        let transportLabel = NSTextField(labelWithString: "Transport: \(entry.config.transport.rawValue.uppercased())   Port: \(entry.config.port)")
-        transportLabel.font = .systemFont(ofSize: 10, weight: .regular)
-        transportLabel.textColor = currentTheme.colors.textMuted
-        stack.addArrangedSubview(transportLabel)
-
-        if let url = entry.instance.url, !url.isEmpty {
-            let urlLabel = NSTextField(labelWithString: "URL: \(url)")
-            urlLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-            urlLabel.textColor = currentTheme.colors.blue
-            stack.addArrangedSubview(urlLabel)
-        }
-
-        let actionRow = NSStackView()
-        actionRow.orientation = .horizontal
-        actionRow.alignment = .centerY
-        actionRow.spacing = 8
-
-        let startStopTitle = entry.instance.status == .running || entry.instance.status == .starting ? "Stop" : "Start"
-        let startStop = NSButton(title: startStopTitle, target: self, action: #selector(mcpStartStopClicked(_:)))
-        startStop.bezelStyle = .rounded
-        startStop.identifier = NSUserInterfaceItemIdentifier(entry.config.id)
-        actionRow.addArrangedSubview(startStop)
-
-        let restart = NSButton(title: "Restart", target: self, action: #selector(mcpRestartClicked(_:)))
-        restart.bezelStyle = .rounded
-        restart.identifier = NSUserInterfaceItemIdentifier(entry.config.id)
-        actionRow.addArrangedSubview(restart)
-
-        let remove = NSButton(title: "Remove", target: self, action: #selector(mcpRemoveClicked(_:)))
-        remove.bezelStyle = .rounded
-        remove.identifier = NSUserInterfaceItemIdentifier(entry.config.id)
-        actionRow.addArrangedSubview(remove)
-
-        stack.addArrangedSubview(actionRow)
-
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: card.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-        ])
-        return card
-    }
-
-    private func mcpStatusText(_ instance: McpServerInstance) -> String {
-        switch instance.status {
-        case .running:
-            return "running"
-        case .starting:
-            return "starting"
-        case .stopped:
-            return "stopped"
-        case .error:
-            return instance.error ?? "error"
-        }
-    }
-
-    private func mcpStatusColor(_ status: McpServerStatus) -> NSColor {
-        switch status {
-        case .running:
-            return currentTheme.colors.success
-        case .starting:
-            return currentTheme.colors.yellow
-        case .error:
-            return currentTheme.colors.danger
-        case .stopped:
-            return currentTheme.colors.gray
-        }
-    }
-
-    @objc private func mcpStartStopClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue,
-              let entry = mcpManager.pool.first(where: { $0.id == id })
-        else { return }
-
-        if entry.instance.status == .running || entry.instance.status == .starting {
-            mcpManager.stopServer(id)
-        } else {
-            mcpManager.startServer(id)
-        }
-        rebuildMcpServerCards()
-    }
-
-    @objc private func mcpRestartClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        mcpManager.restartServer(id)
-        rebuildMcpServerCards()
-    }
-
-    @objc private func mcpRemoveClicked(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        mcpManager.removeServer(id)
-        rebuildMcpServerCards()
-    }
-
-    private func handleMcpChange() {
-        if currentTab == .mcpServers {
-            rebuildMcpServerCards()
-        }
     }
 
     private func buildAboutTab() {

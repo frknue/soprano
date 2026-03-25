@@ -3,7 +3,6 @@ import AppKit
 /// Left sidebar with section icons and expandable panels.
 final class SidebarView: NSView {
     let agentManager: AgentManager
-    let mcpManager: McpManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
 
@@ -34,9 +33,8 @@ final class SidebarView: NSView {
 
     private var sectionButtons: [SidebarSection: NSButton] = [:]
 
-    init(agentManager: AgentManager, mcpManager: McpManager, sessionManager: SessionManager, themeManager: ThemeManager) {
+    init(agentManager: AgentManager, sessionManager: SessionManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
-        self.mcpManager = mcpManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
         super.init(frame: .zero)
@@ -44,9 +42,6 @@ final class SidebarView: NSView {
         layer?.masksToBounds = true
         setupViews()
         agentManager.addObserver(id: "SidebarView") { [weak self] in
-            self?.refresh()
-        }
-        mcpManager.addObserver(id: "SidebarView-mcp") { [weak self] in
             self?.refresh()
         }
         sessionManager.addObserver(id: "SidebarView-sessions") { [weak self] in
@@ -62,7 +57,6 @@ final class SidebarView: NSView {
 
     deinit {
         agentManager.removeObserver(id: "SidebarView")
-        mcpManager.removeObserver(id: "SidebarView-mcp")
         sessionManager.removeObserver(id: "SidebarView-sessions")
     }
 
@@ -229,8 +223,6 @@ final class SidebarView: NSView {
             buildAgentsPanel()
         case .panes:
             buildPanesPanel()
-        case .mcpServers:
-            buildMcpPanel()
         case .sessions:
             buildSessionsPanel()
         case .settings:
@@ -288,22 +280,6 @@ final class SidebarView: NSView {
         let theme = themeManager.currentTheme
         for pane in panes {
             let row = makePaneRow(pane, theme: theme)
-            detailStack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: detailStack.widthAnchor, constant: -20).isActive = true
-        }
-    }
-
-    private func buildMcpPanel() {
-        addDetailSectionHeader("Server Pool (\(mcpManager.runningCount)/\(mcpManager.pool.count))")
-
-        if mcpManager.pool.isEmpty {
-            buildStubPanel(message: "No MCP servers configured")
-            return
-        }
-
-        let theme = themeManager.currentTheme
-        for entry in mcpManager.pool {
-            let row = makeMcpServerRow(entry, theme: theme)
             detailStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: detailStack.widthAnchor, constant: -20).isActive = true
         }
@@ -410,39 +386,6 @@ final class SidebarView: NSView {
             dotColor: dotColor,
             highlighted: false,
             onClick: onClick
-        )
-        return row
-    }
-
-    private func makeMcpServerRow(_ entry: McpPoolEntry, theme: AppTheme) -> NSView {
-        let statusColor: NSColor = switch entry.instance.status {
-        case .running: theme.colors.success
-        case .starting: theme.colors.yellow
-        case .error: theme.colors.danger
-        case .stopped: theme.colors.gray
-        }
-
-        let statusText: String = switch entry.instance.status {
-        case .running: "Running"
-        case .starting: "Starting..."
-        case .error: entry.instance.error ?? "Error"
-        case .stopped: "Stopped"
-        }
-
-        let row = SidebarActionRowView(theme: theme)
-        let isRunning = entry.instance.status == .running || entry.instance.status == .starting
-        row.configure(
-            title: entry.config.name,
-            subtitle: statusText,
-            dotColor: statusColor,
-            highlighted: false,
-            onClick: { [weak self] in
-                if isRunning {
-                    self?.mcpManager.stopServer(entry.config.id)
-                } else {
-                    self?.mcpManager.startServer(entry.config.id)
-                }
-            }
         )
         return row
     }
@@ -716,19 +659,17 @@ private final class SidebarPaneRowView: NSView {
 enum SidebarSection: Int, CaseIterable {
     case agents = 0
     case panes
-    case mcpServers
     case sessions
     case settings
 
     static var activitySections: [SidebarSection] {
-        [.agents, .panes, .mcpServers, .sessions]
+        [.agents, .panes, .sessions]
     }
 
     var label: String {
         switch self {
         case .agents: return "Agents"
         case .panes: return "Panes"
-        case .mcpServers: return "MCP Servers"
         case .sessions: return "Sessions"
         case .settings: return "Settings"
         }
@@ -738,7 +679,6 @@ enum SidebarSection: Int, CaseIterable {
         switch self {
         case .agents: return "command.square"
         case .panes: return "square.split.2x2"
-        case .mcpServers: return "bolt.horizontal.circle"
         case .sessions: return "clock.arrow.trianglehead.counterclockwise.rotate.90"
         case .settings: return "gearshape"
         }
