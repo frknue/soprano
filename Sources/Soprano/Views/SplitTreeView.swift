@@ -246,6 +246,10 @@ final class SplitTreeView: NSView {
         }
     }
 
+    func refreshTheme() {
+        rebuildLayout()
+    }
+
     // MARK: - Helpers
 
     private func mountRootView(_ view: NSView) {

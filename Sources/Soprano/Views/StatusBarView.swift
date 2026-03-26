@@ -75,6 +75,18 @@ final class StatusBarView: NSView {
         }
     }
 
+    func refreshTheme() {
+        let theme = themeManager.currentTheme
+        layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        brandLabel.textColor = theme.colors.accent
+        paneCountLabel.textColor = theme.colors.textMuted
+        if modeLabel.stringValue == "PREFIX" {
+            modeLabel.textColor = theme.colors.accent
+        } else {
+            modeLabel.textColor = theme.colors.textMuted
+        }
+    }
+
     private func refresh() {
         let count = agentManager.paneCount
         paneCountLabel.stringValue = "\(count) pane\(count == 1 ? "" : "s")"

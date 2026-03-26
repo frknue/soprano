@@ -134,7 +134,7 @@ private enum SettingsTab: Int, CaseIterable {
     }
 }
 
-private final class SettingsViewController: NSViewController {
+final class SettingsViewController: NSViewController {
     private let themeManager: ThemeManager
     private var settings: AppSettings
     private var keybindingConfig: KeyBindingConfig

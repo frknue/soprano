@@ -9,7 +9,6 @@ final class MainWindowController: NSWindowController {
     private var mainContentVC: MainContentViewController?
     private var keybindingManager: KeybindingManager?
     private var commandPalette: CommandPalettePanel?
-    private var settingsController: SettingsWindowController?
 
     init(
         agentManager: AgentManager,
@@ -47,7 +46,7 @@ final class MainWindowController: NSWindowController {
             sessionManager: sessionManager,
             themeManager: themeManager,
             onSettingsRequested: { [weak self] in
-                self?.openSettingsWindow()
+                self?.openSettings()
             }
         )
         window.contentViewController = contentVC
@@ -59,6 +58,11 @@ final class MainWindowController: NSWindowController {
             contentVC?.setKeybindingMode(state)
         }
         self.keybindingManager = keybindingManager
+
+        themeManager.onThemeChanged = { [weak self] _ in
+            self?.applyTheme()
+            self?.mainContentVC?.refreshTheme()
+        }
 
         applyTheme()
     }
@@ -240,7 +244,7 @@ extension MainWindowController: KeybindingDelegate {
     }
 
     func keybindingOpenSettings() {
-        openSettingsWindow()
+        openSettings()
     }
 
     func keybindingToggleMaximize() {}
@@ -261,29 +265,23 @@ extension MainWindowController: KeybindingDelegate {
 }
 
 private extension MainWindowController {
-    func openSettingsWindow() {
-        if settingsController == nil {
-            let config = keybindingManager?.config ?? DefaultKeybindings.load()
-            let controller = SettingsWindowController(
-                themeManager: themeManager,
-                settings: settings,
-                keybindingConfig: config
-            )
-            controller.onSettingsChanged = { [weak self] updatedSettings in
+    func openSettings() {
+        let config = keybindingManager?.config ?? DefaultKeybindings.load()
+        mainContentVC?.showSettings(
+            settings: settings,
+            keybindingConfig: config,
+            onSettingsChanged: { [weak self] updatedSettings in
                 guard let self else { return }
                 self.settings = updatedSettings
                 self.settings.save()
                 self.applyTheme()
-            }
-            controller.onKeybindingConfigChanged = { [weak self] updatedConfig in
+            },
+            onKeybindingConfigChanged: { [weak self] updatedConfig in
                 guard let self else { return }
                 DefaultKeybindings.save(updatedConfig)
                 self.reloadKeybindingManager()
             }
-            settingsController = controller
-        }
-
-        settingsController?.showSettingsWindow(relativeTo: window)
+        )
     }
 
     func reloadKeybindingManager() {
