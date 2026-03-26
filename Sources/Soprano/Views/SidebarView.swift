@@ -216,6 +216,10 @@ final class SidebarView: NSView {
         rebuildDetailContent(for: section)
     }
 
+    func refreshTheme() {
+        refresh()
+    }
+
     private func rebuildDetailContent(for section: SidebarSection) {
         clearDetailContent()
         switch section {
