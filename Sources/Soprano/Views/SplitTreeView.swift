@@ -188,8 +188,6 @@ final class SplitTreeView: NSView {
 
         let view: NSView
         switch tab.type {
-        case .browser:
-            view = BrowserPaneView(paneId: paneId)
         case .terminal, .agent:
             let terminalConfig: TerminalConfig
             if tab.type == .agent,

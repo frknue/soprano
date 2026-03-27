@@ -187,8 +187,6 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingOpenProjectSearch() }
         case "new-terminal":
             _ = agentManager.spawnTerminal()
-        case "new-browser":
-            _ = agentManager.spawnBrowser()
         case "close-active":
             agentManager.closePane(agentManager.activePaneId)
         case "save-session":

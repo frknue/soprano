@@ -1,6 +1,6 @@
 import AppKit
 
-/// Static definition of an AI coding agent (or terminal/browser).
+/// Static definition of an AI coding agent profile.
 struct AgentProfile: Identifiable, Codable, Hashable {
     let id: String
     let name: String

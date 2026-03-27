@@ -1025,7 +1025,6 @@ final class SettingsViewController: NSViewController {
             "command-palette",
             "open-settings",
             "new-terminal",
-            "new-browser",
             "split-horizontal",
             "split-vertical",
             "toggle-sidebar",
