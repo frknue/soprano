@@ -261,15 +261,6 @@ final class SidebarView: NSView {
         }
         detailStack.addArrangedSubview(terminalRow)
         terminalRow.widthAnchor.constraint(equalTo: detailStack.widthAnchor, constant: -20).isActive = true
-
-        let browserRow = makeToolRow(
-            title: "Browser",
-            subtitle: "Open browser pane"
-        ) { [weak self] in
-            _ = self?.agentManager.spawnBrowser()
-        }
-        detailStack.addArrangedSubview(browserRow)
-        browserRow.widthAnchor.constraint(equalTo: detailStack.widthAnchor, constant: -20).isActive = true
     }
 
     private func buildPanesPanel() {
@@ -411,8 +402,6 @@ final class SidebarView: NSView {
             }
         }
         switch tab.type {
-        case .browser:
-            return theme.colors.blue
         case .terminal:
             return theme.colors.accent
         case .agent:

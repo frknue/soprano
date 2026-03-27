@@ -93,16 +93,6 @@ final class AgentManager: @unchecked Sendable {
         spawnAgent("terminal", cwd: cwd)
     }
 
-    @discardableResult
-    func spawnBrowser() -> String {
-        let paneId = nextPaneId()
-        let tabId = nextTabId()
-        let tab = PaneTab(id: tabId, type: .browser, title: "Browser")
-        let pane = PaneState(id: paneId, tabs: [tab])
-        insertPane(pane)
-        return paneId
-    }
-
     // MARK: - Pane Splitting
 
     @discardableResult
@@ -304,8 +294,6 @@ final class AgentManager: @unchecked Sendable {
         if type == .agent, let profileId, let profile = DefaultAgents.profile(for: profileId) {
             let agent = AgentInstance(id: tabId, profileId: profile.id)
             tab = PaneTab(id: tabId, type: .agent, title: profile.name, agent: agent)
-        } else if type == .browser {
-            tab = PaneTab(id: tabId, type: .browser, title: "Browser")
         } else {
             tab = PaneTab(id: tabId, type: .terminal, title: "Terminal")
         }
@@ -523,10 +511,6 @@ final class AgentManager: @unchecked Sendable {
             let dirName = cwd?.split(separator: "/").last.map(String.init)
             let title = dirName.map { "\(profile.name): \($0)" } ?? profile.name
             return PaneTab(id: id, type: .agent, title: title, agent: agent, cwd: cwd)
-        }
-
-        if type == .browser {
-            return PaneTab(id: id, type: .browser, title: "Browser")
         }
 
         let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"

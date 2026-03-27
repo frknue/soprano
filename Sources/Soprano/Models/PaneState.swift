@@ -3,8 +3,30 @@ import Foundation
 /// The type of content in a pane tab.
 enum PaneType: String, Codable {
     case agent
-    case browser
     case terminal
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+
+        switch rawValue {
+        case Self.agent.rawValue:
+            self = .agent
+        case Self.terminal.rawValue, "browser":
+            // Legacy sessions may still contain browser tabs. Restore them as terminals.
+            self = .terminal
+        default:
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown pane type: \(rawValue)"
+            )
+        }
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 /// A single tab within a pane.
