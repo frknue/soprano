@@ -25,6 +25,8 @@ cp zig-out/lib/libghostty.a ../lib/
 cp zig-out/include/ghostty.h ../Sources/GhosttyKit/include/
 ```
 
+`ghostty/build.zig` is patched to skip xcframework / macOS-app init when `emit_xcframework=false`, avoiding the iOS SDK requirement.
+
 ## What This Is
 
 Soprano is a native macOS tiling terminal multiplexer for orchestrating AI coding agents (Codex, Claude Code, OpenCode). Swift + AppKit + libghostty (C FFI via GhosttyKit system library target). No SwiftUI, no XIBs, no third-party Swift dependencies.
