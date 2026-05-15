@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:soprano}",
+            "name": "Debug Soprano",
+            "target": "Soprano",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Soprano"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:soprano}",
+            "name": "Release Soprano",
+            "target": "Soprano",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Soprano"
+        }
+    ]
+}
