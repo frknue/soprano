@@ -205,6 +205,9 @@ final class MainContentViewController: NSViewController {
     @objc private func closeSettings() {
         settingsContainerView.isHidden = true
         splitTreeView.isHidden = false
+        // Hiding the split tree dropped the terminal from first responder;
+        // without this, every keystroke after closing settings goes nowhere.
+        splitTreeView.restoreKeyboardFocus()
     }
 
     private func applyTheme() {

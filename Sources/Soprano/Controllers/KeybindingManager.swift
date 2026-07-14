@@ -37,7 +37,11 @@ final class KeybindingManager: @unchecked Sendable {
     private func startMonitoring() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleKeyDown(event: event) ?? event
+            // Optional chaining flattens the NSEvent? result, so `?? event`
+            // must only cover the self-is-gone case — otherwise it would
+            // resurrect events handleKeyDown intentionally swallowed.
+            guard let self else { return event }
+            return self.handleKeyDown(event: event)
         }
     }
 

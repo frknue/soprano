@@ -101,81 +101,138 @@ final class GhosttyAppManager: @unchecked Sendable {
         ghostty_runtime_config_s(
             userdata: Unmanaged.passUnretained(self).toOpaque(),
             supports_selection_clipboard: true,
-            wakeup_cb: { _ in
-                Task { @MainActor in
-                    GhosttyAppManager.shared.tick()
-                }
-            },
-            action_cb: { _, _, _ in
-                false
-            },
-            read_clipboard_cb: { userdata, location, state in
-                guard let userdata else { return }
-                let surfaceView = Unmanaged<TerminalSurfaceView>
-                    .fromOpaque(userdata)
-                    .takeUnretainedValue()
-                guard let surface = surfaceView.surface else { return }
+            wakeup_cb: ghosttyWakeup,
+            action_cb: ghosttyAction,
+            read_clipboard_cb: ghosttyReadClipboard,
+            confirm_read_clipboard_cb: ghosttyConfirmReadClipboard,
+            write_clipboard_cb: ghosttyWriteClipboard,
+            close_surface_cb: ghosttyCloseSurface
+        )
+    }
+}
 
-                let pasteboard: NSPasteboard = switch location {
-                case GHOSTTY_CLIPBOARD_SELECTION:
-                    NSPasteboard(name: .find)
-                default:
-                    .general
-                }
+// MARK: - Runtime Callbacks
+//
+// libghostty invokes these from its own threads (wakeup) or from the main
+// thread during ghostty_app_tick (clipboard, close). They must stay
+// nonisolated: closures declared inside the @MainActor class inherit its
+// isolation and trip Swift's dynamic actor checks when ghostty calls them
+// from a background thread.
 
-                let content = pasteboard.string(forType: .string) ?? ""
-                content.withCString { ptr in
-                    ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
-                }
-            },
-            confirm_read_clipboard_cb: { userdata, content, state, _ in
-                guard let userdata else { return }
-                let surfaceView = Unmanaged<TerminalSurfaceView>
-                    .fromOpaque(userdata)
-                    .takeUnretainedValue()
-                guard let surface = surfaceView.surface else { return }
-                ghostty_surface_complete_clipboard_request(surface, content, state, true)
-            },
-            write_clipboard_cb: { _, location, content, len, _ in
-                let pasteboard: NSPasteboard = switch location {
-                case GHOSTTY_CLIPBOARD_SELECTION:
-                    NSPasteboard(name: .find)
-                default:
-                    .general
-                }
+private func ghosttyWakeup(_ userdata: UnsafeMutableRawPointer?) {
+    // Called from any thread; schedule the tick on the main actor.
+    Task { @MainActor in
+        GhosttyAppManager.shared.tick()
+    }
+}
 
-                pasteboard.clearContents()
+private func ghosttyAction(
+    _ app: ghostty_app_t?,
+    _ target: ghostty_target_s,
+    _ action: ghostty_action_s
+) -> Bool {
+    false
+}
 
-                guard let content else { return }
-                let count = Int(len)
-                guard count > 0 else { return }
+private func ghosttyReadClipboard(
+    _ userdata: UnsafeMutableRawPointer?,
+    _ location: ghostty_clipboard_e,
+    _ state: UnsafeMutableRawPointer?
+) {
+    guard let userdata else { return }
+    // Safe: assumeIsolated verifies we are already on the main thread, so the
+    // pointers never actually cross an isolation boundary.
+    nonisolated(unsafe) let ud = userdata
+    nonisolated(unsafe) let st = state
+    MainActor.assumeIsolated {
+        let surfaceView = Unmanaged<TerminalSurfaceView>
+            .fromOpaque(ud)
+            .takeUnretainedValue()
+        guard let surface = surfaceView.surface else { return }
 
-                let buffer = UnsafeBufferPointer(start: content, count: count)
-                for item in buffer {
-                    guard let mime = item.mime else { continue }
-                    let mimeType = String(cString: mime)
-                    guard mimeType == "text/plain", let data = item.data else { continue }
-                    let text = String(cString: data)
-                    pasteboard.setString(text, forType: .string)
-                    break
-                }
-            },
-            close_surface_cb: { userdata, shouldConfirm in
-                guard let userdata else { return }
-                let surfaceView = Unmanaged<TerminalSurfaceView>
-                    .fromOpaque(userdata)
-                    .takeUnretainedValue()
-                guard let surface = surfaceView.surface else { return }
-                NotificationCenter.default.post(
-                    name: .ghosttyCloseSurface,
-                    object: GhosttyAppManager.shared,
-                    userInfo: [
-                        "surface": surface,
-                        "paneId": surfaceView.paneId,
-                        "shouldConfirm": shouldConfirm,
-                    ]
-                )
-            }
+        let pasteboard: NSPasteboard = switch location {
+        case GHOSTTY_CLIPBOARD_SELECTION:
+            NSPasteboard(name: .find)
+        default:
+            .general
+        }
+
+        let content = pasteboard.string(forType: .string) ?? ""
+        content.withCString { ptr in
+            ghostty_surface_complete_clipboard_request(surface, ptr, st, false)
+        }
+    }
+}
+
+private func ghosttyConfirmReadClipboard(
+    _ userdata: UnsafeMutableRawPointer?,
+    _ content: UnsafePointer<CChar>?,
+    _ state: UnsafeMutableRawPointer?,
+    _ request: ghostty_clipboard_request_e
+) {
+    guard let userdata else { return }
+    nonisolated(unsafe) let ud = userdata
+    nonisolated(unsafe) let ct = content
+    nonisolated(unsafe) let st = state
+    MainActor.assumeIsolated {
+        let surfaceView = Unmanaged<TerminalSurfaceView>
+            .fromOpaque(ud)
+            .takeUnretainedValue()
+        guard let surface = surfaceView.surface else { return }
+        ghostty_surface_complete_clipboard_request(surface, ct, st, true)
+    }
+}
+
+private func ghosttyWriteClipboard(
+    _ userdata: UnsafeMutableRawPointer?,
+    _ location: ghostty_clipboard_e,
+    _ content: UnsafePointer<ghostty_clipboard_content_s>?,
+    _ len: Int,
+    _ confirm: Bool
+) {
+    nonisolated(unsafe) let ct = content
+    MainActor.assumeIsolated {
+        let pasteboard: NSPasteboard = switch location {
+        case GHOSTTY_CLIPBOARD_SELECTION:
+            NSPasteboard(name: .find)
+        default:
+            .general
+        }
+
+        pasteboard.clearContents()
+
+        guard let content = ct else { return }
+        let count = Int(len)
+        guard count > 0 else { return }
+
+        let buffer = UnsafeBufferPointer(start: content, count: count)
+        for item in buffer {
+            guard let mime = item.mime else { continue }
+            let mimeType = String(cString: mime)
+            guard mimeType == "text/plain", let data = item.data else { continue }
+            let text = String(cString: data)
+            pasteboard.setString(text, forType: .string)
+            break
+        }
+    }
+}
+
+private func ghosttyCloseSurface(_ userdata: UnsafeMutableRawPointer?, _ shouldConfirm: Bool) {
+    guard let userdata else { return }
+    nonisolated(unsafe) let ud = userdata
+    MainActor.assumeIsolated {
+        let surfaceView = Unmanaged<TerminalSurfaceView>
+            .fromOpaque(ud)
+            .takeUnretainedValue()
+        guard let surface = surfaceView.surface else { return }
+        NotificationCenter.default.post(
+            name: .ghosttyCloseSurface,
+            object: GhosttyAppManager.shared,
+            userInfo: [
+                "surface": surface,
+                "paneId": surfaceView.paneId,
+                "shouldConfirm": shouldConfirm,
+            ]
         )
     }
 }

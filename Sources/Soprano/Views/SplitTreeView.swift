@@ -63,6 +63,45 @@ final class SplitTreeView: NSView {
         } else {
             updatePaneStyles()
         }
+        syncKeyboardFocus()
+    }
+
+    /// Keeps the window's first responder on the active pane's terminal.
+    /// Without this, closing the focused pane leaves the window with no first
+    /// responder and every keystroke is silently dropped (the app appears
+    /// frozen), and pane navigation/splits move the visual focus but not
+    /// keyboard input.
+    /// Re-focus the active pane's terminal after the split tree becomes
+    /// visible again (e.g. when the settings overlay closes).
+    func restoreKeyboardFocus() {
+        syncKeyboardFocus()
+    }
+
+    private func syncKeyboardFocus() {
+        // While the split tree is hidden (settings overlay open), leave the
+        // first responder alone — focusing an invisible terminal would send
+        // the user's typing into a hidden shell.
+        guard !isHidden, let window else { return }
+        guard let container = paneContainers[agentManager.activePaneId],
+              let terminalView = findTerminalView(in: container)
+        else { return }
+
+        if let responder = window.firstResponder as? NSView {
+            if responder === terminalView { return }
+            // Leave focus alone when it's on a live view outside the split
+            // tree (settings form fields, etc.). A responder detached from
+            // this window (e.g. its pane was just closed) is dead — reclaim.
+            if responder.window === window, !responder.isDescendant(of: self) { return }
+        }
+
+        window.makeFirstResponder(terminalView)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            syncKeyboardFocus()
+        }
     }
 
     // MARK: - Full Layout Rebuild
