@@ -46,6 +46,13 @@ final class TerminalSurfaceView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         setup()
         createSurface()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeScreen(_:)),
+            name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -182,6 +189,25 @@ final class TerminalSurfaceView: NSView {
                displayID != 0 {
                 ghostty_surface_set_display_id(surface, displayID)
             }
+        }
+    }
+
+    /// The renderer vsyncs against a CVDisplayLink keyed by display ID. Without
+    /// this, moving the window to another screen leaves the surface synced to the
+    /// old display and content stops updating (appears frozen).
+    @objc private func windowDidChangeScreen(_ notification: Notification) {
+        guard let window,
+              let changedWindow = notification.object as? NSWindow,
+              changedWindow == window,
+              let screen = window.screen,
+              let surface
+        else { return }
+
+        ghostty_surface_set_display_id(surface, screen.displayID ?? 0)
+
+        // The new screen may have a different scale factor.
+        DispatchQueue.main.async { [weak self] in
+            self?.viewDidChangeBackingProperties()
         }
     }
 
@@ -497,6 +523,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         MainActor.assumeIsolated {
             destroySurface()
         }
