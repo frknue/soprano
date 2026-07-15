@@ -15,9 +15,6 @@ let package = Package(
             name: "Soprano",
             dependencies: ["GhosttyKit"],
             path: "Sources/Soprano",
-            resources: [
-                .process("Resources"),
-            ],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/lib"]),
                 .linkedLibrary("ghostty"),
