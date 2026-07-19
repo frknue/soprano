@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let themeManager = ThemeManager(themeId: settings.themeId)
         let agentManager = AgentManager()
         let sessionManager = SessionManager(agentManager: agentManager)
+        let gitBranchMonitor = GitBranchMonitor()
 
         if settings.restoreLastSession, let workspace = WorkspaceSession.loadLast() {
             agentManager.restoreWorkspace(workspace)
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentManager: agentManager,
             sessionManager: sessionManager,
             themeManager: themeManager,
+            gitBranchMonitor: gitBranchMonitor,
             settings: settings
         )
         controller.window?.makeKeyAndOrderFront(nil)

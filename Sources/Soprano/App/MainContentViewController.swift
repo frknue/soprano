@@ -5,7 +5,9 @@ final class MainContentViewController: NSViewController {
     let agentManager: AgentManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
+    let gitBranchMonitor: GitBranchMonitor
     private let onSettingsRequested: (() -> Void)?
+    private var sidebarVisible: Bool
 
     private var sidebarView: SidebarView!
     private var splitTreeView: SplitTreeView!
@@ -18,19 +20,23 @@ final class MainContentViewController: NSViewController {
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var settingsViewController: SettingsViewController?
 
-    private static let collapsedSidebarWidth: CGFloat = 48
-    private static let expandedSidebarWidth: CGFloat = 248
+    private static let sidebarWidth: CGFloat = 220
+    private static let sidebarVisibleKey = "soprano-sidebar-visible"
 
     init(
         agentManager: AgentManager,
         sessionManager: SessionManager,
         themeManager: ThemeManager,
+        gitBranchMonitor: GitBranchMonitor,
         onSettingsRequested: (() -> Void)? = nil
     ) {
         self.agentManager = agentManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
+        self.gitBranchMonitor = gitBranchMonitor
         self.onSettingsRequested = onSettingsRequested
+        self.sidebarVisible =
+            UserDefaults.standard.object(forKey: Self.sidebarVisibleKey) as? Bool ?? true
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -50,19 +56,13 @@ final class MainContentViewController: NSViewController {
         root.addSubview(splitTreeView)
 
         // Sidebar
-        sidebarView = SidebarView(agentManager: agentManager, sessionManager: sessionManager, themeManager: themeManager)
+        sidebarView = SidebarView(
+            agentManager: agentManager,
+            sessionManager: sessionManager,
+            themeManager: themeManager,
+            gitBranchMonitor: gitBranchMonitor
+        )
         sidebarView.onSettingsRequested = onSettingsRequested
-        sidebarView.onExpandedChanged = { [weak self] expanded in
-            guard let self else { return }
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.15
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                self.sidebarWidthConstraint.animator().constant = expanded
-                    ? Self.expandedSidebarWidth
-                    : Self.collapsedSidebarWidth
-                self.view.layoutSubtreeIfNeeded()
-            }
-        }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
 
@@ -101,7 +101,7 @@ final class MainContentViewController: NSViewController {
 
         // Layout
         sidebarWidthConstraint = sidebarView.widthAnchor.constraint(
-            equalToConstant: Self.collapsedSidebarWidth
+            equalToConstant: sidebarVisible ? Self.sidebarWidth : 0
         )
 
         NSLayoutConstraint.activate([
@@ -150,10 +150,15 @@ final class MainContentViewController: NSViewController {
     }
 
     func toggleSidebar() {
-        if sidebarView.activeSection != nil {
-            sidebarView.activeSection = nil
-        } else {
-            sidebarView.activeSection = .agents
+        sidebarVisible.toggle()
+        UserDefaults.standard.set(sidebarVisible, forKey: Self.sidebarVisibleKey)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.sidebarWidthConstraint.animator().constant = self.sidebarVisible
+                ? Self.sidebarWidth
+                : 0
+            self.view.layoutSubtreeIfNeeded()
         }
     }
 
