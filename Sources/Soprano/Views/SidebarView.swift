@@ -580,4 +580,13 @@ private final class SidebarPaneRowView: NSView {
 /// instead of Auto Layout forcing document height to equal viewport height.
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
 }
