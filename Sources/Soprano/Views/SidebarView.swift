@@ -20,6 +20,8 @@ final class SidebarView: NSView {
     private var footerSeparator: NSView!
     private var trailingBorder: NSView!
     private var settingsButton: NSButton!
+    private var plusButton: NSButton!
+    private var sessionsButton: NSButton!
 
     init(
         agentManager: AgentManager,
@@ -72,6 +74,13 @@ final class SidebarView: NSView {
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(headerLabel)
 
+        plusButton = makeIconButton(
+            symbolName: "plus",
+            accessibilityLabel: "New Pane",
+            action: #selector(plusClicked)
+        )
+        contentContainer.addSubview(plusButton)
+
         scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -106,6 +115,13 @@ final class SidebarView: NSView {
             action: #selector(settingsClicked)
         )
         footerView.addSubview(settingsButton)
+
+        sessionsButton = makeIconButton(
+            symbolName: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+            accessibilityLabel: "Sessions",
+            action: #selector(sessionsClicked)
+        )
+        footerView.addSubview(sessionsButton)
 
         trailingBorder = NSView()
         trailingBorder.wantsLayer = true
@@ -150,6 +166,12 @@ final class SidebarView: NSView {
             settingsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -8),
             settingsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
 
+            plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
+            plusButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+
+            sessionsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: 8),
+            sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+
             trailingBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             trailingBorder.topAnchor.constraint(equalTo: topAnchor),
             trailingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -183,6 +205,87 @@ final class SidebarView: NSView {
         onSettingsRequested?()
     }
 
+    // MARK: - Menus
+
+    @objc private func plusClicked() {
+        let menu = NSMenu()
+        for profile in DefaultAgents.all where profile.id != "terminal" {
+            let item = NSMenuItem(
+                title: profile.name,
+                action: #selector(spawnMenuItemClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = profile.id
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let terminalItem = NSMenuItem(
+            title: "Terminal",
+            action: #selector(spawnMenuItemClicked(_:)),
+            keyEquivalent: ""
+        )
+        terminalItem.target = self
+        terminalItem.representedObject = "terminal"
+        menu.addItem(terminalItem)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: plusButton)
+    }
+
+    @objc private func spawnMenuItemClicked(_ sender: NSMenuItem) {
+        guard let profileId = sender.representedObject as? String else { return }
+        _ = agentManager.spawnAgent(profileId)
+    }
+
+    @objc private func sessionsClicked() {
+        let menu = NSMenu()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .short
+        dateFormatter.timeStyle = .short
+        if sessionManager.sessions.isEmpty {
+            menu.addItem(NSMenuItem(title: "No Saved Sessions", action: nil, keyEquivalent: ""))
+        }
+        for session in sessionManager.sessions {
+            let item = NSMenuItem(
+                title: "\(session.name) — \(dateFormatter.string(from: session.savedAt))",
+                action: #selector(loadSessionItemClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = session.id
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let saveItem = NSMenuItem(
+            title: "Save Session As…",
+            action: #selector(saveSessionClicked),
+            keyEquivalent: ""
+        )
+        saveItem.target = self
+        menu.addItem(saveItem)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: sessionsButton)
+    }
+
+    @objc private func loadSessionItemClicked(_ sender: NSMenuItem) {
+        guard let sessionId = sender.representedObject as? String else { return }
+        sessionManager.loadSession(sessionId)
+    }
+
+    @objc private func saveSessionClicked() {
+        let alert = NSAlert()
+        alert.messageText = "Save Session"
+        alert.informativeText = "Name this workspace session:"
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.placeholderString = "Session name"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        sessionManager.saveSession(name: name)
+    }
+
     // MARK: - Refresh
 
     func refreshTheme() {
@@ -196,6 +299,8 @@ final class SidebarView: NSView {
         footerSeparator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         trailingBorder.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         settingsButton.contentTintColor = theme.colors.textMuted
+        plusButton.contentTintColor = theme.colors.textMuted
+        sessionsButton.contentTintColor = theme.colors.textMuted
 
         // Reconcile watchers first so rows read freshly-invalidated caches.
         gitBranchMonitor.setWatchedPaths(watchedCwds())
