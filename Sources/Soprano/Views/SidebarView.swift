@@ -57,6 +57,7 @@ final class SidebarView: NSView {
     deinit {
         agentManager.removeObserver(id: "SidebarView")
         sessionManager.removeObserver(id: "SidebarView-sessions")
+        gitBranchMonitor.onChange = nil
     }
 
     private func setupViews() {
@@ -88,7 +89,7 @@ final class SidebarView: NSView {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(scrollView)
 
-        listContentView = NSView()
+        listContentView = FlippedView()
         listContentView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = listContentView
 
@@ -145,7 +146,7 @@ final class SidebarView: NSView {
             listContentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             listContentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
             listContentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            listContentView.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor),
+            listContentView.bottomAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.bottomAnchor),
             listContentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
             rowsStack.leadingAnchor.constraint(equalTo: listContentView.leadingAnchor),
@@ -569,4 +570,14 @@ private final class SidebarPaneRowView: NSView {
         }
         return false
     }
+}
+
+// MARK: - Flipped Document View
+
+/// Document view for the pane list's NSScrollView. Flipping the coordinate
+/// system anchors content to the top and lets the view grow taller than the
+/// viewport (via a `>=` bottom pin) so the scroller engages on overflow
+/// instead of Auto Layout forcing document height to equal viewport height.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }
