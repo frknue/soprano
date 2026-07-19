@@ -86,8 +86,9 @@ API:
   the sidebar subscribes and refreshes rows.
 - `func setWatchedPaths(_ paths: [String])` — the sidebar passes the set of
   effective spawn cwds for current panes (`tab.cwd`, falling back to the
-  profile's cwd) after each rebuild; the monitor adds/removes watchers to
-  match.
+  profile's cwd, then to the app process's cwd — which is what ghostty
+  spawns inherit when workingDirectory is unset) after each rebuild; the
+  monitor adds/removes watchers to match.
 
 Internals:
 

@@ -4,6 +4,7 @@ final class MainWindowController: NSWindowController {
     let agentManager: AgentManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
+    let gitBranchMonitor: GitBranchMonitor
     var settings: AppSettings
 
     private var mainContentVC: MainContentViewController?
@@ -14,11 +15,13 @@ final class MainWindowController: NSWindowController {
         agentManager: AgentManager,
         sessionManager: SessionManager,
         themeManager: ThemeManager,
+        gitBranchMonitor: GitBranchMonitor,
         settings: AppSettings
     ) {
         self.agentManager = agentManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
+        self.gitBranchMonitor = gitBranchMonitor
         self.settings = settings
 
         let window = NSWindow(
@@ -45,6 +48,7 @@ final class MainWindowController: NSWindowController {
             agentManager: agentManager,
             sessionManager: sessionManager,
             themeManager: themeManager,
+            gitBranchMonitor: gitBranchMonitor,
             onSettingsRequested: { [weak self] in
                 self?.openSettings()
             }
