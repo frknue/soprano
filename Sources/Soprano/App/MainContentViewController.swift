@@ -20,7 +20,6 @@ final class MainContentViewController: NSViewController {
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var settingsViewController: SettingsViewController?
 
-    private static let sidebarWidth: CGFloat = 220
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
 
     init(
@@ -101,7 +100,7 @@ final class MainContentViewController: NSViewController {
 
         // Layout
         sidebarWidthConstraint = sidebarView.widthAnchor.constraint(
-            equalToConstant: sidebarVisible ? Self.sidebarWidth : 0
+            equalToConstant: sidebarVisible ? SidebarView.width : 0
         )
 
         NSLayoutConstraint.activate([
@@ -156,7 +155,7 @@ final class MainContentViewController: NSViewController {
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             self.sidebarWidthConstraint.animator().constant = self.sidebarVisible
-                ? Self.sidebarWidth
+                ? SidebarView.width
                 : 0
             self.view.layoutSubtreeIfNeeded()
         }
