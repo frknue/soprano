@@ -7,7 +7,7 @@ final class GitBranchMonitor: @unchecked Sendable {
     /// Fired whenever a watched HEAD changes on disk.
     var onChange: (() -> Void)?
 
-    /// cwd -> resolved HEAD file path (nil = resolved as "not inside a repo").
+    /// cwd -> resolved HEAD file path (nil resolutions are re-derived on each call, not cached).
     private var headPathByCwd: [String: String?] = [:]
     /// HEAD path -> cached branch name.
     private var branchByHeadPath: [String: String] = [:]
@@ -25,7 +25,7 @@ final class GitBranchMonitor: @unchecked Sendable {
     /// Current branch for a working directory; nil when not in a git repo.
     func branch(for cwd: String) -> String? {
         let headPath: String?
-        if let cached = headPathByCwd[cwd] {
+        if let cached = headPathByCwd[cwd], cached != nil {
             headPath = cached
         } else {
             headPath = Self.resolveHeadPath(startingAt: cwd)
@@ -46,7 +46,7 @@ final class GitBranchMonitor: @unchecked Sendable {
         var neededHeadPaths = Set<String>()
         for cwd in Set(paths) {
             let headPath: String?
-            if let cached = headPathByCwd[cwd] {
+            if let cached = headPathByCwd[cwd], cached != nil {
                 headPath = cached
             } else {
                 headPath = Self.resolveHeadPath(startingAt: cwd)
