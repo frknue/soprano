@@ -240,8 +240,6 @@ extension MainWindowController: KeybindingDelegate {
         openSettings()
     }
 
-    func keybindingToggleMaximize() {}
-
     func keybindingOpenCommandPalette() {
         guard let window else { return }
 

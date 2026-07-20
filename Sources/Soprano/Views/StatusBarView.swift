@@ -79,16 +79,24 @@ final class StatusBarView: NSView {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         brandLabel.textColor = theme.colors.accent
-        paneCountLabel.textColor = theme.colors.textMuted
         if modeLabel.stringValue == "PREFIX" {
             modeLabel.textColor = theme.colors.accent
         } else {
             modeLabel.textColor = theme.colors.textMuted
         }
+        refresh()
     }
 
     private func refresh() {
+        let theme = themeManager.currentTheme
         let count = agentManager.paneCount
-        paneCountLabel.stringValue = "\(count) pane\(count == 1 ? "" : "s")"
+        let base = "\(count) pane\(count == 1 ? "" : "s")"
+        if agentManager.maximizedPaneId != nil {
+            paneCountLabel.stringValue = "\(base) · MAXIMIZED"
+            paneCountLabel.textColor = theme.colors.accent
+        } else {
+            paneCountLabel.stringValue = base
+            paneCountLabel.textColor = theme.colors.textMuted
+        }
     }
 }
