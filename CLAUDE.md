@@ -15,6 +15,16 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run           # Build + run
 
 No tests or linter configured. Swift 6.0 strict concurrency checking is enforced via swift-tools-version.
 
+### Verifying without triggering the "Ghostty would like to access data from other apps" prompt
+
+**Do NOT launch the GUI (`.build/debug/Soprano`, `swift run`, `./run.sh`) inside automated/agent verification loops.** The dev build is a bare SPM binary, not a signed `.app`, so it runs as a child of the terminal (Ghostty). Launching it opens ghostty PTYs that run the user's **login shell**, whose dotfiles read other apps' data containers; macOS TCC attributes that to Ghostty (the responsible app) and re-prompts on every shell spawn — spamming the user. `swift build`, `swiftc`, and `git` never trigger it; only launching the app does.
+
+Prefer prompt-free verification:
+- **Model/controller logic** (e.g. `AgentManager`, `SplitNode`, most of `Controllers/`) is Foundation/AppKit-only with no PTY or GUI. Compile the relevant source files plus a small `main.swift` harness with `/opt/homebrew/opt/swift/bin/swiftc -sdk "$(xcrun --show-sdk-path)" ...` and run it — no app launch, no shell, no prompt. (AppKit links fine in a command-line tool; instantiating `NSColor` etc. is safe headless.)
+- **Purely visual behavior** (rendering, status-bar text, animation) that genuinely needs the running app: hand the user a short manual checklist instead of driving the GUI, OR ask them to grant Ghostty the permission once (System Settings → Privacy & Security → Files and Folders / App Management) so the prompts stop.
+
+Only launch the GUI in an agent loop if the user has explicitly opted into the permission prompts for that session.
+
 ### Rebuilding libghostty (rarely needed)
 
 ```bash

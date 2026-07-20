@@ -15,7 +15,7 @@
 - Maximize state is transient: `snapshotWorkspace()` and saved sessions must NOT include it (no Codable changes anywhere).
 - `pruneOrphanedContainers()` must keep using `agentManager.layout` — pruning against the effective layout would destroy hidden panes' PTYs.
 - Exit rules (spec): `toggleMaximize` no-ops with fewer than 2 panes; `insertPane`, `splitPane`, `closePane`, `focusPane`, `navigateToPane`, `resizePane`, `setLayout`, `restoreWorkspace` all restore the full layout before applying. Tab operations do NOT exit maximize.
-- Verification helpers `driver`/`allwin` exist in `$SCRATCH` = `/private/tmp/claude-501/-Users-furkanulker-git-private-soprano/33105055-4294-4ee0-82c5-5eb20ce13c03/scratchpad`. Key codes: a=0, s=1, m=46, l=37. Kill instances with `pkill -x Soprano` between launches.
+- **Do NOT launch the GUI (`.build/debug/Soprano`, `swift run`, `./run.sh`) during verification** — it spawns login shells that trigger repeated macOS "Ghostty would like to access data from other apps" prompts (see CLAUDE.md). Verify the logic with a standalone `swiftc` harness (Step 6); the visual checks are handed to the user as a manual checklist (Step 7). `$SCRATCH` = `/private/tmp/claude-501/-Users-furkanulker-git-private-soprano/33105055-4294-4ee0-82c5-5eb20ce13c03/scratchpad`.
 
 ---
 
@@ -167,27 +167,112 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
 
 Expected: `Build complete!`. A remaining reference to `keybindingToggleMaximize` anywhere is a missed call site — fix it.
 
-- [ ] **Step 6: GUI verification (spec's 5 checks)**
+- [ ] **Step 6: Standalone logic verification (no GUI, no prompt)**
+
+Write `$SCRATCH/maximize-test/main.swift` — it drives `AgentManager` directly (no NSEvent, no ghostty, no shell). `AgentManager.init()` starts with one pane (`pane-1`). Helpers below spawn/split by calling the real public methods and read `maximizedPaneId`, `layout`, `panes`, `activePaneId`.
+
+```swift
+import Foundation
+
+var failures = 0
+func check(_ cond: Bool, _ label: String) {
+    print((cond ? "PASS " : "FAIL ") + label)
+    if !cond { failures += 1 }
+}
+
+// 1. Single pane: toggleMaximize is a no-op.
+let m1 = AgentManager()
+m1.toggleMaximize()
+check(m1.maximizedPaneId == nil, "single pane: maximize is no-op")
+
+// 2. Two panes: maximize sets the active pane; toggle clears it.
+let m2 = AgentManager()
+m2.spawnTerminal()                       // insertPane -> 2 panes, active = new pane
+let active = m2.activePaneId
+m2.toggleMaximize()
+check(m2.maximizedPaneId == active, "two panes: maximize sets active pane")
+check(m2.panes.count == 2, "maximize does not drop panes")
+m2.toggleMaximize()
+check(m2.maximizedPaneId == nil, "second toggle restores")
+
+// 3. Auto-exit on split.
+let m3 = AgentManager()
+m3.spawnTerminal()
+m3.toggleMaximize()
+check(m3.maximizedPaneId != nil, "precondition: maximized")
+_ = m3.splitPane(direction: .vertical, paneId: m3.activePaneId)
+check(m3.maximizedPaneId == nil, "split auto-exits maximize")
+check(m3.panes.count == 3, "split still applied after auto-exit")
+
+// 4. Auto-exit on navigation.
+let m4 = AgentManager()
+m4.spawnTerminal()
+m4.toggleMaximize()
+m4.navigateToPane(direction: .left)
+check(m4.maximizedPaneId == nil, "navigation auto-exits maximize")
+
+// 5. Auto-exit on focusPane (sidebar row click path).
+let m5 = AgentManager()
+m5.spawnTerminal()
+let other = m5.panes.keys.first { $0 != m5.activePaneId }!
+m5.toggleMaximize()
+m5.focusPane(other)
+check(m5.maximizedPaneId == nil, "focusPane auto-exits maximize")
+check(m5.activePaneId == other, "focusPane still moved focus")
+
+// 6. Auto-exit on close.
+let m6 = AgentManager()
+m6.spawnTerminal()
+m6.toggleMaximize()
+m6.closePane(m6.activePaneId)
+check(m6.maximizedPaneId == nil, "closePane auto-exits maximize")
+
+// 7. Not persisted: a snapshot taken while maximized restores un-maximized.
+let m7 = AgentManager()
+m7.spawnTerminal()
+m7.toggleMaximize()
+let snap = m7.snapshotWorkspace()
+let m7b = AgentManager()
+m7b.restoreWorkspace(snap)
+check(m7b.maximizedPaneId == nil, "restore is never maximized")
+
+if failures > 0 { print("\(failures) FAILURES"); exit(1) }
+print("ALL PASS")
+```
+
+Compile with the model + controller sources (Foundation/AppKit only — no GUI, no PTY, so no permission prompt) and run:
 
 ```bash
 SCRATCH=/private/tmp/claude-501/-Users-furkanulker-git-private-soprano/33105055-4294-4ee0-82c5-5eb20ce13c03/scratchpad
 cd /Users/furkanulker/git/private/soprano
-pkill -x Soprano; sleep 1
-.build/debug/Soprano > /dev/null 2>&1 &
-sleep 3
-PID=$(pgrep -x Soprano | head -1)
-WID=$("$SCRATCH/allwin" "$PID" | grep "name=Soprano" | sed -E 's/id=([0-9]+).*/\1/')
+mkdir -p "$SCRATCH/maximize-test"
+# (write main.swift above first)
+/opt/homebrew/opt/swift/bin/swiftc -sdk "$(xcrun --show-sdk-path)" \
+    Sources/Soprano/Controllers/AgentManager.swift \
+    Sources/Soprano/Models/SplitNode.swift \
+    Sources/Soprano/Models/PaneState.swift \
+    Sources/Soprano/Models/AgentInstance.swift \
+    Sources/Soprano/Models/WorkspaceSession.swift \
+    Sources/Soprano/Models/AgentProfile.swift \
+    Sources/Soprano/Config/DefaultAgents.swift \
+    Sources/Soprano/Utilities/NSColor+Hex.swift \
+    "$SCRATCH/maximize-test/main.swift" \
+    -o "$SCRATCH/maximize-test/harness"
+"$SCRATCH/maximize-test/harness"
 ```
 
-1. Single-pane no-op: `"$SCRATCH/driver" key "$PID" 0 ctrl; sleep 0.3; "$SCRATCH/driver" key "$PID" 46; sleep 0.5` then capture `max-0-noop.png`. Expected: unchanged single pane, status bar `1 pane` (not accented, no suffix).
-2. Split then maximize: Ctrl+A `s` (`0 ctrl`, then `1`), wait 1s, then Ctrl+A `m` (`0 ctrl`, then `46`), capture `max-1-maximized.png`. Expected: ONE full-size pane in the tiling area, sidebar still lists 2 rows, status bar `2 panes · MAXIMIZED` in accent color.
-3. Toggle back: Ctrl+A `m`, capture `max-2-restored.png`. Expected: both panes visible again, status bar back to plain `2 panes`.
-4. Auto-exit on split: Ctrl+A `m` (maximize again), then Ctrl+A `s`, capture `max-3-autoexit-split.png`. Expected: THREE panes all visible (maximize exited, split applied), no `MAXIMIZED` suffix.
-5. Auto-exit on navigation: Ctrl+A `m`, then Ctrl+L (`37 ctrl`, direct nav-right), capture `max-4-autoexit-nav.png`. Expected: all panes visible, focus moved (highlighted pane changed), no suffix.
+Expected: 11 `PASS` lines and `ALL PASS`, exit 0. If the compile pulls a file that transitively imports a GUI-only symbol, add that source file to the list — do NOT switch to launching the app. The harness lives in the scratchpad and is NOT committed.
 
-Read every PNG against its expectation. `pkill -x Soprano` afterwards. The sidebar-row-click exit path (`focusPane`) shares the same `exitMaximize()` mechanism verified in check 5; rows aren't AX-clickable, so it is verified by code inspection plus the user's manual pass.
+- [ ] **Step 7: Record the manual visual checklist**
 
-- [ ] **Step 7: Commit**
+The rendering and status-bar-text behavior is visual and needs the running app, which is left to the user (launching it in an agent loop spams TCC prompts — see CLAUDE.md). In your report, include this checklist verbatim for the user to run via `./run.sh`:
+
+1. Split once (Ctrl+A S), then Ctrl+A M → one pane fills the tiling area; status bar reads `2 panes · MAXIMIZED` in the accent color; sidebar still lists both panes.
+2. Ctrl+A M again → both panes visible; status bar back to plain `2 panes`.
+3. While maximized, Ctrl+A S → three panes visible (maximize auto-exited, split applied).
+4. While maximized, click the other pane's sidebar row → layout restored, that pane focused.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Sources/Soprano/Controllers/AgentManager.swift \
