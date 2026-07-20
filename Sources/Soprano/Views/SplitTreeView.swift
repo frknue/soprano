@@ -122,7 +122,16 @@ final class SplitTreeView: NSView {
             return
         }
 
-        let view = buildView(for: layout)
+        // Maximize renders a single-leaf effective layout. Orphan pruning
+        // below still uses the real layout, so hidden panes' containers
+        // (and their PTYs) survive.
+        let effectiveLayout: SplitNode
+        if let maximizedId = agentManager.maximizedPaneId, agentManager.panes[maximizedId] != nil {
+            effectiveLayout = .leaf(maximizedId)
+        } else {
+            effectiveLayout = layout
+        }
+        let view = buildView(for: effectiveLayout)
         mountRootView(view)
         pruneOrphanedContainers()
         updatePaneStyles()
