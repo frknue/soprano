@@ -5,7 +5,6 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
     func keybindingSaveSession()
     func keybindingOpenSettings()
-    func keybindingToggleMaximize()
     func keybindingOpenCommandPalette()
     func keybindingOpenProjectSearch()
     func keybindingZoom(delta: Int)
@@ -167,7 +166,7 @@ final class KeybindingManager: @unchecked Sendable {
         case "close-pane", "kill-pane":
             agentManager.closePane(agentManager.activePaneId)
         case "maximize-pane":
-            invokeDelegate { $0.keybindingToggleMaximize() }
+            agentManager.toggleMaximize()
 
         case "new-pane-tab":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)
