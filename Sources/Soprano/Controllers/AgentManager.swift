@@ -6,6 +6,9 @@ final class AgentManager: @unchecked Sendable {
     private(set) var panes: [String: PaneState] = [:]
     private(set) var activePaneId: String = ""
     private(set) var layout: SplitNode?
+    /// Pane rendered full-size instead of the split tree (nil = normal).
+    /// Transient view state — never persisted in sessions.
+    private(set) var maximizedPaneId: String?
     private var nextId: Int = 2
 
     /// Multi-observer notification. Views register closures to receive updates.
@@ -100,6 +103,7 @@ final class AgentManager: @unchecked Sendable {
         guard let sourcePane = panes[paneId],
               let sourceTab = sourcePane.activeTab
         else { return nil }
+        exitMaximize()
 
         let newPaneId = nextPaneId()
         let newTabId = nextTabId()
@@ -138,6 +142,7 @@ final class AgentManager: @unchecked Sendable {
 
     func closePane(_ paneId: String) {
         guard panes[paneId] != nil else { return }
+        exitMaximize()
         panes.removeValue(forKey: paneId)
 
         if let currentLayout = layout {
@@ -171,12 +176,14 @@ final class AgentManager: @unchecked Sendable {
 
     func focusPane(_ paneId: String) {
         guard panes[paneId] != nil, activePaneId != paneId else { return }
+        exitMaximize()
         activePaneId = paneId
         notifyChange()
     }
 
     func navigateToPane(direction: NavigationDirection) {
         guard let currentLayout = layout else { return }
+        exitMaximize()
 
         if let target = currentLayout.adjacentPane(from: activePaneId, direction: direction) {
             activePaneId = target
@@ -202,6 +209,7 @@ final class AgentManager: @unchecked Sendable {
         guard let currentLayout = layout,
               let path = currentLayout.pathTo(activePaneId)
         else { return }
+        exitMaximize()
 
         let axisDirection: SplitDirection = direction.isHorizontal ? .horizontal : .vertical
         let delta = (direction == .left || direction == .up) ? -tickPercent : tickPercent
@@ -230,10 +238,33 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Layout
 
     func setLayout(_ newLayout: SplitNode?) {
+        exitMaximize()
         layout = newLayout
         if let newLayout, newLayout.pathTo(activePaneId) == nil {
             activePaneId = newLayout.firstLeaf ?? activePaneId
         }
+        notifyChange(layoutChanged: true)
+    }
+
+    // MARK: - Maximize
+
+    func toggleMaximize() {
+        if maximizedPaneId != nil {
+            maximizedPaneId = nil
+            notifyChange(layoutChanged: true)
+            return
+        }
+        guard panes.count > 1, panes[activePaneId] != nil else { return }
+        maximizedPaneId = activePaneId
+        notifyChange(layoutChanged: true)
+    }
+
+    /// Restore the full layout before a topology-affecting operation so
+    /// nothing operates blind on hidden panes. Notifies immediately —
+    /// callers notify again after their own mutation, which is harmless.
+    private func exitMaximize() {
+        guard maximizedPaneId != nil else { return }
+        maximizedPaneId = nil
         notifyChange(layoutChanged: true)
     }
 
@@ -441,6 +472,7 @@ final class AgentManager: @unchecked Sendable {
             activePaneId = session.panes[0].id
         }
 
+        maximizedPaneId = nil
         notifyChange(layoutChanged: true)
     }
 
@@ -450,6 +482,7 @@ final class AgentManager: @unchecked Sendable {
 
     private func insertPane(_ pane: PaneState) {
         guard panes.count < Self.maxPanes else { return }
+        exitMaximize()
 
         panes[pane.id] = pane
 
