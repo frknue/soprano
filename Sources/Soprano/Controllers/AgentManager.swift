@@ -494,6 +494,21 @@ final class AgentManager: @unchecked Sendable {
         notifyChange(layoutChanged: windowChanged)
     }
 
+    func renameTab(_ paneId: String, tabId: String, to title: String) {
+        guard let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId })
+        else { return }
+
+        let sanitized = title
+            .components(separatedBy: .newlines)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty, pane.tabs[index].title != sanitized else { return }
+
+        pane.tabs[index].title = sanitized
+        notifyChange()
+    }
+
     // MARK: - Agent Profile Lookup
 
     func agentProfile(for paneId: String) -> AgentProfile? {

@@ -131,7 +131,22 @@ private func ghosttyAction(
     _ target: ghostty_target_s,
     _ action: ghostty_action_s
 ) -> Bool {
-    false
+    guard action.tag == GHOSTTY_ACTION_SET_TITLE,
+          target.tag == GHOSTTY_TARGET_SURFACE,
+          let surface = target.target.surface,
+          let userdata = ghostty_surface_userdata(surface),
+          let titlePointer = action.action.set_title.title,
+          let title = String(validatingCString: titlePointer)
+    else { return false }
+
+    nonisolated(unsafe) let ud = userdata
+    MainActor.assumeIsolated {
+        let surfaceView = Unmanaged<TerminalSurfaceView>
+            .fromOpaque(ud)
+            .takeUnretainedValue()
+        surfaceView.terminalTitleDidChange(title)
+    }
+    return true
 }
 
 private func ghosttyReadClipboard(

@@ -34,6 +34,7 @@ final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
     var onFocusRequested: (() -> Void)?
+    var onTitleChanged: ((String) -> Void)?
     private let config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
@@ -149,6 +150,10 @@ final class TerminalSurfaceView: NSView {
         lastPixelHeight = hpx
         lastXScale = xScale
         lastYScale = yScale
+    }
+
+    func terminalTitleDidChange(_ title: String) {
+        onTitleChanged?(title)
     }
 
     private func withOptionalCString<Result>(
