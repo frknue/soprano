@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        installApplicationMenu()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -38,5 +39,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         mainWindowController?.saveWorkspaceIfNeeded()
+    }
+
+    private func installApplicationMenu() {
+        MainActor.assumeIsolated {
+            let mainMenu = NSMenu()
+            let applicationMenuItem = NSMenuItem(
+                title: "Soprano",
+                action: nil,
+                keyEquivalent: ""
+            )
+            mainMenu.addItem(applicationMenuItem)
+
+            let applicationMenu = NSMenu(title: "Soprano")
+            let quitItem = NSMenuItem(
+                title: "Quit Soprano",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
+            quitItem.keyEquivalentModifierMask = [.command]
+            quitItem.target = NSApp
+            applicationMenu.addItem(quitItem)
+            applicationMenuItem.submenu = applicationMenu
+            NSApp.mainMenu = mainMenu
+        }
     }
 }
