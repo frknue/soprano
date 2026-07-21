@@ -108,7 +108,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     private let agentManager: AgentManager
-    private let notificationCenter = UNUserNotificationCenter.current()
+    private let notificationCenter: UNUserNotificationCenter?
     private var distributedObserver: NSObjectProtocol?
     private var desktopObserver: NSObjectProtocol?
     private var surfaceFocusObserver: NSObjectProtocol?
@@ -118,9 +118,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
 
     init(agentManager: AgentManager) {
         self.agentManager = agentManager
+        self.notificationCenter = Self.makeNotificationCenter()
         super.init()
 
-        notificationCenter.delegate = self
+        notificationCenter?.delegate = self
         distributedObserver = DistributedNotificationCenter.default().addObserver(
             forName: AgentEventCommand.notificationName,
             object: nil,
@@ -152,6 +153,18 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         agentManager.addObserver(id: observerId) { [weak self] in
             self?.clearDeliveredNotificationsForFocusedAgent()
         }
+    }
+
+    /// UserNotifications requires a Launch Services application bundle. SwiftPM
+    /// executables launched with `swift run` or directly from `.build` do not
+    /// have one, and calling `UNUserNotificationCenter.current()` in that state
+    /// raises an Objective-C exception that Swift cannot catch.
+    private static func makeNotificationCenter() -> UNUserNotificationCenter? {
+        guard Bundle.main.bundleURL.pathExtension == "app",
+              Bundle.main.bundleIdentifier != nil
+        else { return nil }
+
+        return UNUserNotificationCenter.current()
     }
 
     deinit {
@@ -233,7 +246,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         agentManager.clearAttention(paneId: paneId, tabId: tabId)
         let target = Target(paneId: paneId, tabId: tabId)
         guard let identifiers = deliveredNotificationIds.removeValue(forKey: target) else { return }
-        notificationCenter.removeDeliveredNotifications(withIdentifiers: Array(identifiers))
+        notificationCenter?.removeDeliveredNotifications(withIdentifiers: Array(identifiers))
     }
 
     private func handle(_ event: AgentEventPayload) {
@@ -265,13 +278,15 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func deliverNotification(title: String, body: String, paneId: String, tabId: String) {
+        guard let notificationCenter else { return }
+
         notificationCenter.getNotificationSettings { [weak self] settings in
             guard let self else { return }
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
                 self.scheduleNotification(title: title, body: body, paneId: paneId, tabId: tabId)
             case .notDetermined:
-                self.notificationCenter.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                self.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, _ in
                     guard granted else { return }
                     self.scheduleNotification(title: title, body: body, paneId: paneId, tabId: tabId)
                 }
@@ -284,6 +299,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func scheduleNotification(title: String, body: String, paneId: String, tabId: String) {
+        guard let notificationCenter else { return }
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -298,7 +315,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                 let target = Target(paneId: paneId, tabId: tabId)
                 guard let self else { return }
                 if self.isFocusedSurface(paneId: paneId, tabId: tabId) {
-                    self.notificationCenter.removeDeliveredNotifications(withIdentifiers: [identifier])
+                    self.notificationCenter?.removeDeliveredNotifications(withIdentifiers: [identifier])
                 } else {
                     self.deliveredNotificationIds[target, default: []].insert(identifier)
                 }
@@ -313,7 +330,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         agentManager.clearAttention(paneId: target.paneId, tabId: target.tabId)
         guard let identifiers = deliveredNotificationIds.removeValue(forKey: target) else { return }
 
-        notificationCenter.removeDeliveredNotifications(withIdentifiers: Array(identifiers))
+        notificationCenter?.removeDeliveredNotifications(withIdentifiers: Array(identifiers))
     }
 
     @MainActor

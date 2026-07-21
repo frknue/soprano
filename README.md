@@ -62,13 +62,18 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
 ### Run
 
 ```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run
+./run.sh
 ```
 
-Or directly:
+`run.sh` builds a development `.app` bundle before launching. A real application
+bundle is required by macOS for native notifications. `swift run` and the raw
+`.build/debug/Soprano` executable are still useful for debugging, but native
+notifications are disabled for those unbundled launches.
+
+To run the unbundled executable:
 
 ```bash
-.build/debug/Soprano
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run
 ```
 
 ### Type-check only
@@ -105,35 +110,11 @@ cp .build/release/Soprano Soprano.app/Contents/MacOS/
 # Copy application icon
 cp Sources/Soprano/Resources/AppIcon.icns Soprano.app/Contents/Resources/
 
-# Create Info.plist
-cat > Soprano.app/Contents/Info.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>Soprano</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.soprano.app</string>
-    <key>CFBundleName</key>
-    <string>Soprano</string>
-    <key>CFBundleVersion</key>
-    <string>0.2.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSSupportsAutomaticTermination</key>
-    <false/>
-</dict>
-</plist>
-EOF
+# Copy SwiftPM resources where Bundle.module expects them
+cp -R .build/release/Soprano_Soprano.bundle Soprano.app/
+
+# Copy application metadata
+cp Support/Info.plist Soprano.app/Contents/Info.plist
 ```
 
 Then open or move `Soprano.app` to `/Applications`:
