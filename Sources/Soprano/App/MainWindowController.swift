@@ -10,7 +10,6 @@ final class MainWindowController: NSWindowController {
     private var mainContentVC: MainContentViewController?
     private var keybindingManager: KeybindingManager?
     private var commandPalette: CommandPalettePanel?
-    private var settingsWindowController: SettingsWindowController?
 
     init(
         agentManager: AgentManager,
@@ -444,30 +443,22 @@ private extension MainWindowController {
     }
 
     func openSettings() {
-        if let settingsWindowController {
-            settingsWindowController.showSettingsWindow(relativeTo: window)
-            return
-        }
-
         let config = keybindingManager?.config ?? DefaultKeybindings.load()
-        let controller = SettingsWindowController(
-            themeManager: themeManager,
+        mainContentVC?.showSettings(
             settings: settings,
-            keybindingConfig: config
+            keybindingConfig: config,
+            onSettingsChanged: { [weak self] updatedSettings in
+                guard let self else { return }
+                self.settings = updatedSettings
+                self.settings.save()
+                self.applyTheme()
+            },
+            onKeybindingConfigChanged: { [weak self] updatedConfig in
+                guard let self else { return }
+                DefaultKeybindings.save(updatedConfig)
+                self.reloadKeybindingManager()
+            }
         )
-        controller.onSettingsChanged = { [weak self] updatedSettings in
-            guard let self else { return }
-            self.settings = updatedSettings
-            self.settings.save()
-            self.applyTheme()
-        }
-        controller.onKeybindingConfigChanged = { [weak self] updatedConfig in
-            guard let self else { return }
-            DefaultKeybindings.save(updatedConfig)
-            self.reloadKeybindingManager()
-        }
-        settingsWindowController = controller
-        controller.showSettingsWindow(relativeTo: window)
     }
 
     func reloadKeybindingManager() {
