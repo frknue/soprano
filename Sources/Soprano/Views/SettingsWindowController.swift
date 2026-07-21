@@ -450,6 +450,8 @@ final class SettingsViewController: NSViewController {
 
         let input = makeTextField(value: "")
         input.placeholderString = "Folder path"
+        input.target = self
+        input.action = #selector(addProjectDirectory)
         projectDirectoryInput = input
         addRow.addArrangedSubview(input)
 
@@ -565,30 +567,51 @@ final class SettingsViewController: NSViewController {
     }
 
     @objc private func browseProjectDirectory() {
+        guard let window = view.window else { return }
+
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.prompt = "Choose"
-        if panel.runModal() == .OK, let url = panel.url {
-            projectDirectoryInput?.stringValue = url.path
+        panel.prompt = "Add"
+        panel.message = "Choose a project directory"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let path = panel.url?.path else { return }
+            self?.storeProjectDirectory(path)
         }
     }
 
     @objc private func addProjectDirectory() {
         guard let input = projectDirectoryInput else { return }
-        let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        guard !settings.projectDirectories.contains(value) else {
-            input.stringValue = ""
+        storeProjectDirectory(input.stringValue)
+    }
+
+    private func storeProjectDirectory(_ rawPath: String) {
+        let trimmedPath = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return }
+
+        let expandedPath = NSString(string: trimmedPath).expandingTildeInPath
+        let path = URL(fileURLWithPath: expandedPath, isDirectory: true)
+            .standardizedFileURL.path
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            NSSound.beep()
             return
         }
 
-        settings.projectDirectories.append(value)
+        guard !settings.projectDirectories.contains(path) else {
+            projectDirectoryInput?.stringValue = ""
+            return
+        }
+
+        settings.projectDirectories.append(path)
         settings.save()
         onSettingsChanged?(settings)
-        input.stringValue = ""
+        projectDirectoryInput?.stringValue = ""
         rebuildProjectDirectoriesList()
     }
 
