@@ -253,6 +253,9 @@ final class SplitTreeView: NSView {
             terminalView.onFocusRequested = { [weak self] in
                 self?.agentManager.focusPane(paneId)
             }
+            terminalView.onTitleChanged = { [weak self] title in
+                self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+            }
             view = terminalView
         }
 
