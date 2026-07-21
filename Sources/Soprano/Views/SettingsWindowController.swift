@@ -214,7 +214,7 @@ final class SettingsViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentBackgroundView.addSubview(scrollView)
 
-        scrollDocumentView = NSView()
+        scrollDocumentView = SettingsScrollDocumentView(frame: .zero)
         scrollDocumentView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = scrollDocumentView
 
@@ -249,7 +249,11 @@ final class SettingsViewController: NSViewController {
             scrollDocumentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             scrollDocumentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
             scrollDocumentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            scrollDocumentView.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor),
+            // The document may be taller than the viewport. Equality here makes
+            // the full shortcuts list become the window's minimum height.
+            scrollDocumentView.bottomAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentView.bottomAnchor
+            ),
             scrollDocumentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
             contentStack.leadingAnchor.constraint(equalTo: scrollDocumentView.leadingAnchor),
@@ -1038,5 +1042,19 @@ final class SettingsViewController: NSViewController {
             }
         }
         return rows
+    }
+}
+
+/// A top-anchored document view whose height can exceed the settings viewport.
+private final class SettingsScrollDocumentView: NSView {
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 }
