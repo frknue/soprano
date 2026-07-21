@@ -334,6 +334,7 @@ final class SidebarView: NSView {
                 paneCount: terminalWindow.paneIds.count,
                 expanded: isExpanded,
                 highlighted: terminalWindow.id == agentManager.activeWindowId,
+                isTitleCustom: terminalWindow.isTitleCustom,
                 onToggle: { [weak self] in
                     guard let self else { return }
                     if self.collapsedWindowIds.contains(terminalWindow.id) {
@@ -345,6 +346,12 @@ final class SidebarView: NSView {
                 },
                 onSelect: { [weak self] in
                     self?.agentManager.activateWindow(terminalWindow.id)
+                },
+                onRename: { [weak self] in
+                    self?.promptToRenameWindow(terminalWindow.id)
+                },
+                onResetTitle: { [weak self] in
+                    self?.agentManager.resetWindowTitle(terminalWindow.id)
                 },
                 onClose: { [weak self] in
                     self?.collapsedWindowIds.remove(terminalWindow.id)
@@ -380,6 +387,24 @@ final class SidebarView: NSView {
                 ).isActive = true
             }
         }
+    }
+
+    private func promptToRenameWindow(_ windowId: String) {
+        guard let terminalWindow = agentManager.windows[windowId] else { return }
+        let alert = NSAlert()
+        alert.messageText = "Rename Window"
+        alert.informativeText = "Choose a stable name for this window."
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = terminalWindow.title
+        field.selectText(nil)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        agentManager.renameWindow(windowId, to: field.stringValue)
     }
 
     // MARK: - Branch Resolution
@@ -460,6 +485,8 @@ private final class SidebarWindowRowView: NSView {
     private let closeButton = NSButton(title: "×", target: nil, action: nil)
     private var onToggle: (() -> Void)?
     private var onSelect: (() -> Void)?
+    private var onRename: (() -> Void)?
+    private var onResetTitle: (() -> Void)?
     private var onClose: (() -> Void)?
     private let theme: AppTheme
 
@@ -528,12 +555,17 @@ private final class SidebarWindowRowView: NSView {
         paneCount: Int,
         expanded: Bool,
         highlighted: Bool,
+        isTitleCustom: Bool,
         onToggle: @escaping () -> Void,
         onSelect: @escaping () -> Void,
+        onRename: @escaping () -> Void,
+        onResetTitle: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.onToggle = onToggle
         self.onSelect = onSelect
+        self.onRename = onRename
+        self.onResetTitle = onResetTitle
         self.onClose = onClose
         titleLabel.stringValue = title
         countLabel.stringValue = "\(paneCount)"
@@ -551,6 +583,25 @@ private final class SidebarWindowRowView: NSView {
         layer?.backgroundColor = highlighted
             ? theme.colors.bgRaised.cgColor
             : NSColor.clear.cgColor
+
+        let contextMenu = NSMenu()
+        let renameItem = NSMenuItem(
+            title: "Rename Window…",
+            action: #selector(handleRename),
+            keyEquivalent: ""
+        )
+        renameItem.target = self
+        contextMenu.addItem(renameItem)
+        if isTitleCustom {
+            let resetItem = NSMenuItem(
+                title: "Reset to Automatic Name",
+                action: #selector(handleResetTitle),
+                keyEquivalent: ""
+            )
+            resetItem.target = self
+            contextMenu.addItem(resetItem)
+        }
+        menu = contextMenu
     }
 
     @objc private func handleToggle() {
@@ -559,6 +610,14 @@ private final class SidebarWindowRowView: NSView {
 
     @objc private func handleClose() {
         onClose?()
+    }
+
+    @objc private func handleRename() {
+        onRename?()
+    }
+
+    @objc private func handleResetTitle() {
+        onResetTitle?()
     }
 
     override func mouseDown(with event: NSEvent) {
