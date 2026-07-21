@@ -149,6 +149,10 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.navigateToPane(direction: .up)
         case "nav-right":
             agentManager.navigateToPane(direction: .right)
+        case "previous-window":
+            agentManager.activatePreviousWindow()
+        case "next-window":
+            agentManager.activateNextWindow()
 
         case "resize-left":
             agentManager.resizePane(direction: .left, tickPercent: config.resizeTickPercent)
