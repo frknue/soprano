@@ -15,6 +15,9 @@ let package = Package(
             name: "Soprano",
             dependencies: ["GhosttyKit"],
             path: "Sources/Soprano",
+            resources: [
+                .copy("Resources/AppIcon.icns"),
+            ],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/lib"]),
                 .linkedLibrary("ghostty"),
