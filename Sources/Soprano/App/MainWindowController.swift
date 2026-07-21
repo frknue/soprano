@@ -105,6 +105,17 @@ final class MainWindowController: NSWindowController {
     private func buildCommandPaletteItems() -> [CommandItem] {
         [
             CommandItem(
+                id: "new-window",
+                icon: "macwindow.badge.plus",
+                label: "New Window",
+                description: "Create a new logical window",
+                shortcut: commandShortcut(for: "new-window"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.createWindow()
+                }
+            ),
+            CommandItem(
                 id: "launch-codex",
                 icon: "command.square",
                 label: "Launch Codex",

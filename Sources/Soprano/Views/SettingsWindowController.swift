@@ -1024,6 +1024,7 @@ final class SettingsViewController: NSViewController {
         let preferredIds = [
             "command-palette",
             "open-settings",
+            "new-window",
             "new-terminal",
             "split-horizontal",
             "split-vertical",

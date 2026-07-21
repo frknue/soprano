@@ -184,7 +184,9 @@ final class SplitTreeView: NSView {
 
     /// Remove containers for panes that no longer exist in the layout.
     private func pruneOrphanedContainers() {
-        let activeIds = agentManager.layout?.leafIds ?? []
+        // Keep detached containers for panes in inactive logical windows so
+        // switching windows preserves their terminal surfaces and PTY state.
+        let activeIds = Set(agentManager.panes.keys)
         let orphanIds = paneContainers.keys.filter { !activeIds.contains($0) }
         for id in orphanIds {
             if let container = paneContainers[id] {

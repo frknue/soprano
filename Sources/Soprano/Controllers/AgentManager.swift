@@ -4,12 +4,21 @@ import Foundation
 /// This is the Swift equivalent of useAgentManager.ts.
 final class AgentManager: @unchecked Sendable {
     private(set) var panes: [String: PaneState] = [:]
-    private(set) var activePaneId: String = ""
-    private(set) var layout: SplitNode?
+    private(set) var windows: [String: WorkspaceWindowState] = [:]
+    private(set) var activeWindowId: String = ""
+    private(set) var activePaneId: String {
+        get { windows[activeWindowId]?.activePaneId ?? "" }
+        set { windows[activeWindowId]?.activePaneId = newValue }
+    }
+    private(set) var layout: SplitNode? {
+        get { windows[activeWindowId]?.layout }
+        set { windows[activeWindowId]?.layout = newValue }
+    }
     /// Pane rendered full-size instead of the split tree (nil = normal).
     /// Transient view state — never persisted in sessions.
     private(set) var maximizedPaneId: String?
     private var nextId: Int = 2
+    private var nextWindowTitleNumber: Int = 1
 
     /// Multi-observer notification. Views register closures to receive updates.
     private var observers: [String: () -> Void] = [:]
@@ -23,13 +32,19 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Initialization
 
     init() {
+        let windowId = "window-1"
         let paneId = "pane-1"
         let tabId = "tab-2"
         let tab = PaneTab(id: tabId, type: .terminal, title: "Terminal 1")
         let pane = PaneState(id: paneId, tabs: [tab])
         panes[paneId] = pane
-        activePaneId = paneId
-        layout = .leaf(paneId)
+        windows[windowId] = WorkspaceWindowState(
+            id: windowId,
+            title: "Window 1",
+            layout: .leaf(paneId),
+            activePaneId: paneId
+        )
+        activeWindowId = windowId
 
         ghosttyCloseObserver = NotificationCenter.default.addObserver(
             forName: .ghosttyCloseSurface,
@@ -67,6 +82,65 @@ final class AgentManager: @unchecked Sendable {
         return "tab-\(nextId)"
     }
 
+    private func nextWindowId() -> String {
+        nextId += 1
+        return "window-\(nextId)"
+    }
+
+    // MARK: - Windows
+
+    @discardableResult
+    func createWindow(cwd: String? = nil) -> String? {
+        guard panes.count < Self.maxPanes else { return nil }
+        let windowId = nextWindowId()
+        let paneId = nextPaneId()
+        let tabId = nextTabId()
+        let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"
+        let tab = PaneTab(id: tabId, type: .terminal, title: title, cwd: cwd)
+        panes[paneId] = PaneState(id: paneId, tabs: [tab])
+        nextWindowTitleNumber += 1
+        windows[windowId] = WorkspaceWindowState(
+            id: windowId,
+            title: "Window \(nextWindowTitleNumber)",
+            layout: .leaf(paneId),
+            activePaneId: paneId
+        )
+        activeWindowId = windowId
+        maximizedPaneId = nil
+        notifyChange(layoutChanged: true)
+        return windowId
+    }
+
+    func activateWindow(_ windowId: String) {
+        guard windows[windowId] != nil, activeWindowId != windowId else { return }
+        activeWindowId = windowId
+        maximizedPaneId = nil
+        notifyChange(layoutChanged: true)
+    }
+
+    func closeWindow(_ windowId: String) {
+        guard let terminalWindow = windows[windowId] else { return }
+        for paneId in terminalWindow.paneIds {
+            panes.removeValue(forKey: paneId)
+        }
+        windows.removeValue(forKey: windowId)
+
+        if windows.isEmpty {
+            _ = createWindow()
+            return
+        }
+
+        if activeWindowId == windowId {
+            activeWindowId = sortedWindows().first?.id ?? ""
+        }
+        maximizedPaneId = nil
+        notifyChange(layoutChanged: true)
+    }
+
+    func window(containingPane paneId: String) -> WorkspaceWindowState? {
+        windows.values.first { $0.paneIds.contains(paneId) }
+    }
+
     // MARK: - Pane Spawning
 
     @discardableResult
@@ -101,8 +175,11 @@ final class AgentManager: @unchecked Sendable {
     @discardableResult
     func splitPane(direction: SplitDirection, paneId: String) -> String? {
         guard let sourcePane = panes[paneId],
-              let sourceTab = sourcePane.activeTab
+              let sourceTab = sourcePane.activeTab,
+              let terminalWindow = window(containingPane: paneId)
         else { return nil }
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
         exitMaximize()
 
         let newPaneId = nextPaneId()
@@ -141,32 +218,25 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Pane Closing
 
     func closePane(_ paneId: String) {
-        guard panes[paneId] != nil else { return }
+        guard panes[paneId] != nil,
+              let terminalWindow = window(containingPane: paneId)
+        else { return }
         exitMaximize()
         panes.removeValue(forKey: paneId)
 
-        if let currentLayout = layout {
-            layout = currentLayout.removing(paneId)
+        if let currentLayout = terminalWindow.layout {
+            terminalWindow.layout = currentLayout.removing(paneId)
         }
 
-        if panes.isEmpty || layout == nil {
-            let fallbackId = nextPaneId()
-            let tabId = nextTabId()
-            let tab = PaneTab(id: tabId, type: .terminal, title: "Terminal")
-            let pane = PaneState(id: fallbackId, tabs: [tab])
-            panes = [fallbackId: pane]
-            activePaneId = fallbackId
-            layout = .leaf(fallbackId)
-        } else if activePaneId == paneId {
-            // Find adjacent or first leaf
-            if let adj = layout?.adjacentPane(from: paneId, direction: .right)
-                ?? layout?.adjacentPane(from: paneId, direction: .left)
-                ?? layout?.adjacentPane(from: paneId, direction: .down)
-                ?? layout?.adjacentPane(from: paneId, direction: .up)
-                ?? layout?.firstLeaf
-            {
-                activePaneId = adj
-            }
+        guard terminalWindow.layout != nil else {
+            closeWindow(terminalWindow.id)
+            return
+        }
+
+        if terminalWindow.activePaneId == paneId,
+           let firstPaneId = terminalWindow.layout?.firstLeaf
+        {
+            terminalWindow.activePaneId = firstPaneId
         }
 
         notifyChange(layoutChanged: true)
@@ -175,10 +245,15 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Navigation
 
     func focusPane(_ paneId: String) {
-        guard panes[paneId] != nil, activePaneId != paneId else { return }
+        guard panes[paneId] != nil,
+              let terminalWindow = window(containingPane: paneId)
+        else { return }
+        if activeWindowId == terminalWindow.id, activePaneId == paneId { return }
         exitMaximize()
-        activePaneId = paneId
-        notifyChange()
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        notifyChange(layoutChanged: windowChanged)
     }
 
     func navigateToPane(direction: NavigationDirection) {
@@ -254,7 +329,9 @@ final class AgentManager: @unchecked Sendable {
             notifyChange(layoutChanged: true)
             return
         }
-        guard panes.count > 1, panes[activePaneId] != nil else { return }
+        guard (windows[activeWindowId]?.paneIds.count ?? 0) > 1,
+              panes[activePaneId] != nil
+        else { return }
         maximizedPaneId = activePaneId
         notifyChange(layoutChanged: true)
     }
@@ -316,6 +393,7 @@ final class AgentManager: @unchecked Sendable {
     @discardableResult
     func addTabToPane(_ paneId: String, type: PaneType, profileId: String? = nil) -> String? {
         guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
               pane.tabs.count < PaneState.maxTabsPerPane
         else { return nil }
 
@@ -331,8 +409,10 @@ final class AgentManager: @unchecked Sendable {
 
         pane.tabs.append(tab)
         pane.activeTabIndex = pane.tabs.count - 1
-        activePaneId = paneId
-        notifyChange()
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        notifyChange(layoutChanged: windowChanged)
         return tabId
     }
 
@@ -356,26 +436,41 @@ final class AgentManager: @unchecked Sendable {
     }
 
     func switchTab(_ paneId: String, index: Int) {
-        guard let pane = panes[paneId], !pane.tabs.isEmpty else { return }
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
+              !pane.tabs.isEmpty
+        else { return }
         let clamped = min(max(0, index), pane.tabs.count - 1)
         pane.activeTabIndex = clamped
-        activePaneId = paneId
-        notifyChange()
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        notifyChange(layoutChanged: windowChanged)
     }
 
     func nextTab(_ paneId: String) {
-        guard let pane = panes[paneId], !pane.tabs.isEmpty else { return }
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
+              !pane.tabs.isEmpty
+        else { return }
         pane.activeTabIndex = (pane.clampedActiveIndex() + 1) % pane.tabs.count
-        activePaneId = paneId
-        notifyChange()
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        notifyChange(layoutChanged: windowChanged)
     }
 
     func prevTab(_ paneId: String) {
-        guard let pane = panes[paneId], !pane.tabs.isEmpty else { return }
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
+              !pane.tabs.isEmpty
+        else { return }
         let current = pane.clampedActiveIndex()
         pane.activeTabIndex = (current - 1 + pane.tabs.count) % pane.tabs.count
-        activePaneId = paneId
-        notifyChange()
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        notifyChange(layoutChanged: windowChanged)
     }
 
     // MARK: - Agent Profile Lookup
@@ -393,9 +488,7 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Workspace Save/Restore
 
     func snapshotWorkspace() -> WorkspaceSession {
-        let leafIds = layout?.leafIds ?? []
         let savedPanes = panes.values
-            .filter { leafIds.contains($0.id) }
             .map { pane in
                 WorkspaceSession.SavedPane(
                     id: pane.id,
@@ -410,6 +503,14 @@ final class AgentManager: @unchecked Sendable {
                     }
                 )
             }
+        let savedWindows = orderedWindows.map { terminalWindow in
+            WorkspaceSession.SavedWindow(
+                id: terminalWindow.id,
+                title: terminalWindow.title,
+                layout: terminalWindow.layout,
+                activePaneId: terminalWindow.activePaneId
+            )
+        }
 
         return WorkspaceSession(
             id: "last",
@@ -417,7 +518,9 @@ final class AgentManager: @unchecked Sendable {
             savedAt: Date(),
             layout: layout,
             panes: savedPanes,
-            activePaneId: activePaneId
+            activePaneId: activePaneId,
+            windows: savedWindows,
+            activeWindowId: activeWindowId
         )
     }
 
@@ -427,12 +530,7 @@ final class AgentManager: @unchecked Sendable {
         var newPanes: [String: PaneState] = [:]
         var maxId = 1
 
-        let effectiveLayout = session.layout ?? .leaf(session.panes[0].id)
-        let layoutIds = effectiveLayout.leafIds
-
         for savedPane in session.panes {
-            guard layoutIds.isEmpty || layoutIds.contains(savedPane.id) else { continue }
-
             if let num = parseIdNumber(savedPane.id) {
                 maxId = max(maxId, num)
             }
@@ -462,21 +560,62 @@ final class AgentManager: @unchecked Sendable {
             newPanes[savedPane.id] = pane
         }
 
-        nextId = maxId
-        panes = newPanes
-        layout = effectiveLayout
-
-        if let first = effectiveLayout.firstLeaf, newPanes[first] != nil {
-            activePaneId = first
+        var newWindows: [String: WorkspaceWindowState] = [:]
+        if let savedWindows = session.windows, !savedWindows.isEmpty {
+            for savedWindow in savedWindows {
+                if let num = parseIdNumber(savedWindow.id) {
+                    maxId = max(maxId, num)
+                }
+                guard let restoredLayout = savedWindow.layout,
+                      let firstPaneId = restoredLayout.leafIds.first(where: { newPanes[$0] != nil })
+                else { continue }
+                let activePaneId = restoredLayout.leafIds.contains(savedWindow.activePaneId)
+                    ? savedWindow.activePaneId
+                    : firstPaneId
+                newWindows[savedWindow.id] = WorkspaceWindowState(
+                    id: savedWindow.id,
+                    title: savedWindow.title,
+                    layout: restoredLayout,
+                    activePaneId: activePaneId
+                )
+            }
         } else {
-            activePaneId = session.panes[0].id
+            let windowId = "window-1"
+            let effectiveLayout = session.layout ?? .leaf(session.panes[0].id)
+            let firstPaneId = effectiveLayout.leafIds.first(where: { newPanes[$0] != nil })
+                ?? session.panes[0].id
+            let restoredActivePaneId = effectiveLayout.leafIds.contains(session.activePaneId)
+                ? session.activePaneId
+                : firstPaneId
+            newWindows[windowId] = WorkspaceWindowState(
+                id: windowId,
+                title: "Window 1",
+                layout: effectiveLayout,
+                activePaneId: restoredActivePaneId
+            )
         }
+
+        guard !newWindows.isEmpty else { return }
+
+        let referencedPaneIds = Set(newWindows.values.flatMap(\.paneIds))
+        panes = newPanes.filter { referencedPaneIds.contains($0.key) }
+        windows = newWindows
+        activeWindowId = session.activeWindowId.flatMap { newWindows[$0] }?.id
+            ?? sortedWindows().first?.id
+            ?? ""
+        nextId = maxId
+        let largestWindowTitleNumber = newWindows.values.compactMap {
+            parseWindowTitleNumber($0.title)
+        }.max() ?? 0
+        nextWindowTitleNumber = max(largestWindowTitleNumber, newWindows.count)
 
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
     }
 
     var paneCount: Int { panes.count }
+    var windowCount: Int { windows.count }
+    var orderedWindows: [WorkspaceWindowState] { sortedWindows() }
 
     // MARK: - Private Helpers
 
@@ -526,11 +665,22 @@ final class AgentManager: @unchecked Sendable {
     }
 
     private func parseIdNumber(_ id: String) -> Int? {
-        let pattern = /^(?:pane|tab)-(\d+)$/
+        let pattern = /^(?:window|pane|tab)-(\d+)$/
         guard let match = id.firstMatch(of: pattern),
               let num = Int(match.1)
         else { return nil }
         return num
+    }
+
+    private func sortedWindows() -> [WorkspaceWindowState] {
+        windows.values.sorted { lhs, rhs in
+            (parseIdNumber(lhs.id) ?? Int.max) < (parseIdNumber(rhs.id) ?? Int.max)
+        }
+    }
+
+    private func parseWindowTitleNumber(_ title: String) -> Int? {
+        guard title.hasPrefix("Window ") else { return nil }
+        return Int(title.dropFirst("Window ".count))
     }
 
     private func createPaneTab(
