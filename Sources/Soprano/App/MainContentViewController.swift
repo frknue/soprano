@@ -13,6 +13,11 @@ final class MainContentViewController: NSViewController {
     private var splitTreeView: SplitTreeView!
     private var statusBarView: StatusBarView!
     private var sidebarWidthConstraint: NSLayoutConstraint!
+    private var settingsContainerView: NSView!
+    private var settingsHeaderView: NSView!
+    private var settingsTitleLabel: NSTextField!
+    private var settingsCloseButton: NSButton!
+    private var settingsViewController: SettingsViewController?
 
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
 
@@ -89,6 +94,8 @@ final class MainContentViewController: NSViewController {
             statusBarView.heightAnchor.constraint(equalToConstant: 28),
         ])
 
+        buildSettingsScreen(in: root, below: safeArea.topAnchor)
+
         self.view = root
         applyTheme()
     }
@@ -114,6 +121,50 @@ final class MainContentViewController: NSViewController {
         sidebarView.setControlKeyHeld(isHeld)
     }
 
+    func showSettings(
+        settings: AppSettings,
+        keybindingConfig: KeyBindingConfig,
+        onSettingsChanged: @escaping (AppSettings) -> Void,
+        onKeybindingConfigChanged: @escaping (KeyBindingConfig) -> Void
+    ) {
+        let settingsViewController: SettingsViewController
+        if let existingController = self.settingsViewController {
+            settingsViewController = existingController
+        } else {
+            let controller = SettingsViewController(
+                themeManager: themeManager,
+                settings: settings,
+                keybindingConfig: keybindingConfig
+            )
+            addChild(controller)
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            settingsContainerView.addSubview(controller.view)
+            NSLayoutConstraint.activate([
+                controller.view.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
+                controller.view.topAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: settingsContainerView.bottomAnchor),
+            ])
+            self.settingsViewController = controller
+            settingsViewController = controller
+        }
+
+        settingsViewController.onSettingsChanged = onSettingsChanged
+        settingsViewController.onKeybindingConfigChanged = onKeybindingConfigChanged
+        settingsViewController.apply(theme: themeManager.currentTheme)
+
+        splitTreeView.isHidden = true
+        settingsContainerView.isHidden = false
+        view.window?.makeFirstResponder(settingsCloseButton)
+    }
+
+    func closeSettings() {
+        guard !settingsContainerView.isHidden else { return }
+        settingsContainerView.isHidden = true
+        splitTreeView.isHidden = false
+        splitTreeView.restoreKeyboardFocus()
+    }
+
     func refreshTheme() {
         applyTheme()
         sidebarView.refreshTheme()
@@ -124,6 +175,68 @@ final class MainContentViewController: NSViewController {
     private func applyTheme() {
         let theme = themeManager.currentTheme
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
+        settingsContainerView?.layer?.backgroundColor = theme.colors.bgBase.cgColor
+        settingsHeaderView?.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        settingsTitleLabel?.textColor = theme.colors.textPrimary
+        settingsCloseButton?.contentTintColor = theme.colors.textPrimary
+        settingsViewController?.apply(theme: theme)
+    }
+
+    private func buildSettingsScreen(in root: NSView, below topAnchor: NSLayoutYAxisAnchor) {
+        settingsContainerView = NSView()
+        settingsContainerView.wantsLayer = true
+        settingsContainerView.isHidden = true
+        settingsContainerView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(settingsContainerView, positioned: .above, relativeTo: nil)
+
+        settingsHeaderView = NSView()
+        settingsHeaderView.wantsLayer = true
+        settingsHeaderView.translatesAutoresizingMaskIntoConstraints = false
+        settingsContainerView.addSubview(settingsHeaderView)
+
+        settingsTitleLabel = NSTextField(labelWithString: "Settings")
+        settingsTitleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        settingsTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        settingsHeaderView.addSubview(settingsTitleLabel)
+
+        settingsCloseButton = NSButton(title: "Done", target: self, action: #selector(settingsCloseClicked))
+        settingsCloseButton.bezelStyle = .rounded
+        settingsCloseButton.keyEquivalent = "\u{1b}"
+        settingsCloseButton.keyEquivalentModifierMask = []
+        settingsCloseButton.toolTip = "Return to the workspace (Esc)"
+        settingsCloseButton.translatesAutoresizingMaskIntoConstraints = false
+        settingsHeaderView.addSubview(settingsCloseButton)
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        settingsHeaderView.addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            settingsContainerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            settingsContainerView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            settingsContainerView.topAnchor.constraint(equalTo: topAnchor),
+            settingsContainerView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            settingsHeaderView.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
+            settingsHeaderView.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
+            settingsHeaderView.topAnchor.constraint(equalTo: settingsContainerView.topAnchor),
+            settingsHeaderView.heightAnchor.constraint(equalToConstant: 52),
+
+            settingsTitleLabel.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor, constant: 20),
+            settingsTitleLabel.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
+
+            settingsCloseButton.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor, constant: -20),
+            settingsCloseButton.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
+        ])
+    }
+
+    @objc private func settingsCloseClicked() {
+        closeSettings()
     }
 }
 

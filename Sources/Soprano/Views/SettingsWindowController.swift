@@ -1,114 +1,5 @@
 import AppKit
 
-final class SettingsWindowController: NSWindowController {
-    private let themeManager: ThemeManager
-    private let contentVC: SettingsViewController
-
-    private(set) var settings: AppSettings
-    private(set) var keybindingConfig: KeyBindingConfig
-
-    var onSettingsChanged: ((AppSettings) -> Void)?
-    var onKeybindingConfigChanged: ((KeyBindingConfig) -> Void)?
-
-    init(
-        themeManager: ThemeManager,
-        settings: AppSettings,
-        keybindingConfig: KeyBindingConfig
-    ) {
-        self.themeManager = themeManager
-        self.settings = settings
-        self.keybindingConfig = keybindingConfig
-
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 560),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Settings"
-        window.minSize = NSSize(width: 700, height: 500)
-        window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: .darkAqua)
-        if !window.setFrameUsingName("SopranoSettingsWindow") {
-            window.center()
-        }
-        window.setFrameAutosaveName("SopranoSettingsWindow")
-
-        contentVC = SettingsViewController(
-            themeManager: themeManager,
-            settings: settings,
-            keybindingConfig: keybindingConfig
-        )
-
-        super.init(window: window)
-
-        window.contentViewController = contentVC
-        contentVC.onSettingsChanged = { [weak self] nextSettings in
-            guard let self else { return }
-            self.settings = nextSettings
-            self.onSettingsChanged?(nextSettings)
-            self.applyTheme()
-        }
-        contentVC.onKeybindingConfigChanged = { [weak self] nextConfig in
-            guard let self else { return }
-            self.keybindingConfig = nextConfig
-            self.onKeybindingConfigChanged?(nextConfig)
-        }
-
-        applyTheme()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func showSettingsWindow(relativeTo parentWindow: NSWindow?) {
-        guard let window else { return }
-        applyTheme()
-        if !window.isVisible {
-            positionWindow(window, relativeTo: parentWindow)
-        }
-        showWindow(nil)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    private func applyTheme() {
-        guard let window else { return }
-        let theme = themeManager.currentTheme
-        window.backgroundColor = theme.colors.bgBase
-        window.appearance = NSAppearance(named: .darkAqua)
-        contentVC.apply(theme: theme)
-    }
-
-    private func positionWindow(_ window: NSWindow, relativeTo parentWindow: NSWindow?) {
-        let referenceFrame = parentWindow?.screen?.visibleFrame
-            ?? parentWindow?.frame
-            ?? NSScreen.main?.visibleFrame
-
-        guard let referenceFrame else {
-            window.center()
-            return
-        }
-
-        var frame = window.frame
-        frame.size.width = min(frame.width, referenceFrame.width)
-        frame.size.height = min(frame.height, referenceFrame.height)
-
-        frame.origin.x = min(max(frame.origin.x, referenceFrame.minX), referenceFrame.maxX - frame.width)
-        frame.origin.y = min(max(frame.origin.y, referenceFrame.minY), referenceFrame.maxY - frame.height)
-
-        if !referenceFrame.contains(frame) {
-            frame.origin.x = referenceFrame.midX - frame.width / 2
-            frame.origin.y = referenceFrame.midY - frame.height / 2
-        }
-
-        window.setFrame(frame, display: false)
-    }
-}
-
 private enum SettingsTab: Int, CaseIterable {
     case general
     case keyboardShortcuts
@@ -359,6 +250,14 @@ final class SettingsViewController: NSViewController {
         case .about:
             buildAboutTab()
         }
+
+        // Keep settings cards at their natural height when the window is taller
+        // than the content. This spacer absorbs the remaining viewport space.
+        let flexibleSpace = NSView()
+        flexibleSpace.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(flexibleSpace)
+        flexibleSpace.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+
         view.layoutSubtreeIfNeeded()
         scrollView.contentView.scroll(to: .zero)
         scrollView.reflectScrolledClipView(scrollView.contentView)
