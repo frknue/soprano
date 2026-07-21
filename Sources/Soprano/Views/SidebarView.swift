@@ -1,6 +1,6 @@
 import AppKit
 
-/// cmux-style persistent sidebar: PANES header, rich pane rows, footer.
+/// Persistent sidebar showing collapsible logical windows and their panes.
 final class SidebarView: NSView {
     let agentManager: AgentManager
     let sessionManager: SessionManager
@@ -22,6 +22,7 @@ final class SidebarView: NSView {
     private var settingsButton: NSButton!
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
+    private var collapsedWindowIds: Set<String> = []
 
     init(
         agentManager: AgentManager,
@@ -70,14 +71,14 @@ final class SidebarView: NSView {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
 
-        headerLabel = NSTextField(labelWithString: "PANES")
+        headerLabel = NSTextField(labelWithString: "WINDOWS")
         headerLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(headerLabel)
 
         plusButton = makeIconButton(
             symbolName: "plus",
-            accessibilityLabel: "New Pane",
+            accessibilityLabel: "New Window or Pane",
             action: #selector(plusClicked)
         )
         contentContainer.addSubview(plusButton)
@@ -210,9 +211,17 @@ final class SidebarView: NSView {
 
     @objc private func plusClicked() {
         let menu = NSMenu()
+        let windowItem = NSMenuItem(
+            title: "New Window",
+            action: #selector(newWindowClicked),
+            keyEquivalent: ""
+        )
+        windowItem.target = self
+        menu.addItem(windowItem)
+        menu.addItem(.separator())
         for profile in DefaultAgents.all where profile.id != "terminal" {
             let item = NSMenuItem(
-                title: profile.name,
+                title: "New \(profile.name) Pane",
                 action: #selector(spawnMenuItemClicked(_:)),
                 keyEquivalent: ""
             )
@@ -222,7 +231,7 @@ final class SidebarView: NSView {
         }
         menu.addItem(.separator())
         let terminalItem = NSMenuItem(
-            title: "Terminal",
+            title: "New Terminal Pane",
             action: #selector(spawnMenuItemClicked(_:)),
             keyEquivalent: ""
         )
@@ -230,6 +239,10 @@ final class SidebarView: NSView {
         terminalItem.representedObject = "terminal"
         menu.addItem(terminalItem)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: plusButton)
+    }
+
+    @objc private func newWindowClicked() {
+        _ = agentManager.createWindow()
     }
 
     @objc private func spawnMenuItemClicked(_ sender: NSMenuItem) {
@@ -313,23 +326,59 @@ final class SidebarView: NSView {
             rowsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        for pane in sortedPanes() {
-            let row = SidebarPaneRowView(theme: theme)
-            row.configure(
-                title: pane.activeTab?.title ?? "Pane",
-                branch: branchForPane(pane),
-                dotColor: paneStatusColor(for: pane, theme: theme),
-                tabCount: pane.tabs.count,
-                highlighted: pane.id == agentManager.activePaneId,
+        for terminalWindow in agentManager.orderedWindows {
+            let isExpanded = !collapsedWindowIds.contains(terminalWindow.id)
+            let windowRow = SidebarWindowRowView(theme: theme)
+            windowRow.configure(
+                title: terminalWindow.title,
+                paneCount: terminalWindow.paneIds.count,
+                expanded: isExpanded,
+                highlighted: terminalWindow.id == agentManager.activeWindowId,
+                onToggle: { [weak self] in
+                    guard let self else { return }
+                    if self.collapsedWindowIds.contains(terminalWindow.id) {
+                        self.collapsedWindowIds.remove(terminalWindow.id)
+                    } else {
+                        self.collapsedWindowIds.insert(terminalWindow.id)
+                    }
+                    self.refresh()
+                },
                 onSelect: { [weak self] in
-                    self?.agentManager.focusPane(pane.id)
+                    self?.agentManager.activateWindow(terminalWindow.id)
                 },
                 onClose: { [weak self] in
-                    self?.agentManager.closePane(pane.id)
+                    self?.collapsedWindowIds.remove(terminalWindow.id)
+                    self?.agentManager.closeWindow(terminalWindow.id)
                 }
             )
-            rowsStack.addArrangedSubview(row)
-            row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor, constant: -20).isActive = true
+            rowsStack.addArrangedSubview(windowRow)
+            windowRow.widthAnchor.constraint(
+                equalTo: rowsStack.widthAnchor,
+                constant: -20
+            ).isActive = true
+
+            guard isExpanded else { continue }
+            for pane in sortedPanes(in: terminalWindow) {
+                let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
+                row.configure(
+                    title: pane.activeTab?.title ?? "Pane",
+                    branch: branchForPane(pane),
+                    dotColor: paneStatusColor(for: pane, theme: theme),
+                    tabCount: pane.tabs.count,
+                    highlighted: pane.id == agentManager.activePaneId,
+                    onSelect: { [weak self] in
+                        self?.agentManager.focusPane(pane.id)
+                    },
+                    onClose: { [weak self] in
+                        self?.agentManager.closePane(pane.id)
+                    }
+                )
+                rowsStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(
+                    equalTo: rowsStack.widthAnchor,
+                    constant: -20
+                ).isActive = true
+            }
         }
     }
 
@@ -387,8 +436,8 @@ final class SidebarView: NSView {
         }
     }
 
-    private func sortedPanes() -> [PaneState] {
-        agentManager.panes.values.sorted { lhs, rhs in
+    private func sortedPanes(in terminalWindow: WorkspaceWindowState) -> [PaneState] {
+        terminalWindow.paneIds.compactMap { agentManager.panes[$0] }.sorted { lhs, rhs in
             paneSortKey(lhs.id) < paneSortKey(rhs.id)
         }
     }
@@ -399,6 +448,141 @@ final class SidebarView: NSView {
             return number
         }
         return Int.max
+    }
+}
+
+// MARK: - Window Row
+
+private final class SidebarWindowRowView: NSView {
+    private let disclosureButton = NSButton(title: "", target: nil, action: nil)
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let closeButton = NSButton(title: "×", target: nil, action: nil)
+    private var onToggle: (() -> Void)?
+    private var onSelect: (() -> Void)?
+    private var onClose: (() -> Void)?
+    private let theme: AppTheme
+
+    init(theme: AppTheme) {
+        self.theme = theme
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        translatesAutoresizingMaskIntoConstraints = false
+        setup()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    private func setup() {
+        disclosureButton.target = self
+        disclosureButton.action = #selector(handleToggle)
+        disclosureButton.isBordered = false
+        disclosureButton.imagePosition = .imageOnly
+        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(disclosureButton)
+
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        countLabel.alignment = .right
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(countLabel)
+
+        closeButton.target = self
+        closeButton.action = #selector(handleClose)
+        closeButton.isBordered = false
+        closeButton.font = .systemFont(ofSize: 14, weight: .regular)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 24),
+            disclosureButton.heightAnchor.constraint(equalToConstant: 24),
+
+            titleLabel.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 2),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: countLabel.leadingAnchor, constant: -6),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 24),
+            closeButton.heightAnchor.constraint(equalToConstant: 24),
+
+            countLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    func configure(
+        title: String,
+        paneCount: Int,
+        expanded: Bool,
+        highlighted: Bool,
+        onToggle: @escaping () -> Void,
+        onSelect: @escaping () -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.onToggle = onToggle
+        self.onSelect = onSelect
+        self.onClose = onClose
+        titleLabel.stringValue = title
+        countLabel.stringValue = "\(paneCount)"
+        let symbolName = expanded ? "chevron.down" : "chevron.right"
+        disclosureButton.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: expanded ? "Collapse Window" : "Expand Window"
+        )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+        titleLabel.textColor = highlighted ? theme.colors.textPrimary : theme.colors.textMuted
+        countLabel.textColor = theme.colors.textMuted
+        disclosureButton.contentTintColor = theme.colors.textMuted
+        closeButton.contentTintColor = highlighted
+            ? theme.colors.textPrimary
+            : theme.colors.textMuted
+        layer?.backgroundColor = highlighted
+            ? theme.colors.bgRaised.cgColor
+            : NSColor.clear.cgColor
+    }
+
+    @objc private func handleToggle() {
+        onToggle?()
+    }
+
+    @objc private func handleClose() {
+        onClose?()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if isInteractiveSubview(hitTest(point)) {
+            super.mouseDown(with: event)
+            return
+        }
+        if event.clickCount == 2 {
+            onToggle?()
+        } else {
+            onSelect?()
+        }
+    }
+
+    private func isInteractiveSubview(_ view: NSView?) -> Bool {
+        var current = view
+        while let candidate = current, candidate !== self {
+            if candidate is NSControl {
+                return true
+            }
+            current = candidate.superview
+        }
+        return false
     }
 }
 
@@ -416,9 +600,11 @@ private final class SidebarPaneRowView: NSView {
     private var onSelect: (() -> Void)?
     private var onClose: (() -> Void)?
     private let theme: AppTheme
+    private let hierarchyIndent: CGFloat
 
-    init(theme: AppTheme) {
+    init(theme: AppTheme, hierarchyIndent: CGFloat = 0) {
         self.theme = theme
+        self.hierarchyIndent = hierarchyIndent
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -480,7 +666,7 @@ private final class SidebarPaneRowView: NSView {
         ]
 
         NSLayoutConstraint.activate([
-            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            dotView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8 + hierarchyIndent),
             dotView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             dotView.widthAnchor.constraint(equalToConstant: 6),
             dotView.heightAnchor.constraint(equalToConstant: 6),

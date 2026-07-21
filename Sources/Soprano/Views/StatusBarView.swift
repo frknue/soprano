@@ -19,6 +19,7 @@ final class StatusBarView: NSView {
         agentManager.addObserver(id: "StatusBarView") { [weak self] in
             self?.refresh()
         }
+        refresh()
     }
 
     @available(*, unavailable)
@@ -89,8 +90,11 @@ final class StatusBarView: NSView {
 
     private func refresh() {
         let theme = themeManager.currentTheme
-        let count = agentManager.paneCount
-        let base = "\(count) pane\(count == 1 ? "" : "s")"
+        let paneCount = agentManager.paneCount
+        let windowCount = agentManager.windowCount
+        let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
+        let windows = "\(windowCount) window\(windowCount == 1 ? "" : "s")"
+        let base = "\(windows) · \(panes)"
         if agentManager.maximizedPaneId != nil {
             paneCountLabel.stringValue = "\(base) · MAXIMIZED"
             paneCountLabel.textColor = theme.colors.accent

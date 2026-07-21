@@ -45,7 +45,7 @@ final class MainContentViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
+        let root = MainContentRootView(frame: .zero)
         root.wantsLayer = true
         let safeArea = root.safeAreaLayoutGuide
 
@@ -222,5 +222,35 @@ final class MainContentViewController: NSViewController {
         settingsHeaderView.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         settingsTitleLabel.textColor = theme.colors.textPrimary
         settingsViewController?.apply(theme: theme)
+    }
+}
+
+/// Restores native title-bar interactions for the portion of a full-size content
+/// view that sits above the safe area. The visible application content covers the
+/// rest of this view, so these interactions are limited to the empty title bar.
+private final class MainContentRootView: NSView {
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            window?.performZoom(nil)
+            return
+        }
+
+        if event.clickCount == 1, let window {
+            window.performDrag(with: event)
+            return
+        }
+
+        super.mouseDown(with: event)
     }
 }

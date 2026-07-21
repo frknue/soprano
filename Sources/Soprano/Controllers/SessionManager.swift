@@ -24,7 +24,9 @@ final class SessionManager: @unchecked Sendable {
             savedAt: Date(),
             layout: session.layout,
             panes: session.panes,
-            activePaneId: session.activePaneId
+            activePaneId: session.activePaneId,
+            windows: session.windows,
+            activeWindowId: session.activeWindowId
         )
 
         sessions.insert(namedSession, at: 0)

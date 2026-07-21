@@ -188,6 +188,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingOpenCommandPalette() }
         case "open-project":
             invokeDelegate { $0.keybindingOpenProjectSearch() }
+        case "new-window":
+            _ = agentManager.createWindow()
         case "new-terminal":
             _ = agentManager.spawnTerminal()
         case "close-active":

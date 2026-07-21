@@ -8,6 +8,15 @@ struct WorkspaceSession: Identifiable, Codable {
     var layout: SplitNode?
     var panes: [SavedPane]
     var activePaneId: String
+    var windows: [SavedWindow]? = nil
+    var activeWindowId: String? = nil
+
+    struct SavedWindow: Codable {
+        let id: String
+        var title: String
+        var layout: SplitNode?
+        var activePaneId: String
+    }
 
     struct SavedPane: Codable {
         let id: String
