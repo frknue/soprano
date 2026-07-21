@@ -94,10 +94,20 @@ final class StatusBarView: NSView {
         let windowCount = agentManager.windowCount
         let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
         let windows = "\(windowCount) window\(windowCount == 1 ? "" : "s")"
-        let base = "\(windows) · \(panes)"
+        var components = [windows, panes]
+        if agentManager.readyAgentCount > 0 {
+            components.append("\(agentManager.readyAgentCount) READY")
+        }
+        if agentManager.attentionCount > 0 {
+            components.append("\(agentManager.attentionCount) NEEDS ATTENTION")
+        }
+        let base = components.joined(separator: " · ")
         if agentManager.maximizedPaneId != nil {
             paneCountLabel.stringValue = "\(base) · MAXIMIZED"
             paneCountLabel.textColor = theme.colors.accent
+        } else if agentManager.attentionCount > 0 {
+            paneCountLabel.stringValue = base
+            paneCountLabel.textColor = theme.colors.blue
         } else {
             paneCountLabel.stringValue = base
             paneCountLabel.textColor = theme.colors.textMuted

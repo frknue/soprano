@@ -17,6 +17,7 @@ let package = Package(
             path: "Sources/Soprano",
             resources: [
                 .copy("Resources/AppIcon.icns"),
+                .copy("Resources/SopranoOpenCodePlugin.js"),
             ],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/lib"]),
@@ -30,6 +31,7 @@ let package = Package(
                 .linkedFramework("CoreText"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreFoundation"),
+                .linkedFramework("UserNotifications"),
             ]
         ),
     ]

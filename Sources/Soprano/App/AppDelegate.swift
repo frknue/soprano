@@ -2,6 +2,7 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
+    private var agentNotificationManager: AgentNotificationManager?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -15,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = AppSettings.load()
         let themeManager = ThemeManager(themeId: settings.themeId)
         let agentManager = AgentManager()
+        let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
         let sessionManager = SessionManager(agentManager: agentManager)
         let gitBranchMonitor = GitBranchMonitor()
 
@@ -32,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         mainWindowController = controller
+        self.agentNotificationManager = agentNotificationManager
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

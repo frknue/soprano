@@ -12,37 +12,166 @@ struct TerminalConfig {
 
     static let defaultShell = TerminalConfig()
 
-    static func forAgent(_ profile: AgentProfile, cwd: String? = nil) -> TerminalConfig {
+    static func forAgent(
+        _ profile: AgentProfile,
+        cwd: String? = nil,
+        paneId: String,
+        tabId: String
+    ) -> TerminalConfig {
         var config = TerminalConfig()
         config.workingDirectory = cwd ?? profile.cwd
         config.waitAfterCommand = true
+        config.env = profile.env ?? [:]
+
+        let executable = Bundle.main.executableURL?.path
+            ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
+        config.env["SOPRANO_BIN"] = executable
+        config.env["SOPRANO_PANE_ID"] = paneId
+        config.env["SOPRANO_TAB_ID"] = tabId
+        config.env["SOPRANO_AGENT_PROFILE"] = profile.id
+        config.env["SOPRANO_AGENT_NAME"] = profile.name
+        config.env["TERM_PROGRAM"] = "Soprano"
+
+        var arguments = profile.args
+        switch profile.id {
+        case "codex":
+            arguments.append(contentsOf: codexIntegrationArguments(executable: executable))
+        case "claude-code":
+            if let settings = claudeIntegrationSettings() {
+                arguments.append(contentsOf: ["--settings", settings])
+            }
+        case "opencode":
+            if let pluginURL = Bundle.module.url(
+                forResource: "SopranoOpenCodePlugin",
+                withExtension: "js"
+            ), let configContent = openCodeConfigContent(pluginURL: pluginURL) {
+                config.env["OPENCODE_CONFIG_CONTENT"] = configContent
+            }
+        default:
+            break
+        }
 
         if let launchScript = profile.launchScript, !launchScript.isEmpty {
             config.launchScript = launchScript
             config.command = nil
         } else {
-            let fullCommand = ([profile.command] + profile.args).joined(separator: " ")
+            let fullCommand = ([profile.command] + arguments)
+                .map(shellQuoted)
+                .joined(separator: " ")
             config.command = fullCommand.isEmpty ? nil : fullCommand
         }
-
-        config.env = profile.env ?? [:]
         return config
+    }
+
+    private static func codexIntegrationArguments(executable: String) -> [String] {
+        let notifyCommand = [
+            executable,
+            "agent-event",
+            "ready",
+            "--notify",
+            "--title",
+            "Codex",
+            "--body",
+            "Ready for a prompt",
+        ]
+        let notifyValue = notifyCommand.map(tomlQuoted).joined(separator: ",")
+        return [
+            "-c", "notify=[\(notifyValue)]",
+            "-c", "tui.notifications=[\"approval-requested\"]",
+            "-c", "tui.notification_method=\"osc9\"",
+            "-c", "tui.notification_condition=\"always\"",
+        ]
+    }
+
+    private static func claudeIntegrationSettings() -> String? {
+        func command(_ state: String, notify: Bool = false, body: String? = nil) -> String {
+            var value = "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event \(state)"
+            if notify {
+                value += " --notify --title \"Claude Code\""
+            }
+            if let body {
+                value += " --body \"\(body)\""
+            }
+            return value
+        }
+
+        func hook(_ command: String) -> [[String: Any]] {
+            [["hooks": [["type": "command", "command": command, "timeout": 5]]]]
+        }
+
+        let settings: [String: Any] = [
+            "hooks": [
+                "SessionStart": hook(command("ready")),
+                "UserPromptSubmit": hook(command("running")),
+                "Stop": hook(command("ready", notify: true, body: "Ready for a prompt")),
+                "Notification": [[
+                    "matcher": "permission_prompt|elicitation_dialog",
+                    "hooks": [[
+                        "type": "command",
+                        "command": command(
+                            "needs-input",
+                            notify: true,
+                            body: "Approval or input required"
+                        ),
+                        "timeout": 5,
+                    ]],
+                ]],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: settings) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func openCodeConfigContent(pluginURL: URL) -> String? {
+        let inherited = ProcessInfo.processInfo.environment["OPENCODE_CONFIG_CONTENT"]
+        var content: [String: Any] = [:]
+
+        if let inherited, !inherited.isEmpty {
+            guard let data = inherited.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data),
+                  let dictionary = object as? [String: Any]
+            else { return nil }
+            content = dictionary
+        }
+
+        var plugins = content["plugin"] as? [String] ?? []
+        if !plugins.contains(pluginURL.absoluteString) {
+            plugins.append(pluginURL.absoluteString)
+        }
+        content["plugin"] = plugins
+
+        guard let data = try? JSONSerialization.data(withJSONObject: content) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func tomlQuoted(_ value: String) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let encoded = String(data: data, encoding: .utf8)
+        else { return "\"\"" }
+        return encoded
     }
 }
 
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
+    let tabId: String
     var onFocusRequested: (() -> Void)?
     var onTitleChanged: ((String) -> Void)?
+    var onAgentInputSubmitted: (() -> Void)?
     private let config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
 
-    init(paneId: String, config: TerminalConfig = .defaultShell) {
+    init(paneId: String, tabId: String, config: TerminalConfig = .defaultShell) {
         self.paneId = paneId
+        self.tabId = tabId
         self.config = config
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         setup()
@@ -156,6 +285,19 @@ final class TerminalSurfaceView: NSView {
         onTitleChanged?(title)
     }
 
+    func terminalDesktopNotification(title: String, body: String) {
+        NotificationCenter.default.post(
+            name: .ghosttyDesktopNotification,
+            object: self,
+            userInfo: [
+                "paneId": paneId,
+                "tabId": tabId,
+                "title": title,
+                "body": body,
+            ]
+        )
+    }
+
     private func withOptionalCString<Result>(
         _ value: String?,
         _ body: (UnsafePointer<CChar>?) -> Result
@@ -172,6 +314,11 @@ final class TerminalSurfaceView: NSView {
         let result = super.becomeFirstResponder()
         if result, let surface {
             ghostty_surface_set_focus(surface, true)
+            NotificationCenter.default.post(
+                name: .ghosttyDidFocusSurface,
+                object: self,
+                userInfo: ["paneId": paneId, "tabId": tabId]
+            )
         }
         return result
     }
@@ -285,6 +432,11 @@ final class TerminalSurfaceView: NSView {
             translationEvent: translationEvent,
             text: text
         )
+
+        if (event.keyCode == 36 || event.keyCode == 76),
+           !event.modifierFlags.contains(.shift) {
+            onAgentInputSubmitted?()
+        }
     }
 
     override func keyUp(with event: NSEvent) {

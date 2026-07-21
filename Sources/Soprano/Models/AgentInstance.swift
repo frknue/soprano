@@ -8,6 +8,7 @@ final class AgentInstance: Identifiable {
     var startedAt: Date?
     var exitCode: Int32?
     var restartCount: Int
+    var needsAttention: Bool
 
     init(id: String, profileId: String) {
         self.id = id
@@ -16,6 +17,7 @@ final class AgentInstance: Identifiable {
         self.startedAt = Date()
         self.exitCode = nil
         self.restartCount = 0
+        self.needsAttention = false
     }
 }
 
@@ -23,6 +25,7 @@ enum AgentStatus: String, Codable {
     case idle
     case starting
     case running
+    case waiting
     case error
     case stopped
 }
