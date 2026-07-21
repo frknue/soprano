@@ -59,6 +59,7 @@ final class AgentManager: @unchecked Sendable {
             else { return }
 
             agent.status = .stopped
+            agent.needsAttention = false
             self.notifyChange()
         }
     }
@@ -283,11 +284,16 @@ final class AgentManager: @unchecked Sendable {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return }
-        if activeWindowId == terminalWindow.id, activePaneId == paneId { return }
+        if activeWindowId == terminalWindow.id, activePaneId == paneId {
+            guard clearAttentionWithoutNotification(paneId: paneId) else { return }
+            notifyChange()
+            return
+        }
         exitMaximize()
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
         notifyChange(layoutChanged: windowChanged)
     }
 
@@ -390,6 +396,7 @@ final class AgentManager: @unchecked Sendable {
         else { return }
 
         agent.status = .starting
+        agent.needsAttention = false
         agent.exitCode = nil
         agent.startedAt = Date()
         agent.restartCount += 1
@@ -404,23 +411,69 @@ final class AgentManager: @unchecked Sendable {
         else { return }
 
         agent.status = .stopped
+        agent.needsAttention = false
         notifyChange()
     }
 
     func updateAgentStatus(paneId: String, status: AgentStatus) {
-        guard let pane = panes[paneId],
-              let tab = pane.activeTab,
-              tab.type == .agent,
-              let agent = tab.agent,
-              agent.status != .stopped,
-              agent.status != status
+        guard let tabId = panes[paneId]?.activeTab?.id else { return }
+        updateAgentStatus(paneId: paneId, tabId: tabId, status: status)
+    }
+
+    func updateAgentStatus(
+        paneId: String,
+        tabId: String,
+        status: AgentStatus,
+        needsAttention: Bool? = nil
+    ) {
+        guard let agent = agent(paneId: paneId, tabId: tabId),
+              agent.status != .stopped
         else { return }
 
+        let attentionChanged = needsAttention.map { agent.needsAttention != $0 } ?? false
+        guard agent.status != status || attentionChanged else { return }
+
         agent.status = status
+        if let needsAttention {
+            agent.needsAttention = needsAttention
+        }
         if status == .starting {
             agent.startedAt = Date()
         }
         notifyChange()
+    }
+
+    func agent(paneId: String, tabId: String) -> AgentInstance? {
+        panes[paneId]?.tabs.first(where: { $0.id == tabId })?.agent
+    }
+
+    func focusTab(paneId: String, tabId: String) {
+        guard let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId })
+        else { return }
+        switchTab(paneId, index: index)
+        clearAttention(paneId: paneId, tabId: tabId)
+    }
+
+    func clearAttention(paneId: String, tabId: String) {
+        guard let agent = agent(paneId: paneId, tabId: tabId), agent.needsAttention else { return }
+        agent.needsAttention = false
+        notifyChange()
+    }
+
+    func markAgentReadyIfStarting(paneId: String, tabId: String) {
+        guard let agent = agent(paneId: paneId, tabId: tabId), agent.status == .starting else { return }
+        agent.status = .idle
+        notifyChange()
+    }
+
+    private func clearAttentionWithoutNotification(paneId: String) -> Bool {
+        guard let tab = panes[paneId]?.activeTab,
+              let agent = tab.agent,
+              agent.needsAttention
+        else { return false }
+        agent.needsAttention = false
+        return true
     }
 
     // MARK: - Tabs
@@ -480,6 +533,7 @@ final class AgentManager: @unchecked Sendable {
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
         notifyChange(layoutChanged: windowChanged)
     }
 
@@ -492,6 +546,7 @@ final class AgentManager: @unchecked Sendable {
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
         notifyChange(layoutChanged: windowChanged)
     }
 
@@ -505,6 +560,7 @@ final class AgentManager: @unchecked Sendable {
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
         notifyChange(layoutChanged: windowChanged)
     }
 
@@ -676,6 +732,12 @@ final class AgentManager: @unchecked Sendable {
     var paneCount: Int { panes.count }
     var windowCount: Int { windows.count }
     var orderedWindows: [WorkspaceWindowState] { sortedWindows() }
+    var readyAgentCount: Int {
+        panes.values.flatMap(\.tabs).filter { $0.agent?.status == .idle }.count
+    }
+    var attentionCount: Int {
+        panes.values.flatMap(\.tabs).filter { $0.agent?.needsAttention == true }.count
+    }
 
     // MARK: - Private Helpers
 

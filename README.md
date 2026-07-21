@@ -2,6 +2,22 @@
 
 Native macOS tiling terminal multiplexer for AI coding agents. Built with Swift + AppKit + [libghostty](https://github.com/ghostty-org/ghostty).
 
+## Agent notifications
+
+Agents launched from Soprano report their lifecycle without changing your global
+configuration:
+
+- Codex uses its external turn notifier plus OSC approval notifications.
+- Claude Code receives launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`,
+  and permission hooks.
+- OpenCode receives a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
+
+When a background agent finishes, macOS shows a notification and the pane gets a
+blue unread ring. The pane header and status bar expose `STARTING`, `WORKING`,
+`READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED` states. Focusing the relevant tab
+clears its unread marker. macOS asks for notification permission the first time
+an agent needs attention.
+
 ## Prerequisites
 
 - macOS 14+ (Sonoma)

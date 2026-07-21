@@ -3,6 +3,8 @@ import GhosttyKit
 
 extension Notification.Name {
     static let ghosttyCloseSurface = Notification.Name("GhosttyCloseSurface")
+    static let ghosttyDesktopNotification = Notification.Name("GhosttyDesktopNotification")
+    static let ghosttyDidFocusSurface = Notification.Name("GhosttyDidFocusSurface")
 }
 
 @MainActor
@@ -131,22 +133,41 @@ private func ghosttyAction(
     _ target: ghostty_target_s,
     _ action: ghostty_action_s
 ) -> Bool {
-    guard action.tag == GHOSTTY_ACTION_SET_TITLE,
-          target.tag == GHOSTTY_TARGET_SURFACE,
+    guard target.tag == GHOSTTY_TARGET_SURFACE,
           let surface = target.target.surface,
-          let userdata = ghostty_surface_userdata(surface),
-          let titlePointer = action.action.set_title.title,
-          let title = String(validatingCString: titlePointer)
+          let userdata = ghostty_surface_userdata(surface)
     else { return false }
 
     nonisolated(unsafe) let ud = userdata
-    MainActor.assumeIsolated {
-        let surfaceView = Unmanaged<TerminalSurfaceView>
+    let surfaceView = MainActor.assumeIsolated {
+        Unmanaged<TerminalSurfaceView>
             .fromOpaque(ud)
             .takeUnretainedValue()
-        surfaceView.terminalTitleDidChange(title)
     }
-    return true
+
+    switch action.tag {
+    case GHOSTTY_ACTION_SET_TITLE:
+        guard let titlePointer = action.action.set_title.title,
+              let title = String(validatingCString: titlePointer)
+        else { return true }
+        MainActor.assumeIsolated {
+            surfaceView.terminalTitleDidChange(title)
+        }
+        return true
+
+    case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+        let title = action.action.desktop_notification.title
+            .flatMap { String(validatingCString: $0) } ?? ""
+        let body = action.action.desktop_notification.body
+            .flatMap { String(validatingCString: $0) } ?? ""
+        MainActor.assumeIsolated {
+            surfaceView.terminalDesktopNotification(title: title, body: body)
+        }
+        return true
+
+    default:
+        return false
+    }
 }
 
 private func ghosttyReadClipboard(

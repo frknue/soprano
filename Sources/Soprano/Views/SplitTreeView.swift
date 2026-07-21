@@ -244,17 +244,42 @@ final class SplitTreeView: NSView {
                let agent = tab.agent,
                let profile = DefaultAgents.profile(for: agent.profileId)
             {
-                terminalConfig = .forAgent(profile, cwd: tab.cwd)
+                terminalConfig = .forAgent(
+                    profile,
+                    cwd: tab.cwd,
+                    paneId: paneId,
+                    tabId: tab.id
+                )
             } else {
                 terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
             }
 
-            let terminalView = TerminalSurfaceView(paneId: paneId, config: terminalConfig)
+            let terminalView = TerminalSurfaceView(
+                paneId: paneId,
+                tabId: tab.id,
+                config: terminalConfig
+            )
             terminalView.onFocusRequested = { [weak self] in
-                self?.agentManager.focusPane(paneId)
+                self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
             }
             terminalView.onTitleChanged = { [weak self] title in
                 self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+            }
+            if tab.agent?.profileId == "codex" {
+                terminalView.onAgentInputSubmitted = { [weak self] in
+                    self?.agentManager.updateAgentStatus(
+                        paneId: paneId,
+                        tabId: tab.id,
+                        status: .running,
+                        needsAttention: false
+                    )
+                }
+                // Codex exposes completion and approval notifications but no
+                // trust-free initial-ready event. Its TUI is normally ready by
+                // this point; later lifecycle events remain authoritative.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                    self?.agentManager.markAgentReadyIfStarting(paneId: paneId, tabId: tab.id)
+                }
             }
             view = terminalView
         }
@@ -430,8 +455,17 @@ final class PaneContainerView: NSView {
     func update() {
         let theme = themeManager.currentTheme
         let isActive = paneId == agentManager.activePaneId
-        layer?.borderWidth = isActive ? 1 : 0
-        layer?.borderColor = isActive ? theme.accentColor.cgColor : nil
+        let needsAttention = agentManager.panes[paneId]?.tabs.contains {
+            $0.agent?.needsAttention == true
+        } ?? false
+        layer?.borderWidth = needsAttention ? 2 : (isActive ? 1 : 0)
+        layer?.borderColor = if needsAttention {
+            theme.colors.blue.cgColor
+        } else if isActive {
+            theme.accentColor.cgColor
+        } else {
+            nil
+        }
         headerView.update()
     }
 

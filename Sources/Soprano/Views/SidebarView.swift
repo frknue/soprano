@@ -341,6 +341,11 @@ final class SidebarView: NSView {
             windowRow.configure(
                 title: terminalWindow.title,
                 paneCount: terminalWindow.paneIds.count,
+                attentionCount: terminalWindow.paneIds.reduce(into: 0) { count, paneId in
+                    count += agentManager.panes[paneId]?.tabs.filter {
+                        $0.agent?.needsAttention == true
+                    }.count ?? 0
+                },
                 shortcutNumber: index < 9 ? index + 1 : nil,
                 showShortcutHint: isControlKeyHeld,
                 expanded: isExpanded,
@@ -449,15 +454,20 @@ final class SidebarView: NSView {
     // MARK: - Status & Sorting
 
     private func paneStatusColor(for pane: PaneState, theme: AppTheme) -> NSColor {
+        if pane.tabs.contains(where: { $0.agent?.needsAttention == true }) {
+            return theme.colors.blue
+        }
         guard let tab = pane.activeTab else { return theme.colors.gray }
         if let agent = tab.agent {
             switch agent.status {
             case .idle:
-                return theme.colors.textMuted
+                return theme.colors.blue
             case .starting:
                 return theme.colors.yellow
             case .running:
                 return theme.colors.success
+            case .waiting:
+                return theme.colors.yellow
             case .error:
                 return theme.colors.danger
             case .stopped:
@@ -501,6 +511,7 @@ private final class SidebarWindowRowView: NSView {
     private var onClose: (() -> Void)?
     private let theme: AppTheme
     private var paneCount = 0
+    private var attentionCount = 0
     private var shortcutNumber: Int?
     private var showShortcutHint = false
 
@@ -567,6 +578,7 @@ private final class SidebarWindowRowView: NSView {
     func configure(
         title: String,
         paneCount: Int,
+        attentionCount: Int,
         shortcutNumber: Int?,
         showShortcutHint: Bool,
         expanded: Bool,
@@ -584,6 +596,7 @@ private final class SidebarWindowRowView: NSView {
         self.onResetTitle = onResetTitle
         self.onClose = onClose
         self.paneCount = paneCount
+        self.attentionCount = attentionCount
         self.shortcutNumber = shortcutNumber
         self.showShortcutHint = showShortcutHint
         titleLabel.stringValue = title
@@ -635,10 +648,15 @@ private final class SidebarWindowRowView: NSView {
             countLabel.textColor = theme.colors.accent
             countLabel.toolTip = shortcutNumber.map { "Ctrl+\($0)" }
         } else {
-            countLabel.stringValue = "\(paneCount)"
+            countLabel.stringValue = attentionCount > 0
+                ? "\(paneCount) · \(attentionCount)!"
+                : "\(paneCount)"
             countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-            countLabel.textColor = theme.colors.textMuted
-            countLabel.toolTip = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
+            countLabel.textColor = attentionCount > 0 ? theme.colors.blue : theme.colors.textMuted
+            let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
+            countLabel.toolTip = attentionCount > 0
+                ? "\(panes), \(attentionCount) agent\(attentionCount == 1 ? "" : "s") ready"
+                : panes
         }
     }
 

@@ -9,6 +9,7 @@ final class PaneHeaderView: NSView {
 
     private var titleLabel: NSTextField!
     private var statusDot: NSView!
+    private var statusLabel: NSTextField!
     private var closeButton: NSButton!
     private var tabStackView: NSStackView!
 
@@ -63,6 +64,12 @@ final class PaneHeaderView: NSView {
         tabStackView.isHidden = true
         addSubview(tabStackView)
 
+        statusLabel = NSTextField(labelWithString: "")
+        statusLabel.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
+        statusLabel.alignment = .right
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
+
         // Close button
         closeButton = NSButton(title: "×", target: self, action: #selector(closePaneAction))
         closeButton.isBordered = false
@@ -79,12 +86,16 @@ final class PaneHeaderView: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -8),
 
             tabStackView.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
             tabStackView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tabStackView.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
+            tabStackView.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
             tabStackView.heightAnchor.constraint(equalToConstant: 24),
+
+            statusLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
 
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -115,8 +126,13 @@ final class PaneHeaderView: NSView {
 
         if let agent = tab?.agent {
             statusDot.layer?.backgroundColor = colorForStatus(agent.status, theme: theme).cgColor
+            statusLabel.stringValue = labelForStatus(agent.status)
+            statusLabel.textColor = colorForStatus(agent.status, theme: theme)
+            statusLabel.isHidden = false
         } else {
             statusDot.layer?.backgroundColor = theme.colors.textMuted.cgColor
+            statusLabel.stringValue = ""
+            statusLabel.isHidden = true
         }
 
         let tabCount = pane?.tabs.count ?? 0
@@ -161,13 +177,24 @@ final class PaneHeaderView: NSView {
 
         let activeIndex = pane.clampedActiveIndex()
         for (index, tab) in pane.tabs.enumerated() {
-            let button = NSButton(title: tab.title, target: self, action: #selector(tabClicked(_:)))
+            let attentionPrefix = tab.agent?.needsAttention == true ? "● " : ""
+            let button = NSButton(
+                title: "\(attentionPrefix)\(tab.title)",
+                target: self,
+                action: #selector(tabClicked(_:))
+            )
             button.tag = index
             button.isBordered = false
             button.font = .systemFont(ofSize: 11, weight: .medium)
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
-            button.contentTintColor = index == activeIndex ? theme.colors.accent : theme.colors.textMuted
+            button.contentTintColor = if tab.agent?.needsAttention == true {
+                theme.colors.blue
+            } else if index == activeIndex {
+                theme.colors.accent
+            } else {
+                theme.colors.textMuted
+            }
             button.translatesAutoresizingMaskIntoConstraints = false
 
             let underline = NSView()
@@ -190,11 +217,23 @@ final class PaneHeaderView: NSView {
 
     private func colorForStatus(_ status: AgentStatus, theme: AppTheme) -> NSColor {
         switch status {
-        case .idle: return theme.colors.textMuted
+        case .idle: return theme.colors.blue
         case .starting: return theme.colors.yellow
         case .running: return theme.colors.success
+        case .waiting: return theme.colors.yellow
         case .error: return theme.colors.danger
         case .stopped: return theme.colors.gray
+        }
+    }
+
+    private func labelForStatus(_ status: AgentStatus) -> String {
+        switch status {
+        case .idle: return "READY"
+        case .starting: return "STARTING"
+        case .running: return "WORKING"
+        case .waiting: return "NEEDS INPUT"
+        case .error: return "ERROR"
+        case .stopped: return "STOPPED"
         }
     }
 
