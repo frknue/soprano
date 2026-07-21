@@ -92,6 +92,12 @@ final class KeybindingManager: @unchecked Sendable {
         }
 
         if let binding = config.bindings.first(where: { matchesDirectBinding($0, key: key, flags: flags) }) {
+            // Let AppKit dispatch standard Command-menu equivalents through
+            // the main menu. This is more reliable than swallowing them in a
+            // local monitor while a terminal surface is first responder.
+            if binding.id == "command-palette" || binding.id == "open-project" {
+                return event
+            }
             executeBinding(binding)
             return nil
         }

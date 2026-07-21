@@ -74,6 +74,7 @@ final class MainWindowController: NSWindowController {
         }
 
         applyTheme()
+        installCommandsMenu()
     }
 
     @available(*, unavailable)
@@ -138,6 +139,20 @@ final class MainWindowController: NSWindowController {
                 shortcut: commandShortcut(for: "next-window"),
                 action: { [weak self] in
                     self?.agentManager.activateNextWindow()
+                }
+            ),
+            CommandItem(
+                id: "open-project",
+                icon: "folder",
+                label: "Open Project…",
+                description: "Search configured projects or choose a directory",
+                shortcut: commandShortcut(for: "open-project"),
+                action: { [weak self] in
+                    // The current palette dismisses after executing an item;
+                    // reopen it in project mode on the next run-loop turn.
+                    DispatchQueue.main.async {
+                        self?.keybindingOpenProjectSearch()
+                    }
                 }
             ),
             CommandItem(
@@ -284,7 +299,16 @@ extension MainWindowController: KeybindingDelegate {
         panel.show(relativeTo: window, commands: commands)
     }
 
-    func keybindingOpenProjectSearch() {}
+    func keybindingOpenProjectSearch() {
+        guard let window else { return }
+
+        let panel = palettePanel()
+        panel.show(
+            relativeTo: window,
+            commands: buildProjectPaletteItems(),
+            placeholder: "Search projects..."
+        )
+    }
 
     func keybindingZoom(delta _: Int) {}
 
@@ -292,6 +316,133 @@ extension MainWindowController: KeybindingDelegate {
 }
 
 private extension MainWindowController {
+    static let commandsMenuIdentifier = NSUserInterfaceItemIdentifier(
+        "SopranoCommandsMenu"
+    )
+
+    struct ProjectEntry {
+        let name: String
+        let path: String
+    }
+
+    func buildProjectPaletteItems() -> [CommandItem] {
+        var projectsByPath: [String: ProjectEntry] = [:]
+        let resourceKeys: Set<URLResourceKey> = [.isDirectoryKey]
+
+        for rootPath in settings.projectDirectories {
+            let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
+            guard let childURLs = try? FileManager.default.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: Array(resourceKeys),
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for childURL in childURLs {
+                guard let values = try? childURL.resourceValues(forKeys: resourceKeys),
+                      values.isDirectory == true
+                else { continue }
+
+                let standardizedURL = childURL.standardizedFileURL
+                projectsByPath[standardizedURL.path] = ProjectEntry(
+                    name: standardizedURL.lastPathComponent,
+                    path: standardizedURL.path
+                )
+            }
+        }
+
+        let projectItems = projectsByPath.values.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder == .orderedSame {
+                return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+            }
+            return nameOrder == .orderedAscending
+        }.map { project in
+            CommandItem(
+                id: "open-project-\(project.path)",
+                icon: "folder",
+                label: project.name,
+                description: project.path,
+                shortcut: nil,
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.spawnTerminal(cwd: project.path)
+                }
+            )
+        }
+
+        let chooseDirectoryItem = CommandItem(
+            id: "choose-project-directory",
+            icon: "folder.badge.plus",
+            label: "Choose Directory…",
+            description: "Open a terminal in any directory",
+            shortcut: nil,
+            action: { [weak self] in
+                DispatchQueue.main.async {
+                    self?.chooseProjectDirectory()
+                }
+            }
+        )
+        return projectItems + [chooseDirectoryItem]
+    }
+
+    func chooseProjectDirectory() {
+        guard let window else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.prompt = "Open"
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let path = panel.url?.path else { return }
+            _ = self?.agentManager.spawnTerminal(cwd: path)
+        }
+    }
+
+    func installCommandsMenu() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+
+        if let existingItem = mainMenu.items.first(where: {
+            $0.identifier == Self.commandsMenuIdentifier
+        }) {
+            mainMenu.removeItem(existingItem)
+        }
+
+        let commandsItem = NSMenuItem(title: "Commands", action: nil, keyEquivalent: "")
+        commandsItem.identifier = Self.commandsMenuIdentifier
+
+        let commandsMenu = NSMenu(title: "Commands")
+        let paletteItem = NSMenuItem(
+            title: "Command Palette…",
+            action: #selector(commandPaletteMenuItemSelected),
+            keyEquivalent: "p"
+        )
+        paletteItem.keyEquivalentModifierMask = [.command]
+        paletteItem.target = self
+        commandsMenu.addItem(paletteItem)
+
+        let projectItem = NSMenuItem(
+            title: "Open Project…",
+            action: #selector(openProjectMenuItemSelected),
+            keyEquivalent: "p"
+        )
+        projectItem.keyEquivalentModifierMask = [.command, .shift]
+        projectItem.target = self
+        commandsMenu.addItem(projectItem)
+
+        commandsItem.submenu = commandsMenu
+        mainMenu.addItem(commandsItem)
+    }
+
+    @objc func commandPaletteMenuItemSelected() {
+        keybindingOpenCommandPalette()
+    }
+
+    @objc func openProjectMenuItemSelected() {
+        keybindingOpenProjectSearch()
+    }
+
     func openSettings() {
         if let settingsWindowController {
             settingsWindowController.showSettingsWindow(relativeTo: window)

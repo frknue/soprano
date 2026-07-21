@@ -161,6 +161,7 @@ soprano/
 | `⌘T` | New terminal |
 | `⌘B` | New browser pane |
 | `⌘P` | Command palette |
+| `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
 | `⇧⌘S` | Save session |
