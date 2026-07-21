@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        installApplicationIcon()
         installApplicationMenu()
     }
 
@@ -39,6 +40,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         mainWindowController?.saveWorkspaceIfNeeded()
+    }
+
+    private func installApplicationIcon() {
+        MainActor.assumeIsolated {
+            let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
+                ?? Bundle.module.url(forResource: "AppIcon", withExtension: "icns")
+            guard let iconURL, let icon = NSImage(contentsOf: iconURL) else { return }
+            NSApp.applicationIconImage = icon
+        }
     }
 
     private func installApplicationMenu() {

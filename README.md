@@ -86,6 +86,9 @@ mkdir -p Soprano.app/Contents/Resources
 # Copy binary
 cp .build/release/Soprano Soprano.app/Contents/MacOS/
 
+# Copy application icon
+cp Sources/Soprano/Resources/AppIcon.icns Soprano.app/Contents/Resources/
+
 # Create Info.plist
 cat > Soprano.app/Contents/Info.plist << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -104,6 +107,8 @@ cat > Soprano.app/Contents/Info.plist << 'EOF'
     <string>0.2.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
