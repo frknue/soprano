@@ -12,6 +12,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "nav-down", label: "Focus Down", description: "Move focus to the pane below", category: .navigation, defaultKeys: "Ctrl+J", mode: .direct, key: "j", ctrl: true),
             KeyBinding(id: "nav-up", label: "Focus Up", description: "Move focus to the pane above", category: .navigation, defaultKeys: "Ctrl+K", mode: .direct, key: "k", ctrl: true),
             KeyBinding(id: "nav-right", label: "Focus Right", description: "Move focus to the pane on the right", category: .navigation, defaultKeys: "Ctrl+L", mode: .direct, key: "l", ctrl: true),
+            KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
+            KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
 
             // Resize (prefix: Ctrl+A → Shift+H/J/K/L)
             KeyBinding(id: "resize-left", label: "Shrink Left", description: "Shrink the active pane to the left", category: .layout, defaultKeys: "Prefix → H", mode: .prefix, key: "h", shift: true),

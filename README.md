@@ -151,6 +151,7 @@ soprano/
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+H/J/K/L` | Navigate panes (left/down/up/right) |
+| `Ctrl+Shift+H/L` | Switch to previous / next logical window |
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `S` / `V` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |

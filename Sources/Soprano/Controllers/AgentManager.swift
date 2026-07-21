@@ -117,6 +117,14 @@ final class AgentManager: @unchecked Sendable {
         notifyChange(layoutChanged: true)
     }
 
+    func activatePreviousWindow() {
+        activateWindow(offset: -1)
+    }
+
+    func activateNextWindow() {
+        activateWindow(offset: 1)
+    }
+
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
         for paneId in terminalWindow.paneIds {
@@ -722,6 +730,16 @@ final class AgentManager: @unchecked Sendable {
         windows.values.sorted { lhs, rhs in
             (parseIdNumber(lhs.id) ?? Int.max) < (parseIdNumber(rhs.id) ?? Int.max)
         }
+    }
+
+    private func activateWindow(offset: Int) {
+        let orderedWindows = sortedWindows()
+        guard orderedWindows.count > 1,
+              let currentIndex = orderedWindows.firstIndex(where: { $0.id == activeWindowId })
+        else { return }
+
+        let nextIndex = (currentIndex + offset + orderedWindows.count) % orderedWindows.count
+        activateWindow(orderedWindows[nextIndex].id)
     }
 
     private func uniqueAutomaticWindowTitle(

@@ -117,6 +117,26 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "previous-window",
+                icon: "chevron.left.square",
+                label: "Previous Window",
+                description: "Switch to the previous logical window",
+                shortcut: commandShortcut(for: "previous-window"),
+                action: { [weak self] in
+                    self?.agentManager.activatePreviousWindow()
+                }
+            ),
+            CommandItem(
+                id: "next-window",
+                icon: "chevron.right.square",
+                label: "Next Window",
+                description: "Switch to the next logical window",
+                shortcut: commandShortcut(for: "next-window"),
+                action: { [weak self] in
+                    self?.agentManager.activateNextWindow()
+                }
+            ),
+            CommandItem(
                 id: "launch-codex",
                 icon: "command.square",
                 label: "Launch Codex",
