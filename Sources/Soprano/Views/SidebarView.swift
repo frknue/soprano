@@ -23,6 +23,7 @@ final class SidebarView: NSView {
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
     private var collapsedWindowIds: Set<String> = []
+    private var isControlKeyHeld = false
 
     init(
         agentManager: AgentManager,
@@ -203,6 +204,14 @@ final class SidebarView: NSView {
         return button
     }
 
+    func setControlKeyHeld(_ isHeld: Bool) {
+        guard isControlKeyHeld != isHeld else { return }
+        isControlKeyHeld = isHeld
+        for case let row as SidebarWindowRowView in rowsStack.arrangedSubviews {
+            row.setShortcutHintVisible(isHeld)
+        }
+    }
+
     @objc private func settingsClicked() {
         onSettingsRequested?()
     }
@@ -326,12 +335,14 @@ final class SidebarView: NSView {
             rowsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        for terminalWindow in agentManager.orderedWindows {
+        for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
             let isExpanded = !collapsedWindowIds.contains(terminalWindow.id)
             let windowRow = SidebarWindowRowView(theme: theme)
             windowRow.configure(
                 title: terminalWindow.title,
                 paneCount: terminalWindow.paneIds.count,
+                shortcutNumber: index < 9 ? index + 1 : nil,
+                showShortcutHint: isControlKeyHeld,
                 expanded: isExpanded,
                 highlighted: terminalWindow.id == agentManager.activeWindowId,
                 isTitleCustom: terminalWindow.isTitleCustom,
@@ -489,6 +500,9 @@ private final class SidebarWindowRowView: NSView {
     private var onResetTitle: (() -> Void)?
     private var onClose: (() -> Void)?
     private let theme: AppTheme
+    private var paneCount = 0
+    private var shortcutNumber: Int?
+    private var showShortcutHint = false
 
     init(theme: AppTheme) {
         self.theme = theme
@@ -553,6 +567,8 @@ private final class SidebarWindowRowView: NSView {
     func configure(
         title: String,
         paneCount: Int,
+        shortcutNumber: Int?,
+        showShortcutHint: Bool,
         expanded: Bool,
         highlighted: Bool,
         isTitleCustom: Bool,
@@ -567,15 +583,17 @@ private final class SidebarWindowRowView: NSView {
         self.onRename = onRename
         self.onResetTitle = onResetTitle
         self.onClose = onClose
+        self.paneCount = paneCount
+        self.shortcutNumber = shortcutNumber
+        self.showShortcutHint = showShortcutHint
         titleLabel.stringValue = title
-        countLabel.stringValue = "\(paneCount)"
+        updateTrailingLabel()
         let symbolName = expanded ? "chevron.down" : "chevron.right"
         disclosureButton.image = NSImage(
             systemSymbolName: symbolName,
             accessibilityDescription: expanded ? "Collapse Window" : "Expand Window"
         )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
         titleLabel.textColor = highlighted ? theme.colors.textPrimary : theme.colors.textMuted
-        countLabel.textColor = theme.colors.textMuted
         disclosureButton.contentTintColor = theme.colors.textMuted
         closeButton.contentTintColor = highlighted
             ? theme.colors.textPrimary
@@ -602,6 +620,26 @@ private final class SidebarWindowRowView: NSView {
             contextMenu.addItem(resetItem)
         }
         menu = contextMenu
+    }
+
+    func setShortcutHintVisible(_ isVisible: Bool) {
+        guard showShortcutHint != isVisible else { return }
+        showShortcutHint = isVisible
+        updateTrailingLabel()
+    }
+
+    private func updateTrailingLabel() {
+        if showShortcutHint {
+            countLabel.stringValue = shortcutNumber.map(String.init) ?? ""
+            countLabel.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
+            countLabel.textColor = theme.colors.accent
+            countLabel.toolTip = shortcutNumber.map { "Ctrl+\($0)" }
+        } else {
+            countLabel.stringValue = "\(paneCount)"
+            countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+            countLabel.textColor = theme.colors.textMuted
+            countLabel.toolTip = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
+        }
     }
 
     @objc private func handleToggle() {

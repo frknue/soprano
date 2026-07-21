@@ -125,6 +125,12 @@ final class AgentManager: @unchecked Sendable {
         activateWindow(offset: 1)
     }
 
+    func activateWindow(number: Int) {
+        let orderedWindows = sortedWindows()
+        guard number >= 1, number <= orderedWindows.count else { return }
+        activateWindow(orderedWindows[number - 1].id)
+    }
+
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
         for paneId in terminalWindow.paneIds {

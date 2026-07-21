@@ -19,28 +19,52 @@ final class KeybindingManager: @unchecked Sendable {
     private(set) var state: KeybindingState = .normal
     private var prefixTimer: Timer?
     private var eventMonitor: Any?
+    private var appResignObserver: NSObjectProtocol?
+    private(set) var isControlKeyHeld: Bool
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
+    var controlKeyStateChangeHandler: (@MainActor (Bool) -> Void)?
 
     init(agentManager: AgentManager) {
         self.agentManager = agentManager
         self.config = DefaultKeybindings.load()
+        self.isControlKeyHeld = NSEvent.modifierFlags.contains(.control)
         startMonitoring()
+        observeApplicationDeactivation()
     }
 
     deinit {
         stopMonitoring()
         prefixTimer?.invalidate()
+        if let appResignObserver {
+            NotificationCenter.default.removeObserver(appResignObserver)
+        }
     }
 
     private func startMonitoring() {
         guard eventMonitor == nil else { return }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged]
+        ) { [weak self] event in
             // Optional chaining flattens the NSEvent? result, so `?? event`
             // must only cover the self-is-gone case — otherwise it would
             // resurrect events handleKeyDown intentionally swallowed.
             guard let self else { return event }
+            if event.type == .flagsChanged {
+                self.setControlKeyHeld(event.modifierFlags.contains(.control))
+                return event
+            }
             return self.handleKeyDown(event: event)
+        }
+    }
+
+    private func observeApplicationDeactivation() {
+        appResignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.setControlKeyHeld(false)
         }
     }
 
@@ -134,12 +158,27 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
+    private func setControlKeyHeld(_ isHeld: Bool) {
+        guard isControlKeyHeld != isHeld else { return }
+        isControlKeyHeld = isHeld
+        MainActor.assumeIsolated {
+            controlKeyStateChangeHandler?(isHeld)
+        }
+    }
+
     @objc
     private func handlePrefixTimeout(_ timer: Timer) {
         clearPrefixMode()
     }
 
     private func executeBinding(_ binding: KeyBinding) {
+        if binding.id.hasPrefix("select-window-"),
+           let windowNumber = Int(binding.id.dropFirst("select-window-".count))
+        {
+            agentManager.activateWindow(number: windowNumber)
+            return
+        }
+
         switch binding.id {
         case "nav-left":
             agentManager.navigateToPane(direction: .left)
