@@ -14,6 +14,7 @@ struct WorkspaceSession: Identifiable, Codable {
     struct SavedWindow: Codable {
         let id: String
         var title: String
+        var isTitleCustom: Bool? = nil
         var layout: SplitNode?
         var activePaneId: String
     }

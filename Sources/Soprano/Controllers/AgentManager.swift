@@ -18,7 +18,6 @@ final class AgentManager: @unchecked Sendable {
     /// Transient view state — never persisted in sessions.
     private(set) var maximizedPaneId: String?
     private var nextId: Int = 2
-    private var nextWindowTitleNumber: Int = 1
 
     /// Multi-observer notification. Views register closures to receive updates.
     private var observers: [String: () -> Void] = [:]
@@ -40,7 +39,7 @@ final class AgentManager: @unchecked Sendable {
         panes[paneId] = pane
         windows[windowId] = WorkspaceWindowState(
             id: windowId,
-            title: "Window 1",
+            title: Self.suggestedWindowTitle(for: tab),
             layout: .leaf(paneId),
             activePaneId: paneId
         )
@@ -98,10 +97,10 @@ final class AgentManager: @unchecked Sendable {
         let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"
         let tab = PaneTab(id: tabId, type: .terminal, title: title, cwd: cwd)
         panes[paneId] = PaneState(id: paneId, tabs: [tab])
-        nextWindowTitleNumber += 1
+        let windowTitle = uniqueAutomaticWindowTitle(Self.suggestedWindowTitle(for: tab))
         windows[windowId] = WorkspaceWindowState(
             id: windowId,
-            title: "Window \(nextWindowTitleNumber)",
+            title: windowTitle,
             layout: .leaf(paneId),
             activePaneId: paneId
         )
@@ -139,6 +138,28 @@ final class AgentManager: @unchecked Sendable {
 
     func window(containingPane paneId: String) -> WorkspaceWindowState? {
         windows.values.first { $0.paneIds.contains(paneId) }
+    }
+
+    func renameWindow(_ windowId: String, to title: String) {
+        guard let terminalWindow = windows[windowId] else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, terminalWindow.title != trimmed else { return }
+        terminalWindow.title = trimmed
+        terminalWindow.isTitleCustom = true
+        notifyChange()
+    }
+
+    func resetWindowTitle(_ windowId: String) {
+        guard let terminalWindow = windows[windowId],
+              let firstPaneId = terminalWindow.layout?.firstLeaf,
+              let tab = panes[firstPaneId]?.tabs.first
+        else { return }
+        terminalWindow.title = uniqueAutomaticWindowTitle(
+            Self.suggestedWindowTitle(for: tab),
+            excluding: windowId
+        )
+        terminalWindow.isTitleCustom = false
+        notifyChange()
     }
 
     // MARK: - Pane Spawning
@@ -507,6 +528,7 @@ final class AgentManager: @unchecked Sendable {
             WorkspaceSession.SavedWindow(
                 id: terminalWindow.id,
                 title: terminalWindow.title,
+                isTitleCustom: terminalWindow.isTitleCustom,
                 layout: terminalWindow.layout,
                 activePaneId: terminalWindow.activePaneId
             )
@@ -572,9 +594,21 @@ final class AgentManager: @unchecked Sendable {
                 let activePaneId = restoredLayout.leafIds.contains(savedWindow.activePaneId)
                     ? savedWindow.activePaneId
                     : firstPaneId
+                let wasGeneratedPlaceholder = Self.isGeneratedWindowTitle(savedWindow.title)
+                let isTitleCustom = savedWindow.isTitleCustom ?? !wasGeneratedPlaceholder
+                let baseTitle = wasGeneratedPlaceholder
+                    ? Self.suggestedWindowTitle(for: newPanes[firstPaneId]?.tabs.first)
+                    : savedWindow.title
+                let restoredTitle = isTitleCustom
+                    ? savedWindow.title
+                    : Self.uniqueAutomaticWindowTitle(
+                        baseTitle,
+                        existingTitles: newWindows.values.map(\.title)
+                    )
                 newWindows[savedWindow.id] = WorkspaceWindowState(
                     id: savedWindow.id,
-                    title: savedWindow.title,
+                    title: restoredTitle,
+                    isTitleCustom: isTitleCustom,
                     layout: restoredLayout,
                     activePaneId: activePaneId
                 )
@@ -587,9 +621,10 @@ final class AgentManager: @unchecked Sendable {
             let restoredActivePaneId = effectiveLayout.leafIds.contains(session.activePaneId)
                 ? session.activePaneId
                 : firstPaneId
+            let title = Self.suggestedWindowTitle(for: newPanes[firstPaneId]?.tabs.first)
             newWindows[windowId] = WorkspaceWindowState(
                 id: windowId,
-                title: "Window 1",
+                title: title,
                 layout: effectiveLayout,
                 activePaneId: restoredActivePaneId
             )
@@ -604,10 +639,6 @@ final class AgentManager: @unchecked Sendable {
             ?? sortedWindows().first?.id
             ?? ""
         nextId = maxId
-        let largestWindowTitleNumber = newWindows.values.compactMap {
-            parseWindowTitleNumber($0.title)
-        }.max() ?? 0
-        nextWindowTitleNumber = max(largestWindowTitleNumber, newWindows.count)
 
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
@@ -678,9 +709,72 @@ final class AgentManager: @unchecked Sendable {
         }
     }
 
-    private func parseWindowTitleNumber(_ title: String) -> Int? {
-        guard title.hasPrefix("Window ") else { return nil }
-        return Int(title.dropFirst("Window ".count))
+    private func uniqueAutomaticWindowTitle(
+        _ baseTitle: String,
+        excluding windowId: String? = nil
+    ) -> String {
+        let existingTitles = windows.values
+            .filter { $0.id != windowId }
+            .map(\.title)
+        return Self.uniqueAutomaticWindowTitle(
+            baseTitle,
+            existingTitles: existingTitles
+        )
+    }
+
+    private static func uniqueAutomaticWindowTitle(
+        _ baseTitle: String,
+        existingTitles: [String]
+    ) -> String {
+        let normalizedTitles = Set(existingTitles.map { $0.lowercased() })
+        guard normalizedTitles.contains(baseTitle.lowercased()) else { return baseTitle }
+
+        var suffix = 2
+        while normalizedTitles.contains("\(baseTitle) (\(suffix))".lowercased()) {
+            suffix += 1
+        }
+        return "\(baseTitle) (\(suffix))"
+    }
+
+    private static func suggestedWindowTitle(for tab: PaneTab?) -> String {
+        let profile = tab?.agent.flatMap { DefaultAgents.profile(for: $0.profileId) }
+        let cwd = tab?.cwd
+            ?? profile?.cwd
+            ?? FileManager.default.currentDirectoryPath
+
+        if let directoryName = projectDirectoryName(for: cwd) {
+            return directoryName
+        }
+        if let profile {
+            return profile.name
+        }
+        return tab?.type == .agent ? "Agent" : "Terminal"
+    }
+
+    private static func projectDirectoryName(for path: String) -> String? {
+        let fileManager = FileManager.default
+        let original = URL(
+            fileURLWithPath: (path as NSString).expandingTildeInPath,
+            isDirectory: true
+        ).standardizedFileURL
+        var directory = original
+
+        while true {
+            let gitPath = directory.appendingPathComponent(".git").path
+            if fileManager.fileExists(atPath: gitPath), !directory.lastPathComponent.isEmpty {
+                return directory.lastPathComponent
+            }
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
+        }
+
+        let fallback = original.lastPathComponent
+        return fallback.isEmpty || fallback == "/" ? nil : fallback
+    }
+
+    private static func isGeneratedWindowTitle(_ title: String) -> Bool {
+        title.wholeMatch(of: /^Window \d+$/) != nil
     }
 
     private func createPaneTab(
