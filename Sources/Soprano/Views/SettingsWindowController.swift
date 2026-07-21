@@ -226,6 +226,11 @@ final class SettingsViewController: NSViewController {
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         scrollDocumentView.addSubview(contentStack)
 
+        let fillDocumentWidth = contentStack.widthAnchor.constraint(
+            equalTo: scrollDocumentView.widthAnchor
+        )
+        fillDocumentWidth.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: rootContainer.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: rootContainer.topAnchor),
@@ -256,8 +261,15 @@ final class SettingsViewController: NSViewController {
             ),
             scrollDocumentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
-            contentStack.leadingAnchor.constraint(equalTo: scrollDocumentView.leadingAnchor),
-            contentStack.trailingAnchor.constraint(equalTo: scrollDocumentView.trailingAnchor),
+            contentStack.centerXAnchor.constraint(equalTo: scrollDocumentView.centerXAnchor),
+            contentStack.leadingAnchor.constraint(
+                greaterThanOrEqualTo: scrollDocumentView.leadingAnchor
+            ),
+            contentStack.trailingAnchor.constraint(
+                lessThanOrEqualTo: scrollDocumentView.trailingAnchor
+            ),
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 960),
+            fillDocumentWidth,
             contentStack.topAnchor.constraint(equalTo: scrollDocumentView.topAnchor),
             contentStack.bottomAnchor.constraint(equalTo: scrollDocumentView.bottomAnchor),
         ])
@@ -347,6 +359,9 @@ final class SettingsViewController: NSViewController {
         case .about:
             buildAboutTab()
         }
+        view.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func makeTabHeader(title: String, subtitle: String) -> NSView {
@@ -378,6 +393,13 @@ final class SettingsViewController: NSViewController {
         ])
 
         return container
+    }
+
+    private func addTabHeader(title: String, subtitle: String) {
+        addContentSubview(
+            makeTabHeader(title: title, subtitle: subtitle),
+            widthInset: -36
+        )
     }
 
     private func makeSectionCard(title: String, subtitle: String? = nil) -> (NSView, NSStackView) {
@@ -467,11 +489,9 @@ final class SettingsViewController: NSViewController {
     }
 
     private func buildGeneralTab() {
-        contentStack.addArrangedSubview(
-            makeTabHeader(
-                title: "General",
-                subtitle: "Theme, persistence, project roots, and keybinding behavior."
-            )
+        addTabHeader(
+            title: "General",
+            subtitle: "Theme, persistence, project roots, and keybinding behavior."
         )
 
         let (appearanceCard, appearanceStack) = makeSectionCard(title: "Appearance", subtitle: "Switch between available app themes.")
@@ -503,7 +523,14 @@ final class SettingsViewController: NSViewController {
         let (sessionCard, sessionStack) = makeSectionCard(title: "Session", subtitle: "Restore workspace state from the previous app launch.")
         let restoreButton = NSButton(checkboxWithTitle: "Restore Last Session", target: self, action: #selector(restoreSessionChanged(_:)))
         restoreButton.state = settings.restoreLastSession ? .on : .off
-        restoreButton.contentTintColor = currentTheme.colors.textPrimary
+        restoreButton.contentTintColor = currentTheme.colors.accent
+        restoreButton.attributedTitle = NSAttributedString(
+            string: "Restore Last Session",
+            attributes: [
+                .foregroundColor: currentTheme.colors.textPrimary,
+                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            ]
+        )
         restoreSessionButton = restoreButton
         sessionStack.addArrangedSubview(restoreButton)
         addContentSubview(sessionCard, widthInset: -36)
@@ -712,11 +739,9 @@ final class SettingsViewController: NSViewController {
     }
 
     private func buildKeyboardShortcutsTab() {
-        contentStack.addArrangedSubview(
-            makeTabHeader(
-                title: "Keyboard Shortcuts",
-                subtitle: "Read-only keybinding reference grouped by category."
-            )
+        addTabHeader(
+            title: "Keyboard Shortcuts",
+            subtitle: "Read-only keybinding reference grouped by category."
         )
 
         let groups: [(title: String, category: KeyBindingCategory)] = [
@@ -729,26 +754,25 @@ final class SettingsViewController: NSViewController {
         for (groupTitle, category) in groups {
             let bindings = keybindingConfig.bindings.filter { $0.category == category }
             let (card, stack) = makeSectionCard(title: groupTitle)
-
-            let headerRow = makeShortcutRow(
-                action: "Action",
-                description: "Description",
-                mode: "Mode",
-                keys: "Binding",
-                index: 0,
-                isHeader: true
-            )
-            stack.addArrangedSubview(headerRow)
-            headerRow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+            stack.spacing = 0
+            if let titleLabel = stack.arrangedSubviews.first {
+                stack.setCustomSpacing(8, after: titleLabel)
+            }
 
             for (index, binding) in bindings.enumerated() {
+                if index > 0 {
+                    let separator = makeShortcutSeparator()
+                    stack.addArrangedSubview(separator)
+                    separator.widthAnchor.constraint(
+                        equalTo: stack.widthAnchor,
+                        constant: -24
+                    ).isActive = true
+                }
                 let row = makeShortcutRow(
                     action: binding.label,
                     description: binding.description,
-                    mode: binding.mode == .direct ? "direct" : "prefix",
-                    keys: binding.defaultKeys,
-                    index: index,
-                    isHeader: false
+                    mode: binding.mode == .direct ? "DIRECT" : "PREFIX",
+                    keys: binding.defaultKeys
                 )
                 stack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
@@ -761,36 +785,32 @@ final class SettingsViewController: NSViewController {
         action: String,
         description: String,
         mode: String,
-        keys: String,
-        index: Int,
-        isHeader: Bool
+        keys: String
     ) -> NSView {
         let row = NSView()
-        row.wantsLayer = true
-        row.layer?.cornerRadius = 6
-        row.layer?.backgroundColor = isHeader
-            ? currentTheme.colors.bgOverlay.cgColor
-            : (index % 2 == 0 ? currentTheme.colors.bgRaised.cgColor : currentTheme.colors.bgPanel.cgColor)
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let actionLabel = NSTextField(labelWithString: action)
-        actionLabel.font = .systemFont(ofSize: 11, weight: isHeader ? .semibold : .medium)
+        actionLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         actionLabel.textColor = currentTheme.colors.textPrimary
         actionLabel.lineBreakMode = .byTruncatingTail
         actionLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(actionLabel)
 
         let descriptionLabel = NSTextField(labelWithString: description)
-        descriptionLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        descriptionLabel.font = .systemFont(ofSize: 10, weight: .regular)
         descriptionLabel.textColor = currentTheme.colors.textMuted
         descriptionLabel.lineBreakMode = .byTruncatingTail
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(descriptionLabel)
 
         let modeLabel = NSTextField(labelWithString: mode)
-        modeLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        modeLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
         modeLabel.textColor = currentTheme.colors.textMuted
         modeLabel.alignment = .center
+        modeLabel.wantsLayer = true
+        modeLabel.layer?.cornerRadius = 5
+        modeLabel.layer?.backgroundColor = currentTheme.colors.bgRaised.cgColor
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(modeLabel)
 
@@ -799,40 +819,57 @@ final class SettingsViewController: NSViewController {
         keyBadge.textColor = currentTheme.colors.textPrimary
         keyBadge.alignment = .center
         keyBadge.wantsLayer = true
-        keyBadge.layer?.cornerRadius = 5
-        keyBadge.layer?.backgroundColor = currentTheme.colors.bgOverlay.cgColor
+        keyBadge.layer?.cornerRadius = 6
+        keyBadge.layer?.borderWidth = 1
+        keyBadge.layer?.borderColor = currentTheme.colors.accent.withAlphaComponent(0.35).cgColor
+        keyBadge.layer?.backgroundColor = currentTheme.colors.accent.withAlphaComponent(0.12).cgColor
         keyBadge.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(keyBadge)
 
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 30),
+            row.heightAnchor.constraint(equalToConstant: 48),
 
             actionLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
-            actionLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            actionLabel.widthAnchor.constraint(equalToConstant: 130),
+            actionLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 7),
+            actionLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: modeLabel.leadingAnchor,
+                constant: -12
+            ),
 
-            descriptionLabel.leadingAnchor.constraint(equalTo: actionLabel.trailingAnchor, constant: 8),
-            descriptionLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            descriptionLabel.trailingAnchor.constraint(equalTo: modeLabel.leadingAnchor, constant: -8),
+            descriptionLabel.leadingAnchor.constraint(equalTo: actionLabel.leadingAnchor),
+            descriptionLabel.topAnchor.constraint(equalTo: actionLabel.bottomAnchor, constant: 2),
+            descriptionLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: modeLabel.leadingAnchor,
+                constant: -12
+            ),
+            descriptionLabel.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -7),
 
             modeLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             modeLabel.trailingAnchor.constraint(equalTo: keyBadge.leadingAnchor, constant: -8),
             modeLabel.widthAnchor.constraint(equalToConstant: 58),
+            modeLabel.heightAnchor.constraint(equalToConstant: 20),
 
             keyBadge.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
             keyBadge.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            keyBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 84),
-            keyBadge.heightAnchor.constraint(equalToConstant: 20),
+            keyBadge.widthAnchor.constraint(equalToConstant: 112),
+            keyBadge.heightAnchor.constraint(equalToConstant: 24),
         ])
         return row
     }
 
+    private func makeShortcutSeparator() -> NSView {
+        let separator = NSView()
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = currentTheme.colors.borderSubtle.withAlphaComponent(0.7).cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
+    }
+
     private func buildAgentProfilesTab() {
-        contentStack.addArrangedSubview(
-            makeTabHeader(
-                title: "Agent Profiles",
-                subtitle: "Read-only profile registry loaded from DefaultAgents."
-            )
+        addTabHeader(
+            title: "Agent Profiles",
+            subtitle: "Read-only profile registry loaded from DefaultAgents."
         )
 
         let gridStack = NSStackView()
@@ -850,8 +887,8 @@ final class SettingsViewController: NSViewController {
                 row.alignment = .top
                 row.spacing = 10
                 row.translatesAutoresizingMaskIntoConstraints = false
-                row.widthAnchor.constraint(equalTo: gridStack.widthAnchor).isActive = true
                 gridStack.addArrangedSubview(row)
+                row.widthAnchor.constraint(equalTo: gridStack.widthAnchor).isActive = true
                 currentRow = row
             }
 
