@@ -10,6 +10,7 @@ final class MainWindowController: NSWindowController {
     private var mainContentVC: MainContentViewController?
     private var keybindingManager: KeybindingManager?
     private var commandPalette: CommandPalettePanel?
+    private var settingsWindowController: SettingsWindowController?
 
     init(
         agentManager: AgentManager,
@@ -268,22 +269,30 @@ extension MainWindowController: KeybindingDelegate {
 
 private extension MainWindowController {
     func openSettings() {
+        if let settingsWindowController {
+            settingsWindowController.showSettingsWindow(relativeTo: window)
+            return
+        }
+
         let config = keybindingManager?.config ?? DefaultKeybindings.load()
-        mainContentVC?.showSettings(
+        let controller = SettingsWindowController(
+            themeManager: themeManager,
             settings: settings,
-            keybindingConfig: config,
-            onSettingsChanged: { [weak self] updatedSettings in
-                guard let self else { return }
-                self.settings = updatedSettings
-                self.settings.save()
-                self.applyTheme()
-            },
-            onKeybindingConfigChanged: { [weak self] updatedConfig in
-                guard let self else { return }
-                DefaultKeybindings.save(updatedConfig)
-                self.reloadKeybindingManager()
-            }
+            keybindingConfig: config
         )
+        controller.onSettingsChanged = { [weak self] updatedSettings in
+            guard let self else { return }
+            self.settings = updatedSettings
+            self.settings.save()
+            self.applyTheme()
+        }
+        controller.onKeybindingConfigChanged = { [weak self] updatedConfig in
+            guard let self else { return }
+            DefaultKeybindings.save(updatedConfig)
+            self.reloadKeybindingManager()
+        }
+        settingsWindowController = controller
+        controller.showSettingsWindow(relativeTo: window)
     }
 
     func reloadKeybindingManager() {
