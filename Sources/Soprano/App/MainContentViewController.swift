@@ -110,6 +110,10 @@ final class MainContentViewController: NSViewController {
         statusBarView.setKeybindingMode(mode)
     }
 
+    func setControlKeyHeld(_ isHeld: Bool) {
+        sidebarView.setControlKeyHeld(isHeld)
+    }
+
     func refreshTheme() {
         applyTheme()
         sidebarView.refreshTheme()

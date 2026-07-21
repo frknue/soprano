@@ -14,6 +14,15 @@ enum DefaultKeybindings {
             KeyBinding(id: "nav-right", label: "Focus Right", description: "Move focus to the pane on the right", category: .navigation, defaultKeys: "Ctrl+L", mode: .direct, key: "l", ctrl: true),
             KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
             KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
+            KeyBinding(id: "select-window-1", label: "Select Window 1", description: "Switch to logical window 1", category: .navigation, defaultKeys: "Ctrl+1", mode: .direct, key: "1", ctrl: true),
+            KeyBinding(id: "select-window-2", label: "Select Window 2", description: "Switch to logical window 2", category: .navigation, defaultKeys: "Ctrl+2", mode: .direct, key: "2", ctrl: true),
+            KeyBinding(id: "select-window-3", label: "Select Window 3", description: "Switch to logical window 3", category: .navigation, defaultKeys: "Ctrl+3", mode: .direct, key: "3", ctrl: true),
+            KeyBinding(id: "select-window-4", label: "Select Window 4", description: "Switch to logical window 4", category: .navigation, defaultKeys: "Ctrl+4", mode: .direct, key: "4", ctrl: true),
+            KeyBinding(id: "select-window-5", label: "Select Window 5", description: "Switch to logical window 5", category: .navigation, defaultKeys: "Ctrl+5", mode: .direct, key: "5", ctrl: true),
+            KeyBinding(id: "select-window-6", label: "Select Window 6", description: "Switch to logical window 6", category: .navigation, defaultKeys: "Ctrl+6", mode: .direct, key: "6", ctrl: true),
+            KeyBinding(id: "select-window-7", label: "Select Window 7", description: "Switch to logical window 7", category: .navigation, defaultKeys: "Ctrl+7", mode: .direct, key: "7", ctrl: true),
+            KeyBinding(id: "select-window-8", label: "Select Window 8", description: "Switch to logical window 8", category: .navigation, defaultKeys: "Ctrl+8", mode: .direct, key: "8", ctrl: true),
+            KeyBinding(id: "select-window-9", label: "Select Window 9", description: "Switch to logical window 9", category: .navigation, defaultKeys: "Ctrl+9", mode: .direct, key: "9", ctrl: true),
 
             // Resize (prefix: Ctrl+A → Shift+H/J/K/L)
             KeyBinding(id: "resize-left", label: "Shrink Left", description: "Shrink the active pane to the left", category: .layout, defaultKeys: "Prefix → H", mode: .prefix, key: "h", shift: true),
