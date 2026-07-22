@@ -4,18 +4,36 @@ Native macOS tiling terminal multiplexer for AI coding agents. Built with Swift 
 
 ## Agent notifications
 
-Agents launched from Soprano report their lifecycle without changing your global
-configuration:
+Every Soprano terminal exports pane metadata for lifecycle hooks. The built-in
+agent launchers configure those hooks without changing your global configuration:
 
 - Codex uses its external turn notifier plus OSC approval notifications.
 - Claude Code receives launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`,
   and permission hooks.
 - OpenCode receives a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
 
+### Agents started from a terminal
+
+To recognize agents started directly, through an alias, or from a script, merge
+the supplied lifecycle hooks into the corresponding user configuration:
+
+- Codex: merge [`Support/AgentHooks/codex-hooks.json`](Support/AgentHooks/codex-hooks.json)
+  into `$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`). Start Codex
+  once, open `/hooks`, and trust the new command hooks.
+- Claude Code: merge the `hooks` entries from
+  [`Support/AgentHooks/claude-settings.json`](Support/AgentHooks/claude-settings.json)
+  into `~/.claude/settings.json`.
+
+Preserve existing hook groups when merging. The commands no-op outside Soprano,
+and the first lifecycle event automatically associates the current terminal tab
+with the reported agent. This works for any launcher whose underlying agent
+process inherits the Soprano terminal environment.
+
 When a background agent finishes, macOS shows a notification and the pane gets a
 blue unread ring. The pane header and status bar expose `STARTING`, `WORKING`,
 `READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED` states. Focusing the relevant tab
-clears its unread marker. macOS asks for notification permission the first time
+clears its unread marker. A completed turn remains at `NEEDS INPUT` until the
+next prompt is submitted. macOS asks for notification permission the first time
 an agent needs attention.
 
 ## Prerequisites

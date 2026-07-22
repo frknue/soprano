@@ -28,7 +28,7 @@ struct AgentEventPayload {
     let body: String
 }
 
-/// Small command-line bridge used by launch-scoped agent hooks. Invoking the
+/// Small command-line bridge used by agent lifecycle hooks. Invoking the
 /// Soprano executable with `agent-event` posts to the already-running app and
 /// exits before AppKit or libghostty are initialized.
 enum AgentEventCommand {
@@ -46,6 +46,7 @@ enum AgentEventCommand {
         else { return true }
 
         var shouldNotify = false
+        var profileId = environment["SOPRANO_AGENT_PROFILE"]
         var title = environment["SOPRANO_AGENT_NAME"] ?? "Agent"
         var body = defaultBody(for: state)
         var index = 3
@@ -55,6 +56,9 @@ enum AgentEventCommand {
             case "--notify":
                 shouldNotify = true
                 index += 1
+            case "--profile" where index + 1 < arguments.count:
+                profileId = arguments[index + 1]
+                index += 2
             case "--title" where index + 1 < arguments.count:
                 title = arguments[index + 1]
                 index += 2
@@ -76,7 +80,7 @@ enum AgentEventCommand {
             "title": title,
             "body": body,
         ]
-        if let profileId = environment["SOPRANO_AGENT_PROFILE"] {
+        if let profileId {
             userInfo["profileId"] = profileId
         }
 
@@ -107,6 +111,13 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         let tabId: String
     }
 
+    private struct EventFingerprint: Equatable {
+        let state: AgentEventState
+        let shouldNotify: Bool
+        let title: String
+        let body: String
+    }
+
     private let agentManager: AgentManager
     private let notificationCenter: UNUserNotificationCenter?
     private var distributedObserver: NSObjectProtocol?
@@ -114,6 +125,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     private var surfaceFocusObserver: NSObjectProtocol?
     private var appActivationObserver: NSObjectProtocol?
     private var deliveredNotificationIds: [Target: Set<String>] = [:]
+    private var recentEvents: [Target: (fingerprint: EventFingerprint, date: Date)] = [:]
     private let observerId = "AgentNotificationManager"
 
     init(agentManager: AgentManager) {
@@ -250,7 +262,31 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func handle(_ event: AgentEventPayload) {
+        if let profileId = event.profileId {
+            agentManager.attachAgentIfNeeded(
+                paneId: event.paneId,
+                tabId: event.tabId,
+                profileId: profileId
+            )
+        }
+
         guard agentManager.agent(paneId: event.paneId, tabId: event.tabId) != nil else { return }
+        let target = Target(paneId: event.paneId, tabId: event.tabId)
+        let fingerprint = EventFingerprint(
+            state: event.state,
+            shouldNotify: event.shouldNotify,
+            title: event.title,
+            body: event.body
+        )
+        let now = Date()
+        if let recent = recentEvents[target],
+           recent.fingerprint == fingerprint,
+           now.timeIntervalSince(recent.date) < 1
+        {
+            return
+        }
+        recentEvents[target] = (fingerprint, now)
+
         let isFocused = MainActor.assumeIsolated {
             isFocusedSurface(paneId: event.paneId, tabId: event.tabId)
         }

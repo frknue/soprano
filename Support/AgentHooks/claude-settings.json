@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile claude-code --title \"Claude Code\" --body \"Ready for a prompt\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile claude-code --title \"Claude Code\" --body \"Working\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --body \"Response ready\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --body \"Approval or input required\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

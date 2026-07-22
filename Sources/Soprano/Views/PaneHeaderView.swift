@@ -126,7 +126,7 @@ final class PaneHeaderView: NSView {
 
         if let agent = tab?.agent {
             statusDot.layer?.backgroundColor = colorForStatus(agent.status, theme: theme).cgColor
-            statusLabel.stringValue = labelForStatus(agent.status)
+            statusLabel.stringValue = agent.status.displayLabel
             statusLabel.textColor = colorForStatus(agent.status, theme: theme)
             statusLabel.isHidden = false
         } else {
@@ -223,17 +223,6 @@ final class PaneHeaderView: NSView {
         case .waiting: return theme.colors.yellow
         case .error: return theme.colors.danger
         case .stopped: return theme.colors.gray
-        }
-    }
-
-    private func labelForStatus(_ status: AgentStatus) -> String {
-        switch status {
-        case .idle: return "READY"
-        case .starting: return "STARTING"
-        case .running: return "WORKING"
-        case .waiting: return "NEEDS INPUT"
-        case .error: return "ERROR"
-        case .stopped: return "STOPPED"
         }
     }
 

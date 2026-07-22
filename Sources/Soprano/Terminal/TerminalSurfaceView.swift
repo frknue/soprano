@@ -67,12 +67,12 @@ struct TerminalConfig {
         let notifyCommand = [
             executable,
             "agent-event",
-            "ready",
+            "needs-input",
             "--notify",
             "--title",
             "Codex",
             "--body",
-            "Ready for a prompt",
+            "Response ready",
         ]
         let notifyValue = notifyCommand.map(tomlQuoted).joined(separator: ",")
         return [
@@ -103,7 +103,7 @@ struct TerminalConfig {
             "hooks": [
                 "SessionStart": hook(command("ready")),
                 "UserPromptSubmit": hook(command("running")),
-                "Stop": hook(command("ready", notify: true, body: "Ready for a prompt")),
+                "Stop": hook(command("needs-input", notify: true, body: "Response ready")),
                 "Notification": [[
                     "matcher": "permission_prompt|elicitation_dialog",
                     "hooks": [[
@@ -172,7 +172,15 @@ final class TerminalSurfaceView: NSView {
     init(paneId: String, tabId: String, config: TerminalConfig = .defaultShell) {
         self.paneId = paneId
         self.tabId = tabId
-        self.config = config
+
+        var scopedConfig = config
+        let executable = Bundle.main.executableURL?.path
+            ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
+        scopedConfig.env["SOPRANO_BIN"] = executable
+        scopedConfig.env["SOPRANO_PANE_ID"] = paneId
+        scopedConfig.env["SOPRANO_TAB_ID"] = tabId
+        scopedConfig.env["TERM_PROGRAM"] = "Soprano"
+        self.config = scopedConfig
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         setup()
         createSurface()

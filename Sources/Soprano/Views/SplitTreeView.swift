@@ -265,15 +265,16 @@ final class SplitTreeView: NSView {
             terminalView.onTitleChanged = { [weak self] title in
                 self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
             }
+            terminalView.onAgentInputSubmitted = { [weak self] in
+                guard self?.agentManager.agent(paneId: paneId, tabId: tab.id) != nil else { return }
+                self?.agentManager.updateAgentStatus(
+                    paneId: paneId,
+                    tabId: tab.id,
+                    status: .running,
+                    needsAttention: false
+                )
+            }
             if tab.agent?.profileId == "codex" {
-                terminalView.onAgentInputSubmitted = { [weak self] in
-                    self?.agentManager.updateAgentStatus(
-                        paneId: paneId,
-                        tabId: tab.id,
-                        status: .running,
-                        needsAttention: false
-                    )
-                }
                 // Codex exposes completion and approval notifications but no
                 // trust-free initial-ready event. Its TUI is normally ready by
                 // this point; later lifecycle events remain authoritative.
