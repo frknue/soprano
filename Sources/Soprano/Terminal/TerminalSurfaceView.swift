@@ -307,6 +307,37 @@ final class TerminalSurfaceView: NSView {
         )
     }
 
+    func changeFontSize(delta: Int) {
+        let action: String
+        if delta > 0 {
+            action = "increase_font_size:\(delta)"
+        } else if delta < 0 {
+            action = "decrease_font_size:\(-delta)"
+        } else {
+            return
+        }
+
+        performBindingAction(action)
+    }
+
+    func resetFontSize() {
+        performBindingAction("reset_font_size")
+    }
+
+    private func performBindingAction(_ action: String) {
+        guard let surface else { return }
+        let succeeded = action.withCString { actionPointer in
+            ghostty_surface_binding_action(
+                surface,
+                actionPointer,
+                UInt(action.lengthOfBytes(using: .utf8))
+            )
+        }
+        if !succeeded {
+            print("[Soprano] Ghostty action failed: \(action)")
+        }
+    }
+
     private func withOptionalCString<Result>(
         _ value: String?,
         _ body: (UnsafePointer<CChar>?) -> Result

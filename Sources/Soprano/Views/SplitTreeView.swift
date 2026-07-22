@@ -77,6 +77,23 @@ final class SplitTreeView: NSView {
         syncKeyboardFocus()
     }
 
+    func changeActiveTerminalFontSize(delta: Int) {
+        activeTerminalView()?.changeFontSize(delta: delta)
+    }
+
+    func resetActiveTerminalFontSize() {
+        activeTerminalView()?.resetFontSize()
+    }
+
+    private func activeTerminalView() -> TerminalSurfaceView? {
+        guard let activeTab = agentManager.panes[agentManager.activePaneId]?.activeTab,
+              let contentView = tabContentViews[activeTab.id]
+        else {
+            return nil
+        }
+        return findTerminalView(in: contentView)
+    }
+
     private func syncKeyboardFocus() {
         // While the split tree is hidden (settings overlay open), leave the
         // first responder alone — focusing an invisible terminal would send

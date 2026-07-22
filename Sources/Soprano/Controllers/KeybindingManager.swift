@@ -166,11 +166,18 @@ final class KeybindingManager: @unchecked Sendable {
 
     private func matchesDirectBinding(_ binding: KeyBinding, key: String, flags: NSEvent.ModifierFlags) -> Bool {
         guard binding.mode == .direct else { return false }
-        guard binding.key == key else { return false }
+
+        // Ghostty accepts both Command+= and Command+plus for increasing the
+        // font size. Depending on the keyboard layout, plus may be a dedicated
+        // key or a shifted equal, so accept either representation here.
+        let isZoomInAlias = binding.id == "zoom-in"
+            && binding.key == "="
+            && (key == "=" || key == "+")
+        guard binding.key == key || isZoomInAlias else { return false }
 
         return hasCtrl(flags) == (binding.ctrl == true)
             && hasMeta(flags) == (binding.meta == true)
-            && hasShift(flags) == (binding.shift == true)
+            && (isZoomInAlias || hasShift(flags) == (binding.shift == true))
     }
 
     private func isCtrlOnly(_ flags: NSEvent.ModifierFlags) -> Bool {
