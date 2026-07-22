@@ -309,9 +309,13 @@ extension MainWindowController: KeybindingDelegate {
         )
     }
 
-    func keybindingZoom(delta _: Int) {}
+    func keybindingZoom(delta: Int) {
+        mainContentVC?.changeActiveTerminalFontSize(delta: delta)
+    }
 
-    func keybindingZoomReset() {}
+    func keybindingZoomReset() {
+        mainContentVC?.resetActiveTerminalFontSize()
+    }
 }
 
 private extension MainWindowController {

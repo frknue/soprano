@@ -122,6 +122,14 @@ final class MainContentViewController: NSViewController {
         sidebarView.setControlKeyHeld(isHeld)
     }
 
+    func changeActiveTerminalFontSize(delta: Int) {
+        splitTreeView.changeActiveTerminalFontSize(delta: delta)
+    }
+
+    func resetActiveTerminalFontSize() {
+        splitTreeView.resetActiveTerminalFontSize()
+    }
+
     func showSettings(
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig,

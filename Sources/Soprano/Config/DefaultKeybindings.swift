@@ -57,7 +57,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "save-session", label: "Save Session", description: "Save the current workspace session", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
             KeyBinding(id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar", category: .general, defaultKeys: "⌘E", mode: .direct, key: "e", meta: true),
             KeyBinding(id: "open-settings", label: "Settings", description: "Open the settings page", category: .general, defaultKeys: "⌘,", mode: .direct, key: ",", meta: true),
-            KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘=", mode: .direct, key: "=", meta: true),
+            KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘+ / ⌘=", mode: .direct, key: "=", meta: true),
             KeyBinding(id: "zoom-out", label: "Zoom Out", description: "Decrease font size", category: .general, defaultKeys: "⌘-", mode: .direct, key: "-", meta: true),
             KeyBinding(id: "zoom-reset", label: "Reset Zoom", description: "Reset font size to default", category: .general, defaultKeys: "⌘0", mode: .direct, key: "0", meta: true),
         ]
