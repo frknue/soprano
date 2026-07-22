@@ -176,6 +176,32 @@ soprano/
 | `⌘W` | Close active pane |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
 
+### Nested pane navigation
+
+Soprano handles `Ctrl+H/J/K/L` directly by default. Integrated editors and
+nested multiplexers claim the keys while active, allowing fuzzy finders,
+completion menus, and other terminal interfaces to use them normally. Those
+integrations bubble navigation to the outer Soprano layout only after reaching
+their own boundary:
+
+```bash
+"$SOPRANO_BIN" navigate-pane left   # left, down, up, or right
+```
+
+The command selects an adjacent tmux pane first when invoked inside tmux. At a
+tmux boundary it targets the originating Soprano process and pane using the
+environment exported by each terminal surface.
+
+Integrations explicitly enable key passthrough while active:
+
+```bash
+"$SOPRANO_BIN" navigation-passthrough enable nvim
+"$SOPRANO_BIN" navigation-passthrough disable nvim
+```
+
+Without an active passthrough claim, Soprano handles `Ctrl+H/J/K/L` directly so
+pane navigation always has a working fallback.
+
 ## License
 
 Private.

@@ -177,6 +177,7 @@ final class TerminalSurfaceView: NSView {
         let executable = Bundle.main.executableURL?.path
             ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
         scopedConfig.env["SOPRANO_BIN"] = executable
+        scopedConfig.env["SOPRANO_APP_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         scopedConfig.env["SOPRANO_PANE_ID"] = paneId
         scopedConfig.env["SOPRANO_TAB_ID"] = tabId
         scopedConfig.env["TERM_PROGRAM"] = "Soprano"

@@ -211,7 +211,7 @@ enum SplitBranchSide: Codable {
     case second
 }
 
-enum NavigationDirection {
+enum NavigationDirection: String {
     case left, right, up, down
 
     var isHorizontal: Bool {
