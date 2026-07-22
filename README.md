@@ -80,13 +80,18 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
 ### Run
 
 ```bash
-./run.sh
+./dev.sh
 ```
 
-`run.sh` builds a development `.app` bundle before launching. A real application
-bundle is required by macOS for native notifications. `swift run` and the raw
-`.build/debug/Soprano` executable are still useful for debugging, but native
-notifications are disabled for those unbundled launches.
+`dev.sh` builds and launches `.build/debug/Soprano Dev.app`. The development app
+uses the separate `com.soprano.dev` bundle identifier, so its preferences,
+window state, sessions, and notification permission remain isolated from the
+installed app. Pass `--build-only` to create the bundle without launching it.
+The legacy `run.sh` command forwards to `dev.sh`.
+
+A real application bundle is required by macOS for native notifications.
+`swift run` and the raw `.build/debug/Soprano` executable are still useful for
+debugging, but native notifications are disabled for those unbundled launches.
 
 To run the unbundled executable:
 
@@ -110,37 +115,20 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
 
 The optimized binary is at `.build/release/Soprano`.
 
-### Creating an .app bundle
+### Install the release app
 
-To create a proper macOS application bundle:
+Build and install `/Applications/Soprano.app` without stopping or launching the
+application:
 
 ```bash
-# Build release binary
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
-
-# Create bundle structure
-mkdir -p Soprano.app/Contents/MacOS
-mkdir -p Soprano.app/Contents/Resources
-
-# Copy binary
-cp .build/release/Soprano Soprano.app/Contents/MacOS/
-
-# Copy application icon
-cp Sources/Soprano/Resources/AppIcon.icns Soprano.app/Contents/Resources/
-
-# Copy SwiftPM resources where Bundle.module expects them
-cp -R .build/release/Soprano_Soprano.bundle Soprano.app/
-
-# Copy application metadata
-cp Support/Info.plist Soprano.app/Contents/Info.plist
+./install.sh
 ```
 
-Then open or move `Soprano.app` to `/Applications`:
+The updated version is used the next time Soprano launches. To install into a
+different applications directory, set `SOPRANO_INSTALL_DIR`:
 
 ```bash
-open Soprano.app
-# or
-cp -r Soprano.app /Applications/
+SOPRANO_INSTALL_DIR="$HOME/Applications" ./install.sh
 ```
 
 ## Project Structure
