@@ -1,6 +1,6 @@
 import AppKit
 
-if !AgentEventCommand.handle() {
+if !AgentEventCommand.handle() && !PaneNavigationCommand.handle() {
     let app = NSApplication.shared
     app.setActivationPolicy(.regular)
 

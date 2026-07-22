@@ -20,6 +20,8 @@ final class KeybindingManager: @unchecked Sendable {
     private var prefixTimer: Timer?
     private var eventMonitor: Any?
     private var appResignObserver: NSObjectProtocol?
+    private var paneNavigationObserver: NSObjectProtocol?
+    private var paneNavigationPassthroughSources: [String: Set<String>] = [:]
     private(set) var isControlKeyHeld: Bool
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
@@ -31,6 +33,7 @@ final class KeybindingManager: @unchecked Sendable {
         self.isControlKeyHeld = NSEvent.modifierFlags.contains(.control)
         startMonitoring()
         observeApplicationDeactivation()
+        observePaneNavigationRequests()
     }
 
     deinit {
@@ -38,6 +41,9 @@ final class KeybindingManager: @unchecked Sendable {
         prefixTimer?.invalidate()
         if let appResignObserver {
             NotificationCenter.default.removeObserver(appResignObserver)
+        }
+        if let paneNavigationObserver {
+            DistributedNotificationCenter.default().removeObserver(paneNavigationObserver)
         }
     }
 
@@ -68,6 +74,44 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
+    private func observePaneNavigationRequests() {
+        let appProcessId = String(ProcessInfo.processInfo.processIdentifier)
+        paneNavigationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: PaneNavigationCommand.notificationName(appProcessId: appProcessId),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let info = notification.userInfo,
+                  let paneId = info["paneId"] as? String
+            else {
+                return
+            }
+
+            if let mode = info["passthrough"] as? String,
+               let source = info["source"] as? String {
+                if mode == "enable" {
+                    self.paneNavigationPassthroughSources[paneId, default: []].insert(source)
+                } else {
+                    self.paneNavigationPassthroughSources[paneId]?.remove(source)
+                    if self.paneNavigationPassthroughSources[paneId]?.isEmpty == true {
+                        self.paneNavigationPassthroughSources[paneId] = nil
+                    }
+                }
+                return
+            }
+
+            guard paneId == self.agentManager.activePaneId,
+                  let rawDirection = info["direction"] as? String,
+                  let direction = NavigationDirection(rawValue: rawDirection)
+            else {
+                return
+            }
+
+            self.agentManager.navigateToPane(direction: direction)
+        }
+    }
+
     private func stopMonitoring() {
         guard let eventMonitor else { return }
         NSEvent.removeMonitor(eventMonitor)
@@ -92,6 +136,15 @@ final class KeybindingManager: @unchecked Sendable {
         }
 
         if let binding = config.bindings.first(where: { matchesDirectBinding($0, key: key, flags: flags) }) {
+            // Terminal applications get first refusal for Ctrl+H/J/K/L. Vim,
+            // tmux, fuzzy finders, and completion menus can consume the keys;
+            // the navigation bridge bubbles them back to Soprano only when an
+            // inner layout reaches its boundary.
+            if Self.paneNavigationBindingIds.contains(binding.id),
+               paneNavigationPassthroughSources[agentManager.activePaneId]?.isEmpty == false {
+                return event
+            }
+
             // Let AppKit dispatch standard Command-menu equivalents through
             // the main menu. This is more reliable than swallowing them in a
             // local monitor while a terminal surface is first responder.
@@ -135,6 +188,13 @@ final class KeybindingManager: @unchecked Sendable {
     private func hasShift(_ flags: NSEvent.ModifierFlags) -> Bool {
         flags.contains(.shift)
     }
+
+    private static let paneNavigationBindingIds: Set<String> = [
+        "nav-left",
+        "nav-down",
+        "nav-up",
+        "nav-right",
+    ]
 
     private func startPrefixMode() {
         state = .prefix
