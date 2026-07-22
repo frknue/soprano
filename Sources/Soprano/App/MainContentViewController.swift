@@ -18,6 +18,7 @@ final class MainContentViewController: NSViewController {
     private var settingsTitleLabel: NSTextField!
     private var settingsCloseButton: NSButton!
     private var settingsViewController: SettingsViewController?
+    private var settingsViewConstraints: [NSLayoutConstraint] = []
 
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
 
@@ -139,12 +140,13 @@ final class MainContentViewController: NSViewController {
             addChild(controller)
             controller.view.translatesAutoresizingMaskIntoConstraints = false
             settingsContainerView.addSubview(controller.view)
-            NSLayoutConstraint.activate([
+            settingsViewConstraints = [
                 controller.view.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
                 controller.view.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
                 controller.view.topAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
                 controller.view.bottomAnchor.constraint(equalTo: settingsContainerView.bottomAnchor),
-            ])
+            ]
+            NSLayoutConstraint.activate(settingsViewConstraints)
             self.settingsViewController = controller
             settingsViewController = controller
         }
@@ -162,6 +164,16 @@ final class MainContentViewController: NSViewController {
         guard !settingsContainerView.isHidden else { return }
         settingsContainerView.isHidden = true
         splitTreeView.isHidden = false
+
+        // Hidden views still participate in Auto Layout. Detach the settings
+        // hierarchy so its content-size constraints cannot restrict the main
+        // window after returning to the workspace.
+        NSLayoutConstraint.deactivate(settingsViewConstraints)
+        settingsViewConstraints.removeAll()
+        settingsViewController?.view.removeFromSuperview()
+        settingsViewController?.removeFromParent()
+        settingsViewController = nil
+
         splitTreeView.restoreKeyboardFocus()
     }
 
