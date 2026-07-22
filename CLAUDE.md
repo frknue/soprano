@@ -10,7 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build        # Debug build
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release  # Release build
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run           # Build + run
-./run.sh                                                     # Dev script (clears window state, builds, launches)
+./dev.sh                                                     # Isolated dev app (builds and launches)
+./dev.sh --build-only                                        # Package dev app without launching
+./install.sh                                                 # Install release app without launching
 ```
 
 No tests or linter configured. Swift 6.0 strict concurrency checking is enforced via swift-tools-version.
