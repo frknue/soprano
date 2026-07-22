@@ -31,6 +31,32 @@ resource_bundle="$build_dir/Soprano_Soprano.bundle"
 info_plist="$repo_root/Support/Info.plist"
 app_icon="$repo_root/Sources/Soprano/Resources/AppIcon.icns"
 
+ghostty_resources_dir=""
+ghostty_resource_candidates=(
+    "${SOPRANO_GHOSTTY_RESOURCES_DIR:-}"
+    "$repo_root/ghostty/zig-out/share/ghostty"
+    "${GHOSTTY_RESOURCES_DIR:-}"
+    "/Applications/Ghostty.app/Contents/Resources/ghostty"
+)
+
+for candidate in "${ghostty_resource_candidates[@]}"; do
+    if [[ -n "$candidate" \
+        && -d "$candidate/themes" \
+        && -d "$candidate/shell-integration" \
+        && -f "$(dirname "$candidate")/terminfo/78/xterm-ghostty" ]]; then
+        ghostty_resources_dir="$candidate"
+        break
+    fi
+done
+
+if [[ -z "$ghostty_resources_dir" ]]; then
+    echo "Unable to find complete Ghostty runtime resources." >&2
+    echo "Build Ghostty first, install Ghostty.app, or set SOPRANO_GHOSTTY_RESOURCES_DIR." >&2
+    exit 1
+fi
+
+ghostty_terminfo_dir="$(dirname "$ghostty_resources_dir")/terminfo"
+
 for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing build artifact: $required_path" >&2
@@ -53,6 +79,8 @@ cp "$binary_path" "$staged_app/Contents/MacOS/Soprano"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
 cp -R "$resource_bundle" "$staged_app/Soprano_Soprano.bundle"
+cp -R "$ghostty_resources_dir" "$staged_app/Contents/Resources/ghostty"
+cp -R "$ghostty_terminfo_dir" "$staged_app/Contents/Resources/terminfo"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$staged_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $bundle_name" "$staged_app/Contents/Info.plist"

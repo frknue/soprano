@@ -86,8 +86,13 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
 `dev.sh` builds and launches `.build/debug/Soprano Dev.app`. The development app
 uses the separate `com.soprano.dev` bundle identifier, so its preferences,
 window state, sessions, and notification permission remain isolated from the
-installed app. Pass `--build-only` to create the bundle without launching it.
-The legacy `run.sh` command forwards to `dev.sh`.
+installed app. Both app bundles include the same Ghostty runtime resources, so
+themes and terminal behavior do not depend on the environment used to launch
+them. Packaging uses `ghostty/zig-out/share` when available, then an exported
+`GHOSTTY_RESOURCES_DIR`, and finally the resources from an installed
+`/Applications/Ghostty.app`. Set `SOPRANO_GHOSTTY_RESOURCES_DIR` to override the
+resource source explicitly. Pass `--build-only` to create the bundle without
+launching it. The legacy `run.sh` command forwards to `dev.sh`.
 
 A real application bundle is required by macOS for native notifications.
 `swift run` and the raw `.build/debug/Soprano` executable are still useful for
