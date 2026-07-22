@@ -28,4 +28,15 @@ enum AgentStatus: String, Codable {
     case waiting
     case error
     case stopped
+
+    var displayLabel: String {
+        switch self {
+        case .idle: return "READY"
+        case .starting: return "STARTING"
+        case .running: return "WORKING"
+        case .waiting: return "NEEDS INPUT"
+        case .error: return "ERROR"
+        case .stopped: return "STOPPED"
+        }
+    }
 }

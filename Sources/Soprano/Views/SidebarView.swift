@@ -384,9 +384,10 @@ final class SidebarView: NSView {
             for pane in sortedPanes(in: terminalWindow) {
                 let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
                 row.configure(
-                    title: pane.activeTab?.title ?? "Pane",
+                    title: sidebarTitle(for: pane),
                     branch: branchForPane(pane),
                     dotColor: paneStatusColor(for: pane, theme: theme),
+                    agentStatus: pane.activeTab?.agent?.status,
                     tabCount: pane.tabs.count,
                     highlighted: pane.id == agentManager.activePaneId,
                     onSelect: { [weak self] in
@@ -424,6 +425,15 @@ final class SidebarView: NSView {
     }
 
     // MARK: - Branch Resolution
+
+    private func sidebarTitle(for pane: PaneState) -> String {
+        guard let tab = pane.activeTab else { return "Pane" }
+        guard tab.type == .terminal,
+              let agent = tab.agent,
+              let profile = DefaultAgents.profile(for: agent.profileId)
+        else { return tab.title }
+        return profile.name
+    }
 
     private func branchForPane(_ pane: PaneState) -> String? {
         guard let tab = pane.activeTab, let cwd = effectiveCwd(for: tab) else { return nil }
@@ -817,6 +827,7 @@ private final class SidebarPaneRowView: NSView {
         title: String,
         branch: String?,
         dotColor: NSColor,
+        agentStatus: AgentStatus?,
         tabCount: Int,
         highlighted: Bool,
         onSelect: @escaping () -> Void,
@@ -826,8 +837,19 @@ private final class SidebarPaneRowView: NSView {
         self.onClose = onClose
         titleLabel.stringValue = title
         dotView.layer?.backgroundColor = dotColor.cgColor
-        badgeContainer.isHidden = tabCount <= 1
-        badgeLabel.stringValue = "\(tabCount)"
+        if let agentStatus {
+            badgeContainer.isHidden = false
+            badgeContainer.layer?.backgroundColor = dotColor.withAlphaComponent(0.16).cgColor
+            badgeLabel.stringValue = tabCount > 1
+                ? "\(agentStatus.displayLabel) · \(tabCount)"
+                : agentStatus.displayLabel
+            badgeLabel.textColor = dotColor
+        } else {
+            badgeContainer.isHidden = tabCount <= 1
+            badgeContainer.layer?.backgroundColor = theme.colors.bgRaised.cgColor
+            badgeLabel.stringValue = "\(tabCount)"
+            badgeLabel.textColor = theme.colors.textMuted
+        }
         closeButton.contentTintColor = highlighted
             ? theme.colors.textPrimary
             : theme.colors.textMuted

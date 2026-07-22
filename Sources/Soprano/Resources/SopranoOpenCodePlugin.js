@@ -30,15 +30,13 @@ export const SopranoNotificationPlugin = async () => {
         case "session.status":
           if (event.properties?.status?.type === "busy") {
             await sendEvent("running")
-          } else if (event.properties?.status?.type === "idle") {
-            await sendEvent("ready")
           }
           break
         case "session.idle":
-          await sendEvent("ready", [
+          await sendEvent("needs-input", [
             "--notify",
             "--title", "OpenCode",
-            "--body", "Ready for a prompt",
+            "--body", "Response ready",
           ])
           break
         case "permission.asked":

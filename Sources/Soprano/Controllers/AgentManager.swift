@@ -447,6 +447,32 @@ final class AgentManager: @unchecked Sendable {
         panes[paneId]?.tabs.first(where: { $0.id == tabId })?.agent
     }
 
+    /// Associate an agent started manually inside a regular terminal tab with
+    /// Soprano's lifecycle model. The tab remains a terminal for persistence,
+    /// so restoring the workspace does not unexpectedly relaunch the agent.
+    @discardableResult
+    func attachAgentIfNeeded(paneId: String, tabId: String, profileId: String) -> AgentInstance? {
+        guard profileId != "terminal",
+              let profile = DefaultAgents.profile(for: profileId),
+              let pane = panes[paneId],
+              let tabIndex = pane.tabs.firstIndex(where: { $0.id == tabId })
+        else { return nil }
+
+        if let existingAgent = pane.tabs[tabIndex].agent {
+            guard existingAgent.profileId != profile.id,
+                  pane.tabs[tabIndex].type == .terminal
+            else { return existingAgent }
+        }
+
+        let agent = AgentInstance(id: tabId, profileId: profile.id)
+        pane.tabs[tabIndex].agent = agent
+        if pane.tabs[tabIndex].title == "Terminal" {
+            pane.tabs[tabIndex].title = profile.name
+        }
+        notifyChange()
+        return agent
+    }
+
     func focusTab(paneId: String, tabId: String) {
         guard let pane = panes[paneId],
               let index = pane.tabs.firstIndex(where: { $0.id == tabId })
