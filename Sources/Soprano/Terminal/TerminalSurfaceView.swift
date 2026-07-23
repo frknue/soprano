@@ -41,10 +41,15 @@ struct TerminalConfig {
                 arguments.append(contentsOf: ["--settings", settings])
             }
         case "opencode":
-            if let pluginURL = Bundle.module.url(
+            let pluginURL = Bundle.main.url(
                 forResource: "SopranoOpenCodePlugin",
                 withExtension: "js"
-            ), let configContent = openCodeConfigContent(pluginURL: pluginURL) {
+            ) ?? Bundle.module.url(
+                forResource: "SopranoOpenCodePlugin",
+                withExtension: "js"
+            )
+            if let pluginURL,
+               let configContent = openCodeConfigContent(pluginURL: pluginURL) {
                 config.env["OPENCODE_CONFIG_CONTENT"] = configContent
             }
         default:

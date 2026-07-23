@@ -223,6 +223,7 @@ final class SettingsViewController: NSViewController {
 
     @objc private func tabClicked(_ sender: NSButton) {
         guard let tab = SettingsTab(rawValue: sender.tag) else { return }
+        view.window?.endEditing(for: nil)
         currentTab = tab
         for (item, button) in tabButtons {
             styleTabButton(button, tab: item, active: item == tab)
@@ -452,6 +453,7 @@ final class SettingsViewController: NSViewController {
         input.placeholderString = "Folder path"
         input.target = self
         input.action = #selector(addProjectDirectory)
+        input.cell?.sendsActionOnEndEditing = false
         projectDirectoryInput = input
         addRow.addArrangedSubview(input)
 
@@ -484,10 +486,13 @@ final class SettingsViewController: NSViewController {
 
             prefixField.target = self
             prefixField.action = #selector(prefixKeyCommitted(_:))
+            prefixField.cell?.sendsActionOnEndEditing = true
             timeoutField.target = self
             timeoutField.action = #selector(prefixTimeoutCommitted(_:))
+            timeoutField.cell?.sendsActionOnEndEditing = true
             resizeField.target = self
             resizeField.action = #selector(resizeStepCommitted(_:))
+            resizeField.cell?.sendsActionOnEndEditing = true
         }
 
         addContentSubview(keybindingCard, widthInset: -36)
