@@ -198,6 +198,9 @@ final class TerminalSurfaceView: NSView {
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
     private let surfaceDestructionGate = SurfaceDestructionGate()
+    private var markedText = NSMutableAttributedString()
+    private var keyTextAccumulator: [String]?
+    private var keyUpMonitor: Any?
 
     init(
         paneId: String,
@@ -325,6 +328,7 @@ final class TerminalSurfaceView: NSView {
         lastPixelHeight = hpx
         lastXScale = xScale
         lastYScale = yScale
+        installKeyUpMonitor()
     }
 
     func terminalTitleDidChange(_ title: String) {
@@ -359,6 +363,18 @@ final class TerminalSurfaceView: NSView {
 
     func resetFontSize() {
         performBindingAction("reset_font_size")
+    }
+
+    @IBAction func copy(_ sender: Any?) {
+        performBindingAction("copy_to_clipboard")
+    }
+
+    @IBAction func paste(_ sender: Any?) {
+        performBindingAction("paste_from_clipboard")
+    }
+
+    @IBAction override func selectAll(_ sender: Any?) {
+        performBindingAction("select_all")
     }
 
     private func performBindingAction(_ action: String) {
@@ -495,20 +511,37 @@ final class TerminalSurfaceView: NSView {
 
     override func keyDown(with event: NSEvent) {
         guard let surface else {
-            super.keyDown(with: event)
+            interpretKeyEvents([event])
             return
         }
 
         let translationEvent = translationEvent(for: event, surface: surface)
         let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
-        let text = translationEvent.ghosttyCharacters
+        keyTextAccumulator = []
+        defer { keyTextAccumulator = nil }
 
-        sendKeyEvent(
-            action,
-            event: event,
-            translationEvent: translationEvent,
-            text: text
-        )
+        let hadMarkedText = hasMarkedText()
+        interpretKeyEvents([translationEvent])
+        syncPreedit(clearIfNeeded: hadMarkedText)
+
+        if let accumulatedText = keyTextAccumulator, !accumulatedText.isEmpty {
+            for text in accumulatedText {
+                sendKeyEvent(
+                    action,
+                    event: event,
+                    translationEvent: translationEvent,
+                    text: text
+                )
+            }
+        } else {
+            sendKeyEvent(
+                action,
+                event: event,
+                translationEvent: translationEvent,
+                text: translationEvent.ghosttyCharacters,
+                composing: hasMarkedText() || hadMarkedText
+            )
+        }
 
         if (event.keyCode == 36 || event.keyCode == 76),
            !event.modifierFlags.contains(.shift) {
@@ -530,8 +563,21 @@ final class TerminalSurfaceView: NSView {
             super.flagsChanged(with: event)
             return
         }
+        guard !hasMarkedText() else { return }
 
-        sendKeyEvent(GHOSTTY_ACTION_PRESS, event: event)
+        let modifiers = TerminalModifierFlags(rawValue: modsFromEvent(event).rawValue)
+        guard let transition = TerminalInputMetadata.modifierTransition(
+            keyCode: event.keyCode,
+            modifiers: modifiers
+        ) else {
+            return
+        }
+
+        let action: ghostty_input_action_e = switch transition {
+        case .press: GHOSTTY_ACTION_PRESS
+        case .release: GHOSTTY_ACTION_RELEASE
+        }
+        sendKeyEvent(action, event: event)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -541,9 +587,8 @@ final class TerminalSurfaceView: NSView {
         }
         onFocusRequested?()
         window?.makeFirstResponder(self)
-        let pt = convert(event.locationInWindow, from: nil)
+        sendMousePosition(event, surface: surface)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
-        ghostty_surface_mouse_pos(surface, pt.x, bounds.height - pt.y, modsFromEvent(event))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -551,19 +596,40 @@ final class TerminalSurfaceView: NSView {
             super.mouseUp(with: event)
             return
         }
+        sendMousePosition(event, surface: surface)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let surface else { return }
-        let pt = convert(event.locationInWindow, from: nil)
-        ghostty_surface_mouse_pos(surface, pt.x, bounds.height - pt.y, modsFromEvent(event))
+        sendMousePosition(event, surface: surface)
     }
 
     override func mouseMoved(with event: NSEvent) {
         guard let surface else { return }
-        let pt = convert(event.locationInWindow, from: nil)
-        ghostty_surface_mouse_pos(surface, pt.x, bounds.height - pt.y, modsFromEvent(event))
+        sendMousePosition(event, surface: surface)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        guard let surface else { return }
+        sendMousePosition(event, surface: surface)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
+        ghostty_surface_mouse_pos(surface, -1, -1, modsFromEvent(event))
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        guard let surface else { return }
+        sendMousePosition(event, surface: surface)
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        guard let surface else { return }
+        sendMousePosition(event, surface: surface)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -571,8 +637,17 @@ final class TerminalSurfaceView: NSView {
             super.scrollWheel(with: event)
             return
         }
-        let scrollMods = ghostty_input_scroll_mods_t(modsFromEvent(event).rawValue)
-        ghostty_surface_mouse_scroll(surface, event.scrollingDeltaX, event.scrollingDeltaY, scrollMods)
+        let precise = event.hasPreciseScrollingDeltas
+        let deltas = TerminalInputMetadata.scrollDeltas(
+            x: event.scrollingDeltaX,
+            y: event.scrollingDeltaY,
+            precise: precise
+        )
+        let scrollFlags = TerminalInputMetadata.scrollFlags(
+            precise: precise,
+            momentum: momentum(from: event.momentumPhase)
+        )
+        ghostty_surface_mouse_scroll(surface, deltas.x, deltas.y, scrollFlags)
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -580,7 +655,15 @@ final class TerminalSurfaceView: NSView {
             super.rightMouseDown(with: event)
             return
         }
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, modsFromEvent(event))
+        sendMousePosition(event, surface: surface)
+        if !ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            GHOSTTY_MOUSE_RIGHT,
+            modsFromEvent(event)
+        ) {
+            super.rightMouseDown(with: event)
+        }
     }
 
     override func rightMouseUp(with event: NSEvent) {
@@ -588,7 +671,43 @@ final class TerminalSurfaceView: NSView {
             super.rightMouseUp(with: event)
             return
         }
-        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, modsFromEvent(event))
+        sendMousePosition(event, surface: surface)
+        if !ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_RIGHT,
+            modsFromEvent(event)
+        ) {
+            super.rightMouseUp(with: event)
+        }
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard let surface else {
+            super.otherMouseDown(with: event)
+            return
+        }
+        sendMousePosition(event, surface: surface)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            mouseButton(from: event.buttonNumber),
+            modsFromEvent(event)
+        )
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard let surface else {
+            super.otherMouseUp(with: event)
+            return
+        }
+        sendMousePosition(event, surface: surface)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            mouseButton(from: event.buttonNumber),
+            modsFromEvent(event)
+        )
     }
 
     override func updateTrackingAreas() {
@@ -596,20 +715,102 @@ final class TerminalSurfaceView: NSView {
         trackingAreas.forEach { removeTrackingArea($0) }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
         addTrackingArea(area)
     }
 
+    private func sendMousePosition(_ event: NSEvent, surface: ghostty_surface_t) {
+        let point = convert(event.locationInWindow, from: nil)
+        ghostty_surface_mouse_pos(
+            surface,
+            point.x,
+            bounds.height - point.y,
+            modsFromEvent(event)
+        )
+    }
+
+    private func mouseButton(from buttonNumber: Int) -> ghostty_input_mouse_button_e {
+        switch buttonNumber {
+        case 0: GHOSTTY_MOUSE_LEFT
+        case 1: GHOSTTY_MOUSE_RIGHT
+        case 2: GHOSTTY_MOUSE_MIDDLE
+        case 3: GHOSTTY_MOUSE_EIGHT
+        case 4: GHOSTTY_MOUSE_NINE
+        case 5: GHOSTTY_MOUSE_SIX
+        case 6: GHOSTTY_MOUSE_SEVEN
+        case 7: GHOSTTY_MOUSE_FOUR
+        case 8: GHOSTTY_MOUSE_FIVE
+        case 9: GHOSTTY_MOUSE_TEN
+        case 10: GHOSTTY_MOUSE_ELEVEN
+        default: GHOSTTY_MOUSE_UNKNOWN
+        }
+    }
+
+    private func momentum(from phase: NSEvent.Phase) -> TerminalScrollMomentum {
+        switch phase {
+        case .began: .began
+        case .stationary: .stationary
+        case .changed: .changed
+        case .ended: .ended
+        case .cancelled: .cancelled
+        case .mayBegin: .mayBegin
+        default: .none
+        }
+    }
+
     private func modsFromEvent(_ event: NSEvent) -> ghostty_input_mods_e {
+        modsFromFlags(event.modifierFlags)
+    }
+
+    private func installKeyUpMonitor() {
+        guard keyUpMonitor == nil, surface != nil else { return }
+        keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { [weak self] event in
+            guard event.modifierFlags.contains(.command),
+                  let self,
+                  self.surface != nil,
+                  let window = self.window,
+                  event.window === window,
+                  window.firstResponder === self
+            else {
+                return event
+            }
+
+            self.keyUp(with: event)
+            return nil
+        }
+    }
+
+    private func removeKeyUpMonitor() {
+        guard let keyUpMonitor else { return }
+        NSEvent.removeMonitor(keyUpMonitor)
+        self.keyUpMonitor = nil
+    }
+
+    private func modsFromFlags(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
         var mods = GHOSTTY_MODS_NONE.rawValue
-        let flags = event.modifierFlags
         if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
         if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
         if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
         if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
+        if flags.contains(.capsLock) { mods |= GHOSTTY_MODS_CAPS.rawValue }
+
+        let rawFlags = flags.rawValue
+        if rawFlags & UInt(NX_DEVICERSHIFTKEYMASK) != 0 {
+            mods |= GHOSTTY_MODS_SHIFT_RIGHT.rawValue
+        }
+        if rawFlags & UInt(NX_DEVICERCTLKEYMASK) != 0 {
+            mods |= GHOSTTY_MODS_CTRL_RIGHT.rawValue
+        }
+        if rawFlags & UInt(NX_DEVICERALTKEYMASK) != 0 {
+            mods |= GHOSTTY_MODS_ALT_RIGHT.rawValue
+        }
+        if rawFlags & UInt(NX_DEVICERCMDKEYMASK) != 0 {
+            mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue
+        }
+
         return ghostty_input_mods_e(rawValue: mods)
     }
 
@@ -666,15 +867,6 @@ final class TerminalSurfaceView: NSView {
     ) -> ghostty_input_mods_e {
         let textFlags = (translationFlags ?? originalFlags).subtracting([.control, .command])
         return modsFromFlags(textFlags)
-    }
-
-    private func modsFromFlags(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
-        var mods = GHOSTTY_MODS_NONE.rawValue
-        if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
-        if flags.contains(.control) { mods |= GHOSTTY_MODS_CTRL.rawValue }
-        if flags.contains(.option) { mods |= GHOSTTY_MODS_ALT.rawValue }
-        if flags.contains(.command) { mods |= GHOSTTY_MODS_SUPER.rawValue }
-        return ghostty_input_mods_e(rawValue: mods)
     }
 
     private func unshiftedCodepoint(for event: NSEvent) -> UInt32 {
@@ -739,11 +931,13 @@ final class TerminalSurfaceView: NSView {
 
     func destroySurface() {
         surfaceDestructionGate.perform {
+            removeKeyUpMonitor()
             guard let surface else { return }
             GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
                 for: ObjectIdentifier(self)
             )
             self.surface = nil
+            markedText.mutableString.setString("")
             ghostty_surface_free(surface)
         }
     }
@@ -764,6 +958,154 @@ final class TerminalSurfaceView: NSView {
         NotificationCenter.default.removeObserver(self)
         MainActor.assumeIsolated {
             destroySurface()
+        }
+    }
+}
+
+extension TerminalSurfaceView: @MainActor NSTextInputClient {
+    func hasMarkedText() -> Bool {
+        markedText.length > 0
+    }
+
+    func markedRange() -> NSRange {
+        guard hasMarkedText() else { return NSRange() }
+        return NSRange(location: 0, length: markedText.length)
+    }
+
+    func selectedRange() -> NSRange {
+        guard let surface else { return NSRange() }
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return NSRange() }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return NSRange(location: Int(text.offset_start), length: Int(text.offset_len))
+    }
+
+    func setMarkedText(
+        _ string: Any,
+        selectedRange: NSRange,
+        replacementRange: NSRange
+    ) {
+        switch string {
+        case let attributedString as NSAttributedString:
+            markedText = NSMutableAttributedString(attributedString: attributedString)
+        case let string as String:
+            markedText = NSMutableAttributedString(string: string)
+        default:
+            return
+        }
+
+        if keyTextAccumulator == nil {
+            syncPreedit()
+        }
+    }
+
+    func unmarkText() {
+        guard hasMarkedText() else { return }
+        markedText.mutableString.setString("")
+        syncPreedit()
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] {
+        []
+    }
+
+    func attributedSubstring(
+        forProposedRange range: NSRange,
+        actualRange: NSRangePointer?
+    ) -> NSAttributedString? {
+        guard let surface, range.length > 0 else { return nil }
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        let selectionRange = NSRange(
+            location: Int(text.offset_start),
+            length: Int(text.offset_len)
+        )
+        actualRange?.pointee = selectionRange
+        return NSAttributedString(string: String(cString: text.text))
+    }
+
+    func characterIndex(for point: NSPoint) -> Int {
+        0
+    }
+
+    func firstRect(
+        forCharacterRange range: NSRange,
+        actualRange: NSRangePointer?
+    ) -> NSRect {
+        guard let surface else {
+            return NSRect(x: frame.origin.x, y: frame.origin.y, width: 0, height: 0)
+        }
+
+        let surfaceSize = ghostty_surface_size(surface)
+        let cellSize = convertFromBacking(NSSize(
+            width: Double(surfaceSize.cell_width_px),
+            height: Double(surfaceSize.cell_height_px)
+        ))
+        var x = 0.0
+        var y = 0.0
+        var width = Double(cellSize.width)
+        var height = Double(cellSize.height)
+        ghostty_surface_ime_point(surface, &x, &y, &width, &height)
+
+        actualRange?.pointee = range
+        let viewRect = NSRect(
+            x: x,
+            y: bounds.height - y,
+            width: width,
+            height: max(height, cellSize.height)
+        )
+        let windowRect = convert(viewRect, to: nil)
+        guard let window else { return windowRect }
+        return window.convertToScreen(windowRect)
+    }
+
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        guard NSApp.currentEvent != nil, surface != nil else { return }
+
+        let text: String
+        switch string {
+        case let attributedString as NSAttributedString:
+            text = attributedString.string
+        case let string as String:
+            text = string
+        default:
+            return
+        }
+
+        unmarkText()
+
+        if var accumulatedText = keyTextAccumulator {
+            accumulatedText.append(text)
+            keyTextAccumulator = accumulatedText
+            return
+        }
+
+        sendText(text)
+    }
+
+    override func doCommand(by selector: Selector) {
+        // NSTextInputClient routes unhandled commands here. Deliberately consume
+        // them so AppKit does not emit a system beep.
+    }
+
+    private func syncPreedit(clearIfNeeded: Bool = true) {
+        guard let surface else { return }
+
+        if hasMarkedText() {
+            let text = markedText.string
+            text.withCString { pointer in
+                ghostty_surface_preedit(
+                    surface,
+                    pointer,
+                    UInt(text.lengthOfBytes(using: .utf8))
+                )
+            }
+        } else if clearIfNeeded {
+            ghostty_surface_preedit(surface, nil, 0)
         }
     }
 }
