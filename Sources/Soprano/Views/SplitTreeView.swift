@@ -130,7 +130,7 @@ final class SplitTreeView: NSView {
         switch action {
         case .stop:
             guard let view = tabContentViews[target] else { return }
-            destroyTerminalView(view)
+            destroyTerminalSurface(in: view)
 
         case .restart:
             if let view = tabContentViews[target] {
@@ -293,9 +293,7 @@ final class SplitTreeView: NSView {
         for id in orphanIds {
             if let container = paneContainers[id] {
                 clearFirstResponderIfNeeded(in: container)
-                if let terminalView = findTerminalView(in: container) {
-                    terminalView.destroySurface()
-                }
+                destroyTerminalSurface(in: container)
             }
             paneContainers[id]?.removeFromSuperview()
             paneContainers.removeValue(forKey: id)
@@ -309,11 +307,7 @@ final class SplitTreeView: NSView {
         let orphanTargets = tabContentViews.keys.filter { !activeTargets.contains($0) }
         for target in orphanTargets {
             if let view = tabContentViews[target] {
-                clearFirstResponderIfNeeded(in: view)
-                if let terminalView = findTerminalView(in: view) {
-                    terminalView.destroySurface()
-                }
-                view.removeFromSuperview()
+                discardCachedTabContentView(view)
             }
             tabContentViews.removeValue(forKey: target)
         }
@@ -321,11 +315,19 @@ final class SplitTreeView: NSView {
 
     private func invalidateCachedTabContentViews() {
         for view in tabContentViews.values {
-            clearFirstResponderIfNeeded(in: view)
-            findTerminalView(in: view)?.destroySurface()
-            view.removeFromSuperview()
+            discardCachedTabContentView(view)
         }
         tabContentViews.removeAll()
+    }
+
+    private func discardCachedTabContentView(_ view: NSView) {
+        clearFirstResponderIfNeeded(in: view)
+        destroyTerminalSurface(in: view)
+        view.removeFromSuperview()
+    }
+
+    private func destroyTerminalSurface(in view: NSView) {
+        destroyTerminalView(findTerminalView(in: view) ?? view)
     }
 
     private func syncVisiblePaneContents() {
