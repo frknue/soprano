@@ -23,8 +23,9 @@ final class SplitTreeView: NSView {
     /// Cached pane container views keyed by pane ID.
     /// These survive layout rebuilds — only removed when the pane itself is closed.
     private var paneContainers: [String: PaneContainerView] = [:]
-    /// Cached content views keyed by tab ID so tab switches don't leave stale responders/views mounted.
-    private var tabContentViews: [String: NSView] = [:]
+    /// Cached content views keyed by exact pane/tab target so even malformed
+    /// restored sessions with duplicate tab IDs cannot alias terminal surfaces.
+    private var tabContentViews: [TerminalTarget: NSView] = [:]
 
     /// The root NSSplitView (or single pane view) currently displayed.
     private var rootView: NSView?
@@ -112,11 +113,11 @@ final class SplitTreeView: NSView {
         let target = action.target
         switch action {
         case .stop:
-            guard let view = tabContentViews[target.tabId] else { return }
+            guard let view = tabContentViews[target] else { return }
             destroyTerminalView(view)
 
         case .restart:
-            if let view = tabContentViews[target.tabId] {
+            if let view = tabContentViews[target] {
                 restartTerminalView(view)
                 return
             }
@@ -148,8 +149,11 @@ final class SplitTreeView: NSView {
     }
 
     private func activeTerminalView() -> TerminalSurfaceView? {
-        guard let activeTab = agentManager.panes[agentManager.activePaneId]?.activeTab,
-              let contentView = tabContentViews[activeTab.id]
+        let paneId = agentManager.activePaneId
+        guard let activeTab = agentManager.panes[paneId]?.activeTab,
+              let contentView = tabContentViews[
+                  TerminalTarget(paneId: paneId, tabId: activeTab.id)
+              ]
         else {
             return nil
         }
@@ -282,17 +286,19 @@ final class SplitTreeView: NSView {
     }
 
     private func pruneOrphanedTabContentViews() {
-        let activeTabIds = Set(agentManager.panes.values.flatMap(\.tabs).map(\.id))
-        let orphanIds = tabContentViews.keys.filter { !activeTabIds.contains($0) }
-        for id in orphanIds {
-            if let view = tabContentViews[id] {
+        let activeTargets = Set(agentManager.panes.values.flatMap { pane in
+            pane.tabs.map { TerminalTarget(paneId: pane.id, tabId: $0.id) }
+        })
+        let orphanTargets = tabContentViews.keys.filter { !activeTargets.contains($0) }
+        for target in orphanTargets {
+            if let view = tabContentViews[target] {
                 clearFirstResponderIfNeeded(in: view)
                 if let terminalView = findTerminalView(in: view) {
                     terminalView.destroySurface()
                 }
                 view.removeFromSuperview()
             }
-            tabContentViews.removeValue(forKey: id)
+            tabContentViews.removeValue(forKey: target)
         }
     }
 
@@ -322,7 +328,8 @@ final class SplitTreeView: NSView {
     }
 
     private func contentViewForTab(_ tab: PaneTab, paneId: String) -> NSView {
-        if let existing = tabContentViews[tab.id] {
+        let target = TerminalTarget(paneId: paneId, tabId: tab.id)
+        if let existing = tabContentViews[target] {
             return existing
         }
 
@@ -344,7 +351,6 @@ final class SplitTreeView: NSView {
                 terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
             }
 
-            let target = TerminalTarget(paneId: paneId, tabId: tab.id)
             let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
             let terminalView = terminalViewFactory(
                 target,
@@ -382,7 +388,7 @@ final class SplitTreeView: NSView {
             view = terminalView
         }
 
-        tabContentViews[tab.id] = view
+        tabContentViews[target] = view
         return view
     }
 

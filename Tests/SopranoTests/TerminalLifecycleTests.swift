@@ -108,6 +108,63 @@ struct TerminalLifecycleTests {
 
 @MainActor
 struct SplitTreeTerminalLifecycleTests {
+    @Test func duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() {
+        let firstTarget = TerminalTarget(paneId: "pane-10", tabId: "tab-shared")
+        let secondTarget = TerminalTarget(paneId: "pane-11", tabId: "tab-shared")
+        let manager = AgentManager()
+        manager.restoreWorkspace(WorkspaceSession(
+            id: "duplicate-tabs",
+            name: "Duplicate tabs",
+            savedAt: .distantPast,
+            layout: .split(.init(
+                direction: .horizontal,
+                first: .leaf(firstTarget.paneId),
+                second: .leaf(secondTarget.paneId)
+            )),
+            panes: [
+                .init(
+                    id: firstTarget.paneId,
+                    activeTabIndex: 0,
+                    tabs: [
+                        .init(
+                            id: firstTarget.tabId,
+                            type: .agent,
+                            profileId: "codex"
+                        ),
+                    ]
+                ),
+                .init(
+                    id: secondTarget.paneId,
+                    activeTabIndex: 0,
+                    tabs: [
+                        .init(
+                            id: secondTarget.tabId,
+                            type: .agent,
+                            profileId: "claude-code"
+                        ),
+                    ]
+                ),
+            ],
+            activePaneId: firstTarget.paneId
+        ))
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+
+        #expect(spy.createdTargets.filter { $0 == firstTarget }.count == 1)
+        #expect(spy.createdTargets.filter { $0 == secondTarget }.count == 1)
+        spy.destroyedTargets.removeAll()
+        spy.restartedTargets.removeAll()
+
+        manager.stopAgent(target: secondTarget)
+        manager.restartAgent(target: secondTarget)
+
+        #expect(spy.destroyedTargets == [secondTarget])
+        #expect(spy.restartedTargets == [secondTarget])
+        #expect(!spy.destroyedTargets.contains(firstTarget))
+        #expect(!spy.restartedTargets.contains(firstTarget))
+        _ = splitTree
+    }
+
     @Test func stoppedUncachedAgentDoesNotStartWhenItBecomesVisible() throws {
         let manager = AgentManager()
         let paneId = manager.activePaneId
