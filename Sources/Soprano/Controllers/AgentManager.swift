@@ -180,7 +180,8 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Pane Spawning
 
     @discardableResult
-    func spawnAgent(_ profileId: String, cwd: String? = nil) -> String {
+    func spawnAgent(_ profileId: String, cwd: String? = nil) -> String? {
+        guard panes.count < Self.maxPanes else { return nil }
         let paneId = nextPaneId()
         let tabId = nextTabId()
         let profile = DefaultAgents.profile(for: profileId)
@@ -197,12 +198,11 @@ final class AgentManager: @unchecked Sendable {
         }
 
         let pane = PaneState(id: paneId, tabs: [tab])
-        insertPane(pane)
-        return paneId
+        return insertPane(pane) ? paneId : nil
     }
 
     @discardableResult
-    func spawnTerminal(cwd: String? = nil) -> String {
+    func spawnTerminal(cwd: String? = nil) -> String? {
         spawnAgent("terminal", cwd: cwd)
     }
 
@@ -212,7 +212,8 @@ final class AgentManager: @unchecked Sendable {
     func splitPane(direction: SplitDirection, paneId: String) -> String? {
         guard let sourcePane = panes[paneId],
               let sourceTab = sourcePane.activeTab,
-              let terminalWindow = window(containingPane: paneId)
+              let terminalWindow = window(containingPane: paneId),
+              panes.count < Self.maxPanes
         else { return nil }
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
@@ -224,9 +225,20 @@ final class AgentManager: @unchecked Sendable {
 
         if sourceTab.type == .agent, let agent = sourceTab.agent {
             let newAgent = AgentInstance(id: newTabId, profileId: agent.profileId)
-            newTab = PaneTab(id: newTabId, type: .agent, title: sourceTab.title, agent: newAgent)
+            newTab = PaneTab(
+                id: newTabId,
+                type: .agent,
+                title: sourceTab.title,
+                agent: newAgent,
+                cwd: sourceTab.cwd
+            )
         } else {
-            newTab = PaneTab(id: newTabId, type: sourceTab.type, title: sourceTab.title)
+            newTab = PaneTab(
+                id: newTabId,
+                type: .terminal,
+                title: sourceTab.title,
+                cwd: sourceTab.cwd
+            )
         }
 
         let newPane = PaneState(id: newPaneId, tabs: [newTab])
@@ -303,17 +315,8 @@ final class AgentManager: @unchecked Sendable {
 
         if let target = currentLayout.adjacentPane(from: activePaneId, direction: direction) {
             activePaneId = target
-        } else {
-            // Wrap around: go to the boundary leaf on the opposite side
-            let opposite: NavigationDirection = switch direction {
-            case .left: .left
-            case .right: .right
-            case .up: .up
-            case .down: .down
-            }
-            if let boundary = currentLayout.adjacentPane(from: activePaneId, direction: opposite) {
-                activePaneId = boundary
-            }
+        } else if let target = currentLayout.wrappingPane(from: activePaneId, direction: direction) {
+            activePaneId = target
         }
 
         notifyChange()
@@ -767,8 +770,8 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Private Helpers
 
-    private func insertPane(_ pane: PaneState) {
-        guard panes.count < Self.maxPanes else { return }
+    private func insertPane(_ pane: PaneState) -> Bool {
+        guard panes.count < Self.maxPanes else { return false }
         exitMaximize()
 
         panes[pane.id] = pane
@@ -793,6 +796,7 @@ final class AgentManager: @unchecked Sendable {
         }
 
         notifyChange(layoutChanged: true)
+        return true
     }
 
     // MARK: - Observer Management
