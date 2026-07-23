@@ -154,6 +154,63 @@ struct ClipboardConfirmationCoordinatorTests {
 
         #expect(resolutionCount == 1)
     }
+
+    @Test func reentrantRequestForCancelingSurfaceIsDeniedSynchronously() {
+        let presenter = ClipboardPresenterSpy()
+        let coordinator = ClipboardConfirmationCoordinator(presenter: presenter)
+        let identity = SurfaceIdentity()
+        let surface = ObjectIdentifier(identity)
+        var resolutions: [String] = []
+
+        coordinator.enqueue(
+            surface: surface,
+            kind: .osc52Read,
+            content: "original",
+            parentWindow: nil
+        ) { allowed in
+            resolutions.append("original:\(allowed)")
+            coordinator.enqueue(
+                surface: surface,
+                kind: .osc52Read,
+                content: "reentrant",
+                parentWindow: nil
+            ) { reentrantAllowed in
+                resolutions.append("reentrant:\(reentrantAllowed)")
+            }
+        }
+
+        coordinator.cancelRequests(for: surface)
+
+        #expect(presenter.prompts.map(\.content) == ["original"])
+        #expect(resolutions == ["original:false", "reentrant:false"])
+    }
+
+    @Test func requestKindsHaveDistinctNativeTitlesAndMessages() {
+        let paste = ClipboardConfirmationPrompt(kind: .paste, content: "")
+        let read = ClipboardConfirmationPrompt(kind: .osc52Read, content: "")
+        let write = ClipboardConfirmationPrompt(kind: .osc52Write, content: "")
+
+        #expect(paste.title == "Warning: Potentially Unsafe Paste")
+        #expect(
+            paste.message
+                == "Pasting this text to the terminal may be dangerous as it looks like some commands may be executed."
+        )
+        #expect(read.title == "Authorize Clipboard Read")
+        #expect(
+            read.message == """
+            An application is attempting to read from the clipboard.
+            The current clipboard contents are shown below.
+            """
+        )
+        #expect(write.title == "Authorize Clipboard Write")
+        #expect(
+            write.message == """
+            An application is attempting to write to the clipboard.
+            The content to write is shown below.
+            """
+        )
+        #expect(Set([paste.title, read.title, write.title]).count == 3)
+    }
 }
 
 @MainActor
