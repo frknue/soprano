@@ -2,6 +2,19 @@ import AppKit
 import GhosttyKit
 import QuartzCore
 
+enum PackagedResourceLocator {
+    static func openCodePluginURL(
+        resourcesURL: URL?,
+        fileExists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> URL? {
+        guard let resourcesURL else { return nil }
+        let pluginURL = resourcesURL
+            .appendingPathComponent("Soprano_Soprano.bundle", isDirectory: true)
+            .appendingPathComponent("SopranoOpenCodePlugin.js")
+        return fileExists(pluginURL) ? pluginURL : nil
+    }
+}
+
 struct TerminalConfig {
     var command: String? = nil
     var args: [String] = []
@@ -41,9 +54,8 @@ struct TerminalConfig {
                 arguments.append(contentsOf: ["--settings", settings])
             }
         case "opencode":
-            let pluginURL = Bundle.main.url(
-                forResource: "SopranoOpenCodePlugin",
-                withExtension: "js"
+            let pluginURL = PackagedResourceLocator.openCodePluginURL(
+                resourcesURL: Bundle.main.resourceURL
             ) ?? Bundle.module.url(
                 forResource: "SopranoOpenCodePlugin",
                 withExtension: "js"
