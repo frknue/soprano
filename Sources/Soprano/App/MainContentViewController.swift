@@ -170,6 +170,7 @@ final class MainContentViewController: NSViewController {
 
     func closeSettings() {
         guard !settingsContainerView.isHidden else { return }
+        view.window?.endEditing(for: nil)
         settingsContainerView.isHidden = true
         splitTreeView.isHidden = false
 

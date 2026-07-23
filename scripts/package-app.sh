@@ -78,13 +78,16 @@ mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources"
 cp "$binary_path" "$staged_app/Contents/MacOS/Soprano"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
-cp -R "$resource_bundle" "$staged_app/Soprano_Soprano.bundle"
+cp -R "$resource_bundle" "$staged_app/Contents/Resources/Soprano_Soprano.bundle"
 cp -R "$ghostty_resources_dir" "$staged_app/Contents/Resources/ghostty"
 cp -R "$ghostty_terminfo_dir" "$staged_app/Contents/Resources/terminfo"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$staged_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $bundle_name" "$staged_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $bundle_name" "$staged_app/Contents/Info.plist"
+
+codesign --force --sign "${SOPRANO_CODESIGN_IDENTITY:--}" "$staged_app"
+codesign --verify --deep --strict "$staged_app"
 
 if [[ -e "$output_app" ]]; then
     mv "$output_app" "$previous_app"
