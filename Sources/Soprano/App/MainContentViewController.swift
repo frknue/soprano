@@ -136,52 +136,56 @@ final class MainContentViewController: NSViewController {
         onSettingsChanged: @escaping (AppSettings) -> Void,
         onKeybindingConfigChanged: @escaping (KeyBindingConfig) -> Void
     ) {
-        let settingsViewController: SettingsViewController
-        if let existingController = self.settingsViewController {
-            settingsViewController = existingController
-        } else {
-            let controller = SettingsViewController(
-                themeManager: themeManager,
-                settings: settings,
-                keybindingConfig: keybindingConfig
-            )
-            addChild(controller)
-            controller.view.translatesAutoresizingMaskIntoConstraints = false
-            settingsContainerView.addSubview(controller.view)
-            settingsViewConstraints = [
-                controller.view.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
-                controller.view.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
-                controller.view.topAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
-                controller.view.bottomAnchor.constraint(equalTo: settingsContainerView.bottomAnchor),
-            ]
-            NSLayoutConstraint.activate(settingsViewConstraints)
-            self.settingsViewController = controller
-            settingsViewController = controller
+        preservingWindowFrame {
+            let settingsViewController: SettingsViewController
+            if let existingController = self.settingsViewController {
+                settingsViewController = existingController
+            } else {
+                let controller = SettingsViewController(
+                    themeManager: themeManager,
+                    settings: settings,
+                    keybindingConfig: keybindingConfig
+                )
+                addChild(controller)
+                controller.view.translatesAutoresizingMaskIntoConstraints = false
+                settingsContainerView.addSubview(controller.view)
+                settingsViewConstraints = [
+                    controller.view.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
+                    controller.view.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
+                    controller.view.topAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
+                    controller.view.bottomAnchor.constraint(equalTo: settingsContainerView.bottomAnchor),
+                ]
+                NSLayoutConstraint.activate(settingsViewConstraints)
+                self.settingsViewController = controller
+                settingsViewController = controller
+            }
+
+            settingsViewController.onSettingsChanged = onSettingsChanged
+            settingsViewController.onKeybindingConfigChanged = onKeybindingConfigChanged
+            settingsViewController.apply(theme: themeManager.currentTheme)
+
+            splitTreeView.isHidden = true
+            settingsContainerView.isHidden = false
         }
-
-        settingsViewController.onSettingsChanged = onSettingsChanged
-        settingsViewController.onKeybindingConfigChanged = onKeybindingConfigChanged
-        settingsViewController.apply(theme: themeManager.currentTheme)
-
-        splitTreeView.isHidden = true
-        settingsContainerView.isHidden = false
         view.window?.makeFirstResponder(settingsCloseButton)
     }
 
     func closeSettings() {
         guard !settingsContainerView.isHidden else { return }
         view.window?.endEditing(for: nil)
-        settingsContainerView.isHidden = true
-        splitTreeView.isHidden = false
+        preservingWindowFrame {
+            settingsContainerView.isHidden = true
+            splitTreeView.isHidden = false
 
-        // Hidden views still participate in Auto Layout. Detach the settings
-        // hierarchy so its content-size constraints cannot restrict the main
-        // window after returning to the workspace.
-        NSLayoutConstraint.deactivate(settingsViewConstraints)
-        settingsViewConstraints.removeAll()
-        settingsViewController?.view.removeFromSuperview()
-        settingsViewController?.removeFromParent()
-        settingsViewController = nil
+            // Hidden views still participate in Auto Layout. Detach the settings
+            // hierarchy so its content-size constraints cannot restrict the main
+            // window after returning to the workspace.
+            NSLayoutConstraint.deactivate(settingsViewConstraints)
+            settingsViewConstraints.removeAll()
+            settingsViewController?.view.removeFromSuperview()
+            settingsViewController?.removeFromParent()
+            settingsViewController = nil
+        }
 
         splitTreeView.restoreKeyboardFocus()
     }
@@ -201,6 +205,14 @@ final class MainContentViewController: NSViewController {
         settingsTitleLabel?.textColor = theme.colors.textPrimary
         settingsCloseButton?.contentTintColor = theme.colors.textPrimary
         settingsViewController?.apply(theme: theme)
+    }
+
+    private func preservingWindowFrame(_ update: () -> Void) {
+        WindowFramePreservation.perform(
+            window: view.window,
+            layoutView: view,
+            update: update
+        )
     }
 
     private func buildSettingsScreen(in root: NSView, below topAnchor: NSLayoutYAxisAnchor) {
