@@ -26,6 +26,8 @@ final class SplitTreeView: NSView {
 
     /// Last observed layout generation, to detect topology changes.
     private var lastLayoutGeneration: Int = -1
+    /// Last restore generation whose terminal cache has been invalidated.
+    private var lastWorkspaceRestoreGeneration: Int
 
     /// Observer ID for AgentManager notifications.
     private let observerId = "SplitTreeView"
@@ -33,6 +35,7 @@ final class SplitTreeView: NSView {
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -55,12 +58,19 @@ final class SplitTreeView: NSView {
     // MARK: - State Change Handler
 
     private func handleStateChange() {
+        let currentRestoreGeneration = agentManager.workspaceRestoreGeneration
+        if currentRestoreGeneration != lastWorkspaceRestoreGeneration {
+            lastWorkspaceRestoreGeneration = currentRestoreGeneration
+            invalidateCachedTabContentViews()
+        }
+
         pruneOrphanedTabContentViews()
         syncVisiblePaneContents()
         let currentGen = agentManager.layoutGeneration
         if currentGen != lastLayoutGeneration {
             rebuildLayout()
         } else {
+            syncVisibleSplitPercentages()
             updatePaneStyles()
         }
         syncKeyboardFocus()
@@ -148,32 +158,34 @@ final class SplitTreeView: NSView {
         } else {
             effectiveLayout = layout
         }
-        let view = buildView(for: effectiveLayout)
+        let view = buildView(for: effectiveLayout, at: [])
         mountRootView(view)
         pruneOrphanedContainers()
         updatePaneStyles()
     }
 
     /// Recursively builds the NSSplitView tree. Leaf nodes pull from the container cache.
-    private func buildView(for node: SplitNode) -> NSView {
+    private func buildView(for node: SplitNode, at path: [SplitBranchSide]) -> NSView {
         switch node {
         case .leaf(let paneId):
             return containerForPane(paneId)
 
         case .split(let branch):
-            let splitView = ThemedSplitView(themeManager: themeManager)
+            let splitView = ThemedSplitView(themeManager: themeManager, branchPath: path)
             splitView.isVertical = branch.direction == .horizontal
             splitView.dividerStyle = .thin
             splitView.translatesAutoresizingMaskIntoConstraints = false
+            splitView.onDividerPercentageChanged = { [weak self] branchPath, percentage in
+                self?.agentManager.setSplitPercentage(at: branchPath, to: percentage)
+            }
 
-            let firstView = buildView(for: branch.first)
-            let secondView = buildView(for: branch.second)
+            let firstView = buildView(for: branch.first, at: path + [.first])
+            let secondView = buildView(for: branch.second, at: path + [.second])
 
             splitView.addSubview(firstView)
             splitView.addSubview(secondView)
 
-            // Store the desired split percentage so the delegate can apply it
-            splitView.desiredSplitPercentage = branch.splitPercentage
+            splitView.applyModelPercentage(branch.splitPercentage)
 
             return splitView
         }
@@ -230,6 +242,15 @@ final class SplitTreeView: NSView {
             }
             tabContentViews.removeValue(forKey: id)
         }
+    }
+
+    private func invalidateCachedTabContentViews() {
+        for view in tabContentViews.values {
+            clearFirstResponderIfNeeded(in: view)
+            findTerminalView(in: view)?.destroySurface()
+            view.removeFromSuperview()
+        }
+        tabContentViews.removeAll()
     }
 
     private func syncVisiblePaneContents() {
@@ -332,6 +353,39 @@ final class SplitTreeView: NSView {
     }
 
     // MARK: - Style Updates (No Rebuild)
+
+    /// Applies model-only percentage changes (for example keyboard resizing)
+    /// to the existing AppKit split tree without rebuilding terminal surfaces.
+    private func syncVisibleSplitPercentages() {
+        guard agentManager.maximizedPaneId == nil,
+              let layout = agentManager.layout,
+              let rootView
+        else { return }
+
+        syncSplitPercentages(in: rootView, layout: layout)
+    }
+
+    private func syncSplitPercentages(in view: NSView, layout: SplitNode) {
+        if let splitView = view as? ThemedSplitView,
+           let percentage = splitPercentage(in: layout, at: splitView.branchPath)
+        {
+            splitView.applyModelPercentage(percentage)
+        }
+
+        for subview in view.subviews {
+            syncSplitPercentages(in: subview, layout: layout)
+        }
+    }
+
+    private func splitPercentage(in node: SplitNode, at path: [SplitBranchSide]) -> Double? {
+        var current = node
+        for side in path {
+            guard case .split(let branch) = current else { return nil }
+            current = side == .first ? branch.first : branch.second
+        }
+        guard case .split(let branch) = current else { return nil }
+        return branch.splitPercentage
+    }
 
     /// Updates visual state (borders, headers) without rebuilding the view tree.
     private func updatePaneStyles() {
@@ -524,15 +578,20 @@ final class PaneContainerView: NSView {
 /// NSSplitView subclass that themes the divider and applies split percentages.
 final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
     let themeManager: ThemeManager
+    let branchPath: [SplitBranchSide]
+    var onDividerPercentageChanged: (([SplitBranchSide], Double) -> Void)?
 
     /// The desired split percentage (0–100) from the SplitNode model.
-    var desiredSplitPercentage: Double = 50.0
+    private(set) var desiredSplitPercentage: Double = 50.0
 
     /// Whether we've applied the initial split position.
     private var hasAppliedInitialPosition = false
+    /// Prevents `setPosition` delegate callbacks from being written back to the model.
+    private var isApplyingModelPercentage = false
 
-    init(themeManager: ThemeManager) {
+    init(themeManager: ThemeManager, branchPath: [SplitBranchSide]) {
         self.themeManager = themeManager
+        self.branchPath = branchPath
         super.init(frame: .zero)
         delegate = self
     }
@@ -560,23 +619,65 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
 
     private func applyInitialPosition() {
         guard !hasAppliedInitialPosition, subviews.count >= 2 else { return }
+        applyModelPercentage(desiredSplitPercentage)
+    }
+
+    func applyModelPercentage(_ percentage: Double) {
+        let clampedPercentage = max(10, min(90, percentage))
+        if hasAppliedInitialPosition,
+           abs(desiredSplitPercentage - clampedPercentage) < 0.0001
+        {
+            return
+        }
+        desiredSplitPercentage = clampedPercentage
+        guard subviews.count >= 2 else { return }
         let totalSize = isVertical ? bounds.width : bounds.height
         guard totalSize > 0 else { return }
 
-        let position = totalSize * CGFloat(desiredSplitPercentage / 100.0)
+        let availableSize = max(0, totalSize - dividerThickness)
+        let position = availableSize * CGFloat(desiredSplitPercentage / 100.0)
+        isApplyingModelPercentage = true
+        defer { isApplyingModelPercentage = false }
         setPosition(position, ofDividerAt: 0)
         hasAppliedInitialPosition = true
     }
 
+    static func percentageForDividerPosition(
+        _ position: Double,
+        totalSize: Double,
+        dividerThickness: Double
+    ) -> Double {
+        let availableSize = totalSize - dividerThickness
+        guard availableSize > 0 else { return 50 }
+        return max(10, min(90, position / availableSize * 100))
+    }
+
     // MARK: - NSSplitViewDelegate
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        guard !isApplyingModelPercentage,
+              hasAppliedInitialPosition,
+              subviews.count >= 2
+        else { return }
+
+        let position = isVertical ? subviews[0].frame.width : subviews[0].frame.height
+        let totalSize = isVertical ? bounds.width : bounds.height
+        let percentage = Self.percentageForDividerPosition(
+            Double(position),
+            totalSize: Double(totalSize),
+            dividerThickness: Double(dividerThickness)
+        )
+        desiredSplitPercentage = percentage
+        onDividerPercentageChanged?(branchPath, percentage)
+    }
 
     func splitView(
         _ splitView: NSSplitView,
         constrainMinCoordinate proposedMinimumPosition: CGFloat,
         ofSubviewAt dividerIndex: Int
     ) -> CGFloat {
-        let total = isVertical ? bounds.width : bounds.height
-        return max(proposedMinimumPosition, total * 0.05)
+        let availableSize = max(0, (isVertical ? bounds.width : bounds.height) - dividerThickness)
+        return max(proposedMinimumPosition, availableSize * 0.10)
     }
 
     func splitView(
@@ -584,8 +685,8 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
         constrainMaxCoordinate proposedMaximumPosition: CGFloat,
         ofSubviewAt dividerIndex: Int
     ) -> CGFloat {
-        let total = isVertical ? bounds.width : bounds.height
-        return min(proposedMaximumPosition, total * 0.95)
+        let availableSize = max(0, (isVertical ? bounds.width : bounds.height) - dividerThickness)
+        return min(proposedMaximumPosition, availableSize * 0.90)
     }
 
     func splitView(
