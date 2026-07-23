@@ -31,8 +31,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "resize-right", label: "Grow Right", description: "Grow the active pane to the right", category: .layout, defaultKeys: "Prefix → L", mode: .prefix, key: "l", shift: true),
 
             // Layout (prefix)
-            KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → S", mode: .prefix, key: "s"),
-            KeyBinding(id: "split-vertical", label: "Split Vertical", description: "Split the active pane vertically", category: .layout, defaultKeys: "Prefix → V", mode: .prefix, key: "v"),
+            KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → -", mode: .prefix, key: "-"),
+            KeyBinding(id: "split-vertical", label: "Split Vertical", description: "Split the active pane vertically", category: .layout, defaultKeys: "Prefix → |", mode: .prefix, key: "|", shift: true),
             KeyBinding(id: "close-pane", label: "Close Pane", description: "Close the active pane", category: .layout, defaultKeys: "Prefix → Q", mode: .prefix, key: "q"),
             KeyBinding(id: "kill-pane", label: "Kill Pane", description: "Force-close the active pane", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
             KeyBinding(id: "maximize-pane", label: "Maximize", description: "Toggle maximize for the active pane", category: .layout, defaultKeys: "Prefix → M", mode: .prefix, key: "m"),
@@ -74,15 +74,27 @@ enum DefaultKeybindings {
             return Self.config
         }
 
-        let savedBindingsById = Dictionary(uniqueKeysWithValues: config.bindings.map { ($0.id, $0) })
-        let mergedBindings = Self.config.bindings.compactMap { defaultBinding in
-            savedBindingsById[defaultBinding.id] ?? defaultBinding
+        return mergedConfig(with: config)
+    }
+
+    static func mergedConfig(with savedConfig: KeyBindingConfig) -> KeyBindingConfig {
+        let savedBindingsById = Dictionary(
+            uniqueKeysWithValues: savedConfig.bindings.map { ($0.id, $0) }
+        )
+        let mergedBindings = Self.config.bindings.map { defaultBinding in
+            guard let savedBinding = savedBindingsById[defaultBinding.id] else {
+                return defaultBinding
+            }
+            return migrateLegacySplitBinding(
+                savedBinding,
+                to: defaultBinding
+            )
         }
 
         return KeyBindingConfig(
-            prefixKey: config.prefixKey,
-            prefixTimeoutMs: config.prefixTimeoutMs,
-            resizeTickPercent: config.resizeTickPercent,
+            prefixKey: savedConfig.prefixKey,
+            prefixTimeoutMs: savedConfig.prefixTimeoutMs,
+            resizeTickPercent: savedConfig.resizeTickPercent,
             bindings: mergedBindings
         )
     }
@@ -90,5 +102,27 @@ enum DefaultKeybindings {
     static func save(_ config: KeyBindingConfig) {
         guard let data = try? JSONEncoder().encode(config) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private static func migrateLegacySplitBinding(
+        _ savedBinding: KeyBinding,
+        to defaultBinding: KeyBinding
+    ) -> KeyBinding {
+        let legacyKey: String
+        switch savedBinding.id {
+        case "split-horizontal":
+            legacyKey = "s"
+        case "split-vertical":
+            legacyKey = "v"
+        default:
+            return savedBinding
+        }
+
+        let usesLegacyDefault = savedBinding.mode == .prefix
+            && savedBinding.key == legacyKey
+            && savedBinding.ctrl != true
+            && savedBinding.meta != true
+            && savedBinding.shift != true
+        return usesLegacyDefault ? defaultBinding : savedBinding
     }
 }
