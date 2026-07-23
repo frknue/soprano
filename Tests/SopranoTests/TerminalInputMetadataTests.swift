@@ -1,7 +1,96 @@
+import AppKit
 import Testing
 @testable import Soprano
 
 struct TerminalInputMetadataTests {
+    @Test func editSelectorsMapToExactGhosttyBindingActions() {
+        #expect(TerminalResponderAction.bindingAction(
+            for: #selector(NSText.copy(_:))
+        ) == "copy_to_clipboard")
+        #expect(TerminalResponderAction.bindingAction(
+            for: #selector(NSText.paste(_:))
+        ) == "paste_from_clipboard")
+        #expect(TerminalResponderAction.bindingAction(
+            for: #selector(NSText.selectAll(_:))
+        ) == "select_all")
+        #expect(TerminalResponderAction.bindingAction(
+            for: #selector(NSText.cut(_:))
+        ) == nil)
+    }
+
+    @Test func unhandledCommandEquivalentDeliversExactlyOnePressAndRelease() {
+        var router = TerminalKeyEquivalentRouter()
+        let timestamp = 42.5
+        let keyCode: UInt16 = 47
+        var pressCount = 0
+        var releaseCount = 0
+
+        #expect(router.routeKeyEquivalent(
+            timestamp: timestamp,
+            hasCommandOrControlModifier: true,
+            isTerminalBinding: false,
+            menuHandled: false
+        ) == .passThrough)
+        #expect(router.shouldRedispatchCommand(timestamp: timestamp))
+
+        if router.routeKeyEquivalent(
+            timestamp: timestamp,
+            hasCommandOrControlModifier: true,
+            isTerminalBinding: false,
+            menuHandled: false
+        ) == .deliverPress {
+            router.prepareForKeyDown()
+            router.recordCommandPress(keyCode: keyCode)
+            pressCount += 1
+        }
+
+        if router.routeKeyEquivalent(
+            timestamp: timestamp,
+            hasCommandOrControlModifier: true,
+            isTerminalBinding: false,
+            menuHandled: false
+        ) == .deliverPress {
+            pressCount += 1
+        }
+        if router.consumeCommandRelease(keyCode: keyCode) {
+            releaseCount += 1
+        }
+        if router.consumeCommandRelease(keyCode: keyCode) {
+            releaseCount += 1
+        }
+
+        #expect(pressCount == 1)
+        #expect(releaseCount == 1)
+        #expect(!router.shouldRedispatchCommand(timestamp: timestamp))
+    }
+
+    @Test func menuHandledEquivalentIsNotRedispatchedOrReleasedToTerminal() {
+        var router = TerminalKeyEquivalentRouter()
+        let timestamp = 73.25
+
+        #expect(router.routeKeyEquivalent(
+            timestamp: timestamp,
+            hasCommandOrControlModifier: true,
+            isTerminalBinding: true,
+            menuHandled: true
+        ) == .handled)
+        #expect(!router.shouldRedispatchCommand(timestamp: timestamp))
+        let releasedToTerminal = router.consumeCommandRelease(keyCode: 8)
+        #expect(!releasedToTerminal)
+    }
+
+    @Test func zeroTimestampEquivalentIsNeverTrackedForRedispatch() {
+        var router = TerminalKeyEquivalentRouter()
+
+        #expect(router.routeKeyEquivalent(
+            timestamp: 0,
+            hasCommandOrControlModifier: true,
+            isTerminalBinding: false,
+            menuHandled: false
+        ) == .passThrough)
+        #expect(!router.shouldRedispatchCommand(timestamp: 0))
+    }
+
     @Test func scrollMetadataKeepsPrecisionAndMomentumInTheirDedicatedBits() {
         #expect(TerminalInputMetadata.scrollFlags(
             precise: false,

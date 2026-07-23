@@ -1,5 +1,94 @@
 import Foundation
 
+enum TerminalResponderAction {
+    static func bindingAction(for selector: Selector) -> String? {
+        switch NSStringFromSelector(selector) {
+        case "copy:":
+            "copy_to_clipboard"
+        case "paste:":
+            "paste_from_clipboard"
+        case "selectAll:":
+            "select_all"
+        default:
+            nil
+        }
+    }
+}
+
+enum TerminalKeyEquivalentRoute {
+    case passThrough
+    case deliverPress
+    case handled
+}
+
+struct TerminalKeyEquivalentRouter {
+    private var pendingTimestamp: TimeInterval?
+    private var deliveredTimestamp: TimeInterval?
+    private var pressedCommandKeyCodes: Set<UInt16> = []
+
+    mutating func routeKeyEquivalent(
+        timestamp: TimeInterval,
+        hasCommandOrControlModifier: Bool,
+        isTerminalBinding: Bool,
+        menuHandled: Bool
+    ) -> TerminalKeyEquivalentRoute {
+        guard timestamp != 0 else { return .passThrough }
+        guard hasCommandOrControlModifier else {
+            pendingTimestamp = nil
+            return .passThrough
+        }
+
+        if menuHandled {
+            pendingTimestamp = nil
+            return .handled
+        }
+
+        if deliveredTimestamp == timestamp {
+            pendingTimestamp = nil
+            return .handled
+        }
+
+        if isTerminalBinding {
+            pendingTimestamp = nil
+            deliveredTimestamp = timestamp
+            return .deliverPress
+        }
+
+        if pendingTimestamp == timestamp {
+            pendingTimestamp = nil
+            deliveredTimestamp = timestamp
+            return .deliverPress
+        }
+
+        pendingTimestamp = timestamp
+        return .passThrough
+    }
+
+    func shouldRedispatchCommand(timestamp: TimeInterval) -> Bool {
+        timestamp != 0
+            && pendingTimestamp == timestamp
+            && deliveredTimestamp != timestamp
+    }
+
+    mutating func prepareForKeyDown() {
+        pendingTimestamp = nil
+    }
+
+    mutating func recordCommandPress(keyCode: UInt16) {
+        pressedCommandKeyCodes.insert(keyCode)
+    }
+
+    mutating func consumeCommandRelease(keyCode: UInt16) -> Bool {
+        pressedCommandKeyCodes.remove(keyCode) != nil
+    }
+
+    mutating func reset() {
+        pendingTimestamp = nil
+        deliveredTimestamp = nil
+        pressedCommandKeyCodes.removeAll()
+    }
+}
+
 enum TerminalScrollMomentum: Int32 {
     case none = 0
     case began = 1
