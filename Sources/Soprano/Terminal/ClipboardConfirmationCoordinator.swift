@@ -14,8 +14,10 @@ struct ClipboardConfirmationPrompt: Equatable {
         switch kind {
         case .paste:
             "Warning: Potentially Unsafe Paste"
-        case .osc52Read, .osc52Write:
-            "Authorize Clipboard Access"
+        case .osc52Read:
+            "Authorize Clipboard Read"
+        case .osc52Write:
+            "Authorize Clipboard Write"
         }
     }
 
@@ -97,6 +99,7 @@ final class ClipboardConfirmationCoordinator {
     private let presenter: any ClipboardConfirmationPresenting
     private var queue: [Request] = []
     private var active: ActiveRequest?
+    private var cancelingSurfaces: Set<ObjectIdentifier> = []
 
     init(presenter: any ClipboardConfirmationPresenting) {
         self.presenter = presenter
@@ -109,6 +112,11 @@ final class ClipboardConfirmationCoordinator {
         parentWindow: NSWindow?,
         resolve: @escaping (Bool) -> Void
     ) {
+        guard !cancelingSurfaces.contains(surface) else {
+            resolve(false)
+            return
+        }
+
         queue.append(Request(
             surface: surface,
             prompt: ClipboardConfirmationPrompt(kind: kind, content: content),
@@ -119,6 +127,8 @@ final class ClipboardConfirmationCoordinator {
     }
 
     func cancelRequests(for surface: ObjectIdentifier) {
+        guard cancelingSurfaces.insert(surface).inserted else { return }
+
         let activeToCancel: ActiveRequest?
         if active?.request.surface == surface {
             activeToCancel = active
@@ -142,6 +152,7 @@ final class ClipboardConfirmationCoordinator {
             request.resolve(false)
         }
 
+        cancelingSurfaces.remove(surface)
         presentNextIfNeeded()
     }
 
