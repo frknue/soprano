@@ -24,6 +24,9 @@ final class AgentManager: @unchecked Sendable {
 
     /// Tracks whether the layout topology changed (vs just focus/status change).
     private(set) var layoutGeneration: Int = 0
+    /// Advances after a workspace has been successfully restored so views can
+    /// discard cached terminal surfaces even when restored IDs collide.
+    private(set) var workspaceRestoreGeneration: Int = 0
     private var ghosttyCloseObserver: NSObjectProtocol?
 
     static let maxPanes = 20
@@ -323,6 +326,15 @@ final class AgentManager: @unchecked Sendable {
     }
 
     // MARK: - Resizing
+
+    func setSplitPercentage(at path: [SplitBranchSide], to percentage: Double) {
+        guard let currentLayout = layout else { return }
+        let updatedLayout = currentLayout.settingSplitPercentage(at: path, to: percentage)
+        guard updatedLayout != currentLayout else { return }
+
+        layout = updatedLayout
+        notifyChange()
+    }
 
     func resizePane(direction: NavigationDirection, tickPercent: Double = 5) {
         guard let currentLayout = layout,
@@ -755,6 +767,7 @@ final class AgentManager: @unchecked Sendable {
         nextId = maxId
 
         maximizedPaneId = nil
+        workspaceRestoreGeneration += 1
         notifyChange(layoutChanged: true)
     }
 

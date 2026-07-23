@@ -56,6 +56,33 @@ struct SplitNodeTests {
         #expect(splitPercentage(in: layout.settingSplitPercentage(at: [], to: 150), at: []) == 90)
     }
 
+    @Test func agentManagerSetsAnAbsoluteNestedPercentageWithoutChangingTopologyGeneration() throws {
+        let manager = AgentManager()
+        let nestedLayout = SplitNode.split(.init(
+            direction: .horizontal,
+            first: .leaf("pane-1"),
+            second: .split(.init(
+                direction: .vertical,
+                first: .leaf("pane-2"),
+                second: .leaf("pane-3"),
+                splitPercentage: 35
+            )),
+            splitPercentage: 40
+        ))
+        manager.setLayout(nestedLayout)
+        let topologyGeneration = manager.layoutGeneration
+
+        manager.setSplitPercentage(at: [.second], to: 125)
+
+        let updatedLayout = try #require(manager.layout)
+        #expect(splitPercentage(in: updatedLayout, at: []) == 40)
+        #expect(splitPercentage(in: updatedLayout, at: [.second]) == 90)
+        #expect(manager.layoutGeneration == topologyGeneration)
+
+        let savedLayout = try #require(manager.snapshotWorkspace().layout)
+        #expect(splitPercentage(in: savedLayout, at: [.second]) == 90)
+    }
+
     private var nestedLayout: SplitNode {
         .split(.init(
             direction: .horizontal,
