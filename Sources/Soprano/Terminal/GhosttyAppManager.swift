@@ -267,6 +267,7 @@ private func ghosttyCloseSurface(_ userdata: UnsafeMutableRawPointer?, _ shouldC
             userInfo: [
                 "surface": surface,
                 "paneId": surfaceView.paneId,
+                "tabId": surfaceView.tabId,
                 "shouldConfirm": shouldConfirm,
             ]
         )

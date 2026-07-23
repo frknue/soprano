@@ -169,7 +169,12 @@ final class TerminalSurfaceView: NSView {
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
 
-    init(paneId: String, tabId: String, config: TerminalConfig = .defaultShell) {
+    init(
+        paneId: String,
+        tabId: String,
+        config: TerminalConfig = .defaultShell,
+        startsSurface: Bool = true
+    ) {
         self.paneId = paneId
         self.tabId = tabId
 
@@ -184,7 +189,9 @@ final class TerminalSurfaceView: NSView {
         self.config = scopedConfig
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         setup()
-        createSurface()
+        if startsSurface {
+            createSurface()
+        }
 
         NotificationCenter.default.addObserver(
             self,
@@ -701,10 +708,9 @@ final class TerminalSurfaceView: NSView {
     }
 
     func destroySurface() {
-        if let surface {
-            ghostty_surface_free(surface)
-            self.surface = nil
-        }
+        guard let surface else { return }
+        self.surface = nil
+        ghostty_surface_free(surface)
     }
 
     func sendText(_ text: String) {

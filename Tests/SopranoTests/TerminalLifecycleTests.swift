@@ -1,0 +1,244 @@
+import Testing
+@testable import Soprano
+
+struct TerminalLifecycleTests {
+    @Test func exactStopAndRestartEmitTheirTargetAfterUpdatingOnlyThatAgent() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let firstTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let secondTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        manager.updateAgentStatus(paneId: paneId, tabId: firstTabId, status: .running)
+        manager.updateAgentStatus(paneId: paneId, tabId: secondTabId, status: .running)
+
+        var actions: [TerminalLifecycleAction] = []
+        var statusWhenDelivered: [AgentStatus] = []
+        manager.addTerminalLifecycleObserver(id: "test-spy") { [weak manager] action in
+            actions.append(action)
+            let target = action.target
+            if let status = manager?.agent(paneId: target.paneId, tabId: target.tabId)?.status {
+                statusWhenDelivered.append(status)
+            }
+        }
+
+        let firstTarget = TerminalTarget(paneId: paneId, tabId: firstTabId)
+        manager.stopAgent(target: firstTarget)
+
+        #expect(actions == [.stop(firstTarget)])
+        #expect(statusWhenDelivered == [.stopped])
+        #expect(manager.agent(paneId: paneId, tabId: firstTabId)?.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: secondTabId)?.status == .running)
+
+        manager.restartAgent(target: firstTarget)
+
+        #expect(actions == [.stop(firstTarget), .restart(firstTarget)])
+        #expect(statusWhenDelivered == [.stopped, .starting])
+        #expect(manager.agent(paneId: paneId, tabId: firstTabId)?.status == .starting)
+        #expect(manager.agent(paneId: paneId, tabId: firstTabId)?.restartCount == 1)
+        #expect(manager.agent(paneId: paneId, tabId: secondTabId)?.status == .running)
+    }
+
+    @Test func activeTabConveniencesResolveAndEmitTheExactTarget() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        _ = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "codex"))
+        let activeTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        let expectedTarget = TerminalTarget(paneId: paneId, tabId: activeTabId)
+        var actions: [TerminalLifecycleAction] = []
+        manager.addTerminalLifecycleObserver(id: "test-spy") { actions.append($0) }
+
+        manager.stopAgent(paneId: paneId)
+        manager.restartAgent(paneId: paneId)
+
+        #expect(actions == [.stop(expectedTarget), .restart(expectedTarget)])
+    }
+
+    @Test func inactiveAgentCloseStopsOnlyTheSuppliedTab() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let inactiveTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let activeTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        manager.updateAgentStatus(paneId: paneId, tabId: inactiveTabId, status: .running)
+        manager.updateAgentStatus(paneId: paneId, tabId: activeTabId, status: .running)
+
+        manager.handleTerminalClose(
+            target: TerminalTarget(paneId: paneId, tabId: inactiveTabId)
+        )
+
+        #expect(manager.agent(paneId: paneId, tabId: inactiveTabId)?.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: activeTabId)?.status == .running)
+        #expect(manager.panes[paneId]?.activeTab?.id == activeTabId)
+
+        manager.handleTerminalClose(
+            target: TerminalTarget(paneId: paneId, tabId: inactiveTabId)
+        )
+        #expect(manager.agent(paneId: paneId, tabId: activeTabId)?.status == .running)
+    }
+
+    @Test func inactiveRegularTerminalCloseRemovesOnlyTheSuppliedTab() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let terminalTabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let firstAgentTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let activeAgentTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+
+        let terminalTarget = TerminalTarget(paneId: paneId, tabId: terminalTabId)
+        manager.handleTerminalClose(target: terminalTarget)
+
+        #expect(manager.panes[paneId]?.tabs.map(\.id) == [firstAgentTabId, activeAgentTabId])
+        #expect(manager.panes[paneId]?.activeTab?.id == activeAgentTabId)
+
+        manager.handleTerminalClose(target: terminalTarget)
+        #expect(manager.panes[paneId]?.tabs.map(\.id) == [firstAgentTabId, activeAgentTabId])
+    }
+}
+
+@MainActor
+struct SplitTreeTerminalLifecycleTests {
+    @Test func stoppedUncachedAgentDoesNotStartWhenItBecomesVisible() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let stoppedTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        _ = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        manager.stopAgent(target: TerminalTarget(paneId: paneId, tabId: stoppedTabId))
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+
+        #expect(!spy.createdTargets.contains(
+            TerminalTarget(paneId: paneId, tabId: stoppedTabId)
+        ))
+
+        manager.focusTab(paneId: paneId, tabId: stoppedTabId)
+
+        #expect(spy.createdTargets.last == TerminalTarget(paneId: paneId, tabId: stoppedTabId))
+        #expect(spy.createdStartFlags.last == false)
+        #expect(spy.restartedTargets.isEmpty)
+        _ = splitTree
+    }
+
+    @Test func stopAndRestartOperateOnlyOnTheCachedTargetSurface() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let firstTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let secondTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+        manager.focusTab(paneId: paneId, tabId: firstTabId)
+        spy.destroyedTargets.removeAll()
+        spy.restartedTargets.removeAll()
+
+        manager.stopAgent(
+            target: TerminalTarget(paneId: paneId, tabId: firstTabId)
+        )
+
+        #expect(spy.destroyedTargets == [
+            TerminalTarget(paneId: paneId, tabId: firstTabId),
+        ])
+        #expect(!spy.destroyedTargets.contains(
+            TerminalTarget(paneId: paneId, tabId: secondTabId)
+        ))
+        #expect(spy.restartedTargets.isEmpty)
+
+        manager.stopAgent(
+            target: TerminalTarget(paneId: paneId, tabId: firstTabId)
+        )
+        #expect(spy.destroyedTargets.count == 1)
+
+        manager.restartAgent(
+            target: TerminalTarget(paneId: paneId, tabId: firstTabId)
+        )
+
+        #expect(spy.restartedTargets == [
+            TerminalTarget(paneId: paneId, tabId: firstTabId),
+        ])
+        #expect(!spy.restartedTargets.contains(
+            TerminalTarget(paneId: paneId, tabId: secondTabId)
+        ))
+        _ = splitTree
+    }
+
+    @Test func restartOfUncachedTargetConstructsAndStartsItExactlyOnce() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let inactiveTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        _ = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        manager.stopAgent(target: TerminalTarget(paneId: paneId, tabId: inactiveTabId))
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+
+        manager.restartAgent(
+            target: TerminalTarget(paneId: paneId, tabId: inactiveTabId)
+        )
+
+        let target = TerminalTarget(paneId: paneId, tabId: inactiveTabId)
+        #expect(spy.createdTargets.filter { $0 == target }.count == 1)
+        let creationIndex = try #require(spy.createdTargets.firstIndex(of: target))
+        #expect(spy.createdStartFlags[creationIndex])
+        #expect(spy.restartedTargets.isEmpty)
+        _ = splitTree
+    }
+
+    private func makeSplitTree(
+        manager: AgentManager,
+        spy: SurfaceLifecycleSpy
+    ) -> SplitTreeView {
+        SplitTreeView(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            terminalViewFactory: { target, _, startsSurface in
+                let view = ThemedSplitView(
+                    themeManager: ThemeManager(themeId: "gruvbox-dark"),
+                    branchPath: []
+                )
+                spy.createdTargets.append(target)
+                spy.createdStartFlags.append(startsSurface)
+                spy.targetsByView[ObjectIdentifier(view)] = target
+                return view
+            },
+            destroyTerminalView: { view in
+                if let target = spy.targetsByView[ObjectIdentifier(view)] {
+                    spy.destroyedTargets.append(target)
+                }
+            },
+            restartTerminalView: { view in
+                if let target = spy.targetsByView[ObjectIdentifier(view)] {
+                    spy.restartedTargets.append(target)
+                }
+            }
+        )
+    }
+}
+
+@MainActor
+private final class SurfaceLifecycleSpy {
+    var createdTargets: [TerminalTarget] = []
+    var createdStartFlags: [Bool] = []
+    var targetsByView: [ObjectIdentifier: TerminalTarget] = [:]
+    var destroyedTargets: [TerminalTarget] = []
+    var restartedTargets: [TerminalTarget] = []
+}
