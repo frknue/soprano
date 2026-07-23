@@ -118,4 +118,32 @@ then
     exit 1
 fi
 
+sign_app="$repo_root/scripts/sign-app.sh"
+managed_app="$test_root/managed.app"
+cp -R "$test_root/one.app" "$managed_app"
+/usr/bin/codesign --remove-signature "$managed_app"
+
+SOPRANO_LOCAL_SIGNING_DIR="$signing_dir" "$sign_app" "$managed_app"
+/usr/bin/codesign --verify --deep --strict "$managed_app"
+
+explicit_app="$test_root/explicit.app"
+cp -R "$test_root/two.app" "$explicit_app"
+/usr/bin/codesign --remove-signature "$explicit_app"
+SOPRANO_CODESIGN_IDENTITY="$identity_hash" \
+SOPRANO_LOCAL_SIGNING_DIR="/must-not-be-used" \
+    "$sign_app" "$explicit_app"
+/usr/bin/codesign --verify --deep --strict "$explicit_app"
+
+missing_identity_log="$test_root/missing-identity.log"
+if SOPRANO_CODESIGN_IDENTITY="Soprano Missing Identity" \
+    "$sign_app" "$explicit_app" 2> "$missing_identity_log"
+then
+    echo "Signing unexpectedly accepted a missing identity" >&2
+    exit 1
+fi
+if ! grep -q 'could not sign' "$missing_identity_log"; then
+    echo "Missing identity failure did not identify the signing step" >&2
+    exit 1
+fi
+
 echo "Local code signing identity is stable."

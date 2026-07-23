@@ -86,8 +86,7 @@ cp -R "$ghostty_terminfo_dir" "$staged_app/Contents/Resources/terminfo"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $bundle_name" "$staged_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $bundle_name" "$staged_app/Contents/Info.plist"
 
-codesign --force --sign "${SOPRANO_CODESIGN_IDENTITY:--}" "$staged_app"
-codesign --verify --deep --strict "$staged_app"
+"$script_dir/sign-app.sh" "$staged_app"
 
 if [[ -e "$output_app" ]]; then
     mv "$output_app" "$previous_app"
