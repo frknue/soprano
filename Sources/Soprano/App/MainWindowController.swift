@@ -24,8 +24,11 @@ final class MainWindowController: NSWindowController {
         self.gitBranchMonitor = gitBranchMonitor
         self.settings = settings
 
+        let initialFrame = MainWindowSizing.initialFrame(
+            in: NSScreen.main?.visibleFrame ?? MainWindowSizing.fallbackVisibleFrame
+        )
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            contentRect: NSRect(origin: .zero, size: initialFrame.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -36,9 +39,9 @@ final class MainWindowController: NSWindowController {
         window.minSize = NSSize(width: 600, height: 400)
         window.isReleasedWhenClosed = false
 
-        // Restore saved frame or center on screen
+        // Restore the user's last frame, or use the screen-aware initial frame.
         if !window.setFrameUsingName("SopranoMainWindow") {
-            window.center()
+            window.setFrame(initialFrame, display: false)
         }
         window.setFrameAutosaveName("SopranoMainWindow")
 
