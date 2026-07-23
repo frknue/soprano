@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import Soprano
 
@@ -338,6 +339,31 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
+    @Test func ordinaryLayoutUpdatePreservesContentWhileSameTargetRestoreReplacesIt() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        let session = manager.snapshotWorkspace()
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+
+        let originalView = try #require(spy.createdViewsByTarget[target]?.first)
+        manager.setLayout(manager.layout)
+
+        #expect(spy.createdViewsByTarget[target]?.count == 1)
+        #expect(spy.destroyedTargets.isEmpty)
+        #expect(spy.createdViewsByTarget[target]?.first === originalView)
+
+        manager.restoreWorkspace(session)
+
+        #expect(spy.destroyedTargets == [target])
+        #expect(spy.createdViewsByTarget[target]?.count == 2)
+        let replacementView = try #require(spy.createdViewsByTarget[target]?.last)
+        #expect(replacementView !== originalView)
+        _ = splitTree
+    }
+
     private func makeSplitTree(
         manager: AgentManager,
         spy: SurfaceLifecycleSpy,
@@ -355,6 +381,7 @@ struct SplitTreeTerminalLifecycleTests {
                 spy.createdTargets.append(target)
                 spy.createdStartFlags.append(startsSurface)
                 spy.targetsByView[ObjectIdentifier(view)] = target
+                spy.createdViewsByTarget[target, default: []].append(view)
                 return view
             },
             destroyTerminalView: { view in
@@ -379,6 +406,7 @@ private final class SurfaceLifecycleSpy {
     var createdTargets: [TerminalTarget] = []
     var createdStartFlags: [Bool] = []
     var targetsByView: [ObjectIdentifier: TerminalTarget] = [:]
+    var createdViewsByTarget: [TerminalTarget: [NSView]] = [:]
     var destroyedTargets: [TerminalTarget] = []
     var restartedTargets: [TerminalTarget] = []
 }
