@@ -18,77 +18,218 @@ struct TerminalInputMetadataTests {
         ) == nil)
     }
 
-    @Test func unhandledCommandEquivalentDeliversExactlyOnePressAndRelease() {
-        var router = TerminalKeyEquivalentRouter()
-        let timestamp = 42.5
-        let keyCode: UInt16 = 47
-        var pressCount = 0
-        var releaseCount = 0
+    @Test func unhandledCommandAndControlEquivalentsRedispatchTheirExactEventOnce() {
+        let cases: [(modifiers: TerminalKeyEquivalentModifiers, keyCode: UInt16)] = [
+            (.command, 47),
+            (.control, 8),
+        ]
 
-        #expect(router.routeKeyEquivalent(
-            timestamp: timestamp,
-            hasCommandOrControlModifier: true,
-            isTerminalBinding: false,
-            menuHandled: false
-        ) == .passThrough)
-        #expect(router.shouldRedispatchCommand(timestamp: timestamp))
+        for testCase in cases {
+            var router = TerminalKeyEquivalentRouter()
+            let timestamp = 42.5
 
-        if router.routeKeyEquivalent(
-            timestamp: timestamp,
-            hasCommandOrControlModifier: true,
-            isTerminalBinding: false,
-            menuHandled: false
-        ) == .deliverPress {
-            router.prepareForKeyDown()
-            router.recordCommandPress(keyCode: keyCode)
-            pressCount += 1
-        }
+            let firstRoute = router.routeKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode,
+                modifiers: testCase.modifiers,
+                isTerminalBinding: false,
+                menuHandled: false
+            )
+            #expect(firstRoute == .passThrough)
+            #expect(router.shouldRedispatchKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode
+            ))
+            #expect(!router.shouldRedispatchKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode + 1
+            ))
 
-        if router.routeKeyEquivalent(
-            timestamp: timestamp,
-            hasCommandOrControlModifier: true,
-            isTerminalBinding: false,
-            menuHandled: false
-        ) == .deliverPress {
-            pressCount += 1
-        }
-        if router.consumeCommandRelease(keyCode: keyCode) {
-            releaseCount += 1
-        }
-        if router.consumeCommandRelease(keyCode: keyCode) {
-            releaseCount += 1
-        }
+            let secondRoute = router.routeKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode,
+                modifiers: testCase.modifiers,
+                isTerminalBinding: false,
+                menuHandled: false
+            )
+            #expect(secondRoute == .deliverPress)
+            router.prepareForKeyDown(timestamp: timestamp, keyCode: testCase.keyCode)
+            router.recordKeyDownDelivery(keyCode: testCase.keyCode)
 
-        #expect(pressCount == 1)
-        #expect(releaseCount == 1)
-        #expect(!router.shouldRedispatchCommand(timestamp: timestamp))
+            let duplicatePress = router.routeKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode,
+                modifiers: testCase.modifiers,
+                isTerminalBinding: false,
+                menuHandled: false
+            )
+            let release = router.routeKeyUp(keyCode: testCase.keyCode)
+            let duplicateRelease = router.routeKeyUp(keyCode: testCase.keyCode)
+
+            #expect(duplicatePress == .handled)
+            #expect(release == .deliver)
+            #expect(duplicateRelease == .suppress)
+            #expect(!router.shouldRedispatchKeyEquivalent(
+                timestamp: timestamp,
+                keyCode: testCase.keyCode
+            ))
+        }
     }
 
-    @Test func menuHandledEquivalentIsNotRedispatchedOrReleasedToTerminal() {
+    @Test func sameTimestampEquivalentKeyCodesRemainIndependent() {
+        var router = TerminalKeyEquivalentRouter()
+        let timestamp = 66.0
+
+        let commandRoute = router.routeKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: 47,
+            modifiers: .command,
+            isTerminalBinding: true,
+            menuHandled: false
+        )
+        router.prepareForKeyDown(timestamp: timestamp, keyCode: 47)
+        router.recordKeyDownDelivery(keyCode: 47)
+
+        let controlRoute = router.routeKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: 8,
+            modifiers: .control,
+            isTerminalBinding: true,
+            menuHandled: false
+        )
+        router.prepareForKeyDown(timestamp: timestamp, keyCode: 8)
+        router.recordKeyDownDelivery(keyCode: 8)
+
+        #expect(commandRoute == .deliverPress)
+        #expect(controlRoute == .deliverPress)
+        #expect(router.routeKeyUp(keyCode: 47) == .deliver)
+        #expect(router.routeKeyUp(keyCode: 8) == .deliver)
+    }
+
+    @Test func menuHandledControlEquivalentEmitsNoTerminalPressOrRelease() {
         var router = TerminalKeyEquivalentRouter()
         let timestamp = 73.25
+        let keyCode: UInt16 = 8
 
-        #expect(router.routeKeyEquivalent(
+        let pressRoute = router.routeKeyEquivalent(
             timestamp: timestamp,
-            hasCommandOrControlModifier: true,
+            keyCode: keyCode,
+            modifiers: .control,
             isTerminalBinding: true,
             menuHandled: true
-        ) == .handled)
-        #expect(!router.shouldRedispatchCommand(timestamp: timestamp))
-        let releasedToTerminal = router.consumeCommandRelease(keyCode: 8)
-        #expect(!releasedToTerminal)
+        )
+        let releaseRoute = router.routeKeyUp(keyCode: keyCode)
+        let duplicateRelease = router.routeKeyUp(keyCode: keyCode)
+
+        #expect(pressRoute == .handled)
+        #expect(releaseRoute == .suppress)
+        #expect(duplicateRelease == .suppress)
+        #expect(!router.shouldRedispatchKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: keyCode
+        ))
+    }
+
+    @Test func passedThroughControlHandledElsewhereEmitsNoTerminalRelease() {
+        var router = TerminalKeyEquivalentRouter()
+        let timestamp = 79.5
+        let keyCode: UInt16 = 9
+
+        let pressRoute = router.routeKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: keyCode,
+            modifiers: .control,
+            isTerminalBinding: false,
+            menuHandled: false
+        )
+        let releaseRoute = router.routeKeyUp(keyCode: keyCode)
+        let duplicateRelease = router.routeKeyUp(keyCode: keyCode)
+
+        #expect(pressRoute == .passThrough)
+        #expect(releaseRoute == .suppress)
+        #expect(duplicateRelease == .suppress)
+        #expect(!router.shouldRedispatchKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: keyCode
+        ))
+    }
+
+    @Test func deliveredControlEquivalentEmitsExactlyOnePressAndRelease() {
+        var router = TerminalKeyEquivalentRouter()
+        let timestamp = 84.5
+        let keyCode: UInt16 = 8
+
+        let pressRoute = router.routeKeyEquivalent(
+            timestamp: timestamp,
+            keyCode: keyCode,
+            modifiers: .control,
+            isTerminalBinding: true,
+            menuHandled: false
+        )
+        #expect(pressRoute == .deliverPress)
+        router.prepareForKeyDown(timestamp: timestamp, keyCode: keyCode)
+        router.recordKeyDownDelivery(keyCode: keyCode)
+
+        let releaseRoute = router.routeKeyUp(keyCode: keyCode)
+        let duplicateRelease = router.routeKeyUp(keyCode: keyCode)
+        #expect(releaseRoute == .deliver)
+        #expect(duplicateRelease == .suppress)
+    }
+
+    @Test func deliveredCommandEquivalentReleasesAfterCommandModifierIsLifted() {
+        var router = TerminalKeyEquivalentRouter()
+        let keyCode: UInt16 = 47
+
+        let pressRoute = router.routeKeyEquivalent(
+            timestamp: 95.75,
+            keyCode: keyCode,
+            modifiers: .command,
+            isTerminalBinding: true,
+            menuHandled: false
+        )
+        #expect(pressRoute == .deliverPress)
+        router.prepareForKeyDown(timestamp: 95.75, keyCode: keyCode)
+        router.recordKeyDownDelivery(keyCode: keyCode)
+
+        // Key-up intentionally has no modifier argument: the Command key may
+        // already have been lifted when the character release arrives.
+        let releaseWithoutModifierSnapshot = router.routeKeyUp(keyCode: keyCode)
+        let duplicateRelease = router.routeKeyUp(keyCode: keyCode)
+        #expect(releaseWithoutModifierSnapshot == .deliver)
+        #expect(duplicateRelease == .suppress)
+
+        // A subsequent ordinary press of the same key clears duplicate-release
+        // history and remains independently deliverable.
+        router.prepareForKeyDown(timestamp: 96.0, keyCode: keyCode)
+        router.recordKeyDownDelivery(keyCode: keyCode)
+        let laterOrdinaryRelease = router.routeKeyUp(keyCode: keyCode)
+        #expect(laterOrdinaryRelease == .deliver)
+    }
+
+    @Test func ordinaryNonEquivalentKeyUpRemainsDeliverable() {
+        var router = TerminalKeyEquivalentRouter()
+        let keyCode: UInt16 = 12
+
+        router.prepareForKeyDown(timestamp: 105.0, keyCode: keyCode)
+        router.recordKeyDownDelivery(keyCode: keyCode)
+        let releaseRoute = router.routeKeyUp(keyCode: keyCode)
+
+        #expect(releaseRoute == .deliver)
     }
 
     @Test func zeroTimestampEquivalentIsNeverTrackedForRedispatch() {
         var router = TerminalKeyEquivalentRouter()
+        let keyCode: UInt16 = 47
 
-        #expect(router.routeKeyEquivalent(
+        let route = router.routeKeyEquivalent(
             timestamp: 0,
-            hasCommandOrControlModifier: true,
+            keyCode: keyCode,
+            modifiers: .command,
             isTerminalBinding: false,
             menuHandled: false
-        ) == .passThrough)
-        #expect(!router.shouldRedispatchCommand(timestamp: 0))
+        )
+        #expect(route == .passThrough)
+        #expect(!router.shouldRedispatchKeyEquivalent(timestamp: 0, keyCode: keyCode))
     }
 
     @Test func scrollMetadataKeepsPrecisionAndMomentumInTheirDedicatedBits() {

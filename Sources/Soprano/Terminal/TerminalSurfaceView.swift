@@ -519,11 +519,14 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        keyEquivalentRouter.prepareForKeyDown()
         guard let surface else {
             interpretKeyEvents([event])
             return
         }
+        keyEquivalentRouter.prepareForKeyDown(
+            timestamp: event.timestamp,
+            keyCode: event.keyCode
+        )
 
         let translationEvent = translationEvent(for: event, surface: surface)
         let action = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
@@ -557,9 +560,7 @@ final class TerminalSurfaceView: NSView {
            !event.modifierFlags.contains(.shift) {
             onAgentInputSubmitted?()
         }
-        if event.type == .keyDown, event.modifierFlags.contains(.command) {
-            keyEquivalentRouter.recordCommandPress(keyCode: event.keyCode)
-        }
+        keyEquivalentRouter.recordKeyDownDelivery(keyCode: event.keyCode)
     }
 
     override func keyUp(with event: NSEvent) {
@@ -568,9 +569,7 @@ final class TerminalSurfaceView: NSView {
             return
         }
 
-        if event.modifierFlags.contains(.command),
-           !keyEquivalentRouter.consumeCommandRelease(keyCode: event.keyCode)
-        {
+        if keyEquivalentRouter.routeKeyUp(keyCode: event.keyCode) == .suppress {
             return
         }
         sendKeyEvent(GHOSTTY_ACTION_RELEASE, event: event)
@@ -585,8 +584,13 @@ final class TerminalSurfaceView: NSView {
             return false
         }
 
-        let hasCommandOrControlModifier = event.modifierFlags.contains(.command)
-            || event.modifierFlags.contains(.control)
+        var equivalentModifiers: TerminalKeyEquivalentModifiers = []
+        if event.modifierFlags.contains(.command) {
+            equivalentModifiers.insert(.command)
+        }
+        if event.modifierFlags.contains(.control) {
+            equivalentModifiers.insert(.control)
+        }
         var bindingFlags = ghostty_binding_flags_e(0)
         var keyEvent = ghosttyKeyEvent(GHOSTTY_ACTION_PRESS, event: event)
         let isTerminalBinding = (event.characters ?? "").withCString { pointer in
@@ -601,7 +605,8 @@ final class TerminalSurfaceView: NSView {
 
         switch keyEquivalentRouter.routeKeyEquivalent(
             timestamp: event.timestamp,
-            hasCommandOrControlModifier: hasCommandOrControlModifier,
+            keyCode: event.keyCode,
+            modifiers: equivalentModifiers,
             isTerminalBinding: isTerminalBinding,
             menuHandled: menuHandled
         ) {
@@ -1161,7 +1166,10 @@ extension TerminalSurfaceView: @MainActor NSTextInputClient {
     override func doCommand(by selector: Selector) {
         if let currentEvent = NSApp.currentEvent,
            currentEvent.type == .keyDown,
-           keyEquivalentRouter.shouldRedispatchCommand(timestamp: currentEvent.timestamp)
+           keyEquivalentRouter.shouldRedispatchKeyEquivalent(
+               timestamp: currentEvent.timestamp,
+               keyCode: currentEvent.keyCode
+           )
         {
             NSApp.sendEvent(currentEvent)
             return
