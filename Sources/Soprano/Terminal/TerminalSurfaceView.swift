@@ -726,6 +726,9 @@ final class TerminalSurfaceView: NSView {
 
     func destroySurface() {
         guard let surface else { return }
+        GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
+            for: ObjectIdentifier(self)
+        )
         self.surface = nil
         ghostty_surface_free(surface)
     }

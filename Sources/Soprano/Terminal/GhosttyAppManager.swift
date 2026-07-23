@@ -13,6 +13,9 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    let clipboardConfirmationCoordinator = ClipboardConfirmationCoordinator(
+        presenter: AppKitClipboardConfirmationPresenter()
+    )
     private var isInitialized = false
     private var didBecomeObserver: NSObjectProtocol?
     private var didResignObserver: NSObjectProtocol?
@@ -186,14 +189,8 @@ private func ghosttyReadClipboard(
             .takeUnretainedValue()
         guard let surface = surfaceView.surface else { return }
 
-        let pasteboard: NSPasteboard = switch location {
-        case GHOSTTY_CLIPBOARD_SELECTION:
-            NSPasteboard(name: .find)
-        default:
-            .general
-        }
-
-        let content = pasteboard.string(forType: .string) ?? ""
+        let content = ghosttyPasteboard(for: location)?
+            .string(forType: .string) ?? ""
         content.withCString { ptr in
             ghostty_surface_complete_clipboard_request(surface, ptr, st, false)
         }
@@ -206,16 +203,51 @@ private func ghosttyConfirmReadClipboard(
     _ state: UnsafeMutableRawPointer?,
     _ request: ghostty_clipboard_request_e
 ) {
+    let ownedContent = content
+        .flatMap { String(validatingCString: $0) } ?? ""
+    let kind: ClipboardConfirmationKind?
+    switch request {
+    case GHOSTTY_CLIPBOARD_REQUEST_PASTE:
+        kind = .paste
+    case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ:
+        kind = .osc52Read
+    case GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE:
+        kind = .osc52Write
+    default:
+        kind = nil
+    }
+
     guard let userdata else { return }
     nonisolated(unsafe) let ud = userdata
-    nonisolated(unsafe) let ct = content
     nonisolated(unsafe) let st = state
     MainActor.assumeIsolated {
         let surfaceView = Unmanaged<TerminalSurfaceView>
             .fromOpaque(ud)
             .takeUnretainedValue()
         guard let surface = surfaceView.surface else { return }
-        ghostty_surface_complete_clipboard_request(surface, ct, st, true)
+        guard let kind else {
+            completeClipboardRequest(
+                surface: surface,
+                content: "",
+                state: st,
+                confirmed: true
+            )
+            return
+        }
+
+        GhosttyAppManager.shared.clipboardConfirmationCoordinator.enqueue(
+            surface: ObjectIdentifier(surfaceView),
+            kind: kind,
+            content: ownedContent,
+            parentWindow: surfaceView.window
+        ) { allowed in
+            completeClipboardRequest(
+                surface: surface,
+                content: allowed ? ownedContent : "",
+                state: st,
+                confirmed: true
+            )
+        }
     }
 }
 
@@ -226,30 +258,88 @@ private func ghosttyWriteClipboard(
     _ len: Int,
     _ confirm: Bool
 ) {
-    nonisolated(unsafe) let ct = content
+    let ownedContent = copyClipboardContent(content, count: len)
+
+    nonisolated(unsafe) let ud = userdata
     MainActor.assumeIsolated {
-        let pasteboard: NSPasteboard = switch location {
-        case GHOSTTY_CLIPBOARD_SELECTION:
-            NSPasteboard(name: .find)
-        default:
-            .general
-        }
+        guard let pasteboard = ghosttyPasteboard(for: location) else { return }
 
-        pasteboard.clearContents()
-
-        guard let content = ct else { return }
-        let count = Int(len)
-        guard count > 0 else { return }
-
-        let buffer = UnsafeBufferPointer(start: content, count: count)
-        for item in buffer {
-            guard let mime = item.mime else { continue }
-            let mimeType = String(cString: mime)
-            guard mimeType == "text/plain", let data = item.data else { continue }
-            let text = String(cString: data)
+        if !confirm {
+            pasteboard.clearContents()
+            guard let text = ownedContent.first(where: { $0.mime == "text/plain" })?.data else {
+                return
+            }
             pasteboard.setString(text, forType: .string)
-            break
+            return
         }
+
+        guard let userdata = ud,
+              let text = ownedContent.first(where: { $0.mime == "text/plain" })?.data
+        else { return }
+        let surfaceView = Unmanaged<TerminalSurfaceView>
+            .fromOpaque(userdata)
+            .takeUnretainedValue()
+        guard surfaceView.surface != nil else { return }
+
+        GhosttyAppManager.shared.clipboardConfirmationCoordinator.enqueue(
+            surface: ObjectIdentifier(surfaceView),
+            kind: .osc52Write,
+            content: text,
+            parentWindow: surfaceView.window
+        ) { allowed in
+            guard allowed else { return }
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+        }
+    }
+}
+
+private struct OwnedClipboardContent {
+    let mime: String
+    let data: String
+}
+
+private func copyClipboardContent(
+    _ content: UnsafePointer<ghostty_clipboard_content_s>?,
+    count: Int
+) -> [OwnedClipboardContent] {
+    guard let content, count > 0 else { return [] }
+
+    let buffer = UnsafeBufferPointer(start: content, count: count)
+    return buffer.compactMap { item in
+        guard let mime = item.mime.flatMap({ String(validatingCString: $0) }),
+              let data = item.data.flatMap({ String(validatingCString: $0) })
+        else { return nil }
+        return OwnedClipboardContent(mime: mime, data: data)
+    }
+}
+
+@MainActor
+private func ghosttyPasteboard(for location: ghostty_clipboard_e) -> NSPasteboard? {
+    switch location {
+    case GHOSTTY_CLIPBOARD_STANDARD:
+        .general
+    case GHOSTTY_CLIPBOARD_SELECTION:
+        NSPasteboard(name: NSPasteboard.Name("com.mitchellh.ghostty.selection"))
+    default:
+        nil
+    }
+}
+
+@MainActor
+private func completeClipboardRequest(
+    surface: ghostty_surface_t,
+    content: String,
+    state: UnsafeMutableRawPointer?,
+    confirmed: Bool
+) {
+    content.withCString { pointer in
+        ghostty_surface_complete_clipboard_request(
+            surface,
+            pointer,
+            state,
+            confirmed
+        )
     }
 }
 
