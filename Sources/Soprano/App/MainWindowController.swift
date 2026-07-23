@@ -24,11 +24,14 @@ final class MainWindowController: NSWindowController {
         self.gitBranchMonitor = gitBranchMonitor
         self.settings = settings
 
-        let initialFrame = MainWindowSizing.initialFrame(
-            in: NSScreen.main?.visibleFrame ?? MainWindowSizing.fallbackVisibleFrame
-        )
+        let mainVisibleFrame =
+            NSScreen.main?.visibleFrame ?? MainWindowSizing.fallbackVisibleFrame
+        let visibleFrames = NSScreen.screens.map(\.visibleFrame)
+        let startupFrame = MainWindowFrameStore.load(
+            visibleFrames: visibleFrames
+        ) ?? MainWindowSizing.initialFrame(in: mainVisibleFrame)
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: initialFrame.size),
+            contentRect: NSRect(origin: .zero, size: startupFrame.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -36,14 +39,8 @@ final class MainWindowController: NSWindowController {
         window.title = "Soprano"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.minSize = NSSize(width: 600, height: 400)
+        window.minSize = MainWindowSizing.minimumFrameSize
         window.isReleasedWhenClosed = false
-
-        // Restore the user's last frame, or use the screen-aware initial frame.
-        if !window.setFrameUsingName("SopranoMainWindow") {
-            window.setFrame(initialFrame, display: false)
-        }
-        window.setFrameAutosaveName("SopranoMainWindow")
 
         super.init(window: window)
 
@@ -57,6 +54,10 @@ final class MainWindowController: NSWindowController {
             }
         )
         window.contentViewController = contentVC
+        // Assigning a content controller can make AppKit consult its fitting
+        // size. Reapply the chosen startup frame after the content is attached.
+        window.setFrame(startupFrame, display: false)
+        window.delegate = self
         self.mainContentVC = contentVC
 
         let keybindingManager = KeybindingManager(agentManager: agentManager)
@@ -85,9 +86,19 @@ final class MainWindowController: NSWindowController {
     }
 
     func saveWorkspaceIfNeeded() {
+        saveWindowFrame()
         guard settings.restoreLastSession else { return }
         let session = agentManager.snapshotWorkspace()
         WorkspaceSession.saveLast(session)
+    }
+
+    private func saveWindowFrame() {
+        guard let window,
+              !window.styleMask.contains(.fullScreen)
+        else {
+            return
+        }
+        MainWindowFrameStore.save(window.frame)
     }
 
     private func applyTheme() {
@@ -277,6 +288,20 @@ final class MainWindowController: NSWindowController {
                 }
             ),
         ]
+    }
+}
+
+extension MainWindowController: NSWindowDelegate {
+    func windowDidMove(_ notification: Notification) {
+        saveWindowFrame()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        saveWindowFrame()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        saveWindowFrame()
     }
 }
 
