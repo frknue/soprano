@@ -11,11 +11,27 @@ enum PaneNavigationCommand {
         arguments: [String] = CommandLine.arguments,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
+        handle(
+            arguments: arguments,
+            environment: environment,
+            tmuxNavigator: PaneNavigationCommand.navigateWithinTmux
+        )
+    }
+
+    static func handle(
+        arguments: [String],
+        environment: [String: String],
+        tmuxNavigator: (NavigationDirection, [String: String]) -> Bool
+    ) -> Bool {
         guard arguments.count >= 2 else { return false }
 
         switch arguments[1] {
         case navigateCommand:
-            return handleNavigation(arguments: arguments, environment: environment)
+            return handleNavigation(
+                arguments: arguments,
+                environment: environment,
+                tmuxNavigator: tmuxNavigator
+            )
         case passthroughCommand:
             return handlePassthrough(arguments: arguments, environment: environment)
         default:
@@ -72,18 +88,19 @@ enum PaneNavigationCommand {
 
     private static func handleNavigation(
         arguments: [String],
-        environment: [String: String]
+        environment: [String: String],
+        tmuxNavigator: (NavigationDirection, [String: String]) -> Bool
     ) -> Bool {
         guard arguments.count >= 3,
               let direction = NavigationDirection(rawValue: arguments[2])
         else { return true }
 
-        if navigateWithinTmux(direction: direction, environment: environment) {
-            return true
-        }
-
         guard let envelope = notificationEnvelope(arguments: arguments, environment: environment)
         else { return true }
+
+        if tmuxNavigator(direction, environment) {
+            return true
+        }
 
         DistributedNotificationCenter.default().postNotificationName(
             envelope.name,

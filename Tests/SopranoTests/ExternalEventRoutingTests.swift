@@ -1,4 +1,3 @@
-import Foundation
 import Testing
 @testable import Soprano
 
@@ -93,5 +92,20 @@ struct ExternalEventRoutingTests {
                 "SOPRANO_TAB_ID": "tab-2",
             ]
         ) == nil)
+    }
+
+    @Test func navigationWithMissingIdentityDoesNotInvokeTmux() {
+        var tmuxNavigatorCalls = 0
+
+        let handled = PaneNavigationCommand.handle(
+            arguments: ["soprano", "navigate-pane", "left"],
+            environment: ["TMUX": "/tmp/tmux-123/default,1,0"]
+        ) { _, _ in
+            tmuxNavigatorCalls += 1
+            return false
+        }
+
+        #expect(handled)
+        #expect(tmuxNavigatorCalls == 0)
     }
 }
