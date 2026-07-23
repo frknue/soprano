@@ -35,6 +35,7 @@ GhosttyKit/
 # Misc
 *.log
 *.tsbuildinfo
+.worktrees/
 
 # Pre-built libghostty (rebuild from ghostty/ submodule)
 lib/
