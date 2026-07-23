@@ -28,22 +28,51 @@ struct AgentEventPayload {
     let body: String
 }
 
+/// A distributed notification prepared for delivery by a command bridge.
+/// Keeping envelope construction separate from posting makes command routing
+/// deterministic and safe to exercise without sending system notifications.
+struct DistributedNotificationEnvelope {
+    let name: Notification.Name
+    let userInfo: [String: String]
+}
+
 /// Small command-line bridge used by agent lifecycle hooks. Invoking the
 /// Soprano executable with `agent-event` posts to the already-running app and
 /// exits before AppKit or libghostty are initialized.
 enum AgentEventCommand {
-    static let notificationName = Notification.Name("com.soprano.agent-event")
+    private static let notificationPrefix = "com.soprano.agent-event"
+
+    static func notificationName(appProcessId: String) -> Notification.Name {
+        Notification.Name("\(notificationPrefix).\(appProcessId)")
+    }
 
     static func handle(
         arguments: [String] = CommandLine.arguments,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
         guard arguments.count >= 2, arguments[1] == "agent-event" else { return false }
+        guard let envelope = notificationEnvelope(arguments: arguments, environment: environment)
+        else { return true }
+
+        DistributedNotificationCenter.default().postNotificationName(
+            envelope.name,
+            object: nil,
+            userInfo: envelope.userInfo,
+            deliverImmediately: true
+        )
+        return true
+    }
+
+    static func notificationEnvelope(
+        arguments: [String],
+        environment: [String: String]
+    ) -> DistributedNotificationEnvelope? {
         guard arguments.count >= 3,
               let state = AgentEventState(rawValue: arguments[2]),
-              let paneId = environment["SOPRANO_PANE_ID"],
-              let tabId = environment["SOPRANO_TAB_ID"]
-        else { return true }
+              let appProcessId = environment["SOPRANO_APP_PID"], !appProcessId.isEmpty,
+              let paneId = environment["SOPRANO_PANE_ID"], !paneId.isEmpty,
+              let tabId = environment["SOPRANO_TAB_ID"], !tabId.isEmpty
+        else { return nil }
 
         var shouldNotify = false
         var profileId = environment["SOPRANO_AGENT_PROFILE"]
@@ -84,13 +113,10 @@ enum AgentEventCommand {
             userInfo["profileId"] = profileId
         }
 
-        DistributedNotificationCenter.default().postNotificationName(
-            notificationName,
-            object: nil,
-            userInfo: userInfo,
-            deliverImmediately: true
+        return DistributedNotificationEnvelope(
+            name: notificationName(appProcessId: appProcessId),
+            userInfo: userInfo
         )
-        return true
     }
 
     private static func defaultBody(for state: AgentEventState) -> String {
@@ -134,8 +160,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         super.init()
 
         notificationCenter?.delegate = self
+        let appProcessId = String(ProcessInfo.processInfo.processIdentifier)
         distributedObserver = DistributedNotificationCenter.default().addObserver(
-            forName: AgentEventCommand.notificationName,
+            forName: AgentEventCommand.notificationName(appProcessId: appProcessId),
             object: nil,
             queue: .main
         ) { [weak self] notification in

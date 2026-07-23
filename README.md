@@ -194,8 +194,10 @@ their own boundary:
 ```
 
 The command selects an adjacent tmux pane first when invoked inside tmux. At a
-tmux boundary it targets the originating Soprano process and pane using the
-environment exported by each terminal surface.
+tmux boundary it targets the originating Soprano process, pane, and tab using
+the environment exported by each terminal surface. This keeps nested
+navigation and passthrough claims isolated to the exact terminal tab that
+issued them, even when several Soprano instances or tabs share a pane.
 
 Integrations explicitly enable key passthrough while active:
 
