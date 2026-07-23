@@ -24,7 +24,33 @@ indirect enum SplitNode: Codable, Equatable {
             self.direction = direction
             self.first = first
             self.second = second
-            self.splitPercentage = splitPercentage
+            self.splitPercentage = Self.clampedPercentage(splitPercentage)
+        }
+
+        fileprivate static func clampedPercentage(_ percentage: Double) -> Double {
+            max(10, min(90, percentage))
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case direction, first, second, splitPercentage
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                direction: try container.decode(SplitDirection.self, forKey: .direction),
+                first: try container.decode(SplitNode.self, forKey: .first),
+                second: try container.decode(SplitNode.self, forKey: .second),
+                splitPercentage: try container.decode(Double.self, forKey: .splitPercentage)
+            )
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(direction, forKey: .direction)
+            try container.encode(first, forKey: .first)
+            try container.encode(second, forKey: .second)
+            try container.encode(splitPercentage, forKey: .splitPercentage)
         }
     }
 
@@ -152,12 +178,39 @@ indirect enum SplitNode: Codable, Equatable {
         return nil
     }
 
+    /// Find the pane at the opposite directional boundary for navigation wrapping.
+    func wrappingPane(
+        from sourceId: String,
+        direction: NavigationDirection
+    ) -> String? {
+        guard pathTo(sourceId) != nil, leafIds.count > 1 else { return nil }
+        return boundaryLeaf(seeking: direction)
+    }
+
+    /// Set the split percentage at a path, clamped to the supported bounds.
+    func settingSplitPercentage(at path: [SplitBranchSide], to percentage: Double) -> SplitNode {
+        guard case .split(var branch) = self else { return self }
+
+        guard let side = path.first else {
+            branch.splitPercentage = SplitBranch.clampedPercentage(percentage)
+            return .split(branch)
+        }
+
+        let remaining = Array(path.dropFirst())
+        switch side {
+        case .first:
+            branch.first = branch.first.settingSplitPercentage(at: remaining, to: percentage)
+        case .second:
+            branch.second = branch.second.settingSplitPercentage(at: remaining, to: percentage)
+        }
+        return .split(branch)
+    }
+
     /// Adjust the split percentage at a path.
     func adjustingSplit(at path: [SplitBranchSide], delta: Double) -> SplitNode {
         guard !path.isEmpty else {
             guard case .split(var branch) = self else { return self }
-            let clamped = max(10, min(90, (branch.splitPercentage) + delta))
-            branch.splitPercentage = clamped
+            branch.splitPercentage = SplitBranch.clampedPercentage(branch.splitPercentage + delta)
             return .split(branch)
         }
 
