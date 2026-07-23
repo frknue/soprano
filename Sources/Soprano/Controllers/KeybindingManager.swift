@@ -2,6 +2,7 @@ import AppKit
 
 struct PaneNavigationClaimRegistry {
     private var countsByTarget: [TerminalTarget: [String: Int]] = [:]
+    private var workspaceRestoreGeneration: Int?
 
     mutating func enable(source: String, for target: TerminalTarget) {
         countsByTarget[target, default: [:]][source, default: 0] += 1
@@ -21,6 +22,19 @@ struct PaneNavigationClaimRegistry {
 
     func hasClaims(for target: TerminalTarget) -> Bool {
         countsByTarget[target]?.isEmpty == false
+    }
+
+    mutating func synchronize(
+        validTargets: Set<TerminalTarget>,
+        workspaceRestoreGeneration: Int
+    ) {
+        if let previousGeneration = self.workspaceRestoreGeneration,
+           previousGeneration != workspaceRestoreGeneration {
+            countsByTarget.removeAll()
+        } else {
+            countsByTarget = countsByTarget.filter { validTargets.contains($0.key) }
+        }
+        self.workspaceRestoreGeneration = workspaceRestoreGeneration
     }
 }
 
@@ -46,6 +60,7 @@ final class KeybindingManager: @unchecked Sendable {
     private var appResignObserver: NSObjectProtocol?
     private var paneNavigationObserver: NSObjectProtocol?
     private var paneNavigationPassthroughClaims = PaneNavigationClaimRegistry()
+    private let paneNavigationClaimObserverId = "KeybindingManager"
     private(set) var isControlKeyHeld: Bool
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
@@ -58,6 +73,7 @@ final class KeybindingManager: @unchecked Sendable {
         startMonitoring()
         observeApplicationDeactivation()
         observePaneNavigationRequests()
+        observePaneNavigationClaimLifecycle()
     }
 
     deinit {
@@ -69,6 +85,7 @@ final class KeybindingManager: @unchecked Sendable {
         if let paneNavigationObserver {
             DistributedNotificationCenter.default().removeObserver(paneNavigationObserver)
         }
+        agentManager.removeObserver(id: paneNavigationClaimObserverId)
     }
 
     private func startMonitoring() {
@@ -133,6 +150,23 @@ final class KeybindingManager: @unchecked Sendable {
 
             self.agentManager.navigateToPane(direction: direction)
         }
+    }
+
+    private func observePaneNavigationClaimLifecycle() {
+        synchronizePaneNavigationClaims()
+        agentManager.addObserver(id: paneNavigationClaimObserverId) { [weak self] in
+            self?.synchronizePaneNavigationClaims()
+        }
+    }
+
+    private func synchronizePaneNavigationClaims() {
+        let validTargets = Set(agentManager.panes.values.flatMap { pane in
+            pane.tabs.map { TerminalTarget(paneId: pane.id, tabId: $0.id) }
+        })
+        paneNavigationPassthroughClaims.synchronize(
+            validTargets: validTargets,
+            workspaceRestoreGeneration: agentManager.workspaceRestoreGeneration
+        )
     }
 
     private func stopMonitoring() {

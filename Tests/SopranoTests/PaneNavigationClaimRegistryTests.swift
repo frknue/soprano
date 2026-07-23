@@ -36,4 +36,31 @@ struct PaneNavigationClaimRegistryTests {
 
         #expect(registry.hasClaims(for: target))
     }
+
+    @Test func synchronizationPrunesClaimsForRemovedTabs() {
+        let removedTarget = TerminalTarget(paneId: "pane-1", tabId: "tab-1")
+        let survivingTarget = TerminalTarget(paneId: "pane-1", tabId: "tab-2")
+        var registry = PaneNavigationClaimRegistry()
+        registry.enable(source: "nvim", for: removedTarget)
+        registry.enable(source: "tmux", for: survivingTarget)
+
+        registry.synchronize(
+            validTargets: [survivingTarget],
+            workspaceRestoreGeneration: 0
+        )
+
+        #expect(!registry.hasClaims(for: removedTarget))
+        #expect(registry.hasClaims(for: survivingTarget))
+    }
+
+    @Test func synchronizationClearsSameTargetClaimsAfterWorkspaceReplacement() {
+        let target = TerminalTarget(paneId: "pane-1", tabId: "tab-1")
+        var registry = PaneNavigationClaimRegistry()
+        registry.synchronize(validTargets: [target], workspaceRestoreGeneration: 0)
+        registry.enable(source: "nvim", for: target)
+
+        registry.synchronize(validTargets: [target], workspaceRestoreGeneration: 1)
+
+        #expect(!registry.hasClaims(for: target))
+    }
 }
