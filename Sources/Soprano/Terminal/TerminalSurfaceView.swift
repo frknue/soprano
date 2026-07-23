@@ -201,6 +201,7 @@ final class TerminalSurfaceView: NSView {
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var keyUpMonitor: Any?
+    private var keyEquivalentRouter = TerminalKeyEquivalentRouter()
 
     init(
         paneId: String,
@@ -366,15 +367,20 @@ final class TerminalSurfaceView: NSView {
     }
 
     @IBAction func copy(_ sender: Any?) {
-        performBindingAction("copy_to_clipboard")
+        performResponderAction(#selector(NSText.copy(_:)))
     }
 
     @IBAction func paste(_ sender: Any?) {
-        performBindingAction("paste_from_clipboard")
+        performResponderAction(#selector(NSText.paste(_:)))
     }
 
     @IBAction override func selectAll(_ sender: Any?) {
-        performBindingAction("select_all")
+        performResponderAction(#selector(NSText.selectAll(_:)))
+    }
+
+    private func performResponderAction(_ selector: Selector) {
+        guard let action = TerminalResponderAction.bindingAction(for: selector) else { return }
+        performBindingAction(action)
     }
 
     private func performBindingAction(_ action: String) {
@@ -420,6 +426,9 @@ final class TerminalSurfaceView: NSView {
         let result = super.resignFirstResponder()
         if result, let surface {
             ghostty_surface_set_focus(surface, false)
+        }
+        if result {
+            keyEquivalentRouter.reset()
         }
         return result
     }
@@ -510,6 +519,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        keyEquivalentRouter.prepareForKeyDown()
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -547,6 +557,9 @@ final class TerminalSurfaceView: NSView {
            !event.modifierFlags.contains(.shift) {
             onAgentInputSubmitted?()
         }
+        if event.type == .keyDown, event.modifierFlags.contains(.command) {
+            keyEquivalentRouter.recordCommandPress(keyCode: event.keyCode)
+        }
     }
 
     override func keyUp(with event: NSEvent) {
@@ -555,7 +568,51 @@ final class TerminalSurfaceView: NSView {
             return
         }
 
+        if event.modifierFlags.contains(.command),
+           !keyEquivalentRouter.consumeCommandRelease(keyCode: event.keyCode)
+        {
+            return
+        }
         sendKeyEvent(GHOSTTY_ACTION_RELEASE, event: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              let window,
+              window.firstResponder === self,
+              let surface
+        else {
+            return false
+        }
+
+        let hasCommandOrControlModifier = event.modifierFlags.contains(.command)
+            || event.modifierFlags.contains(.control)
+        var bindingFlags = ghostty_binding_flags_e(0)
+        var keyEvent = ghosttyKeyEvent(GHOSTTY_ACTION_PRESS, event: event)
+        let isTerminalBinding = (event.characters ?? "").withCString { pointer in
+            keyEvent.text = pointer
+            return ghostty_surface_key_is_binding(surface, keyEvent, &bindingFlags)
+        }
+
+        var menuHandled = false
+        if isTerminalBinding, shouldOfferBindingToMainMenu(bindingFlags) {
+            menuHandled = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+        }
+
+        switch keyEquivalentRouter.routeKeyEquivalent(
+            timestamp: event.timestamp,
+            hasCommandOrControlModifier: hasCommandOrControlModifier,
+            isTerminalBinding: isTerminalBinding,
+            menuHandled: menuHandled
+        ) {
+        case .passThrough:
+            return false
+        case .deliverPress:
+            keyDown(with: event)
+            return true
+        case .handled:
+            return true
+        }
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -793,6 +850,13 @@ final class TerminalSurfaceView: NSView {
         self.keyUpMonitor = nil
     }
 
+    private func shouldOfferBindingToMainMenu(_ flags: ghostty_binding_flags_e) -> Bool {
+        let excluded = GHOSTTY_BINDING_FLAGS_ALL.rawValue
+            | GHOSTTY_BINDING_FLAGS_PERFORMABLE.rawValue
+        return flags.rawValue & GHOSTTY_BINDING_FLAGS_CONSUMED.rawValue != 0
+            && flags.rawValue & excluded == 0
+    }
+
     private func modsFromFlags(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
         var mods = GHOSTTY_MODS_NONE.rawValue
         if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
@@ -936,6 +1000,7 @@ final class TerminalSurfaceView: NSView {
     func destroySurface() {
         surfaceDestructionGate.perform {
             removeKeyUpMonitor()
+            keyEquivalentRouter.reset()
             guard let surface else { return }
             GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
                 for: ObjectIdentifier(self)
@@ -1092,7 +1157,15 @@ extension TerminalSurfaceView: @MainActor NSTextInputClient {
     }
 
     override func doCommand(by selector: Selector) {
-        // NSTextInputClient routes unhandled commands here. Deliberately consume
+        if let currentEvent = NSApp.currentEvent,
+           currentEvent.type == .keyDown,
+           keyEquivalentRouter.shouldRedispatchCommand(timestamp: currentEvent.timestamp)
+        {
+            NSApp.sendEvent(currentEvent)
+            return
+        }
+
+        // NSTextInputClient routes ordinary unhandled commands here. Consume
         // them so AppKit does not emit a system beep.
     }
 
