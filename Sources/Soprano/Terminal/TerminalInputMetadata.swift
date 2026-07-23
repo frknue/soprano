@@ -21,71 +21,156 @@ enum TerminalKeyEquivalentRoute {
     case handled
 }
 
+struct TerminalKeyEquivalentModifiers: OptionSet {
+    let rawValue: UInt8
+
+    static let command = Self(rawValue: 1 << 0)
+    static let control = Self(rawValue: 1 << 1)
+}
+
+enum TerminalKeyUpRoute {
+    case deliver
+    case suppress
+}
+
 struct TerminalKeyEquivalentRouter {
-    private var pendingTimestamp: TimeInterval?
-    private var deliveredTimestamp: TimeInterval?
-    private var pressedCommandKeyCodes: Set<UInt16> = []
+    private struct EventIdentity: Equatable {
+        let timestamp: TimeInterval
+        let keyCode: UInt16
+    }
+
+    private enum PressDisposition {
+        case handledOutsideTerminal
+        case awaitingTerminalDelivery
+        case deliveredToTerminal
+    }
+
+    private struct EquivalentPress {
+        let event: EventIdentity
+        var disposition: PressDisposition
+    }
+
+    private var pendingEvent: EventIdentity?
+    private var activePresses: [UInt16: EquivalentPress] = [:]
+    private var completedEvents: [UInt16: EventIdentity] = [:]
 
     mutating func routeKeyEquivalent(
         timestamp: TimeInterval,
-        hasCommandOrControlModifier: Bool,
+        keyCode: UInt16,
+        modifiers: TerminalKeyEquivalentModifiers,
         isTerminalBinding: Bool,
         menuHandled: Bool
     ) -> TerminalKeyEquivalentRoute {
         guard timestamp != 0 else { return .passThrough }
-        guard hasCommandOrControlModifier else {
-            pendingTimestamp = nil
+        guard !modifiers.isDisjoint(with: [.command, .control]) else {
+            pendingEvent = nil
             return .passThrough
         }
 
-        if menuHandled {
-            pendingTimestamp = nil
+        let event = EventIdentity(timestamp: timestamp, keyCode: keyCode)
+
+        if completedEvents[keyCode] == event {
+            pendingEvent = nil
             return .handled
         }
 
-        if deliveredTimestamp == timestamp {
-            pendingTimestamp = nil
+        if let activePress = activePresses[keyCode],
+           activePress.event == event
+        {
+            let isPendingPassThrough =
+                activePress.disposition == .handledOutsideTerminal
+                && pendingEvent == event
+            if !isPendingPassThrough {
+                pendingEvent = nil
+                return .handled
+            }
+        }
+
+        if menuHandled {
+            pendingEvent = nil
+            activePresses[keyCode] = EquivalentPress(
+                event: event,
+                disposition: .handledOutsideTerminal
+            )
             return .handled
         }
 
         if isTerminalBinding {
-            pendingTimestamp = nil
-            deliveredTimestamp = timestamp
+            pendingEvent = nil
+            activePresses[keyCode] = EquivalentPress(
+                event: event,
+                disposition: .awaitingTerminalDelivery
+            )
             return .deliverPress
         }
 
-        if pendingTimestamp == timestamp {
-            pendingTimestamp = nil
-            deliveredTimestamp = timestamp
+        if pendingEvent == event {
+            pendingEvent = nil
+            activePresses[keyCode] = EquivalentPress(
+                event: event,
+                disposition: .awaitingTerminalDelivery
+            )
             return .deliverPress
         }
 
-        pendingTimestamp = timestamp
+        pendingEvent = event
+        activePresses[keyCode] = EquivalentPress(
+            event: event,
+            disposition: .handledOutsideTerminal
+        )
         return .passThrough
     }
 
-    func shouldRedispatchCommand(timestamp: TimeInterval) -> Bool {
-        timestamp != 0
-            && pendingTimestamp == timestamp
-            && deliveredTimestamp != timestamp
+    func shouldRedispatchKeyEquivalent(
+        timestamp: TimeInterval,
+        keyCode: UInt16
+    ) -> Bool {
+        let event = EventIdentity(timestamp: timestamp, keyCode: keyCode)
+        return timestamp != 0
+            && pendingEvent == event
     }
 
-    mutating func prepareForKeyDown() {
-        pendingTimestamp = nil
+    mutating func prepareForKeyDown(
+        timestamp: TimeInterval,
+        keyCode: UInt16
+    ) {
+        pendingEvent = nil
+        completedEvents.removeValue(forKey: keyCode)
+
+        guard activePresses[keyCode] != nil else { return }
+        activePresses[keyCode] = EquivalentPress(
+            event: EventIdentity(timestamp: timestamp, keyCode: keyCode),
+            disposition: .awaitingTerminalDelivery
+        )
     }
 
-    mutating func recordCommandPress(keyCode: UInt16) {
-        pressedCommandKeyCodes.insert(keyCode)
+    mutating func recordKeyDownDelivery(keyCode: UInt16) {
+        guard var activePress = activePresses[keyCode],
+              activePress.disposition == .awaitingTerminalDelivery
+        else {
+            return
+        }
+        activePress.disposition = .deliveredToTerminal
+        activePresses[keyCode] = activePress
     }
 
-    mutating func consumeCommandRelease(keyCode: UInt16) -> Bool {
-        pressedCommandKeyCodes.remove(keyCode) != nil
+    mutating func routeKeyUp(keyCode: UInt16) -> TerminalKeyUpRoute {
+        if pendingEvent?.keyCode == keyCode {
+            pendingEvent = nil
+        }
+
+        if let activePress = activePresses.removeValue(forKey: keyCode) {
+            completedEvents[keyCode] = activePress.event
+            return activePress.disposition == .deliveredToTerminal ? .deliver : .suppress
+        }
+
+        return completedEvents[keyCode] == nil ? .deliver : .suppress
     }
 
     mutating func reset() {
-        pendingTimestamp = nil
-        deliveredTimestamp = nil
-        pressedCommandKeyCodes.removeAll()
+        pendingEvent = nil
+        activePresses.removeAll()
+        completedEvents.removeAll()
     }
 }
 
