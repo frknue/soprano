@@ -13,12 +13,17 @@ import AppKit
 ///   (borders, header labels) via `updatePaneStyles()`.
 final class SplitTreeView: NSView {
     typealias TerminalViewFactory = (TerminalTarget, TerminalConfig, Bool) -> NSView
+    typealias CodexReadinessScheduler = (
+        @escaping @MainActor @Sendable () -> Void
+    ) -> Void
 
     let agentManager: AgentManager
     let themeManager: ThemeManager
     private let terminalViewFactory: TerminalViewFactory
     private let destroyTerminalView: (NSView) -> Void
-    private let restartTerminalView: (NSView) -> Void
+    private let restartTerminalView: (NSView) -> Bool
+    private let terminalViewHasLiveSurface: (NSView) -> Bool
+    private let scheduleCodexReadiness: CodexReadinessScheduler
 
     /// Cached pane container views keyed by pane ID.
     /// These survive layout rebuilds — only removed when the pane itself is closed.
@@ -55,8 +60,17 @@ final class SplitTreeView: NSView {
         destroyTerminalView: @escaping (NSView) -> Void = { view in
             (view as? TerminalSurfaceView)?.destroySurface()
         },
-        restartTerminalView: @escaping (NSView) -> Void = { view in
-            (view as? TerminalSurfaceView)?.recreateSurface()
+        restartTerminalView: @escaping (NSView) -> Bool = { view in
+            guard let terminalView = view as? TerminalSurfaceView else { return false }
+            return terminalView.recreateSurface()
+        },
+        terminalViewHasLiveSurface: @escaping (NSView) -> Bool = { view in
+            (view as? TerminalSurfaceView)?.surface != nil
+        },
+        scheduleCodexReadiness: @escaping CodexReadinessScheduler = { callback in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                callback()
+            }
         }
     ) {
         self.agentManager = agentManager
@@ -64,6 +78,8 @@ final class SplitTreeView: NSView {
         self.terminalViewFactory = terminalViewFactory
         self.destroyTerminalView = destroyTerminalView
         self.restartTerminalView = restartTerminalView
+        self.terminalViewHasLiveSurface = terminalViewHasLiveSurface
+        self.scheduleCodexReadiness = scheduleCodexReadiness
         self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
         wantsLayer = true
@@ -118,7 +134,8 @@ final class SplitTreeView: NSView {
 
         case .restart:
             if let view = tabContentViews[target] {
-                restartTerminalView(view)
+                guard restartTerminalView(view) else { return }
+                scheduleCodexReadinessIfNeeded(for: target)
                 return
             }
 
@@ -334,6 +351,7 @@ final class SplitTreeView: NSView {
         }
 
         let view: NSView
+        let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
         switch tab.type {
         case .terminal, .agent:
             let terminalConfig: TerminalConfig
@@ -351,7 +369,6 @@ final class SplitTreeView: NSView {
                 terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
             }
 
-            let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
             let terminalView = terminalViewFactory(
                 target,
                 terminalConfig,
@@ -377,19 +394,24 @@ final class SplitTreeView: NSView {
                     )
                 }
             }
-            if tab.agent?.profileId == "codex" {
-                // Codex exposes completion and approval notifications but no
-                // trust-free initial-ready event. Its TUI is normally ready by
-                // this point; later lifecycle events remain authoritative.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                    self?.agentManager.markAgentReadyIfStarting(paneId: paneId, tabId: tab.id)
-                }
-            }
             view = terminalView
         }
 
         tabContentViews[target] = view
+        if startsSurface, terminalViewHasLiveSurface(view) {
+            scheduleCodexReadinessIfNeeded(for: target)
+        }
         return view
+    }
+
+    private func scheduleCodexReadinessIfNeeded(for target: TerminalTarget) {
+        guard let generation = agentManager.beginAgentReadinessGeneration(for: target) else {
+            return
+        }
+
+        scheduleCodexReadiness { [weak agentManager] in
+            agentManager?.markAgentReadyIfStarting(generation: generation)
+        }
     }
 
     private func findTerminalView(in view: NSView) -> TerminalSurfaceView? {

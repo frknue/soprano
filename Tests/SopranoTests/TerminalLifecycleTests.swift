@@ -260,9 +260,89 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
+    @Test func cachedCodexRestartSchedulesANewReadinessGeneration() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        let spy = SurfaceLifecycleSpy()
+        var readinessCallbacks: [() -> Void] = []
+        let splitTree = makeSplitTree(
+            manager: manager,
+            spy: spy,
+            scheduleCodexReadiness: { readinessCallbacks.append($0) }
+        )
+
+        #expect(readinessCallbacks.count == 1)
+        manager.restartAgent(target: target)
+        #expect(spy.restartedTargets == [target])
+        #expect(readinessCallbacks.count == 2)
+
+        readinessCallbacks[0]()
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .starting)
+
+        readinessCallbacks[1]()
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .idle)
+        _ = splitTree
+    }
+
+    @Test func failedCachedRestartDoesNotScheduleReadiness() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let spy = SurfaceLifecycleSpy()
+        var readinessCallbacks: [() -> Void] = []
+        let splitTree = makeSplitTree(
+            manager: manager,
+            spy: spy,
+            restartSucceeds: false,
+            scheduleCodexReadiness: { readinessCallbacks.append($0) }
+        )
+
+        #expect(readinessCallbacks.count == 1)
+        manager.restartAgent(target: TerminalTarget(paneId: paneId, tabId: tabId))
+        #expect(readinessCallbacks.count == 1)
+        _ = splitTree
+    }
+
+    @Test func sameTargetRestoreIgnoresTheReplacedSurfaceReadinessGeneration() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        let session = manager.snapshotWorkspace()
+        let spy = SurfaceLifecycleSpy()
+        var readinessCallbacks: [() -> Void] = []
+        let splitTree = makeSplitTree(
+            manager: manager,
+            spy: spy,
+            scheduleCodexReadiness: { readinessCallbacks.append($0) }
+        )
+
+        #expect(readinessCallbacks.count == 1)
+        manager.restoreWorkspace(session)
+        #expect(spy.createdTargets.filter { $0 == target }.count == 2)
+        #expect(readinessCallbacks.count == 2)
+
+        readinessCallbacks[0]()
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .starting)
+
+        readinessCallbacks[1]()
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .idle)
+        _ = splitTree
+    }
+
     private func makeSplitTree(
         manager: AgentManager,
-        spy: SurfaceLifecycleSpy
+        spy: SurfaceLifecycleSpy,
+        restartSucceeds: Bool = true,
+        scheduleCodexReadiness: @escaping (@escaping () -> Void) -> Void = { _ in }
     ) -> SplitTreeView {
         SplitTreeView(
             agentManager: manager,
@@ -286,7 +366,10 @@ struct SplitTreeTerminalLifecycleTests {
                 if let target = spy.targetsByView[ObjectIdentifier(view)] {
                     spy.restartedTargets.append(target)
                 }
-            }
+                return restartSucceeds
+            },
+            terminalViewHasLiveSurface: { _ in true },
+            scheduleCodexReadiness: scheduleCodexReadiness
         )
     }
 }

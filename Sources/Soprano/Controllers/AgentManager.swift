@@ -1,8 +1,13 @@
 import Foundation
 
-struct TerminalTarget: Hashable {
+struct TerminalTarget: Hashable, Sendable {
     let paneId: String
     let tabId: String
+}
+
+struct AgentReadinessGeneration: Equatable, Sendable {
+    let target: TerminalTarget
+    fileprivate let value: Int
 }
 
 enum TerminalLifecycleAction: Equatable {
@@ -40,6 +45,10 @@ final class AgentManager: @unchecked Sendable {
     private var observers: [String: () -> Void] = [:]
     /// Exact-target terminal lifecycle work, separate from ordinary model updates.
     private var terminalLifecycleObservers: [String: (TerminalLifecycleAction) -> Void] = [:]
+    /// Monotonic tokens prevent an older surface's readiness fallback from
+    /// completing a restarted or same-ID replacement agent.
+    private var nextAgentReadinessGeneration: Int = 0
+    private var activeAgentReadinessGenerations: [TerminalTarget: Int] = [:]
 
     /// Tracks whether the layout topology changed (vs just focus/status change).
     private(set) var layoutGeneration: Int = 0
@@ -152,6 +161,7 @@ final class AgentManager: @unchecked Sendable {
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
         for paneId in terminalWindow.paneIds {
+            cancelAgentReadinessGenerations(in: paneId)
             panes.removeValue(forKey: paneId)
         }
         windows.removeValue(forKey: windowId)
@@ -287,6 +297,7 @@ final class AgentManager: @unchecked Sendable {
               let terminalWindow = window(containingPane: paneId)
         else { return }
         exitMaximize()
+        cancelAgentReadinessGenerations(in: paneId)
         panes.removeValue(forKey: paneId)
 
         if let currentLayout = terminalWindow.layout {
@@ -425,6 +436,7 @@ final class AgentManager: @unchecked Sendable {
     func restartAgent(target: TerminalTarget) {
         guard let agent = agentTab(for: target)?.agent else { return }
 
+        cancelAgentReadinessGeneration(for: target)
         agent.status = .starting
         agent.needsAttention = false
         agent.exitCode = nil
@@ -440,6 +452,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     func stopAgent(target: TerminalTarget) {
+        cancelAgentReadinessGeneration(for: target)
         guard let agent = agentTab(for: target)?.agent,
               agent.status != .stopped
         else { return }
@@ -460,6 +473,7 @@ final class AgentManager: @unchecked Sendable {
 
         if tab.type == .agent {
             guard let agent = tab.agent, agent.status != .stopped else { return }
+            cancelAgentReadinessGeneration(for: target)
             agent.status = .stopped
             agent.needsAttention = false
             notifyChange()
@@ -499,6 +513,10 @@ final class AgentManager: @unchecked Sendable {
         }
         if status == .starting {
             agent.startedAt = Date()
+        } else {
+            cancelAgentReadinessGeneration(
+                for: TerminalTarget(paneId: paneId, tabId: tabId)
+            )
         }
         notifyChange()
     }
@@ -547,8 +565,36 @@ final class AgentManager: @unchecked Sendable {
         notifyChange()
     }
 
-    func markAgentReadyIfStarting(paneId: String, tabId: String) {
-        guard let agent = agent(paneId: paneId, tabId: tabId), agent.status == .starting else { return }
+    func beginAgentReadinessGeneration(
+        for target: TerminalTarget
+    ) -> AgentReadinessGeneration? {
+        guard let agent = agent(paneId: target.paneId, tabId: target.tabId),
+              agent.profileId == "codex",
+              agent.status == .starting
+        else {
+            return nil
+        }
+
+        nextAgentReadinessGeneration += 1
+        activeAgentReadinessGenerations[target] = nextAgentReadinessGeneration
+        return AgentReadinessGeneration(
+            target: target,
+            value: nextAgentReadinessGeneration
+        )
+    }
+
+    func markAgentReadyIfStarting(generation: AgentReadinessGeneration) {
+        guard activeAgentReadinessGenerations[generation.target] == generation.value else {
+            return
+        }
+        activeAgentReadinessGenerations.removeValue(forKey: generation.target)
+
+        let target = generation.target
+        guard let agent = agent(paneId: target.paneId, tabId: target.tabId),
+              agent.status == .starting
+        else {
+            return
+        }
         agent.status = .idle
         notifyChange()
     }
@@ -593,6 +639,9 @@ final class AgentManager: @unchecked Sendable {
     func removeTabFromPane(_ paneId: String, tabId: String) {
         guard let pane = panes[paneId] else { return }
         guard let index = pane.tabs.firstIndex(where: { $0.id == tabId }) else { return }
+        cancelAgentReadinessGeneration(
+            for: TerminalTarget(paneId: paneId, tabId: tabId)
+        )
 
         if pane.tabs.count == 1 {
             closePane(paneId)
@@ -803,6 +852,7 @@ final class AgentManager: @unchecked Sendable {
 
         guard !newWindows.isEmpty else { return }
 
+        activeAgentReadinessGenerations.removeAll()
         let referencedPaneIds = Set(newWindows.values.flatMap(\.paneIds))
         panes = newPanes.filter { referencedPaneIds.contains($0.key) }
         windows = newWindows
@@ -855,6 +905,16 @@ final class AgentManager: @unchecked Sendable {
 
         notifyChange(layoutChanged: true)
         return true
+    }
+
+    private func cancelAgentReadinessGeneration(for target: TerminalTarget) {
+        activeAgentReadinessGenerations.removeValue(forKey: target)
+    }
+
+    private func cancelAgentReadinessGenerations(in paneId: String) {
+        activeAgentReadinessGenerations = activeAgentReadinessGenerations.filter {
+            $0.key.paneId != paneId
+        }
     }
 
     // MARK: - Observer Management
