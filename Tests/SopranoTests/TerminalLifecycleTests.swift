@@ -299,3 +299,23 @@ private final class SurfaceLifecycleSpy {
     var destroyedTargets: [TerminalTarget] = []
     var restartedTargets: [TerminalTarget] = []
 }
+
+@MainActor
+struct SurfaceDestructionGateTests {
+    @Test func reentrantDestructionIsSkippedButLaterSequentialCallRuns() {
+        let gate = SurfaceDestructionGate()
+        var operations: [String] = []
+
+        gate.perform {
+            operations.append("outer")
+            gate.perform {
+                operations.append("reentrant")
+            }
+        }
+        gate.perform {
+            operations.append("sequential")
+        }
+
+        #expect(operations == ["outer", "sequential"])
+    }
+}

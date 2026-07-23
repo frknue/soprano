@@ -173,6 +173,18 @@ struct TerminalConfig {
     }
 }
 
+@MainActor
+final class SurfaceDestructionGate {
+    private var isPerforming = false
+
+    func perform(_ operation: () -> Void) {
+        guard !isPerforming else { return }
+        isPerforming = true
+        defer { isPerforming = false }
+        operation()
+    }
+}
+
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
@@ -185,6 +197,7 @@ final class TerminalSurfaceView: NSView {
     private var lastPixelHeight: UInt32 = 0
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
+    private let surfaceDestructionGate = SurfaceDestructionGate()
 
     init(
         paneId: String,
@@ -725,12 +738,14 @@ final class TerminalSurfaceView: NSView {
     }
 
     func destroySurface() {
-        guard let surface else { return }
-        GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
-            for: ObjectIdentifier(self)
-        )
-        self.surface = nil
-        ghostty_surface_free(surface)
+        surfaceDestructionGate.perform {
+            guard let surface else { return }
+            GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
+                for: ObjectIdentifier(self)
+            )
+            self.surface = nil
+            ghostty_surface_free(surface)
+        }
     }
 
     func sendText(_ text: String) {
