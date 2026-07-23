@@ -203,3 +203,137 @@ Build complete! (0.07s)
   deployment versions and missing Ghostty debug symbols. The final cached full
   suite and build completed without errors.
 - Per the task constraints, `dev.sh` and `install.sh` were not run.
+
+## Mandatory gate fix: preserve the complete target in the view cache
+
+The mandatory review correctly identified that the original
+`[String: NSView]` cache discarded `paneId` after lifecycle delivery. A
+malformed/restored workspace can contain duplicate tab IDs across panes, so
+tab-only lookup could reuse and destroy the wrong view.
+
+`SplitTreeView.tabContentViews` is now keyed by `TerminalTarget`. The complete
+target is retained by:
+
+- active-terminal lookup;
+- lifecycle stop and restart lookup;
+- content creation and reuse;
+- orphan pruning;
+- restore invalidation and all cache removal.
+
+Orphan pruning derives the valid target set by pairing each pane's ID with each
+of its tab IDs. `PaneContainerView` continues receiving the displayed tab ID
+because that local comparison is scoped to one pane.
+
+### Gate-fix RED
+
+The duplicate-ID regression was added before the cache implementation changed.
+It restores two visible panes containing agent tabs with the same tab ID, uses
+the injected lifecycle spy, and stop/restarts only the second exact target.
+
+Command:
+
+```sh
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test --filter duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces
+```
+
+Exit status: `1`.
+
+Exact failure output:
+
+```text
+Build complete! (3.05s)
+✘ Test duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() recorded an issue at TerminalLifecycleTests.swift:154:9: Expectation failed: (spy.createdTargets.filter { $0 == secondTarget }.count → 0) == 1
+✘ Test duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() recorded an issue at TerminalLifecycleTests.swift:161:9: Expectation failed: (spy.destroyedTargets → [Soprano.TerminalTarget(paneId: "pane-10", tabId: "tab-shared")]) == ([secondTarget] → [Soprano.TerminalTarget(paneId: "pane-11", tabId: "tab-shared")])
+✘ Test duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() recorded an issue at TerminalLifecycleTests.swift:162:9: Expectation failed: (spy.restartedTargets → [Soprano.TerminalTarget(paneId: "pane-10", tabId: "tab-shared")]) == ([secondTarget] → [Soprano.TerminalTarget(paneId: "pane-11", tabId: "tab-shared")])
+✘ Test duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() failed after 0.036 seconds with 5 issues.
+✘ Test run with 1 test in 1 suite failed after 0.036 seconds with 5 issues.
+```
+
+This directly demonstrated the defect: the second pane created no surface, and
+its stop/restart actions operated on the first pane's cached surface.
+
+### Gate-fix focused GREEN
+
+Collision-only command:
+
+```sh
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test --filter duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces
+```
+
+Exit status: `0`.
+
+```text
+Build complete! (4.77s)
+✔ Test duplicateTabIdsAcrossPanesKeepDistinctExactTargetSurfaces() passed after 0.039 seconds.
+✔ Suite SplitTreeTerminalLifecycleTests passed after 0.039 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.039 seconds.
+```
+
+Full lifecycle command:
+
+```sh
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test --filter TerminalLifecycle
+```
+
+Exit status: `0`.
+
+```text
+Build complete! (0.05s)
+✔ Suite TerminalLifecycleTests passed after 0.001 seconds.
+✔ Suite SplitTreeTerminalLifecycleTests passed after 0.054 seconds.
+✔ Test run with 8 tests in 2 suites passed after 0.054 seconds.
+```
+
+### Gate-fix full verification
+
+Command:
+
+```sh
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test
+```
+
+Exit status: `0`.
+
+```text
+Build complete! (0.05s)
+✔ Suite SplitNodeTests passed after 0.001 seconds.
+✔ Suite TerminalLifecycleTests passed after 0.001 seconds.
+✔ Suite AgentManagerPaneTests passed after 0.001 seconds.
+✔ Suite WorkspaceRestoreTests passed after 0.001 seconds.
+✔ Suite SplitTreeTerminalLifecycleTests passed after 0.050 seconds.
+✔ Suite ThemedSplitViewTests passed after 0.050 seconds.
+✔ Test run with 23 tests in 6 suites passed after 0.051 seconds.
+```
+
+Command:
+
+```sh
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
+```
+
+Exit status: `0`.
+
+```text
+[0/1] Planning build
+Building for debugging...
+[0/3] Write swift-version-F267FA2F636F94C.txt
+Build complete! (0.07s)
+```
+
+### Gate-fix self-review
+
+- Audited every `tabContentViews` reference; no lookup or mutation indexes the
+  cache by a bare tab ID.
+- Confirmed active-terminal lookup constructs its target from
+  `activePaneId` plus the active tab's ID.
+- Confirmed lifecycle stop/restart use the delivered `TerminalTarget` without
+  decomposition.
+- Confirmed content reuse can now retain two distinct views whose targets share
+  a tab ID.
+- Confirmed orphan pruning constructs valid targets from each owning pane and
+  tab rather than using a global set of tab IDs.
+- Confirmed restore invalidation still destroys every cached view before
+  clearing the complete-target dictionary.
+- Ran `git diff --check`; no whitespace errors.
+- The construction-tied Codex readiness fallback was intentionally not changed,
+  per the gate-fix scope.
