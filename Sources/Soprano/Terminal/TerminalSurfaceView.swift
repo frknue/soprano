@@ -566,9 +566,13 @@ final class TerminalSurfaceView: NSView {
         guard !hasMarkedText() else { return }
 
         let modifiers = TerminalModifierFlags(rawValue: modsFromEvent(event).rawValue)
+        let deviceModifiers = TerminalModifierDeviceFlags(
+            rawValue: UInt32(truncatingIfNeeded: event.modifierFlags.rawValue)
+        )
         guard let transition = TerminalInputMetadata.modifierTransition(
             keyCode: event.keyCode,
-            modifiers: modifiers
+            modifiers: modifiers,
+            deviceModifiers: deviceModifiers
         ) else {
             return
         }

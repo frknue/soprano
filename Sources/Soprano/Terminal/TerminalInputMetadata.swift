@@ -24,6 +24,19 @@ struct TerminalModifierFlags: OptionSet {
     static let commandRight = Self(rawValue: 1 << 9)
 }
 
+struct TerminalModifierDeviceFlags: OptionSet {
+    let rawValue: UInt32
+
+    static let controlLeft = Self(rawValue: 0x0000_0001)
+    static let shiftLeft = Self(rawValue: 0x0000_0002)
+    static let shiftRight = Self(rawValue: 0x0000_0004)
+    static let commandLeft = Self(rawValue: 0x0000_0008)
+    static let commandRight = Self(rawValue: 0x0000_0010)
+    static let optionLeft = Self(rawValue: 0x0000_0020)
+    static let optionRight = Self(rawValue: 0x0000_0040)
+    static let controlRight = Self(rawValue: 0x0000_2000)
+}
+
 enum TerminalModifierAction {
     case press
     case release
@@ -48,57 +61,30 @@ enum TerminalInputMetadata {
 
     static func modifierTransition(
         keyCode: UInt16,
-        modifiers: TerminalModifierFlags
+        modifiers: TerminalModifierFlags,
+        deviceModifiers: TerminalModifierDeviceFlags
     ) -> TerminalModifierAction? {
-        let base: TerminalModifierFlags
-        let right: TerminalModifierFlags?
-        let isRight: Bool
-
         switch keyCode {
         case 0x39:
-            base = .capsLock
-            right = nil
-            isRight = false
+            return modifiers.contains(.capsLock) ? .press : .release
         case 0x38:
-            base = .shift
-            right = .shiftRight
-            isRight = false
+            return deviceModifiers.contains(.shiftLeft) ? .press : .release
         case 0x3C:
-            base = .shift
-            right = .shiftRight
-            isRight = true
+            return deviceModifiers.contains(.shiftRight) ? .press : .release
         case 0x3B:
-            base = .control
-            right = .controlRight
-            isRight = false
+            return deviceModifiers.contains(.controlLeft) ? .press : .release
         case 0x3E:
-            base = .control
-            right = .controlRight
-            isRight = true
+            return deviceModifiers.contains(.controlRight) ? .press : .release
         case 0x3A:
-            base = .option
-            right = .optionRight
-            isRight = false
+            return deviceModifiers.contains(.optionLeft) ? .press : .release
         case 0x3D:
-            base = .option
-            right = .optionRight
-            isRight = true
+            return deviceModifiers.contains(.optionRight) ? .press : .release
         case 0x37:
-            base = .command
-            right = .commandRight
-            isRight = false
+            return deviceModifiers.contains(.commandLeft) ? .press : .release
         case 0x36:
-            base = .command
-            right = .commandRight
-            isRight = true
+            return deviceModifiers.contains(.commandRight) ? .press : .release
         default:
             return nil
         }
-
-        guard modifiers.contains(base) else { return .release }
-        if isRight, let right, !modifiers.contains(right) {
-            return .release
-        }
-        return .press
     }
 }
