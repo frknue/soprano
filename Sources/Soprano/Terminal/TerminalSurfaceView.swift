@@ -1018,9 +1018,11 @@ final class TerminalSurfaceView: NSView {
         }
     }
 
-    func recreateSurface() {
+    @discardableResult
+    func recreateSurface() -> Bool {
         destroySurface()
         createSurface()
+        return surface != nil
     }
 
     deinit {
