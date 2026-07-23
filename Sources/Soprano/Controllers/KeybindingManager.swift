@@ -1,5 +1,29 @@
 import AppKit
 
+struct PaneNavigationClaimRegistry {
+    private var countsByTarget: [TerminalTarget: [String: Int]] = [:]
+
+    mutating func enable(source: String, for target: TerminalTarget) {
+        countsByTarget[target, default: [:]][source, default: 0] += 1
+    }
+
+    mutating func disable(source: String, for target: TerminalTarget) {
+        guard let count = countsByTarget[target]?[source], count > 0 else { return }
+        if count == 1 {
+            countsByTarget[target]?[source] = nil
+            if countsByTarget[target]?.isEmpty == true {
+                countsByTarget[target] = nil
+            }
+        } else {
+            countsByTarget[target]?[source] = count - 1
+        }
+    }
+
+    func hasClaims(for target: TerminalTarget) -> Bool {
+        countsByTarget[target]?.isEmpty == false
+    }
+}
+
 @MainActor
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
@@ -21,7 +45,7 @@ final class KeybindingManager: @unchecked Sendable {
     private var eventMonitor: Any?
     private var appResignObserver: NSObjectProtocol?
     private var paneNavigationObserver: NSObjectProtocol?
-    private var paneNavigationPassthroughSources: [String: Set<String>] = [:]
+    private var paneNavigationPassthroughClaims = PaneNavigationClaimRegistry()
     private(set) var isControlKeyHeld: Bool
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
@@ -83,25 +107,24 @@ final class KeybindingManager: @unchecked Sendable {
         ) { [weak self] notification in
             guard let self,
                   let info = notification.userInfo,
-                  let paneId = info["paneId"] as? String
+                  let paneId = info["paneId"] as? String,
+                  let tabId = info["tabId"] as? String
             else {
                 return
             }
+            let target = TerminalTarget(paneId: paneId, tabId: tabId)
 
             if let mode = info["passthrough"] as? String,
                let source = info["source"] as? String {
                 if mode == "enable" {
-                    self.paneNavigationPassthroughSources[paneId, default: []].insert(source)
-                } else {
-                    self.paneNavigationPassthroughSources[paneId]?.remove(source)
-                    if self.paneNavigationPassthroughSources[paneId]?.isEmpty == true {
-                        self.paneNavigationPassthroughSources[paneId] = nil
-                    }
+                    self.paneNavigationPassthroughClaims.enable(source: source, for: target)
+                } else if mode == "disable" {
+                    self.paneNavigationPassthroughClaims.disable(source: source, for: target)
                 }
                 return
             }
 
-            guard paneId == self.agentManager.activePaneId,
+            guard target == self.activeTerminalTarget,
                   let rawDirection = info["direction"] as? String,
                   let direction = NavigationDirection(rawValue: rawDirection)
             else {
@@ -141,7 +164,8 @@ final class KeybindingManager: @unchecked Sendable {
             // the navigation bridge bubbles them back to Soprano only when an
             // inner layout reaches its boundary.
             if Self.paneNavigationBindingIds.contains(binding.id),
-               paneNavigationPassthroughSources[agentManager.activePaneId]?.isEmpty == false {
+               let activeTarget = activeTerminalTarget,
+               paneNavigationPassthroughClaims.hasClaims(for: activeTarget) {
                 return event
             }
 
@@ -202,6 +226,13 @@ final class KeybindingManager: @unchecked Sendable {
         "nav-up",
         "nav-right",
     ]
+
+    private var activeTerminalTarget: TerminalTarget? {
+        guard let tabId = agentManager.panes[agentManager.activePaneId]?.activeTab?.id else {
+            return nil
+        }
+        return TerminalTarget(paneId: agentManager.activePaneId, tabId: tabId)
+    }
 
     private func startPrefixMode() {
         state = .prefix

@@ -27,6 +27,49 @@ enum PaneNavigationCommand {
         Notification.Name("\(notificationPrefix).\(appProcessId)")
     }
 
+    static func notificationEnvelope(
+        arguments: [String],
+        environment: [String: String]
+    ) -> DistributedNotificationEnvelope? {
+        guard arguments.count >= 2,
+              let appProcessId = environment["SOPRANO_APP_PID"], !appProcessId.isEmpty,
+              let paneId = environment["SOPRANO_PANE_ID"], !paneId.isEmpty,
+              let tabId = environment["SOPRANO_TAB_ID"], !tabId.isEmpty
+        else { return nil }
+
+        let name = notificationName(appProcessId: appProcessId)
+        switch arguments[1] {
+        case navigateCommand:
+            guard arguments.count >= 3,
+                  let direction = NavigationDirection(rawValue: arguments[2])
+            else { return nil }
+            return DistributedNotificationEnvelope(
+                name: name,
+                userInfo: [
+                    "paneId": paneId,
+                    "tabId": tabId,
+                    "direction": direction.rawValue,
+                ]
+            )
+        case passthroughCommand:
+            guard arguments.count >= 4,
+                  arguments[2] == "enable" || arguments[2] == "disable",
+                  !arguments[3].isEmpty
+            else { return nil }
+            return DistributedNotificationEnvelope(
+                name: name,
+                userInfo: [
+                    "paneId": paneId,
+                    "tabId": tabId,
+                    "passthrough": arguments[2],
+                    "source": arguments[3],
+                ]
+            )
+        default:
+            return nil
+        }
+    }
+
     private static func handleNavigation(
         arguments: [String],
         environment: [String: String]
@@ -39,17 +82,13 @@ enum PaneNavigationCommand {
             return true
         }
 
-        guard let appProcessId = environment["SOPRANO_APP_PID"],
-              let paneId = environment["SOPRANO_PANE_ID"]
+        guard let envelope = notificationEnvelope(arguments: arguments, environment: environment)
         else { return true }
 
         DistributedNotificationCenter.default().postNotificationName(
-            notificationName(appProcessId: appProcessId),
+            envelope.name,
             object: nil,
-            userInfo: [
-                "paneId": paneId,
-                "direction": direction.rawValue,
-            ],
+            userInfo: envelope.userInfo,
             deliverImmediately: true
         )
         return true
@@ -59,21 +98,13 @@ enum PaneNavigationCommand {
         arguments: [String],
         environment: [String: String]
     ) -> Bool {
-        guard arguments.count >= 4,
-              arguments[2] == "enable" || arguments[2] == "disable",
-              !arguments[3].isEmpty,
-              let appProcessId = environment["SOPRANO_APP_PID"],
-              let paneId = environment["SOPRANO_PANE_ID"]
+        guard let envelope = notificationEnvelope(arguments: arguments, environment: environment)
         else { return true }
 
         DistributedNotificationCenter.default().postNotificationName(
-            notificationName(appProcessId: appProcessId),
+            envelope.name,
             object: nil,
-            userInfo: [
-                "paneId": paneId,
-                "passthrough": arguments[2],
-                "source": arguments[3],
-            ],
+            userInfo: envelope.userInfo,
             deliverImmediately: true
         )
         return true
