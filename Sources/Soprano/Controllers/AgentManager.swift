@@ -1,5 +1,22 @@
 import Foundation
 
+struct TerminalTarget: Hashable {
+    let paneId: String
+    let tabId: String
+}
+
+enum TerminalLifecycleAction: Equatable {
+    case stop(TerminalTarget)
+    case restart(TerminalTarget)
+
+    var target: TerminalTarget {
+        switch self {
+        case .stop(let target), .restart(let target):
+            return target
+        }
+    }
+}
+
 /// Central controller for pane/tab/agent lifecycle and tiling layout.
 /// This is the Swift equivalent of useAgentManager.ts.
 final class AgentManager: @unchecked Sendable {
@@ -21,6 +38,8 @@ final class AgentManager: @unchecked Sendable {
 
     /// Multi-observer notification. Views register closures to receive updates.
     private var observers: [String: () -> Void] = [:]
+    /// Exact-target terminal lifecycle work, separate from ordinary model updates.
+    private var terminalLifecycleObservers: [String: (TerminalLifecycleAction) -> Void] = [:]
 
     /// Tracks whether the layout topology changed (vs just focus/status change).
     private(set) var layoutGeneration: Int = 0
@@ -55,15 +74,10 @@ final class AgentManager: @unchecked Sendable {
         ) { [weak self] notification in
             guard let self,
                   let paneId = notification.userInfo?["paneId"] as? String,
-                  let pane = self.panes[paneId],
-                  let tab = pane.activeTab,
-                  tab.type == .agent,
-                  let agent = tab.agent
+                  let tabId = notification.userInfo?["tabId"] as? String
             else { return }
 
-            agent.status = .stopped
-            agent.needsAttention = false
-            self.notifyChange()
+            self.handleTerminalClose(target: TerminalTarget(paneId: paneId, tabId: tabId))
         }
     }
 
@@ -404,30 +418,61 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Agent Lifecycle
 
     func restartAgent(paneId: String) {
-        guard let pane = panes[paneId],
-              let tab = pane.activeTab,
-              tab.type == .agent,
-              let agent = tab.agent
-        else { return }
+        guard let tabId = panes[paneId]?.activeTab?.id else { return }
+        restartAgent(target: TerminalTarget(paneId: paneId, tabId: tabId))
+    }
+
+    func restartAgent(target: TerminalTarget) {
+        guard let agent = agentTab(for: target)?.agent else { return }
 
         agent.status = .starting
         agent.needsAttention = false
         agent.exitCode = nil
         agent.startedAt = Date()
         agent.restartCount += 1
+        notifyTerminalLifecycle(.restart(target))
         notifyChange()
     }
 
     func stopAgent(paneId: String) {
-        guard let pane = panes[paneId],
-              let tab = pane.activeTab,
-              tab.type == .agent,
-              let agent = tab.agent
+        guard let tabId = panes[paneId]?.activeTab?.id else { return }
+        stopAgent(target: TerminalTarget(paneId: paneId, tabId: tabId))
+    }
+
+    func stopAgent(target: TerminalTarget) {
+        guard let agent = agentTab(for: target)?.agent,
+              agent.status != .stopped
         else { return }
 
         agent.status = .stopped
         agent.needsAttention = false
+        notifyTerminalLifecycle(.stop(target))
         notifyChange()
+    }
+
+    /// Routes Ghostty's close request by the surface's immutable pane/tab IDs.
+    /// Kept internal so exact-target behavior can be tested without posting a
+    /// process-global notification.
+    func handleTerminalClose(target: TerminalTarget) {
+        guard let pane = panes[target.paneId],
+              let tab = pane.tabs.first(where: { $0.id == target.tabId })
+        else { return }
+
+        if tab.type == .agent {
+            guard let agent = tab.agent, agent.status != .stopped else { return }
+            agent.status = .stopped
+            agent.needsAttention = false
+            notifyChange()
+        } else {
+            removeTabFromPane(target.paneId, tabId: target.tabId)
+        }
+    }
+
+    private func agentTab(for target: TerminalTarget) -> PaneTab? {
+        guard let tab = panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
+              tab.type == .agent
+        else { return nil }
+        return tab
     }
 
     func updateAgentStatus(paneId: String, status: AgentStatus) {
@@ -820,6 +865,23 @@ final class AgentManager: @unchecked Sendable {
 
     func removeObserver(id: String) {
         observers.removeValue(forKey: id)
+    }
+
+    func addTerminalLifecycleObserver(
+        id: String,
+        handler: @escaping (TerminalLifecycleAction) -> Void
+    ) {
+        terminalLifecycleObservers[id] = handler
+    }
+
+    func removeTerminalLifecycleObserver(id: String) {
+        terminalLifecycleObservers.removeValue(forKey: id)
+    }
+
+    private func notifyTerminalLifecycle(_ action: TerminalLifecycleAction) {
+        for (_, handler) in terminalLifecycleObservers {
+            handler(action)
+        }
     }
 
     private func notifyChange(layoutChanged: Bool = false) {

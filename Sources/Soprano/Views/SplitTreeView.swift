@@ -12,8 +12,13 @@ import AppKit
 /// - **Non-topology changes** (focus, agent status, tab switch) only update styling
 ///   (borders, header labels) via `updatePaneStyles()`.
 final class SplitTreeView: NSView {
+    typealias TerminalViewFactory = (TerminalTarget, TerminalConfig, Bool) -> NSView
+
     let agentManager: AgentManager
     let themeManager: ThemeManager
+    private let terminalViewFactory: TerminalViewFactory
+    private let destroyTerminalView: (NSView) -> Void
+    private let restartTerminalView: (NSView) -> Void
 
     /// Cached pane container views keyed by pane ID.
     /// These survive layout rebuilds — only removed when the pane itself is closed.
@@ -32,15 +37,41 @@ final class SplitTreeView: NSView {
     /// Observer ID for AgentManager notifications.
     private let observerId = "SplitTreeView"
 
-    init(agentManager: AgentManager, themeManager: ThemeManager) {
+    init(
+        agentManager: AgentManager,
+        themeManager: ThemeManager,
+        terminalViewFactory: @escaping TerminalViewFactory = {
+            target,
+            config,
+            startsSurface in
+            TerminalSurfaceView(
+                paneId: target.paneId,
+                tabId: target.tabId,
+                config: config,
+                startsSurface: startsSurface
+            )
+        },
+        destroyTerminalView: @escaping (NSView) -> Void = { view in
+            (view as? TerminalSurfaceView)?.destroySurface()
+        },
+        restartTerminalView: @escaping (NSView) -> Void = { view in
+            (view as? TerminalSurfaceView)?.recreateSurface()
+        }
+    ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        self.terminalViewFactory = terminalViewFactory
+        self.destroyTerminalView = destroyTerminalView
+        self.restartTerminalView = restartTerminalView
         self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
         wantsLayer = true
 
         agentManager.addObserver(id: observerId) { [weak self] in
             self?.handleStateChange()
+        }
+        agentManager.addTerminalLifecycleObserver(id: observerId) { [weak self] action in
+            self?.handleTerminalLifecycle(action)
         }
 
         rebuildLayout()
@@ -53,6 +84,7 @@ final class SplitTreeView: NSView {
 
     deinit {
         agentManager.removeObserver(id: observerId)
+        agentManager.removeTerminalLifecycleObserver(id: observerId)
     }
 
     // MARK: - State Change Handler
@@ -74,6 +106,26 @@ final class SplitTreeView: NSView {
             updatePaneStyles()
         }
         syncKeyboardFocus()
+    }
+
+    private func handleTerminalLifecycle(_ action: TerminalLifecycleAction) {
+        let target = action.target
+        switch action {
+        case .stop:
+            guard let view = tabContentViews[target.tabId] else { return }
+            destroyTerminalView(view)
+
+        case .restart:
+            if let view = tabContentViews[target.tabId] {
+                restartTerminalView(view)
+                return
+            }
+
+            guard let tab = agentManager.panes[target.paneId]?.tabs.first(
+                where: { $0.id == target.tabId }
+            ) else { return }
+            _ = contentViewForTab(tab, paneId: target.paneId)
+        }
     }
 
     /// Keeps the window's first responder on the active pane's terminal.
@@ -292,25 +344,32 @@ final class SplitTreeView: NSView {
                 terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
             }
 
-            let terminalView = TerminalSurfaceView(
-                paneId: paneId,
-                tabId: tab.id,
-                config: terminalConfig
+            let target = TerminalTarget(paneId: paneId, tabId: tab.id)
+            let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
+            let terminalView = terminalViewFactory(
+                target,
+                terminalConfig,
+                startsSurface
             )
-            terminalView.onFocusRequested = { [weak self] in
-                self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
-            }
-            terminalView.onTitleChanged = { [weak self] title in
-                self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
-            }
-            terminalView.onAgentInputSubmitted = { [weak self] in
-                guard self?.agentManager.agent(paneId: paneId, tabId: tab.id) != nil else { return }
-                self?.agentManager.updateAgentStatus(
-                    paneId: paneId,
-                    tabId: tab.id,
-                    status: .running,
-                    needsAttention: false
-                )
+            if let terminalView = terminalView as? TerminalSurfaceView {
+                terminalView.onFocusRequested = { [weak self] in
+                    self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
+                }
+                terminalView.onTitleChanged = { [weak self] title in
+                    self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+                }
+                terminalView.onAgentInputSubmitted = { [weak self] in
+                    guard self?.agentManager.agent(
+                        paneId: paneId,
+                        tabId: tab.id
+                    ) != nil else { return }
+                    self?.agentManager.updateAgentStatus(
+                        paneId: paneId,
+                        tabId: tab.id,
+                        status: .running,
+                        needsAttention: false
+                    )
+                }
             }
             if tab.agent?.profileId == "codex" {
                 // Codex exposes completion and approval notifications but no
