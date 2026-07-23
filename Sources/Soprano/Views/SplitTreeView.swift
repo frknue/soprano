@@ -655,7 +655,8 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
     // MARK: - NSSplitViewDelegate
 
     func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard !isApplyingModelPercentage,
+        guard notification.userInfo?["NSSplitViewDividerIndex"] != nil,
+              !isApplyingModelPercentage,
               hasAppliedInitialPosition,
               subviews.count >= 2
         else { return }
