@@ -213,6 +213,10 @@ final class KeybindingManager: @unchecked Sendable {
             return nil
         }
 
+        if isCtrlOnly(flags), agentManager.focusPane(shortcutKey: key) {
+            return nil
+        }
+
         return event
     }
 

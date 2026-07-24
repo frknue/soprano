@@ -2,6 +2,46 @@ import Testing
 @testable import Soprano
 
 struct DefaultKeybindingsTests {
+    @Test func numberedWindowBindingsRemainControlNumber() throws {
+        for number in 1...9 {
+            let window = try #require(binding("select-window-\(number)"))
+            #expect(window.key == "\(number)")
+            #expect(window.ctrl == true)
+            #expect(window.shift != true)
+            #expect(window.defaultKeys == "Ctrl+\(number)")
+        }
+    }
+
+    @Test func temporaryShiftedWindowBindingsMigrateBackToControlNumber() throws {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings = savedConfig.bindings.map { binding in
+            guard binding.id.hasPrefix("select-window-") else { return binding }
+            let number = String(binding.id.suffix(1))
+            return KeyBinding(
+                id: binding.id,
+                label: binding.label,
+                description: binding.description,
+                category: binding.category,
+                defaultKeys: "Ctrl+Shift+\(number)",
+                mode: .direct,
+                key: number,
+                ctrl: true,
+                shift: true
+            )
+        }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        for number in 1...9 {
+            let window = try #require(
+                mergedConfig.bindings.first { $0.id == "select-window-\(number)" }
+            )
+            #expect(window.ctrl == true)
+            #expect(window.shift != true)
+            #expect(window.defaultKeys == "Ctrl+\(number)")
+        }
+    }
+
     @Test func splitDefaultsUseDashAndPipe() throws {
         let horizontal = try #require(binding("split-horizontal"))
         let vertical = try #require(binding("split-vertical"))

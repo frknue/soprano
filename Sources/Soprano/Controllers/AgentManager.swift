@@ -58,6 +58,7 @@ final class AgentManager: @unchecked Sendable {
     private var ghosttyCloseObserver: NSObjectProtocol?
 
     static let maxPanes = 20
+    private static let paneShortcutKeys = Array("bdefgimnopqrstuvwxyz")
 
     // MARK: - Initialization
 
@@ -335,6 +336,31 @@ final class AgentManager: @unchecked Sendable {
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
         notifyChange(layoutChanged: windowChanged)
+    }
+
+    func orderedPanes(in windowId: String) -> [PaneState] {
+        guard let layout = windows[windowId]?.layout else { return [] }
+        return layout.orderedLeafIds.compactMap { panes[$0] }
+    }
+
+    var paneShortcutAssignments: [(key: String, paneId: String)] {
+        let orderedPaneIds = orderedWindows.flatMap { terminalWindow in
+            orderedPanes(in: terminalWindow.id).map(\.id)
+        }
+        return zip(Self.paneShortcutKeys, orderedPaneIds).map {
+            (key: String($0.0), paneId: $0.1)
+        }
+    }
+
+    @discardableResult
+    func focusPane(shortcutKey: String) -> Bool {
+        guard let assignment = paneShortcutAssignments.first(where: {
+            $0.key == shortcutKey.lowercased()
+        }) else {
+            return false
+        }
+        focusPane(assignment.paneId)
+        return true
     }
 
     func navigateToPane(direction: NavigationDirection) {
