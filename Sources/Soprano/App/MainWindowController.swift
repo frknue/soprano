@@ -214,24 +214,36 @@ final class MainWindowController: NSWindowController {
             ),
             CommandItem(
                 id: "split-horizontal",
-                icon: "rectangle.split.2x1",
+                icon: "rectangle.split.1x2",
                 label: "Split Horizontal",
                 description: "Split the active pane horizontally",
                 shortcut: commandShortcut(for: "split-horizontal"),
                 action: { [weak self] in
                     guard let self else { return }
-                    _ = self.agentManager.splitPane(direction: .horizontal, paneId: self.agentManager.activePaneId)
+                    guard let direction = KeybindingManager.splitDirection(
+                        for: "split-horizontal"
+                    ) else { return }
+                    _ = self.agentManager.splitPane(
+                        direction: direction,
+                        paneId: self.agentManager.activePaneId
+                    )
                 }
             ),
             CommandItem(
                 id: "split-vertical",
-                icon: "rectangle.split.1x2",
+                icon: "rectangle.split.2x1",
                 label: "Split Vertical",
                 description: "Split the active pane vertically",
                 shortcut: commandShortcut(for: "split-vertical"),
                 action: { [weak self] in
                     guard let self else { return }
-                    _ = self.agentManager.splitPane(direction: .vertical, paneId: self.agentManager.activePaneId)
+                    guard let direction = KeybindingManager.splitDirection(
+                        for: "split-vertical"
+                    ) else { return }
+                    _ = self.agentManager.splitPane(
+                        direction: direction,
+                        paneId: self.agentManager.activePaneId
+                    )
                 }
             ),
             CommandItem(
