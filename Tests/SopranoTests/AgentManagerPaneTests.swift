@@ -57,6 +57,65 @@ struct AgentManagerPaneTests {
         #expect(splitTab.cwd == "/tmp/agent-project")
     }
 
+    @Test func liveWorkingDirectoryIsInheritedByNewContent() throws {
+        let manager = AgentManager()
+        let sourcePaneId = manager.activePaneId
+        let sourceTabId = try #require(manager.panes[sourcePaneId]?.activeTab?.id)
+
+        manager.updateWorkingDirectory(
+            paneId: sourcePaneId,
+            tabId: sourceTabId,
+            to: "/tmp/live-project"
+        )
+
+        let splitPaneId = try #require(
+            manager.splitPane(direction: .horizontal, paneId: sourcePaneId)
+        )
+        #expect(manager.panes[splitPaneId]?.activeTab?.cwd == "/tmp/live-project")
+
+        manager.focusTab(paneId: sourcePaneId, tabId: sourceTabId)
+        let tabId = try #require(
+            manager.addTabToPane(sourcePaneId, type: .terminal)
+        )
+        #expect(
+            manager.panes[sourcePaneId]?.tabs.first(where: { $0.id == tabId })?.cwd
+                == "/tmp/live-project"
+        )
+
+        manager.switchTab(sourcePaneId, index: 0)
+        let agentPaneId = try #require(manager.spawnAgent("codex"))
+        #expect(manager.panes[agentPaneId]?.activeTab?.cwd == "/tmp/live-project")
+
+        manager.focusTab(paneId: sourcePaneId, tabId: sourceTabId)
+        let windowId = try #require(manager.createWindow())
+        #expect(manager.windows[windowId]?.activePaneId == manager.activePaneId)
+        #expect(manager.panes[manager.activePaneId]?.activeTab?.cwd == "/tmp/live-project")
+    }
+
+    @Test func workingDirectoryUpdatesOnlyTheExactTerminalTab() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let firstTabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let secondTabId = try #require(
+            manager.addTabToPane(paneId, type: .terminal)
+        )
+
+        manager.updateWorkingDirectory(
+            paneId: paneId,
+            tabId: firstTabId,
+            to: "/tmp/first"
+        )
+        manager.updateWorkingDirectory(
+            paneId: "missing-pane",
+            tabId: secondTabId,
+            to: "/tmp/ignored"
+        )
+
+        let tabs = try #require(manager.panes[paneId]?.tabs)
+        #expect(tabs.first(where: { $0.id == firstTabId })?.cwd == "/tmp/first")
+        #expect(tabs.first(where: { $0.id == secondTabId })?.cwd == nil)
+    }
+
     @Test func navigationUsesWrapWhenNoDirectAdjacentPaneExists() throws {
         let manager = AgentManager()
         let secondPaneId = try #require(manager.spawnTerminal())

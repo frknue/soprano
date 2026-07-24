@@ -75,6 +75,28 @@ struct DefaultKeybindingsTests {
         #expect(rightBracket.key == "]")
     }
 
+    @Test func newWindowCurrentDirectoryUsesTmuxPrefixC() throws {
+        let newWindow = try #require(binding("new-window-current-directory"))
+
+        #expect(newWindow.mode == .prefix)
+        #expect(newWindow.key == "c")
+        #expect(newWindow.shift != true)
+        #expect(newWindow.defaultKeys == "Prefix → C")
+    }
+
+    @Test func savedConfigurationsGainTheNewWindowCurrentDirectoryBinding() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "new-window-current-directory" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(
+            mergedConfig.bindings.contains {
+                $0.id == "new-window-current-directory"
+            }
+        )
+    }
+
     @Test func savedLegacySplitDefaultsMigrateToCurrentDefaults() throws {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings = savedConfig.bindings.map { binding in

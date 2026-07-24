@@ -205,6 +205,7 @@ final class TerminalSurfaceView: NSView {
     let tabId: String
     var onFocusRequested: (() -> Void)?
     var onTitleChanged: ((String) -> Void)?
+    var onWorkingDirectoryChanged: ((String) -> Void)?
     var onAgentInputSubmitted: (() -> Void)?
     var onAgentProcessExited: ((Int32?) -> Void)?
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
@@ -356,6 +357,10 @@ final class TerminalSurfaceView: NSView {
 
     func terminalTitleDidChange(_ title: String) {
         onTitleChanged?(title)
+    }
+
+    func terminalWorkingDirectoryDidChange(_ workingDirectory: String) {
+        onWorkingDirectoryChanged?(workingDirectory)
     }
 
     func terminalDesktopNotification(title: String, body: String) {

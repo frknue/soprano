@@ -390,6 +390,13 @@ final class SplitTreeView: NSView {
                 terminalView.onTitleChanged = { [weak self] title in
                     self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
                 }
+                terminalView.onWorkingDirectoryChanged = { [weak self] workingDirectory in
+                    self?.agentManager.updateWorkingDirectory(
+                        paneId: paneId,
+                        tabId: tab.id,
+                        to: workingDirectory
+                    )
+                }
                 terminalView.onAgentInputSubmitted = { [weak self] in
                     guard self?.agentManager.agent(
                         paneId: paneId,

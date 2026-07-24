@@ -38,6 +38,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "maximize-pane", label: "Maximize", description: "Toggle maximize for the active pane", category: .layout, defaultKeys: "Prefix → M", mode: .prefix, key: "m"),
             KeyBinding(id: "copy-mode", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → [", mode: .prefix, key: "["),
             KeyBinding(id: "copy-mode-right-bracket", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → ]", mode: .prefix, key: "]"),
+            KeyBinding(id: "new-window-current-directory", label: "New Window Here", description: "Create a logical window in the active terminal directory", category: .layout, defaultKeys: "Prefix → C", mode: .prefix, key: "c"),
 
             // Tabs (prefix)
             KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),
