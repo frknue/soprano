@@ -55,6 +55,16 @@ struct DefaultKeybindingsTests {
         #expect(vertical.shift == true)
     }
 
+    @Test func symbolicSplitBindingsFollowDividerOrientation() throws {
+        let horizontal = try #require(binding("split-horizontal"))
+        let vertical = try #require(binding("split-vertical"))
+
+        // SplitDirection describes pane arrangement: stacked panes produce a
+        // horizontal divider, while side-by-side panes produce a vertical one.
+        #expect(KeybindingManager.splitDirection(for: horizontal.id) == .vertical)
+        #expect(KeybindingManager.splitDirection(for: vertical.id) == .horizontal)
+    }
+
     @Test func savedLegacySplitDefaultsMigrateToCurrentDefaults() throws {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings = savedConfig.bindings.map { binding in

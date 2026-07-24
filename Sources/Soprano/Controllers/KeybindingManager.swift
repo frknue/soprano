@@ -265,6 +265,19 @@ final class KeybindingManager: @unchecked Sendable {
         "nav-right",
     ]
 
+    /// Split actions are named for the divider they draw, while
+    /// `SplitDirection` describes the axis along which panes are arranged.
+    static func splitDirection(for bindingId: String) -> SplitDirection? {
+        switch bindingId {
+        case "split-horizontal":
+            return .vertical
+        case "split-vertical":
+            return .horizontal
+        default:
+            return nil
+        }
+    }
+
     private var activeTerminalTarget: TerminalTarget? {
         guard let tabId = agentManager.panes[agentManager.activePaneId]?.activeTab?.id else {
             return nil
@@ -321,6 +334,14 @@ final class KeybindingManager: @unchecked Sendable {
             return
         }
 
+        if let splitDirection = Self.splitDirection(for: binding.id) {
+            _ = agentManager.splitPane(
+                direction: splitDirection,
+                paneId: agentManager.activePaneId
+            )
+            return
+        }
+
         switch binding.id {
         case "nav-left":
             agentManager.navigateToPane(direction: .left)
@@ -344,10 +365,6 @@ final class KeybindingManager: @unchecked Sendable {
         case "resize-right":
             agentManager.resizePane(direction: .right, tickPercent: config.resizeTickPercent)
 
-        case "split-horizontal":
-            _ = agentManager.splitPane(direction: .horizontal, paneId: agentManager.activePaneId)
-        case "split-vertical":
-            _ = agentManager.splitPane(direction: .vertical, paneId: agentManager.activePaneId)
         case "close-pane", "kill-pane":
             agentManager.closePane(agentManager.activePaneId)
         case "maximize-pane":
