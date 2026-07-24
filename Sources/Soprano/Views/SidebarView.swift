@@ -246,6 +246,13 @@ final class SidebarView: NSView {
         terminalItem.target = self
         terminalItem.representedObject = "terminal"
         menu.addItem(terminalItem)
+        let browserItem = NSMenuItem(
+            title: "New Browser Pane",
+            action: #selector(spawnBrowserMenuItemClicked),
+            keyEquivalent: ""
+        )
+        browserItem.target = self
+        menu.addItem(browserItem)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: plusButton)
     }
 
@@ -256,6 +263,10 @@ final class SidebarView: NSView {
     @objc private func spawnMenuItemClicked(_ sender: NSMenuItem) {
         guard let profileId = sender.representedObject as? String else { return }
         _ = agentManager.spawnAgent(profileId)
+    }
+
+    @objc private func spawnBrowserMenuItemClicked() {
+        _ = agentManager.spawnBrowser()
     }
 
     @objc private func sessionsClicked() {
@@ -521,6 +532,7 @@ final class SidebarView: NSView {
     /// else the profile's cwd, else the app process's cwd (ghostty inherits it
     /// when workingDirectory is unset).
     private func effectiveCwd(for tab: PaneTab) -> String? {
+        guard tab.type != .browser else { return nil }
         if let cwd = tab.cwd {
             return cwd
         }
@@ -568,6 +580,8 @@ final class SidebarView: NSView {
         switch tab.type {
         case .terminal:
             return theme.colors.accent
+        case .browser:
+            return theme.colors.blue
         case .agent:
             return theme.colors.textMuted
         }

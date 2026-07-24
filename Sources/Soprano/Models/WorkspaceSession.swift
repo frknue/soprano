@@ -30,6 +30,7 @@ struct WorkspaceSession: Identifiable, Codable {
         let type: PaneType
         var profileId: String?
         var cwd: String?
+        var url: String? = nil
         var title: String? = nil
         /// Optional for backward compatibility with sessions saved before
         /// pane depth was introduced.

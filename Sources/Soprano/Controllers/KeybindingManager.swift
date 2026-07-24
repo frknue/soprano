@@ -453,6 +453,8 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.closeWindow(agentManager.activeWindowId)
         case "new-terminal":
             _ = agentManager.spawnTerminal()
+        case "new-browser":
+            _ = agentManager.spawnBrowser()
         case "close-active":
             agentManager.closePane(agentManager.activePaneId)
         case "save-session":

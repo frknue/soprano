@@ -2,6 +2,24 @@ import Testing
 @testable import Soprano
 
 struct AgentManagerPaneTests {
+    @Test func focusingTheAlreadyActiveTabDoesNotEmitAnotherModelChange() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        var changeCount = 0
+        let observerId = "focus-active-tab-test"
+        manager.addObserver(id: observerId) {
+            changeCount += 1
+        }
+        defer {
+            manager.removeObserver(id: observerId)
+        }
+
+        manager.focusTab(paneId: paneId, tabId: tabId)
+
+        #expect(changeCount == 0)
+    }
+
     @Test func spawnResultsAreTruthfulAndBecomeNilAtPaneCapacityWithoutConsumingAnID() throws {
         let manager = AgentManager()
         var createdPaneIds: [String] = []
@@ -13,6 +31,7 @@ struct AgentManagerPaneTests {
         #expect(manager.paneCount == AgentManager.maxPanes)
         #expect(manager.spawnTerminal() == nil)
         #expect(manager.spawnAgent("codex") == nil)
+        #expect(manager.spawnBrowser() == nil)
         #expect(manager.paneCount == AgentManager.maxPanes)
 
         manager.closePane(createdPaneIds[0])

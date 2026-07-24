@@ -256,6 +256,21 @@ final class AgentManager: @unchecked Sendable {
         spawnAgent("terminal", cwd: cwd)
     }
 
+    @discardableResult
+    func spawnBrowser(url: String? = nil) -> String? {
+        guard panes.count < Self.maxPanes else { return nil }
+        let paneId = nextPaneId()
+        let tabId = nextTabId()
+        let tab = PaneTab(
+            id: tabId,
+            type: .browser,
+            title: "Browser",
+            url: url
+        )
+        let pane = PaneState(id: paneId, tabs: [tab])
+        return insertPane(pane) ? paneId : nil
+    }
+
     // MARK: - Pane Splitting
 
     @discardableResult
@@ -281,6 +296,13 @@ final class AgentManager: @unchecked Sendable {
                 title: sourceTab.title,
                 agent: newAgent,
                 cwd: sourceTab.cwd
+            )
+        } else if sourceTab.type == .browser {
+            newTab = PaneTab(
+                id: newTabId,
+                type: .browser,
+                title: sourceTab.title,
+                url: sourceTab.url
             )
         } else {
             newTab = PaneTab(
@@ -629,10 +651,20 @@ final class AgentManager: @unchecked Sendable {
 
     func focusTab(paneId: String, tabId: String) {
         guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
               let index = pane.tabs.firstIndex(where: { $0.id == tabId })
         else { return }
-        switchTab(paneId, index: index)
-        clearAttention(paneId: paneId, tabId: tabId)
+
+        let isAlreadyFocused = activeWindowId == terminalWindow.id
+            && terminalWindow.activePaneId == paneId
+            && pane.activeTabIndex == index
+        if isAlreadyFocused {
+            clearAttention(paneId: paneId, tabId: tabId)
+        } else {
+            // switchTab also clears attention and emits the single model update
+            // needed to move focus to this target.
+            switchTab(paneId, index: index)
+        }
     }
 
     func clearAttention(paneId: String, tabId: String) {
@@ -889,6 +921,18 @@ final class AgentManager: @unchecked Sendable {
         notifyChange()
     }
 
+    func updateBrowserURL(paneId: String, tabId: String, to url: String) {
+        guard !url.isEmpty,
+              let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
+              pane.tabs[index].type == .browser,
+              pane.tabs[index].url != url
+        else { return }
+
+        pane.tabs[index].url = url
+        notifyChange()
+    }
+
     // MARK: - Agent Profile Lookup
 
     func agentProfile(for paneId: String) -> AgentProfile? {
@@ -915,6 +959,7 @@ final class AgentManager: @unchecked Sendable {
                             type: tab.type,
                             profileId: tab.agent?.profileId,
                             cwd: tab.cwd,
+                            url: tab.url,
                             title: tab.title,
                             depthParentId: tab.depthParentId
                         )
@@ -967,6 +1012,7 @@ final class AgentManager: @unchecked Sendable {
                     type: savedTab.type,
                     profileId: savedTab.profileId,
                     cwd: savedTab.cwd,
+                    url: savedTab.url,
                     title: savedTab.title,
                     depthParentId: validDepthParentId
                 )
@@ -1199,7 +1245,14 @@ final class AgentManager: @unchecked Sendable {
         if let profile {
             return profile.name
         }
-        return tab?.type == .agent ? "Agent" : "Terminal"
+        switch tab?.type {
+        case .agent:
+            return "Agent"
+        case .browser:
+            return "Browser"
+        case .terminal, nil:
+            return "Terminal"
+        }
     }
 
     private static func projectDirectoryName(for path: String) -> String? {
@@ -1237,6 +1290,7 @@ final class AgentManager: @unchecked Sendable {
         type: PaneType,
         profileId: String? = nil,
         cwd: String? = nil,
+        url: String? = nil,
         title: String? = nil,
         depthParentId: String? = nil
     ) -> PaneTab {
@@ -1250,6 +1304,16 @@ final class AgentManager: @unchecked Sendable {
                 title: restoredTitle,
                 agent: agent,
                 cwd: cwd,
+                depthParentId: depthParentId
+            )
+        }
+
+        if type == .browser {
+            return PaneTab(
+                id: id,
+                type: .browser,
+                title: title ?? "Browser",
+                url: url,
                 depthParentId: depthParentId
             )
         }

@@ -234,6 +234,17 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "new-browser",
+                icon: "globe",
+                label: "Open Browser",
+                description: "Split a browser pane to the right",
+                shortcut: commandShortcut(for: "new-browser"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.spawnBrowser()
+                }
+            ),
+            CommandItem(
                 id: "split-horizontal",
                 icon: "rectangle.split.1x2",
                 label: "Split Horizontal",

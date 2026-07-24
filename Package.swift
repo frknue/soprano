@@ -33,6 +33,7 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreFoundation"),
                 .linkedFramework("UserNotifications"),
+                .linkedFramework("WebKit"),
             ]
         ),
         .testTarget(
