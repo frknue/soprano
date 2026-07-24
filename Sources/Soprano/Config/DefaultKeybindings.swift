@@ -62,6 +62,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "rename-window", label: "Rename Window", description: "Rename the active logical window", category: .general, defaultKeys: "⇧⌘R", mode: .direct, key: "r", meta: true, shift: true),
             KeyBinding(id: "close-window", label: "Close Window", description: "Close the active logical window", category: .general, defaultKeys: "⇧⌘W", mode: .direct, key: "w", meta: true, shift: true),
             KeyBinding(id: "new-terminal", label: "New Terminal", description: "Open a new terminal pane", category: .general, defaultKeys: "⌘T", mode: .direct, key: "t", meta: true),
+            KeyBinding(id: "new-browser", label: "New Browser", description: "Split a browser pane to the right", category: .general, defaultKeys: "⌘B", mode: .direct, key: "b", meta: true),
             KeyBinding(id: "close-active", label: "Close Pane", description: "Close the active pane", category: .general, defaultKeys: "⌘W", mode: .direct, key: "w", meta: true),
             KeyBinding(id: "save-session", label: "Save Session As…", description: "Save the current workspace as a named session", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
             KeyBinding(id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar", category: .general, defaultKeys: "⌘E", mode: .direct, key: "e", meta: true),

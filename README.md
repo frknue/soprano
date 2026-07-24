@@ -183,6 +183,8 @@ soprano/
 | `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |
 | `⌘B` | New browser pane |
+| `⌘L` | Focus the active browser address bar |
+| `⌘[` / `⌘]` / `⌘R` | Browser back / forward / reload |
 | `⌘P` | Command palette |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
@@ -194,6 +196,31 @@ soprano/
 Holding Control reveals the window and pane hints in the sidebar. Pane hints
 include `⇧` because they require Control+Shift; unmodified alphabetic Control
 chords remain available to the terminal.
+
+### In-app browser
+
+`⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a
+native WebKit browser to the right of the active pane. Browser URLs and page
+titles are saved with workspace sessions. Bare local development addresses
+such as `localhost:5173` use HTTP; normal hostnames use HTTPS, and other text is
+sent to web search.
+
+Every terminal exports `SOPRANO_BIN`, so agents can drive a browser in the same
+Soprano process with an agent-browser-style CLI:
+
+```bash
+"$SOPRANO_BIN" browser open http://localhost:5173
+"$SOPRANO_BIN" browser snapshot --interactive
+"$SOPRANO_BIN" browser click @e1
+"$SOPRANO_BIN" browser fill '#email' user@example.com
+"$SOPRANO_BIN" browser eval 'document.title'
+```
+
+Snapshots assign ephemeral element refs (`e1`, `e2`, …); use them as selectors
+with an `@` prefix until the next snapshot or navigation. Commands target the
+focused browser by default. Pass `--pane pane-7` immediately after `browser` to
+select a specific pane. Run `"$SOPRANO_BIN" browser --help` for navigation,
+state inspection, input, getter, and screenshot commands.
 
 ### Pane depth
 

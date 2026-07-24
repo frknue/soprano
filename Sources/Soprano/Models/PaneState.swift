@@ -3,6 +3,7 @@ import Foundation
 /// The type of content in a pane tab.
 enum PaneType: String, Codable {
     case agent
+    case browser
     case terminal
 
     init(from decoder: any Decoder) throws {
@@ -12,8 +13,9 @@ enum PaneType: String, Codable {
         switch rawValue {
         case Self.agent.rawValue:
             self = .agent
-        case Self.terminal.rawValue, "browser":
-            // Legacy sessions may still contain browser tabs. Restore them as terminals.
+        case Self.browser.rawValue:
+            self = .browser
+        case Self.terminal.rawValue:
             self = .terminal
         default:
             throw DecodingError.dataCorruptedError(
@@ -36,6 +38,9 @@ struct PaneTab: Identifiable {
     var title: String
     var agent: AgentInstance?
     var cwd: String?
+    /// Last committed browser location. Used to restore browser tabs without
+    /// coupling session persistence to the live WKWebView.
+    var url: String? = nil
     /// The terminal immediately outside this one on the pane's z-axis.
     /// `nil` marks a regular, top-level tab.
     var depthParentId: String? = nil

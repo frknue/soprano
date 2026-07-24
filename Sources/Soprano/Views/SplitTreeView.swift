@@ -41,6 +41,7 @@ final class SplitTreeView: NSView {
     /// Last restore generation whose terminal cache has been invalidated.
     private var lastWorkspaceRestoreGeneration: Int
     private var copyModeTarget: TerminalTarget?
+    private var isSynchronizingKeyboardFocus = false
 
     /// Observer ID for AgentManager notifications.
     private let observerId = "SplitTreeView"
@@ -149,12 +150,12 @@ final class SplitTreeView: NSView {
         }
     }
 
-    /// Keeps the window's first responder on the active pane's terminal.
+    /// Keeps the window's first responder on the active pane's content.
     /// Without this, closing the focused pane leaves the window with no first
     /// responder and every keystroke is silently dropped (the app appears
     /// frozen), and pane navigation/splits move the visual focus but not
     /// keyboard input.
-    /// Re-focus the active pane's terminal after the split tree becomes
+    /// Re-focus the active pane after the split tree becomes
     /// visible again (e.g. when the settings overlay closes).
     func restoreKeyboardFocus() {
         syncKeyboardFocus()
@@ -186,22 +187,28 @@ final class SplitTreeView: NSView {
 
     private func syncKeyboardFocus() {
         // While the split tree is hidden (settings overlay open), leave the
-        // first responder alone — focusing an invisible terminal would send
-        // the user's typing into a hidden shell.
+        // first responder alone — focusing invisible content would send the
+        // user's typing into a hidden terminal or browser.
         guard !isHidden, let window else { return }
-        guard let container = paneContainers[agentManager.activePaneId],
-              let terminalView = findTerminalView(in: container)
-        else { return }
+        guard !isSynchronizingKeyboardFocus else { return }
+        isSynchronizingKeyboardFocus = true
+        defer { isSynchronizingKeyboardFocus = false }
+
+        guard let container = paneContainers[agentManager.activePaneId] else { return }
 
         if let responder = window.firstResponder as? NSView {
-            if responder === terminalView { return }
+            if responder === container || responder.isDescendant(of: container) { return }
             // Leave focus alone when it's on a live view outside the split
             // tree (settings form fields, etc.). A responder detached from
             // this window (e.g. its pane was just closed) is dead — reclaim.
             if responder.window === window, !responder.isDescendant(of: self) { return }
         }
 
-        window.makeFirstResponder(terminalView)
+        if let terminalView = findTerminalView(in: container) {
+            window.makeFirstResponder(terminalView)
+        } else {
+            findBrowserView(in: container)?.focusPreferredControl()
+        }
     }
 
     override func viewDidMoveToWindow() {
@@ -362,6 +369,27 @@ final class SplitTreeView: NSView {
         let view: NSView
         let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
         switch tab.type {
+        case .browser:
+            let browserView = BrowserPaneView(
+                target: BrowserTarget(paneId: paneId, tabId: tab.id),
+                initialURL: tab.url,
+                themeManager: themeManager
+            )
+            browserView.onFocusRequested = { [weak self] in
+                self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
+            }
+            browserView.onTitleChanged = { [weak self] title in
+                self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+            }
+            browserView.onURLChanged = { [weak self] url in
+                self?.agentManager.updateBrowserURL(
+                    paneId: paneId,
+                    tabId: tab.id,
+                    to: url
+                )
+            }
+            view = browserView
+
         case .terminal, .agent:
             let terminalConfig: TerminalConfig
             if tab.type == .agent,
@@ -463,6 +491,18 @@ final class SplitTreeView: NSView {
         return nil
     }
 
+    private func findBrowserView(in view: NSView) -> BrowserPaneView? {
+        if let browserView = view as? BrowserPaneView {
+            return browserView
+        }
+        for subview in view.subviews {
+            if let found = findBrowserView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func cancelCopyModeOutsideActiveTerminal() {
         guard let copyModeTarget else { return }
         let activeTarget = agentManager.panes[agentManager.activePaneId]?.activeTab.map {
@@ -532,6 +572,9 @@ final class SplitTreeView: NSView {
     }
 
     func refreshTheme() {
+        for view in tabContentViews.values {
+            findBrowserView(in: view)?.applyTheme()
+        }
         rebuildLayout()
     }
 
