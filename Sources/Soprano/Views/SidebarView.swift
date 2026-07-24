@@ -292,6 +292,10 @@ final class SidebarView: NSView {
     }
 
     @objc private func saveSessionClicked() {
+        saveSessionAs()
+    }
+
+    func saveSessionAs() {
         let alert = NSAlert()
         alert.messageText = "Save Session"
         alert.informativeText = "Name this workspace session:"

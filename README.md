@@ -178,7 +178,7 @@ soprano/
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
-| `⇧⌘S` | Save session |
+| `⇧⌘S` | Save session as… |
 | `⌘W` | Close active pane |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
 

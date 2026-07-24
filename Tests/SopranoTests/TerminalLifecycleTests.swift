@@ -105,6 +105,60 @@ struct TerminalLifecycleTests {
         manager.handleTerminalClose(target: terminalTarget)
         #expect(manager.panes[paneId]?.tabs.map(\.id) == [firstAgentTabId, activeAgentTabId])
     }
+
+    @Test func finishedManualAgentDetachesWhenItsShellCommandReturns() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.renameTab(paneId, tabId: tabId, to: "Terminal")
+        let firstAgent = try #require(
+            manager.attachAgentIfNeeded(
+                paneId: paneId,
+                tabId: tabId,
+                profileId: "codex"
+            )
+        )
+        manager.updateAgentStatus(
+            paneId: paneId,
+            tabId: tabId,
+            status: .running
+        )
+
+        manager.agentProcessDidExit(
+            target: TerminalTarget(paneId: paneId, tabId: tabId),
+            exitCode: 130
+        )
+
+        #expect(firstAgent.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: tabId) == nil)
+        #expect(manager.panes[paneId]?.activeTab?.title == "Terminal")
+
+        let secondAgent = manager.attachAgentIfNeeded(
+            paneId: paneId,
+            tabId: tabId,
+            profileId: "codex"
+        )
+        #expect(secondAgent != nil)
+        #expect(secondAgent !== firstAgent)
+    }
+
+    @Test func finishedDedicatedAgentBecomesStoppedWithoutStoppingItsSurfaceAgain() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        var actions: [TerminalLifecycleAction] = []
+        manager.addTerminalLifecycleObserver(id: "test-spy") { actions.append($0) }
+
+        manager.agentProcessDidExit(target: target, exitCode: 130)
+
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.exitCode == 130)
+        #expect(actions.isEmpty)
+    }
 }
 
 @MainActor

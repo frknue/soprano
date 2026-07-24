@@ -30,6 +30,7 @@ struct WorkspaceSession: Identifiable, Codable {
         let type: PaneType
         var profileId: String?
         var cwd: String?
+        var title: String? = nil
     }
 
     // MARK: - Session List Persistence
@@ -37,8 +38,8 @@ struct WorkspaceSession: Identifiable, Codable {
     private static let sessionsKey = "soprano-sessions"
     private static let lastSessionKey = "soprano-last-session"
 
-    static func loadAll() -> [WorkspaceSession] {
-        guard let data = UserDefaults.standard.data(forKey: sessionsKey),
+    static func loadAll(defaults: UserDefaults = .standard) -> [WorkspaceSession] {
+        guard let data = defaults.data(forKey: sessionsKey),
               let sessions = try? JSONDecoder().decode([WorkspaceSession].self, from: data)
         else {
             return []
@@ -46,15 +47,15 @@ struct WorkspaceSession: Identifiable, Codable {
         return sessions
     }
 
-    static func saveAll(_ sessions: [WorkspaceSession]) {
+    static func saveAll(_ sessions: [WorkspaceSession], defaults: UserDefaults = .standard) {
         guard let data = try? JSONEncoder().encode(sessions) else { return }
-        UserDefaults.standard.set(data, forKey: sessionsKey)
+        defaults.set(data, forKey: sessionsKey)
     }
 
     // MARK: - Last Session Persistence
 
-    static func loadLast() -> WorkspaceSession? {
-        guard let data = UserDefaults.standard.data(forKey: lastSessionKey),
+    static func loadLast(defaults: UserDefaults = .standard) -> WorkspaceSession? {
+        guard let data = defaults.data(forKey: lastSessionKey),
               let session = try? JSONDecoder().decode(WorkspaceSession.self, from: data)
         else {
             return nil
@@ -62,12 +63,12 @@ struct WorkspaceSession: Identifiable, Codable {
         return session
     }
 
-    static func saveLast(_ session: WorkspaceSession) {
+    static func saveLast(_ session: WorkspaceSession, defaults: UserDefaults = .standard) {
         guard let data = try? JSONEncoder().encode(session) else { return }
-        UserDefaults.standard.set(data, forKey: lastSessionKey)
+        defaults.set(data, forKey: lastSessionKey)
     }
 
-    static func clearLast() {
-        UserDefaults.standard.removeObject(forKey: lastSessionKey)
+    static func clearLast(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: lastSessionKey)
     }
 }

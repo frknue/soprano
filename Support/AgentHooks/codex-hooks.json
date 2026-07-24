@@ -34,6 +34,17 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped --profile codex --title \"Codex\" --body \"Stopped\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "PermissionRequest": [
       {
         "hooks": [

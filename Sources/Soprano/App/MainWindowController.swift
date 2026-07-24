@@ -85,7 +85,7 @@ final class MainWindowController: NSWindowController {
         fatalError("init(coder:) is not supported")
     }
 
-    func saveWorkspaceIfNeeded() {
+    func saveLastWorkspaceIfNeeded() {
         saveWindowFrame()
         guard settings.restoreLastSession else { return }
         let session = agentManager.snapshotWorkspace()
@@ -282,8 +282,8 @@ final class MainWindowController: NSWindowController {
             CommandItem(
                 id: "save-session",
                 icon: "square.and.arrow.down",
-                label: "Save Session",
-                description: "Save the current workspace session",
+                label: "Save Session As…",
+                description: "Save the current workspace as a named session",
                 shortcut: commandShortcut(for: "save-session"),
                 action: { [weak self] in
                     self?.keybindingSaveSession()
@@ -323,7 +323,7 @@ extension MainWindowController: KeybindingDelegate {
     }
 
     func keybindingSaveSession() {
-        saveWorkspaceIfNeeded()
+        mainContentVC?.saveSessionAs()
     }
 
     func keybindingOpenSettings() {

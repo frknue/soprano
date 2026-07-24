@@ -4,11 +4,13 @@ import Foundation
 final class SessionManager: @unchecked Sendable {
     private(set) var sessions: [WorkspaceSession] = []
     private let agentManager: AgentManager
+    private let defaults: UserDefaults
     private var observers: [String: () -> Void] = [:]
 
-    init(agentManager: AgentManager) {
+    init(agentManager: AgentManager, defaults: UserDefaults = .standard) {
         self.agentManager = agentManager
-        sessions = WorkspaceSession.loadAll()
+        self.defaults = defaults
+        sessions = WorkspaceSession.loadAll(defaults: defaults)
     }
 
     // MARK: - Session Operations
@@ -67,6 +69,6 @@ final class SessionManager: @unchecked Sendable {
     }
 
     private func persistSessions() {
-        WorkspaceSession.saveAll(sessions)
+        WorkspaceSession.saveAll(sessions, defaults: defaults)
     }
 }
