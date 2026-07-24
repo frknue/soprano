@@ -119,10 +119,7 @@ final class MainContentViewController: NSViewController {
 
     func setKeybindingMode(_ mode: KeybindingState) {
         statusBarView.setKeybindingMode(mode)
-    }
-
-    func setControlKeyHeld(_ isHeld: Bool) {
-        sidebarView.setControlKeyHeld(isHeld)
+        sidebarView.setPaneSelectionActive(mode == .paneSelection)
     }
 
     func changeActiveTerminalFontSize(delta: Int) {

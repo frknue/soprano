@@ -73,6 +73,9 @@ final class StatusBarView: NSView {
         case .prefix:
             modeLabel.stringValue = "PREFIX"
             modeLabel.textColor = theme.colors.accent
+        case .paneSelection:
+            modeLabel.stringValue = "PANE"
+            modeLabel.textColor = theme.colors.blue
         case .copy:
             modeLabel.stringValue = "COPY"
             modeLabel.textColor = theme.colors.accent
@@ -88,7 +91,7 @@ final class StatusBarView: NSView {
         brandLabel.textColor = theme.colors.accent
         if modeLabel.stringValue == "PREFIX" || modeLabel.stringValue == "COPY" {
             modeLabel.textColor = theme.colors.accent
-        } else if modeLabel.stringValue == "SELECT" {
+        } else if modeLabel.stringValue == "PANE" || modeLabel.stringValue == "SELECT" {
             modeLabel.textColor = theme.colors.blue
         } else {
             modeLabel.textColor = theme.colors.textMuted

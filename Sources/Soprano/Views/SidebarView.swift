@@ -23,7 +23,7 @@ final class SidebarView: NSView {
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
     private var collapsedWindowIds: Set<String> = []
-    private var isControlKeyHeld = false
+    private var isPaneSelectionActive = false
 
     init(
         agentManager: AgentManager,
@@ -204,9 +204,9 @@ final class SidebarView: NSView {
         return button
     }
 
-    func setControlKeyHeld(_ isHeld: Bool) {
-        guard isControlKeyHeld != isHeld else { return }
-        isControlKeyHeld = isHeld
+    func setPaneSelectionActive(_ isActive: Bool) {
+        guard isPaneSelectionActive != isActive else { return }
+        isPaneSelectionActive = isActive
         rebuildRows(theme: themeManager.currentTheme)
     }
 
@@ -343,7 +343,7 @@ final class SidebarView: NSView {
             view.removeFromSuperview()
         }
         for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
-            let isExpanded = isControlKeyHeld
+            let isExpanded = isPaneSelectionActive
                 || !collapsedWindowIds.contains(terminalWindow.id)
             let windowRow = SidebarWindowRowView(theme: theme)
             windowRow.configure(
@@ -355,7 +355,7 @@ final class SidebarView: NSView {
                     }.count ?? 0
                 },
                 shortcutNumber: index < 9 ? index + 1 : nil,
-                showShortcutHint: isControlKeyHeld,
+                showShortcutHint: false,
                 expanded: isExpanded,
                 highlighted: terminalWindow.id == agentManager.activeWindowId,
                 isTitleCustom: terminalWindow.isTitleCustom,
@@ -398,7 +398,7 @@ final class SidebarView: NSView {
                     agentStatus: pane.activeTab?.agent?.status,
                     tabCount: pane.tabs.count,
                     shortcutKey: paneShortcutKeysById[pane.id],
-                    showShortcutHint: isControlKeyHeld,
+                    showShortcutHint: isPaneSelectionActive,
                     highlighted: pane.id == agentManager.activePaneId,
                     onSelect: { [weak self] in
                         self?.agentManager.focusPane(pane.id)
@@ -835,7 +835,7 @@ private final class SidebarPaneRowView: NSView {
             badgeContainer.layer?.backgroundColor = theme.colors.accent.withAlphaComponent(0.2).cgColor
             badgeLabel.stringValue = shortcutKey.uppercased()
             badgeLabel.textColor = theme.colors.accent
-            badgeContainer.toolTip = "Ctrl+\(shortcutKey.uppercased())"
+            badgeContainer.toolTip = "Select pane \(shortcutKey.uppercased())"
         } else if let agentStatus {
             badgeContainer.isHidden = false
             badgeContainer.layer?.backgroundColor = dotColor.withAlphaComponent(0.16).cgColor

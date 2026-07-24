@@ -84,6 +84,26 @@ struct DefaultKeybindingsTests {
         #expect(newWindow.defaultKeys == "Prefix → C")
     }
 
+    @Test func paneSelectionUsesDedicatedPrefixMode() throws {
+        let selectPane = try #require(binding("select-pane"))
+
+        #expect(selectPane.mode == .prefix)
+        #expect(selectPane.key == " ")
+        #expect(selectPane.ctrl != true)
+        #expect(selectPane.meta != true)
+        #expect(selectPane.shift != true)
+        #expect(selectPane.defaultKeys == "Prefix → Space")
+    }
+
+    @Test func savedConfigurationsGainPaneSelectionBinding() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "select-pane" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "select-pane" })
+    }
+
     @Test func savedConfigurationsGainTheNewWindowCurrentDirectoryBinding() {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings.removeAll { $0.id == "new-window-current-directory" }

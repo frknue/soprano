@@ -39,6 +39,7 @@ struct KeyBindingConfig: Codable {
 enum KeybindingState {
     case normal
     case prefix
+    case paneSelection
     case copy
     case copySelection
 }
