@@ -42,6 +42,7 @@ struct PaneNavigationClaimRegistry {
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
     func keybindingSaveSession()
+    func keybindingRenameWindow()
     func keybindingOpenSettings()
     func keybindingOpenCommandPalette()
     func keybindingOpenProjectSearch()
@@ -431,6 +432,10 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingOpenProjectSearch() }
         case "new-window":
             _ = agentManager.createWindow()
+        case "rename-window":
+            invokeDelegate { $0.keybindingRenameWindow() }
+        case "close-window":
+            agentManager.closeWindow(agentManager.activeWindowId)
         case "new-terminal":
             _ = agentManager.spawnTerminal()
         case "close-active":

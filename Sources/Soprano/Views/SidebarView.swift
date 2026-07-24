@@ -416,6 +416,10 @@ final class SidebarView: NSView {
         }
     }
 
+    func promptToRenameActiveWindow() {
+        promptToRenameWindow(agentManager.activeWindowId)
+    }
+
     private func promptToRenameWindow(_ windowId: String) {
         guard let terminalWindow = agentManager.windows[windowId] else { return }
         let alert = NSAlert()

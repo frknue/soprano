@@ -55,6 +55,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "command-palette", label: "Commands", description: "Open the command palette", category: .general, defaultKeys: "⌘P", mode: .direct, key: "p", meta: true),
             KeyBinding(id: "open-project", label: "Open Project", description: "Open a project directory", category: .general, defaultKeys: "⇧⌘P", mode: .direct, key: "p", meta: true, shift: true),
             KeyBinding(id: "new-window", label: "New Window", description: "Create a new logical window", category: .general, defaultKeys: "⌘N", mode: .direct, key: "n", meta: true),
+            KeyBinding(id: "rename-window", label: "Rename Window", description: "Rename the active logical window", category: .general, defaultKeys: "⇧⌘R", mode: .direct, key: "r", meta: true, shift: true),
+            KeyBinding(id: "close-window", label: "Close Window", description: "Close the active logical window", category: .general, defaultKeys: "⇧⌘W", mode: .direct, key: "w", meta: true, shift: true),
             KeyBinding(id: "new-terminal", label: "New Terminal", description: "Open a new terminal pane", category: .general, defaultKeys: "⌘T", mode: .direct, key: "t", meta: true),
             KeyBinding(id: "close-active", label: "Close Pane", description: "Close the active pane", category: .general, defaultKeys: "⌘W", mode: .direct, key: "w", meta: true),
             KeyBinding(id: "save-session", label: "Save Session As…", description: "Save the current workspace as a named session", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),

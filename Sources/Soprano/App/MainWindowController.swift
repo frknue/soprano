@@ -155,6 +155,27 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "rename-window",
+                icon: "pencil",
+                label: "Rename Window…",
+                description: "Rename the active logical window",
+                shortcut: commandShortcut(for: "rename-window"),
+                action: { [weak self] in
+                    self?.keybindingRenameWindow()
+                }
+            ),
+            CommandItem(
+                id: "close-window",
+                icon: "xmark.rectangle",
+                label: "Close Window",
+                description: "Close the active logical window",
+                shortcut: commandShortcut(for: "close-window"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    self.agentManager.closeWindow(self.agentManager.activeWindowId)
+                }
+            ),
+            CommandItem(
                 id: "open-project",
                 icon: "folder",
                 label: "Open Project…",
@@ -324,6 +345,10 @@ extension MainWindowController: KeybindingDelegate {
 
     func keybindingSaveSession() {
         mainContentVC?.saveSessionAs()
+    }
+
+    func keybindingRenameWindow() {
+        mainContentVC?.renameActiveWindow()
     }
 
     func keybindingOpenSettings() {
