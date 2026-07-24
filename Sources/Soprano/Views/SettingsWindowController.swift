@@ -120,7 +120,12 @@ final class SettingsViewController: NSViewController {
         let fillDocumentWidth = contentStack.widthAnchor.constraint(
             equalTo: scrollDocumentView.widthAnchor
         )
-        fillDocumentWidth.priority = .defaultHigh
+        // Keep this above content hugging so the settings use the available
+        // width, but just below AppKit's `.windowSizeStayPut` priority so the
+        // fitting width cannot shrink the main window.
+        fillDocumentWidth.priority = NSLayoutConstraint.Priority(
+            rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1
+        )
 
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: rootContainer.leadingAnchor),
