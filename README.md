@@ -225,11 +225,12 @@ state inspection, input, getter, and screenshot commands.
 ### Window depth
 
 Each pane can own a private inner workspace on the window's z-axis. Going in
-opens that workspace full-screen with a fresh terminal while the complete outer
-layout stays alive behind it. Splits and tabs created there belong only to that
-pane's branch. Going out restores the outer layout; entering the same pane again
-restores its inner splits, tabs, and live terminal surfaces. Sibling panes keep
-independent branches and are never changed by another pane's Go In operation.
+replaces that pane's region with a fresh terminal while every sibling remains
+visible and live. Splits and tabs created there stay confined to the owning
+pane's region. Going out collapses only that branch; entering the same pane
+again restores its inner splits, tabs, and live terminal surfaces. Sibling
+panes keep independent branches and are never changed by another pane's Go In
+operation.
 Use `Ctrl+A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or
 **Go In** / **Go Out** in the command palette. Sidebar panes are labeled with
 their window depth and can be selected directly.

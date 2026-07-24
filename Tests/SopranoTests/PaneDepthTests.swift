@@ -53,7 +53,7 @@ struct PaneDepthTests {
         #expect(!manager.goOut(rootPaneId))
     }
 
-    @Test func eachOuterSplitOwnsAnIndependentFullScreenDepthBranch() throws {
+    @Test func eachOuterSplitOwnsAnIndependentVisibleDepthBranch() throws {
         let manager = AgentManager()
         let firstRootPaneId = manager.activePaneId
         let secondRootPaneId = try #require(
@@ -66,13 +66,16 @@ struct PaneDepthTests {
 
         let firstInnerTabId = try #require(manager.goIn(firstRootPaneId))
         let firstInnerPaneId = manager.activePaneId
-        #expect(manager.layout?.leafIds == [firstInnerPaneId])
-        #expect(!manager.layout!.leafIds.contains(secondRootPaneId))
+        #expect(manager.layout?.orderedLeafIds == [
+            firstInnerPaneId, secondRootPaneId,
+        ])
         let secondInnerPaneId = try #require(
             manager.splitPane(direction: .vertical, paneId: firstInnerPaneId)
         )
         let firstBranchLayout = try #require(manager.layout)
-        #expect(firstBranchLayout.leafIds == [firstInnerPaneId, secondInnerPaneId])
+        #expect(firstBranchLayout.orderedLeafIds == [
+            firstInnerPaneId, secondInnerPaneId, secondRootPaneId,
+        ])
         #expect(manager.panes[secondRootPaneId]?.activeTab?.id == secondRootTabId)
 
         #expect(manager.goOut(secondInnerPaneId))
@@ -81,7 +84,9 @@ struct PaneDepthTests {
         let secondBranchTabId = try #require(manager.goIn(secondRootPaneId))
         let secondBranchPaneId = manager.activePaneId
         #expect(secondBranchPaneId != firstInnerPaneId)
-        #expect(manager.layout?.leafIds == [secondBranchPaneId])
+        #expect(manager.layout?.orderedLeafIds == [
+            firstRootPaneId, secondBranchPaneId,
+        ])
 
         #expect(manager.goOut(secondBranchPaneId))
         let resumedFirstBranchTabId = try #require(manager.goIn(firstRootPaneId))

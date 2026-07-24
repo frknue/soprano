@@ -33,7 +33,7 @@ final class AgentManager: @unchecked Sendable {
         set { windows[activeWindowId]?.activePaneId = newValue }
     }
     private(set) var layout: SplitNode? {
-        get { windows[activeWindowId]?.layout }
+        get { windows[activeWindowId]?.visibleLayout }
         set { windows[activeWindowId]?.layout = newValue }
     }
     var activeDepth: Int {
@@ -210,7 +210,7 @@ final class AgentManager: @unchecked Sendable {
 
     func resetWindowTitle(_ windowId: String) {
         guard let terminalWindow = windows[windowId],
-              let firstPaneId = terminalWindow.layout?.firstLeaf,
+              let firstPaneId = terminalWindow.rootLayout?.firstLeaf,
               let tab = panes[firstPaneId]?.tabs.first
         else { return }
         terminalWindow.title = uniqueAutomaticWindowTitle(
@@ -323,18 +323,13 @@ final class AgentManager: @unchecked Sendable {
         let newPane = PaneState(id: newPaneId, tabs: [newTab])
         panes[newPaneId] = newPane
 
-        if let currentLayout = layout,
-           let updatedLayout = currentLayout.insertingSplit(
-               at: paneId, newId: newPaneId, direction: direction
-           )
-        {
-            layout = updatedLayout
-        } else {
-            layout = .split(SplitNode.SplitBranch(
-                direction: direction,
-                first: layout ?? .leaf(paneId),
-                second: .leaf(newPaneId)
-            ))
+        guard terminalWindow.insertSplit(
+            at: paneId,
+            newPaneId: newPaneId,
+            direction: direction
+        ) else {
+            panes.removeValue(forKey: newPaneId)
+            return nil
         }
 
         activePaneId = newPaneId
@@ -372,9 +367,7 @@ final class AgentManager: @unchecked Sendable {
         cancelAgentReadinessGenerations(in: paneId)
         panes.removeValue(forKey: paneId)
 
-        if let currentLayout = terminalWindow.layout {
-            terminalWindow.layout = currentLayout.removing(paneId)
-        }
+        _ = terminalWindow.removePaneFromOwningLayout(paneId)
 
         guard terminalWindow.layout != nil else {
             if terminalWindow.activeDepth > 0 {
@@ -384,12 +377,6 @@ final class AgentManager: @unchecked Sendable {
             }
             closeWindow(terminalWindow.id)
             return
-        }
-
-        if terminalWindow.activePaneId == paneId,
-           let firstPaneId = terminalWindow.layout?.firstLeaf
-        {
-            terminalWindow.activePaneId = firstPaneId
         }
 
         notifyChange(layoutChanged: true)
@@ -459,11 +446,12 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Resizing
 
     func setSplitPercentage(at path: [SplitBranchSide], to percentage: Double) {
-        guard let currentLayout = layout else { return }
-        let updatedLayout = currentLayout.settingSplitPercentage(at: path, to: percentage)
-        guard updatedLayout != currentLayout else { return }
-
-        layout = updatedLayout
+        guard let terminalWindow = windows[activeWindowId],
+              terminalWindow.setSplitPercentage(
+                atVisiblePath: path,
+                to: percentage
+              )
+        else { return }
         notifyChange()
     }
 
@@ -491,7 +479,10 @@ final class AgentManager: @unchecked Sendable {
             }
             guard valid else { continue }
 
-            layout = currentLayout.adjustingSplit(at: ancestorPath, delta: delta)
+            guard windows[activeWindowId]?.adjustSplit(
+                atVisiblePath: ancestorPath,
+                delta: delta
+            ) == true else { return }
             notifyChange()
             return
         }
@@ -755,9 +746,8 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Window Depth
 
-    /// Moves one level inward on the window's z-axis. Every depth owns a full
-    /// pane layout, so splits made at that depth stay together when moving
-    /// outward and back inward.
+    /// Moves one level inward through the active pane. The pane's private
+    /// layout replaces only its region, so outer siblings remain visible.
     @discardableResult
     func goIn(_ paneId: String) -> String? {
         guard let pane = panes[paneId],
@@ -796,7 +786,7 @@ final class AgentManager: @unchecked Sendable {
         return newTabId
     }
 
-    /// Reveals the complete pane layout immediately outside the active layer.
+    /// Collapses the active branch and reveals its owning outer pane.
     @discardableResult
     func goOut(_ paneId: String) -> Bool {
         guard panes[paneId] != nil,
@@ -1008,13 +998,14 @@ final class AgentManager: @unchecked Sendable {
                 id: terminalWindow.id,
                 title: terminalWindow.title,
                 isTitleCustom: terminalWindow.isTitleCustom,
-                layout: terminalWindow.layout,
+                layout: terminalWindow.rootLayout,
                 activePaneId: terminalWindow.activePaneId,
                 depthLayers: terminalWindow.depthLayers.map { layer in
                     WorkspaceSession.SavedDepthLayer(
                         parentPaneId: layer.parentPaneId,
                         layout: layer.layout,
-                        activePaneId: layer.activePaneId
+                        activePaneId: layer.activePaneId,
+                        isExpanded: layer.isExpanded
                     )
                 },
                 activeDepthLayerIndex: terminalWindow.activeDepthLayerIndex,
@@ -1107,7 +1098,9 @@ final class AgentManager: @unchecked Sendable {
                     return WorkspaceDepthLayer(
                         parentPaneId: parentPaneId,
                         layout: restoredLayout,
-                        activePaneId: activePaneId
+                        activePaneId: activePaneId,
+                        isExpanded: savedLayer.isExpanded
+                            ?? (index == 0)
                     )
                 }
                 guard let firstPaneId = restoredDepthLayers.first?.layout?.firstLeaf else {
@@ -1185,20 +1178,21 @@ final class AgentManager: @unchecked Sendable {
 
         panes[pane.id] = pane
 
-        if layout == nil {
-            layout = .leaf(pane.id)
+        guard let terminalWindow = windows[activeWindowId] else { return false }
+        if terminalWindow.layout == nil {
+            terminalWindow.layout = .leaf(pane.id)
             activePaneId = pane.id
-        } else if let currentLayout = layout,
+        } else if let currentLayout = terminalWindow.layout,
                   let updated = currentLayout.insertingSplit(
                       at: activePaneId, newId: pane.id, direction: .horizontal
                   )
         {
-            layout = updated
+            terminalWindow.layout = updated
             activePaneId = pane.id
         } else {
-            layout = .split(SplitNode.SplitBranch(
+            terminalWindow.layout = .split(SplitNode.SplitBranch(
                 direction: .horizontal,
-                first: layout!,
+                first: terminalWindow.layout!,
                 second: .leaf(pane.id)
             ))
             activePaneId = pane.id

@@ -30,6 +30,7 @@ struct WorkspaceSession: Identifiable, Codable {
         var parentPaneId: String? = nil
         var layout: SplitNode?
         var activePaneId: String
+        var isExpanded: Bool? = nil
     }
 
     struct SavedPane: Codable {
