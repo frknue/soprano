@@ -170,7 +170,7 @@ soprano/
 | `Ctrl+A` → `Ctrl+A` | Send a literal `Ctrl+A` to the terminal |
 | `Ctrl+Shift+H/L` | Switch to previous / next logical window |
 | `Ctrl+1…9` | Select logical window 1–9 |
-| `Ctrl+letter shown in sidebar` | Select the matching pane across logical windows |
+| `Ctrl+A` → `Space`, then shown letter | Select the matching pane across logical windows |
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |
@@ -221,10 +221,6 @@ Integrations explicitly enable key passthrough while active:
 "$SOPRANO_BIN" navigation-passthrough enable nvim
 "$SOPRANO_BIN" navigation-passthrough disable nvim
 ```
-
-While passthrough is active, Soprano also leaves alphabetic control chords such
-as `Ctrl+B/D/F/R/U/W` to the terminal application instead of treating them as
-sidebar pane hints.
 
 Without an active passthrough claim, Soprano handles `Ctrl+H/J/K/L` directly so
 pane navigation always has a working fallback.

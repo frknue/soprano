@@ -23,6 +23,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "select-window-7", label: "Select Window 7", description: "Switch to logical window 7", category: .navigation, defaultKeys: "Ctrl+7", mode: .direct, key: "7", ctrl: true),
             KeyBinding(id: "select-window-8", label: "Select Window 8", description: "Switch to logical window 8", category: .navigation, defaultKeys: "Ctrl+8", mode: .direct, key: "8", ctrl: true),
             KeyBinding(id: "select-window-9", label: "Select Window 9", description: "Switch to logical window 9", category: .navigation, defaultKeys: "Ctrl+9", mode: .direct, key: "9", ctrl: true),
+            KeyBinding(id: "select-pane", label: "Select Pane", description: "Show pane letters, then focus the chosen pane", category: .navigation, defaultKeys: "Prefix → Space", mode: .prefix, key: " "),
 
             // Resize (prefix: Ctrl+A → Shift+H/J/K/L)
             KeyBinding(id: "resize-left", label: "Shrink Left", description: "Shrink the active pane to the left", category: .layout, defaultKeys: "Prefix → H", mode: .prefix, key: "h", shift: true),

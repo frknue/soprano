@@ -423,7 +423,7 @@ final class SplitTreeView: NSView {
                     case .normal:
                         guard self.copyModeTarget == target else { return }
                         self.copyModeTarget = nil
-                    case .prefix:
+                    case .prefix, .paneSelection:
                         break
                     }
                     self.onCopyModeStateChanged?(state)

@@ -58,21 +58,16 @@ final class KeybindingManager: @unchecked Sendable {
     private(set) var state: KeybindingState = .normal
     private var prefixTimer: Timer?
     private var eventMonitor: Any?
-    private var appResignObserver: NSObjectProtocol?
     private var paneNavigationObserver: NSObjectProtocol?
     private var paneNavigationPassthroughClaims = PaneNavigationClaimRegistry()
     private let paneNavigationClaimObserverId = "KeybindingManager"
-    private(set) var isControlKeyHeld: Bool
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
-    var controlKeyStateChangeHandler: (@MainActor (Bool) -> Void)?
 
     init(agentManager: AgentManager) {
         self.agentManager = agentManager
         self.config = DefaultKeybindings.load()
-        self.isControlKeyHeld = NSEvent.modifierFlags.contains(.control)
         startMonitoring()
-        observeApplicationDeactivation()
         observePaneNavigationRequests()
         observePaneNavigationClaimLifecycle()
     }
@@ -80,9 +75,6 @@ final class KeybindingManager: @unchecked Sendable {
     deinit {
         stopMonitoring()
         prefixTimer?.invalidate()
-        if let appResignObserver {
-            NotificationCenter.default.removeObserver(appResignObserver)
-        }
         if let paneNavigationObserver {
             DistributedNotificationCenter.default().removeObserver(paneNavigationObserver)
         }
@@ -92,27 +84,13 @@ final class KeybindingManager: @unchecked Sendable {
     private func startMonitoring() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged]
+            matching: .keyDown
         ) { [weak self] event in
             // Optional chaining flattens the NSEvent? result, so `?? event`
             // must only cover the self-is-gone case — otherwise it would
             // resurrect events handleKeyDown intentionally swallowed.
             guard let self else { return event }
-            if event.type == .flagsChanged {
-                self.setControlKeyHeld(event.modifierFlags.contains(.control))
-                return event
-            }
             return self.handleKeyDown(event: event)
-        }
-    }
-
-    private func observeApplicationDeactivation() {
-        appResignObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didResignActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.setControlKeyHeld(false)
         }
     }
 
@@ -180,6 +158,14 @@ final class KeybindingManager: @unchecked Sendable {
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        if state == .paneSelection {
+            clearPrefixMode()
+            if Self.acceptsPaneSelectionKey(flags: flags) {
+                _ = agentManager.focusPane(shortcutKey: key)
+            }
+            return nil
+        }
+
         if isCtrlOnly(flags) && key == config.prefixKey.lowercased() {
             if Self.shouldForwardPrefixKey(in: state) {
                 clearPrefixMode()
@@ -191,8 +177,12 @@ final class KeybindingManager: @unchecked Sendable {
 
         if state == .prefix {
             if let binding = config.bindings.first(where: { matchesPrefixBinding($0, key: key, flags: flags) }) {
-                clearPrefixMode()
-                executeBinding(binding)
+                if binding.id == "select-pane" {
+                    startPaneSelectionMode()
+                } else {
+                    clearPrefixMode()
+                    executeBinding(binding)
+                }
             } else {
                 clearPrefixMode()
             }
@@ -218,19 +208,6 @@ final class KeybindingManager: @unchecked Sendable {
             }
             executeBinding(binding)
             return nil
-        }
-
-        if isCtrlOnly(flags) {
-            let terminalClaimsControlKeys = activeTerminalTarget.map {
-                paneNavigationPassthroughClaims.hasClaims(for: $0)
-            } ?? false
-            if Self.handlePaneShortcut(
-                key: key,
-                terminalClaimsControlKeys: terminalClaimsControlKeys,
-                focusPane: agentManager.focusPane(shortcutKey:)
-            ) {
-                return nil
-            }
         }
 
         return event
@@ -281,13 +258,8 @@ final class KeybindingManager: @unchecked Sendable {
         "nav-right",
     ]
 
-    static func handlePaneShortcut(
-        key: String,
-        terminalClaimsControlKeys: Bool,
-        focusPane: (String) -> Bool
-    ) -> Bool {
-        guard !terminalClaimsControlKeys else { return false }
-        return focusPane(key)
+    static func acceptsPaneSelectionKey(flags: NSEvent.ModifierFlags) -> Bool {
+        flags.intersection([.control, .option, .command]).isEmpty
     }
 
     static func shouldForwardPrefixKey(in state: KeybindingState) -> Bool {
@@ -315,9 +287,16 @@ final class KeybindingManager: @unchecked Sendable {
     }
 
     private func startPrefixMode() {
-        state = .prefix
-        notifyStateChange(.prefix)
+        startTimedMode(.prefix)
+    }
 
+    private func startPaneSelectionMode() {
+        startTimedMode(.paneSelection)
+    }
+
+    private func startTimedMode(_ nextState: KeybindingState) {
+        state = nextState
+        notifyStateChange(nextState)
         prefixTimer?.invalidate()
         let timeoutSeconds = TimeInterval(config.prefixTimeoutMs) / 1000.0
         prefixTimer = Timer.scheduledTimer(
@@ -339,14 +318,6 @@ final class KeybindingManager: @unchecked Sendable {
     private func notifyStateChange(_ nextState: KeybindingState) {
         MainActor.assumeIsolated {
             stateChangeHandler?(nextState)
-        }
-    }
-
-    private func setControlKeyHeld(_ isHeld: Bool) {
-        guard isControlKeyHeld != isHeld else { return }
-        isControlKeyHeld = isHeld
-        MainActor.assumeIsolated {
-            controlKeyStateChangeHandler?(isHeld)
         }
     }
 
