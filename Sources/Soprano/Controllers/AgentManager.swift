@@ -116,14 +116,24 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Windows
 
+    var activeWorkingDirectory: String? {
+        panes[activePaneId]?.activeTab?.cwd
+    }
+
     @discardableResult
     func createWindow(cwd: String? = nil) -> String? {
         guard panes.count < Self.maxPanes else { return nil }
+        let workingDirectory = cwd ?? activeWorkingDirectory
         let windowId = nextWindowId()
         let paneId = nextPaneId()
         let tabId = nextTabId()
-        let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"
-        let tab = PaneTab(id: tabId, type: .terminal, title: title, cwd: cwd)
+        let title = workingDirectory?.split(separator: "/").last.map(String.init) ?? "Terminal"
+        let tab = PaneTab(
+            id: tabId,
+            type: .terminal,
+            title: title,
+            cwd: workingDirectory
+        )
         panes[paneId] = PaneState(id: paneId, tabs: [tab])
         let windowTitle = uniqueAutomaticWindowTitle(Self.suggestedWindowTitle(for: tab))
         windows[windowId] = WorkspaceWindowState(
@@ -210,19 +220,31 @@ final class AgentManager: @unchecked Sendable {
     @discardableResult
     func spawnAgent(_ profileId: String, cwd: String? = nil) -> String? {
         guard panes.count < Self.maxPanes else { return nil }
+        let workingDirectory = cwd ?? activeWorkingDirectory
         let paneId = nextPaneId()
         let tabId = nextTabId()
         let profile = DefaultAgents.profile(for: profileId)
 
         let tab: PaneTab
         if let profile, profile.id != "terminal" {
-            let dirName = cwd?.split(separator: "/").last.map(String.init)
+            let dirName = workingDirectory?.split(separator: "/").last.map(String.init)
             let title = dirName.map { "\(profile.name): \($0)" } ?? profile.name
             let agent = AgentInstance(id: tabId, profileId: profile.id)
-            tab = PaneTab(id: tabId, type: .agent, title: title, agent: agent, cwd: cwd)
+            tab = PaneTab(
+                id: tabId,
+                type: .agent,
+                title: title,
+                agent: agent,
+                cwd: workingDirectory
+            )
         } else {
-            let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"
-            tab = PaneTab(id: tabId, type: .terminal, title: title, cwd: cwd)
+            let title = workingDirectory?.split(separator: "/").last.map(String.init) ?? "Terminal"
+            tab = PaneTab(
+                id: tabId,
+                type: .terminal,
+                title: title,
+                cwd: workingDirectory
+            )
         }
 
         let pane = PaneState(id: paneId, tabs: [tab])
@@ -672,14 +694,12 @@ final class AgentManager: @unchecked Sendable {
         else { return nil }
 
         let tabId = nextTabId()
-        let tab: PaneTab
-
-        if type == .agent, let profileId, let profile = DefaultAgents.profile(for: profileId) {
-            let agent = AgentInstance(id: tabId, profileId: profile.id)
-            tab = PaneTab(id: tabId, type: .agent, title: profile.name, agent: agent)
-        } else {
-            tab = PaneTab(id: tabId, type: .terminal, title: "Terminal")
-        }
+        let tab = createPaneTab(
+            id: tabId,
+            type: type,
+            profileId: profileId,
+            cwd: pane.activeTab?.cwd
+        )
 
         pane.tabs.append(tab)
         pane.activeTabIndex = pane.tabs.count - 1
@@ -765,6 +785,17 @@ final class AgentManager: @unchecked Sendable {
         guard !sanitized.isEmpty, pane.tabs[index].title != sanitized else { return }
 
         pane.tabs[index].title = sanitized
+        notifyChange()
+    }
+
+    func updateWorkingDirectory(paneId: String, tabId: String, to workingDirectory: String) {
+        guard !workingDirectory.isEmpty,
+              let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
+              pane.tabs[index].cwd != workingDirectory
+        else { return }
+
+        pane.tabs[index].cwd = workingDirectory
         notifyChange()
     }
 

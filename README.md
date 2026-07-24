@@ -174,6 +174,7 @@ soprano/
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |
 | `Ctrl+A` → `[` / `]` | Enter Vim-style terminal copy mode |
+| `Ctrl+A` → `C` | New logical window in the current directory |
 | `Ctrl+A` → `T` / `N` / `P` / `W` | New tab / next / prev / close tab |
 | `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |

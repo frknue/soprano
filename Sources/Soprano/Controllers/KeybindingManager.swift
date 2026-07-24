@@ -374,6 +374,8 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.toggleMaximize()
         case "copy-mode", "copy-mode-right-bracket":
             invokeDelegate { $0.keybindingStartCopyMode() }
+        case "new-window-current-directory":
+            _ = agentManager.createWindow()
 
         case "new-pane-tab":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)

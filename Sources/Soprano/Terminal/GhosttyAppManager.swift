@@ -173,6 +173,15 @@ private func ghosttyAction(
         }
         return true
 
+    case GHOSTTY_ACTION_PWD:
+        guard let pwdPointer = action.action.pwd.pwd,
+              let workingDirectory = String(validatingCString: pwdPointer)
+        else { return true }
+        MainActor.assumeIsolated {
+            surfaceView.terminalWorkingDirectoryDidChange(workingDirectory)
+        }
+        return true
+
     case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
         let title = action.action.desktop_notification.title
             .flatMap { String(validatingCString: $0) } ?? ""
