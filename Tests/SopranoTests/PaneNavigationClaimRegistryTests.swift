@@ -63,4 +63,42 @@ struct PaneNavigationClaimRegistryTests {
 
         #expect(!registry.hasClaims(for: target))
     }
+
+    @Test func claimedTerminalControlKeysBypassAllStandardAlphabeticPaneHints() {
+        var focusedKeys: [String] = []
+        let standardTerminalKeys = Array("bdefgimnopqrstuvwxyz").map(String.init)
+
+        for key in standardTerminalKeys {
+            let handled = KeybindingManager.handlePaneShortcut(
+                key: key,
+                terminalClaimsControlKeys: true
+            ) { focusedKey in
+                focusedKeys.append(focusedKey)
+                return true
+            }
+            #expect(!handled)
+        }
+
+        #expect(focusedKeys.isEmpty)
+    }
+
+    @Test func unclaimedControlKeysStillActivateAlphabeticPaneHints() {
+        var focusedKeys: [String] = []
+
+        let handled = KeybindingManager.handlePaneShortcut(
+            key: "d",
+            terminalClaimsControlKeys: false
+        ) { key in
+            focusedKeys.append(key)
+            return true
+        }
+
+        #expect(handled)
+        #expect(focusedKeys == ["d"])
+    }
+
+    @Test func repeatedPrefixForwardsLiteralControlA() {
+        #expect(!KeybindingManager.shouldForwardPrefixKey(in: .normal))
+        #expect(KeybindingManager.shouldForwardPrefixKey(in: .prefix))
+    }
 }
