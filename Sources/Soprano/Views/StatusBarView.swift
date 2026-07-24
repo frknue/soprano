@@ -7,6 +7,7 @@ final class StatusBarView: NSView {
 
     private var brandLabel: NSTextField!
     private var modeLabel: NSTextField!
+    private var locationLabel: NSTextField!
     private var paneCountLabel: NSTextField!
 
     init(agentManager: AgentManager, themeManager: ThemeManager) {
@@ -45,6 +46,14 @@ final class StatusBarView: NSView {
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(modeLabel)
 
+        // Active window ▸ pane breadcrumb
+        locationLabel = NSTextField(labelWithString: "")
+        locationLabel.identifier = NSUserInterfaceItemIdentifier("status-location")
+        locationLabel.lineBreakMode = .byTruncatingTail
+        locationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        locationLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(locationLabel)
+
         // Pane count
         paneCountLabel = NSTextField(labelWithString: "1 pane")
         paneCountLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -58,6 +67,13 @@ final class StatusBarView: NSView {
 
             modeLabel.leadingAnchor.constraint(equalTo: brandLabel.trailingAnchor, constant: 16),
             modeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            locationLabel.leadingAnchor.constraint(equalTo: modeLabel.trailingAnchor, constant: 16),
+            locationLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            locationLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: paneCountLabel.leadingAnchor,
+                constant: -16
+            ),
 
             paneCountLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             paneCountLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -96,8 +112,47 @@ final class StatusBarView: NSView {
         refresh()
     }
 
+    /// `window ▸ pane` for the focused location, with the depth layer appended
+    /// when the window has any inner workspace. Nil when nothing is open.
+    private func locationText(theme: AppTheme) -> NSAttributedString? {
+        guard let terminalWindow = agentManager.windows[agentManager.activeWindowId] else {
+            return nil
+        }
+
+        let bold = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        let regular = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        let text = NSMutableAttributedString(
+            string: terminalWindow.title,
+            attributes: [.font: bold, .foregroundColor: theme.colors.accent]
+        )
+
+        let paneId = agentManager.activePaneId
+        if let title = agentManager.panes[paneId]?.activeTab?.title {
+            text.append(NSAttributedString(
+                string: " ▸ ",
+                attributes: [.font: regular, .foregroundColor: theme.colors.textMuted]
+            ))
+            text.append(NSAttributedString(
+                string: title,
+                attributes: [.font: regular, .foregroundColor: theme.colors.textPrimary]
+            ))
+        }
+
+        if terminalWindow.maximumDepth > 0 {
+            let depth = terminalWindow.depth(containingPane: paneId) ?? 0
+            text.append(NSAttributedString(
+                string: " · Z\(depth)",
+                attributes: [.font: bold, .foregroundColor: theme.colors.accent]
+            ))
+        }
+
+        return text
+    }
+
     private func refresh() {
         let theme = themeManager.currentTheme
+        locationLabel.attributedStringValue = locationText(theme: theme)
+            ?? NSAttributedString(string: "")
         let paneCount = agentManager.paneCount
         let windowCount = agentManager.windowCount
         let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"

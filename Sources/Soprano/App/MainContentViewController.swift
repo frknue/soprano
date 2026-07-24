@@ -8,12 +8,15 @@ final class MainContentViewController: NSViewController {
     let gitBranchMonitor: GitBranchMonitor
     private let onSettingsRequested: (() -> Void)?
     private let splitTreeViewFactory: (AgentManager, ThemeManager) -> SplitTreeView
+    private let defaults: UserDefaults
     private var sidebarVisible: Bool
 
     private var sidebarView: SidebarView!
     private var splitTreeView: SplitTreeView!
     private var statusBarView: StatusBarView!
     private var sidebarWidthConstraint: NSLayoutConstraint!
+    private var sidebarResizeHandle: SidebarResizeHandleView!
+    private var sidebarWidth: CGFloat
     private var settingsContainerView: NSView!
     private var settingsHeaderView: NSView!
     private var settingsTitleLabel: NSTextField!
@@ -29,6 +32,7 @@ final class MainContentViewController: NSViewController {
         themeManager: ThemeManager,
         gitBranchMonitor: GitBranchMonitor,
         onSettingsRequested: (() -> Void)? = nil,
+        defaults: UserDefaults = .standard,
         splitTreeViewFactory: @escaping (AgentManager, ThemeManager) -> SplitTreeView = {
             SplitTreeView(agentManager: $0, themeManager: $1)
         }
@@ -39,8 +43,9 @@ final class MainContentViewController: NSViewController {
         self.gitBranchMonitor = gitBranchMonitor
         self.onSettingsRequested = onSettingsRequested
         self.splitTreeViewFactory = splitTreeViewFactory
-        self.sidebarVisible =
-            UserDefaults.standard.object(forKey: Self.sidebarVisibleKey) as? Bool ?? true
+        self.defaults = defaults
+        self.sidebarVisible = defaults.object(forKey: Self.sidebarVisibleKey) as? Bool ?? true
+        self.sidebarWidth = SidebarWidthStore.load(from: defaults)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -78,12 +83,26 @@ final class MainContentViewController: NSViewController {
             self?.setKeybindingMode(state)
         }
 
+        sidebarView.setContentWidth(sidebarWidth)
+
+        // Resize handle, above the sidebar and the tiling layout
+        sidebarResizeHandle = makeSidebarResizeHandle()
+        sidebarResizeHandle.isHidden = !sidebarVisible
+        root.addSubview(sidebarResizeHandle, positioned: .above, relativeTo: sidebarView)
+
         // Layout
         sidebarWidthConstraint = sidebarView.widthAnchor.constraint(
-            equalToConstant: sidebarVisible ? SidebarView.width : 0
+            equalToConstant: sidebarVisible ? sidebarWidth : 0
         )
 
         NSLayoutConstraint.activate([
+            sidebarResizeHandle.centerXAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+            sidebarResizeHandle.topAnchor.constraint(equalTo: sidebarView.topAnchor),
+            sidebarResizeHandle.bottomAnchor.constraint(equalTo: sidebarView.bottomAnchor),
+            sidebarResizeHandle.widthAnchor.constraint(
+                equalToConstant: SidebarResizeHandleView.grabWidth
+            ),
+
             // Respect the window safe area so content stays out of the titlebar/traffic-light region.
             sidebarView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
@@ -111,15 +130,62 @@ final class MainContentViewController: NSViewController {
 
     func toggleSidebar() {
         sidebarVisible.toggle()
-        UserDefaults.standard.set(sidebarVisible, forKey: Self.sidebarVisibleKey)
+        defaults.set(sidebarVisible, forKey: Self.sidebarVisibleKey)
+        // Hidden sidebars have no edge to grab, and the handle would otherwise sit
+        // over the leftmost pane.
+        sidebarResizeHandle.isHidden = !sidebarVisible
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             self.sidebarWidthConstraint.animator().constant = self.sidebarVisible
-                ? SidebarView.width
+                ? self.sidebarWidth
                 : 0
             self.view.layoutSubtreeIfNeeded()
         }
+    }
+
+    // MARK: - Sidebar Resizing
+
+    private func makeSidebarResizeHandle() -> SidebarResizeHandleView {
+        let handle = SidebarResizeHandleView()
+        handle.translatesAutoresizingMaskIntoConstraints = false
+        handle.toolTip = "Drag to resize the sidebar, double-click to reset"
+        handle.onDragBegan = { [weak self] in self?.sidebarWidth ?? SidebarWidthStore.defaultWidth }
+        handle.onDragged = { [weak self] proposedWidth in
+            self?.applySidebarWidth(proposedWidth)
+        }
+        handle.onDragEnded = { [weak self] in
+            guard let self else { return }
+            SidebarWidthStore.save(self.sidebarWidth, to: self.defaults)
+        }
+        handle.onResetRequested = { [weak self] in
+            guard let self else { return }
+            self.applySidebarWidth(SidebarWidthStore.defaultWidth)
+            SidebarWidthStore.save(self.sidebarWidth, to: self.defaults)
+        }
+        handle.onHoverChanged = { [weak self] isHighlighted in
+            self?.sidebarView.setResizeHighlighted(isHighlighted)
+        }
+        return handle
+    }
+
+    /// Applies a dragged width to both the sidebar and its content, clamped to the
+    /// allowed range and to what the current window can spare for panes.
+    private func applySidebarWidth(_ proposedWidth: CGFloat) {
+        guard sidebarVisible else { return }
+
+        let width = SidebarWidthStore.clamp(
+            proposedWidth,
+            availableWidth: view.bounds.width
+        )
+        guard width != sidebarWidth else { return }
+
+        sidebarWidth = width
+        sidebarWidthConstraint.constant = width
+        sidebarView.setContentWidth(width)
+        view.layoutSubtreeIfNeeded()
+        // The handle moves with the sidebar edge, so its cursor rect is stale.
+        view.window?.invalidateCursorRects(for: sidebarResizeHandle)
     }
 
     func setKeybindingMode(_ mode: KeybindingState) {
@@ -292,6 +358,81 @@ final class MainContentViewController: NSViewController {
 
     @objc private func settingsCloseClicked() {
         closeSettings()
+    }
+}
+
+/// Invisible grab strip straddling the sidebar's trailing edge. It sits above both
+/// the sidebar and the tiling layout so its cursor and clicks win over the
+/// terminal surfaces underneath.
+private final class SidebarResizeHandleView: NSView {
+    static let grabWidth: CGFloat = 8
+
+    /// Returns the width the drag starts from.
+    var onDragBegan: (() -> CGFloat)?
+    var onDragged: ((CGFloat) -> Void)?
+    var onDragEnded: (() -> Void)?
+    var onResetRequested: (() -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
+
+    private var initialWidth: CGFloat = 0
+    private var initialLocationX: CGFloat = 0
+    private var isDragging = false
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .cursorUpdate, .mouseEnteredAndExited],
+            owner: self
+        ))
+    }
+
+    // Tracking-area cursor updates take precedence over the terminal surfaces
+    // this strip overlaps, which cursor rects alone do not reliably win.
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard !isDragging else { return }
+        onHoverChanged?(false)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onResetRequested?()
+            return
+        }
+
+        isDragging = true
+        initialWidth = onDragBegan?() ?? 0
+        // Window coordinates stay fixed while the handle itself moves with the drag.
+        initialLocationX = event.locationInWindow.x
+        onHoverChanged?(true)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
+        onDragged?(initialWidth + (event.locationInWindow.x - initialLocationX))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        isDragging = false
+        onDragEnded?()
+        let isInside = bounds.contains(convert(event.locationInWindow, from: nil))
+        onHoverChanged?(isInside)
     }
 }
 

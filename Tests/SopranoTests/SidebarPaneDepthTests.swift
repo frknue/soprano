@@ -13,7 +13,7 @@ struct SidebarPaneDepthTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark"),
             gitBranchMonitor: GitBranchMonitor()
         )
-        sidebar.frame = NSRect(x: 0, y: 0, width: SidebarView.width, height: 600)
+        sidebar.frame = NSRect(x: 0, y: 0, width: SidebarWidthStore.defaultWidth, height: 600)
         sidebar.layoutSubtreeIfNeeded()
 
         #expect(depthBadgeTexts(in: sidebar).sorted() == ["Z0/1", "Z1/1"])

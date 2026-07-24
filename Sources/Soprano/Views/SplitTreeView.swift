@@ -710,13 +710,15 @@ final class PaneContainerView: NSView {
         let needsAttention = agentManager.panes[paneId]?.tabs.contains {
             $0.agent?.needsAttention == true
         } ?? false
-        layer?.borderWidth = needsAttention ? 2 : (isActive ? 1 : 0)
+        // Inactive panes keep a hairline border so the focused pane's thicker
+        // accent frame reads as a deliberate marker instead of a stray edge.
+        layer?.borderWidth = needsAttention || isActive ? 2 : 1
         layer?.borderColor = if needsAttention {
             theme.colors.blue.cgColor
         } else if isActive {
             theme.accentColor.cgColor
         } else {
-            nil
+            theme.colors.borderSubtle.cgColor
         }
         headerView.update()
     }

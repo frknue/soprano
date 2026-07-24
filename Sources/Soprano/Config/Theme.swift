@@ -32,6 +32,22 @@ struct ThemeColors {
     let gray: NSColor
 }
 
+extension ThemeColors {
+    /// Background tint for the selected group in a list (the active logical
+    /// window and its panes).
+    ///
+    /// Derived from the accent rather than reusing `bgRaised`: themes are free to
+    /// define `bgRaised` identical to `bgPanel` (Gruvbox Dark does), which makes a
+    /// raised-background highlight completely invisible on a panel surface.
+    var bgSelected: NSColor { accent.withAlphaComponent(0.14) }
+
+    /// Stronger tint for the single focused row inside the selected group.
+    var bgSelectedStrong: NSColor { accent.withAlphaComponent(0.26) }
+
+    /// Leading edge rail marking rows that belong to the active window.
+    var railMuted: NSColor { accent.withAlphaComponent(0.45) }
+}
+
 struct TerminalColors {
     let background: NSColor
     let foreground: NSColor

@@ -203,6 +203,23 @@ Holding Control reveals the window and pane hints in the sidebar. Pane hints
 include `⇧` because they require Control+Shift; unmodified alphabetic Control
 chords remain available to the terminal.
 
+### Sidebar
+
+Drag the sidebar's trailing edge to resize it between 160 and 520 points; the
+cursor changes to a resize arrow over the edge and the border accents while you
+drag. A narrow window caps the sidebar so at least 320 points stay available for
+panes. Double-click the edge to return to the default 220, and `⌘E` still toggles
+the sidebar, reopening at whatever width you last chose. The width persists across
+launches.
+
+### Current location
+
+The active logical window and pane are marked in three places: the sidebar draws
+an accent rail down the active window and its panes and tints the focused row,
+the status bar names the location as `window ▸ pane · Z<depth>`, and the focused
+pane carries an accent frame while the others keep a hairline border. Panes in
+inactive windows are dimmed.
+
 ### In-app browser
 
 `⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a

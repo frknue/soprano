@@ -9,8 +9,7 @@ final class SidebarView: NSView {
 
     var onSettingsRequested: (() -> Void)?
 
-    static let width: CGFloat = 220
-
+    private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
     private var headerLabel: NSTextField!
     private var scrollView: NSScrollView!
@@ -65,9 +64,10 @@ final class SidebarView: NSView {
     private func setupViews() {
         translatesAutoresizingMaskIntoConstraints = false
 
-        // Fixed-width container pinned to the leading edge: the outer width
+        // Explicit-width container pinned to the leading edge: the outer width
         // constraint can animate to 0 and clip instead of fighting content
-        // constraints (masksToBounds is set above).
+        // constraints (masksToBounds is set above). Resizing drives both widths,
+        // so this constant tracks the chosen width rather than a fixed default.
         contentContainer = NSView()
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
@@ -131,11 +131,15 @@ final class SidebarView: NSView {
         trailingBorder.translatesAutoresizingMaskIntoConstraints = false
         addSubview(trailingBorder)
 
+        contentWidthConstraint = contentContainer.widthAnchor.constraint(
+            equalToConstant: SidebarWidthStore.defaultWidth
+        )
+
         NSLayoutConstraint.activate([
             contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentContainer.topAnchor.constraint(equalTo: topAnchor),
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
-            contentContainer.widthAnchor.constraint(equalToConstant: Self.width),
+            contentWidthConstraint,
 
             headerLabel.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 14),
             headerLabel.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
@@ -202,6 +206,21 @@ final class SidebarView: NSView {
             button.heightAnchor.constraint(equalToConstant: 26),
         ])
         return button
+    }
+
+    /// Width of the sidebar's content. Kept in step with the view's own width so
+    /// rows lay out at the dragged size instead of being clipped at the default.
+    func setContentWidth(_ width: CGFloat) {
+        contentWidthConstraint.constant = width
+    }
+
+    /// Accents the trailing border while the resize handle is hovered or dragged,
+    /// so the draggable edge is visible before the mouse goes down.
+    func setResizeHighlighted(_ isHighlighted: Bool) {
+        let theme = themeManager.currentTheme
+        trailingBorder.layer?.backgroundColor = isHighlighted
+            ? theme.colors.accent.cgColor
+            : theme.colors.borderSubtle.cgColor
     }
 
     func setControlKeyHeld(_ isHeld: Bool) {
@@ -354,6 +373,7 @@ final class SidebarView: NSView {
             view.removeFromSuperview()
         }
         for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
+            let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
             let isExpanded = isControlKeyHeld
                 || !collapsedWindowIds.contains(terminalWindow.id)
             let windowRow = SidebarWindowRowView(theme: theme)
@@ -368,7 +388,7 @@ final class SidebarView: NSView {
                 shortcutNumber: index < 9 ? index + 1 : nil,
                 showShortcutHint: isControlKeyHeld,
                 expanded: isExpanded,
-                highlighted: terminalWindow.id == agentManager.activeWindowId,
+                highlighted: isActiveWindow,
                 isTitleCustom: terminalWindow.isTitleCustom,
                 onToggle: { [weak self] in
                     guard let self else { return }
@@ -417,7 +437,8 @@ final class SidebarView: NSView {
                     showShortcutHint: isControlKeyHeld,
                     showsDisclosure: false,
                     expanded: false,
-                    highlighted: pane.id == agentManager.activePaneId,
+                    highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
+                    inActiveWindow: isActiveWindow,
                     onToggle: {},
                     onSelect: { [weak self] in
                         self?.agentManager.focusPane(pane.id)
@@ -543,10 +564,42 @@ final class SidebarView: NSView {
 
 }
 
+// MARK: - Selection Rail
+
+/// Leading-edge bar marking sidebar rows that belong to the active logical
+/// window. A nil color hides it, which keeps rows in inactive windows flush.
+private final class SidebarRailView: NSView {
+    static let width: CGFloat = 2
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = Self.width / 2
+        identifier = NSUserInterfaceItemIdentifier("sidebar-selection-rail")
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: Self.width).isActive = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    /// The rail's current color, or nil while hidden. Read by tests.
+    private(set) var color: NSColor?
+
+    func setColor(_ color: NSColor?) {
+        self.color = color
+        isHidden = color == nil
+        layer?.backgroundColor = color?.cgColor
+    }
+}
+
 // MARK: - Window Row
 
 private final class SidebarWindowRowView: NSView {
     private let disclosureButton = NSButton(title: "", target: nil, action: nil)
+    private let railView = SidebarRailView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let countLabel = NSTextField(labelWithString: "")
     private let closeButton = NSButton(title: "×", target: nil, action: nil)
@@ -576,6 +629,8 @@ private final class SidebarWindowRowView: NSView {
     }
 
     private func setup() {
+        addSubview(railView)
+
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
         disclosureButton.isBordered = false
@@ -604,6 +659,10 @@ private final class SidebarWindowRowView: NSView {
 
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: 32),
+            railView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            railView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+
             disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
             disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             disclosureButton.widthAnchor.constraint(equalToConstant: 24),
@@ -654,14 +713,17 @@ private final class SidebarWindowRowView: NSView {
             systemSymbolName: symbolName,
             accessibilityDescription: expanded ? "Collapse Window" : "Expand Window"
         )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
-        titleLabel.textColor = highlighted ? theme.colors.textPrimary : theme.colors.textMuted
-        disclosureButton.contentTintColor = theme.colors.textMuted
+        titleLabel.textColor = highlighted ? theme.colors.accent : theme.colors.textMuted
+        disclosureButton.contentTintColor = highlighted
+            ? theme.colors.accent
+            : theme.colors.textMuted
         closeButton.contentTintColor = highlighted
             ? theme.colors.textPrimary
             : theme.colors.textMuted
         layer?.backgroundColor = highlighted
-            ? theme.colors.bgRaised.cgColor
+            ? theme.colors.bgSelected.cgColor
             : NSColor.clear.cgColor
+        railView.setColor(highlighted ? theme.colors.accent : nil)
 
         let contextMenu = NSMenu()
         let renameItem = NSMenuItem(
@@ -747,6 +809,7 @@ private final class SidebarWindowRowView: NSView {
 
 private final class SidebarPaneRowView: NSView {
     private let disclosureButton = NSButton(title: "", target: nil, action: nil)
+    private let railView = SidebarRailView()
     private let dotView = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let badgeContainer = NSView()
@@ -777,6 +840,8 @@ private final class SidebarPaneRowView: NSView {
     }
 
     private func setup() {
+        addSubview(railView)
+
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
         disclosureButton.isBordered = false
@@ -834,6 +899,10 @@ private final class SidebarPaneRowView: NSView {
         ]
 
         NSLayoutConstraint.activate([
+            railView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            railView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            railView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+
             disclosureButton.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
                 constant: 2 + hierarchyIndent
@@ -891,6 +960,7 @@ private final class SidebarPaneRowView: NSView {
         expanded: Bool,
         showsClose: Bool = true,
         highlighted: Bool,
+        inActiveWindow: Bool,
         onToggle: @escaping () -> Void,
         onSelect: @escaping () -> Void,
         onClose: @escaping () -> Void
@@ -953,9 +1023,24 @@ private final class SidebarPaneRowView: NSView {
         closeButton.contentTintColor = highlighted
             ? theme.colors.textPrimary
             : theme.colors.textMuted
+
+        // The rail runs down every pane of the active window so the group reads as
+        // one unit; only the focused pane also gets a filled background.
+        titleLabel.textColor = inActiveWindow
+            ? theme.colors.textPrimary
+            : theme.colors.textMuted
+        titleLabel.font = .systemFont(
+            ofSize: 12,
+            weight: highlighted ? .semibold : .medium
+        )
         layer?.backgroundColor = highlighted
-            ? theme.colors.bgRaised.cgColor
+            ? theme.colors.bgSelectedStrong.cgColor
             : NSColor.clear.cgColor
+        railView.setColor(
+            highlighted
+                ? theme.colors.accent
+                : (inActiveWindow ? theme.colors.railMuted : nil)
+        )
 
         if let branch {
             branchLabel.stringValue = "⎇ \(branch)"
