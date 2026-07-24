@@ -65,6 +65,10 @@ final class MainWindowController: NSWindowController {
         keybindingManager.stateChangeHandler = { [weak contentVC] state in
             contentVC?.setKeybindingMode(state)
         }
+        keybindingManager.controlKeyStateChangeHandler = { [weak contentVC] isHeld in
+            contentVC?.setControlKeyHeld(isHeld)
+        }
+        contentVC.setControlKeyHeld(keybindingManager.isControlKeyHeld)
         self.keybindingManager = keybindingManager
 
         themeManager.onThemeChanged = { [weak self] _ in
@@ -511,6 +515,10 @@ private extension MainWindowController {
         manager.stateChangeHandler = { [weak mainContentVC] state in
             mainContentVC?.setKeybindingMode(state)
         }
+        manager.controlKeyStateChangeHandler = { [weak mainContentVC] isHeld in
+            mainContentVC?.setControlKeyHeld(isHeld)
+        }
+        mainContentVC?.setControlKeyHeld(manager.isControlKeyHeld)
         keybindingManager = manager
     }
 }

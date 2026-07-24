@@ -170,7 +170,7 @@ soprano/
 | `Ctrl+A` → `Ctrl+A` | Send a literal `Ctrl+A` to the terminal |
 | `Ctrl+Shift+H/L` | Switch to previous / next logical window |
 | `Ctrl+1…9` | Select logical window 1–9 |
-| `Ctrl+A` → `Space`, then shown letter | Select the matching pane across logical windows |
+| `Ctrl+Shift+letter shown in sidebar` | Select the matching pane across logical windows |
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |
@@ -187,6 +187,10 @@ soprano/
 | `⇧⌘S` | Save session as… |
 | `⌘W` | Close active pane |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
+
+Holding Control reveals the window and pane hints in the sidebar. Pane hints
+include `⇧` because they require Control+Shift; unmodified alphabetic Control
+chords remain available to the terminal.
 
 ### Terminal copy mode
 

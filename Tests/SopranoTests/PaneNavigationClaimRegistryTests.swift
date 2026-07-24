@@ -64,12 +64,43 @@ struct PaneNavigationClaimRegistryTests {
         #expect(!registry.hasClaims(for: target))
     }
 
-    @Test func paneSelectionRejectsModifiedTerminalKeys() {
-        #expect(KeybindingManager.acceptsPaneSelectionKey(flags: []))
-        #expect(KeybindingManager.acceptsPaneSelectionKey(flags: .shift))
-        #expect(!KeybindingManager.acceptsPaneSelectionKey(flags: .control))
-        #expect(!KeybindingManager.acceptsPaneSelectionKey(flags: .option))
-        #expect(!KeybindingManager.acceptsPaneSelectionKey(flags: .command))
+    @Test func ordinaryControlKeysNeverActivatePaneHints() {
+        #expect(!KeybindingManager.isPaneShortcutChord([]))
+        #expect(!KeybindingManager.isPaneShortcutChord(.control))
+        #expect(!KeybindingManager.isPaneShortcutChord(.shift))
+        #expect(KeybindingManager.isPaneShortcutChord([.control, .shift]))
+        #expect(!KeybindingManager.isPaneShortcutChord([.control, .shift, .option]))
+        #expect(!KeybindingManager.isPaneShortcutChord([.control, .shift, .command]))
+    }
+
+    @Test func claimedTerminalControlKeysBypassPaneHints() {
+        var focusedKeys: [String] = []
+
+        let handled = KeybindingManager.handlePaneShortcut(
+            key: "d",
+            terminalClaimsControlKeys: true
+        ) { key in
+            focusedKeys.append(key)
+            return true
+        }
+
+        #expect(!handled)
+        #expect(focusedKeys.isEmpty)
+    }
+
+    @Test func unclaimedControlShiftKeysActivatePaneHints() {
+        var focusedKeys: [String] = []
+
+        let handled = KeybindingManager.handlePaneShortcut(
+            key: "d",
+            terminalClaimsControlKeys: false
+        ) { key in
+            focusedKeys.append(key)
+            return true
+        }
+
+        #expect(handled)
+        #expect(focusedKeys == ["d"])
     }
 
     @Test func repeatedPrefixForwardsLiteralControlA() {
