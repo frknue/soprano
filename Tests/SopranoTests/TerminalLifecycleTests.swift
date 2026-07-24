@@ -418,6 +418,30 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
+    @Test func paneDepthNavigationPreservesBothLiveTerminalSurfaces() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let rootTabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let rootTarget = TerminalTarget(paneId: paneId, tabId: rootTabId)
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+        let rootView = try #require(spy.createdViewsByTarget[rootTarget]?.first)
+
+        let childTabId = try #require(manager.goIn(paneId))
+        let childTarget = TerminalTarget(paneId: paneId, tabId: childTabId)
+        let childView = try #require(spy.createdViewsByTarget[childTarget]?.first)
+
+        #expect(spy.destroyedTargets.isEmpty)
+        #expect(manager.goOut(paneId))
+        #expect(manager.goIn(paneId) == childTabId)
+        #expect(spy.createdViewsByTarget[rootTarget]?.count == 1)
+        #expect(spy.createdViewsByTarget[childTarget]?.count == 1)
+        #expect(spy.createdViewsByTarget[rootTarget]?.first === rootView)
+        #expect(spy.createdViewsByTarget[childTarget]?.first === childView)
+        #expect(spy.destroyedTargets.isEmpty)
+        _ = splitTree
+    }
+
     private func makeSplitTree(
         manager: AgentManager,
         spy: SurfaceLifecycleSpy,

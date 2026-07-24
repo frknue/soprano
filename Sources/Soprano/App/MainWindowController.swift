@@ -268,6 +268,28 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "pane-depth-in",
+                icon: "arrow.down.right.and.arrow.up.left",
+                label: "Go In",
+                description: "Open or resume a terminal one level into the active pane",
+                shortcut: commandShortcut(for: "pane-depth-in"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.goIn(self.agentManager.activePaneId)
+                }
+            ),
+            CommandItem(
+                id: "pane-depth-out",
+                icon: "arrow.up.left.and.arrow.down.right",
+                label: "Go Out",
+                description: "Return to the terminal one level out of the active pane",
+                shortcut: commandShortcut(for: "pane-depth-out"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.goOut(self.agentManager.activePaneId)
+                }
+            ),
+            CommandItem(
                 id: "close-pane",
                 icon: "xmark.square",
                 label: "Close Pane",

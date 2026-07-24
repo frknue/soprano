@@ -10,6 +10,9 @@ final class PaneHeaderView: NSView {
     private var titleLabel: NSTextField!
     private var statusDot: NSView!
     private var statusLabel: NSTextField!
+    private var depthOutButton: NSButton!
+    private var depthLabel: NSTextField!
+    private var depthInButton: NSButton!
     private var closeButton: NSButton!
     private var tabStackView: NSStackView!
 
@@ -70,11 +73,34 @@ final class PaneHeaderView: NSView {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
+        depthOutButton = makeDepthButton(
+            title: "‹",
+            action: #selector(goOutAction),
+            toolTip: "Go Out (Prefix → O)"
+        )
+        addSubview(depthOutButton)
+
+        depthLabel = NSTextField(labelWithString: "Z0")
+        depthLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        depthLabel.textColor = theme.colors.textMuted
+        depthLabel.alignment = .center
+        depthLabel.toolTip = "Pane depth"
+        depthLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(depthLabel)
+
+        depthInButton = makeDepthButton(
+            title: "›",
+            action: #selector(goInAction),
+            toolTip: "Go In (Prefix → I)"
+        )
+        addSubview(depthInButton)
+
         // Close button
         closeButton = NSButton(title: "×", target: self, action: #selector(closePaneAction))
         closeButton.isBordered = false
         closeButton.font = .systemFont(ofSize: 14, weight: .regular)
         closeButton.contentTintColor = theme.colors.textMuted
+        closeButton.toolTip = "Close active tab or depth layer"
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
@@ -93,10 +119,24 @@ final class PaneHeaderView: NSView {
             tabStackView.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
             tabStackView.heightAnchor.constraint(equalToConstant: 24),
 
-            statusLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            statusLabel.trailingAnchor.constraint(equalTo: depthOutButton.leadingAnchor, constant: -2),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
 
+            depthOutButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            depthOutButton.widthAnchor.constraint(equalToConstant: 20),
+            depthOutButton.heightAnchor.constraint(equalToConstant: 24),
+
+            depthLabel.leadingAnchor.constraint(equalTo: depthOutButton.trailingAnchor),
+            depthLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            depthLabel.widthAnchor.constraint(equalToConstant: 22),
+
+            depthInButton.leadingAnchor.constraint(equalTo: depthLabel.trailingAnchor),
+            depthInButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            depthInButton.widthAnchor.constraint(equalToConstant: 20),
+            depthInButton.heightAnchor.constraint(equalToConstant: 24),
+
+            closeButton.leadingAnchor.constraint(equalTo: depthInButton.trailingAnchor, constant: 2),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 24),
@@ -123,6 +163,18 @@ final class PaneHeaderView: NSView {
 
         titleLabel.stringValue = tab?.title ?? "Pane"
         closeButton.contentTintColor = theme.colors.textMuted
+        depthOutButton.contentTintColor = theme.colors.textMuted
+        depthInButton.contentTintColor = theme.colors.textMuted
+        depthOutButton.isEnabled = pane?.canGoOut == true
+        depthInButton.isEnabled = if let pane {
+            pane.childOfActiveTab != nil || pane.tabs.count < PaneState.maxTabsPerPane
+        } else {
+            false
+        }
+        depthLabel.stringValue = "Z\(pane?.activeDepth ?? 0)"
+        depthLabel.textColor = (pane?.activeDepth ?? 0) > 0
+            ? theme.colors.accent
+            : theme.colors.textMuted
 
         if let agent = tab?.agent {
             statusDot.layer?.backgroundColor = colorForStatus(agent.status, theme: theme).cgColor
@@ -135,7 +187,7 @@ final class PaneHeaderView: NSView {
             statusLabel.isHidden = true
         }
 
-        let tabCount = pane?.tabs.count ?? 0
+        let tabCount = pane?.rootTabs.count ?? 0
         let shouldShowTabs = tabCount > 1
         titleLabel.isHidden = shouldShowTabs
         tabStackView.isHidden = !shouldShowTabs
@@ -161,6 +213,14 @@ final class PaneHeaderView: NSView {
         agentManager.removeTabFromPane(paneId, tabId: activeTab.id)
     }
 
+    @objc private func goOutAction() {
+        agentManager.goOut(paneId)
+    }
+
+    @objc private func goInAction() {
+        agentManager.goIn(paneId)
+    }
+
     @objc private func tabClicked(_ sender: NSButton) {
         agentManager.switchTab(paneId, index: sender.tag)
     }
@@ -175,9 +235,13 @@ final class PaneHeaderView: NSView {
     private func rebuildTabButtons(for pane: PaneState, theme: AppTheme) {
         clearTabButtons()
 
-        let activeIndex = pane.clampedActiveIndex()
-        for (index, tab) in pane.tabs.enumerated() {
-            let attentionPrefix = tab.agent?.needsAttention == true ? "● " : ""
+        let activeRootId = pane.activeDepthPath.first?.id
+        for (index, tab) in pane.tabs.enumerated() where tab.depthParentId == nil {
+            let branchIds = pane.descendantIds(of: tab.id)
+            let needsAttention = pane.tabs.contains {
+                branchIds.contains($0.id) && $0.agent?.needsAttention == true
+            }
+            let attentionPrefix = needsAttention ? "● " : ""
             let button = NSButton(
                 title: "\(attentionPrefix)\(tab.title)",
                 target: self,
@@ -188,9 +252,9 @@ final class PaneHeaderView: NSView {
             button.font = .systemFont(ofSize: 11, weight: .medium)
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
-            button.contentTintColor = if tab.agent?.needsAttention == true {
+            button.contentTintColor = if needsAttention {
                 theme.colors.blue
-            } else if index == activeIndex {
+            } else if tab.id == activeRootId {
                 theme.colors.accent
             } else {
                 theme.colors.textMuted
@@ -200,7 +264,9 @@ final class PaneHeaderView: NSView {
             let underline = NSView()
             underline.wantsLayer = true
             underline.layer?.cornerRadius = 0.5
-            underline.layer?.backgroundColor = (index == activeIndex ? theme.colors.accent : NSColor.clear).cgColor
+            underline.layer?.backgroundColor = (
+                tab.id == activeRootId ? theme.colors.accent : NSColor.clear
+            ).cgColor
             underline.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(underline)
 
@@ -213,6 +279,20 @@ final class PaneHeaderView: NSView {
 
             tabStackView.addArrangedSubview(button)
         }
+    }
+
+    private func makeDepthButton(
+        title: String,
+        action: Selector,
+        toolTip: String
+    ) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.isBordered = false
+        button.font = .systemFont(ofSize: 16, weight: .medium)
+        button.contentTintColor = themeManager.currentTheme.colors.textMuted
+        button.toolTip = toolTip
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
     }
 
     private func colorForStatus(_ status: AgentStatus, theme: AppTheme) -> NSColor {

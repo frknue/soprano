@@ -31,6 +31,9 @@ struct WorkspaceSession: Identifiable, Codable {
         var profileId: String?
         var cwd: String?
         var title: String? = nil
+        /// Optional for backward compatibility with sessions saved before
+        /// pane depth was introduced.
+        var depthParentId: String? = nil
     }
 
     // MARK: - Session List Persistence

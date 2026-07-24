@@ -42,6 +42,141 @@ struct DefaultKeybindingsTests {
         }
     }
 
+    @Test func tmuxWindowCyclingUsesPrefixPAndN() throws {
+        let previousWindow = try #require(binding("previous-window"))
+        let nextWindow = try #require(binding("next-window"))
+        let previousWindowDirect = try #require(binding("previous-window-direct"))
+        let nextWindowDirect = try #require(binding("next-window-direct"))
+
+        #expect(previousWindow.mode == .prefix)
+        #expect(previousWindow.key == "p")
+        #expect(previousWindow.shift != true)
+        #expect(previousWindow.defaultKeys == "Prefix → P")
+        #expect(nextWindow.mode == .prefix)
+        #expect(nextWindow.key == "n")
+        #expect(nextWindow.shift != true)
+        #expect(nextWindow.defaultKeys == "Prefix → N")
+
+        #expect(previousWindowDirect.mode == .direct)
+        #expect(previousWindowDirect.key == "h")
+        #expect(previousWindowDirect.ctrl == true)
+        #expect(previousWindowDirect.shift == true)
+        #expect(nextWindowDirect.mode == .direct)
+        #expect(nextWindowDirect.key == "l")
+        #expect(nextWindowDirect.ctrl == true)
+        #expect(nextWindowDirect.shift == true)
+    }
+
+    @Test func paneTabCyclingMovesToShiftedPrefixPAndN() throws {
+        let previousTab = try #require(binding("prev-pane-tab"))
+        let nextTab = try #require(binding("next-pane-tab"))
+
+        #expect(previousTab.mode == .prefix)
+        #expect(previousTab.key == "p")
+        #expect(previousTab.shift == true)
+        #expect(previousTab.defaultKeys == "Prefix → Shift+P")
+        #expect(nextTab.mode == .prefix)
+        #expect(nextTab.key == "n")
+        #expect(nextTab.shift == true)
+        #expect(nextTab.defaultKeys == "Prefix → Shift+N")
+    }
+
+    @Test func legacyWindowAndTabDefaultsMigrateToTmuxBindings() throws {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll {
+            $0.id == "previous-window-direct" || $0.id == "next-window-direct"
+        }
+        savedConfig.bindings = savedConfig.bindings.map { current in
+            switch current.id {
+            case "previous-window":
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Ctrl+Shift+H",
+                    mode: .direct,
+                    key: "h",
+                    ctrl: true,
+                    shift: true
+                )
+            case "next-window":
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Ctrl+Shift+L",
+                    mode: .direct,
+                    key: "l",
+                    ctrl: true,
+                    shift: true
+                )
+            case "prev-pane-tab":
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → P",
+                    mode: .prefix,
+                    key: "p"
+                )
+            case "next-pane-tab":
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → N",
+                    mode: .prefix,
+                    key: "n"
+                )
+            default:
+                return current
+            }
+        }
+
+        let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let byId = Dictionary(uniqueKeysWithValues: merged.bindings.map { ($0.id, $0) })
+
+        #expect(byId["previous-window"]?.mode == .prefix)
+        #expect(byId["previous-window"]?.key == "p")
+        #expect(byId["next-window"]?.mode == .prefix)
+        #expect(byId["next-window"]?.key == "n")
+        #expect(byId["prev-pane-tab"]?.shift == true)
+        #expect(byId["next-pane-tab"]?.shift == true)
+        #expect(byId["previous-window-direct"] != nil)
+        #expect(byId["next-window-direct"] != nil)
+    }
+
+    @Test func customizedWindowCyclingBindingIsPreserved() throws {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings = savedConfig.bindings.map { current in
+            guard current.id == "previous-window" else { return current }
+            return legacyBinding(
+                basedOn: current,
+                display: "Ctrl+Shift+B",
+                mode: .direct,
+                key: "b",
+                ctrl: true,
+                shift: true
+            )
+        }
+
+        let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let previousWindow = try #require(
+            merged.bindings.first { $0.id == "previous-window" }
+        )
+
+        #expect(previousWindow.mode == .direct)
+        #expect(previousWindow.key == "b")
+        #expect(previousWindow.ctrl == true)
+        #expect(previousWindow.shift == true)
+    }
+
+    @Test func defaultBindingsDoNotContainShortcutCollisions() {
+        let chords = DefaultKeybindings.config.bindings.map { binding in
+            [
+                binding.mode.rawValue,
+                binding.key,
+                binding.ctrl == true ? "ctrl" : "",
+                binding.meta == true ? "meta" : "",
+                binding.shift == true ? "shift" : "",
+            ].joined(separator: ":")
+        }
+
+        #expect(Set(chords).count == chords.count)
+    }
+
     @Test func splitDefaultsUseDashAndPipe() throws {
         let horizontal = try #require(binding("split-horizontal"))
         let vertical = try #require(binding("split-vertical"))
@@ -82,6 +217,42 @@ struct DefaultKeybindingsTests {
         #expect(newWindow.key == "c")
         #expect(newWindow.shift != true)
         #expect(newWindow.defaultKeys == "Prefix → C")
+    }
+
+    @Test func paneDepthUsesMnemonicPrefixBindings() throws {
+        let goIn = try #require(binding("pane-depth-in"))
+        let goOut = try #require(binding("pane-depth-out"))
+
+        #expect(goIn.mode == .prefix)
+        #expect(goIn.key == "i")
+        #expect(goIn.shift != true)
+        #expect(goIn.defaultKeys == "Prefix → I")
+        #expect(goOut.mode == .prefix)
+        #expect(goOut.key == "o")
+        #expect(goOut.shift != true)
+        #expect(goOut.defaultKeys == "Prefix → O")
+    }
+
+    @Test func prefixXClosesADepthLayerBeforeKillingThePane() throws {
+        let killBinding = try #require(binding("kill-pane"))
+
+        #expect(killBinding.mode == .prefix)
+        #expect(killBinding.key == "x")
+        #expect(killBinding.label == "Close Layer / Kill Pane")
+        #expect(killBinding.description.contains("depth layer"))
+        #expect(killBinding.description.contains("Z0"))
+    }
+
+    @Test func savedConfigurationsGainPaneDepthBindings() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll {
+            $0.id == "pane-depth-in" || $0.id == "pane-depth-out"
+        }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "pane-depth-in" })
+        #expect(mergedConfig.bindings.contains { $0.id == "pane-depth-out" })
     }
 
     @Test func windowManagementUsesShiftedCommandShortcuts() throws {
@@ -189,6 +360,27 @@ struct DefaultKeybindingsTests {
             defaultKeys: display,
             mode: .prefix,
             key: key
+        )
+    }
+
+    private func legacyBinding(
+        basedOn binding: KeyBinding,
+        display: String,
+        mode: KeyBindingMode,
+        key: String,
+        ctrl: Bool? = nil,
+        shift: Bool? = nil
+    ) -> KeyBinding {
+        KeyBinding(
+            id: binding.id,
+            label: binding.label,
+            description: binding.description,
+            category: binding.category,
+            defaultKeys: display,
+            mode: mode,
+            key: key,
+            ctrl: ctrl,
+            shift: shift
         )
     }
 }
