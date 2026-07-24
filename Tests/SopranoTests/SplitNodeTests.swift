@@ -2,6 +2,20 @@ import Testing
 @testable import Soprano
 
 struct SplitNodeTests {
+    @Test func orderedLeafIdsFollowVisualTreeOrder() {
+        let layout = SplitNode.split(.init(
+            direction: .horizontal,
+            first: .leaf("pane-3"),
+            second: .split(.init(
+                direction: .vertical,
+                first: .leaf("pane-1"),
+                second: .leaf("pane-2")
+            ))
+        ))
+
+        #expect(layout.orderedLeafIds == ["pane-3", "pane-1", "pane-2"])
+    }
+
     @Test func wrapQueryUsesOppositeBoundaryForEveryDirectionInNestedTree() {
         let layout = nestedLayout
 

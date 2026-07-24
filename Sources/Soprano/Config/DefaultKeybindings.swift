@@ -85,7 +85,7 @@ enum DefaultKeybindings {
             guard let savedBinding = savedBindingsById[defaultBinding.id] else {
                 return defaultBinding
             }
-            return migrateLegacySplitBinding(
+            return migrateLegacyBinding(
                 savedBinding,
                 to: defaultBinding
             )
@@ -104,10 +104,20 @@ enum DefaultKeybindings {
         UserDefaults.standard.set(data, forKey: key)
     }
 
-    private static func migrateLegacySplitBinding(
+    private static func migrateLegacyBinding(
         _ savedBinding: KeyBinding,
         to defaultBinding: KeyBinding
     ) -> KeyBinding {
+        if savedBinding.id.hasPrefix("select-window-"),
+           savedBinding.mode == .direct,
+           savedBinding.key == String(savedBinding.id.suffix(1)),
+           savedBinding.ctrl == true,
+           savedBinding.meta != true,
+           savedBinding.shift == true
+        {
+            return defaultBinding
+        }
+
         let legacyKey: String
         switch savedBinding.id {
         case "split-horizontal":

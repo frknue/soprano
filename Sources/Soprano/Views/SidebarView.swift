@@ -207,9 +207,7 @@ final class SidebarView: NSView {
     func setControlKeyHeld(_ isHeld: Bool) {
         guard isControlKeyHeld != isHeld else { return }
         isControlKeyHeld = isHeld
-        for case let row as SidebarWindowRowView in rowsStack.arrangedSubviews {
-            row.setShortcutHintVisible(isHeld)
-        }
+        rebuildRows(theme: themeManager.currentTheme)
     }
 
     @objc private func settingsClicked() {
@@ -331,12 +329,18 @@ final class SidebarView: NSView {
     }
 
     private func rebuildRows(theme: AppTheme) {
+        let paneShortcutKeysById = Dictionary(
+            uniqueKeysWithValues: agentManager.paneShortcutAssignments.map {
+                ($0.paneId, $0.key)
+            }
+        )
         for view in rowsStack.arrangedSubviews {
             rowsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
         for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
-            let isExpanded = !collapsedWindowIds.contains(terminalWindow.id)
+            let isExpanded = isControlKeyHeld
+                || !collapsedWindowIds.contains(terminalWindow.id)
             let windowRow = SidebarWindowRowView(theme: theme)
             windowRow.configure(
                 title: terminalWindow.title,
@@ -381,7 +385,7 @@ final class SidebarView: NSView {
             ).isActive = true
 
             guard isExpanded else { continue }
-            for pane in sortedPanes(in: terminalWindow) {
+            for pane in agentManager.orderedPanes(in: terminalWindow.id) {
                 let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
                 row.configure(
                     title: sidebarTitle(for: pane),
@@ -389,6 +393,8 @@ final class SidebarView: NSView {
                     dotColor: paneStatusColor(for: pane, theme: theme),
                     agentStatus: pane.activeTab?.agent?.status,
                     tabCount: pane.tabs.count,
+                    shortcutKey: paneShortcutKeysById[pane.id],
+                    showShortcutHint: isControlKeyHeld,
                     highlighted: pane.id == agentManager.activePaneId,
                     onSelect: { [weak self] in
                         self?.agentManager.focusPane(pane.id)
@@ -492,19 +498,6 @@ final class SidebarView: NSView {
         }
     }
 
-    private func sortedPanes(in terminalWindow: WorkspaceWindowState) -> [PaneState] {
-        terminalWindow.paneIds.compactMap { agentManager.panes[$0] }.sorted { lhs, rhs in
-            paneSortKey(lhs.id) < paneSortKey(rhs.id)
-        }
-    }
-
-    private func paneSortKey(_ paneId: String) -> Int {
-        let numberPart = paneId.split(separator: "-").last
-        if let numberPart, let number = Int(numberPart) {
-            return number
-        }
-        return Int.max
-    }
 }
 
 // MARK: - Window Row
@@ -643,12 +636,6 @@ private final class SidebarWindowRowView: NSView {
             contextMenu.addItem(resetItem)
         }
         menu = contextMenu
-    }
-
-    func setShortcutHintVisible(_ isVisible: Bool) {
-        guard showShortcutHint != isVisible else { return }
-        showShortcutHint = isVisible
-        updateTrailingLabel()
     }
 
     private func updateTrailingLabel() {
@@ -829,6 +816,8 @@ private final class SidebarPaneRowView: NSView {
         dotColor: NSColor,
         agentStatus: AgentStatus?,
         tabCount: Int,
+        shortcutKey: String?,
+        showShortcutHint: Bool,
         highlighted: Bool,
         onSelect: @escaping () -> Void,
         onClose: @escaping () -> Void
@@ -837,18 +826,26 @@ private final class SidebarPaneRowView: NSView {
         self.onClose = onClose
         titleLabel.stringValue = title
         dotView.layer?.backgroundColor = dotColor.cgColor
-        if let agentStatus {
+        if showShortcutHint, let shortcutKey {
+            badgeContainer.isHidden = false
+            badgeContainer.layer?.backgroundColor = theme.colors.accent.withAlphaComponent(0.2).cgColor
+            badgeLabel.stringValue = shortcutKey.uppercased()
+            badgeLabel.textColor = theme.colors.accent
+            badgeContainer.toolTip = "Ctrl+\(shortcutKey.uppercased())"
+        } else if let agentStatus {
             badgeContainer.isHidden = false
             badgeContainer.layer?.backgroundColor = dotColor.withAlphaComponent(0.16).cgColor
             badgeLabel.stringValue = tabCount > 1
                 ? "\(agentStatus.displayLabel) · \(tabCount)"
                 : agentStatus.displayLabel
             badgeLabel.textColor = dotColor
+            badgeContainer.toolTip = nil
         } else {
             badgeContainer.isHidden = tabCount <= 1
             badgeContainer.layer?.backgroundColor = theme.colors.bgRaised.cgColor
             badgeLabel.stringValue = "\(tabCount)"
             badgeLabel.textColor = theme.colors.textMuted
+            badgeContainer.toolTip = nil
         }
         closeButton.contentTintColor = highlighted
             ? theme.colors.textPrimary

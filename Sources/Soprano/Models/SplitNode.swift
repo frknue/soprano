@@ -66,6 +66,16 @@ indirect enum SplitNode: Codable, Equatable {
         }
     }
 
+    /// Collect leaf pane IDs in visual tree order (left/top before right/bottom).
+    var orderedLeafIds: [String] {
+        switch self {
+        case .leaf(let id):
+            return [id]
+        case .split(let branch):
+            return branch.first.orderedLeafIds + branch.second.orderedLeafIds
+        }
+    }
+
     /// Find the first (leftmost/topmost) leaf in the tree.
     var firstLeaf: String? {
         switch self {

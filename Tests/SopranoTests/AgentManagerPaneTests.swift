@@ -71,4 +71,51 @@ struct AgentManagerPaneTests {
 
         #expect(manager.activePaneId == secondPaneId)
     }
+
+    @Test func alphabeticPaneHintsUseVisualOrderAcrossLogicalWindows() throws {
+        let manager = AgentManager()
+        let secondPaneId = try #require(manager.spawnTerminal())
+        let thirdPaneId = try #require(manager.spawnTerminal())
+        manager.setLayout(.split(.init(
+            direction: .horizontal,
+            first: .leaf(thirdPaneId),
+            second: .split(.init(
+                direction: .vertical,
+                first: .leaf("pane-1"),
+                second: .leaf(secondPaneId)
+            ))
+        )))
+
+        #expect(manager.orderedPanes(in: manager.activeWindowId).map(\.id) == [
+            thirdPaneId,
+            "pane-1",
+            secondPaneId,
+        ])
+        #expect(manager.paneShortcutAssignments.map(\.key) == ["b", "d", "e"])
+        #expect(manager.paneShortcutAssignments.map(\.paneId) == [
+            thirdPaneId,
+            "pane-1",
+            secondPaneId,
+        ])
+
+        #expect(manager.focusPane(shortcutKey: "d"))
+        #expect(manager.activePaneId == "pane-1")
+
+        #expect(manager.focusPane(shortcutKey: "E"))
+        #expect(manager.activePaneId == secondPaneId)
+
+        #expect(!manager.focusPane(shortcutKey: "a"))
+        #expect(manager.activePaneId == secondPaneId)
+
+        let firstWindowId = manager.activeWindowId
+        let secondWindowId = try #require(manager.createWindow())
+        let secondWindowPaneId = manager.activePaneId
+        #expect(manager.paneShortcutAssignments.last?.key == "f")
+        #expect(manager.paneShortcutAssignments.last?.paneId == secondWindowPaneId)
+
+        #expect(manager.focusPane(shortcutKey: "b"))
+        #expect(manager.activeWindowId == firstWindowId)
+        #expect(manager.activePaneId == thirdPaneId)
+        #expect(manager.activeWindowId != secondWindowId)
+    }
 }
