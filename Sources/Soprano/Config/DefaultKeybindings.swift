@@ -41,8 +41,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "copy-mode", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → [", mode: .prefix, key: "["),
             KeyBinding(id: "copy-mode-right-bracket", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → ]", mode: .prefix, key: "]"),
             KeyBinding(id: "new-window-current-directory", label: "New Window Here", description: "Create a logical window in the active terminal directory", category: .layout, defaultKeys: "Prefix → C", mode: .prefix, key: "c"),
-            KeyBinding(id: "pane-depth-in", label: "Go In", description: "Open or resume a terminal one level into the active pane", category: .layout, defaultKeys: "Prefix → I", mode: .prefix, key: "i"),
-            KeyBinding(id: "pane-depth-out", label: "Go Out", description: "Return to the terminal one level out of the active pane", category: .layout, defaultKeys: "Prefix → O", mode: .prefix, key: "o"),
+            KeyBinding(id: "pane-depth-in", label: "Go In", description: "Open or resume the active pane's private inner workspace", category: .layout, defaultKeys: "Prefix → I", mode: .prefix, key: "i"),
+            KeyBinding(id: "pane-depth-out", label: "Go Out", description: "Return to the workspace containing the active depth branch", category: .layout, defaultKeys: "Prefix → O", mode: .prefix, key: "o"),
 
             // Tabs (prefix)
             KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),

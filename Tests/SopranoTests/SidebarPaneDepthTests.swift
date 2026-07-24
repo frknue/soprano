@@ -4,7 +4,7 @@ import Testing
 
 @MainActor
 struct SidebarPaneDepthTests {
-    @Test func paneDisclosureExpandsIntoSelectableDepthRows() throws {
+    @Test func sidebarListsPanesWithTheirWorkspaceDepth() throws {
         let manager = AgentManager()
         _ = try #require(manager.goIn(manager.activePaneId))
         let sidebar = SidebarView(
@@ -16,17 +16,12 @@ struct SidebarPaneDepthTests {
         sidebar.frame = NSRect(x: 0, y: 0, width: SidebarView.width, height: 600)
         sidebar.layoutSubtreeIfNeeded()
 
-        let disclosure = try #require(
-            descendants(of: sidebar, as: NSButton.self).first {
-                $0.identifier?.rawValue == "pane-depth-disclosure"
+        #expect(depthBadgeTexts(in: sidebar).sorted() == ["Z0/1", "Z1/1"])
+        #expect(
+            descendants(of: sidebar, as: NSButton.self).allSatisfy {
+                $0.identifier?.rawValue != "pane-depth-disclosure"
             }
         )
-        #expect(depthBadgeTexts(in: sidebar) == ["Z1/1"])
-
-        disclosure.performClick(nil)
-        sidebar.layoutSubtreeIfNeeded()
-
-        #expect(depthBadgeTexts(in: sidebar).sorted() == ["Z0/1", "Z1/1", "Z1/1"])
     }
 
     private func depthBadgeTexts(in view: NSView) -> [String] {

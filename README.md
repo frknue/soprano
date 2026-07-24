@@ -174,11 +174,11 @@ soprano/
 | `Ctrl+Shift+letter shown in sidebar` | Select the matching pane across logical windows |
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
-| `Ctrl+A` → `Q` | Close the whole pane and all of its depth layers |
+| `Ctrl+A` → `Q` | Close the active pane |
 | `Ctrl+A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
 | `Ctrl+A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `Ctrl+A` → `C` | New logical window in the current directory |
-| `Ctrl+A` → `I` / `O` | Go one terminal layer in / out on the pane z-axis |
+| `Ctrl+A` → `I` / `O` | Go one complete layout in / out on the window z-axis |
 | `Ctrl+A` → `T` / `Shift+N` / `Shift+P` / `W` | New tab / next / prev / close tab |
 | `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |
@@ -222,15 +222,17 @@ focused browser by default. Pass `--pane pane-7` immediately after `browser` to
 select a specific pane. Run `"$SOPRANO_BIN" browser --help` for navigation,
 state inspection, input, getter, and screenshot commands.
 
-### Pane depth
+### Window depth
 
-Each pane has a z-axis in addition to splits and tabs. Going in creates a
-terminal in the active terminal's current directory and keeps the existing
-surface alive behind it. Going out reveals that surface again. Going back in
-resumes the same inner terminal, and the stack can contain multiple levels.
-Use `Ctrl+A` then `I` / `O`, the `‹ Z0 ›` controls in the pane header, or
-**Go In** / **Go Out** in the command palette. The pane's sidebar disclosure
-shows every layer in the active depth branch and lets you jump directly to one.
+Each pane can own a private inner workspace on the window's z-axis. Going in
+opens that workspace full-screen with a fresh terminal while the complete outer
+layout stays alive behind it. Splits and tabs created there belong only to that
+pane's branch. Going out restores the outer layout; entering the same pane again
+restores its inner splits, tabs, and live terminal surfaces. Sibling panes keep
+independent branches and are never changed by another pane's Go In operation.
+Use `Ctrl+A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or
+**Go In** / **Go Out** in the command palette. Sidebar panes are labeled with
+their window depth and can be selected directly.
 
 ### Terminal copy mode
 
