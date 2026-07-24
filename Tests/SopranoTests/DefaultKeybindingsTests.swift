@@ -84,6 +84,35 @@ struct DefaultKeybindingsTests {
         #expect(newWindow.defaultKeys == "Prefix → C")
     }
 
+    @Test func windowManagementUsesShiftedCommandShortcuts() throws {
+        let renameWindow = try #require(binding("rename-window"))
+        let closeWindow = try #require(binding("close-window"))
+
+        #expect(renameWindow.mode == .direct)
+        #expect(renameWindow.key == "r")
+        #expect(renameWindow.meta == true)
+        #expect(renameWindow.shift == true)
+        #expect(renameWindow.defaultKeys == "⇧⌘R")
+
+        #expect(closeWindow.mode == .direct)
+        #expect(closeWindow.key == "w")
+        #expect(closeWindow.meta == true)
+        #expect(closeWindow.shift == true)
+        #expect(closeWindow.defaultKeys == "⇧⌘W")
+    }
+
+    @Test func savedConfigurationsGainWindowManagementBindings() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll {
+            $0.id == "rename-window" || $0.id == "close-window"
+        }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "rename-window" })
+        #expect(mergedConfig.bindings.contains { $0.id == "close-window" })
+    }
+
     @Test func savedConfigurationsGainTheNewWindowCurrentDirectoryBinding() {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings.removeAll { $0.id == "new-window-current-directory" }

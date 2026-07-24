@@ -142,6 +142,11 @@ final class MainContentViewController: NSViewController {
         sidebarView.saveSessionAs()
     }
 
+    func renameActiveWindow() {
+        loadViewIfNeeded()
+        sidebarView.promptToRenameActiveWindow()
+    }
+
     func showSettings(
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig,
