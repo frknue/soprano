@@ -7,6 +7,7 @@ final class MainContentViewController: NSViewController {
     let themeManager: ThemeManager
     let gitBranchMonitor: GitBranchMonitor
     private let onSettingsRequested: (() -> Void)?
+    private let splitTreeViewFactory: (AgentManager, ThemeManager) -> SplitTreeView
     private var sidebarVisible: Bool
 
     private var sidebarView: SidebarView!
@@ -27,13 +28,17 @@ final class MainContentViewController: NSViewController {
         sessionManager: SessionManager,
         themeManager: ThemeManager,
         gitBranchMonitor: GitBranchMonitor,
-        onSettingsRequested: (() -> Void)? = nil
+        onSettingsRequested: (() -> Void)? = nil,
+        splitTreeViewFactory: @escaping (AgentManager, ThemeManager) -> SplitTreeView = {
+            SplitTreeView(agentManager: $0, themeManager: $1)
+        }
     ) {
         self.agentManager = agentManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
         self.gitBranchMonitor = gitBranchMonitor
         self.onSettingsRequested = onSettingsRequested
+        self.splitTreeViewFactory = splitTreeViewFactory
         self.sidebarVisible =
             UserDefaults.standard.object(forKey: Self.sidebarVisibleKey) as? Bool ?? true
         super.init(nibName: nil, bundle: nil)
@@ -50,7 +55,7 @@ final class MainContentViewController: NSViewController {
         let safeArea = root.safeAreaLayoutGuide
 
         // Split tree (tiling layout)
-        splitTreeView = SplitTreeView(agentManager: agentManager, themeManager: themeManager)
+        splitTreeView = splitTreeViewFactory(agentManager, themeManager)
         splitTreeView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(splitTreeView)
 
