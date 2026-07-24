@@ -115,6 +115,36 @@ struct ExternalEventRoutingTests {
         ) == nil)
     }
 
+    @Test func notificationSubtitleNamesTheWindowAndPaneItCameFrom() {
+        #expect(
+            AgentNotificationManager.locationSubtitle(
+                windowTitle: "Soprano",
+                tabTitle: "Claude Code"
+            ) == "Soprano ▸ Claude Code"
+        )
+    }
+
+    @Test func notificationSubtitleSkipsMissingAndEmptyLocationParts() {
+        #expect(
+            AgentNotificationManager.locationSubtitle(
+                windowTitle: "Soprano",
+                tabTitle: nil
+            ) == "Soprano"
+        )
+        #expect(
+            AgentNotificationManager.locationSubtitle(
+                windowTitle: "",
+                tabTitle: "Codex"
+            ) == "Codex"
+        )
+        #expect(
+            AgentNotificationManager.locationSubtitle(
+                windowTitle: nil,
+                tabTitle: ""
+            ) == nil
+        )
+    }
+
     @Test func navigationWithMissingIdentityDoesNotInvokeTmux() {
         var tmuxNavigatorCalls = 0
 

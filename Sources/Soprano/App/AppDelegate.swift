@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let themeManager = ThemeManager(themeId: settings.themeId)
         let agentManager = AgentManager()
         let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
+        agentNotificationManager.requestAuthorizationIfNeeded()
         let sessionManager = SessionManager(agentManager: agentManager)
         let gitBranchMonitor = GitBranchMonitor()
 

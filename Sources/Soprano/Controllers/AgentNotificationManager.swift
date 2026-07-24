@@ -209,6 +209,23 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         return UNUserNotificationCenter.current()
     }
 
+    /// Asks macOS for notification authorization once, at launch.
+    ///
+    /// Authorization is also requested lazily by `deliverNotification`, but that
+    /// path only runs when an agent reports in while its pane is unfocused. A
+    /// user who watches their agents finish never reaches it, so the system
+    /// prompt never appears, the app is never registered with Notification
+    /// Center, and no notification can ever be delivered. Asking at launch makes
+    /// the permission state explicit before the first agent event arrives.
+    func requestAuthorizationIfNeeded() {
+        guard let notificationCenter else { return }
+
+        notificationCenter.getNotificationSettings { [weak self] settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            self?.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
+    }
+
     deinit {
         if let distributedObserver {
             DistributedNotificationCenter.default().removeObserver(distributedObserver)
@@ -350,18 +367,52 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         profileId.flatMap { DefaultAgents.profile(for: $0)?.name } ?? "Agent"
     }
 
+    /// `window ▸ pane` for the notification subtitle. Several panes across
+    /// several logical windows can be waiting at once, so the banner has to say
+    /// which one is asking.
+    static func locationSubtitle(windowTitle: String?, tabTitle: String?) -> String? {
+        let parts = [windowTitle, tabTitle]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " ▸ ")
+    }
+
+    @MainActor
+    private func locationSubtitle(paneId: String, tabId: String) -> String? {
+        Self.locationSubtitle(
+            windowTitle: agentManager.window(containingPane: paneId)?.title,
+            tabTitle: agentManager.panes[paneId]?.tabs.first { $0.id == tabId }?.title
+        )
+    }
+
     private func deliverNotification(title: String, body: String, paneId: String, tabId: String) {
         guard let notificationCenter else { return }
+
+        let subtitle = MainActor.assumeIsolated {
+            locationSubtitle(paneId: paneId, tabId: tabId)
+        }
 
         notificationCenter.getNotificationSettings { [weak self] settings in
             guard let self else { return }
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
-                self.scheduleNotification(title: title, body: body, paneId: paneId, tabId: tabId)
+                self.scheduleNotification(
+                    title: title,
+                    body: body,
+                    subtitle: subtitle,
+                    paneId: paneId,
+                    tabId: tabId
+                )
             case .notDetermined:
                 self.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, _ in
                     guard granted else { return }
-                    self.scheduleNotification(title: title, body: body, paneId: paneId, tabId: tabId)
+                    self.scheduleNotification(
+                        title: title,
+                        body: body,
+                        subtitle: subtitle,
+                        paneId: paneId,
+                        tabId: tabId
+                    )
                 }
             case .denied:
                 break
@@ -371,13 +422,24 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         }
     }
 
-    private func scheduleNotification(title: String, body: String, paneId: String, tabId: String) {
+    private func scheduleNotification(
+        title: String,
+        body: String,
+        subtitle: String?,
+        paneId: String,
+        tabId: String
+    ) {
         guard let notificationCenter else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        if let subtitle {
+            content.subtitle = subtitle
+        }
         content.sound = .default
+        // Groups a pane's banners together instead of stacking one per event.
+        content.threadIdentifier = paneId
         content.userInfo = ["paneId": paneId, "tabId": tabId]
 
         let identifier = UUID().uuidString

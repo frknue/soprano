@@ -33,11 +33,17 @@ with the reported agent. This works for any launcher whose underlying agent
 process inherits the Soprano terminal environment.
 
 When a background agent finishes, macOS shows a notification and the pane gets a
-blue unread ring. The pane header and status bar expose `STARTING`, `WORKING`,
-`READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED` states. Focusing the relevant tab
-clears its unread marker. A completed turn remains at `NEEDS INPUT` until the
-next prompt is submitted. macOS asks for notification permission the first time
-an agent needs attention.
+blue unread ring. The notification is subtitled `window ▸ pane` so it names the
+location that wants attention, and a pane's banners group together rather than
+stacking. Clicking one activates Soprano and focuses that tab. The pane header
+and status bar expose `STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and
+`STOPPED` states. Focusing the relevant tab clears its unread marker. A completed
+turn remains at `NEEDS INPUT` until the next prompt is submitted.
+
+Soprano asks for notification permission at launch. Notifications are only sent
+for panes that are not focused, so denying the prompt leaves the in-app unread
+ring as the only signal. Re-enable it under **System Settings → Notifications →
+Soprano**.
 
 ## Prerequisites
 
