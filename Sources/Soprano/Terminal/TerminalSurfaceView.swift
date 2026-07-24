@@ -268,6 +268,7 @@ final class TerminalSurfaceView: NSView {
     private func setup() {
         wantsLayer = true
         layer?.masksToBounds = true
+        registerForDraggedTypes(Array(TerminalDropContent.acceptedPasteboardTypes))
     }
 
     private func createSurface() {
@@ -1239,6 +1240,35 @@ final class TerminalSurfaceView: NSView {
             momentum: momentum(from: event.momentumPhase)
         )
         ghostty_surface_mouse_scroll(surface, deltas.x, deltas.y, scrollFlags)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let types = sender.draggingPasteboard.types,
+              !Set(types).isDisjoint(
+                  with: TerminalDropContent.acceptedPasteboardTypes
+              )
+        else {
+            return []
+        }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let content = TerminalDropContent.text(from: sender.draggingPasteboard) else {
+            return false
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.surface != nil else { return }
+            if self.copyModeSession != nil {
+                self.finishCopyMode(copySelection: false)
+            }
+            self.onFocusRequested?()
+            self.window?.makeFirstResponder(self)
+            self.unmarkText()
+            self.sendText(content)
+        }
+        return true
     }
 
     override func rightMouseDown(with event: NSEvent) {

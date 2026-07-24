@@ -2,6 +2,9 @@
 
 Native macOS tiling terminal multiplexer for AI coding agents. Built with Swift + AppKit + [libghostty](https://github.com/ghostty-org/ghostty).
 
+Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly
+onto a terminal to insert their shell-safe paths.
+
 ## Agent notifications
 
 Every Soprano terminal exports pane metadata for lifecycle hooks. The built-in
