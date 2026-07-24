@@ -181,6 +181,10 @@ final class KeybindingManager: @unchecked Sendable {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if isCtrlOnly(flags) && key == config.prefixKey.lowercased() {
+            if Self.shouldForwardPrefixKey(in: state) {
+                clearPrefixMode()
+                return event
+            }
             startPrefixMode()
             return nil
         }
@@ -216,8 +220,17 @@ final class KeybindingManager: @unchecked Sendable {
             return nil
         }
 
-        if isCtrlOnly(flags), agentManager.focusPane(shortcutKey: key) {
-            return nil
+        if isCtrlOnly(flags) {
+            let terminalClaimsControlKeys = activeTerminalTarget.map {
+                paneNavigationPassthroughClaims.hasClaims(for: $0)
+            } ?? false
+            if Self.handlePaneShortcut(
+                key: key,
+                terminalClaimsControlKeys: terminalClaimsControlKeys,
+                focusPane: agentManager.focusPane(shortcutKey:)
+            ) {
+                return nil
+            }
         }
 
         return event
@@ -267,6 +280,19 @@ final class KeybindingManager: @unchecked Sendable {
         "nav-up",
         "nav-right",
     ]
+
+    static func handlePaneShortcut(
+        key: String,
+        terminalClaimsControlKeys: Bool,
+        focusPane: (String) -> Bool
+    ) -> Bool {
+        guard !terminalClaimsControlKeys else { return false }
+        return focusPane(key)
+    }
+
+    static func shouldForwardPrefixKey(in state: KeybindingState) -> Bool {
+        state == .prefix
+    }
 
     /// Split actions are named for the divider they draw, while
     /// `SplitDirection` describes the axis along which panes are arranged.
