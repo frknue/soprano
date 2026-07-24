@@ -17,6 +17,7 @@ let package = Package(
             path: "Sources/Soprano",
             resources: [
                 .copy("Resources/AppIcon.icns"),
+                .copy("Resources/SopranoCopyMode.conf"),
                 .copy("Resources/SopranoOpenCodePlugin.js"),
             ],
             linkerSettings: [

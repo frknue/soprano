@@ -13,6 +13,7 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    private(set) var clearsSelectionOnCopy = false
     let clipboardConfirmationCoordinator = ClipboardConfirmationCoordinator(
         presenter: AppKitClipboardConfirmationPresenter()
     )
@@ -42,11 +43,11 @@ final class GhosttyAppManager: @unchecked Sendable {
         if let primaryApp = ghostty_app_new(&runtimeConfig, primaryConfig) {
             app = primaryApp
         } else {
-            let fallbackConfig = ghostty_config_new()
-            guard fallbackConfig != nil else {
+            guard let fallbackConfig = ghostty_config_new() else {
                 print("[Soprano] Failed to allocate fallback ghostty config")
                 return
             }
+            clearsSelectionOnCopy = applySopranoCopyModeConfig(to: fallbackConfig)
             ghostty_config_finalize(fallbackConfig)
 
             if let fallbackApp = ghostty_app_new(&runtimeConfig, fallbackConfig) {
@@ -71,11 +72,25 @@ final class GhosttyAppManager: @unchecked Sendable {
     }
 
     private func createPrimaryConfig() -> ghostty_config_t? {
-        let cfg = ghostty_config_new()
-        guard cfg != nil else { return nil }
+        guard let cfg = ghostty_config_new() else { return nil }
         ghostty_config_load_default_files(cfg)
+        clearsSelectionOnCopy = applySopranoCopyModeConfig(to: cfg)
         ghostty_config_finalize(cfg)
         return cfg
+    }
+
+    private func applySopranoCopyModeConfig(to config: ghostty_config_t) -> Bool {
+        guard let configURL = Bundle.module.url(
+            forResource: "SopranoCopyMode",
+            withExtension: "conf"
+        ) else {
+            return false
+        }
+
+        configURL.path.withCString {
+            ghostty_config_load_file(config, $0)
+        }
+        return true
     }
 
     private func observeApplicationFocusChanges() {

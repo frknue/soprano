@@ -24,6 +24,7 @@ final class SplitTreeView: NSView {
     private let restartTerminalView: (NSView) -> Bool
     private let terminalViewHasLiveSurface: (NSView) -> Bool
     private let scheduleCodexReadiness: CodexReadinessScheduler
+    var onCopyModeStateChanged: ((KeybindingState) -> Void)?
 
     /// Cached pane container views keyed by pane ID.
     /// These survive layout rebuilds — only removed when the pane itself is closed.
@@ -39,6 +40,7 @@ final class SplitTreeView: NSView {
     private var lastLayoutGeneration: Int = -1
     /// Last restore generation whose terminal cache has been invalidated.
     private var lastWorkspaceRestoreGeneration: Int
+    private var copyModeTarget: TerminalTarget?
 
     /// Observer ID for AgentManager notifications.
     private let observerId = "SplitTreeView"
@@ -107,6 +109,7 @@ final class SplitTreeView: NSView {
     // MARK: - State Change Handler
 
     private func handleStateChange() {
+        cancelCopyModeOutsideActiveTerminal()
         let currentRestoreGeneration = agentManager.workspaceRestoreGeneration
         if currentRestoreGeneration != lastWorkspaceRestoreGeneration {
             lastWorkspaceRestoreGeneration = currentRestoreGeneration
@@ -163,6 +166,10 @@ final class SplitTreeView: NSView {
 
     func resetActiveTerminalFontSize() {
         activeTerminalView()?.resetFontSize()
+    }
+
+    func beginActiveTerminalCopyMode() {
+        activeTerminalView()?.beginCopyMode()
     }
 
     private func activeTerminalView() -> TerminalSurfaceView? {
@@ -401,6 +408,19 @@ final class SplitTreeView: NSView {
                         exitCode: exitCode
                     )
                 }
+                terminalView.onCopyModeStateChanged = { [weak self] state in
+                    guard let self else { return }
+                    switch state {
+                    case .copy, .copySelection:
+                        self.copyModeTarget = target
+                    case .normal:
+                        guard self.copyModeTarget == target else { return }
+                        self.copyModeTarget = nil
+                    case .prefix:
+                        break
+                    }
+                    self.onCopyModeStateChanged?(state)
+                }
             }
             view = terminalView
         }
@@ -434,6 +454,21 @@ final class SplitTreeView: NSView {
         }
 
         return nil
+    }
+
+    private func cancelCopyModeOutsideActiveTerminal() {
+        guard let copyModeTarget else { return }
+        let activeTarget = agentManager.panes[agentManager.activePaneId]?.activeTab.map {
+            TerminalTarget(paneId: agentManager.activePaneId, tabId: $0.id)
+        }
+        guard copyModeTarget != activeTarget else { return }
+        if let contentView = tabContentViews[copyModeTarget],
+           let terminalView = findTerminalView(in: contentView) {
+            terminalView.cancelCopyMode()
+            return
+        }
+        self.copyModeTarget = nil
+        onCopyModeStateChanged?(.normal)
     }
 
     private func clearFirstResponderIfNeeded(in container: NSView) {

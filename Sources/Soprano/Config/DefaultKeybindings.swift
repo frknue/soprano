@@ -36,6 +36,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "close-pane", label: "Close Pane", description: "Close the active pane", category: .layout, defaultKeys: "Prefix → Q", mode: .prefix, key: "q"),
             KeyBinding(id: "kill-pane", label: "Kill Pane", description: "Force-close the active pane", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
             KeyBinding(id: "maximize-pane", label: "Maximize", description: "Toggle maximize for the active pane", category: .layout, defaultKeys: "Prefix → M", mode: .prefix, key: "m"),
+            KeyBinding(id: "copy-mode", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → [", mode: .prefix, key: "["),
+            KeyBinding(id: "copy-mode-right-bracket", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → ]", mode: .prefix, key: "]"),
 
             // Tabs (prefix)
             KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),

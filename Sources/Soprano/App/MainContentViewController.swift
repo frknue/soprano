@@ -69,6 +69,9 @@ final class MainContentViewController: NSViewController {
         statusBarView = StatusBarView(agentManager: agentManager, themeManager: themeManager)
         statusBarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(statusBarView)
+        splitTreeView.onCopyModeStateChanged = { [weak self] state in
+            self?.setKeybindingMode(state)
+        }
 
         // Layout
         sidebarWidthConstraint = sidebarView.widthAnchor.constraint(
@@ -128,6 +131,10 @@ final class MainContentViewController: NSViewController {
 
     func resetActiveTerminalFontSize() {
         splitTreeView.resetActiveTerminalFontSize()
+    }
+
+    func beginActiveTerminalCopyMode() {
+        splitTreeView.beginActiveTerminalCopyMode()
     }
 
     func saveSessionAs() {
