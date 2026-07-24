@@ -130,6 +130,11 @@ final class MainContentViewController: NSViewController {
         splitTreeView.resetActiveTerminalFontSize()
     }
 
+    func saveSessionAs() {
+        loadViewIfNeeded()
+        sidebarView.saveSessionAs()
+    }
+
     func showSettings(
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig,

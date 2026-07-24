@@ -30,6 +30,27 @@ struct ExternalEventRoutingTests {
         ])
     }
 
+    @Test func stoppedAgentEventUsesTheSessionEndState() {
+        let envelope = AgentEventCommand.notificationEnvelope(
+            arguments: ["soprano", "agent-event", "stopped", "--profile", "codex"],
+            environment: [
+                "SOPRANO_APP_PID": "4242",
+                "SOPRANO_PANE_ID": "pane-1",
+                "SOPRANO_TAB_ID": "tab-2",
+            ]
+        )
+
+        #expect(envelope?.userInfo == [
+            "paneId": "pane-1",
+            "tabId": "tab-2",
+            "state": "stopped",
+            "notify": "0",
+            "title": "Agent",
+            "body": "Stopped",
+            "profileId": "codex",
+        ])
+    }
+
     @Test func agentEventWithoutAProcessOrTerminalIdentityBuildsNoEnvelope() {
         #expect(AgentEventCommand.notificationEnvelope(
             arguments: ["soprano", "agent-event", "ready"],

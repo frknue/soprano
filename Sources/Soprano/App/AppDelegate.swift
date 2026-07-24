@@ -42,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        mainWindowController?.saveWorkspaceIfNeeded()
+        mainWindowController?.saveLastWorkspaceIfNeeded()
     }
 
     private func installApplicationIcon() {

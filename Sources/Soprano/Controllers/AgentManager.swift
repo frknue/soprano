@@ -508,6 +508,34 @@ final class AgentManager: @unchecked Sendable {
         }
     }
 
+    /// Reconciles an agent process that exited on its own. Agent tabs remain
+    /// restartable in the stopped state, while agents launched inside a regular
+    /// terminal are detached because the terminal has returned to its shell.
+    func agentProcessDidExit(target: TerminalTarget, exitCode: Int32? = nil) {
+        guard let pane = panes[target.paneId],
+              let tabIndex = pane.tabs.firstIndex(where: { $0.id == target.tabId }),
+              let agent = pane.tabs[tabIndex].agent
+        else { return }
+
+        cancelAgentReadinessGeneration(for: target)
+        if pane.tabs[tabIndex].type == .terminal {
+            agent.status = .stopped
+            agent.needsAttention = false
+            agent.exitCode = exitCode
+            if pane.tabs[tabIndex].title == agentName(for: agent.profileId) {
+                pane.tabs[tabIndex].title = pane.tabs[tabIndex].cwd?
+                    .split(separator: "/").last.map(String.init) ?? "Terminal"
+            }
+            pane.tabs[tabIndex].agent = nil
+        } else {
+            guard agent.status != .stopped || agent.exitCode != exitCode else { return }
+            agent.status = .stopped
+            agent.needsAttention = false
+            agent.exitCode = exitCode
+        }
+        notifyChange()
+    }
+
     private func agentTab(for target: TerminalTarget) -> PaneTab? {
         guard let tab = panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
               tab.type == .agent
@@ -765,7 +793,8 @@ final class AgentManager: @unchecked Sendable {
                             id: tab.id,
                             type: tab.type,
                             profileId: tab.agent?.profileId,
-                            cwd: tab.cwd
+                            cwd: tab.cwd,
+                            title: tab.title
                         )
                     }
                 )
@@ -811,7 +840,8 @@ final class AgentManager: @unchecked Sendable {
                     id: savedTab.id,
                     type: savedTab.type,
                     profileId: savedTab.profileId,
-                    cwd: savedTab.cwd
+                    cwd: savedTab.cwd,
+                    title: savedTab.title
                 )
             }
 
@@ -1069,20 +1099,33 @@ final class AgentManager: @unchecked Sendable {
         title.wholeMatch(of: /^Window \d+$/) != nil
     }
 
+    private func agentName(for profileId: String) -> String {
+        DefaultAgents.profile(for: profileId)?.name ?? "Agent"
+    }
+
     private func createPaneTab(
         id: String,
         type: PaneType,
         profileId: String? = nil,
-        cwd: String? = nil
+        cwd: String? = nil,
+        title: String? = nil
     ) -> PaneTab {
         if type == .agent, let profileId, let profile = DefaultAgents.profile(for: profileId) {
             let agent = AgentInstance(id: id, profileId: profile.id)
             let dirName = cwd?.split(separator: "/").last.map(String.init)
-            let title = dirName.map { "\(profile.name): \($0)" } ?? profile.name
-            return PaneTab(id: id, type: .agent, title: title, agent: agent, cwd: cwd)
+            let restoredTitle = title ?? dirName.map { "\(profile.name): \($0)" } ?? profile.name
+            return PaneTab(
+                id: id,
+                type: .agent,
+                title: restoredTitle,
+                agent: agent,
+                cwd: cwd
+            )
         }
 
-        let title = cwd?.split(separator: "/").last.map(String.init) ?? "Terminal"
-        return PaneTab(id: id, type: .terminal, title: title, cwd: cwd)
+        let restoredTitle = title
+            ?? cwd?.split(separator: "/").last.map(String.init)
+            ?? "Terminal"
+        return PaneTab(id: id, type: .terminal, title: restoredTitle, cwd: cwd)
     }
 }

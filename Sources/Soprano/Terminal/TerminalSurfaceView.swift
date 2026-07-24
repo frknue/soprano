@@ -192,6 +192,7 @@ final class TerminalSurfaceView: NSView {
     var onFocusRequested: (() -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onAgentInputSubmitted: (() -> Void)?
+    var onAgentProcessExited: ((Int32?) -> Void)?
     private let config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
@@ -347,6 +348,10 @@ final class TerminalSurfaceView: NSView {
                 "body": body,
             ]
         )
+    }
+
+    func terminalCommandDidFinish(exitCode: Int32?) {
+        onAgentProcessExited?(exitCode)
     }
 
     func changeFontSize(delta: Int) {

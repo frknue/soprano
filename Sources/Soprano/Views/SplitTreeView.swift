@@ -395,6 +395,12 @@ final class SplitTreeView: NSView {
                         needsAttention: false
                     )
                 }
+                terminalView.onAgentProcessExited = { [weak self] exitCode in
+                    self?.agentManager.agentProcessDidExit(
+                        target: target,
+                        exitCode: exitCode
+                    )
+                }
             }
             view = terminalView
         }

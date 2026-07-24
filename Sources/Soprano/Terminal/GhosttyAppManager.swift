@@ -168,6 +168,23 @@ private func ghosttyAction(
         }
         return true
 
+    case GHOSTTY_ACTION_COMMAND_FINISHED:
+        let rawExitCode = action.action.command_finished.exit_code
+        let exitCode = rawExitCode >= 0 ? Int32(rawExitCode) : nil
+        MainActor.assumeIsolated {
+            surfaceView.terminalCommandDidFinish(exitCode: exitCode)
+        }
+        return true
+
+    case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+        let exitCode = Int32(
+            truncatingIfNeeded: action.action.child_exited.exit_code
+        )
+        MainActor.assumeIsolated {
+            surfaceView.terminalCommandDidFinish(exitCode: exitCode)
+        }
+        return false
+
     default:
         return false
     }

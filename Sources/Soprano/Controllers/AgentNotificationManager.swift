@@ -7,6 +7,7 @@ enum AgentEventState: String {
     case running
     case needsInput = "needs-input"
     case error
+    case stopped
 
     var agentStatus: AgentStatus {
         switch self {
@@ -14,6 +15,7 @@ enum AgentEventState: String {
         case .running: return .running
         case .needsInput: return .waiting
         case .error: return .error
+        case .stopped: return .stopped
         }
     }
 }
@@ -125,6 +127,7 @@ enum AgentEventCommand {
         case .running: return "Working"
         case .needsInput: return "Input required"
         case .error: return "The agent stopped with an error"
+        case .stopped: return "Stopped"
         }
     }
 }
@@ -318,6 +321,13 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             isFocusedSurface(paneId: event.paneId, tabId: event.tabId)
         }
         let needsAttention = event.shouldNotify && !isFocused
+
+        if event.state == .stopped {
+            agentManager.agentProcessDidExit(
+                target: TerminalTarget(paneId: event.paneId, tabId: event.tabId)
+            )
+            return
+        }
 
         agentManager.updateAgentStatus(
             paneId: event.paneId,
