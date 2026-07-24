@@ -550,11 +550,13 @@ private final class SidebarWindowRowView: NSView {
 
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
         countLabel.alignment = .right
+        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(countLabel)
 
@@ -746,6 +748,7 @@ private final class SidebarPaneRowView: NSView {
         titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
         titleLabel.textColor = theme.colors.textPrimary
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
@@ -758,6 +761,7 @@ private final class SidebarPaneRowView: NSView {
         badgeLabel.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
         badgeLabel.textColor = theme.colors.textMuted
         badgeLabel.alignment = .center
+        badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
         badgeContainer.addSubview(badgeLabel)
 
