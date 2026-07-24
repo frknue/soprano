@@ -418,22 +418,23 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
-    @Test func paneDepthNavigationPreservesBothLiveTerminalSurfaces() throws {
+    @Test func windowDepthNavigationPreservesBothLiveTerminalSurfaces() throws {
         let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let rootTabId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let rootTarget = TerminalTarget(paneId: paneId, tabId: rootTabId)
+        let rootPaneId = manager.activePaneId
+        let rootTabId = try #require(manager.panes[rootPaneId]?.activeTab?.id)
+        let rootTarget = TerminalTarget(paneId: rootPaneId, tabId: rootTabId)
         let spy = SurfaceLifecycleSpy()
         let splitTree = makeSplitTree(manager: manager, spy: spy)
         let rootView = try #require(spy.createdViewsByTarget[rootTarget]?.first)
 
-        let childTabId = try #require(manager.goIn(paneId))
-        let childTarget = TerminalTarget(paneId: paneId, tabId: childTabId)
+        let childTabId = try #require(manager.goIn(rootPaneId))
+        let childPaneId = manager.activePaneId
+        let childTarget = TerminalTarget(paneId: childPaneId, tabId: childTabId)
         let childView = try #require(spy.createdViewsByTarget[childTarget]?.first)
 
         #expect(spy.destroyedTargets.isEmpty)
-        #expect(manager.goOut(paneId))
-        #expect(manager.goIn(paneId) == childTabId)
+        #expect(manager.goOut(childPaneId))
+        #expect(manager.goIn(rootPaneId) == childTabId)
         #expect(spy.createdViewsByTarget[rootTarget]?.count == 1)
         #expect(spy.createdViewsByTarget[childTarget]?.count == 1)
         #expect(spy.createdViewsByTarget[rootTarget]?.first === rootView)

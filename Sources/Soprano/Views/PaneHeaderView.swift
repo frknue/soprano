@@ -84,7 +84,7 @@ final class PaneHeaderView: NSView {
         depthLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
         depthLabel.textColor = theme.colors.textMuted
         depthLabel.alignment = .center
-        depthLabel.toolTip = "Pane depth"
+        depthLabel.toolTip = "Window depth"
         depthLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(depthLabel)
 
@@ -165,14 +165,15 @@ final class PaneHeaderView: NSView {
         closeButton.contentTintColor = theme.colors.textMuted
         depthOutButton.contentTintColor = theme.colors.textMuted
         depthInButton.contentTintColor = theme.colors.textMuted
-        depthOutButton.isEnabled = pane?.canGoOut == true
-        depthInButton.isEnabled = if let pane {
-            pane.childOfActiveTab != nil || pane.tabs.count < PaneState.maxTabsPerPane
-        } else {
-            false
-        }
-        depthLabel.stringValue = "Z\(pane?.activeDepth ?? 0)"
-        depthLabel.textColor = (pane?.activeDepth ?? 0) > 0
+        let terminalWindow = agentManager.window(containingPane: paneId)
+        let depth = terminalWindow?.depth(containingPane: paneId) ?? 0
+        depthOutButton.isEnabled = depth > 0
+        depthInButton.isEnabled = terminalWindow.map {
+            $0.hasDepthBranch(from: paneId)
+                || agentManager.paneCount < AgentManager.maxPanes
+        } ?? false
+        depthLabel.stringValue = "Z\(depth)"
+        depthLabel.textColor = depth > 0
             ? theme.colors.accent
             : theme.colors.textMuted
 
@@ -187,7 +188,7 @@ final class PaneHeaderView: NSView {
             statusLabel.isHidden = true
         }
 
-        let tabCount = pane?.rootTabs.count ?? 0
+        let tabCount = pane?.tabs.count ?? 0
         let shouldShowTabs = tabCount > 1
         titleLabel.isHidden = shouldShowTabs
         tabStackView.isHidden = !shouldShowTabs
@@ -210,6 +211,9 @@ final class PaneHeaderView: NSView {
             return
         }
 
+        if agentManager.closeActiveDepthLayer(paneId) {
+            return
+        }
         agentManager.removeTabFromPane(paneId, tabId: activeTab.id)
     }
 
@@ -235,12 +239,9 @@ final class PaneHeaderView: NSView {
     private func rebuildTabButtons(for pane: PaneState, theme: AppTheme) {
         clearTabButtons()
 
-        let activeRootId = pane.activeDepthPath.first?.id
-        for (index, tab) in pane.tabs.enumerated() where tab.depthParentId == nil {
-            let branchIds = pane.descendantIds(of: tab.id)
-            let needsAttention = pane.tabs.contains {
-                branchIds.contains($0.id) && $0.agent?.needsAttention == true
-            }
+        let activeTabId = pane.activeTab?.id
+        for (index, tab) in pane.tabs.enumerated() {
+            let needsAttention = tab.agent?.needsAttention == true
             let attentionPrefix = needsAttention ? "● " : ""
             let button = NSButton(
                 title: "\(attentionPrefix)\(tab.title)",
@@ -254,7 +255,7 @@ final class PaneHeaderView: NSView {
             button.setButtonType(.momentaryChange)
             button.contentTintColor = if needsAttention {
                 theme.colors.blue
-            } else if tab.id == activeRootId {
+            } else if tab.id == activeTabId {
                 theme.colors.accent
             } else {
                 theme.colors.textMuted
@@ -265,7 +266,7 @@ final class PaneHeaderView: NSView {
             underline.wantsLayer = true
             underline.layer?.cornerRadius = 0.5
             underline.layer?.backgroundColor = (
-                tab.id == activeRootId ? theme.colors.accent : NSColor.clear
+                tab.id == activeTabId ? theme.colors.accent : NSColor.clear
             ).cgColor
             underline.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(underline)

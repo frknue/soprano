@@ -3,157 +3,248 @@ import Testing
 @testable import Soprano
 
 struct PaneDepthTests {
-    @Test func goingInCreatesAChildTerminalAndGoingBackInResumesIt() throws {
+    @Test func goingInCreatesAWindowLayerAndGoingBackInResumesIt() throws {
         let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let rootId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let rootPaneId = manager.activePaneId
+        let rootTabId = try #require(manager.panes[rootPaneId]?.activeTab?.id)
         manager.updateWorkingDirectory(
-            paneId: paneId,
-            tabId: rootId,
+            paneId: rootPaneId,
+            tabId: rootTabId,
             to: "/tmp/z-axis-project"
         )
 
-        let childId = try #require(manager.goIn(paneId))
-        let pane = try #require(manager.panes[paneId])
+        let childTabId = try #require(manager.goIn(rootPaneId))
+        let childPaneId = manager.activePaneId
 
-        #expect(pane.activeTab?.id == childId)
-        #expect(pane.activeTab?.type == .terminal)
-        #expect(pane.activeTab?.cwd == "/tmp/z-axis-project")
-        #expect(pane.activeTab?.depthParentId == rootId)
-        #expect(pane.activeDepth == 1)
-        #expect(pane.rootTabs.map(\.id) == [rootId])
+        #expect(childPaneId != rootPaneId)
+        #expect(manager.activeDepth == 1)
+        #expect(manager.panes[childPaneId]?.activeTab?.id == childTabId)
+        #expect(manager.panes[childPaneId]?.activeTab?.type == .terminal)
+        #expect(manager.panes[childPaneId]?.activeTab?.cwd == "/tmp/z-axis-project")
 
-        manager.nextTab(paneId)
-        #expect(pane.activeTab?.id == childId)
-        manager.prevTab(paneId)
-        #expect(pane.activeTab?.id == childId)
+        #expect(manager.goOut(childPaneId))
+        #expect(manager.activeDepth == 0)
+        #expect(manager.activePaneId == rootPaneId)
+        #expect(manager.panes[rootPaneId]?.activeTab?.id == rootTabId)
 
-        #expect(manager.goOut(paneId))
-        #expect(pane.activeTab?.id == rootId)
-        #expect(pane.activeDepth == 0)
-        #expect(pane.activeDepthBranch.map(\.id) == [rootId, childId])
-
-        #expect(manager.goIn(paneId) == childId)
-        #expect(pane.tabs.count == 2)
-        #expect(pane.activeTab?.id == childId)
+        #expect(manager.goIn(rootPaneId) == childTabId)
+        #expect(manager.activeDepth == 1)
+        #expect(manager.activePaneId == childPaneId)
+        #expect(manager.paneCount == 2)
     }
 
-    @Test func depthCanNestAndStopsAtTheOutermostTerminal() throws {
+    @Test func depthCanNestAndStopsAtTheOutermostLayout() throws {
         let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let rootId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let childId = try #require(manager.goIn(paneId))
-        let grandchildId = try #require(manager.goIn(paneId))
-        let pane = try #require(manager.panes[paneId])
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let childPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(childPaneId))
+        let grandchildPaneId = manager.activePaneId
 
-        #expect(pane.activeDepthPath.map(\.id) == [rootId, childId, grandchildId])
-        #expect(pane.activeDepth == 2)
+        #expect(manager.activeDepth == 2)
+        #expect(manager.maximumDepth == 2)
 
-        #expect(manager.goOut(paneId))
-        #expect(pane.activeTab?.id == childId)
-        #expect(manager.goOut(paneId))
-        #expect(pane.activeTab?.id == rootId)
-        #expect(!manager.goOut(paneId))
+        #expect(manager.goOut(grandchildPaneId))
+        #expect(manager.activePaneId == childPaneId)
+        #expect(manager.activeDepth == 1)
+        #expect(manager.goOut(childPaneId))
+        #expect(manager.activePaneId == rootPaneId)
+        #expect(manager.activeDepth == 0)
+        #expect(!manager.goOut(rootPaneId))
     }
 
-    @Test func closingTheActiveDepthLayerPopsOneLevelWithoutClosingThePane() throws {
+    @Test func eachOuterSplitOwnsAnIndependentFullScreenDepthBranch() throws {
         let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let rootId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let childId = try #require(manager.goIn(paneId))
-        let grandchildId = try #require(manager.goIn(paneId))
-        let pane = try #require(manager.panes[paneId])
+        let firstRootPaneId = manager.activePaneId
+        let secondRootPaneId = try #require(
+            manager.splitPane(direction: .horizontal, paneId: firstRootPaneId)
+        )
+        manager.focusPane(firstRootPaneId)
+        let secondRootTabId = try #require(
+            manager.panes[secondRootPaneId]?.activeTab?.id
+        )
 
-        #expect(manager.closeActiveDepthLayer(paneId))
-        #expect(pane.activeTab?.id == childId)
-        #expect(!pane.tabs.contains { $0.id == grandchildId })
-        #expect(manager.paneCount == 1)
+        let firstInnerTabId = try #require(manager.goIn(firstRootPaneId))
+        let firstInnerPaneId = manager.activePaneId
+        #expect(manager.layout?.leafIds == [firstInnerPaneId])
+        #expect(!manager.layout!.leafIds.contains(secondRootPaneId))
+        let secondInnerPaneId = try #require(
+            manager.splitPane(direction: .vertical, paneId: firstInnerPaneId)
+        )
+        let firstBranchLayout = try #require(manager.layout)
+        #expect(firstBranchLayout.leafIds == [firstInnerPaneId, secondInnerPaneId])
+        #expect(manager.panes[secondRootPaneId]?.activeTab?.id == secondRootTabId)
 
-        #expect(manager.closeActiveDepthLayer(paneId))
-        #expect(pane.activeTab?.id == rootId)
-        #expect(manager.paneCount == 1)
+        #expect(manager.goOut(secondInnerPaneId))
+        #expect(manager.layout?.orderedLeafIds == [firstRootPaneId, secondRootPaneId])
 
-        #expect(!manager.closeActiveDepthLayer(paneId))
-        #expect(manager.panes[paneId] != nil)
+        let secondBranchTabId = try #require(manager.goIn(secondRootPaneId))
+        let secondBranchPaneId = manager.activePaneId
+        #expect(secondBranchPaneId != firstInnerPaneId)
+        #expect(manager.layout?.leafIds == [secondBranchPaneId])
+
+        #expect(manager.goOut(secondBranchPaneId))
+        let resumedFirstBranchTabId = try #require(manager.goIn(firstRootPaneId))
+        #expect(resumedFirstBranchTabId != secondBranchTabId)
+        #expect(manager.layout == firstBranchLayout)
+        #expect(manager.panes[firstInnerPaneId]?.activeTab?.id == firstInnerTabId)
+    }
+
+    @Test func splitBelongsToItsDepthAndEitherPaneNavigatesTheSharedStack() throws {
+        let manager = AgentManager()
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let firstInnerPaneId = manager.activePaneId
+        let secondInnerPaneId = try #require(
+            manager.splitPane(direction: .horizontal, paneId: firstInnerPaneId)
+        )
+
+        #expect(manager.activeDepth == 1)
+        #expect(manager.layout?.leafIds == [firstInnerPaneId, secondInnerPaneId])
+
+        #expect(manager.goOut(secondInnerPaneId))
+        #expect(manager.activeDepth == 0)
+        #expect(manager.layout?.leafIds == [rootPaneId])
+
+        _ = try #require(manager.goIn(rootPaneId))
+        #expect(manager.activeDepth == 1)
+        #expect(manager.layout?.leafIds == [firstInnerPaneId, secondInnerPaneId])
+
+        manager.focusPane(firstInnerPaneId)
+        #expect(manager.goOut(firstInnerPaneId))
+        #expect(manager.layout?.leafIds == [rootPaneId])
+    }
+
+    @Test func closingTheActiveDepthLayerRemovesItsSplitsAndInnerDescendants() throws {
+        let manager = AgentManager()
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let firstInnerPaneId = manager.activePaneId
+        let secondInnerPaneId = try #require(
+            manager.splitPane(direction: .vertical, paneId: firstInnerPaneId)
+        )
+        _ = try #require(manager.goIn(secondInnerPaneId))
+        let deepestPaneId = manager.activePaneId
+
+        #expect(manager.closeActiveDepthLayer(deepestPaneId))
+        #expect(manager.activeDepth == 1)
+        #expect(manager.maximumDepth == 1)
+        #expect(manager.panes[deepestPaneId] == nil)
+        #expect(manager.layout?.leafIds == [firstInnerPaneId, secondInnerPaneId])
+
+        #expect(manager.closeActiveDepthLayer(firstInnerPaneId))
+        #expect(manager.activeDepth == 0)
+        #expect(manager.maximumDepth == 0)
+        #expect(manager.panes[firstInnerPaneId] == nil)
+        #expect(manager.panes[secondInnerPaneId] == nil)
+        #expect(manager.layout?.leafIds == [rootPaneId])
+        #expect(!manager.closeActiveDepthLayer(rootPaneId))
+    }
+
+    @Test func closingAnOuterPaneRemovesOnlyItsPrivateHiddenBranch() throws {
+        let manager = AgentManager()
+        let firstRootPaneId = manager.activePaneId
+        let secondRootPaneId = try #require(
+            manager.splitPane(direction: .horizontal, paneId: firstRootPaneId)
+        )
+
+        manager.focusPane(firstRootPaneId)
+        _ = try #require(manager.goIn(firstRootPaneId))
+        let firstBranchPaneId = manager.activePaneId
+        #expect(manager.goOut(firstBranchPaneId))
+
+        manager.focusPane(secondRootPaneId)
+        let secondBranchTabId = try #require(manager.goIn(secondRootPaneId))
+        let secondBranchPaneId = manager.activePaneId
+        #expect(manager.goOut(secondBranchPaneId))
+
+        manager.closePane(firstRootPaneId)
+
+        #expect(manager.panes[firstRootPaneId] == nil)
+        #expect(manager.panes[firstBranchPaneId] == nil)
+        #expect(manager.panes[secondRootPaneId] != nil)
+        #expect(manager.panes[secondBranchPaneId] != nil)
+        #expect(manager.layout?.leafIds == [secondRootPaneId])
+        #expect(manager.goIn(secondRootPaneId) == secondBranchTabId)
+    }
+
+    @Test func closingTheOnlyPaneInAnInnerWorkspaceReturnsToItsOwner() throws {
+        let manager = AgentManager()
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let innerPaneId = manager.activePaneId
+
+        manager.closePane(innerPaneId)
+
+        #expect(manager.activeDepth == 0)
+        #expect(manager.activePaneId == rootPaneId)
+        #expect(manager.panes[innerPaneId] == nil)
+        #expect(manager.panes[rootPaneId] != nil)
     }
 
     @Test func prefixXRoutingClosesALayerInsideAndThePaneAtZ0() throws {
         let manager = AgentManager()
         let originalPaneId = manager.activePaneId
-        let childId = try #require(manager.goIn(originalPaneId))
+        _ = try #require(manager.goIn(originalPaneId))
+        let childPaneId = manager.activePaneId
 
         KeybindingManager.closeDepthLayerOrPane(using: manager)
 
         #expect(manager.panes[originalPaneId] != nil)
-        #expect(manager.panes[originalPaneId]?.activeDepth == 0)
-        #expect(!manager.panes[originalPaneId]!.tabs.contains { $0.id == childId })
+        #expect(manager.panes[childPaneId] == nil)
+        #expect(manager.activeDepth == 0)
 
         KeybindingManager.closeDepthLayerOrPane(using: manager)
 
         #expect(manager.panes[originalPaneId] == nil)
     }
 
-    @Test func closingADepthLayerPopsToItsParentAndRemovesInnerDescendants() throws {
+    @Test func regularTabsStayInsideTheirWindowDepth() throws {
         let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let rootId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let childId = try #require(manager.goIn(paneId))
-        let grandchildId = try #require(manager.goIn(paneId))
-
-        manager.goOut(paneId)
-        manager.removeTabFromPane(paneId, tabId: childId)
-
-        let pane = try #require(manager.panes[paneId])
-        #expect(pane.tabs.map(\.id) == [rootId])
-        #expect(pane.activeTab?.id == rootId)
-        #expect(!pane.tabs.contains { $0.id == grandchildId })
-        #expect(manager.paneCount == 1)
-    }
-
-    @Test func regularTabNavigationDoesNotExposeDepthLayersAsTabs() throws {
-        let manager = AgentManager()
-        let paneId = manager.activePaneId
-        let firstRootId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let childId = try #require(manager.goIn(paneId))
-        manager.goOut(paneId)
-        let secondRootId = try #require(
-            manager.addTabToPane(paneId, type: .terminal)
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let innerPaneId = manager.activePaneId
+        let firstTabId = try #require(manager.panes[innerPaneId]?.activeTab?.id)
+        let secondTabId = try #require(
+            manager.addTabToPane(innerPaneId, type: .terminal)
         )
-        let pane = try #require(manager.panes[paneId])
 
-        #expect(pane.rootTabs.map(\.id) == [firstRootId, secondRootId])
-        #expect(pane.tabs.count == 3)
+        manager.nextTab(innerPaneId)
+        #expect(manager.panes[innerPaneId]?.activeTab?.id == firstTabId)
+        manager.prevTab(innerPaneId)
+        #expect(manager.panes[innerPaneId]?.activeTab?.id == secondTabId)
+        #expect(manager.activeDepth == 1)
 
-        manager.nextTab(paneId)
-        #expect(pane.activeTab?.id == firstRootId)
-        #expect(manager.goIn(paneId) == childId)
-
-        manager.nextTab(paneId)
-        #expect(pane.activeTab?.id == secondRootId)
-        manager.prevTab(paneId)
-        #expect(pane.activeTab?.id == firstRootId)
+        #expect(manager.goOut(innerPaneId))
+        #expect(manager.activePaneId == rootPaneId)
+        #expect(manager.goIn(rootPaneId) == secondTabId)
+        #expect(manager.panes[innerPaneId]?.tabs.count == 2)
     }
 
-    @Test func workspaceRoundTripPreservesDepthParentsAndActiveLayer() throws {
+    @Test func workspaceRoundTripPreservesDepthLayoutsAndActiveLayer() throws {
         let source = AgentManager()
-        let paneId = source.activePaneId
-        let rootId = try #require(source.panes[paneId]?.activeTab?.id)
-        let childId = try #require(source.goIn(paneId))
-        let grandchildId = try #require(source.goIn(paneId))
-        source.goOut(paneId)
+        let rootPaneId = source.activePaneId
+        _ = try #require(source.goIn(rootPaneId))
+        let firstInnerPaneId = source.activePaneId
+        let secondInnerPaneId = try #require(
+            source.splitPane(direction: .horizontal, paneId: firstInnerPaneId)
+        )
+        source.focusPane(firstInnerPaneId)
 
         let restored = AgentManager()
         restored.restoreWorkspace(source.snapshotWorkspace())
-        let pane = try #require(restored.panes[paneId])
 
-        #expect(pane.activeTab?.id == childId)
-        #expect(pane.tabs.first { $0.id == childId }?.depthParentId == rootId)
-        #expect(pane.tabs.first { $0.id == grandchildId }?.depthParentId == childId)
-        #expect(restored.goIn(paneId) == grandchildId)
-        #expect(pane.tabs.count == 3)
+        #expect(restored.activeDepth == 1)
+        #expect(restored.maximumDepth == 1)
+        #expect(restored.activePaneId == firstInnerPaneId)
+        #expect(restored.layout?.leafIds == [firstInnerPaneId, secondInnerPaneId])
+        #expect(restored.goOut(firstInnerPaneId))
+        #expect(restored.layout?.leafIds == [rootPaneId])
+        _ = try #require(restored.goIn(rootPaneId))
+        #expect(restored.layout?.leafIds == [firstInnerPaneId, secondInnerPaneId])
     }
 
-    @Test func legacyTabsWithoutDepthParentsRemainRootTabs() throws {
+    @Test func legacyTabsWithoutDepthParentsRemainDecodable() throws {
         let data = Data(
             #"{"id":"tab-9","type":"terminal","cwd":"/tmp/legacy"}"#.utf8
         )

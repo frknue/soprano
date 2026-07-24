@@ -23,7 +23,6 @@ final class SidebarView: NSView {
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
     private var collapsedWindowIds: Set<String> = []
-    private var expandedPaneDepthIds: Set<String> = []
     private var isControlKeyHeld = false
 
     init(
@@ -402,33 +401,24 @@ final class SidebarView: NSView {
 
             guard isExpanded else { continue }
             for pane in agentManager.orderedPanes(in: terminalWindow.id) {
-                let depthBranch = pane.activeDepthBranch
-                let maximumDepth = max(0, depthBranch.count - 1)
+                let depth = terminalWindow.depth(containingPane: pane.id) ?? 0
+                let maximumDepth = terminalWindow.maximumDepth
                 let hasDepth = maximumDepth > 0
-                let isDepthExpanded = hasDepth && expandedPaneDepthIds.contains(pane.id)
                 let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
                 row.configure(
                     title: sidebarTitle(for: pane),
                     branch: branchForPane(pane),
                     dotColor: paneStatusColor(for: pane, theme: theme),
                     agentStatus: pane.activeTab?.agent?.status,
-                    tabCount: pane.rootTabs.count,
-                    depthLevel: hasDepth ? pane.activeDepth : nil,
+                    tabCount: pane.tabs.count,
+                    depthLevel: hasDepth ? depth : nil,
                     maximumDepth: hasDepth ? maximumDepth : nil,
                     shortcutKey: paneShortcutKeysById[pane.id],
                     showShortcutHint: isControlKeyHeld,
-                    showsDisclosure: hasDepth,
-                    expanded: isDepthExpanded,
+                    showsDisclosure: false,
+                    expanded: false,
                     highlighted: pane.id == agentManager.activePaneId,
-                    onToggle: { [weak self] in
-                        guard let self else { return }
-                        if self.expandedPaneDepthIds.contains(pane.id) {
-                            self.expandedPaneDepthIds.remove(pane.id)
-                        } else {
-                            self.expandedPaneDepthIds.insert(pane.id)
-                        }
-                        self.refresh()
-                    },
+                    onToggle: {},
                     onSelect: { [weak self] in
                         self?.agentManager.focusPane(pane.id)
                     },
@@ -441,42 +431,6 @@ final class SidebarView: NSView {
                     equalTo: rowsStack.widthAnchor,
                     constant: -20
                 ).isActive = true
-
-                guard isDepthExpanded else { continue }
-                for (depth, tab) in depthBranch.enumerated() {
-                    let depthRow = SidebarPaneRowView(
-                        theme: theme,
-                        hierarchyIndent: 30 + CGFloat(min(depth, 4) * 6)
-                    )
-                    depthRow.configure(
-                        title: sidebarTitle(for: tab),
-                        branch: branchForTab(tab),
-                        dotColor: tabStatusColor(for: tab, theme: theme),
-                        agentStatus: tab.agent?.status,
-                        tabCount: 1,
-                        depthLevel: depth,
-                        maximumDepth: maximumDepth,
-                        shortcutKey: nil,
-                        showShortcutHint: false,
-                        showsDisclosure: false,
-                        expanded: false,
-                        showsClose: depth > 0,
-                        highlighted: pane.id == agentManager.activePaneId
-                            && pane.activeTab?.id == tab.id,
-                        onToggle: {},
-                        onSelect: { [weak self] in
-                            self?.agentManager.focusTab(paneId: pane.id, tabId: tab.id)
-                        },
-                        onClose: { [weak self] in
-                            self?.agentManager.removeTabFromPane(pane.id, tabId: tab.id)
-                        }
-                    )
-                    rowsStack.addArrangedSubview(depthRow)
-                    depthRow.widthAnchor.constraint(
-                        equalTo: rowsStack.widthAnchor,
-                        constant: -20
-                    ).isActive = true
-                }
             }
         }
     }
@@ -993,7 +947,7 @@ private final class SidebarPaneRowView: NSView {
             badgeLabel.stringValue = badgeParts.joined(separator: " · ")
             badgeLabel.textColor = agentStatus == nil ? theme.colors.textMuted : dotColor
             badgeContainer.toolTip = maximumDepth.map {
-                "Pane depth Z\(depthLevel ?? 0) of Z\($0)"
+                "Window depth Z\(depthLevel ?? 0) of Z\($0)"
             }
         }
         closeButton.contentTintColor = highlighted

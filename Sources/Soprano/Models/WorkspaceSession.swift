@@ -17,6 +17,19 @@ struct WorkspaceSession: Identifiable, Codable {
         var isTitleCustom: Bool? = nil
         var layout: SplitNode?
         var activePaneId: String
+        /// Optional for backward compatibility with sessions saved before
+        /// depth became a tree of pane-owned workspaces.
+        var depthLayers: [SavedDepthLayer]? = nil
+        /// Layer array index. `activeDepth` remains as a decoder fallback for
+        /// sessions written by the earlier linear-stack implementation.
+        var activeDepthLayerIndex: Int? = nil
+        var activeDepth: Int? = nil
+    }
+
+    struct SavedDepthLayer: Codable {
+        var parentPaneId: String? = nil
+        var layout: SplitNode?
+        var activePaneId: String
     }
 
     struct SavedPane: Codable {
@@ -32,8 +45,8 @@ struct WorkspaceSession: Identifiable, Codable {
         var cwd: String?
         var url: String? = nil
         var title: String? = nil
-        /// Optional for backward compatibility with sessions saved before
-        /// pane depth was introduced.
+        /// Retained only to decode sessions from the earlier pane-local depth
+        /// implementation. Restored entries are migrated to regular tabs.
         var depthParentId: String? = nil
     }
 
