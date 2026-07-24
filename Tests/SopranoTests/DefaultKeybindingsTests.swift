@@ -65,6 +65,16 @@ struct DefaultKeybindingsTests {
         #expect(KeybindingManager.splitDirection(for: vertical.id) == .horizontal)
     }
 
+    @Test func copyModeSupportsBothTmuxBracketShortcuts() throws {
+        let leftBracket = try #require(binding("copy-mode"))
+        let rightBracket = try #require(binding("copy-mode-right-bracket"))
+
+        #expect(leftBracket.mode == .prefix)
+        #expect(leftBracket.key == "[")
+        #expect(rightBracket.mode == .prefix)
+        #expect(rightBracket.key == "]")
+    }
+
     @Test func savedLegacySplitDefaultsMigrateToCurrentDefaults() throws {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings = savedConfig.bindings.map { binding in

@@ -356,6 +356,10 @@ extension MainWindowController: KeybindingDelegate {
     func keybindingZoomReset() {
         mainContentVC?.resetActiveTerminalFontSize()
     }
+
+    func keybindingStartCopyMode() {
+        mainContentVC?.beginActiveTerminalCopyMode()
+    }
 }
 
 private extension MainWindowController {

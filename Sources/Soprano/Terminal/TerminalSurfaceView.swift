@@ -185,6 +185,20 @@ final class SurfaceDestructionGate {
     }
 }
 
+private struct TerminalCopyModeGridMetrics {
+    let originX: CGFloat
+    let originY: CGFloat
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+
+    func topLeft(column: Int, row: Int) -> CGPoint {
+        CGPoint(
+            x: originX + CGFloat(column) * cellWidth,
+            y: originY + CGFloat(row) * cellHeight
+        )
+    }
+}
+
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
@@ -193,6 +207,7 @@ final class TerminalSurfaceView: NSView {
     var onTitleChanged: ((String) -> Void)?
     var onAgentInputSubmitted: (() -> Void)?
     var onAgentProcessExited: ((Int32?) -> Void)?
+    var onCopyModeStateChanged: ((KeybindingState) -> Void)?
     private let config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
@@ -203,6 +218,11 @@ final class TerminalSurfaceView: NSView {
     private var keyTextAccumulator: [String]?
     private var keyUpMonitor: Any?
     private var keyEquivalentRouter = TerminalKeyEquivalentRouter()
+    private var copyModeSession: TerminalCopyModeSession?
+    private var copyModeGridMetrics: TerminalCopyModeGridMetrics?
+    private var copyModeCursorLayer: CALayer?
+    private var copyModeLineSelectionMouseHeld = false
+    private var suppressedCopyModeKeyUps: Set<UInt16> = []
 
     init(
         paneId: String,
@@ -371,6 +391,67 @@ final class TerminalSurfaceView: NSView {
         performBindingAction("reset_font_size")
     }
 
+    @discardableResult
+    func beginCopyMode() -> Bool {
+        guard copyModeSession == nil, let surface else { return false }
+
+        _ = performBindingAction("scroll_to_bottom")
+        let surfaceSize = ghostty_surface_size(surface)
+        let cellSize = convertFromBacking(NSSize(
+            width: Double(surfaceSize.cell_width_px),
+            height: Double(surfaceSize.cell_height_px)
+        ))
+        guard surfaceSize.columns > 0,
+              surfaceSize.rows > 0,
+              cellSize.width > 0,
+              cellSize.height > 0
+        else {
+            return false
+        }
+
+        var cursorX = 0.0
+        var cursorBottomY = 0.0
+        var cursorWidth = 0.0
+        var cursorHeight = 0.0
+        ghostty_surface_ime_point(
+            surface,
+            &cursorX,
+            &cursorBottomY,
+            &cursorWidth,
+            &cursorHeight
+        )
+
+        let cursorLeft = CGFloat(cursorX) - cellSize.width / 2
+        let cursorTop = CGFloat(cursorBottomY) - cellSize.height
+        let originX = positiveRemainder(cursorLeft, divisor: cellSize.width)
+        let originY = positiveRemainder(cursorTop, divisor: cellSize.height)
+        let column = Int(round((cursorLeft - originX) / cellSize.width))
+        let row = Int(round((cursorTop - originY) / cellSize.height))
+
+        copyModeGridMetrics = TerminalCopyModeGridMetrics(
+            originX: originX,
+            originY: originY,
+            cellWidth: cellSize.width,
+            cellHeight: cellSize.height
+        )
+        copyModeSession = TerminalCopyModeSession(
+            column: column,
+            row: row,
+            columnCount: Int(surfaceSize.columns),
+            rowCount: Int(surfaceSize.rows)
+        )
+        if ghostty_surface_has_selection(surface) {
+            clearKeyboardSelection(surface: surface)
+        }
+        updateCopyModeCursor()
+        onCopyModeStateChanged?(.copy)
+        return true
+    }
+
+    func cancelCopyMode() {
+        finishCopyMode(copySelection: false)
+    }
+
     @IBAction func copy(_ sender: Any?) {
         performResponderAction(#selector(NSText.copy(_:)))
     }
@@ -388,8 +469,9 @@ final class TerminalSurfaceView: NSView {
         performBindingAction(action)
     }
 
-    private func performBindingAction(_ action: String) {
-        guard let surface else { return }
+    @discardableResult
+    private func performBindingAction(_ action: String) -> Bool {
+        guard let surface else { return false }
         let succeeded = action.withCString { actionPointer in
             ghostty_surface_binding_action(
                 surface,
@@ -400,6 +482,427 @@ final class TerminalSurfaceView: NSView {
         if !succeeded {
             print("[Soprano] Ghostty action failed: \(action)")
         }
+        return succeeded
+    }
+
+    private func handleCopyModeKeyDown(_ event: NSEvent) -> Bool {
+        guard var session = copyModeSession else { return false }
+        suppressedCopyModeKeyUps.insert(event.keyCode)
+
+        guard let command = session.command(for: TerminalCopyModeInput(event: event)) else {
+            copyModeSession = session
+            return true
+        }
+
+        switch command {
+        case .moveLeft:
+            if session.moveHorizontal(-1), session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:left")
+                }
+            }
+
+        case .moveRight:
+            if session.moveHorizontal(1), session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:right")
+                }
+            }
+
+        case .moveUp:
+            let overflow = session.moveVertical(-1)
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    if overflow != 0 {
+                        _ = performBindingAction("scroll_page_lines:\(overflow)")
+                    }
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:up")
+                }
+            } else if overflow != 0 {
+                _ = performBindingAction("scroll_page_lines:\(overflow)")
+            }
+
+        case .moveDown:
+            let overflow = session.moveVertical(1)
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    if overflow != 0 {
+                        _ = performBindingAction("scroll_page_lines:\(overflow)")
+                    }
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:down")
+                }
+            } else if overflow != 0 {
+                _ = performBindingAction("scroll_page_lines:\(overflow)")
+            }
+
+        case .lineStart:
+            session.moveToLineStart()
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:beginning_of_line")
+                }
+            }
+
+        case .lineEnd:
+            session.moveToLineEnd()
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:end_of_line")
+                }
+            }
+
+        case .viewportTop:
+            moveCopyCursor(
+                &session,
+                toViewportRow: 0
+            )
+
+        case .viewportMiddle:
+            moveCopyCursor(
+                &session,
+                toViewportRow: max(0, (session.rowCount - 1) / 2)
+            )
+
+        case .viewportBottom:
+            moveCopyCursor(
+                &session,
+                toViewportRow: session.rowCount - 1
+            )
+
+        case .historyTop:
+            session.moveToHistoryTop()
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    _ = performBindingAction("scroll_to_top")
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:home")
+                }
+            } else {
+                _ = performBindingAction("scroll_to_top")
+            }
+
+        case .historyBottom:
+            session.moveToHistoryBottom()
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    _ = performBindingAction("scroll_to_bottom")
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:end")
+                }
+            } else {
+                _ = performBindingAction("scroll_to_bottom")
+            }
+
+        case .halfPageUp:
+            moveCopyCursorByPage(&session, lines: -max(1, session.rowCount / 2))
+
+        case .halfPageDown:
+            moveCopyCursorByPage(&session, lines: max(1, session.rowCount / 2))
+
+        case .pageUp:
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    _ = performBindingAction("scroll_page_up")
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:page_up")
+                }
+            } else {
+                _ = performBindingAction("scroll_page_up")
+            }
+
+        case .pageDown:
+            if session.phase == .selecting {
+                if session.selectionStyle == .line {
+                    _ = performBindingAction("scroll_page_down")
+                    updateKeyboardLineSelection(session: session)
+                } else {
+                    _ = performBindingAction("adjust_selection:page_down")
+                }
+            } else {
+                _ = performBindingAction("scroll_page_down")
+            }
+
+        case .beginSelection:
+            if session.phase == .navigating,
+               beginKeyboardSelection(session: session) {
+                session.beginSelection()
+                onCopyModeStateChanged?(.copySelection)
+            }
+
+        case .beginLineSelection:
+            if session.phase == .navigating,
+               beginKeyboardLineSelection(session: session) {
+                session.beginSelection(style: .line)
+                onCopyModeStateChanged?(.copySelection)
+            }
+
+        case .copyAndExit:
+            guard session.phase == .selecting else {
+                copyModeSession = session
+                updateCopyModeCursor()
+                return true
+            }
+            copyModeSession = session
+            finishCopyMode(copySelection: true)
+            return true
+
+        case .cancel:
+            copyModeSession = session
+            finishCopyMode(copySelection: false)
+            return true
+
+        case .awaitMore:
+            break
+        }
+
+        copyModeSession = session
+        updateCopyModeCursor()
+        return true
+    }
+
+    private func moveCopyCursor(
+        _ session: inout TerminalCopyModeSession,
+        toViewportRow targetRow: Int
+    ) {
+        let delta = targetRow - session.row
+        guard delta != 0 else { return }
+
+        if session.phase == .selecting {
+            if session.selectionStyle == .line {
+                session.moveToViewportRow(targetRow)
+                updateKeyboardLineSelection(session: session)
+                return
+            } else {
+                let action = delta < 0 ? "adjust_selection:up" : "adjust_selection:down"
+                for _ in 0..<abs(delta) {
+                    _ = performBindingAction(action)
+                }
+            }
+        }
+        session.moveToViewportRow(targetRow)
+    }
+
+    private func moveCopyCursorByPage(
+        _ session: inout TerminalCopyModeSession,
+        lines: Int
+    ) {
+        guard lines != 0 else { return }
+        if session.phase == .selecting {
+            if session.selectionStyle == .line {
+                _ = performBindingAction("scroll_page_lines:\(lines)")
+                updateKeyboardLineSelection(session: session)
+            } else {
+                let action = lines < 0 ? "adjust_selection:up" : "adjust_selection:down"
+                for _ in 0..<abs(lines) {
+                    _ = session.moveVertical(lines < 0 ? -1 : 1)
+                    _ = performBindingAction(action)
+                }
+            }
+        } else {
+            _ = performBindingAction("scroll_page_lines:\(lines)")
+        }
+    }
+
+    private func beginKeyboardSelection(session: TerminalCopyModeSession) -> Bool {
+        guard let surface, let metrics = copyModeGridMetrics else { return false }
+        resetSyntheticClickSequence(surface: surface)
+
+        let topLeft = metrics.topLeft(column: session.column, row: session.row)
+        let y = topLeft.y + metrics.cellHeight / 2
+        let startX = topLeft.x + metrics.cellWidth * 0.1
+        let endX = topLeft.x + metrics.cellWidth * 0.9
+        let mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_SHIFT.rawValue)
+
+        ghostty_surface_mouse_pos(surface, startX, y, mods)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+        ghostty_surface_mouse_pos(surface, endX, y, mods)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+        return ghostty_surface_has_selection(surface)
+    }
+
+    private func beginKeyboardLineSelection(session: TerminalCopyModeSession) -> Bool {
+        guard let surface, let metrics = copyModeGridMetrics else { return false }
+        resetSyntheticClickSequence(surface: surface)
+
+        let topLeft = metrics.topLeft(column: session.column, row: session.row)
+        let x = topLeft.x + metrics.cellWidth / 2
+        let y = topLeft.y + metrics.cellHeight / 2
+        let mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_SHIFT.rawValue)
+        ghostty_surface_mouse_pos(surface, x, y, mods)
+
+        for _ in 0..<2 {
+            _ = ghostty_surface_mouse_button(
+                surface,
+                GHOSTTY_MOUSE_PRESS,
+                GHOSTTY_MOUSE_LEFT,
+                mods
+            )
+            _ = ghostty_surface_mouse_button(
+                surface,
+                GHOSTTY_MOUSE_RELEASE,
+                GHOSTTY_MOUSE_LEFT,
+                mods
+            )
+        }
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+        copyModeLineSelectionMouseHeld = true
+        ghostty_surface_mouse_pos(surface, x, y, mods)
+
+        guard ghostty_surface_has_selection(surface) else {
+            releaseKeyboardLineSelection(surface: surface)
+            return false
+        }
+        return true
+    }
+
+    private func updateKeyboardLineSelection(session: TerminalCopyModeSession) {
+        guard copyModeLineSelectionMouseHeld,
+              let surface,
+              let metrics = copyModeGridMetrics
+        else { return }
+
+        let topLeft = metrics.topLeft(column: session.column, row: session.row)
+        let mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_SHIFT.rawValue)
+        ghostty_surface_mouse_pos(
+            surface,
+            topLeft.x + metrics.cellWidth / 2,
+            topLeft.y + metrics.cellHeight / 2,
+            mods
+        )
+    }
+
+    private func releaseKeyboardLineSelection(surface: ghostty_surface_t) {
+        guard copyModeLineSelectionMouseHeld else { return }
+        let mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_SHIFT.rawValue)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+        copyModeLineSelectionMouseHeld = false
+    }
+
+    private func clearKeyboardSelection(surface: ghostty_surface_t) {
+        resetSyntheticClickSequence(surface: surface)
+    }
+
+    private func resetSyntheticClickSequence(surface: ghostty_surface_t) {
+        let mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_SHIFT.rawValue)
+        ghostty_surface_mouse_pos(surface, -1_000, -1_000, mods)
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_PRESS,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_LEFT,
+            mods
+        )
+    }
+
+    private func finishCopyMode(
+        copySelection: Bool,
+        scrollToBottom: Bool = true
+    ) {
+        guard let session = copyModeSession else { return }
+        if let surface {
+            releaseKeyboardLineSelection(surface: surface)
+            if session.phase == .selecting {
+                if copySelection {
+                    _ = performBindingAction("copy_to_clipboard")
+                }
+                if !copySelection || !GhosttyAppManager.shared.clearsSelectionOnCopy {
+                    clearKeyboardSelection(surface: surface)
+                }
+            }
+        } else {
+            copyModeLineSelectionMouseHeld = false
+        }
+        if scrollToBottom {
+            _ = performBindingAction("scroll_to_bottom")
+        }
+
+        copyModeSession = nil
+        copyModeGridMetrics = nil
+        copyModeCursorLayer?.removeFromSuperlayer()
+        copyModeCursorLayer = nil
+        onCopyModeStateChanged?(.normal)
+    }
+
+    private func updateCopyModeCursor() {
+        guard let session = copyModeSession,
+              session.phase == .navigating,
+              let metrics = copyModeGridMetrics
+        else {
+            copyModeCursorLayer?.removeFromSuperlayer()
+            copyModeCursorLayer = nil
+            return
+        }
+
+        let cursorLayer: CALayer
+        if let existing = copyModeCursorLayer {
+            cursorLayer = existing
+        } else {
+            cursorLayer = CALayer()
+            cursorLayer.zPosition = 1_000
+            cursorLayer.borderWidth = 1
+            layer?.addSublayer(cursorLayer)
+            copyModeCursorLayer = cursorLayer
+        }
+
+        let topLeft = metrics.topLeft(column: session.column, row: session.row)
+        let frame = CGRect(
+            x: topLeft.x,
+            y: bounds.height - topLeft.y - metrics.cellHeight,
+            width: metrics.cellWidth,
+            height: metrics.cellHeight
+        )
+        let color = NSColor.controlAccentColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cursorLayer.frame = frame
+        cursorLayer.backgroundColor = color.withAlphaComponent(0.24).cgColor
+        cursorLayer.borderColor = color.withAlphaComponent(0.95).cgColor
+        CATransaction.commit()
+    }
+
+    private func positiveRemainder(_ value: CGFloat, divisor: CGFloat) -> CGFloat {
+        let remainder = value.truncatingRemainder(dividingBy: divisor)
+        return remainder >= 0 ? remainder : remainder + divisor
     }
 
     private func withOptionalCString<Result>(
@@ -434,6 +937,7 @@ final class TerminalSurfaceView: NSView {
         }
         if result {
             keyEquivalentRouter.reset()
+            suppressedCopyModeKeyUps.removeAll()
         }
         return result
     }
@@ -524,6 +1028,9 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleCopyModeKeyDown(event) {
+            return
+        }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -569,6 +1076,9 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyUp(with event: NSEvent) {
+        if suppressedCopyModeKeyUps.remove(event.keyCode) != nil {
+            return
+        }
         guard surface != nil else {
             super.keyUp(with: event)
             return
@@ -652,6 +1162,9 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if copyModeSession != nil {
+            finishCopyMode(copySelection: false)
+        }
         guard let surface else {
             super.mouseDown(with: event)
             return
@@ -672,38 +1185,45 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
         sendMousePosition(event, surface: surface)
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
         sendMousePosition(event, surface: surface)
     }
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
         sendMousePosition(event, surface: surface)
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
         ghostty_surface_mouse_pos(surface, -1, -1, modsFromEvent(event))
     }
 
     override func rightMouseDragged(with event: NSEvent) {
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
         sendMousePosition(event, surface: surface)
     }
 
     override func otherMouseDragged(with event: NSEvent) {
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
         sendMousePosition(event, surface: surface)
     }
 
     override func scrollWheel(with event: NSEvent) {
+        guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else {
             super.scrollWheel(with: event)
             return
@@ -1009,8 +1529,10 @@ final class TerminalSurfaceView: NSView {
 
     func destroySurface() {
         surfaceDestructionGate.perform {
+            finishCopyMode(copySelection: false, scrollToBottom: false)
             removeKeyUpMonitor()
             keyEquivalentRouter.reset()
+            suppressedCopyModeKeyUps.removeAll()
             guard let surface else { return }
             GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
                 for: ObjectIdentifier(self)

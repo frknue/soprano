@@ -47,6 +47,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingOpenProjectSearch()
     func keybindingZoom(delta: Int)
     func keybindingZoomReset()
+    func keybindingStartCopyMode()
 }
 
 final class KeybindingManager: @unchecked Sendable {
@@ -186,9 +187,11 @@ final class KeybindingManager: @unchecked Sendable {
 
         if state == .prefix {
             if let binding = config.bindings.first(where: { matchesPrefixBinding($0, key: key, flags: flags) }) {
+                clearPrefixMode()
                 executeBinding(binding)
+            } else {
+                clearPrefixMode()
             }
-            clearPrefixMode()
             return nil
         }
 
@@ -369,6 +372,8 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.closePane(agentManager.activePaneId)
         case "maximize-pane":
             agentManager.toggleMaximize()
+        case "copy-mode", "copy-mode-right-bracket":
+            invokeDelegate { $0.keybindingStartCopyMode() }
 
         case "new-pane-tab":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)

@@ -170,6 +170,7 @@ soprano/
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
 | `Ctrl+A` → `Q` / `X` | Close / kill pane |
+| `Ctrl+A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `Ctrl+A` → `T` / `N` / `P` / `W` | New tab / next / prev / close tab |
 | `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |
@@ -181,6 +182,15 @@ soprano/
 | `⇧⌘S` | Save session as… |
 | `⌘W` | Close active pane |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
+
+### Terminal copy mode
+
+Copy mode starts at the terminal cursor and keeps navigation keys out of the
+running shell or TUI. Move with `h/j/k/l` or the arrow keys, use `0`/`$` for
+line boundaries, `H/M/L` for viewport positions, `gg`/`G` for scrollback
+boundaries, and `Ctrl+U/D` or `Ctrl+B/F` for paging. Press `v` to begin a
+character selection or `Shift+V` to select whole lines, then `y` or Enter to
+copy it to the macOS clipboard and exit. Escape, `q`, or `Ctrl+C` cancels.
 
 ### Nested pane navigation
 
