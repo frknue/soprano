@@ -168,15 +168,18 @@ soprano/
 |----------|--------|
 | `Ctrl+H/J/K/L` | Navigate panes (left/down/up/right) |
 | `Ctrl+A` → `Ctrl+A` | Send a literal `Ctrl+A` to the terminal |
+| `Ctrl+A` → `P` / `N` | Switch to previous / next logical window |
 | `Ctrl+Shift+H/L` | Switch to previous / next logical window |
 | `Ctrl+1…9` | Select logical window 1–9 |
 | `Ctrl+Shift+letter shown in sidebar` | Select the matching pane across logical windows |
 | `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
 | `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
-| `Ctrl+A` → `Q` / `X` | Close / kill pane |
+| `Ctrl+A` → `Q` | Close the whole pane and all of its depth layers |
+| `Ctrl+A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
 | `Ctrl+A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `Ctrl+A` → `C` | New logical window in the current directory |
-| `Ctrl+A` → `T` / `N` / `P` / `W` | New tab / next / prev / close tab |
+| `Ctrl+A` → `I` / `O` | Go one terminal layer in / out on the pane z-axis |
+| `Ctrl+A` → `T` / `Shift+N` / `Shift+P` / `W` | New tab / next / prev / close tab |
 | `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
 | `⌘T` | New terminal |
 | `⌘B` | New browser pane |
@@ -191,6 +194,16 @@ soprano/
 Holding Control reveals the window and pane hints in the sidebar. Pane hints
 include `⇧` because they require Control+Shift; unmodified alphabetic Control
 chords remain available to the terminal.
+
+### Pane depth
+
+Each pane has a z-axis in addition to splits and tabs. Going in creates a
+terminal in the active terminal's current directory and keeps the existing
+surface alive behind it. Going out reveals that surface again. Going back in
+resumes the same inner terminal, and the stack can contain multiple levels.
+Use `Ctrl+A` then `I` / `O`, the `‹ Z0 ›` controls in the pane header, or
+**Go In** / **Go Out** in the command palette. The pane's sidebar disclosure
+shows every layer in the active depth branch and lets you jump directly to one.
 
 ### Terminal copy mode
 

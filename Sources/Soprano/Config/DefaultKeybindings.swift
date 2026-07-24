@@ -12,8 +12,10 @@ enum DefaultKeybindings {
             KeyBinding(id: "nav-down", label: "Focus Down", description: "Move focus to the pane below", category: .navigation, defaultKeys: "Ctrl+J", mode: .direct, key: "j", ctrl: true),
             KeyBinding(id: "nav-up", label: "Focus Up", description: "Move focus to the pane above", category: .navigation, defaultKeys: "Ctrl+K", mode: .direct, key: "k", ctrl: true),
             KeyBinding(id: "nav-right", label: "Focus Right", description: "Move focus to the pane on the right", category: .navigation, defaultKeys: "Ctrl+L", mode: .direct, key: "l", ctrl: true),
-            KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
-            KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
+            KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Prefix → P", mode: .prefix, key: "p"),
+            KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Prefix → N", mode: .prefix, key: "n"),
+            KeyBinding(id: "previous-window-direct", label: "Previous Window (Direct)", description: "Switch to the previous logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
+            KeyBinding(id: "next-window-direct", label: "Next Window (Direct)", description: "Switch to the next logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
             KeyBinding(id: "select-window-1", label: "Select Window 1", description: "Switch to logical window 1", category: .navigation, defaultKeys: "Ctrl+1", mode: .direct, key: "1", ctrl: true),
             KeyBinding(id: "select-window-2", label: "Select Window 2", description: "Switch to logical window 2", category: .navigation, defaultKeys: "Ctrl+2", mode: .direct, key: "2", ctrl: true),
             KeyBinding(id: "select-window-3", label: "Select Window 3", description: "Switch to logical window 3", category: .navigation, defaultKeys: "Ctrl+3", mode: .direct, key: "3", ctrl: true),
@@ -34,16 +36,18 @@ enum DefaultKeybindings {
             KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → -", mode: .prefix, key: "-"),
             KeyBinding(id: "split-vertical", label: "Split Vertical", description: "Split the active pane vertically", category: .layout, defaultKeys: "Prefix → |", mode: .prefix, key: "|", shift: true),
             KeyBinding(id: "close-pane", label: "Close Pane", description: "Close the active pane", category: .layout, defaultKeys: "Prefix → Q", mode: .prefix, key: "q"),
-            KeyBinding(id: "kill-pane", label: "Kill Pane", description: "Force-close the active pane", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
+            KeyBinding(id: "kill-pane", label: "Close Layer / Kill Pane", description: "Close the active depth layer, or force-close the pane at Z0", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
             KeyBinding(id: "maximize-pane", label: "Maximize", description: "Toggle maximize for the active pane", category: .layout, defaultKeys: "Prefix → M", mode: .prefix, key: "m"),
             KeyBinding(id: "copy-mode", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → [", mode: .prefix, key: "["),
             KeyBinding(id: "copy-mode-right-bracket", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → ]", mode: .prefix, key: "]"),
             KeyBinding(id: "new-window-current-directory", label: "New Window Here", description: "Create a logical window in the active terminal directory", category: .layout, defaultKeys: "Prefix → C", mode: .prefix, key: "c"),
+            KeyBinding(id: "pane-depth-in", label: "Go In", description: "Open or resume a terminal one level into the active pane", category: .layout, defaultKeys: "Prefix → I", mode: .prefix, key: "i"),
+            KeyBinding(id: "pane-depth-out", label: "Go Out", description: "Return to the terminal one level out of the active pane", category: .layout, defaultKeys: "Prefix → O", mode: .prefix, key: "o"),
 
             // Tabs (prefix)
             KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),
-            KeyBinding(id: "next-pane-tab", label: "Next Tab", description: "Switch to the next tab", category: .layout, defaultKeys: "Prefix → N", mode: .prefix, key: "n"),
-            KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → P", mode: .prefix, key: "p"),
+            KeyBinding(id: "next-pane-tab", label: "Next Tab", description: "Switch to the next tab", category: .layout, defaultKeys: "Prefix → Shift+N", mode: .prefix, key: "n", shift: true),
+            KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → Shift+P", mode: .prefix, key: "p", shift: true),
             KeyBinding(id: "close-pane-tab", label: "Close Tab", description: "Close the active tab", category: .layout, defaultKeys: "Prefix → W", mode: .prefix, key: "w"),
 
             // Agents (direct: Cmd+1/2/3)
@@ -120,6 +124,39 @@ enum DefaultKeybindings {
            savedBinding.meta != true,
            savedBinding.shift == true
         {
+            return defaultBinding
+        }
+
+        let usesLegacyWindowOrTabDefault: Bool
+        switch savedBinding.id {
+        case "previous-window":
+            usesLegacyWindowOrTabDefault = savedBinding.mode == .direct
+                && savedBinding.key == "h"
+                && savedBinding.ctrl == true
+                && savedBinding.meta != true
+                && savedBinding.shift == true
+        case "next-window":
+            usesLegacyWindowOrTabDefault = savedBinding.mode == .direct
+                && savedBinding.key == "l"
+                && savedBinding.ctrl == true
+                && savedBinding.meta != true
+                && savedBinding.shift == true
+        case "prev-pane-tab":
+            usesLegacyWindowOrTabDefault = savedBinding.mode == .prefix
+                && savedBinding.key == "p"
+                && savedBinding.ctrl != true
+                && savedBinding.meta != true
+                && savedBinding.shift != true
+        case "next-pane-tab":
+            usesLegacyWindowOrTabDefault = savedBinding.mode == .prefix
+                && savedBinding.key == "n"
+                && savedBinding.ctrl != true
+                && savedBinding.meta != true
+                && savedBinding.shift != true
+        default:
+            usesLegacyWindowOrTabDefault = false
+        }
+        if usesLegacyWindowOrTabDefault {
             return defaultBinding
         }
 

@@ -315,6 +315,15 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
+    /// Prefix X pops one z-axis layer when possible, retaining its historic
+    /// whole-pane kill behavior at the outermost layer.
+    static func closeDepthLayerOrPane(using agentManager: AgentManager) {
+        let paneId = agentManager.activePaneId
+        if !agentManager.closeActiveDepthLayer(paneId) {
+            agentManager.closePane(paneId)
+        }
+    }
+
     private var activeTerminalTarget: TerminalTarget? {
         guard let tabId = agentManager.panes[agentManager.activePaneId]?.activeTab?.id else {
             return nil
@@ -387,9 +396,9 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.navigateToPane(direction: .up)
         case "nav-right":
             agentManager.navigateToPane(direction: .right)
-        case "previous-window":
+        case "previous-window", "previous-window-direct":
             agentManager.activatePreviousWindow()
-        case "next-window":
+        case "next-window", "next-window-direct":
             agentManager.activateNextWindow()
 
         case "resize-left":
@@ -401,14 +410,20 @@ final class KeybindingManager: @unchecked Sendable {
         case "resize-right":
             agentManager.resizePane(direction: .right, tickPercent: config.resizeTickPercent)
 
-        case "close-pane", "kill-pane":
+        case "close-pane":
             agentManager.closePane(agentManager.activePaneId)
+        case "kill-pane":
+            Self.closeDepthLayerOrPane(using: agentManager)
         case "maximize-pane":
             agentManager.toggleMaximize()
         case "copy-mode", "copy-mode-right-bracket":
             invokeDelegate { $0.keybindingStartCopyMode() }
         case "new-window-current-directory":
             _ = agentManager.createWindow()
+        case "pane-depth-in":
+            _ = agentManager.goIn(agentManager.activePaneId)
+        case "pane-depth-out":
+            _ = agentManager.goOut(agentManager.activePaneId)
 
         case "new-pane-tab":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)

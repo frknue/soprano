@@ -684,6 +684,76 @@ final class AgentManager: @unchecked Sendable {
         return true
     }
 
+    // MARK: - Pane Depth
+
+    /// Moves one level inward on a pane's z-axis. The first visit creates a
+    /// terminal in the current directory; later visits resume the same live
+    /// terminal surface.
+    @discardableResult
+    func goIn(_ paneId: String) -> String? {
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
+              let activeTab = pane.activeTab
+        else { return nil }
+
+        let targetIndex: Int
+        if let existingChildIndex = pane.tabs.firstIndex(where: {
+            $0.depthParentId == activeTab.id
+        }) {
+            targetIndex = existingChildIndex
+        } else {
+            guard pane.tabs.count < PaneState.maxTabsPerPane else { return nil }
+            let tabId = nextTabId()
+            let child = createPaneTab(
+                id: tabId,
+                type: .terminal,
+                cwd: activeTab.cwd,
+                depthParentId: activeTab.id
+            )
+            pane.tabs.append(child)
+            targetIndex = pane.tabs.count - 1
+        }
+
+        pane.activeTabIndex = targetIndex
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
+        notifyChange(layoutChanged: windowChanged)
+        return pane.tabs[targetIndex].id
+    }
+
+    /// Reveals the live terminal immediately outside the active depth layer.
+    @discardableResult
+    func goOut(_ paneId: String) -> Bool {
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId),
+              let parentId = pane.activeTab?.depthParentId,
+              let parentIndex = pane.tabs.firstIndex(where: { $0.id == parentId })
+        else { return false }
+
+        pane.activeTabIndex = parentIndex
+        let windowChanged = activeWindowId != terminalWindow.id
+        activeWindowId = terminalWindow.id
+        terminalWindow.activePaneId = paneId
+        _ = clearAttentionWithoutNotification(paneId: paneId)
+        notifyChange(layoutChanged: windowChanged)
+        return true
+    }
+
+    /// Closes only the active inner layer. Returns `false` at the outermost
+    /// layer so callers can retain their normal whole-pane behavior there.
+    @discardableResult
+    func closeActiveDepthLayer(_ paneId: String) -> Bool {
+        guard let pane = panes[paneId],
+              let activeTab = pane.activeTab,
+              activeTab.depthParentId != nil
+        else { return false }
+
+        removeTabFromPane(paneId, tabId: activeTab.id)
+        return true
+    }
+
     // MARK: - Tabs
 
     @discardableResult
@@ -713,22 +783,35 @@ final class AgentManager: @unchecked Sendable {
     func removeTabFromPane(_ paneId: String, tabId: String) {
         guard let pane = panes[paneId] else { return }
         guard let index = pane.tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        cancelAgentReadinessGeneration(
-            for: TerminalTarget(paneId: paneId, tabId: tabId)
-        )
+        let tab = pane.tabs[index]
+        let removedIds = pane.descendantIds(of: tabId)
+        let activeTabId = pane.activeTab?.id
+        let activeTabWillBeRemoved = activeTabId.map(removedIds.contains) == true
 
-        if pane.tabs.count == 1 {
+        for removedId in removedIds {
+            cancelAgentReadinessGeneration(
+                for: TerminalTarget(paneId: paneId, tabId: removedId)
+            )
+        }
+
+        if tab.depthParentId == nil, pane.rootTabs.count == 1 {
             closePane(paneId)
             return
         }
 
-        pane.tabs.remove(at: index)
-        if index < pane.activeTabIndex {
-            pane.activeTabIndex -= 1
-        } else if index == pane.activeTabIndex {
-            pane.activeTabIndex = max(0, pane.activeTabIndex - 1)
+        pane.tabs.removeAll { removedIds.contains($0.id) }
+
+        let nextActiveId: String?
+        if activeTabWillBeRemoved {
+            nextActiveId = tab.depthParentId.flatMap { parentId in
+                pane.tabs.contains { $0.id == parentId } ? parentId : nil
+            } ?? pane.rootTabs.first?.id
+        } else {
+            nextActiveId = activeTabId
         }
-        pane.activeTabIndex = pane.clampedActiveIndex()
+        pane.activeTabIndex = nextActiveId.flatMap { nextId in
+            pane.tabs.firstIndex { $0.id == nextId }
+        } ?? pane.clampedActiveIndex()
         notifyChange()
     }
 
@@ -749,9 +832,13 @@ final class AgentManager: @unchecked Sendable {
     func nextTab(_ paneId: String) {
         guard let pane = panes[paneId],
               let terminalWindow = window(containingPane: paneId),
-              !pane.tabs.isEmpty
+              pane.rootTabs.count > 1
         else { return }
-        pane.activeTabIndex = (pane.clampedActiveIndex() + 1) % pane.tabs.count
+        let roots = pane.rootTabs
+        let activeRootId = pane.activeDepthPath.first?.id
+        let currentIndex = roots.firstIndex { $0.id == activeRootId } ?? 0
+        let nextRoot = roots[(currentIndex + 1) % roots.count]
+        pane.activeTabIndex = pane.tabs.firstIndex { $0.id == nextRoot.id } ?? 0
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
@@ -762,10 +849,13 @@ final class AgentManager: @unchecked Sendable {
     func prevTab(_ paneId: String) {
         guard let pane = panes[paneId],
               let terminalWindow = window(containingPane: paneId),
-              !pane.tabs.isEmpty
+              pane.rootTabs.count > 1
         else { return }
-        let current = pane.clampedActiveIndex()
-        pane.activeTabIndex = (current - 1 + pane.tabs.count) % pane.tabs.count
+        let roots = pane.rootTabs
+        let activeRootId = pane.activeDepthPath.first?.id
+        let currentIndex = roots.firstIndex { $0.id == activeRootId } ?? 0
+        let previousRoot = roots[(currentIndex - 1 + roots.count) % roots.count]
+        pane.activeTabIndex = pane.tabs.firstIndex { $0.id == previousRoot.id } ?? 0
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
         terminalWindow.activePaneId = paneId
@@ -825,7 +915,8 @@ final class AgentManager: @unchecked Sendable {
                             type: tab.type,
                             profileId: tab.agent?.profileId,
                             cwd: tab.cwd,
-                            title: tab.title
+                            title: tab.title,
+                            depthParentId: tab.depthParentId
                         )
                     }
                 )
@@ -863,17 +954,24 @@ final class AgentManager: @unchecked Sendable {
                 maxId = max(maxId, num)
             }
 
+            var restoredTabIds: Set<String> = []
             let tabs: [PaneTab] = savedPane.tabs.map { savedTab in
                 if let num = parseIdNumber(savedTab.id) {
                     maxId = max(maxId, num)
                 }
-                return createPaneTab(
+                let validDepthParentId = savedTab.depthParentId.flatMap { parentId in
+                    restoredTabIds.contains(parentId) ? parentId : nil
+                }
+                let tab = createPaneTab(
                     id: savedTab.id,
                     type: savedTab.type,
                     profileId: savedTab.profileId,
                     cwd: savedTab.cwd,
-                    title: savedTab.title
+                    title: savedTab.title,
+                    depthParentId: validDepthParentId
                 )
+                restoredTabIds.insert(savedTab.id)
+                return tab
             }
 
             let finalTabs = tabs.isEmpty
@@ -1139,7 +1237,8 @@ final class AgentManager: @unchecked Sendable {
         type: PaneType,
         profileId: String? = nil,
         cwd: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        depthParentId: String? = nil
     ) -> PaneTab {
         if type == .agent, let profileId, let profile = DefaultAgents.profile(for: profileId) {
             let agent = AgentInstance(id: id, profileId: profile.id)
@@ -1150,13 +1249,20 @@ final class AgentManager: @unchecked Sendable {
                 type: .agent,
                 title: restoredTitle,
                 agent: agent,
-                cwd: cwd
+                cwd: cwd,
+                depthParentId: depthParentId
             )
         }
 
         let restoredTitle = title
             ?? cwd?.split(separator: "/").last.map(String.init)
             ?? "Terminal"
-        return PaneTab(id: id, type: .terminal, title: restoredTitle, cwd: cwd)
+        return PaneTab(
+            id: id,
+            type: .terminal,
+            title: restoredTitle,
+            cwd: cwd,
+            depthParentId: depthParentId
+        )
     }
 }
