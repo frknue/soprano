@@ -1,235 +1,251 @@
+<div align="center">
+
+<img src="app-icon.png" alt="" width="112">
+
 # Soprano
 
-Native macOS tiling terminal multiplexer for AI coding agents. Built with Swift + AppKit + [libghostty](https://github.com/ghostty-org/ghostty).
+**A native macOS tiling multiplexer for running a room full of AI coding agents.**
 
-Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly
-onto a terminal to insert their shell-safe paths.
+Codex, Claude Code, and OpenCode side by side in real GPU-rendered terminals — every
+pane says what its agent is doing, and macOS tells you which one is waiting on you.
 
-## Agent notifications
+<img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple&logoColor=white">
+<img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
+<img alt="AppKit, programmatic" src="https://img.shields.io/badge/AppKit-programmatic-2b6cb0">
+<img alt="libghostty" src="https://img.shields.io/badge/terminal-libghostty-8f3f71">
 
-Every Soprano terminal exports pane metadata for lifecycle hooks. The built-in
-agent launchers configure those hooks without changing your global configuration:
+</div>
 
-- Codex uses its external turn notifier plus OSC approval notifications.
-- Claude Code receives launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`,
-  and permission hooks.
-- OpenCode receives a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
+```
+┌───────────────────────┬─ Codex ────── WORKING · Z0 ─┬─ Claude Code ─ NEEDS INPUT · Z0 ─┐
+│ WINDOWS               │ • editing SplitNode.swift   │ Drop the legacy column? [y/n]    │
+│ ▍soprano              │ • 3 files changed           │ >                                │
+│ ▍ Codex    ⎇ main     │                             │                                  │
+│ ▍ Claude   ⎇ fix/ui • ├─ Terminal 1 ────────────────┴──────────────────────────────────┤
+│ ▍ Browser             │ > swift test                                                   │
+│  webapp               │ Executed 142 tests, 0 failures                                 │
+│   Terminal ⎇ main     │ >                                                              │
+├───────────────────────┴────────────────────────────────────────────────────────────────┤
+│ soprano ▸ Claude Code · Z0                                     ⌘P commands   ⌃A prefix │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-### Agents started from a terminal
+## Why
 
-To recognize agents started directly, through an alias, or from a script, merge
-the supplied lifecycle hooks into the corresponding user configuration:
+One agent is easy. Four is a scheduling problem. They run asynchronously, they all
+stop to ask you something eventually, and terminal tabs hide the one that is blocked.
+Soprano is built around the question you actually have all day: *which agent needs me
+right now?*
 
-- Codex: merge [`Support/AgentHooks/codex-hooks.json`](Support/AgentHooks/codex-hooks.json)
-  into `$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`). Start Codex
-  once, open `/hooks`, and trust the new command hooks.
-- Claude Code: merge the `hooks` entries from
-  [`Support/AgentHooks/claude-settings.json`](Support/AgentHooks/claude-settings.json)
-  into `~/.claude/settings.json`.
+- **Panes report their own status.** `STARTING` · `WORKING` · `READY` · `NEEDS INPUT` ·
+  `ERROR` · `STOPPED`, driven by real agent lifecycle hooks rather than output scraping.
+- **Notifications name the location.** Subtitled `window ▸ pane`; clicking one activates
+  Soprano and focuses that exact tab.
+- **A real terminal.** Every pane is a [libghostty](https://github.com/ghostty-org/ghostty)
+  surface hosted in AppKit. No Electron, no web view, no reimplemented VT parser.
+- **Depth.** Any pane can open a private workspace on the window's z-axis, so one pane
+  becomes a whole layout while its siblings keep running.
+- **A browser your agents can drive.** `⌘B` splits a WebKit pane;
+  `"$SOPRANO_BIN" browser click @e1` works from inside any terminal.
+- **Layouts that come back.** The last workspace restores on launch, and `⇧⌘S` saves
+  named sessions.
 
-Preserve existing hook groups when merging. The commands no-op outside Soprano,
-and the first lifecycle event automatically associates the current terminal tab
-with the reported agent. This works for any launcher whose underlying agent
-process inherits the Soprano terminal environment.
+## Try it
 
-When a background agent finishes, macOS shows a notification and the pane gets a
-blue unread ring. The notification is subtitled `window ▸ pane` so it names the
-location that wants attention, and a pane's banners group together rather than
-stacking. Clicking one activates Soprano and focuses that tab. The pane header
-and status bar expose `STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and
-`STOPPED` states. Focusing the relevant tab clears its unread marker. A completed
-turn remains at `NEEDS INPUT` until the next prompt is submitted.
-
-Soprano asks for notification permission at launch. Notifications are only sent
-for panes that are not focused, so denying the prompt leaves the in-app unread
-ring as the only signal. Re-enable it under **System Settings → Notifications →
-Soprano**.
-
-## Prerequisites
-
-- macOS 14+ (Sonoma)
-- [Homebrew Swift](https://formulae.brew.sh/formula/swift) 6.2+ (system CLT Swift has broken SPM)
-- [Zig](https://ziglang.org/download/) 0.13+ (for building libghostty)
-- Xcode (with Metal Toolchain installed)
+Fresh clone to installed app, four steps:
 
 ```bash
-brew install swift
-brew install zig
+# 1 · Toolchain. Homebrew Swift is required — the system CLT Swift has broken SPM.
+brew install swift zig
 xcodebuild -downloadComponent MetalToolchain
-```
 
-## Building libghostty
+# 2 · Clone with the ghostty submodule
+git clone --recurse-submodules https://github.com/frknue/soprano.git
+cd soprano
 
-Soprano depends on a pre-built `libghostty.a` static library. The ghostty source is included as a submodule/directory in `ghostty/`.
-
-```bash
-cd ghostty
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  zig build -Dapp-runtime=none -Demit-xcframework=false -Doptimize=ReleaseFast
-```
-
-Then copy the built artifacts into the project:
-
-```bash
+# 3 · Build libghostty once (a few minutes, needs Xcode's Metal Toolchain)
+(cd ghostty && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  zig build -Dapp-runtime=none -Demit-xcframework=false -Doptimize=ReleaseFast)
 mkdir -p lib
 cp ghostty/zig-out/lib/libghostty.a lib/
 cp ghostty/zig-out/include/ghostty.h Sources/GhosttyKit/include/
-```
 
-> You only need to rebuild libghostty when updating the ghostty source. The `lib/libghostty.a` file is checked in for convenience.
-
-## Development
-
-### Build (debug)
-
-```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build
-```
-
-### Run
-
-```bash
-./dev.sh
-```
-
-`dev.sh` builds and launches `.build/debug/Soprano Dev.app`. The development app
-uses the separate `com.soprano.dev` bundle identifier, so its preferences,
-window state, sessions, and notification permission remain isolated from the
-installed app. Both app bundles include the same Ghostty runtime resources, so
-themes and terminal behavior do not depend on the environment used to launch
-them. Packaging uses `ghostty/zig-out/share` when available, then an exported
-`GHOSTTY_RESOURCES_DIR`, and finally the resources from an installed
-`/Applications/Ghostty.app`. Set `SOPRANO_GHOSTTY_RESOURCES_DIR` to override the
-resource source explicitly. Pass `--build-only` to create the bundle without
-launching it. The legacy `run.sh` command forwards to `dev.sh`.
-
-A real application bundle is required by macOS for native notifications.
-`swift run` and the raw `.build/debug/Soprano` executable are still useful for
-debugging, but native notifications are disabled for those unbundled launches.
-
-To run the unbundled executable:
-
-```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift run
-```
-
-### Type-check only
-
-```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build 2>&1 | head -20
-```
-
-## Production Build
-
-### Release binary
-
-```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
-```
-
-The optimized binary is at `.build/release/Soprano`.
-
-### Install the release app
-
-Build and install `/Applications/Soprano.app` without stopping or launching the
-application:
-
-```bash
+# 4 · Build the release app into /Applications
 ./install.sh
 ```
 
-The updated version is used the next time Soprano launches. To install into a
-different applications directory, set `SOPRANO_INSTALL_DIR`:
+**Requirements:** macOS 14 Sonoma or newer · Xcode with the Metal Toolchain ·
+[Homebrew Swift](https://formulae.brew.sh/formula/swift) 6.2+ ·
+[Zig](https://ziglang.org/download/) 0.13+.
 
-```bash
-SOPRANO_INSTALL_DIR="$HOME/Applications" ./install.sh
-```
+`lib/` is not tracked, so step 3 is mandatory on a fresh clone — but you only repeat it
+when the ghostty submodule moves. Packaging also needs Ghostty's *runtime* resources
+(themes, shell integration, terminfo); step 3 produces them, an installed
+`/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
+both.
 
-## Project Structure
+`install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
+stable local identity so macOS keeps your notification permission across rebuilds, and
+replaces `/Applications/Soprano.app` **without** stopping a running instance — the
+update applies on the next launch. Install elsewhere with
+`SOPRANO_INSTALL_DIR="$HOME/Applications" ./install.sh`.
 
-```
-soprano/
-├── Package.swift                 # SPM package (swift-tools-version: 6.0, macOS 14+)
-├── lib/libghostty.a              # Pre-built ghostty static library (135MB)
-├── Sources/
-│   ├── Soprano/
-│   │   ├── main.swift            # Entry point
-│   │   ├── App/                  # AppDelegate, MainWindowController, MainContentViewController
-│   │   ├── Models/               # Data types (AgentProfile, PaneState, SplitNode, etc.)
-│   │   ├── Controllers/          # AgentManager, KeybindingManager, SessionManager, ThemeManager
-│   │   ├── Views/                # All AppKit views (SplitTreeView, SidebarView, CommandPalette, etc.)
-│   │   ├── Config/               # Default configs, themes, keybindings
-│   │   ├── Terminal/             # GhosttyAppManager, TerminalSurfaceView
-│   │   └── Utilities/            # NSColor+Hex extension
-│   └── GhosttyKit/
-│       ├── module.modulemap      # System library module map
-│       └── include/ghostty.h     # libghostty C API header
-├── ghostty/                      # Ghostty source (for rebuilding libghostty)
-└── _archive/                     # Old Tauri/React/Rust code (reference)
-```
+### The first five minutes
 
-## Keyboard Shortcuts
+| Press | And |
+|---|---|
+| `⌘2` | Claude Code launches in the active pane; the header takes its color and starts reporting status |
+| `⌃A` then `\|` | Split vertically. `⌃A` is the tmux-style prefix; `-` splits horizontally |
+| `⌘1` | Codex starts in the new pane |
+| `⌃H` `⌃J` `⌃K` `⌃L` | Move between panes — no prefix needed |
+| `⌘B` | A WebKit browser pane splits off to the right |
+| *drag a file from Finder onto a terminal* | Its shell-safe path is inserted at the cursor |
+| `⌃A` then `M` | Maximize the active pane, and again to restore it |
+| `⌃A` then `I` | Dive into that pane's private inner workspace; `O` comes back out |
+| *hold* `⌃` | The sidebar reveals its window and pane jump hints |
+| *switch away, let an agent finish* | macOS notification titled `window ▸ pane`, plus a blue unread ring on the pane |
+| `⌘P` | Command palette for everything above |
+
+## Agents that report in
+
+Every Soprano terminal exports pane metadata for lifecycle hooks. The built-in agent
+launchers configure those hooks per launch, without changing your global configuration:
+
+- **Codex** — its external turn notifier plus OSC approval notifications.
+- **Claude Code** — launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`, and
+  permission hooks.
+- **OpenCode** — a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
+
+When a background agent finishes, macOS shows a notification and the pane gets a blue
+unread ring. The notification is subtitled `window ▸ pane` so it names the location that
+wants attention, and a pane's banners group together rather than stacking. Clicking one
+activates Soprano and focuses that tab. The pane header and status bar expose
+`STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED`. Focusing the
+relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPUT` until
+the next prompt is submitted.
+
+Soprano asks for notification permission at launch. Notifications are only sent for
+panes that are not focused, so denying the prompt leaves the in-app unread ring as the
+only signal. Re-enable it under **System Settings → Notifications → Soprano**.
+
+<details>
+<summary><b>Agents you start yourself — aliases, scripts, plain <code>codex</code> in a shell</b></summary>
+
+To recognize agents started outside the built-in launchers, merge the supplied lifecycle
+hooks into the corresponding user configuration:
+
+- **Codex:** merge [`Support/AgentHooks/codex-hooks.json`](Support/AgentHooks/codex-hooks.json)
+  into `$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`). Start Codex once, open
+  `/hooks`, and trust the new command hooks.
+- **Claude Code:** merge the `hooks` entries from
+  [`Support/AgentHooks/claude-settings.json`](Support/AgentHooks/claude-settings.json)
+  into `~/.claude/settings.json`.
+
+Preserve existing hook groups when merging. The commands no-op outside Soprano, and the
+first lifecycle event automatically associates the current terminal tab with the
+reported agent. This works for any launcher whose underlying agent process inherits the
+Soprano terminal environment.
+
+</details>
+
+## Keyboard shortcuts
+
+`⌃A` is the prefix. Every binding below — including the prefix key, its timeout, and the
+resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
+
+**Panes**
 
 | Shortcut | Action |
-|----------|--------|
-| `Ctrl+H/J/K/L` | Navigate panes (left/down/up/right) |
-| `Ctrl+A` → `Ctrl+A` | Send a literal `Ctrl+A` to the terminal |
-| `Ctrl+A` → `P` / `N` | Switch to previous / next logical window |
-| `Ctrl+Shift+H/L` | Switch to previous / next logical window |
-| `Ctrl+1…9` | Select logical window 1–9 |
-| `Ctrl+Shift+letter shown in sidebar` | Select the matching pane across logical windows |
-| `Ctrl+A` → `Shift+H/J/K/L` | Resize panes |
-| `Ctrl+A` → `-` / `|` | Split horizontal / vertical |
-| `Ctrl+A` → `Q` | Close the active pane |
-| `Ctrl+A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
-| `Ctrl+A` → `[` / `]` | Enter Vim-style terminal copy mode |
-| `Ctrl+A` → `C` | New logical window in the current directory |
-| `Ctrl+A` → `I` / `O` | Go one complete layout in / out on the window z-axis |
-| `Ctrl+A` → `T` / `Shift+N` / `Shift+P` / `W` | New tab / next / prev / close tab |
-| `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude / OpenCode |
-| `⌘T` | New terminal |
+|---|---|
+| `⌃H` / `⌃J` / `⌃K` / `⌃L` | Focus the pane left / down / up / right |
+| `⌃A` → `-` / `\|` | Split horizontal / vertical |
+| `⌃A` → `⇧H/J/K/L` | Resize the active pane |
+| `⌃A` → `M` | Toggle maximize for the active pane |
+| `⌃A` → `Q` | Close the active pane |
+| `⌃A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
+| `⌃A` → `I` / `O` | Go one complete layout in / out on the window z-axis |
+| `⌘W` | Close the active pane |
+
+**Windows and tabs**
+
+| Shortcut | Action |
+|---|---|
+| `⌃⇧H` / `⌃⇧L` | Previous / next logical window |
+| `⌃A` → `P` / `N` | Previous / next logical window |
+| `⌃1`…`⌃9` | Select logical window 1–9 |
+| `⌃⇧` + the letter shown in the sidebar | Select the matching pane across logical windows |
+| `⌘N` | New logical window |
+| `⌃A` → `C` | New logical window in the active terminal's directory |
+| `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
+| `⌃A` → `T` / `⇧N` / `⇧P` / `W` | New tab / next / previous / close tab |
+
+**Agents and panes to open**
+
+| Shortcut | Action |
+|---|---|
+| `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude Code / OpenCode |
+| `⌘T` | New terminal pane |
 | `⌘B` | New browser pane |
-| `⌘L` | Focus the active browser address bar |
+| `⌘L` | Focus the address bar of the focused browser pane |
 | `⌘[` / `⌘]` / `⌘R` | Browser back / forward / reload |
+
+**App**
+
+| Shortcut | Action |
+|---|---|
 | `⌘P` | Command palette |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
 | `⇧⌘S` | Save session as… |
-| `⌘W` | Close active pane |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
+| `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
+| `⌃A` → `⌃A` | Send a literal `⌃A` to the terminal |
 
-Holding Control reveals the window and pane hints in the sidebar. Pane hints
-include `⇧` because they require Control+Shift; unmodified alphabetic Control
-chords remain available to the terminal.
+Holding Control reveals the window and pane hints in the sidebar. Pane hints include `⇧`
+because they require Control+Shift; unmodified alphabetic Control chords remain available
+to the terminal.
 
-### Sidebar
+## Knowing where you are
 
-Drag the sidebar's trailing edge to resize it between 160 and 520 points; the
-cursor changes to a resize arrow over the edge and the border accents while you
-drag. A narrow window caps the sidebar so at least 320 points stay available for
-panes. Double-click the edge to return to the default 220, and `⌘E` still toggles
-the sidebar, reopening at whatever width you last chose. The width persists across
-launches.
+The active logical window and pane are marked in three places: the sidebar draws an
+accent rail down the active window and its panes and tints the focused row, the status
+bar names the location as `window ▸ pane · Z<depth>`, and the focused pane carries an
+accent frame while the others keep a hairline border. Panes in inactive windows are
+dimmed. Sidebar rows also show each pane's current git branch, refreshed as `HEAD`
+changes on disk.
 
-### Current location
+Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
+changes to a resize arrow over the edge and the border accents while you drag. A narrow
+window caps the sidebar so at least 320 points stay available for panes. Double-click the
+edge to return to the default 220, and `⌘E` still toggles the sidebar, reopening at
+whatever width you last chose. The width persists across launches.
 
-The active logical window and pane are marked in three places: the sidebar draws
-an accent rail down the active window and its panes and tints the focused row,
-the status bar names the location as `window ▸ pane · Z<depth>`, and the focused
-pane carries an accent frame while the others keep a hairline border. Panes in
-inactive windows are dimmed.
+Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly onto a
+terminal to insert their shell-safe paths.
 
-### In-app browser
+## Window depth
 
-`⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a
-native WebKit browser to the right of the active pane. Browser URLs and page
-titles are saved with workspace sessions. Bare local development addresses
-such as `localhost:5173` use HTTP; normal hostnames use HTTPS, and other text is
-sent to web search.
+Each pane can own a private inner workspace on the window's z-axis. Going in replaces
+that pane's region with a fresh terminal while every sibling remains visible and live.
+Splits and tabs created there stay confined to the owning pane's region. Going out
+collapses only that branch; entering the same pane again restores its inner splits, tabs,
+and live terminal surfaces. Sibling panes keep independent branches and are never changed
+by another pane's Go In operation.
 
-Every terminal exports `SOPRANO_BIN`, so agents can drive a browser in the same
-Soprano process with an agent-browser-style CLI:
+Use `⌃A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or **Go In** /
+**Go Out** in the command palette. Sidebar panes are labeled with their window depth and
+can be selected directly.
+
+## In-app browser
+
+`⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a native
+WebKit browser to the right of the active pane. Browser URLs and page titles are saved
+with workspace sessions. Bare local development addresses such as `localhost:5173` use
+HTTP; normal hostnames use HTTPS, and other text is sent to web search.
+
+Every terminal exports `SOPRANO_BIN`, so agents can drive a browser in the same Soprano
+process with an agent-browser-style CLI:
 
 ```bash
 "$SOPRANO_BIN" browser open http://localhost:5173
@@ -239,51 +255,37 @@ Soprano process with an agent-browser-style CLI:
 "$SOPRANO_BIN" browser eval 'document.title'
 ```
 
-Snapshots assign ephemeral element refs (`e1`, `e2`, …); use them as selectors
-with an `@` prefix until the next snapshot or navigation. Commands target the
-focused browser by default. Pass `--pane pane-7` immediately after `browser` to
-select a specific pane. Run `"$SOPRANO_BIN" browser --help` for navigation,
-state inspection, input, getter, and screenshot commands.
+Snapshots assign ephemeral element refs (`e1`, `e2`, …); use them as selectors with an
+`@` prefix until the next snapshot or navigation. Commands target the focused browser by
+default. Pass `--pane pane-7` immediately after `browser` to select a specific pane. Run
+`"$SOPRANO_BIN" browser --help` for navigation, state inspection, input, getter, and
+screenshot commands.
 
-### Window depth
+## Terminal copy mode
 
-Each pane can own a private inner workspace on the window's z-axis. Going in
-replaces that pane's region with a fresh terminal while every sibling remains
-visible and live. Splits and tabs created there stay confined to the owning
-pane's region. Going out collapses only that branch; entering the same pane
-again restores its inner splits, tabs, and live terminal surfaces. Sibling
-panes keep independent branches and are never changed by another pane's Go In
-operation.
-Use `Ctrl+A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or
-**Go In** / **Go Out** in the command palette. Sidebar panes are labeled with
-their window depth and can be selected directly.
+Copy mode starts at the terminal cursor and keeps navigation keys out of the running
+shell or TUI. Move with `h/j/k/l` or the arrow keys, use `0`/`$` for line boundaries,
+`H/M/L` for viewport positions, `gg`/`G` for scrollback boundaries, and `Ctrl+U/D` or
+`Ctrl+B/F` for paging. Press `v` to begin a character selection or `Shift+V` to select
+whole lines, then `y` or Enter to copy it to the macOS clipboard and exit. Escape, `q`,
+or `Ctrl+C` cancels.
 
-### Terminal copy mode
+## Nested pane navigation
 
-Copy mode starts at the terminal cursor and keeps navigation keys out of the
-running shell or TUI. Move with `h/j/k/l` or the arrow keys, use `0`/`$` for
-line boundaries, `H/M/L` for viewport positions, `gg`/`G` for scrollback
-boundaries, and `Ctrl+U/D` or `Ctrl+B/F` for paging. Press `v` to begin a
-character selection or `Shift+V` to select whole lines, then `y` or Enter to
-copy it to the macOS clipboard and exit. Escape, `q`, or `Ctrl+C` cancels.
-
-### Nested pane navigation
-
-Soprano handles `Ctrl+H/J/K/L` directly by default. Integrated editors and
-nested multiplexers claim the keys while active, allowing fuzzy finders,
-completion menus, and other terminal interfaces to use them normally. Those
-integrations bubble navigation to the outer Soprano layout only after reaching
-their own boundary:
+Soprano handles `⌃H/J/K/L` directly by default. Integrated editors and nested
+multiplexers claim the keys while active, allowing fuzzy finders, completion menus, and
+other terminal interfaces to use them normally. Those integrations bubble navigation to
+the outer Soprano layout only after reaching their own boundary:
 
 ```bash
 "$SOPRANO_BIN" navigate-pane left   # left, down, up, or right
 ```
 
-The command selects an adjacent tmux pane first when invoked inside tmux. At a
-tmux boundary it targets the originating Soprano process, pane, and tab using
-the environment exported by each terminal surface. This keeps nested
-navigation and passthrough claims isolated to the exact terminal tab that
-issued them, even when several Soprano instances or tabs share a pane.
+The command selects an adjacent tmux pane first when invoked inside tmux. At a tmux
+boundary it targets the originating Soprano process, pane, and tab using the environment
+exported by each terminal surface. This keeps nested navigation and passthrough claims
+isolated to the exact terminal tab that issued them, even when several Soprano instances
+or tabs share a pane.
 
 Integrations explicitly enable key passthrough while active:
 
@@ -292,8 +294,75 @@ Integrations explicitly enable key passthrough while active:
 "$SOPRANO_BIN" navigation-passthrough disable nvim
 ```
 
-Without an active passthrough claim, Soprano handles `Ctrl+H/J/K/L` directly so
-pane navigation always has a working fallback.
+Without an active passthrough claim, Soprano handles `⌃H/J/K/L` directly so pane
+navigation always has a working fallback.
+
+## Settings
+
+`⌘,` opens a four-tab settings window: **General** (theme — Gruvbox Dark or Catppuccin
+Mocha — restore-last-session, and the project directories that `⇧⌘P` searches),
+**Keyboard Shortcuts**, **Agent Profiles**, and **About**.
+
+The agent registry is read-only in the UI and lives in code: teaching Soprano about
+another CLI agent is a few lines in
+[`Sources/Soprano/Config/DefaultAgents.swift`](Sources/Soprano/Config/DefaultAgents.swift)
+— a name, a color, the command to run, and the patterns that mean *ready* or *error*.
+
+## Development
+
+```bash
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build          # debug build / type-check
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test           # swift-testing suite
+PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
+./dev.sh                 # build, package, and launch an isolated Soprano Dev.app
+./dev.sh --build-only    # same, without launching
+./install.sh             # release build → /Applications/Soprano.app
+```
+
+`dev.sh` produces `.build/debug/Soprano Dev.app` under the separate `com.soprano.dev`
+bundle identifier, so its preferences, window state, sessions, and notification
+permission stay isolated from the installed app. Both bundles embed the same Ghostty
+runtime resources, so themes and terminal behavior do not depend on how you launched
+them. The legacy `run.sh` forwards to `dev.sh`.
+
+macOS requires a real application bundle for native notifications. `swift run` and the
+raw `.build/debug/Soprano` executable are still useful for debugging, but notifications
+are silently disabled for those unbundled launches.
+
+The `ld: warning: building for macOS-14.0 …` and `could not find symbol '_ImGui…'` link
+warnings appear on every build and are expected.
+
+<details>
+<summary><b>Project layout</b></summary>
+
+```
+soprano/
+├── Package.swift                 # SPM package (swift-tools-version: 6.0, macOS 14+)
+├── lib/libghostty.a              # Pre-built ghostty static library (not tracked; see Try it)
+├── Sources/
+│   ├── Soprano/
+│   │   ├── main.swift            # CLI subcommand dispatch, then NSApplication
+│   │   ├── App/                  # AppDelegate, MainWindowController, MainContentViewController
+│   │   ├── Models/               # SplitNode layout tree, PaneState, AgentProfile, sessions
+│   │   ├── Controllers/          # AgentManager, KeybindingManager, SessionManager, ThemeManager
+│   │   ├── Views/                # AppKit views (SplitTreeView, SidebarView, CommandPalette, …)
+│   │   ├── Config/               # Default agents, keybindings, themes
+│   │   ├── Terminal/             # GhosttyAppManager, TerminalSurfaceView, copy mode
+│   │   └── Utilities/            # NSColor+Hex extension
+│   └── GhosttyKit/
+│       ├── module.modulemap      # System library module map
+│       └── include/ghostty.h     # libghostty C API header
+├── Support/                      # Info.plist and agent lifecycle hook templates
+├── scripts/                      # package-app.sh, sign-app.sh, signing identity helper
+└── ghostty/                      # Ghostty submodule (source for libghostty)
+```
+
+`SplitNode` is where every pane geometry question is answered; the views render it.
+`AgentManager` owns the mutable state — panes, tabs, depth layers, splits. The app binary
+doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
+[`AGENTS.md`](AGENTS.md) has the full contributor briefing.
+
+</details>
 
 ## License
 
