@@ -120,6 +120,25 @@ struct PaneDepthTests {
         #expect(manager.layout?.leafIds == [rootPaneId])
     }
 
+    @Test func focusingHiddenPanesCollapsesAndReopensTheirDepthBranch() throws {
+        let manager = AgentManager()
+        let rootPaneId = manager.activePaneId
+        _ = try #require(manager.goIn(rootPaneId))
+        let innerPaneId = manager.activePaneId
+
+        manager.focusPane(rootPaneId)
+
+        #expect(manager.activePaneId == rootPaneId)
+        #expect(manager.activeDepth == 0)
+        #expect(manager.layout?.leafIds == [rootPaneId])
+
+        manager.focusPane(innerPaneId)
+
+        #expect(manager.activePaneId == innerPaneId)
+        #expect(manager.activeDepth == 1)
+        #expect(manager.layout?.leafIds == [innerPaneId])
+    }
+
     @Test func closingTheActiveDepthLayerRemovesItsSplitsAndInnerDescendants() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId

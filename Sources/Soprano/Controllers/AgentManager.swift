@@ -388,8 +388,8 @@ final class AgentManager: @unchecked Sendable {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return }
-        let depthChanged = terminalWindow.depth(containingPane: paneId) != terminalWindow.activeDepth
-        if activeWindowId == terminalWindow.id, !depthChanged, activePaneId == paneId {
+        let paneIsVisible = terminalWindow.visibleLayout?.leafIds.contains(paneId) == true
+        if activeWindowId == terminalWindow.id, paneIsVisible, activePaneId == paneId {
             guard clearAttentionWithoutNotification(paneId: paneId) else { return }
             notifyChange()
             return
@@ -397,10 +397,14 @@ final class AgentManager: @unchecked Sendable {
         exitMaximize()
         let windowChanged = activeWindowId != terminalWindow.id
         activeWindowId = terminalWindow.id
-        _ = terminalWindow.activateDepth(containingPane: paneId)
+        let previousDepth = terminalWindow.activeDepth
+        let visibilityChanged = terminalWindow.revealPane(paneId)
+        let depthChanged = terminalWindow.activeDepth != previousDepth
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
-        notifyChange(layoutChanged: windowChanged || depthChanged)
+        notifyChange(
+            layoutChanged: windowChanged || depthChanged || visibilityChanged
+        )
     }
 
     func orderedPanes(in windowId: String) -> [PaneState] {

@@ -19,6 +19,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - **Settings ▸ About** reports the version declared by the packaged bundle instead of a
   hardcoded string, and shows `dev` for unbundled `swift run` launches.
 
+### Fixed
+
+- Selecting a pane in the sidebar now reveals it when an expanded inner workspace was
+  previously occupying its region.
+
 ## [0.2.0] - 2026-07-25
 
 First entry in this changelog. It summarizes the native Swift + AppKit application as it

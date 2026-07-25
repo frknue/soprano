@@ -124,6 +124,23 @@ final class WorkspaceWindowState: Identifiable {
         return changed
     }
 
+    /// Makes `paneId` part of the visible layout and activates its owning layer.
+    ///
+    /// Ancestor branches are expanded on the way in, while the pane's own child
+    /// branch is collapsed so it no longer replaces the pane being revealed.
+    @discardableResult
+    func revealPane(_ paneId: String) -> Bool {
+        guard let index = layerIndex(containingPane: paneId) else { return false }
+        let previousVisibleLayout = visibleLayout
+        activeDepthLayerIndex = index
+        expandAncestors(ofLayerAt: index)
+        for childIndex in depthLayers.indices
+        where depthLayers[childIndex].parentPaneId == paneId {
+            depthLayers[childIndex].isExpanded = false
+        }
+        return visibleLayout != previousVisibleLayout
+    }
+
     /// Enter the private child workspace owned by `paneId`.
     @discardableResult
     func goIn(from paneId: String) -> Bool {
