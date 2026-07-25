@@ -57,6 +57,7 @@ enum DefaultKeybindings {
 
             // General (direct)
             KeyBinding(id: "command-palette", label: "Commands", description: "Open the command palette", category: .general, defaultKeys: "⌘P", mode: .direct, key: "p", meta: true),
+            KeyBinding(id: "find-window", label: "Find Window", description: "Search and switch to a logical window", category: .general, defaultKeys: "⌘F", mode: .direct, key: "f", meta: true),
             KeyBinding(id: "open-project", label: "Open Project", description: "Open a project directory", category: .general, defaultKeys: "⇧⌘P", mode: .direct, key: "p", meta: true, shift: true),
             KeyBinding(id: "new-window", label: "New Window", description: "Create a new logical window", category: .general, defaultKeys: "⌘N", mode: .direct, key: "n", meta: true),
             KeyBinding(id: "rename-window", label: "Rename Window", description: "Rename the active logical window", category: .general, defaultKeys: "⇧⌘R", mode: .direct, key: "r", meta: true, shift: true),

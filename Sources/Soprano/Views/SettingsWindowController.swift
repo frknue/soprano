@@ -996,6 +996,7 @@ final class SettingsViewController: NSViewController {
     private func quickReferenceBindings() -> [(String, String)] {
         let preferredIds = [
             "command-palette",
+            "find-window",
             "open-settings",
             "new-window",
             "new-terminal",

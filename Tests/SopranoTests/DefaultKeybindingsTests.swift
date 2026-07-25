@@ -12,6 +12,31 @@ struct DefaultKeybindingsTests {
         }
     }
 
+    @Test func findWindowUsesCommandF() throws {
+        let findWindow = try #require(binding("find-window"))
+
+        #expect(findWindow.mode == .direct)
+        #expect(findWindow.key == "f")
+        #expect(findWindow.meta == true)
+        #expect(findWindow.shift != true)
+        #expect(findWindow.defaultKeys == "⌘F")
+    }
+
+    @Test func findWindowExecutesBeforeTheTerminalCanClaimCommandF() {
+        #expect(!KeybindingManager.dispatchesThroughMainMenu("find-window"))
+        #expect(KeybindingManager.dispatchesThroughMainMenu("command-palette"))
+        #expect(KeybindingManager.dispatchesThroughMainMenu("open-project"))
+    }
+
+    @Test func savedConfigurationsGainFindWindow() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "find-window" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "find-window" })
+    }
+
     @Test func temporaryShiftedWindowBindingsMigrateBackToControlNumber() throws {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings = savedConfig.bindings.map { binding in

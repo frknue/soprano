@@ -45,6 +45,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingRenameWindow()
     func keybindingOpenSettings()
     func keybindingOpenCommandPalette()
+    func keybindingFindWindow()
     func keybindingOpenProjectSearch()
     func keybindingZoom(delta: Int)
     func keybindingZoomReset()
@@ -214,7 +215,7 @@ final class KeybindingManager: @unchecked Sendable {
             // Let AppKit dispatch standard Command-menu equivalents through
             // the main menu. This is more reliable than swallowing them in a
             // local monitor while a terminal surface is first responder.
-            if binding.id == "command-palette" || binding.id == "open-project" {
+            if Self.dispatchesThroughMainMenu(binding.id) {
                 return event
             }
             executeBinding(binding)
@@ -300,6 +301,10 @@ final class KeybindingManager: @unchecked Sendable {
 
     static func shouldForwardPrefixKey(in state: KeybindingState) -> Bool {
         state == .prefix
+    }
+
+    static func dispatchesThroughMainMenu(_ bindingId: String) -> Bool {
+        bindingId == "command-palette" || bindingId == "open-project"
     }
 
     /// Split actions are named for the divider they draw, while
@@ -443,6 +448,8 @@ final class KeybindingManager: @unchecked Sendable {
 
         case "command-palette":
             invokeDelegate { $0.keybindingOpenCommandPalette() }
+        case "find-window":
+            invokeDelegate { $0.keybindingFindWindow() }
         case "open-project":
             invokeDelegate { $0.keybindingOpenProjectSearch() }
         case "new-window":

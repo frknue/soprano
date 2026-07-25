@@ -9,6 +9,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Added
+
+- `⌘F` opens a window switcher that searches window titles and nested pane details,
+  prioritizing window-title matches.
+
 ### Changed
 
 - **Settings ▸ About** reports the version declared by the packaged bundle instead of a

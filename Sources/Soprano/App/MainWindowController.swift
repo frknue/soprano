@@ -155,6 +155,18 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "find-window",
+                icon: "macwindow",
+                label: "Find Window…",
+                description: "Search and switch to a logical window",
+                shortcut: commandShortcut(for: "find-window"),
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.keybindingFindWindow()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "rename-window",
                 icon: "pencil",
                 label: "Rename Window…",
@@ -396,6 +408,17 @@ extension MainWindowController: KeybindingDelegate {
         panel.show(relativeTo: window, commands: commands)
     }
 
+    func keybindingFindWindow() {
+        guard let window else { return }
+
+        let panel = palettePanel()
+        panel.show(
+            relativeTo: window,
+            commands: buildWindowPaletteItems(),
+            placeholder: "Search windows and panes..."
+        )
+    }
+
     func keybindingOpenProjectSearch() {
         guard let window else { return }
 
@@ -428,6 +451,44 @@ private extension MainWindowController {
     struct ProjectEntry {
         let name: String
         let path: String
+    }
+
+    func buildWindowPaletteItems() -> [CommandItem] {
+        agentManager.orderedWindows.enumerated().map { index, terminalWindow in
+            let panes = agentManager.orderedPanes(in: terminalWindow.id)
+            let activePaneTitle = agentManager.panes[terminalWindow.activePaneId]?
+                .activeTab?.title ?? "No active pane"
+            let paneCount = panes.count
+            let currentPrefix = terminalWindow.id == agentManager.activeWindowId
+                ? "Current · "
+                : ""
+            let description = "\(currentPrefix)\(paneCount) pane\(paneCount == 1 ? "" : "s") · Active: \(activePaneTitle)"
+            let searchText = panes.flatMap { pane in
+                pane.tabs.flatMap { tab -> [String] in
+                    [
+                        tab.title,
+                        tab.cwd,
+                        tab.url,
+                        tab.agent.flatMap { DefaultAgents.profile(for: $0.profileId)?.name },
+                    ].compactMap { $0 }
+                }
+            }.joined(separator: " ")
+            let shortcut = index < 9
+                ? commandShortcut(for: "select-window-\(index + 1)")
+                : nil
+
+            return CommandItem(
+                id: "activate-\(terminalWindow.id)",
+                icon: "macwindow",
+                label: terminalWindow.title,
+                description: description,
+                shortcut: shortcut,
+                searchText: searchText,
+                action: { [weak self] in
+                    self?.agentManager.activateWindow(terminalWindow.id)
+                }
+            )
+        }
     }
 
     func buildProjectPaletteItems() -> [CommandItem] {
@@ -518,6 +579,15 @@ private extension MainWindowController {
         commandsItem.identifier = Self.commandsMenuIdentifier
 
         let commandsMenu = NSMenu(title: "Commands")
+        let windowItem = NSMenuItem(
+            title: "Find Window…",
+            action: #selector(findWindowMenuItemSelected),
+            keyEquivalent: "f"
+        )
+        windowItem.keyEquivalentModifierMask = [.command]
+        windowItem.target = self
+        commandsMenu.addItem(windowItem)
+
         let paletteItem = NSMenuItem(
             title: "Command Palette…",
             action: #selector(commandPaletteMenuItemSelected),
@@ -542,6 +612,10 @@ private extension MainWindowController {
 
     @objc func commandPaletteMenuItemSelected() {
         keybindingOpenCommandPalette()
+    }
+
+    @objc func findWindowMenuItemSelected() {
+        keybindingFindWindow()
     }
 
     @objc func openProjectMenuItemSelected() {

@@ -6,7 +6,82 @@ struct CommandItem {
     let label: String
     let description: String
     let shortcut: String?
+    let searchText: String?
     let action: () -> Void
+
+    init(
+        id: String,
+        icon: String,
+        label: String,
+        description: String,
+        shortcut: String?,
+        searchText: String? = nil,
+        action: @escaping () -> Void
+    ) {
+        self.id = id
+        self.icon = icon
+        self.label = label
+        self.description = description
+        self.shortcut = shortcut
+        self.searchText = searchText
+        self.action = action
+    }
+}
+
+enum CommandPaletteSearch {
+    private struct Match {
+        let item: CommandItem
+        let originalIndex: Int
+        let fieldPriority: Int
+        let matchPriority: Int
+        let matchOffset: Int
+    }
+
+    static func filter(_ commands: [CommandItem], query: String) -> [CommandItem] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return commands }
+
+        return commands.enumerated().compactMap { index, item -> Match? in
+            let fields = [
+                (priority: 0, text: item.label),
+                (priority: 1, text: item.description),
+                (priority: 2, text: item.searchText ?? ""),
+            ]
+
+            for field in fields {
+                let haystack = field.text.lowercased()
+                guard let range = haystack.range(of: needle) else { continue }
+                let offset = haystack.distance(from: haystack.startIndex, to: range.lowerBound)
+                let matchPriority: Int
+                if haystack == needle {
+                    matchPriority = 0
+                } else if offset == 0 {
+                    matchPriority = 1
+                } else {
+                    matchPriority = 2
+                }
+                return Match(
+                    item: item,
+                    originalIndex: index,
+                    fieldPriority: field.priority,
+                    matchPriority: matchPriority,
+                    matchOffset: offset
+                )
+            }
+            return nil
+        }.sorted { lhs, rhs in
+            if lhs.fieldPriority != rhs.fieldPriority {
+                return lhs.fieldPriority < rhs.fieldPriority
+            }
+            if lhs.matchPriority != rhs.matchPriority {
+                return lhs.matchPriority < rhs.matchPriority
+            }
+            if lhs.matchOffset != rhs.matchOffset {
+                return lhs.matchOffset < rhs.matchOffset
+            }
+            return lhs.originalIndex < rhs.originalIndex
+        }.map(\.item)
+    }
 }
 
 final class CommandPalettePanel: NSPanel {
@@ -298,15 +373,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     }
 
     private func updateFilter(query: String) {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if needle.isEmpty {
-            filtered = commands
-        } else {
-            filtered = commands.filter { item in
-                let haystack = "\(item.label) \(item.description)".lowercased()
-                return haystack.contains(needle)
-            }
-        }
+        filtered = CommandPaletteSearch.filter(commands, query: query)
 
         selectedIndex = 0
         refreshRows()
@@ -323,7 +390,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         resultCountLabel.stringValue = "\(filtered.count) result\(filtered.count == 1 ? "" : "s")"
 
         if filtered.isEmpty {
-            let emptyLabel = NSTextField(labelWithString: "No matching commands")
+            let emptyLabel = NSTextField(labelWithString: "No matching results")
             emptyLabel.font = .systemFont(ofSize: 12, weight: .regular)
             emptyLabel.textColor = currentTheme.colors.textMuted
             emptyLabel.alignment = .center

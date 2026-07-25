@@ -194,6 +194,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | Shortcut | Action |
 |---|---|
 | `⌘P` | Command palette |
+| `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
@@ -214,6 +215,11 @@ bar names the location as `window ▸ pane · Z<depth>`, and the focused pane ca
 accent frame while the others keep a hairline border. Panes in inactive windows are
 dimmed. Sidebar rows also show each pane's current git branch, refreshed as `HEAD`
 changes on disk.
+
+Press `⌘F` to search logical windows by window title, pane or tab title, working
+directory, browser URL, or agent name. Window-title matches rank ahead of matches found
+only inside a split pane; selecting a result restores that window's remembered active
+pane.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow
