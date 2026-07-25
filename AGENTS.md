@@ -47,6 +47,38 @@ There is no linter or formatter configured. Match surrounding style.
 - Do not use `sudo` if installation fails. Report the permission problem instead.
 - Documentation-only or read-only tasks do not require installation.
 
+## Changelog and versioning
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
+project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+- After finishing a user-visible change, add a line under `## [Unreleased]` in the
+  matching group — `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security` —
+  creating the group if it is missing and keeping the groups in that order.
+- Write for the person using the app, not for the diff: one line describing the effect,
+  naming the keybinding, CLI subcommand, or setting when there is one.
+- Skip the changelog when nothing user-visible changed: refactors, test-only work,
+  internal documentation, and the plans and specs under `docs/`.
+- Never add a version heading as part of feature work. Day-to-day changes only ever touch
+  `## [Unreleased]`; releases are cut deliberately.
+
+### Cutting a release
+
+Scale for this app:
+
+- **major** — a workspace or session format older builds cannot read, or a documented
+  keybinding or CLI subcommand removed.
+- **minor** — new panes, keybindings, CLI subcommands, agent integrations, or settings.
+- **patch** — fixes and polish that add no new surface.
+
+1. Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add a fresh, empty
+   `## [Unreleased]` above it.
+2. Bump `CFBundleShortVersionString` **and** `CFBundleVersion` in `Support/Info.plist`.
+   That plist is the single source of truth — `AppVersion` reads it at runtime, so no
+   Swift file carries the number. `ChangelogVersionTests` fails if the two drift apart.
+3. `swift build && swift test`, then `./install.sh`.
+4. Commit as `release: vX.Y.Z` and tag `vX.Y.Z`.
+
 ## Architecture
 
 `Sources/Soprano/` — single executable target:
@@ -88,7 +120,8 @@ by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
 - Commits: short imperative subject, `fix:` / `feat:` prefixes common but not
   universal.
 - Keep `README.md` in sync when changing keybindings, CLI subcommands, or
-  packaging behavior — it is the user-facing reference.
+  packaging behavior — it is the user-facing reference. User-visible changes also
+  get a `CHANGELOG.md` entry; see **Changelog and versioning** above.
 
 ## Gotchas
 
@@ -109,6 +142,10 @@ by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
 - `swift test` links the CLT-bundled `Testing.framework` via `unsafeFlags` in
   `Package.swift`; that path is hardcoded to
   `/Library/Developer/CommandLineTools/…`.
+- Never `import Foundation` next to `import Testing` in a test file: that activates
+  the `_Testing_Foundation` cross-import overlay, which the CLT framework builds for
+  macOS 26 while this package targets macOS 14, and every test file then fails to
+  compile. Test files `import AppKit` instead and get Foundation types through it.
 - Dev and installed apps use distinct bundle IDs (`com.soprano.dev` vs
   `com.soprano.app`), so preferences, sessions, and notification permissions do
   not carry over between them.

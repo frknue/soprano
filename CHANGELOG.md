@@ -1,0 +1,92 @@
+# Changelog
+
+All notable changes to Soprano are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
+project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The number
+in each released heading matches `CFBundleShortVersionString` in `Support/Info.plist`,
+which is the single source of truth for the version shown in **Settings ▸ About**.
+
+## [Unreleased]
+
+### Changed
+
+- **Settings ▸ About** reports the version declared by the packaged bundle instead of a
+  hardcoded string, and shows `dev` for unbundled `swift run` launches.
+
+## [0.2.0] - 2026-07-25
+
+First entry in this changelog. It summarizes the native Swift + AppKit application as it
+stands today, reconstructed from the commit history — earlier work was never tagged or
+released.
+
+### Added
+
+- Tiling panes backed by a recursive split tree, with symbolic `⌃A -` / `⌃A |` splits,
+  prefix resizing, and `⌃A M` maximize.
+- Direct `⌃H/J/K/L` pane navigation that wraps at layout boundaries.
+- Logical windows with per-pane tabs, numbered `⌃1`…`⌃9` selection, contextual names, and
+  rename and close shortcuts.
+- Window depth: any pane can open a private inner workspace on the window's z-axis with
+  `⌃A I` / `⌃A O`, keeping sibling panes visible, live, and independent.
+- Built-in launchers for Codex (`⌘1`), Claude Code (`⌘2`), and OpenCode (`⌘3`) that
+  install lifecycle hooks per launch without changing global agent configuration.
+- Pane status reporting — `STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`,
+  `STOPPED` — in the pane header, sidebar, and status bar.
+- Native macOS notifications for unfocused panes, subtitled `window ▸ pane`, with grouped
+  banners, blue unread rings, and click-to-focus.
+- Hook templates in `Support/AgentHooks/` so agents started from a shell, alias, or script
+  are recognized too.
+- libghostty terminal surfaces with full keyboard routing, sided modifier handling, and a
+  clipboard confirmation policy for paste.
+- Vim-style terminal copy mode (`⌃A [`) with motions, viewport and scrollback jumps,
+  character and line selection, and clipboard yank.
+- Drag and drop of files, folders, URLs, and macOS screenshot thumbnails into terminals as
+  shell-safe paths.
+- Terminal zoom controls (`⌘=` / `⌘-` / `⌘0`) and working directory inheritance for new
+  panes and windows.
+- Nested pane navigation through the `navigate-pane` and `navigation-passthrough` CLI
+  subcommands, including tmux boundary handoff scoped to the issuing process, pane, and
+  tab.
+- Native WebKit browser panes (`⌘B`) with an address bar, back/forward/reload, and local
+  development address handling.
+- Scriptable browser automation over `"$SOPRANO_BIN" browser`, with interactive snapshots
+  that assign ephemeral element refs for use as selectors.
+- Sidebar pane list with per-pane git branch, spawn menu, sessions footer, Control-held
+  jump hints, an active-location rail, and a resizable width that persists across launches.
+- Command palette (`⌘P`), plus a project launcher and search (`⇧⌘P`) over configured
+  project directories.
+- Workspace persistence with restore on launch, and named sessions (`⇧⌘S`).
+- Settings embedded in the main window: General, Keyboard Shortcuts, Agent Profiles, and
+  About.
+- Gruvbox Dark and Catppuccin Mocha themes.
+- Configurable keybindings with a `⌃A` prefix, adjustable prefix timeout, and resize step.
+- Packaging workflow: `dev.sh` builds and launches an isolated `com.soprano.dev` bundle,
+  `install.sh` installs the release build, and both embed Ghostty's runtime resources.
+- Stable local code signing identity, so macOS keeps notification permission across
+  rebuilds.
+- Application icon.
+
+### Changed
+
+- Rewritten as a native macOS application (Swift + AppKit + libghostty), replacing the
+  earlier Tauri/React/Rust prototype.
+- Pane selection moved behind the prefix so unmodified alphabetic Control chords stay
+  available to the terminal.
+- Contributor documentation consolidated into `AGENTS.md`, with `CLAUDE.md` as a symlink.
+- README reorganized around evaluating and first-running the app.
+
+### Fixed
+
+- Keyboard focus freezes and command key-equivalent routing, including sided modifier
+  release transitions.
+- Terminal surfaces destroyed reentrantly, terminal caches keyed by the exact target, and
+  PTY process leaks that accumulated with many panes.
+- Workspace restore and split resizing, orphan panes pruned on restore, and cold restore
+  cache replacement.
+- Sibling panes disappearing when entering pane depth, and depth workspaces leaking into
+  one another.
+- Main window size preserved across settings transitions and screen-aware on first launch.
+- Notification authorization requested at launch rather than on first delivery.
+- Ghostty runtime resources bundled into the app, so themes and terminal behavior no
+  longer depend on the launch environment.

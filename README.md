@@ -332,6 +332,10 @@ are silently disabled for those unbundled launches.
 The `ld: warning: building for macOS-14.0 …` and `could not find symbol '_ImGui…'` link
 warnings appear on every build and are expected.
 
+Release history lives in [`CHANGELOG.md`](CHANGELOG.md); user-visible changes land under
+`Unreleased` until a release is cut. [`AGENTS.md`](AGENTS.md) is the full contributor
+briefing — architecture, conventions, and the release workflow.
+
 <details>
 <summary><b>Project layout</b></summary>
 
@@ -360,7 +364,6 @@ soprano/
 `SplitNode` is where every pane geometry question is answered; the views render it.
 `AgentManager` owns the mutable state — panes, tabs, depth layers, splits. The app binary
 doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
-[`AGENTS.md`](AGENTS.md) has the full contributor briefing.
 
 </details>
 

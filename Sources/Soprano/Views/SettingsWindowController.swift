@@ -915,7 +915,7 @@ final class SettingsViewController: NSViewController {
         tagline.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(tagline)
 
-        let version = NSTextField(labelWithString: "Version: 0.2.0")
+        let version = NSTextField(labelWithString: "Version: \(AppVersion.current)")
         version.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         version.textColor = currentTheme.colors.textPrimary
         version.translatesAutoresizingMaskIntoConstraints = false
