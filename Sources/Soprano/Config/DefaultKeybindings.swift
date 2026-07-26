@@ -14,6 +14,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "nav-right", label: "Focus Right", description: "Move focus to the pane on the right", category: .navigation, defaultKeys: "Ctrl+L", mode: .direct, key: "l", ctrl: true),
             KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Prefix → P", mode: .prefix, key: "p"),
             KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Prefix → N", mode: .prefix, key: "n"),
+            KeyBinding(id: "last-window", label: "Last Window", description: "Switch to the most recently active logical window", category: .navigation, defaultKeys: "Prefix → Shift+P", mode: .prefix, key: "p", shift: true),
             KeyBinding(id: "previous-window-direct", label: "Previous Window (Direct)", description: "Switch to the previous logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
             KeyBinding(id: "next-window-direct", label: "Next Window (Direct)", description: "Switch to the next logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
             KeyBinding(id: "select-window-1", label: "Select Window 1", description: "Switch to logical window 1", category: .navigation, defaultKeys: "Ctrl+1", mode: .direct, key: "1", ctrl: true),
@@ -26,11 +27,11 @@ enum DefaultKeybindings {
             KeyBinding(id: "select-window-8", label: "Select Window 8", description: "Switch to logical window 8", category: .navigation, defaultKeys: "Ctrl+8", mode: .direct, key: "8", ctrl: true),
             KeyBinding(id: "select-window-9", label: "Select Window 9", description: "Switch to logical window 9", category: .navigation, defaultKeys: "Ctrl+9", mode: .direct, key: "9", ctrl: true),
 
-            // Resize (prefix: Ctrl+A → Shift+H/J/K/L)
-            KeyBinding(id: "resize-left", label: "Shrink Left", description: "Shrink the active pane to the left", category: .layout, defaultKeys: "Prefix → H", mode: .prefix, key: "h", shift: true),
-            KeyBinding(id: "resize-down", label: "Grow Down", description: "Grow the active pane downward", category: .layout, defaultKeys: "Prefix → J", mode: .prefix, key: "j", shift: true),
-            KeyBinding(id: "resize-up", label: "Shrink Up", description: "Shrink the active pane upward", category: .layout, defaultKeys: "Prefix → K", mode: .prefix, key: "k", shift: true),
-            KeyBinding(id: "resize-right", label: "Grow Right", description: "Grow the active pane to the right", category: .layout, defaultKeys: "Prefix → L", mode: .prefix, key: "l", shift: true),
+            // Resize (prefix: Ctrl+A → H/J/K/L)
+            KeyBinding(id: "resize-left", label: "Shrink Left", description: "Shrink the active pane to the left", category: .layout, defaultKeys: "Prefix → H", mode: .prefix, key: "h"),
+            KeyBinding(id: "resize-down", label: "Grow Down", description: "Grow the active pane downward", category: .layout, defaultKeys: "Prefix → J", mode: .prefix, key: "j"),
+            KeyBinding(id: "resize-up", label: "Shrink Up", description: "Shrink the active pane upward", category: .layout, defaultKeys: "Prefix → K", mode: .prefix, key: "k"),
+            KeyBinding(id: "resize-right", label: "Grow Right", description: "Grow the active pane to the right", category: .layout, defaultKeys: "Prefix → L", mode: .prefix, key: "l"),
 
             // Layout (prefix)
             KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → -", mode: .prefix, key: "-"),
@@ -46,8 +47,8 @@ enum DefaultKeybindings {
 
             // Tabs (prefix)
             KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),
-            KeyBinding(id: "next-pane-tab", label: "Next Tab", description: "Switch to the next tab", category: .layout, defaultKeys: "Prefix → Shift+N", mode: .prefix, key: "n", shift: true),
-            KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → Shift+P", mode: .prefix, key: "p", shift: true),
+            KeyBinding(id: "next-pane-tab", label: "Next Tab", description: "Switch to the next tab", category: .layout, defaultKeys: "Prefix → >", mode: .prefix, key: ">", shift: true),
+            KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → <", mode: .prefix, key: "<", shift: true),
             KeyBinding(id: "close-pane-tab", label: "Close Tab", description: "Close the active tab", category: .layout, defaultKeys: "Prefix → W", mode: .prefix, key: "w"),
 
             // Agents (direct: Cmd+1/2/3)
@@ -128,36 +129,52 @@ enum DefaultKeybindings {
             return defaultBinding
         }
 
-        let usesLegacyWindowOrTabDefault: Bool
+        let usesLegacyWindowTabOrResizeDefault: Bool
         switch savedBinding.id {
         case "previous-window":
-            usesLegacyWindowOrTabDefault = savedBinding.mode == .direct
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .direct
                 && savedBinding.key == "h"
                 && savedBinding.ctrl == true
                 && savedBinding.meta != true
                 && savedBinding.shift == true
         case "next-window":
-            usesLegacyWindowOrTabDefault = savedBinding.mode == .direct
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .direct
                 && savedBinding.key == "l"
                 && savedBinding.ctrl == true
                 && savedBinding.meta != true
                 && savedBinding.shift == true
+        case "last-window":
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
+                && savedBinding.key == "l"
+                && savedBinding.ctrl != true
+                && savedBinding.meta != true
+                && savedBinding.shift != true
         case "prev-pane-tab":
-            usesLegacyWindowOrTabDefault = savedBinding.mode == .prefix
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
                 && savedBinding.key == "p"
                 && savedBinding.ctrl != true
                 && savedBinding.meta != true
-                && savedBinding.shift != true
         case "next-pane-tab":
-            usesLegacyWindowOrTabDefault = savedBinding.mode == .prefix
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
                 && savedBinding.key == "n"
                 && savedBinding.ctrl != true
                 && savedBinding.meta != true
-                && savedBinding.shift != true
+        case "resize-left", "resize-down", "resize-up", "resize-right":
+            let oldKeyById = [
+                "resize-left": "h",
+                "resize-down": "j",
+                "resize-up": "k",
+                "resize-right": "l",
+            ]
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
+                && savedBinding.key == oldKeyById[savedBinding.id]
+                && savedBinding.ctrl != true
+                && savedBinding.meta != true
+                && savedBinding.shift == true
         default:
-            usesLegacyWindowOrTabDefault = false
+            usesLegacyWindowTabOrResizeDefault = false
         }
-        if usesLegacyWindowOrTabDefault {
+        if usesLegacyWindowTabOrResizeDefault {
             return defaultBinding
         }
 

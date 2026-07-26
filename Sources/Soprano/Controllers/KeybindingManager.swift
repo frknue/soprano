@@ -448,6 +448,8 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.activatePreviousWindow()
         case "next-window", "next-window-direct":
             agentManager.activateNextWindow()
+        case "last-window":
+            agentManager.activateLastWindow()
 
         case "resize-left":
             agentManager.resizePane(direction: .left, tickPercent: config.resizeTickPercent)

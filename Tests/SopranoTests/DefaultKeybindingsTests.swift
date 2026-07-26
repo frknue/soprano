@@ -113,21 +113,56 @@ struct DefaultKeybindingsTests {
         #expect(nextWindowDirect.shift == true)
     }
 
-    @Test func paneTabCyclingMovesToShiftedPrefixPAndN() throws {
+    @Test func tmuxLastWindowUsesPrefixShiftP() throws {
+        let lastWindow = try #require(binding("last-window"))
+
+        #expect(lastWindow.mode == .prefix)
+        #expect(lastWindow.key == "p")
+        #expect(lastWindow.shift == true)
+        #expect(lastWindow.defaultKeys == "Prefix → Shift+P")
+    }
+
+    @Test func savedConfigurationsGainTheLastWindowShortcut() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "last-window" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "last-window" })
+    }
+
+    @Test func paneTabCyclingUsesPrefixAngleBrackets() throws {
         let previousTab = try #require(binding("prev-pane-tab"))
         let nextTab = try #require(binding("next-pane-tab"))
 
         #expect(previousTab.mode == .prefix)
-        #expect(previousTab.key == "p")
+        #expect(previousTab.key == "<")
         #expect(previousTab.shift == true)
-        #expect(previousTab.defaultKeys == "Prefix → Shift+P")
+        #expect(previousTab.defaultKeys == "Prefix → <")
         #expect(nextTab.mode == .prefix)
-        #expect(nextTab.key == "n")
+        #expect(nextTab.key == ">")
         #expect(nextTab.shift == true)
-        #expect(nextTab.defaultKeys == "Prefix → Shift+N")
+        #expect(nextTab.defaultKeys == "Prefix → >")
     }
 
-    @Test func legacyWindowAndTabDefaultsMigrateToTmuxBindings() throws {
+    @Test func paneResizingMatchesTmuxPrefixHJKLWithoutShift() throws {
+        let expected = [
+            ("resize-left", "h"),
+            ("resize-down", "j"),
+            ("resize-up", "k"),
+            ("resize-right", "l"),
+        ]
+
+        for (id, key) in expected {
+            let resize = try #require(binding(id))
+            #expect(resize.mode == .prefix)
+            #expect(resize.key == key)
+            #expect(resize.shift != true)
+            #expect(resize.defaultKeys == "Prefix → \(key.uppercased())")
+        }
+    }
+
+    @Test func legacyWindowAndTabDefaultsMigrateToCurrentBindings() throws {
         var savedConfig = DefaultKeybindings.config
         savedConfig.bindings.removeAll {
             $0.id == "previous-window-direct" || $0.id == "next-window-direct"
@@ -178,10 +213,72 @@ struct DefaultKeybindingsTests {
         #expect(byId["previous-window"]?.key == "p")
         #expect(byId["next-window"]?.mode == .prefix)
         #expect(byId["next-window"]?.key == "n")
+        #expect(byId["prev-pane-tab"]?.key == "<")
         #expect(byId["prev-pane-tab"]?.shift == true)
+        #expect(byId["next-pane-tab"]?.key == ">")
         #expect(byId["next-pane-tab"]?.shift == true)
         #expect(byId["previous-window-direct"] != nil)
         #expect(byId["next-window-direct"] != nil)
+    }
+
+    @Test func previousLastWindowResizeAndPaneTabDefaultsMigrateToCurrentBindings() throws {
+        let oldResizeKeys = [
+            "resize-left": "h",
+            "resize-down": "j",
+            "resize-up": "k",
+            "resize-right": "l",
+        ]
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings = savedConfig.bindings.map { current in
+            if current.id == "last-window" {
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → L",
+                    mode: .prefix,
+                    key: "l"
+                )
+            }
+            if let key = oldResizeKeys[current.id] {
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → Shift+\(key.uppercased())",
+                    mode: .prefix,
+                    key: key,
+                    shift: true
+                )
+            }
+            if current.id == "prev-pane-tab" {
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → Shift+P",
+                    mode: .prefix,
+                    key: "p",
+                    shift: true
+                )
+            }
+            if current.id == "next-pane-tab" {
+                return legacyBinding(
+                    basedOn: current,
+                    display: "Prefix → Shift+N",
+                    mode: .prefix,
+                    key: "n",
+                    shift: true
+                )
+            }
+            return current
+        }
+
+        let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let byId = Dictionary(uniqueKeysWithValues: merged.bindings.map { ($0.id, $0) })
+
+        #expect(byId["last-window"]?.key == "p")
+        #expect(byId["last-window"]?.shift == true)
+        for (id, key) in oldResizeKeys {
+            #expect(byId[id]?.key == key)
+            #expect(byId[id]?.shift != true)
+        }
+        #expect(byId["prev-pane-tab"]?.key == "<")
+        #expect(byId["next-pane-tab"]?.key == ">")
     }
 
     @Test func customizedWindowCyclingBindingIsPreserved() throws {

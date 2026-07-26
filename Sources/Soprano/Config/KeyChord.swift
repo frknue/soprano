@@ -161,11 +161,6 @@ struct KeyChord: Equatable, Hashable {
     ///   "split-vertical" binding renders "Prefix → |".
     /// - Invisible keys are named: Space, Tab, Enter, Esc, Backspace, and the
     ///   arrows as ←→↑↓.
-    ///
-    /// (The built-in resize bindings render shifted letters without "Shift+",
-    /// e.g. "Prefix → H"; that inconsistency is not reproduced here — a
-    /// shifted letter always shows "Shift+" so the string names the keys the
-    /// user must actually press.)
     var displayString: String {
         let renderedKey = Self.displayKeyNames[key] ?? key.uppercased()
         let showsShift = shift && !Self.shiftedSymbols.contains(key)

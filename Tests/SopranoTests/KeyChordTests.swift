@@ -246,12 +246,9 @@ struct KeyChordTests {
     }
 
     @Test func builtInBindingsRenderTheSameDisplayStringTheyShipWith() {
-        // The resize bindings ship a display string that omits the Shift they
-        // require, and zoom-in advertises two chords in one string; every
-        // other built-in must render byte-identically.
-        let knownDeviations: Set<String> = [
-            "resize-left", "resize-down", "resize-up", "resize-right", "zoom-in",
-        ]
+        // Zoom-in advertises two equivalent chords in one string; every other
+        // built-in must render byte-identically.
+        let knownDeviations: Set<String> = ["zoom-in"]
 
         for binding in DefaultKeybindings.config.bindings where !knownDeviations.contains(binding.id) {
             #expect(
@@ -263,7 +260,6 @@ struct KeyChordTests {
         let byId = Dictionary(
             uniqueKeysWithValues: DefaultKeybindings.config.bindings.map { ($0.id, $0) }
         )
-        #expect(byId["resize-left"].map { KeyChord(binding: $0).displayString } == "Prefix → Shift+H")
         #expect(byId["zoom-in"].map { KeyChord(binding: $0).displayString } == "⌘=")
     }
 }

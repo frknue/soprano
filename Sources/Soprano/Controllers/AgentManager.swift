@@ -28,6 +28,7 @@ final class AgentManager: @unchecked Sendable {
     private(set) var panes: [String: PaneState] = [:]
     private(set) var windows: [String: WorkspaceWindowState] = [:]
     private(set) var activeWindowId: String = ""
+    private var lastActiveWindowId: String?
     private(set) var activePaneId: String {
         get { windows[activeWindowId]?.activePaneId ?? "" }
         set { windows[activeWindowId]?.activePaneId = newValue }
@@ -148,17 +149,21 @@ final class AgentManager: @unchecked Sendable {
             layout: .leaf(paneId),
             activePaneId: paneId
         )
-        activeWindowId = windowId
+        _ = setActiveWindow(windowId)
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
         return windowId
     }
 
     func activateWindow(_ windowId: String) {
-        guard windows[windowId] != nil, activeWindowId != windowId else { return }
-        activeWindowId = windowId
+        guard setActiveWindow(windowId) else { return }
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
+    }
+
+    func activateLastWindow() {
+        guard let lastActiveWindowId else { return }
+        activateWindow(lastActiveWindowId)
     }
 
     func activatePreviousWindow() {
@@ -182,6 +187,9 @@ final class AgentManager: @unchecked Sendable {
             panes.removeValue(forKey: paneId)
         }
         windows.removeValue(forKey: windowId)
+        if lastActiveWindowId == windowId {
+            lastActiveWindowId = nil
+        }
 
         if windows.isEmpty {
             _ = createWindow()
@@ -190,6 +198,9 @@ final class AgentManager: @unchecked Sendable {
 
         if activeWindowId == windowId {
             activeWindowId = sortedWindows().first?.id ?? ""
+            if lastActiveWindowId == activeWindowId {
+                lastActiveWindowId = nil
+            }
         }
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
@@ -286,7 +297,7 @@ final class AgentManager: @unchecked Sendable {
               let terminalWindow = window(containingPane: paneId),
               panes.count < Self.maxPanes
         else { return nil }
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         exitMaximize()
@@ -396,7 +407,7 @@ final class AgentManager: @unchecked Sendable {
         }
         exitMaximize()
         let windowChanged = activeWindowId != terminalWindow.id
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         let previousDepth = terminalWindow.activeDepth
         let visibilityChanged = terminalWindow.revealPane(paneId)
         let depthChanged = terminalWindow.activeDepth != previousDepth
@@ -695,7 +706,7 @@ final class AgentManager: @unchecked Sendable {
         } else {
             exitMaximize()
             let windowChanged = activeWindowId != terminalWindow.id
-            activeWindowId = terminalWindow.id
+            _ = setActiveWindow(terminalWindow.id)
             let previousDepth = terminalWindow.activeDepth
             let visibilityChanged = terminalWindow.revealPane(paneId)
             let depthChanged = terminalWindow.activeDepth != previousDepth
@@ -768,7 +779,7 @@ final class AgentManager: @unchecked Sendable {
               pane.activeTab != nil
         else { return nil }
 
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
         if terminalWindow.goIn(from: paneId) {
             let targetPaneId = terminalWindow.activePaneId
@@ -806,7 +817,7 @@ final class AgentManager: @unchecked Sendable {
               let terminalWindow = window(containingPane: paneId)
         else { return false }
 
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
         guard terminalWindow.goOut() else { return false }
         retargetMaximize(
@@ -834,7 +845,7 @@ final class AgentManager: @unchecked Sendable {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return false }
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
         guard terminalWindow.activeDepth > 0 else { return false }
 
@@ -874,7 +885,7 @@ final class AgentManager: @unchecked Sendable {
         pane.tabs.append(tab)
         pane.activeTabIndex = pane.tabs.count - 1
         let windowChanged = activeWindowId != terminalWindow.id
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         notifyChange(layoutChanged: windowChanged || depthChanged)
@@ -911,7 +922,7 @@ final class AgentManager: @unchecked Sendable {
         let clamped = min(max(0, index), pane.tabs.count - 1)
         pane.activeTabIndex = clamped
         let windowChanged = activeWindowId != terminalWindow.id
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
@@ -925,7 +936,7 @@ final class AgentManager: @unchecked Sendable {
         else { return }
         pane.activeTabIndex = (pane.clampedActiveIndex() + 1) % pane.tabs.count
         let windowChanged = activeWindowId != terminalWindow.id
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
@@ -940,7 +951,7 @@ final class AgentManager: @unchecked Sendable {
         let current = pane.clampedActiveIndex()
         pane.activeTabIndex = (current - 1 + pane.tabs.count) % pane.tabs.count
         let windowChanged = activeWindowId != terminalWindow.id
-        activeWindowId = terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
         let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
@@ -1178,6 +1189,7 @@ final class AgentManager: @unchecked Sendable {
         activeWindowId = session.activeWindowId.flatMap { newWindows[$0] }?.id
             ?? sortedWindows().first?.id
             ?? ""
+        lastActiveWindowId = nil
         nextId = maxId
 
         maximizedPaneId = nil
@@ -1291,6 +1303,19 @@ final class AgentManager: @unchecked Sendable {
         windows.values.sorted { lhs, rhs in
             (parseIdNumber(lhs.id) ?? Int.max) < (parseIdNumber(rhs.id) ?? Int.max)
         }
+    }
+
+    @discardableResult
+    private func setActiveWindow(_ windowId: String) -> Bool {
+        guard windows[windowId] != nil, activeWindowId != windowId else {
+            return false
+        }
+        let previousWindowId = activeWindowId
+        activeWindowId = windowId
+        lastActiveWindowId = windows[previousWindowId] != nil
+            ? previousWindowId
+            : nil
+        return true
     }
 
     private func activateWindow(offset: Int) {

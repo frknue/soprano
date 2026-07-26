@@ -150,6 +150,42 @@ struct AgentManagerPaneTests {
         #expect(manager.activePaneId == secondPaneId)
     }
 
+    @Test func lastWindowTogglesBetweenTheTwoMostRecentlyActiveLogicalWindows() throws {
+        let manager = AgentManager()
+        let secondWindowId = try #require(manager.createWindow())
+        let thirdWindowId = try #require(manager.createWindow())
+
+        manager.activateLastWindow()
+        #expect(manager.activeWindowId == secondWindowId)
+
+        manager.activateLastWindow()
+        #expect(manager.activeWindowId == thirdWindowId)
+    }
+
+    @Test func focusingAPaneInAnotherWindowUpdatesTheLastWindowTarget() throws {
+        let manager = AgentManager()
+        let firstWindowId = manager.activeWindowId
+        let firstPaneId = manager.activePaneId
+        let secondWindowId = try #require(manager.createWindow())
+
+        manager.focusPane(firstPaneId)
+        #expect(manager.activeWindowId == firstWindowId)
+
+        manager.activateLastWindow()
+        #expect(manager.activeWindowId == secondWindowId)
+    }
+
+    @Test func closingTheLastWindowTargetClearsIt() throws {
+        let manager = AgentManager()
+        let firstWindowId = manager.activeWindowId
+        let secondWindowId = try #require(manager.createWindow())
+
+        manager.closeWindow(firstWindowId)
+        manager.activateLastWindow()
+
+        #expect(manager.activeWindowId == secondWindowId)
+    }
+
     @Test func alphabeticPaneHintsUseVisualOrderAcrossLogicalWindows() throws {
         let manager = AgentManager()
         let secondPaneId = try #require(manager.spawnTerminal())

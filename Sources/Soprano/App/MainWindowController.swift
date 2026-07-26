@@ -218,6 +218,16 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "last-window",
+                icon: "arrow.uturn.backward.square",
+                label: "Last Window",
+                description: "Switch to the most recently active logical window",
+                shortcut: commandShortcut(for: "last-window"),
+                action: { [weak self] in
+                    self?.agentManager.activateLastWindow()
+                }
+            ),
+            CommandItem(
                 id: "find-window",
                 icon: "macwindow",
                 label: "Find Window…",

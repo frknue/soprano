@@ -160,7 +160,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 |---|---|
 | `⌃H` / `⌃J` / `⌃K` / `⌃L` | Focus the pane left / down / up / right |
 | `⌃A` → `-` / `\|` | Split horizontal / vertical |
-| `⌃A` → `⇧H/J/K/L` | Resize the active pane |
+| `⌃A` → `H/J/K/L` | Resize the active pane left / down / up / right by 5% |
 | `⌃A` → `M` | Toggle maximize for the active pane |
 | `⌃A` → `Q` | Close the active pane |
 | `⌃A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
@@ -173,12 +173,13 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 |---|---|
 | `⌃⇧H` / `⌃⇧L` | Previous / next logical window |
 | `⌃A` → `P` / `N` | Previous / next logical window |
+| `⌃A` → `⇧P` | Jump to the most recently active logical window; press again to toggle back |
 | `⌃1`…`⌃9` | Select logical window 1–9 |
 | `⌃⇧` + the letter shown in the sidebar | Select the matching pane across logical windows |
 | `⌘N` | New logical window |
 | `⌃A` → `C` | New logical window in the active terminal's directory |
 | `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
-| `⌃A` → `T` / `⇧N` / `⇧P` / `W` | New tab / next / previous / close tab |
+| `⌃A` → `T` / `>` / `<` / `W` | New tab / next / previous / close tab |
 
 **Agents and panes to open**
 
