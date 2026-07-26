@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile codex --notify --title \"Codex\" --body \"Response ready\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile codex --notify --title \"Codex\" --message-from-stdin --body \"Response ready\"",
             "timeout": 5
           }
         ]
@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile codex --notify --title \"Codex\" --body \"Approval or input required\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile codex --notify --title \"Codex\" --message-from-stdin --body \"Approval or input required\"",
             "timeout": 5
           }
         ]

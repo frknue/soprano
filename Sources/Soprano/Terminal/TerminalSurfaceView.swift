@@ -80,6 +80,9 @@ struct TerminalConfig {
         return config
     }
 
+    /// Codex appends its notification payload as a trailing JSON argument to the
+    /// configured notify program, so `agent-event` picks the message out of the
+    /// arguments without any extra flag here.
     private static func codexIntegrationArguments(executable: String) -> [String] {
         let notifyCommand = [
             executable,
@@ -101,10 +104,14 @@ struct TerminalConfig {
     }
 
     private static func claudeIntegrationSettings() -> String? {
+        // Claude Code pipes each hook a JSON payload on stdin. The notifying
+        // hooks forward it so the banner can quote what the agent actually
+        // asked; `--body` stays as the fallback when the payload carries no
+        // readable message.
         func command(_ state: String, notify: Bool = false, body: String? = nil) -> String {
             var value = "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event \(state)"
             if notify {
-                value += " --notify --title \"Claude Code\""
+                value += " --notify --title \"Claude Code\" --message-from-stdin"
             }
             if let body {
                 value += " --body \"\(body)\""
@@ -122,7 +129,10 @@ struct TerminalConfig {
                 "UserPromptSubmit": hook(command("running")),
                 "Stop": hook(command("needs-input", notify: true, body: "Response ready")),
                 "Notification": [[
-                    "matcher": "permission_prompt|elicitation_dialog",
+                    // idle_prompt is what Claude Code sends when it finishes and
+                    // sits waiting; leaving it out meant the most common reason
+                    // to look at a pane never reached this hook.
+                    "matcher": "idle_prompt|permission_prompt|elicitation_dialog",
                     "hooks": [[
                         "type": "command",
                         "command": command(

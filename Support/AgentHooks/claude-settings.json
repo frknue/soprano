@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --body \"Response ready\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --message-from-stdin --body \"Response ready\"",
             "timeout": 5
           }
         ]
@@ -35,11 +35,11 @@
     ],
     "Notification": [
       {
-        "matcher": "permission_prompt|elicitation_dialog",
+        "matcher": "idle_prompt|permission_prompt|elicitation_dialog",
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --body \"Approval or input required\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --message-from-stdin --body \"Approval or input required\"",
             "timeout": 5
           }
         ]

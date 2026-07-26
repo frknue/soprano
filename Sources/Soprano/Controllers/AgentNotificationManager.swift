@@ -48,6 +48,11 @@ enum AgentEventCommand {
         Notification.Name("\(notificationPrefix).\(appProcessId)")
     }
 
+    /// Longest agent message a banner shows before it is elided. macOS truncates
+    /// well before this, but the string also lands in the pane's status, so it is
+    /// bounded here rather than left to the window server.
+    static let messageLimit = 180
+
     static func handle(
         arguments: [String] = CommandLine.arguments,
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -67,7 +72,8 @@ enum AgentEventCommand {
 
     static func notificationEnvelope(
         arguments: [String],
-        environment: [String: String]
+        environment: [String: String],
+        standardInput: () -> Data? = { readStandardInput() }
     ) -> DistributedNotificationEnvelope? {
         guard arguments.count >= 3,
               let state = AgentEventState(rawValue: arguments[2]),
@@ -80,6 +86,8 @@ enum AgentEventCommand {
         var profileId = environment["SOPRANO_AGENT_PROFILE"]
         var title = environment["SOPRANO_AGENT_NAME"] ?? "Agent"
         var body = defaultBody(for: state)
+        var readsStandardInput = false
+        var payloads: [String] = []
         var index = 3
 
         while index < arguments.count {
@@ -96,11 +104,28 @@ enum AgentEventCommand {
             case "--body" where index + 1 < arguments.count:
                 body = arguments[index + 1]
                 index += 2
+            case "--message-from-stdin":
+                readsStandardInput = true
+                index += 1
+            case "--message-json" where index + 1 < arguments.count:
+                payloads.append(arguments[index + 1])
+                index += 2
             default:
-                // Codex appends its JSON notification payload as one final
-                // argument. It is intentionally ignored here.
+                // Codex appends its notification payload as one trailing JSON
+                // argument rather than passing it through a flag.
+                payloads.append(arguments[index])
                 index += 1
             }
+        }
+
+        if readsStandardInput, let data = standardInput(), !data.isEmpty {
+            payloads.append(String(decoding: data, as: UTF8.self))
+        }
+
+        // The agent's own words beat the caller's static description: a banner
+        // saying what was asked is the whole point of notifying at all.
+        if let message = payloads.lazy.compactMap(agentMessage(fromPayload:)).first {
+            body = "\(label(for: state)) — \(message)"
         }
 
         var userInfo: [String: String] = [
@@ -129,6 +154,80 @@ enum AgentEventCommand {
         case .error: return "The agent stopped with an error"
         case .stopped: return "Stopped"
         }
+    }
+
+    /// Short prefix so a banner reads `Needs input — <what was asked>`.
+    static func label(for state: AgentEventState) -> String {
+        switch state {
+        case .ready: return "Ready"
+        case .running: return "Working"
+        case .needsInput: return "Needs input"
+        case .error: return "Error"
+        case .stopped: return "Stopped"
+        }
+    }
+
+    /// Keys the three supported agents use for the text a human should read.
+    /// Tried in order, so the most specific wins.
+    private static let messageKeys = [
+        "message",                  // Claude Code notification hooks
+        "last-assistant-message",   // Codex notify payloads
+        "last_assistant_message",
+        "description",
+        "body",
+        "text",
+        "prompt",
+    ]
+
+    /// Claude Code sends a type rather than prose for some notifications.
+    private static func message(forNotificationType type: String) -> String? {
+        switch type {
+        case "idle_prompt": return "Waiting for your next prompt"
+        case "permission_prompt": return "Approval required"
+        case "elicitation_dialog": return "Input required"
+        default: return nil
+        }
+    }
+
+    /// Pulls a human-readable line out of an agent payload. Every agent hands us
+    /// a different shape, so this reads whichever known key is present instead of
+    /// modelling three schemas that upstream can change at will.
+    static func agentMessage(fromPayload payload: String) -> String? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else { return nil }
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let json = object as? [String: Any]
+        else { return nil }
+
+        for key in messageKeys {
+            if let value = json[key] as? String, let summary = summarize(value) {
+                return summary
+            }
+        }
+
+        if let type = json["notification_type"] as? String {
+            return message(forNotificationType: type)
+        }
+
+        return nil
+    }
+
+    /// Agent output is multi-line and unbounded; a banner is one line.
+    static func summarize(_ raw: String) -> String? {
+        let collapsed = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !collapsed.isEmpty else { return nil }
+        guard collapsed.count > messageLimit else { return collapsed }
+
+        let clipped = collapsed.prefix(messageLimit)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return clipped + "…"
+    }
+
+    /// Reads the hook payload piped to the command. Guarded on a pipe so running
+    /// `soprano agent-event …` by hand in a shell cannot block on an open tty.
+    private static func readStandardInput() -> Data? {
+        guard isatty(FileHandle.standardInput.fileDescriptor) == 0 else { return nil }
+        return try? FileHandle.standardInput.readToEnd()
     }
 }
 

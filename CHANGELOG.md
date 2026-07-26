@@ -41,6 +41,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Notifications now quote what the agent actually said — *Needs input — Drop the legacy
+  column? [y/n]* — instead of a fixed phrase like *Approval or input required*. Codex,
+  Claude Code, and OpenCode each hand their payload over differently and all three are
+  read; when one carries no readable message the previous wording is still used.
 - Pane resizing now uses `⌃A H/J/K/L` without Shift; pane-tab cycling moves to
   `⌃A <` / `⌃A >`.
 - The settings screen now edits `settings.json` directly rather than a private
@@ -51,6 +55,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Fixed
 
+- Claude Code's *idle prompt* notifications now reach Soprano. The launch-scoped hook
+  matched only permission prompts, so an agent that simply finished and sat waiting never
+  fired one — the most common reason a pane wants you.
 - **Settings ▸ General** no longer discards edits to *Prefix Timeout* and *Resize Step*
   in locales that group digits, where the displayed `1'500` failed to parse and silently
   reverted.

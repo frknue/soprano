@@ -119,7 +119,9 @@ launchers configure those hooks per launch, without changing your global configu
 
 When a background agent finishes, macOS shows a notification and the pane gets a blue
 unread ring. The notification is subtitled `window ▸ pane` so it names the location that
-wants attention, and a pane's banners group together rather than stacking. Clicking one
+wants attention, and its body quotes the agent itself — `Needs input — Drop the legacy
+column? [y/n]` — rather than a generic phrase, so you can often answer without switching
+at all. A pane's banners group together rather than stacking. Clicking one
 activates Soprano and focuses that tab. The pane header and status bar expose
 `STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED`. Focusing the
 relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPUT` until

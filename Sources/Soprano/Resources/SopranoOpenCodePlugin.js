@@ -21,6 +21,20 @@ const sendEvent = async (state, options = []) => {
   }
 }
 
+// Hands the event's own properties to Soprano, which reads whichever known
+// message key is present. Forwarding the payload rather than a fixed string is
+// what lets a banner quote the permission OpenCode is actually asking about.
+const payloadOf = (event) => {
+  try {
+    const properties = event?.properties
+    if (!properties) return []
+    return ["--message-json", JSON.stringify(properties)]
+  } catch {
+    // A payload that will not serialize must not cost us the notification.
+    return []
+  }
+}
+
 export const SopranoNotificationPlugin = async () => {
   await sendEvent("ready")
 
@@ -37,6 +51,7 @@ export const SopranoNotificationPlugin = async () => {
             "--notify",
             "--title", "OpenCode",
             "--body", "Response ready",
+            ...payloadOf(event),
           ])
           break
         case "permission.asked":
@@ -44,6 +59,7 @@ export const SopranoNotificationPlugin = async () => {
             "--notify",
             "--title", "OpenCode",
             "--body", "Approval required",
+            ...payloadOf(event),
           ])
           break
         case "session.error":
@@ -51,6 +67,7 @@ export const SopranoNotificationPlugin = async () => {
             "--notify",
             "--title", "OpenCode",
             "--body", "The agent stopped with an error",
+            ...payloadOf(event),
           ])
           break
       }
