@@ -23,6 +23,8 @@ final class MainContentViewController: NSViewController {
     private var settingsCloseButton: NSButton!
     private var settingsViewController: SettingsViewController?
     private var settingsViewConstraints: [NSLayoutConstraint] = []
+    private var dashboardViewController: AgentDashboardViewController?
+    private var dashboardViewConstraints: [NSLayoutConstraint] = []
 
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
 
@@ -72,6 +74,9 @@ final class MainContentViewController: NSViewController {
             gitBranchMonitor: gitBranchMonitor
         )
         sidebarView.onSettingsRequested = onSettingsRequested
+        sidebarView.onDashboardRequested = { [weak self] in
+            self?.showDashboard()
+        }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
 
@@ -222,6 +227,10 @@ final class MainContentViewController: NSViewController {
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig
     ) {
+        loadViewIfNeeded()
+        if dashboardViewController != nil {
+            closeDashboard(restoreKeyboardFocus: false)
+        }
         preservingWindowFrame {
             let settingsViewController: SettingsViewController
             if let existingController = self.settingsViewController {
@@ -293,11 +302,64 @@ final class MainContentViewController: NSViewController {
         splitTreeView.restoreKeyboardFocus()
     }
 
+    func showDashboard() {
+        loadViewIfNeeded()
+        if !settingsContainerView.isHidden {
+            closeSettings()
+        }
+        guard dashboardViewController == nil else { return }
+
+        preservingWindowFrame {
+            let controller = AgentDashboardViewController(
+                agentManager: agentManager,
+                themeManager: themeManager
+            )
+            controller.onDismiss = { [weak self] in
+                self?.closeDashboard()
+            }
+            controller.onAgentSelected = { [weak self] paneId, tabId in
+                guard let self else { return }
+                self.closeDashboard(restoreKeyboardFocus: false)
+                self.agentManager.focusTab(paneId: paneId, tabId: tabId)
+                self.splitTreeView.restoreKeyboardFocus()
+            }
+            addChild(controller)
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(controller.view, positioned: .above, relativeTo: nil)
+            dashboardViewConstraints = [
+                controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            ]
+            NSLayoutConstraint.activate(dashboardViewConstraints)
+            dashboardViewController = controller
+            splitTreeView.isHidden = true
+        }
+        view.window?.makeFirstResponder(dashboardViewController?.view)
+    }
+
+    func closeDashboard(restoreKeyboardFocus: Bool = true) {
+        guard let dashboardViewController else { return }
+        preservingWindowFrame {
+            NSLayoutConstraint.deactivate(dashboardViewConstraints)
+            dashboardViewConstraints.removeAll()
+            dashboardViewController.view.removeFromSuperview()
+            dashboardViewController.removeFromParent()
+            self.dashboardViewController = nil
+            splitTreeView.isHidden = false
+        }
+        if restoreKeyboardFocus {
+            splitTreeView.restoreKeyboardFocus()
+        }
+    }
+
     func refreshTheme() {
         applyTheme()
         sidebarView.refreshTheme()
         splitTreeView.refreshTheme()
         statusBarView.refreshTheme()
+        dashboardViewController?.apply(theme: themeManager.currentTheme)
     }
 
     private func applyTheme() {
@@ -308,6 +370,7 @@ final class MainContentViewController: NSViewController {
         settingsTitleLabel?.textColor = theme.colors.textPrimary
         settingsCloseButton?.contentTintColor = theme.colors.textPrimary
         settingsViewController?.apply(theme: theme)
+        dashboardViewController?.apply(theme: theme)
     }
 
     private func preservingWindowFrame(_ update: () -> Void) {

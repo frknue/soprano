@@ -693,9 +693,18 @@ final class AgentManager: @unchecked Sendable {
         if isAlreadyFocused {
             clearAttention(paneId: paneId, tabId: tabId)
         } else {
-            // switchTab also clears attention and emits the single model update
-            // needed to move focus to this target.
-            switchTab(paneId, index: index)
+            exitMaximize()
+            let windowChanged = activeWindowId != terminalWindow.id
+            activeWindowId = terminalWindow.id
+            let previousDepth = terminalWindow.activeDepth
+            let visibilityChanged = terminalWindow.revealPane(paneId)
+            let depthChanged = terminalWindow.activeDepth != previousDepth
+            terminalWindow.activePaneId = paneId
+            pane.activeTabIndex = index
+            _ = clearAttentionWithoutNotification(paneId: paneId)
+            notifyChange(
+                layoutChanged: windowChanged || depthChanged || visibilityChanged
+            )
         }
     }
 

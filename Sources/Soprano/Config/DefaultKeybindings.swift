@@ -54,6 +54,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "launch-codex", label: "Launch Codex", description: "Launch Codex agent", category: .agents, defaultKeys: "⌘1", mode: .direct, key: "1", meta: true),
             KeyBinding(id: "launch-claude-code", label: "Launch Claude", description: "Launch Claude Code agent", category: .agents, defaultKeys: "⌘2", mode: .direct, key: "2", meta: true),
             KeyBinding(id: "launch-opencode", label: "Launch OpenCode", description: "Launch OpenCode agent", category: .agents, defaultKeys: "⌘3", mode: .direct, key: "3", meta: true),
+            KeyBinding(id: "agent-dashboard", label: "Agent Dashboard", description: "Monitor agents across all windows", category: .agents, defaultKeys: "⇧⌘D", mode: .direct, key: "d", meta: true, shift: true),
 
             // General (direct)
             KeyBinding(id: "command-palette", label: "Commands", description: "Open the command palette", category: .general, defaultKeys: "⌘P", mode: .direct, key: "p", meta: true),

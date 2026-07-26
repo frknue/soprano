@@ -44,6 +44,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingSaveSession()
     func keybindingRenameWindow()
     func keybindingOpenSettings()
+    func keybindingOpenAgentDashboard()
     func keybindingOpenCommandPalette()
     func keybindingFindWindow()
     func keybindingOpenProjectSearch()
@@ -326,7 +327,8 @@ final class KeybindingManager: @unchecked Sendable {
     }
 
     static func dispatchesThroughMainMenu(_ bindingId: String) -> Bool {
-        bindingId == "command-palette" || bindingId == "open-project"
+        bindingId == "command-palette"
+            || bindingId == "open-project"
     }
 
     /// The agent a `launch-<agent>` binding spawns, or nil for any other
@@ -504,6 +506,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingToggleSidebar() }
         case "open-settings":
             invokeDelegate { $0.keybindingOpenSettings() }
+        case "agent-dashboard":
+            invokeDelegate { $0.keybindingOpenAgentDashboard() }
         case "zoom-in":
             invokeDelegate { $0.keybindingZoom(delta: 1) }
         case "zoom-out":

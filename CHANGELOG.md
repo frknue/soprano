@@ -26,6 +26,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   Open/Reveal/Reload buttons in **Settings ▸ General**.
 - `⌘F` opens a window switcher that searches window titles and nested pane details,
   prioritizing window-title matches.
+- Agent Dashboard: monitor live agent states across every logical window, see working,
+  input-needed, and error totals, and jump directly to an agent from the sidebar chart
+  button, **Commands** menu, or the configurable `⇧⌘D` shortcut; press `Esc` to close it.
 
 ### Changed
 
@@ -48,6 +51,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   stops pane-navigation passthrough from tracking closed panes.
 - Selecting a pane in the sidebar now reveals it when an expanded inner workspace was
   previously occupying its region.
+- Selecting an exact agent tab from a notification or the Agent Dashboard now reveals
+  its hidden depth branch before focusing it.
 - A maximized pane now stays maximized when moving into or out of its depth workspace.
 
 ## [0.2.0] - 2026-07-25

@@ -8,6 +8,7 @@ final class SidebarView: NSView {
     let gitBranchMonitor: GitBranchMonitor
 
     var onSettingsRequested: (() -> Void)?
+    var onDashboardRequested: (() -> Void)?
 
     private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
@@ -19,6 +20,7 @@ final class SidebarView: NSView {
     private var footerSeparator: NSView!
     private var trailingBorder: NSView!
     private var settingsButton: NSButton!
+    private var dashboardButton: NSButton!
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
     private var collapsedWindowIds: Set<String> = []
@@ -126,6 +128,13 @@ final class SidebarView: NSView {
         )
         footerView.addSubview(sessionsButton)
 
+        dashboardButton = makeIconButton(
+            symbolName: "chart.xyaxis.line",
+            accessibilityLabel: "Agent Dashboard",
+            action: #selector(dashboardClicked)
+        )
+        footerView.addSubview(dashboardButton)
+
         trailingBorder = NSView()
         trailingBorder.wantsLayer = true
         trailingBorder.translatesAutoresizingMaskIntoConstraints = false
@@ -179,6 +188,9 @@ final class SidebarView: NSView {
             sessionsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: 8),
             sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
 
+            dashboardButton.leadingAnchor.constraint(equalTo: sessionsButton.trailingAnchor, constant: 2),
+            dashboardButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+
             trailingBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             trailingBorder.topAnchor.constraint(equalTo: topAnchor),
             trailingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -231,6 +243,10 @@ final class SidebarView: NSView {
 
     @objc private func settingsClicked() {
         onSettingsRequested?()
+    }
+
+    @objc private func dashboardClicked() {
+        onDashboardRequested?()
     }
 
     // MARK: - Menus
@@ -354,6 +370,7 @@ final class SidebarView: NSView {
         footerSeparator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         trailingBorder.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         settingsButton.contentTintColor = theme.colors.textMuted
+        dashboardButton.contentTintColor = theme.colors.textMuted
         plusButton.contentTintColor = theme.colors.textMuted
         sessionsButton.contentTintColor = theme.colors.textMuted
 

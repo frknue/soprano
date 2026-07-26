@@ -22,10 +22,31 @@ struct DefaultKeybindingsTests {
         #expect(findWindow.defaultKeys == "⌘F")
     }
 
+    @Test func agentDashboardUsesItsOwnShiftCommandDShortcut() throws {
+        let dashboard = try #require(binding("agent-dashboard"))
+
+        #expect(dashboard.mode == .direct)
+        #expect(dashboard.key == "d")
+        #expect(dashboard.meta == true)
+        #expect(dashboard.shift == true)
+        #expect(dashboard.defaultKeys == "⇧⌘D")
+        #expect(!KeybindingManager.dispatchesThroughMainMenu("agent-dashboard"))
+    }
+
     @Test func findWindowExecutesBeforeTheTerminalCanClaimCommandF() {
         #expect(!KeybindingManager.dispatchesThroughMainMenu("find-window"))
         #expect(KeybindingManager.dispatchesThroughMainMenu("command-palette"))
         #expect(KeybindingManager.dispatchesThroughMainMenu("open-project"))
+        #expect(!KeybindingManager.dispatchesThroughMainMenu("agent-dashboard"))
+    }
+
+    @Test func savedConfigurationsGainTheAgentDashboardShortcut() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "agent-dashboard" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "agent-dashboard" })
     }
 
     @Test func savedConfigurationsGainFindWindow() {

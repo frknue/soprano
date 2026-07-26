@@ -194,6 +194,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | Shortcut | Action |
 |---|---|
 | `⌘P` | Command palette |
+| `⇧⌘D` | Open the Agent Dashboard |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
@@ -220,6 +221,13 @@ Press `⌘F` to search logical windows by window title, pane or tab title, worki
 directory, browser URL, or agent name. Window-title matches rank ahead of matches found
 only inside a split pane; selecting a result restores that window's remembered active
 pane.
+
+Open the **Agent Dashboard** from the sidebar chart button, the **Commands** menu, or the
+`⇧⌘D` (`agent-dashboard`). It summarizes agents that are working, waiting for input, or
+in an error state across every logical window. Entries are ordered by urgency, update
+from the same lifecycle events as pane headers and notifications, show elapsed runtime
+and working directory, and select the exact agent tab when clicked. Press `Esc` to close
+the dashboard without changing the active agent.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow

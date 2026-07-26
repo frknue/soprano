@@ -385,6 +385,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "agent-dashboard",
+                icon: "chart.xyaxis.line",
+                label: "Agent Dashboard",
+                description: "Monitor every agent across all windows",
+                shortcut: commandShortcut(for: "agent-dashboard"),
+                searchText: "agents monitor status attention working",
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.mainContentVC?.showDashboard()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "toggle-sidebar",
                 icon: "sidebar.leading",
                 label: "Toggle Sidebar",
@@ -450,6 +463,10 @@ extension MainWindowController: KeybindingDelegate {
 
     func keybindingOpenSettings() {
         openSettings()
+    }
+
+    func keybindingOpenAgentDashboard() {
+        mainContentVC?.showDashboard()
     }
 
     func keybindingOpenCommandPalette() {
@@ -652,6 +669,13 @@ private extension MainWindowController {
         )
         commandsMenu.addItem(projectItem)
 
+        let dashboardItem = makeCommandsMenuItem(
+            title: "Agent Dashboard",
+            action: #selector(openDashboardMenuItemSelected),
+            bindingId: "agent-dashboard"
+        )
+        commandsMenu.addItem(dashboardItem)
+
         commandsMenu.addItem(.separator())
         let settingsFileItem = NSMenuItem(
             title: "Open settings.json",
@@ -668,7 +692,7 @@ private extension MainWindowController {
     /// A Commands-menu item whose key equivalent comes from the live keybinding
     /// configuration.
     ///
-    /// These three actions are dispatched by AppKit through the menu rather
+    /// These actions are dispatched by AppKit through the menu rather
     /// than by the event monitor, so a hardcoded key equivalent here would
     /// quietly outrank `settings.json`: the rebound chord would do nothing and
     /// the original would keep firing. Prefix chords and disabled actions get
@@ -709,6 +733,10 @@ private extension MainWindowController {
 
     @objc func openSettingsFileMenuItemSelected() {
         ConfigStore.shared.openInEditor()
+    }
+
+    @objc func openDashboardMenuItemSelected() {
+        keybindingOpenAgentDashboard()
     }
 
     func openSettings() {
