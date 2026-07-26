@@ -24,9 +24,6 @@ Package.resolved
 # Archive of old Tauri/React code
 _archive/
 
-# GhosttyKit build artifacts
-GhosttyKit/
-
 # App bundle
 *.app
 *.dmg
