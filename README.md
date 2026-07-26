@@ -64,25 +64,26 @@ git clone --recurse-submodules https://github.com/frknue/soprano.git
 cd soprano
 
 # 3 · Build libghostty once (a few minutes, needs Xcode's Metal Toolchain)
-(cd ghostty && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  zig build -Dapp-runtime=none -Demit-xcframework=false -Doptimize=ReleaseFast)
-mkdir -p lib
-cp ghostty/zig-out/lib/libghostty.a lib/
-cp ghostty/zig-out/include/ghostty.h Sources/GhosttyKit/include/
+./scripts/build-ghostty.sh
 
 # 4 · Build the release app into /Applications
 ./install.sh
 ```
 
-**Requirements:** macOS 14 Sonoma or newer · Xcode with the Metal Toolchain ·
+**Requirements:** macOS 14 Sonoma or newer · full Xcode with the Metal Toolchain
+(Command Line Tools alone cannot build libghostty) ·
 [Homebrew Swift](https://formulae.brew.sh/formula/swift) 6.2+ ·
-[Zig](https://ziglang.org/download/) 0.13+.
+[Zig](https://ziglang.org/download/) 0.15.2+.
 
 `lib/` is not tracked, so step 3 is mandatory on a fresh clone — but you only repeat it
-when the ghostty submodule moves. Packaging also needs Ghostty's *runtime* resources
-(themes, shell integration, terminfo); step 3 produces them, an installed
-`/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
-both.
+when the ghostty submodule moves. To move it, hand the script a ref
+(`./scripts/build-ghostty.sh v1.3.1`) and commit the submodule pin: it refreshes the
+library, the C header, and the recorded version together, and `swift test` fails if they
+ever disagree. Packaging also needs Ghostty's *runtime* resources (themes, shell
+integration, terminfo); step 3 produces them, an installed `/Applications/Ghostty.app`
+works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides both. Packaging says which
+source it used and warns when that source is a different Ghostty version than the
+library Soprano links.
 
 `install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
 stable local identity so macOS keeps your notification permission across rebuilds, and
@@ -431,9 +432,9 @@ soprano/
 │   │   └── Utilities/            # NSColor+Hex extension
 │   └── GhosttyKit/
 │       ├── module.modulemap      # System library module map
-│       └── include/ghostty.h     # libghostty C API header
-├── Support/                      # Info.plist and agent lifecycle hook templates
-├── scripts/                      # package-app.sh, sign-app.sh, signing identity helper
+│       └── include/ghostty.h     # libghostty C API header (generated; see Try it)
+├── Support/                      # Info.plist, agent hook templates, ghostty-version.txt
+├── scripts/                      # build-ghostty.sh, package-app.sh, sign-app.sh, signing helper
 └── ghostty/                      # Ghostty submodule (source for libghostty)
 ```
 

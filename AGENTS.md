@@ -106,8 +106,9 @@ Scale for this app:
   and writes changes back through `JSONCText` so comments and key order survive.
   `AgentCatalog` is the merged agent registry every other file reads;
   `KeyChord` converts between chord text and `KeyBinding` fields.
-- `Sources/GhosttyKit/` — modulemap + `ghostty.h` only. Regenerate the header
-  from a ghostty build; never hand-edit it.
+- `Sources/GhosttyKit/` — modulemap + `ghostty.h` only, both tracked so a clone can
+  compile before anyone builds libghostty. Regenerate the header with
+  `scripts/build-ghostty.sh`; never hand-edit it and never copy it in on its own.
 
 `Support/Info.plist` and `Support/AgentHooks/*.json` are copied into the bundle
 by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
@@ -147,18 +148,31 @@ they are app state, not configuration.
 
 ## Gotchas
 
-- `lib/` is **gitignored** despite the README calling `libghostty.a` "checked in".
-  A fresh clone must build it from the `ghostty/` submodule (needs Zig 0.13+ and
-  the Xcode Metal Toolchain):
-  ```bash
-  cd ghostty && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-    zig build -Dapp-runtime=none -Demit-xcframework=false -Doptimize=ReleaseFast
-  cp zig-out/lib/libghostty.a ../lib/ && cp zig-out/include/ghostty.h ../Sources/GhosttyKit/include/
-  ```
+- `lib/libghostty.a` is **gitignored** (141 MB, over GitHub's file limit). A fresh
+  clone must build it with `scripts/build-ghostty.sh`, which needs **full Xcode**
+  for the Metal toolchain — Command Line Tools alone cannot build it — plus Zig
+  at least the `minimum_zig_version` in `ghostty/build.zig.zon` (0.15.2 today).
+- **Never copy libghostty artifacts by hand.** `scripts/build-ghostty.sh` builds the
+  submodule and refreshes `lib/libghostty.a`, `Sources/GhosttyKit/include/ghostty.h`,
+  and `Support/ghostty-version.txt` together. Updating only some of them is how a
+  header ends up describing a different struct layout than the library actually has —
+  that compiles, links, and corrupts memory at runtime with no diagnostic. Pass a ref
+  to move ghostty: `scripts/build-ghostty.sh v1.3.1`, then `git add ghostty` so the
+  submodule pin records what you built.
+- `Support/ghostty-version.txt` is the recorded ghostty version for the checkout, and
+  `GhosttyVersionTests` fails when the linked library disagrees with it. That test is
+  the only thing standing in for the version tracking git cannot do on an untracked
+  141 MB binary — if it fails, rebuild rather than editing the file.
 - Packaging needs Ghostty **runtime resources** (themes, shell-integration,
   terminfo). `package-app.sh` searches `SOPRANO_GHOSTTY_RESOURCES_DIR`,
   `ghostty/zig-out/share/ghostty`, `GHOSTTY_RESOURCES_DIR`, then
-  `/Applications/Ghostty.app`. It hard-fails if none is complete.
+  `/Applications/Ghostty.app`. It hard-fails if none is complete. These are found
+  independently of the linked library, so it prints which source it used and warns
+  when the versions differ; `SOPRANO_STRICT_GHOSTTY_RESOURCES=1` turns that into a
+  failure. Soprano exports `GHOSTTY_RESOURCES_DIR` into every pane pointing at its
+  own bundle, so packaging from inside a Soprano pane would otherwise copy resources
+  from the installed app back into the new one forever — candidates inside a
+  `com.soprano.*` bundle are refused for that reason.
 - Native notifications require a real `.app` bundle. `swift run` and
   `.build/debug/Soprano` work for debugging but silently disable them.
 - `swift test` links the CLT-bundled `Testing.framework` via `unsafeFlags` in

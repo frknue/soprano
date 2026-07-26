@@ -41,11 +41,41 @@ ghostty_resource_candidates=(
     "/Applications/Ghostty.app/Contents/Resources/ghostty"
 )
 
+# Soprano exports GHOSTTY_RESOURCES_DIR into every pane, pointing at its own bundle. Packaging
+# from inside a Soprano pane would therefore copy the runtime resources out of the previously
+# installed Soprano and straight back into the new one, forwarding them from build to build
+# without them ever coming from ghostty again. Refuse to read resources out of a Soprano bundle.
+is_soprano_bundle() {
+    local resources_dir="$1"
+
+    case "$resources_dir" in
+        */Contents/Resources/ghostty) ;;
+        *) return 1 ;;
+    esac
+
+    local bundle="${resources_dir%/Contents/Resources/ghostty}"
+    local identifier
+
+    identifier="$(
+        defaults read "$bundle/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true
+    )"
+
+    case "$identifier" in
+        com.soprano.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 for candidate in "${ghostty_resource_candidates[@]}"; do
     if [[ -n "$candidate" \
         && -d "$candidate/themes" \
         && -d "$candidate/shell-integration" \
         && -f "$(dirname "$candidate")/terminfo/78/xterm-ghostty" ]]; then
+        if is_soprano_bundle "$candidate"; then
+            echo "Ignoring Ghostty resources inside a Soprano bundle: $candidate"
+            continue
+        fi
+
         ghostty_resources_dir="$candidate"
         break
     fi
@@ -58,6 +88,48 @@ if [[ -z "$ghostty_resources_dir" ]]; then
 fi
 
 ghostty_terminfo_dir="$(dirname "$ghostty_resources_dir")/terminfo"
+
+# The runtime resources (themes, shell-integration, terminfo) are found separately from the
+# library Soprano links, so they can silently come from a different Ghostty version. That is
+# mostly harmless for themes, but a mismatched terminfo or shell-integration breaks key
+# handling and the prompt markers pane status depends on. Report what was picked, and say so
+# when it does not match the linked library.
+echo "Ghostty runtime resources: $ghostty_resources_dir"
+
+linked_ghostty_version=""
+if [[ -f "$repo_root/Support/ghostty-version.txt" ]]; then
+    linked_ghostty_version="$(tr -d '[:space:]' < "$repo_root/Support/ghostty-version.txt")"
+fi
+
+resources_ghostty_version=""
+if [[ "$ghostty_resources_dir" == "$repo_root/ghostty/zig-out/share/ghostty" ]]; then
+    resources_ghostty_version="$linked_ghostty_version"
+elif [[ "$ghostty_resources_dir" == *"/Ghostty.app/Contents/Resources/ghostty" ]]; then
+    resources_app="${ghostty_resources_dir%/Contents/Resources/ghostty}"
+    resources_ghostty_version="$(
+        defaults read "$resources_app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true
+    )"
+fi
+
+if [[ -n "$linked_ghostty_version" && -n "$resources_ghostty_version" ]]; then
+    # Compare only X.Y.Z: the linked version carries a channel and commit suffix that a
+    # released Ghostty.app never has.
+    linked_release="${linked_ghostty_version%%-*}"
+
+    if [[ "$linked_release" != "$resources_ghostty_version" ]]; then
+        echo "Warning: resources are Ghostty $resources_ghostty_version but the linked" >&2
+        echo "         libghostty is $linked_ghostty_version." >&2
+        echo "         Build the submodule (scripts/build-ghostty.sh) so both come from one" >&2
+        echo "         source, or set SOPRANO_GHOSTTY_RESOURCES_DIR to a matching directory." >&2
+
+        if [[ "${SOPRANO_STRICT_GHOSTTY_RESOURCES:-0}" != "0" ]]; then
+            echo "SOPRANO_STRICT_GHOSTTY_RESOURCES is set; refusing to package a mismatch." >&2
+            exit 1
+        fi
+    fi
+elif [[ -z "$resources_ghostty_version" ]]; then
+    echo "Note: could not determine the version of those resources."
+fi
 
 for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" \
     "$soprano_license" "$ghostty_license"; do
