@@ -12,8 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        GhosttyAppManager.shared.initialize()
-
         // Load settings.json (creating it on first run) before anything reads
         // a setting, so the whole launch sees the user's configuration.
         let configStore = ConfigStore.shared
@@ -21,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let settings = configStore.settings
         let themeManager = ThemeManager(themeId: settings.themeId)
+        GhosttyAppManager.shared.initialize(theme: themeManager.currentTheme)
         let agentManager = AgentManager()
         let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
         agentNotificationManager.requestAuthorizationIfNeeded()

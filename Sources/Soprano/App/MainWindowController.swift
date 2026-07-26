@@ -74,7 +74,8 @@ final class MainWindowController: NSWindowController {
         contentVC.setControlKeyHeld(keybindingManager.isControlKeyHeld)
         self.keybindingManager = keybindingManager
 
-        themeManager.onThemeChanged = { [weak self] _ in
+        themeManager.onThemeChanged = { [weak self] theme in
+            GhosttyAppManager.shared.applyTheme(theme)
             self?.applyTheme()
             self?.mainContentVC?.refreshTheme()
         }

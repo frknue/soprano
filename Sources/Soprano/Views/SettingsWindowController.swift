@@ -707,7 +707,12 @@ final class SettingsViewController: NSViewController {
         settings.themeId = selectedTheme.id
         configStore.write(selectedTheme.id, at: ["theme"])
 
-        themeManager.setTheme(id: selectedTheme.id)
+        // The shared store observer normally applies the theme during write().
+        // Standalone settings controllers used in tests and previews have no
+        // observer, so retain the local fallback without applying it twice.
+        if themeManager.currentTheme.id != selectedTheme.id {
+            themeManager.setTheme(id: selectedTheme.id)
+        }
         apply(theme: themeManager.currentTheme)
     }
 

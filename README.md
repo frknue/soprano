@@ -332,7 +332,9 @@ default.
 {
   // Comments and trailing commas are allowed. The UI preserves both when it
   // writes to this file.
-  "theme": "catppuccin-mocha",          // gruvbox-dark | catppuccin-mocha
+  // gruvbox-dark | catppuccin-mocha | dracula | solarized-dark | nord
+  // tokyo-night | atom-one-dark
+  "theme": "catppuccin-mocha",
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
 

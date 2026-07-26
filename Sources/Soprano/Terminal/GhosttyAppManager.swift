@@ -23,8 +23,11 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private init() {}
 
-    func initialize() {
-        guard !isInitialized else { return }
+    func initialize(theme: AppTheme) {
+        if isInitialized {
+            applyTheme(theme)
+            return
+        }
 
         let initResult = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
         guard initResult == GHOSTTY_SUCCESS else {
@@ -32,28 +35,30 @@ final class GhosttyAppManager: @unchecked Sendable {
             return
         }
 
-        guard let primaryConfig = createPrimaryConfig() else {
+        guard let primary = createConfig(theme: theme, loadDefaultFiles: true) else {
             print("[Soprano] Failed to create ghostty config")
             return
         }
 
-        config = primaryConfig
         var runtimeConfig = makeRuntimeConfig()
 
-        if let primaryApp = ghostty_app_new(&runtimeConfig, primaryConfig) {
+        if let primaryApp = ghostty_app_new(&runtimeConfig, primary.config) {
+            config = primary.config
+            clearsSelectionOnCopy = primary.clearsSelectionOnCopy
             app = primaryApp
         } else {
-            guard let fallbackConfig = ghostty_config_new() else {
+            ghostty_config_free(primary.config)
+            guard let fallback = createConfig(theme: theme, loadDefaultFiles: false) else {
                 print("[Soprano] Failed to allocate fallback ghostty config")
                 return
             }
-            clearsSelectionOnCopy = applySopranoCopyModeConfig(to: fallbackConfig)
-            ghostty_config_finalize(fallbackConfig)
 
-            if let fallbackApp = ghostty_app_new(&runtimeConfig, fallbackConfig) {
-                config = fallbackConfig
+            if let fallbackApp = ghostty_app_new(&runtimeConfig, fallback.config) {
+                config = fallback.config
+                clearsSelectionOnCopy = fallback.clearsSelectionOnCopy
                 app = fallbackApp
             } else {
+                ghostty_config_free(fallback.config)
                 print("[Soprano] Failed to create ghostty app")
                 return
             }
@@ -66,17 +71,41 @@ final class GhosttyAppManager: @unchecked Sendable {
         isInitialized = true
     }
 
+    func applyTheme(_ theme: AppTheme) {
+        guard isInitialized, let app else { return }
+        guard let updated = createConfig(theme: theme, loadDefaultFiles: true) else {
+            print("[Soprano] Failed to apply terminal theme \(theme.id)")
+            return
+        }
+
+        ghostty_app_update_config(app, updated.config)
+        if let config {
+            ghostty_config_free(config)
+        }
+        config = updated.config
+        clearsSelectionOnCopy = updated.clearsSelectionOnCopy
+    }
+
     func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
     }
 
-    private func createPrimaryConfig() -> ghostty_config_t? {
+    private func createConfig(
+        theme: AppTheme,
+        loadDefaultFiles: Bool
+    ) -> (config: ghostty_config_t, clearsSelectionOnCopy: Bool)? {
         guard let cfg = ghostty_config_new() else { return nil }
-        ghostty_config_load_default_files(cfg)
-        clearsSelectionOnCopy = applySopranoCopyModeConfig(to: cfg)
+        if loadDefaultFiles {
+            ghostty_config_load_default_files(cfg)
+        }
+        let clearsSelectionOnCopy = applySopranoCopyModeConfig(to: cfg)
+        guard applyTerminalThemeConfig(theme, to: cfg) else {
+            ghostty_config_free(cfg)
+            return nil
+        }
         ghostty_config_finalize(cfg)
-        return cfg
+        return (cfg, clearsSelectionOnCopy)
     }
 
     private func applySopranoCopyModeConfig(to config: ghostty_config_t) -> Bool {
@@ -91,6 +120,32 @@ final class GhosttyAppManager: @unchecked Sendable {
             ghostty_config_load_file(config, $0)
         }
         return true
+    }
+
+    private func applyTerminalThemeConfig(
+        _ theme: AppTheme,
+        to config: ghostty_config_t
+    ) -> Bool {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "soprano-terminal-theme-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString).conf"
+            )
+
+        do {
+            try theme.terminalColors.ghosttyConfiguration.write(
+                to: fileURL,
+                atomically: true,
+                encoding: .utf8
+            )
+            defer { try? FileManager.default.removeItem(at: fileURL) }
+            fileURL.path.withCString {
+                ghostty_config_load_file(config, $0)
+            }
+            return true
+        } catch {
+            print("[Soprano] Failed to prepare terminal theme \(theme.id): \(error)")
+            return false
+        }
     }
 
     private func observeApplicationFocusChanges() {

@@ -30,6 +30,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   input-needed, and error totals, and jump directly to an agent from the sidebar chart
   button, **Commands** menu, or the configurable `⇧⌘D` shortcut; navigate with `J` / `K`
   or the arrow keys, open with `Return`, and close with `Esc`.
+- Dracula, Solarized Dark, Nord, Tokyo Night, and Atom One Dark themes.
 
 ### Changed
 
@@ -46,8 +47,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   reverted.
 - Rebinding **Command Palette**, **Open Project…**, or **Find Window…** now takes effect:
   their Commands-menu shortcuts follow `settings.json` instead of staying hardcoded.
-- Changing the theme now repaints pane backgrounds and pane-header titles instead of
-  leaving open panes in the previous theme's colors.
+- Changing the theme now updates open terminals (including their background and ANSI
+  palette) and repaints pane backgrounds and pane-header titles.
 - Reloading keybindings no longer strands the status bar in `PREFIX`, and no longer
   stops pane-navigation passthrough from tracking closed panes.
 - Selecting a pane in the sidebar now reveals it when an expanded inner workspace was
