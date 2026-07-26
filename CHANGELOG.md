@@ -63,6 +63,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - Selecting an exact agent tab from a notification or the Agent Dashboard now reveals
   its hidden depth branch before focusing it.
 - A maximized pane now stays maximized when moving into or out of its depth workspace.
+- Terminal title, working-directory, and browser URL updates no longer rebuild unrelated
+  UI, and hidden terminal surfaces pause rendering to reduce multi-pane CPU and GPU use.
 
 ## [0.2.0] - 2026-07-25
 

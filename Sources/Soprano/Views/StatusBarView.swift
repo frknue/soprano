@@ -17,8 +17,8 @@ final class StatusBarView: NSView {
         wantsLayer = true
         setupViews()
 
-        agentManager.addObserver(id: "StatusBarView") { [weak self] in
-            self?.refresh()
+        agentManager.addObserver(id: "StatusBarView") { [weak self] change in
+            self?.handleAgentChange(change)
         }
         refresh()
     }
@@ -110,6 +110,22 @@ final class StatusBarView: NSView {
             modeLabel.textColor = theme.colors.textMuted
         }
         refresh()
+    }
+
+    private func handleAgentChange(_ change: AgentManagerChange) {
+        switch change {
+        case .model:
+            refresh()
+
+        case .tabTitle(let target):
+            guard target.paneId == agentManager.activePaneId,
+                  agentManager.panes[target.paneId]?.activeTab?.id == target.tabId
+            else { return }
+            refresh()
+
+        case .tabWorkingDirectory, .browserURL:
+            break
+        }
     }
 
     /// `window ▸ pane` for the focused location, with the depth layer appended

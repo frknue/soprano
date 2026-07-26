@@ -22,6 +22,13 @@ enum TerminalLifecycleAction: Equatable {
     }
 }
 
+enum AgentManagerChange: Equatable, Sendable {
+    case model
+    case tabTitle(TerminalTarget)
+    case tabWorkingDirectory(TerminalTarget)
+    case browserURL(TerminalTarget)
+}
+
 /// Central controller for pane/tab/agent lifecycle and tiling layout.
 /// This is the Swift equivalent of useAgentManager.ts.
 final class AgentManager: @unchecked Sendable {
@@ -49,7 +56,7 @@ final class AgentManager: @unchecked Sendable {
     private var nextId: Int = 2
 
     /// Multi-observer notification. Views register closures to receive updates.
-    private var observers: [String: () -> Void] = [:]
+    private var observers: [String: (AgentManagerChange) -> Void] = [:]
     /// Exact-target terminal lifecycle work, separate from ordinary model updates.
     private var terminalLifecycleObservers: [String: (TerminalLifecycleAction) -> Void] = [:]
     /// Monotonic tokens prevent an older surface's readiness fallback from
@@ -970,7 +977,7 @@ final class AgentManager: @unchecked Sendable {
         guard !sanitized.isEmpty, pane.tabs[index].title != sanitized else { return }
 
         pane.tabs[index].title = sanitized
-        notifyChange()
+        notifyChange(.tabTitle(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
     func updateWorkingDirectory(paneId: String, tabId: String, to workingDirectory: String) {
@@ -981,7 +988,9 @@ final class AgentManager: @unchecked Sendable {
         else { return }
 
         pane.tabs[index].cwd = workingDirectory
-        notifyChange()
+        notifyChange(.tabWorkingDirectory(
+            TerminalTarget(paneId: paneId, tabId: tabId)
+        ))
     }
 
     func updateBrowserURL(paneId: String, tabId: String, to url: String) {
@@ -993,7 +1002,7 @@ final class AgentManager: @unchecked Sendable {
         else { return }
 
         pane.tabs[index].url = url
-        notifyChange()
+        notifyChange(.browserURL(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
     // MARK: - Agent Profile Lookup
@@ -1251,8 +1260,17 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Observer Management
 
-    func addObserver(id: String, handler: @escaping () -> Void) {
+    func addObserver(
+        id: String,
+        handler: @escaping (AgentManagerChange) -> Void
+    ) {
         observers[id] = handler
+    }
+
+    /// Convenience for observers that need every model change and do not need
+    /// to distinguish high-frequency tab metadata updates.
+    func addObserver(id: String, handler: @escaping () -> Void) {
+        observers[id] = { _ in handler() }
     }
 
     func removeObserver(id: String) {
@@ -1284,10 +1302,13 @@ final class AgentManager: @unchecked Sendable {
         }
     }
 
-    private func notifyChange(layoutChanged: Bool = false) {
+    private func notifyChange(
+        _ change: AgentManagerChange = .model,
+        layoutChanged: Bool = false
+    ) {
         if layoutChanged { layoutGeneration += 1 }
         for (_, handler) in observers {
-            handler()
+            handler(change)
         }
     }
 

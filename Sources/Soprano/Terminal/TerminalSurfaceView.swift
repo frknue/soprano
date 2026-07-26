@@ -214,6 +214,7 @@ final class TerminalSurfaceView: NSView {
     private var lastPixelHeight: UInt32 = 0
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
+    private var lastSurfaceVisibility: Bool?
     private let surfaceDestructionGate = SurfaceDestructionGate()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
@@ -253,6 +254,12 @@ final class TerminalSurfaceView: NSView {
             self,
             selector: #selector(windowDidChangeScreen(_:)),
             name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeOcclusionState(_:)),
+            name: NSWindow.didChangeOcclusionStateNotification,
             object: nil
         )
     }
@@ -353,6 +360,7 @@ final class TerminalSurfaceView: NSView {
         lastXScale = xScale
         lastYScale = yScale
         installKeyUpMonitor()
+        syncSurfaceVisibility()
     }
 
     func terminalTitleDidChange(_ title: String) {
@@ -959,6 +967,17 @@ final class TerminalSurfaceView: NSView {
                 ghostty_surface_set_display_id(surface, displayID)
             }
         }
+        syncSurfaceVisibility()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        syncSurfaceVisibility()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        syncSurfaceVisibility()
     }
 
     /// The renderer vsyncs against a CVDisplayLink keyed by display ID. Without
@@ -978,6 +997,36 @@ final class TerminalSurfaceView: NSView {
         DispatchQueue.main.async { [weak self] in
             self?.viewDidChangeBackingProperties()
         }
+    }
+
+    @objc private func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let changedWindow = notification.object as? NSWindow,
+              changedWindow === window
+        else { return }
+        syncSurfaceVisibility()
+    }
+
+    static func shouldRenderSurface(
+        isAttachedToWindow: Bool,
+        windowIsVisible: Bool,
+        isHiddenOrHasHiddenAncestor: Bool
+    ) -> Bool {
+        isAttachedToWindow && windowIsVisible && !isHiddenOrHasHiddenAncestor
+    }
+
+    private func syncSurfaceVisibility() {
+        guard let surface else {
+            lastSurfaceVisibility = nil
+            return
+        }
+        let isVisible = Self.shouldRenderSurface(
+            isAttachedToWindow: window != nil,
+            windowIsVisible: window?.occlusionState.contains(.visible) == true,
+            isHiddenOrHasHiddenAncestor: isHiddenOrHasHiddenAncestor
+        )
+        guard lastSurfaceVisibility != isVisible else { return }
+        lastSurfaceVisibility = isVisible
+        ghostty_surface_set_occlusion(surface, isVisible)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -1573,6 +1622,7 @@ final class TerminalSurfaceView: NSView {
                 for: ObjectIdentifier(self)
             )
             self.surface = nil
+            lastSurfaceVisibility = nil
             markedText.mutableString.setString("")
             ghostty_surface_free(surface)
         }

@@ -25,6 +25,7 @@ final class SidebarView: NSView {
     private var sessionsButton: NSButton!
     private var collapsedWindowIds: Set<String> = []
     private var isControlKeyHeld = false
+    private var paneRows: [String: SidebarPaneRowView] = [:]
 
     init(
         agentManager: AgentManager,
@@ -40,8 +41,8 @@ final class SidebarView: NSView {
         wantsLayer = true
         layer?.masksToBounds = true
         setupViews()
-        agentManager.addObserver(id: "SidebarView") { [weak self] in
-            self?.refresh()
+        agentManager.addObserver(id: "SidebarView") { [weak self] change in
+            self?.handleAgentChange(change)
         }
         sessionManager.addObserver(id: "SidebarView-sessions") { [weak self] in
             self?.refresh()
@@ -379,12 +380,36 @@ final class SidebarView: NSView {
         rebuildRows(theme: theme)
     }
 
+    private func handleAgentChange(_ change: AgentManagerChange) {
+        switch change {
+        case .model:
+            refresh()
+
+        case .tabTitle(let target):
+            guard let pane = agentManager.panes[target.paneId],
+                  pane.activeTab?.id == target.tabId
+            else { return }
+            paneRows[target.paneId]?.setTitle(sidebarTitle(for: pane))
+
+        case .tabWorkingDirectory(let target):
+            gitBranchMonitor.setWatchedPaths(watchedCwds())
+            guard let pane = agentManager.panes[target.paneId],
+                  pane.activeTab?.id == target.tabId
+            else { return }
+            paneRows[target.paneId]?.setBranch(branchForPane(pane))
+
+        case .browserURL:
+            break
+        }
+    }
+
     private func rebuildRows(theme: AppTheme) {
         let paneShortcutKeysById = Dictionary(
             uniqueKeysWithValues: agentManager.paneShortcutAssignments.map {
                 ($0.paneId, $0.key)
             }
         )
+        paneRows.removeAll(keepingCapacity: true)
         for view in rowsStack.arrangedSubviews {
             rowsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -442,6 +467,7 @@ final class SidebarView: NSView {
                 let maximumDepth = terminalWindow.maximumDepth
                 let hasDepth = maximumDepth > 0
                 let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
+                row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
                 row.configure(
                     title: sidebarTitle(for: pane),
                     branch: branchForPane(pane),
@@ -469,6 +495,7 @@ final class SidebarView: NSView {
                     equalTo: rowsStack.widthAnchor,
                     constant: -20
                 ).isActive = true
+                paneRows[pane.id] = row
             }
         }
     }
@@ -840,6 +867,8 @@ private final class SidebarPaneRowView: NSView {
     private var onClose: (() -> Void)?
     private let theme: AppTheme
     private let hierarchyIndent: CGFloat
+    private var displayedBranch: String?
+    private var hasConfiguredBranch = false
 
     init(theme: AppTheme, hierarchyIndent: CGFloat = 0) {
         self.theme = theme
@@ -985,7 +1014,7 @@ private final class SidebarPaneRowView: NSView {
         self.onToggle = onToggle
         self.onSelect = onSelect
         self.onClose = onClose
-        titleLabel.stringValue = title
+        setTitle(title)
         dotView.layer?.backgroundColor = dotColor.cgColor
 
         disclosureButton.isHidden = !showsDisclosure
@@ -1058,6 +1087,19 @@ private final class SidebarPaneRowView: NSView {
                 ? theme.colors.accent
                 : (inActiveWindow ? theme.colors.railMuted : nil)
         )
+
+        setBranch(branch)
+    }
+
+    func setTitle(_ title: String) {
+        guard titleLabel.stringValue != title else { return }
+        titleLabel.stringValue = title
+    }
+
+    func setBranch(_ branch: String?) {
+        guard !hasConfiguredBranch || displayedBranch != branch else { return }
+        hasConfiguredBranch = true
+        displayedBranch = branch
 
         if let branch {
             branchLabel.stringValue = "⎇ \(branch)"

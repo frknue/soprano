@@ -180,7 +180,8 @@ final class KeybindingManager: @unchecked Sendable {
 
     private func observePaneNavigationClaimLifecycle() {
         synchronizePaneNavigationClaims()
-        agentManager.addObserver(id: paneNavigationClaimObserverId) { [weak self] in
+        agentManager.addObserver(id: paneNavigationClaimObserverId) { [weak self] change in
+            guard change == .model else { return }
             self?.synchronizePaneNavigationClaims()
         }
     }

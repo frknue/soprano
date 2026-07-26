@@ -104,6 +104,20 @@ final class PaneHeaderView: NSView {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
+        // Pane containers are briefly zero-width while AppKit reparents a
+        // cached split tree. Let the flexible labels collapse during that
+        // transient state instead of breaking the fixed control constraints.
+        let titleTrailingConstraint = titleLabel.trailingAnchor.constraint(
+            lessThanOrEqualTo: statusLabel.leadingAnchor,
+            constant: -8
+        )
+        titleTrailingConstraint.priority = .defaultHigh
+        let tabsTrailingConstraint = tabStackView.trailingAnchor.constraint(
+            lessThanOrEqualTo: statusLabel.leadingAnchor,
+            constant: -6
+        )
+        tabsTrailingConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             statusDot.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -112,11 +126,11 @@ final class PaneHeaderView: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -8),
+            titleTrailingConstraint,
 
             tabStackView.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
             tabStackView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            tabStackView.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
+            tabsTrailingConstraint,
             tabStackView.heightAnchor.constraint(equalToConstant: 24),
 
             statusLabel.trailingAnchor.constraint(equalTo: depthOutButton.leadingAnchor, constant: -2),

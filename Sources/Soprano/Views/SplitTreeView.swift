@@ -87,8 +87,8 @@ final class SplitTreeView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
 
-        agentManager.addObserver(id: observerId) { [weak self] in
-            self?.handleStateChange()
+        agentManager.addObserver(id: observerId) { [weak self] change in
+            self?.handleStateChange(change)
         }
         agentManager.addTerminalLifecycleObserver(id: observerId) { [weak self] action in
             self?.handleTerminalLifecycle(action)
@@ -108,6 +108,19 @@ final class SplitTreeView: NSView {
     }
 
     // MARK: - State Change Handler
+
+    private func handleStateChange(_ change: AgentManagerChange) {
+        switch change {
+        case .model:
+            handleStateChange()
+
+        case .tabTitle(let target):
+            paneContainers[target.paneId]?.updateHeader()
+
+        case .tabWorkingDirectory, .browserURL:
+            break
+        }
+    }
 
     private func handleStateChange() {
         cancelCopyModeOutsideActiveTerminal()
@@ -732,11 +745,14 @@ final class PaneContainerView: NSView {
         addSubview(headerView)
         addSubview(contentView)
 
+        let headerHeightConstraint = headerView.heightAnchor.constraint(equalToConstant: 32)
+        headerHeightConstraint.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             headerView.topAnchor.constraint(equalTo: topAnchor),
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: 32),
+            headerHeightConstraint,
 
             contentView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),

@@ -22,8 +22,13 @@ final class AgentDashboardViewController: NSViewController {
         self.agentManager = agentManager
         self.themeManager = themeManager
         super.init(nibName: nil, bundle: nil)
-        agentManager.addObserver(id: observerId) { [weak self] in
-            self?.refresh()
+        agentManager.addObserver(id: observerId) { [weak self] change in
+            switch change {
+            case .model, .tabTitle:
+                self?.refresh()
+            case .tabWorkingDirectory, .browserURL:
+                break
+            }
         }
     }
 

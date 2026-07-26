@@ -192,7 +192,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         ) { [weak self] _ in
             self?.clearDeliveredNotificationsForFocusedAgent()
         }
-        agentManager.addObserver(id: observerId) { [weak self] in
+        agentManager.addObserver(id: observerId) { [weak self] change in
+            guard change == .model else { return }
             self?.clearDeliveredNotificationsForFocusedAgent()
         }
     }
