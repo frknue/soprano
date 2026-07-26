@@ -762,8 +762,8 @@ final class AgentManager: @unchecked Sendable {
         activeWindowId = terminalWindow.id
         _ = terminalWindow.activateDepth(containingPane: paneId)
         if terminalWindow.goIn(from: paneId) {
-            exitMaximize()
             let targetPaneId = terminalWindow.activePaneId
+            retargetMaximize(from: paneId, to: targetPaneId)
             _ = clearAttentionWithoutNotification(paneId: targetPaneId)
             notifyChange(layoutChanged: true)
             return panes[targetPaneId]?.activeTab?.id
@@ -772,7 +772,6 @@ final class AgentManager: @unchecked Sendable {
         guard panes.count < Self.maxPanes,
               let activeTab = pane.activeTab
         else { return nil }
-        exitMaximize()
         let newPaneId = nextPaneId()
         let newTabId = nextTabId()
         let child = createPaneTab(
@@ -786,6 +785,7 @@ final class AgentManager: @unchecked Sendable {
             layout: .leaf(newPaneId),
             activePaneId: newPaneId
         )
+        retargetMaximize(from: paneId, to: newPaneId)
         notifyChange(layoutChanged: true)
         return newTabId
     }
@@ -800,10 +800,22 @@ final class AgentManager: @unchecked Sendable {
         activeWindowId = terminalWindow.id
         _ = terminalWindow.activateDepth(containingPane: paneId)
         guard terminalWindow.goOut() else { return false }
-        exitMaximize()
+        retargetMaximize(
+            from: paneId,
+            to: terminalWindow.activePaneId
+        )
         _ = clearAttentionWithoutNotification(paneId: terminalWindow.activePaneId)
         notifyChange(layoutChanged: true)
         return true
+    }
+
+    /// Keep a maximized region full-size while replacing its pane with the
+    /// corresponding pane from an adjacent depth layer.
+    private func retargetMaximize(from sourcePaneId: String, to targetPaneId: String) {
+        guard let maximizedPaneId else { return }
+        self.maximizedPaneId = maximizedPaneId == sourcePaneId
+            ? targetPaneId
+            : nil
     }
 
     /// Closes the complete active inner layout and all layouts farther inward.

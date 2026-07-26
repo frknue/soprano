@@ -48,6 +48,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   stops pane-navigation passthrough from tracking closed panes.
 - Selecting a pane in the sidebar now reveals it when an expanded inner workspace was
   previously occupying its region.
+- A maximized pane now stays maximized when moving into or out of its depth workspace.
 
 ## [0.2.0] - 2026-07-25
 

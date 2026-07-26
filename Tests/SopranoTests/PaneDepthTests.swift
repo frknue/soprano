@@ -33,6 +33,30 @@ struct PaneDepthTests {
         #expect(manager.paneCount == 2)
     }
 
+    @Test func maximizeFollowsAPaneIntoAndOutOfItsDepthBranch() throws {
+        let manager = AgentManager()
+        let firstRootPaneId = manager.activePaneId
+        let secondRootPaneId = try #require(
+            manager.splitPane(direction: .horizontal, paneId: firstRootPaneId)
+        )
+        manager.focusPane(firstRootPaneId)
+        manager.toggleMaximize()
+
+        #expect(manager.maximizedPaneId == firstRootPaneId)
+
+        _ = try #require(manager.goIn(firstRootPaneId))
+        let innerPaneId = manager.activePaneId
+
+        #expect(manager.layout?.orderedLeafIds == [innerPaneId, secondRootPaneId])
+        #expect(manager.maximizedPaneId == innerPaneId)
+
+        #expect(manager.goOut(innerPaneId))
+        #expect(manager.layout?.orderedLeafIds == [
+            firstRootPaneId, secondRootPaneId,
+        ])
+        #expect(manager.maximizedPaneId == firstRootPaneId)
+    }
+
     @Test func depthCanNestAndStopsAtTheOutermostLayout() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId
