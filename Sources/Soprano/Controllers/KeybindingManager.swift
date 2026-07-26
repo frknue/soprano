@@ -42,7 +42,6 @@ struct PaneNavigationClaimRegistry {
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
     func keybindingSaveSession()
-    func keybindingSwitchToLastSession()
     func keybindingRenameWindow()
     func keybindingOpenSettings()
     func keybindingOpenAgentDashboard()
@@ -452,8 +451,6 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.activateNextWindow()
         case "last-window":
             agentManager.activateLastWindow()
-        case "last-session":
-            invokeDelegate { $0.keybindingSwitchToLastSession() }
 
         case "resize-left":
             agentManager.resizePane(direction: .left, tickPercent: config.resizeTickPercent)

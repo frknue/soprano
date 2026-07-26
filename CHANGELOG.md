@@ -38,10 +38,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   input-needed, and error totals, and jump directly to an agent from the sidebar chart
   button, **Commands** menu, or the configurable `⇧⌘D` shortcut; navigate with `J` / `K`
   or the arrow keys, open with `Return`, and close with `Esc`.
-- `⌃A ⇧P` jumps to the most recently active logical window and toggles back when pressed
+- `⌃A ⇧L` jumps to the most recently active logical window and toggles back when pressed
   again.
-- `⌃A ⇧L` switches to the previously active workspace session and toggles back when
-  pressed again.
 - Dracula, Solarized Dark, Nord, Tokyo Night, and Atom One Dark themes.
 
 ### Changed

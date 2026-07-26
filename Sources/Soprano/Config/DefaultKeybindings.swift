@@ -14,8 +14,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "nav-right", label: "Focus Right", description: "Move focus to the pane on the right", category: .navigation, defaultKeys: "Ctrl+L", mode: .direct, key: "l", ctrl: true),
             KeyBinding(id: "previous-window", label: "Previous Window", description: "Switch to the previous logical window", category: .navigation, defaultKeys: "Prefix → P", mode: .prefix, key: "p"),
             KeyBinding(id: "next-window", label: "Next Window", description: "Switch to the next logical window", category: .navigation, defaultKeys: "Prefix → N", mode: .prefix, key: "n"),
-            KeyBinding(id: "last-window", label: "Last Window", description: "Switch to the most recently active logical window", category: .navigation, defaultKeys: "Prefix → Shift+P", mode: .prefix, key: "p", shift: true),
-            KeyBinding(id: "last-session", label: "Last Session", description: "Switch to the previously active workspace session", category: .navigation, defaultKeys: "Prefix → Shift+L", mode: .prefix, key: "l", shift: true),
+            KeyBinding(id: "last-window", label: "Last Window", description: "Switch to the most recently active logical window", category: .navigation, defaultKeys: "Prefix → Shift+L", mode: .prefix, key: "l", shift: true),
             KeyBinding(id: "previous-window-direct", label: "Previous Window (Direct)", description: "Switch to the previous logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+H", mode: .direct, key: "h", ctrl: true, shift: true),
             KeyBinding(id: "next-window-direct", label: "Next Window (Direct)", description: "Switch to the next logical window without the prefix", category: .navigation, defaultKeys: "Ctrl+Shift+L", mode: .direct, key: "l", ctrl: true, shift: true),
             KeyBinding(id: "select-window-1", label: "Select Window 1", description: "Switch to logical window 1", category: .navigation, defaultKeys: "Ctrl+1", mode: .direct, key: "1", ctrl: true),
@@ -146,10 +145,12 @@ enum DefaultKeybindings {
                 && savedBinding.shift == true
         case "last-window":
             usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
-                && savedBinding.key == "l"
                 && savedBinding.ctrl != true
                 && savedBinding.meta != true
-                && savedBinding.shift != true
+                && (
+                    (savedBinding.key == "l" && savedBinding.shift != true)
+                        || (savedBinding.key == "p" && savedBinding.shift == true)
+                )
         case "prev-pane-tab":
             usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
                 && savedBinding.key == "p"

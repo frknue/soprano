@@ -113,13 +113,13 @@ struct DefaultKeybindingsTests {
         #expect(nextWindowDirect.shift == true)
     }
 
-    @Test func tmuxLastWindowUsesPrefixShiftP() throws {
+    @Test func lastWindowUsesPrefixShiftL() throws {
         let lastWindow = try #require(binding("last-window"))
 
         #expect(lastWindow.mode == .prefix)
-        #expect(lastWindow.key == "p")
+        #expect(lastWindow.key == "l")
         #expect(lastWindow.shift == true)
-        #expect(lastWindow.defaultKeys == "Prefix → Shift+P")
+        #expect(lastWindow.defaultKeys == "Prefix → Shift+L")
     }
 
     @Test func savedConfigurationsGainTheLastWindowShortcut() {
@@ -131,22 +131,27 @@ struct DefaultKeybindingsTests {
         #expect(mergedConfig.bindings.contains { $0.id == "last-window" })
     }
 
-    @Test func tmuxLastSessionUsesPrefixShiftL() throws {
-        let lastSession = try #require(binding("last-session"))
-
-        #expect(lastSession.mode == .prefix)
-        #expect(lastSession.key == "l")
-        #expect(lastSession.shift == true)
-        #expect(lastSession.defaultKeys == "Prefix → Shift+L")
-    }
-
-    @Test func savedConfigurationsGainTheLastSessionShortcut() {
+    @Test func previousPrefixShiftPLastWindowDefaultMigratesToPrefixShiftL() throws {
         var savedConfig = DefaultKeybindings.config
-        savedConfig.bindings.removeAll { $0.id == "last-session" }
+        savedConfig.bindings = savedConfig.bindings.map { current in
+            guard current.id == "last-window" else { return current }
+            return legacyBinding(
+                basedOn: current,
+                display: "Prefix → Shift+P",
+                mode: .prefix,
+                key: "p",
+                shift: true
+            )
+        }
 
-        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let lastWindow = try #require(
+            merged.bindings.first { $0.id == "last-window" }
+        )
 
-        #expect(mergedConfig.bindings.contains { $0.id == "last-session" })
+        #expect(lastWindow.key == "l")
+        #expect(lastWindow.shift == true)
+        #expect(lastWindow.defaultKeys == "Prefix → Shift+L")
     }
 
     @Test func paneTabCyclingUsesPrefixAngleBrackets() throws {
@@ -289,7 +294,7 @@ struct DefaultKeybindingsTests {
         let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
         let byId = Dictionary(uniqueKeysWithValues: merged.bindings.map { ($0.id, $0) })
 
-        #expect(byId["last-window"]?.key == "p")
+        #expect(byId["last-window"]?.key == "l")
         #expect(byId["last-window"]?.shift == true)
         for (id, key) in oldResizeKeys {
             #expect(byId[id]?.key == key)

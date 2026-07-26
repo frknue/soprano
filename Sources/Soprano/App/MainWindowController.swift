@@ -228,16 +228,6 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
-                id: "last-session",
-                icon: "arrow.left.arrow.right.square",
-                label: "Last Session",
-                description: "Switch to the previously active workspace session",
-                shortcut: commandShortcut(for: "last-session"),
-                action: { [weak self] in
-                    self?.keybindingSwitchToLastSession()
-                }
-            ),
-            CommandItem(
                 id: "find-window",
                 icon: "macwindow",
                 label: "Find Window…",
@@ -476,10 +466,6 @@ extension MainWindowController: KeybindingDelegate {
 
     func keybindingSaveSession() {
         mainContentVC?.saveSessionAs()
-    }
-
-    func keybindingSwitchToLastSession() {
-        sessionManager.switchToLastSession()
     }
 
     func keybindingRenameWindow() {

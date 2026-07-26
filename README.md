@@ -181,7 +181,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 |---|---|
 | `⌃⇧H` / `⌃⇧L` | Previous / next logical window |
 | `⌃A` → `P` / `N` | Previous / next logical window |
-| `⌃A` → `⇧P` | Jump to the most recently active logical window; press again to toggle back |
+| `⌃A` → `⇧L` | Jump to the most recently active logical window; press again to toggle back |
 | `⌃1`…`⌃9` | Select logical window 1–9 |
 | `⌃⇧` + the letter shown in the sidebar | Select the matching pane across logical windows |
 | `⌘N` | New logical window |
@@ -210,7 +210,6 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
 | `⇧⌘S` | Save session as… |
-| `⌃A` → `⇧L` | Switch to the last session; press again to toggle back |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `⌃A` → `⌃A` | Send a literal `⌃A` to the terminal |

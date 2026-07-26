@@ -6,7 +6,6 @@ final class SessionManager: @unchecked Sendable {
     private let agentManager: AgentManager
     private let defaults: UserDefaults
     private var observers: [String: () -> Void] = [:]
-    private var lastActiveSession: WorkspaceSession?
 
     init(agentManager: AgentManager, defaults: UserDefaults = .standard) {
         self.agentManager = agentManager
@@ -42,19 +41,7 @@ final class SessionManager: @unchecked Sendable {
               !session.panes.isEmpty
         else { return }
 
-        lastActiveSession = agentManager.snapshotWorkspace()
         agentManager.restoreWorkspace(session)
-    }
-
-    /// Swaps the current workspace with the one most recently left through a
-    /// named-session load or this action. Keeping the replacement snapshot
-    /// makes repeated invocations toggle between the same two sessions.
-    func switchToLastSession() {
-        guard let lastActiveSession, !lastActiveSession.panes.isEmpty else { return }
-
-        let currentSession = agentManager.snapshotWorkspace()
-        self.lastActiveSession = currentSession
-        agentManager.restoreWorkspace(lastActiveSession)
     }
 
     func deleteSession(_ sessionId: String) {
