@@ -53,6 +53,9 @@ final class SettingsViewController: NSViewController {
 
     private var themePopup: NSPopUpButton?
     private var restoreSessionButton: NSButton?
+    private var notificationSoundButton: NSButton?
+    private var notificationStatusLabel: NSTextField?
+    private var notificationFixButton: NSButton?
     private var projectDirectoriesStack: NSStackView?
     private var projectDirectoryInput: NSTextField?
     private var prefixKeyField: NSTextField?
@@ -71,6 +74,21 @@ final class SettingsViewController: NSViewController {
         self.configStore = configStore
         self.currentTheme = themeManager.currentTheme
         super.init(nibName: nil, bundle: nil)
+
+        // Permission can change while this screen is open — the user may be
+        // sent to System Settings and come straight back. Registered by
+        // selector so AppKit drops it on dealloc; a stored block token would
+        // need a deinit, which cannot touch actor-isolated state.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(notificationAuthorizationDidChange),
+            name: AgentNotificationManager.authorizationDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func notificationAuthorizationDidChange() {
+        refreshNotificationAuthorizationRow()
     }
 
     /// Adopts values that changed underneath the screen — either because the
@@ -493,6 +511,59 @@ final class SettingsViewController: NSViewController {
         sessionStack.addArrangedSubview(restoreButton)
         addContentSubview(sessionCard, widthInset: -36)
 
+        let (notificationCard, notificationStack) = makeSectionCard(
+            title: "Notifications",
+            subtitle: "Banners for panes that are not focused, named window ▸ pane."
+        )
+
+        let soundButton = NSButton(
+            checkboxWithTitle: "Play a sound",
+            target: self,
+            action: #selector(notificationSoundChanged(_:))
+        )
+        soundButton.state = settings.notificationSound ? .on : .off
+        soundButton.contentTintColor = currentTheme.colors.accent
+        soundButton.attributedTitle = NSAttributedString(
+            string: "Play a sound",
+            attributes: [
+                .foregroundColor: currentTheme.colors.textPrimary,
+                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            ]
+        )
+        notificationSoundButton = soundButton
+        notificationStack.addArrangedSubview(soundButton)
+
+        // Permission lives in System Settings, and macOS only ever prompts
+        // once. When it has been refused the app can only say so and offer the
+        // way back, which is exactly what this row does.
+        let statusRow = NSStackView()
+        statusRow.orientation = .horizontal
+        statusRow.alignment = .centerY
+        statusRow.spacing = 10
+
+        let statusLabel = NSTextField(labelWithString: "")
+        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        statusLabel.textColor = currentTheme.colors.textMuted
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.maximumNumberOfLines = 2
+        notificationStatusLabel = statusLabel
+        statusRow.addArrangedSubview(statusLabel)
+
+        let fixButton = NSButton(
+            title: "Open System Settings",
+            target: self,
+            action: #selector(openNotificationSystemSettings)
+        )
+        fixButton.bezelStyle = .rounded
+        fixButton.controlSize = .small
+        fixButton.isHidden = true
+        notificationFixButton = fixButton
+        statusRow.addArrangedSubview(fixButton)
+
+        notificationStack.addArrangedSubview(statusRow)
+        addContentSubview(notificationCard, widthInset: -36)
+        refreshNotificationAuthorizationRow()
+
         let (projectCard, projectStack) = makeSectionCard(title: "Project Directories", subtitle: "Directories available to project-aware features.")
         let listStack = NSStackView()
         listStack.orientation = .vertical
@@ -719,6 +790,49 @@ final class SettingsViewController: NSViewController {
     @objc private func restoreSessionChanged(_ sender: NSButton) {
         settings.restoreLastSession = sender.state == .on
         configStore.write(settings.restoreLastSession, at: ["restoreLastSession"])
+    }
+
+    @objc private func notificationSoundChanged(_ sender: NSButton) {
+        settings.notificationSound = sender.state == .on
+        configStore.write(settings.notificationSound, at: ["notifications", "sound"])
+    }
+
+    @objc private func openNotificationSystemSettings() {
+        AgentNotificationManager.openSystemNotificationSettings()
+    }
+
+    /// Describes the current permission and offers the only remedy macOS allows.
+    func refreshNotificationAuthorizationRow() {
+        guard let notificationStatusLabel, let notificationFixButton else { return }
+
+        let message: String
+        let needsSystemSettings: Bool
+
+        switch AgentNotificationManager.authorization {
+        case .authorized:
+            message = "macOS is allowed to show Soprano notifications."
+            needsSystemSettings = false
+        case .denied:
+            message = "macOS is blocking Soprano notifications. Panes still show status "
+                + "and an unread ring, but no banner appears."
+            needsSystemSettings = true
+        case .notDetermined:
+            message = "macOS has not been asked yet. The prompt appears the first time "
+                + "an unfocused pane wants you."
+            needsSystemSettings = false
+        case .unavailable:
+            message = "Notifications need the packaged app; unbundled builds cannot post them."
+            needsSystemSettings = false
+        case nil:
+            message = "Checking notification permission…"
+            needsSystemSettings = false
+        }
+
+        notificationStatusLabel.stringValue = message
+        notificationStatusLabel.textColor = needsSystemSettings
+            ? currentTheme.colors.danger
+            : currentTheme.colors.textMuted
+        notificationFixButton.isHidden = !needsSystemSettings
     }
 
     @objc private func browseProjectDirectory() {

@@ -321,8 +321,13 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         guard let notificationCenter else { return }
 
         notificationCenter.getNotificationSettings { [weak self] settings in
-            guard settings.authorizationStatus == .notDetermined else { return }
-            self?.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            guard settings.authorizationStatus == .notDetermined else {
+                self?.refreshAuthorization()
+                return
+            }
+            self?.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                Self.publish(authorization: granted ? .authorized : .denied)
+            }
         }
     }
 
@@ -488,44 +493,121 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     private func deliverNotification(title: String, body: String, paneId: String, tabId: String) {
         guard let notificationCenter else { return }
 
-        let subtitle = MainActor.assumeIsolated {
-            locationSubtitle(paneId: paneId, tabId: tabId)
+        // Both are main-actor state, read here rather than inside the
+        // background completion below, so a settings.json edit applies to the
+        // very next banner without a restart.
+        let (subtitle, playsSound) = MainActor.assumeIsolated {
+            (
+                locationSubtitle(paneId: paneId, tabId: tabId),
+                ConfigStore.shared.settings.notificationSound
+            )
         }
 
         notificationCenter.getNotificationSettings { [weak self] settings in
             guard let self else { return }
             switch settings.authorizationStatus {
             case .authorized, .provisional, .ephemeral:
+                Self.publish(authorization: .authorized)
                 self.scheduleNotification(
                     title: title,
                     body: body,
                     subtitle: subtitle,
+                    playsSound: playsSound,
                     paneId: paneId,
                     tabId: tabId
                 )
             case .notDetermined:
                 self.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                    Self.publish(authorization: granted ? .authorized : .denied)
                     guard granted else { return }
                     self.scheduleNotification(
                         title: title,
                         body: body,
                         subtitle: subtitle,
+                        playsSound: playsSound,
                         paneId: paneId,
                         tabId: tabId
                     )
                 }
             case .denied:
-                break
+                // macOS only ever prompts once. After a denial the app cannot
+                // ask again, so the only honest thing is to record it and let
+                // Settings offer the trip to System Settings.
+                Self.publish(authorization: .denied)
             @unknown default:
                 break
             }
         }
     }
 
+    // MARK: - Authorization state
+
+    /// What macOS last told us about permission, for the settings screen.
+    /// `nil` until the first check completes.
+    enum Authorization: String {
+        case authorized
+        case denied
+        case notDetermined
+        case unavailable
+    }
+
+    static let authorizationDidChange = Notification.Name("com.soprano.notification-authorization")
+
+    private static let authorizationKey = "soprano-notification-authorization"
+
+    private(set) static var authorization: Authorization? {
+        get {
+            UserDefaults.standard.string(forKey: authorizationKey).flatMap(Authorization.init(rawValue:))
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue, forKey: authorizationKey)
+        }
+    }
+
+    private static func publish(authorization value: Authorization) {
+        guard authorization != value else { return }
+        authorization = value
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: authorizationDidChange, object: nil)
+        }
+    }
+
+    /// Asks macOS for the current state and publishes it. The settings screen
+    /// calls this when it appears so the row is never stale.
+    func refreshAuthorization() {
+        guard let notificationCenter else {
+            Self.publish(authorization: .unavailable)
+            return
+        }
+
+        notificationCenter.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                Self.publish(authorization: .authorized)
+            case .denied:
+                Self.publish(authorization: .denied)
+            case .notDetermined:
+                Self.publish(authorization: .notDetermined)
+            @unknown default:
+                Self.publish(authorization: .unavailable)
+            }
+        }
+    }
+
+    /// Opens the Notifications pane of System Settings. Once permission is
+    /// denied this is the only route back, so the UI links straight to it.
+    @MainActor
+    static func openSystemNotificationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        guard let url else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     private func scheduleNotification(
         title: String,
         body: String,
         subtitle: String?,
+        playsSound: Bool,
         paneId: String,
         tabId: String
     ) {
@@ -537,7 +619,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         if let subtitle {
             content.subtitle = subtitle
         }
-        content.sound = .default
+        if playsSound {
+            content.sound = .default
+        }
         // Groups a pane's banners together instead of stacking one per event.
         content.threadIdentifier = paneId
         content.userInfo = ["paneId": paneId, "tabId": tabId]
@@ -545,7 +629,12 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         let identifier = UUID().uuidString
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         notificationCenter.add(request) { [weak self] error in
-            guard error == nil else { return }
+            if let error {
+                // Swallowing this is how a completely dead notification path
+                // stays invisible; at minimum it belongs in the log.
+                NSLog("Soprano: could not post notification for \(paneId): \(error)")
+                return
+            }
             DispatchQueue.main.async {
                 let target = Target(paneId: paneId, tabId: tabId)
                 guard let self else { return }

@@ -9,10 +9,17 @@ struct SopranoConfig: Codable, Equatable {
     var theme: String?
     var restoreLastSession: Bool?
     var projectDirectories: [String]?
+    var notifications: Notifications?
     var keybindings: Keybindings?
     var agents: [Agent]?
 
     static let empty = SopranoConfig()
+
+    /// Whether macOS may deliver a banner is the system's decision, not ours, so
+    /// the only thing configured here is what Soprano controls about it.
+    struct Notifications: Codable, Equatable {
+        var sound: Bool?
+    }
 
     struct Keybindings: Codable, Equatable {
         var prefixKey: String?
@@ -157,6 +164,10 @@ extension SopranoConfig {
 
         if let restoreLastSession {
             settings.restoreLastSession = restoreLastSession
+        }
+
+        if let sound = notifications?.sound {
+            settings.notificationSound = sound
         }
 
         if let projectDirectories {

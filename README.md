@@ -128,8 +128,14 @@ relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPU
 the next prompt is submitted.
 
 Soprano asks for notification permission at launch. Notifications are only sent for
-panes that are not focused, so denying the prompt leaves the in-app unread ring as the
-only signal. Re-enable it under **System Settings → Notifications → Soprano**.
+panes that are **not focused** — a pane you are looking at updates its status without
+interrupting you. Banners are silent by default; enable *Play a sound* under
+**Settings ▸ General ▸ Notifications**, or set `notifications.sound` in `settings.json`.
+
+That same section reports whether macOS is allowing banners at all. Denying the prompt
+leaves the in-app unread ring as the only signal, and because macOS only ever asks once,
+Soprano cannot re-prompt — the section links straight to
+**System Settings → Notifications → Soprano** instead.
 
 <details>
 <summary><b>Agents you start yourself — aliases, scripts, plain <code>codex</code> in a shell</b></summary>

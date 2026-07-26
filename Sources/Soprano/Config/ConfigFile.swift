@@ -133,6 +133,14 @@ enum ConfigFile {
           // Roots offered by "Open Project…" (⇧⌘P). "~" is expanded.
           "projectDirectories": \(projectDirectories),
 
+          "notifications": {
+            // Play a sound with each banner. Off by default: a pane that wants
+            // you already shows a banner, an unread ring, and a status.
+            // Whether banners appear at all is macOS's call — see
+            // System Settings ▸ Notifications ▸ Soprano.
+            "sound": \(settings.notificationSound)
+          },
+
           "keybindings": {
             // The tmux-style prefix is Ctrl+<prefixKey>.
             "prefixKey": "\(keybindings.prefixKey)",

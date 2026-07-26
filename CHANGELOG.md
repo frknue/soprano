@@ -11,6 +11,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- **Settings ▸ General ▸ Notifications**: a *Play a sound* toggle, and a line reporting
+  whether macOS is actually allowing banners. When permission has been refused it says so
+  and offers **Open System Settings** — macOS only ever prompts once, so an app that has
+  been denied cannot ask again and previously just went quiet with no explanation.
+
 - Soprano is now open source under the MIT license. The packaged app carries its own
   `LICENSE` plus Ghostty's in `Soprano.app/Contents/Resources/`.
 
@@ -41,6 +46,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Notifications are **silent by default**. A pane that wants you already shows a banner,
+  an unread ring, and a status, and a chime on every finished turn gets old fast. Turn it
+  back on in **Settings ▸ General ▸ Notifications** or with `notifications.sound` in
+  `settings.json`.
 - Notifications now quote what the agent actually said — *Needs input — Drop the legacy
   column? [y/n]* — instead of a fixed phrase like *Approval or input required*. Codex,
   Claude Code, and OpenCode each hand their payload over differently and all three are
