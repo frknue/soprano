@@ -179,22 +179,80 @@ struct AgentDashboardViewTests {
             allSubviews(in: contentViewController.view)
                 .first { $0.identifier?.rawValue == "agent-dashboard" }
         )
-        let escape = try #require(NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: 0,
-            windowNumber: window.windowNumber,
-            context: nil,
-            characters: "\u{1b}",
-            charactersIgnoringModifiers: "\u{1b}",
-            isARepeat: false,
-            keyCode: 53
+        let escape = try #require(keyEvent(
+            character: "\u{1b}",
+            keyCode: 53,
+            window: window
         ))
 
         #expect(dashboardRoot.performKeyEquivalent(with: escape))
 
         #expect(window.frame == originalFrame)
+        #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
+    }
+
+    @Test func jAndKMoveTheSelectionAndReturnFocusesTheChosenAgent() throws {
+        let suiteName = "AgentDashboardKeyboardTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let agentManager = AgentManager()
+        let codexPaneId = try #require(agentManager.spawnAgent("codex"))
+        let claudePaneId = try #require(agentManager.spawnAgent("claude-code"))
+        agentManager.focusPane("pane-1")
+        let contentViewController = MainContentViewController(
+            agentManager: agentManager,
+            sessionManager: SessionManager(
+                agentManager: agentManager,
+                defaults: defaults
+            ),
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            gitBranchMonitor: GitBranchMonitor(),
+            defaults: defaults,
+            splitTreeViewFactory: { agentManager, themeManager in
+                SplitTreeView(
+                    agentManager: agentManager,
+                    themeManager: themeManager,
+                    terminalViewFactory: { _, _, _ in NSView() }
+                )
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 1_100, height: 720),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = contentViewController
+        contentViewController.showDashboard()
+        contentViewController.view.layoutSubtreeIfNeeded()
+
+        let dashboardRoot = try #require(
+            allSubviews(in: contentViewController.view)
+                .first { $0.identifier?.rawValue == "agent-dashboard" }
+        )
+        let rows = allSubviews(in: contentViewController.view)
+            .filter { $0.identifier?.rawValue == "agent-dashboard-row" }
+        #expect(rows.count == 2)
+        #expect(rows[0].layer?.borderWidth == 2)
+        #expect(rows[1].layer?.borderWidth == 1)
+
+        let j = try #require(keyEvent(character: "j", keyCode: 38, window: window))
+        #expect(dashboardRoot.performKeyEquivalent(with: j))
+        #expect(rows[0].layer?.borderWidth == 1)
+        #expect(rows[1].layer?.borderWidth == 2)
+
+        let k = try #require(keyEvent(character: "k", keyCode: 40, window: window))
+        #expect(dashboardRoot.performKeyEquivalent(with: k))
+        #expect(rows[0].layer?.borderWidth == 2)
+        #expect(rows[1].layer?.borderWidth == 1)
+
+        #expect(dashboardRoot.performKeyEquivalent(with: j))
+        let enter = try #require(keyEvent(character: "\r", keyCode: 36, window: window))
+        #expect(dashboardRoot.performKeyEquivalent(with: enter))
+
+        #expect(agentManager.activePaneId == claudePaneId)
+        #expect(agentManager.activePaneId != codexPaneId)
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
     }
 
@@ -207,5 +265,24 @@ struct AgentDashboardViewTests {
 
     private func allSubviews(in view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap(allSubviews(in:))
+    }
+
+    private func keyEvent(
+        character: String,
+        keyCode: UInt16,
+        window: NSWindow
+    ) -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: character,
+            charactersIgnoringModifiers: character,
+            isARepeat: false,
+            keyCode: keyCode
+        )
     }
 }

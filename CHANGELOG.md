@@ -28,7 +28,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   prioritizing window-title matches.
 - Agent Dashboard: monitor live agent states across every logical window, see working,
   input-needed, and error totals, and jump directly to an agent from the sidebar chart
-  button, **Commands** menu, or the configurable `⇧⌘D` shortcut; press `Esc` to close it.
+  button, **Commands** menu, or the configurable `⇧⌘D` shortcut; navigate with `J` / `K`
+  or the arrow keys, open with `Return`, and close with `Esc`.
 
 ### Changed
 

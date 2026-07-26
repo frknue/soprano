@@ -14,6 +14,7 @@ final class AgentDashboardViewController: NSViewController {
     private var doneButton: NSButton!
     private var contentStack: NSStackView!
     private var agentRows: [AgentDashboardRowView] = []
+    private var selectedEntryId: String?
     nonisolated(unsafe) private var elapsedTimer: Timer?
     private let observerId = "AgentDashboardViewController"
 
@@ -42,6 +43,12 @@ final class AgentDashboardViewController: NSViewController {
         root.identifier = NSUserInterfaceItemIdentifier("agent-dashboard")
         root.onEscape = { [weak self] in
             self?.onDismiss?()
+        }
+        root.onMoveSelection = { [weak self] delta in
+            self?.moveSelection(by: delta)
+        }
+        root.onActivateSelection = { [weak self] in
+            self?.activateSelection()
         }
         root.wantsLayer = true
         root.layer?.backgroundColor = theme.colors.bgBase.cgColor
@@ -190,6 +197,10 @@ final class AgentDashboardViewController: NSViewController {
         guard isViewLoaded else { return }
         let snapshot = agentManager.agentDashboardSnapshot()
         let theme = themeManager.currentTheme
+        let previousSelection = selectedEntryId
+        selectedEntryId = snapshot.entries.contains {
+            $0.id == previousSelection
+        } ? previousSelection : snapshot.entries.first?.id
         subtitleLabel.stringValue = monitoringSubtitle(
             agentCount: snapshot.totalCount,
             windowCount: agentManager.windowCount
@@ -234,6 +245,36 @@ final class AgentDashboardViewController: NSViewController {
                 rowsStack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
                 agentRows.append(row)
+            }
+        }
+        updateRowSelection(scrollIntoView: previousSelection != nil)
+    }
+
+    private func moveSelection(by delta: Int) {
+        guard !agentRows.isEmpty else { return }
+        let currentIndex = selectedEntryId.flatMap { selectedId in
+            agentRows.firstIndex { $0.entry.id == selectedId }
+        } ?? 0
+        let nextIndex = min(max(0, currentIndex + delta), agentRows.count - 1)
+        selectedEntryId = agentRows[nextIndex].entry.id
+        updateRowSelection(scrollIntoView: true)
+    }
+
+    private func activateSelection() {
+        guard let selectedEntryId,
+              let entry = agentRows.first(where: {
+                  $0.entry.id == selectedEntryId
+              })?.entry
+        else { return }
+        onAgentSelected?(entry.paneId, entry.tabId)
+    }
+
+    private func updateRowSelection(scrollIntoView: Bool) {
+        for row in agentRows {
+            let isSelected = row.entry.id == selectedEntryId
+            row.setKeyboardSelected(isSelected)
+            if isSelected, scrollIntoView {
+                row.scrollToVisible(row.bounds)
             }
         }
     }
@@ -292,11 +333,28 @@ final class AgentDashboardViewController: NSViewController {
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(countLabel)
 
+        let keyboardHint = NSTextField(
+            labelWithString: "J/K MOVE  ·  ↩ OPEN  ·  ESC CLOSE"
+        )
+        keyboardHint.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        keyboardHint.textColor = theme.colors.textMuted
+        keyboardHint.alignment = .right
+        keyboardHint.lineBreakMode = .byTruncatingHead
+        keyboardHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        keyboardHint.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(keyboardHint)
+
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             countLabel.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
             countLabel.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            keyboardHint.leadingAnchor.constraint(
+                greaterThanOrEqualTo: countLabel.trailingAnchor,
+                constant: 12
+            ),
+            keyboardHint.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            keyboardHint.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
         return container
     }
@@ -398,6 +456,7 @@ private final class AgentDashboardRowView: NSControl {
     private let theme: AppTheme
     private let elapsedLabel = NSTextField(labelWithString: "")
     private var isHovered = false
+    private var isKeyboardSelected = false
 
     init(entry: AgentDashboardEntry, theme: AppTheme) {
         self.entry = entry
@@ -461,6 +520,20 @@ private final class AgentDashboardRowView: NSControl {
             startedAt: entry.startedAt,
             now: now
         )
+    }
+
+    func setKeyboardSelected(_ isSelected: Bool) {
+        guard isKeyboardSelected != isSelected else { return }
+        isKeyboardSelected = isSelected
+        layer?.borderWidth = isSelected ? 2 : 1
+        layer?.borderColor = (
+            isSelected
+                ? theme.colors.accent
+                : entry.needsAttention
+                    ? theme.colors.blue
+                    : theme.colors.borderSubtle
+        ).cgColor
+        updateBackground()
     }
 
     private func setup() {
@@ -575,7 +648,11 @@ private final class AgentDashboardRowView: NSControl {
 
     private func updateBackground() {
         layer?.backgroundColor = (
-            isHovered ? theme.colors.bgOverlay : theme.colors.bgPanel
+            isKeyboardSelected
+                ? theme.colors.bgSelected
+                : isHovered
+                    ? theme.colors.bgOverlay
+                    : theme.colors.bgPanel
         ).cgColor
     }
 
@@ -620,30 +697,74 @@ private final class AgentDashboardFlippedView: NSView {
 
 private final class AgentDashboardRootView: NSView {
     var onEscape: (() -> Void)?
+    var onMoveSelection: ((Int) -> Void)?
+    var onActivateSelection: (() -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        guard !isEscape(event) else {
-            onEscape?()
+        if let action = keyboardAction(for: event) {
+            perform(action)
             return true
         }
         return super.performKeyEquivalent(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
-        guard !isEscape(event) else {
-            onEscape?()
+        guard let action = keyboardAction(for: event) else {
+            super.keyDown(with: event)
             return
         }
-        super.keyDown(with: event)
+        perform(action)
     }
 
-    private func isEscape(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown, event.keyCode == 53 else { return false }
+    private enum KeyboardAction {
+        case dismiss
+        case move(Int)
+        case activate
+    }
+
+    private func keyboardAction(for event: NSEvent) -> KeyboardAction? {
+        guard event.type == .keyDown else { return nil }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        return !flags.contains(.command)
-            && !flags.contains(.control)
-            && !flags.contains(.option)
+        guard !flags.contains(.command),
+              !flags.contains(.control),
+              !flags.contains(.option)
+        else { return nil }
+
+        switch event.keyCode {
+        case 53:
+            return .dismiss
+        case 125:
+            return .move(1)
+        case 126:
+            return .move(-1)
+        case 36, 76:
+            return .activate
+        default:
+            break
+        }
+
+        switch event.charactersIgnoringModifiers?.lowercased() {
+        case "j":
+            return .move(1)
+        case "k":
+            return .move(-1)
+        case " ":
+            return .activate
+        default:
+            return nil
+        }
+    }
+
+    private func perform(_ action: KeyboardAction) {
+        switch action {
+        case .dismiss:
+            onEscape?()
+        case .move(let delta):
+            onMoveSelection?(delta)
+        case .activate:
+            onActivateSelection?()
+        }
     }
 }
