@@ -220,9 +220,7 @@ final class MainContentViewController: NSViewController {
 
     func showSettings(
         settings: AppSettings,
-        keybindingConfig: KeyBindingConfig,
-        onSettingsChanged: @escaping (AppSettings) -> Void,
-        onKeybindingConfigChanged: @escaping (KeyBindingConfig) -> Void
+        keybindingConfig: KeyBindingConfig
     ) {
         preservingWindowFrame {
             let settingsViewController: SettingsViewController
@@ -248,14 +246,31 @@ final class MainContentViewController: NSViewController {
                 settingsViewController = controller
             }
 
-            settingsViewController.onSettingsChanged = onSettingsChanged
-            settingsViewController.onKeybindingConfigChanged = onKeybindingConfigChanged
+            settingsViewController.update(
+                settings: settings,
+                keybindingConfig: keybindingConfig
+            )
             settingsViewController.apply(theme: themeManager.currentTheme)
 
             splitTreeView.isHidden = true
             settingsContainerView.isHidden = false
         }
         view.window?.makeFirstResponder(settingsCloseButton)
+    }
+
+    /// Pushes new values into the settings screen while it is on screen, so a
+    /// hand edit to settings.json is visible without closing and reopening it.
+    func refreshSettingsScreenIfVisible(
+        settings: AppSettings,
+        keybindingConfig: KeyBindingConfig
+    ) {
+        guard !settingsContainerView.isHidden,
+              let settingsViewController
+        else { return }
+        settingsViewController.update(
+            settings: settings,
+            keybindingConfig: keybindingConfig
+        )
     }
 
     func closeSettings() {

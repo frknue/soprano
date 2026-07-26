@@ -30,8 +30,14 @@ final class SettingsViewController: NSViewController {
     private var settings: AppSettings
     private var keybindingConfig: KeyBindingConfig
 
-    var onSettingsChanged: ((AppSettings) -> Void)?
-    var onKeybindingConfigChanged: ((KeyBindingConfig) -> Void)?
+    /// Where edits go. Every control on this screen writes one key into
+    /// `settings.json`; nothing here owns state of its own.
+    private let configStore: ConfigStore
+    /// What is currently drawn on screen but is not part of `settings` or
+    /// `keybindingConfig`, so a change in either alone still triggers a
+    /// rebuild: config problems, and the agent catalog.
+    private var renderedIssues: [ConfigIssue] = []
+    private var renderedAgents: [AgentProfile] = []
 
     private var currentTab: SettingsTab = .general
     private var currentTheme: AppTheme
@@ -56,13 +62,38 @@ final class SettingsViewController: NSViewController {
     init(
         themeManager: ThemeManager,
         settings: AppSettings,
-        keybindingConfig: KeyBindingConfig
+        keybindingConfig: KeyBindingConfig,
+        configStore: ConfigStore = .shared
     ) {
         self.themeManager = themeManager
         self.settings = settings
         self.keybindingConfig = keybindingConfig
+        self.configStore = configStore
         self.currentTheme = themeManager.currentTheme
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// Adopts values that changed underneath the screen — either because the
+    /// user edited `settings.json` in another app, or because a control here
+    /// wrote to it.
+    func update(settings: AppSettings, keybindingConfig: KeyBindingConfig) {
+        // Issues are part of what this screen renders, and they move
+        // *independently* of the values: a syntax error deliberately leaves the
+        // last good settings in place, so comparing only those would leave the
+        // error banner unrendered — exactly when the user needs it.
+        let isUnchanged = settings == self.settings
+            && keybindingConfig == self.keybindingConfig
+            && configStore.issues == renderedIssues
+            && configStore.resolved.agents == renderedAgents
+        self.settings = settings
+        self.keybindingConfig = keybindingConfig
+        guard isViewLoaded, !isUnchanged else { return }
+
+        // Rebuilding tears down the control that is mid-edit; let the current
+        // event finish first so AppKit is not left editing a detached field.
+        DispatchQueue.main.async { [weak self] in
+            self?.rebuildCurrentTab()
+        }
     }
 
     @available(*, unavailable)
@@ -245,6 +276,11 @@ final class SettingsViewController: NSViewController {
 
     private func rebuildCurrentTab() {
         guard isViewLoaded else { return }
+        // Stamped here rather than in `update`, because this is where issues
+        // actually reach the screen — every other entry point (tab switch,
+        // theme change, Reload) lands here too.
+        renderedIssues = configStore.issues
+        renderedAgents = configStore.resolved.agents
         clearContent()
         switch currentTab {
         case .general:
@@ -382,8 +418,23 @@ final class SettingsViewController: NSViewController {
         formatter.numberStyle = .decimal
         formatter.generatesDecimalNumbers = false
         formatter.minimum = 0
+        // A millisecond count is not a quantity anyone wants grouped, and the
+        // separator is locale-dependent: with grouping on, a Swiss or German
+        // locale renders 1500 as "1'500"/"1.500", which no longer round-trips
+        // through `Int(_:)`.
+        formatter.usesGroupingSeparator = false
         field.formatter = formatter
         return field
+    }
+
+    /// Reads a number the way the field displays it, so a value the formatter
+    /// grouped or localized still parses instead of silently reverting.
+    private func integerValue(of field: NSTextField) -> Int? {
+        if let formatter = field.formatter as? NumberFormatter,
+           let number = formatter.number(from: field.stringValue) {
+            return number.intValue
+        }
+        return Int(field.stringValue)
     }
 
     private func makeActionButton(title: String, action: Selector) -> NSButton {
@@ -396,8 +447,10 @@ final class SettingsViewController: NSViewController {
     private func buildGeneralTab() {
         addTabHeader(
             title: "General",
-            subtitle: "Theme, persistence, project roots, and keybinding behavior."
+            subtitle: "Theme, persistence, project roots, and keybinding behavior. Every setting here is stored in settings.json."
         )
+
+        addConfigFileCard()
 
         let (appearanceCard, appearanceStack) = makeSectionCard(title: "Appearance", subtitle: "Switch between available app themes.")
         let themeRow = NSStackView()
@@ -503,6 +556,80 @@ final class SettingsViewController: NSViewController {
         addContentSubview(keybindingCard, widthInset: -36)
     }
 
+    /// The file card is the bridge between the two ways to configure Soprano:
+    /// it names the file the UI is editing, opens it, and reports anything
+    /// wrong with it. Without this, a typo in the file would fail silently.
+    private func addConfigFileCard() {
+        let (card, stack) = makeSectionCard(
+            title: "Configuration File",
+            subtitle: "This screen edits \(configStore.displayPath). Hand edits apply as soon as you save — comments and key order are preserved."
+        )
+
+        for issue in configStore.issues {
+            stack.addArrangedSubview(makeIssueRow(issue))
+        }
+
+        let buttonRow = NSStackView()
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+        buttonRow.addArrangedSubview(
+            makeActionButton(title: "Open settings.json", action: #selector(openConfigFile))
+        )
+        buttonRow.addArrangedSubview(
+            makeActionButton(title: "Reveal in Finder", action: #selector(revealConfigFile))
+        )
+        buttonRow.addArrangedSubview(
+            makeActionButton(title: "Reload", action: #selector(reloadConfigFile))
+        )
+        stack.addArrangedSubview(buttonRow)
+
+        addContentSubview(card, widthInset: -36)
+    }
+
+    private func makeIssueRow(_ issue: ConfigIssue) -> NSView {
+        let row = NSView()
+        row.wantsLayer = true
+        row.layer?.cornerRadius = 6
+        row.layer?.borderWidth = 1
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let tint = issue.severity == .error
+            ? currentTheme.colors.danger
+            : currentTheme.colors.yellow
+        row.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
+        row.layer?.borderColor = tint.withAlphaComponent(0.45).cgColor
+
+        let location = issue.line.map { "Line \($0): " } ?? ""
+        let label = NSTextField(wrappingLabelWithString: location + issue.message)
+        label.font = .systemFont(ofSize: 11, weight: .regular)
+        label.textColor = currentTheme.colors.textPrimary
+        label.maximumNumberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -10),
+            label.topAnchor.constraint(equalTo: row.topAnchor, constant: 7),
+            label.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -7),
+        ])
+        return row
+    }
+
+    @objc private func openConfigFile() {
+        configStore.openInEditor()
+    }
+
+    @objc private func revealConfigFile() {
+        configStore.revealInFinder()
+    }
+
+    @objc private func reloadConfigFile() {
+        configStore.reloadFromDisk()
+        rebuildCurrentTab()
+    }
+
     private func rebuildProjectDirectoriesList() {
         guard let list = projectDirectoriesStack else { return }
         for row in list.arrangedSubviews {
@@ -510,7 +637,12 @@ final class SettingsViewController: NSViewController {
             row.removeFromSuperview()
         }
 
-        if settings.projectDirectories.isEmpty {
+        // The list shows what the FILE says, not the resolved result: a root
+        // on an unmounted volume is dropped during resolution, and rendering
+        // the resolved list would make "Remove" renumber onto the wrong entry
+        // and a later write delete the missing root for good.
+        let directories = configuredProjectDirectories
+        if directories.isEmpty {
             let empty = NSTextField(labelWithString: "No project directories configured")
             empty.font = .systemFont(ofSize: 11, weight: .regular)
             empty.textColor = currentTheme.colors.textMuted
@@ -518,7 +650,7 @@ final class SettingsViewController: NSViewController {
             return
         }
 
-        for (index, directory) in settings.projectDirectories.enumerated() {
+        for (index, directory) in directories.enumerated() {
             let row = NSView()
             row.wantsLayer = true
             row.layer?.cornerRadius = 6
@@ -527,9 +659,19 @@ final class SettingsViewController: NSViewController {
             row.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
             row.translatesAutoresizingMaskIntoConstraints = false
 
-            let pathLabel = NSTextField(labelWithString: directory)
+            var isDirectory: ObjCBool = false
+            let isReachable = FileManager.default.fileExists(
+                atPath: SopranoConfig.expandPath(directory),
+                isDirectory: &isDirectory
+            ) && isDirectory.boolValue
+
+            let pathLabel = NSTextField(
+                labelWithString: isReachable ? directory : "\(directory)  ·  not found"
+            )
             pathLabel.font = .systemFont(ofSize: 11, weight: .regular)
-            pathLabel.textColor = currentTheme.colors.textPrimary
+            pathLabel.textColor = isReachable
+                ? currentTheme.colors.textPrimary
+                : currentTheme.colors.textMuted
             pathLabel.lineBreakMode = .byTruncatingMiddle
             pathLabel.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(pathLabel)
@@ -563,8 +705,7 @@ final class SettingsViewController: NSViewController {
         let selectedTheme = AppTheme.allThemes[index]
 
         settings.themeId = selectedTheme.id
-        settings.save()
-        onSettingsChanged?(settings)
+        configStore.write(selectedTheme.id, at: ["theme"])
 
         themeManager.setTheme(id: selectedTheme.id)
         apply(theme: themeManager.currentTheme)
@@ -572,8 +713,7 @@ final class SettingsViewController: NSViewController {
 
     @objc private func restoreSessionChanged(_ sender: NSButton) {
         settings.restoreLastSession = sender.state == .on
-        settings.save()
-        onSettingsChanged?(settings)
+        configStore.write(settings.restoreLastSession, at: ["restoreLastSession"])
     }
 
     @objc private func browseProjectDirectory() {
@@ -613,24 +753,36 @@ final class SettingsViewController: NSViewController {
             return
         }
 
-        guard !settings.projectDirectories.contains(path) else {
+        var directories = configuredProjectDirectories
+        guard !directories.contains(where: { SopranoConfig.expandPath($0) == path }) else {
             projectDirectoryInput?.stringValue = ""
             return
         }
 
-        settings.projectDirectories.append(path)
-        settings.save()
-        onSettingsChanged?(settings)
+        directories.append(ConfigFile.abbreviatingHome(path))
+        writeProjectDirectories(directories)
         projectDirectoryInput?.stringValue = ""
         rebuildProjectDirectoriesList()
     }
 
     @objc private func removeProjectDirectory(_ sender: NSButton) {
-        guard sender.tag >= 0, sender.tag < settings.projectDirectories.count else { return }
-        settings.projectDirectories.remove(at: sender.tag)
-        settings.save()
-        onSettingsChanged?(settings)
+        var directories = configuredProjectDirectories
+        guard sender.tag >= 0, sender.tag < directories.count else { return }
+        directories.remove(at: sender.tag)
+        writeProjectDirectories(directories)
         rebuildProjectDirectoriesList()
+    }
+
+    /// The roots exactly as `settings.json` lists them — unexpanded, including
+    /// any that are not reachable right now.
+    private var configuredProjectDirectories: [String] {
+        configStore.config.projectDirectories ?? []
+    }
+
+    /// Written home-relative: this list is meant to be read and edited by hand
+    /// in settings.json, and `/Users/you/git` reads worse than `~/git`.
+    private func writeProjectDirectories(_ directories: [String]) {
+        configStore.write(directories, at: ["projectDirectories"])
     }
 
     @objc private func prefixKeyCommitted(_ sender: NSTextField) {
@@ -642,39 +794,47 @@ final class SettingsViewController: NSViewController {
         let value = String(first).lowercased()
         sender.stringValue = value
         keybindingConfig.prefixKey = value
-        DefaultKeybindings.save(keybindingConfig)
-        onKeybindingConfigChanged?(keybindingConfig)
+        configStore.write(value, at: ["keybindings", "prefixKey"])
     }
 
     @objc private func prefixTimeoutCommitted(_ sender: NSTextField) {
-        guard let intValue = Int(sender.stringValue) else {
+        guard let intValue = integerValue(of: sender) else {
             sender.stringValue = "\(keybindingConfig.prefixTimeoutMs)"
             return
         }
-        let clamped = min(max(300, intValue), 5000)
+        let range = SopranoConfig.Limits.prefixTimeoutMs
+        let clamped = min(max(range.lowerBound, intValue), range.upperBound)
         sender.stringValue = "\(clamped)"
         keybindingConfig.prefixTimeoutMs = clamped
-        DefaultKeybindings.save(keybindingConfig)
-        onKeybindingConfigChanged?(keybindingConfig)
+        configStore.write(clamped, at: ["keybindings", "prefixTimeoutMs"])
     }
 
     @objc private func resizeStepCommitted(_ sender: NSTextField) {
-        guard let intValue = Int(sender.stringValue) else {
+        guard let intValue = integerValue(of: sender) else {
             sender.stringValue = "\(Int(keybindingConfig.resizeTickPercent))"
             return
         }
-        let clamped = min(max(1, intValue), 25)
+        let range = SopranoConfig.Limits.resizeTickPercent
+        let clamped = min(max(range.lowerBound, intValue), range.upperBound)
         sender.stringValue = "\(clamped)"
         keybindingConfig.resizeTickPercent = Double(clamped)
-        DefaultKeybindings.save(keybindingConfig)
-        onKeybindingConfigChanged?(keybindingConfig)
+        configStore.write(clamped, at: ["keybindings", "resizeTickPercent"])
     }
 
     private func buildKeyboardShortcutsTab() {
         addTabHeader(
             title: "Keyboard Shortcuts",
-            subtitle: "Read-only keybinding reference grouped by category."
+            subtitle: "The shortcuts in effect. Rebind any of them by id under \"keybindings.bindings\" in settings.json — for example \"\(exampleBindingId)\": \"\(exampleBindingChord)\" — or set one to null to turn it off."
         )
+
+        let (fileCard, fileStack) = makeSectionCard(
+            title: "Editing shortcuts",
+            subtitle: "Shortcuts are configured in \(configStore.displayPath). Ids shown here are the keys to use."
+        )
+        fileStack.addArrangedSubview(
+            makeActionButton(title: "Open settings.json", action: #selector(openConfigFile))
+        )
+        addContentSubview(fileCard, widthInset: -36)
 
         let groups: [(title: String, category: KeyBindingCategory)] = [
             ("Navigation", .navigation),
@@ -683,15 +843,28 @@ final class SettingsViewController: NSViewController {
             ("General", .general),
         ]
 
+        let customized = configStore.resolved.customizedBindingIds
+        let disabledIds = configStore.resolved.disabledBindingIds
+
         for (groupTitle, category) in groups {
-            let bindings = keybindingConfig.bindings.filter { $0.category == category }
+            let active = keybindingConfig.bindings.filter { $0.category == category }
+            // Disabled bindings still belong on this list: a shortcut that is
+            // missing because the file switched it off should be visibly off,
+            // not simply absent.
+            let disabled = DefaultKeybindings.config.bindings.filter {
+                $0.category == category && disabledIds.contains($0.id)
+            }
+            let rows = active.map { ($0, false) } + disabled.map { ($0, true) }
+            guard !rows.isEmpty else { continue }
+
             let (card, stack) = makeSectionCard(title: groupTitle)
             stack.spacing = 0
             if let titleLabel = stack.arrangedSubviews.first {
                 stack.setCustomSpacing(8, after: titleLabel)
             }
 
-            for (index, binding) in bindings.enumerated() {
+            for (index, entry) in rows.enumerated() {
+                let (binding, isDisabled) = entry
                 if index > 0 {
                     let separator = makeShortcutSeparator()
                     stack.addArrangedSubview(separator)
@@ -702,9 +875,11 @@ final class SettingsViewController: NSViewController {
                 }
                 let row = makeShortcutRow(
                     action: binding.label,
-                    description: binding.description,
-                    mode: binding.mode == .direct ? "DIRECT" : "PREFIX",
-                    keys: binding.defaultKeys
+                    description: "\(binding.id) · \(binding.description)",
+                    mode: isDisabled ? "OFF" : (binding.mode == .direct ? "DIRECT" : "PREFIX"),
+                    keys: isDisabled ? "disabled" : binding.defaultKeys,
+                    isCustomized: customized.contains(binding.id),
+                    isDisabled: isDisabled
                 )
                 stack.addArrangedSubview(row)
                 row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
@@ -713,11 +888,27 @@ final class SettingsViewController: NSViewController {
         }
     }
 
+    /// A real, currently-bound action to show in the tab's instructions, so the
+    /// example always names something the reader can find in the list below.
+    private var exampleBindingId: String {
+        keybindingConfig.bindings.first { $0.id == "split-vertical" }?.id
+            ?? keybindingConfig.bindings.first?.id
+            ?? "split-vertical"
+    }
+
+    private var exampleBindingChord: String {
+        keybindingConfig.bindings.first { $0.id == exampleBindingId }
+            .map { KeyChord(binding: $0).canonicalString }
+            ?? "prefix+shift+|"
+    }
+
     private func makeShortcutRow(
         action: String,
         description: String,
         mode: String,
-        keys: String
+        keys: String,
+        isCustomized: Bool = false,
+        isDisabled: Bool = false
     ) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -746,15 +937,22 @@ final class SettingsViewController: NSViewController {
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(modeLabel)
 
+        // Customized bindings get the stronger tint so a glance down the list
+        // shows what settings.json changed; disabled ones read as inert.
+        let badgeTint = isDisabled
+            ? currentTheme.colors.gray
+            : (isCustomized ? currentTheme.colors.accentStrong : currentTheme.colors.accent)
+
         let keyBadge = NSTextField(labelWithString: keys)
         keyBadge.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        keyBadge.textColor = currentTheme.colors.textPrimary
+        keyBadge.textColor = isDisabled ? currentTheme.colors.textMuted : currentTheme.colors.textPrimary
         keyBadge.alignment = .center
         keyBadge.wantsLayer = true
         keyBadge.layer?.cornerRadius = 6
-        keyBadge.layer?.borderWidth = 1
-        keyBadge.layer?.borderColor = currentTheme.colors.accent.withAlphaComponent(0.35).cgColor
-        keyBadge.layer?.backgroundColor = currentTheme.colors.accent.withAlphaComponent(0.12).cgColor
+        keyBadge.layer?.borderWidth = isCustomized && !isDisabled ? 2 : 1
+        keyBadge.layer?.borderColor = badgeTint.withAlphaComponent(0.35).cgColor
+        keyBadge.layer?.backgroundColor = badgeTint.withAlphaComponent(isDisabled ? 0.06 : 0.12).cgColor
+        keyBadge.toolTip = isCustomized ? "Customized in settings.json" : nil
         keyBadge.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(keyBadge)
 
@@ -801,8 +999,17 @@ final class SettingsViewController: NSViewController {
     private func buildAgentProfilesTab() {
         addTabHeader(
             title: "Agent Profiles",
-            subtitle: "Read-only profile registry loaded from DefaultAgents."
+            subtitle: "The agents Soprano can launch. Add your own — or patch a built-in — under \"agents\" in settings.json."
         )
+
+        let (fileCard, fileStack) = makeSectionCard(
+            title: "Adding an agent",
+            subtitle: "{ \"id\": \"aider\", \"name\": \"Aider\", \"command\": \"aider\", \"launchKey\": \"cmd+4\" }\nReusing a built-in id patches that profile instead of creating a new one."
+        )
+        fileStack.addArrangedSubview(
+            makeActionButton(title: "Open settings.json", action: #selector(openConfigFile))
+        )
+        addContentSubview(fileCard, widthInset: -36)
 
         let gridStack = NSStackView()
         gridStack.orientation = .vertical
@@ -811,7 +1018,7 @@ final class SettingsViewController: NSViewController {
         gridStack.translatesAutoresizingMaskIntoConstraints = false
 
         var currentRow: NSStackView?
-        for (index, profile) in DefaultAgents.all.enumerated() {
+        for (index, profile) in AgentCatalog.all.enumerated() {
             if index % 2 == 0 {
                 let row = NSStackView()
                 row.orientation = .horizontal
@@ -866,6 +1073,18 @@ final class SettingsViewController: NSViewController {
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.textColor = currentTheme.colors.textPrimary
         titleRow.addArrangedSubview(title)
+
+        if configStore.resolved.configuredAgentIds.contains(profile.id) {
+            let badge = NSTextField(labelWithString: "settings.json")
+            badge.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+            badge.textColor = currentTheme.colors.accent
+            badge.alignment = .center
+            badge.wantsLayer = true
+            badge.layer?.cornerRadius = 5
+            badge.layer?.backgroundColor = currentTheme.colors.accent.withAlphaComponent(0.14).cgColor
+            titleRow.addArrangedSubview(badge)
+        }
+
         stack.addArrangedSubview(titleRow)
 
         let description = NSTextField(wrappingLabelWithString: profile.description)

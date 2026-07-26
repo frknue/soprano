@@ -305,14 +305,73 @@ navigation always has a working fallback.
 
 ## Settings
 
-`⌘,` opens a four-tab settings window: **General** (theme — Gruvbox Dark or Catppuccin
-Mocha — restore-last-session, and the project directories that `⇧⌘P` searches),
-**Keyboard Shortcuts**, **Agent Profiles**, and **About**.
+`⌘,` opens a four-tab settings screen: **General** (theme, restore-last-session, project
+directories), **Keyboard Shortcuts**, **Agent Profiles**, and **About**.
 
-The agent registry is read-only in the UI and lives in code: teaching Soprano about
-another CLI agent is a few lines in
-[`Sources/Soprano/Config/DefaultAgents.swift`](Sources/Soprano/Config/DefaultAgents.swift)
-— a name, a color, the command to run, and the patterns that mean *ready* or *error*.
+Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
+the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking
+a control rewrites one key in the file, and saving the file applies to the running app
+immediately. Open it with **Commands ▸ Open settings.json**, `⌘P` → *Open settings.json*,
+or the button on any settings tab.
+
+The path follows `XDG_CONFIG_HOME` when set, and `SOPRANO_CONFIG=/path/to/file.json`
+overrides it outright. The file is created on first launch, pre-seeded with whatever you
+had already configured, and every key in it is optional — delete one to fall back to the
+default.
+
+```jsonc
+{
+  // Comments and trailing commas are allowed. The UI preserves both when it
+  // writes to this file.
+  "theme": "catppuccin-mocha",          // gruvbox-dark | catppuccin-mocha
+  "restoreLastSession": true,
+  "projectDirectories": ["~/git", "~/work"],
+
+  "keybindings": {
+    "prefixKey": "a",                   // the prefix chord is Ctrl+<prefixKey>
+    "prefixTimeoutMs": 1500,            // 300–5000
+    "resizeTickPercent": 5,             // 1–25
+
+    // Rebind by action id — every id is listed in Settings ▸ Keyboard
+    // Shortcuts. Modifiers: "cmd", "ctrl", "shift", "prefix".
+    "bindings": {
+      "new-browser": "cmd+shift+b",
+      "split-vertical": "prefix+v",
+      "zoom-reset": null                // null turns the shortcut off
+    }
+  },
+
+  // Add your own agents. Reusing a built-in id ("codex", "claude-code",
+  // "opencode") patches that profile field by field instead. Plain terminal
+  // panes are not configured here — they run your login shell.
+  "agents": [
+    {
+      "id": "aider",
+      "name": "Aider",
+      "command": "aider",
+      "args": ["--no-auto-commits"],
+      "color": "#8bd5ca",
+      "launchKey": "cmd+4",
+      "env": { "AIDER_DARK_MODE": "1" },
+      "cwd": "~/git"
+    }
+  ]
+}
+```
+
+A user-defined agent is a first-class one: it appears in the sidebar's **+** menu, in the
+`⌘P` palette, and in **Settings ▸ Agent Profiles**, its `launchKey` becomes a real
+shortcut, and its panes restore with the workspace. Instead of `command`/`args` you can
+give a `launchScript` to run something multi-step (`nvm use 22 && aider`).
+
+What it does *not* get automatically is status reporting — `WORKING` / `NEEDS INPUT`
+come from lifecycle hooks, and Soprano only injects those for the three built-in
+launchers. Every pane exports `SOPRANO_BIN`, `SOPRANO_PANE_ID`, and `SOPRANO_TAB_ID`, so
+an agent with its own hook mechanism can report in the same way the built-ins do.
+
+A malformed file never takes the app down: Soprano keeps the last values that worked,
+and the parse error — with its line number — plus any warning about an unknown theme,
+unparseable chord, or conflicting shortcut appears at the top of **Settings ▸ General**.
 
 ## Development
 

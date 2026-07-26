@@ -11,16 +11,41 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Soprano is configured by `~/.config/soprano/settings.json` (honors `XDG_CONFIG_HOME`;
+  `SOPRANO_CONFIG` overrides the path). The file is created on first launch, seeded with
+  your existing settings, and documents itself in comments. Saving it applies
+  immediately — no restart.
+- Custom agents: define your own launcher under `agents` — command, args, env, cwd or a
+  `launchScript`, color, and a `launchKey` shortcut — or reuse a built-in id to patch
+  that profile. Custom agents appear in the sidebar **+** menu and in
+  **Settings ▸ Agent Profiles** like built-in ones.
+- Rebind any shortcut by action id under `keybindings.bindings` (`"new-browser":
+  "cmd+shift+b"`), or set one to `null` to turn it off. **Settings ▸ Keyboard Shortcuts**
+  lists every id and marks the ones you changed.
+- **Commands ▸ Open settings.json**, an *Open settings.json* command in `⌘P`, and
+  Open/Reveal/Reload buttons in **Settings ▸ General**.
 - `⌘F` opens a window switcher that searches window titles and nested pane details,
   prioritizing window-title matches.
 
 ### Changed
 
+- The settings screen now edits `settings.json` directly rather than a private
+  preferences store, preserving your comments and key order, and it reflects edits made
+  to the file while it is open.
 - **Settings ▸ About** reports the version declared by the packaged bundle instead of a
   hardcoded string, and shows `dev` for unbundled `swift run` launches.
 
 ### Fixed
 
+- **Settings ▸ General** no longer discards edits to *Prefix Timeout* and *Resize Step*
+  in locales that group digits, where the displayed `1'500` failed to parse and silently
+  reverted.
+- Rebinding **Command Palette**, **Open Project…**, or **Find Window…** now takes effect:
+  their Commands-menu shortcuts follow `settings.json` instead of staying hardcoded.
+- Changing the theme now repaints pane backgrounds and pane-header titles instead of
+  leaving open panes in the previous theme's colors.
+- Reloading keybindings no longer strands the status bar in `PREFIX`, and no longer
+  stops pane-navigation passthrough from tracking closed panes.
 - Selecting a pane in the sidebar now reveals it when an expanded inner workspace was
   previously occupying its region.
 

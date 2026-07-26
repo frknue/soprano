@@ -74,10 +74,13 @@ enum DefaultKeybindings {
         ]
     )
 
-    // MARK: - Persistence
+    // MARK: - Legacy persistence
 
     private static let key = "soprano-keybindings"
 
+    /// Reads keybindings customized before `settings.json` existed, so
+    /// `ConfigStore` can carry them into the new file on first launch. Current
+    /// customizations live in that file; nothing writes here any more.
     static func load() -> KeyBindingConfig {
         guard let data = UserDefaults.standard.data(forKey: key),
               let config = try? JSONDecoder().decode(KeyBindingConfig.self, from: data)
@@ -108,11 +111,6 @@ enum DefaultKeybindings {
             resizeTickPercent: savedConfig.resizeTickPercent,
             bindings: mergedBindings
         )
-    }
-
-    static func save(_ config: KeyBindingConfig) {
-        guard let data = try? JSONEncoder().encode(config) else { return }
-        UserDefaults.standard.set(data, forKey: key)
     }
 
     private static func migrateLegacyBinding(

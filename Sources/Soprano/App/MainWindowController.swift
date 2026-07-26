@@ -60,7 +60,10 @@ final class MainWindowController: NSWindowController {
         window.delegate = self
         self.mainContentVC = contentVC
 
-        let keybindingManager = KeybindingManager(agentManager: agentManager)
+        let keybindingManager = KeybindingManager(
+            agentManager: agentManager,
+            config: ConfigStore.shared.keybindings
+        )
         keybindingManager.delegate = self
         keybindingManager.stateChangeHandler = { [weak contentVC] state in
             contentVC?.setKeybindingMode(state)
@@ -78,11 +81,49 @@ final class MainWindowController: NSWindowController {
 
         applyTheme()
         installCommandsMenu()
+
+        // settings.json is the source of truth: an edit on disk must land in
+        // the running app the same way a click in Settings does.
+        //
+        // The observer is keyed by type and captures self weakly, so it needs
+        // no matching teardown — and a `deinit` could not do one safely anyway,
+        // since reaching the main-actor store from a nonisolated `deinit`
+        // means `assumeIsolated`, which traps if the final release lands off
+        // the main thread.
+        ConfigStore.shared.addObserver(id: Self.configObserverId) { [weak self] in
+            self?.applyConfigChange()
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    private static let configObserverId = "MainWindowController"
+
+    /// Re-applies everything `settings.json` owns after the file changed.
+    private func applyConfigChange() {
+        let store = ConfigStore.shared
+        settings = store.settings
+
+        if themeManager.currentTheme.id != settings.themeId {
+            // setTheme fans out through onThemeChanged to the whole view tree.
+            themeManager.setTheme(id: settings.themeId)
+        }
+
+        reloadKeybindingManager()
+        // The Commands menu carries key equivalents for the actions AppKit
+        // dispatches itself; rebuild it so a rebound chord takes effect and the
+        // old one stops firing.
+        installCommandsMenu()
+        // Agent profiles feed pane headers and the sidebar; redraw them so a
+        // renamed or recolored agent updates without touching a pane.
+        agentManager.reloadAgentProfiles()
+        mainContentVC?.refreshSettingsScreenIfVisible(
+            settings: settings,
+            keybindingConfig: store.keybindings
+        )
     }
 
     func saveLastWorkspaceIfNeeded() {
@@ -121,8 +162,29 @@ final class MainWindowController: NSWindowController {
         keybindingManager?.config.bindings.first(where: { $0.id == bindingId })?.defaultKeys
     }
 
+    /// One launcher per agent in the catalog, so an agent defined in
+    /// settings.json is reachable from `⌘P` exactly like a built-in one.
+    /// `terminal` is excluded because "Open Terminal" already covers it.
+    private func agentLaunchPaletteItems() -> [CommandItem] {
+        AgentCatalog.all
+            .filter { $0.id != "terminal" }
+            .map { profile in
+                CommandItem(
+                    id: "launch-\(profile.id)",
+                    icon: "command.square",
+                    label: "Launch \(profile.name)",
+                    description: "Launch the \(profile.name) agent",
+                    shortcut: commandShortcut(for: "launch-\(profile.id)"),
+                    action: { [weak self] in
+                        guard let self else { return }
+                        _ = self.agentManager.spawnAgent(profile.id)
+                    }
+                )
+            }
+    }
+
     private func buildCommandPaletteItems() -> [CommandItem] {
-        [
+        agentLaunchPaletteItems() + [
             CommandItem(
                 id: "new-window",
                 icon: "macwindow.badge.plus",
@@ -199,39 +261,6 @@ final class MainWindowController: NSWindowController {
                     DispatchQueue.main.async {
                         self?.keybindingOpenProjectSearch()
                     }
-                }
-            ),
-            CommandItem(
-                id: "launch-codex",
-                icon: "command.square",
-                label: "Launch Codex",
-                description: "Launch Codex agent",
-                shortcut: commandShortcut(for: "launch-codex"),
-                action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.spawnAgent("codex")
-                }
-            ),
-            CommandItem(
-                id: "launch-claude-code",
-                icon: "sparkles",
-                label: "Launch Claude Code",
-                description: "Launch Claude Code agent",
-                shortcut: commandShortcut(for: "launch-claude-code"),
-                action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.spawnAgent("claude-code")
-                }
-            ),
-            CommandItem(
-                id: "launch-opencode",
-                icon: "chevron.left.forwardslash.chevron.right",
-                label: "Launch OpenCode",
-                description: "Launch OpenCode agent",
-                shortcut: commandShortcut(for: "launch-opencode"),
-                action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.spawnAgent("opencode")
                 }
             ),
             CommandItem(
@@ -365,6 +394,29 @@ final class MainWindowController: NSWindowController {
                     self?.keybindingToggleSidebar()
                 }
             ),
+            CommandItem(
+                id: "open-settings",
+                icon: "gearshape",
+                label: "Settings",
+                description: "Open the settings screen",
+                shortcut: commandShortcut(for: "open-settings"),
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.openSettings()
+                    }
+                }
+            ),
+            CommandItem(
+                id: "open-settings-json",
+                icon: "curlybraces",
+                label: "Open settings.json",
+                description: ConfigStore.shared.displayPath,
+                shortcut: nil,
+                searchText: "config json edit settings file",
+                action: {
+                    ConfigStore.shared.openInEditor()
+                }
+            ),
         ]
     }
 }
@@ -469,7 +521,7 @@ private extension MainWindowController {
                         tab.title,
                         tab.cwd,
                         tab.url,
-                        tab.agent.flatMap { DefaultAgents.profile(for: $0.profileId)?.name },
+                        tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name },
                     ].compactMap { $0 }
                 }
             }.joined(separator: " ")
@@ -579,35 +631,68 @@ private extension MainWindowController {
         commandsItem.identifier = Self.commandsMenuIdentifier
 
         let commandsMenu = NSMenu(title: "Commands")
-        let windowItem = NSMenuItem(
+        let windowItem = makeCommandsMenuItem(
             title: "Find Window…",
             action: #selector(findWindowMenuItemSelected),
-            keyEquivalent: "f"
+            bindingId: "find-window"
         )
-        windowItem.keyEquivalentModifierMask = [.command]
-        windowItem.target = self
         commandsMenu.addItem(windowItem)
 
-        let paletteItem = NSMenuItem(
+        let paletteItem = makeCommandsMenuItem(
             title: "Command Palette…",
             action: #selector(commandPaletteMenuItemSelected),
-            keyEquivalent: "p"
+            bindingId: "command-palette"
         )
-        paletteItem.keyEquivalentModifierMask = [.command]
-        paletteItem.target = self
         commandsMenu.addItem(paletteItem)
 
-        let projectItem = NSMenuItem(
+        let projectItem = makeCommandsMenuItem(
             title: "Open Project…",
             action: #selector(openProjectMenuItemSelected),
-            keyEquivalent: "p"
+            bindingId: "open-project"
         )
-        projectItem.keyEquivalentModifierMask = [.command, .shift]
-        projectItem.target = self
         commandsMenu.addItem(projectItem)
+
+        commandsMenu.addItem(.separator())
+        let settingsFileItem = NSMenuItem(
+            title: "Open settings.json",
+            action: #selector(openSettingsFileMenuItemSelected),
+            keyEquivalent: ""
+        )
+        settingsFileItem.target = self
+        commandsMenu.addItem(settingsFileItem)
 
         commandsItem.submenu = commandsMenu
         mainMenu.addItem(commandsItem)
+    }
+
+    /// A Commands-menu item whose key equivalent comes from the live keybinding
+    /// configuration.
+    ///
+    /// These three actions are dispatched by AppKit through the menu rather
+    /// than by the event monitor, so a hardcoded key equivalent here would
+    /// quietly outrank `settings.json`: the rebound chord would do nothing and
+    /// the original would keep firing. Prefix chords and disabled actions get
+    /// no key equivalent — the menu cannot express the former, and the latter
+    /// is the point.
+    private func makeCommandsMenuItem(
+        title: String,
+        action: Selector,
+        bindingId: String
+    ) -> NSMenuItem {
+        let binding = ConfigStore.shared.keybindings.bindings.first { $0.id == bindingId }
+        var key = ""
+        var modifiers: NSEvent.ModifierFlags = []
+        if let binding, binding.mode == .direct, binding.key.count == 1 {
+            key = binding.key
+            if binding.meta == true { modifiers.insert(.command) }
+            if binding.ctrl == true { modifiers.insert(.control) }
+            if binding.shift == true { modifiers.insert(.shift) }
+        }
+
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        item.target = self
+        return item
     }
 
     @objc func commandPaletteMenuItemSelected() {
@@ -622,35 +707,20 @@ private extension MainWindowController {
         keybindingOpenProjectSearch()
     }
 
+    @objc func openSettingsFileMenuItemSelected() {
+        ConfigStore.shared.openInEditor()
+    }
+
     func openSettings() {
-        let config = keybindingManager?.config ?? DefaultKeybindings.load()
+        // The settings screen edits settings.json; the store's observer feeds
+        // the result back here, so there is nothing to save on this side.
         mainContentVC?.showSettings(
-            settings: settings,
-            keybindingConfig: config,
-            onSettingsChanged: { [weak self] updatedSettings in
-                guard let self else { return }
-                self.settings = updatedSettings
-                self.settings.save()
-                self.applyTheme()
-            },
-            onKeybindingConfigChanged: { [weak self] updatedConfig in
-                guard let self else { return }
-                DefaultKeybindings.save(updatedConfig)
-                self.reloadKeybindingManager()
-            }
+            settings: ConfigStore.shared.settings,
+            keybindingConfig: ConfigStore.shared.keybindings
         )
     }
 
     func reloadKeybindingManager() {
-        let manager = KeybindingManager(agentManager: agentManager)
-        manager.delegate = self
-        manager.stateChangeHandler = { [weak mainContentVC] state in
-            mainContentVC?.setKeybindingMode(state)
-        }
-        manager.controlKeyStateChangeHandler = { [weak mainContentVC] isHeld in
-            mainContentVC?.setControlKeyHeld(isHeld)
-        }
-        mainContentVC?.setControlKeyHeld(manager.isControlKeyHeld)
-        keybindingManager = manager
+        keybindingManager?.apply(config: ConfigStore.shared.keybindings)
     }
 }

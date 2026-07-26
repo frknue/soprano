@@ -245,7 +245,7 @@ final class SidebarView: NSView {
         windowItem.target = self
         menu.addItem(windowItem)
         menu.addItem(.separator())
-        for profile in DefaultAgents.all where profile.id != "terminal" {
+        for profile in AgentCatalog.all where profile.id != "terminal" {
             let item = NSMenuItem(
                 title: "New \(profile.name) Pane",
                 action: #selector(spawnMenuItemClicked(_:)),
@@ -488,7 +488,7 @@ final class SidebarView: NSView {
     private func sidebarTitle(for tab: PaneTab) -> String {
         guard tab.type == .terminal,
               let agent = tab.agent,
-              let profile = DefaultAgents.profile(for: agent.profileId)
+              let profile = AgentCatalog.profile(for: agent.profileId)
         else { return tab.title }
         return profile.name
     }
@@ -512,7 +512,7 @@ final class SidebarView: NSView {
             return cwd
         }
         if let agent = tab.agent,
-           let profileCwd = DefaultAgents.profile(for: agent.profileId)?.cwd
+           let profileCwd = AgentCatalog.profile(for: agent.profileId)?.cwd
         {
             return profileCwd
         }

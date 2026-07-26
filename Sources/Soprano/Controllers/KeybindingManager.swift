@@ -69,9 +69,12 @@ final class KeybindingManager: @unchecked Sendable {
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
     var controlKeyStateChangeHandler: (@MainActor (Bool) -> Void)?
 
-    init(agentManager: AgentManager) {
+    /// The config is injected rather than loaded here: `settings.json` is the
+    /// source of truth for keybindings, and `ConfigStore` is main-actor
+    /// isolated while this type is not.
+    init(agentManager: AgentManager, config: KeyBindingConfig) {
         self.agentManager = agentManager
-        self.config = DefaultKeybindings.load()
+        self.config = config
         self.isControlKeyHeld = NSEvent.modifierFlags.contains(.control)
         startMonitoring()
         observeApplicationDeactivation()
@@ -89,6 +92,25 @@ final class KeybindingManager: @unchecked Sendable {
             DistributedNotificationCenter.default().removeObserver(paneNavigationObserver)
         }
         agentManager.removeObserver(id: paneNavigationClaimObserverId)
+    }
+
+    /// Adopts a new keybinding configuration in place.
+    ///
+    /// Deliberately not "throw the manager away and build a new one": this
+    /// object owns the pane-navigation passthrough claims (which only the shell
+    /// integration can re-announce), an `AgentManager` observer registered
+    /// under a fixed id, and a live event monitor. Replacing the instance
+    /// silently drops all three — and because the outgoing instance's `deinit`
+    /// runs *after* the replacement registers, it unregisters the new
+    /// manager's observer. Reloading now happens on every settings.json save,
+    /// so that had to stop being a possibility.
+    func apply(config: KeyBindingConfig) {
+        self.config = config
+        // A half-typed prefix chord refers to the old table; drop it so the
+        // next key is interpreted against the config the user just wrote.
+        if state == .prefix {
+            clearPrefixMode()
+        }
     }
 
     private func startMonitoring() {
@@ -307,6 +329,17 @@ final class KeybindingManager: @unchecked Sendable {
         bindingId == "command-palette" || bindingId == "open-project"
     }
 
+    /// The agent a `launch-<agent>` binding spawns, or nil for any other
+    /// action. Resolved against the live catalog so a shortcut can never spawn
+    /// an agent that is no longer configured.
+    static func launchedAgentId(for bindingId: String) -> String? {
+        let prefix = "launch-"
+        guard bindingId.hasPrefix(prefix) else { return nil }
+        let agentId = String(bindingId.dropFirst(prefix.count))
+        guard AgentCatalog.profile(for: agentId) != nil else { return nil }
+        return agentId
+    }
+
     /// Split actions are named for the divider they draw, while
     /// `SplitDirection` describes the axis along which panes are arranged.
     static func splitDirection(for bindingId: String) -> SplitDirection? {
@@ -384,6 +417,14 @@ final class KeybindingManager: @unchecked Sendable {
             return
         }
 
+        // Agent launchers are addressed by id (`launch-<agent>`) so an agent
+        // defined in settings.json gets a working shortcut without a new case
+        // here.
+        if let agentId = Self.launchedAgentId(for: binding.id) {
+            _ = agentManager.spawnAgent(agentId)
+            return
+        }
+
         if let splitDirection = Self.splitDirection(for: binding.id) {
             _ = agentManager.splitPane(
                 direction: splitDirection,
@@ -438,13 +479,6 @@ final class KeybindingManager: @unchecked Sendable {
             agentManager.prevTab(agentManager.activePaneId)
         case "close-pane-tab":
             closeActiveTab()
-
-        case "launch-codex":
-            _ = agentManager.spawnAgent("codex")
-        case "launch-claude-code":
-            _ = agentManager.spawnAgent("claude-code")
-        case "launch-opencode":
-            _ = agentManager.spawnAgent("opencode")
 
         case "command-palette":
             invokeDelegate { $0.keybindingOpenCommandPalette() }

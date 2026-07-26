@@ -394,7 +394,7 @@ final class SplitTreeView: NSView {
             let terminalConfig: TerminalConfig
             if tab.type == .agent,
                let agent = tab.agent,
-               let profile = DefaultAgents.profile(for: agent.profileId)
+               let profile = AgentCatalog.profile(for: agent.profileId)
             {
                 terminalConfig = .forAgent(
                     profile,
@@ -710,6 +710,9 @@ final class PaneContainerView: NSView {
         let needsAttention = agentManager.panes[paneId]?.tabs.contains {
             $0.agent?.needsAttention == true
         } ?? false
+        // Containers are cached for the lifetime of a pane, so the background
+        // set in init would otherwise keep the old theme's color forever.
+        layer?.backgroundColor = theme.panelColor.cgColor
         // Inactive panes keep a hairline border so the focused pane's thicker
         // accent frame reads as a deliberate marker instead of a stray edge.
         layer?.borderWidth = needsAttention || isActive ? 2 : 1

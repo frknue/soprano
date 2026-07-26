@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single keyboard shortcut binding.
-struct KeyBinding: Identifiable, Codable {
+struct KeyBinding: Identifiable, Codable, Equatable {
     let id: String
     let label: String
     let description: String
@@ -29,7 +29,7 @@ enum KeyBindingMode: String, Codable {
 }
 
 /// Full keybinding configuration.
-struct KeyBindingConfig: Codable {
+struct KeyBindingConfig: Codable, Equatable {
     var prefixKey: String
     var prefixTimeoutMs: Int
     var resizeTickPercent: Double

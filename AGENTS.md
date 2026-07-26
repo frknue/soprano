@@ -99,13 +99,35 @@ Scale for this app:
   routing, drag-and-drop, env export, copy mode); `GhosttyAppManager` owns the
   single global `ghostty_app_t`.
 - `Views/` — `SplitTreeView` renders a `SplitNode`; browser panes are WebKit.
-- `Config/` — default agent profiles, default keybindings, themes.
+- `Config/` — built-in defaults (agent profiles, keybindings, themes) **and** the
+  user configuration layer. `ConfigStore` is the runtime authority for every
+  user-facing setting: it loads `~/.config/soprano/settings.json`, resolves it
+  over the built-in defaults (`SopranoConfig.resolved()`), publishes the result,
+  and writes changes back through `JSONCText` so comments and key order survive.
+  `AgentCatalog` is the merged agent registry every other file reads;
+  `KeyChord` converts between chord text and `KeyBinding` fields.
 - `Sources/GhosttyKit/` — modulemap + `ghostty.h` only. Regenerate the header
   from a ghostty build; never hand-edit it.
 
 `Support/Info.plist` and `Support/AgentHooks/*.json` are copied into the bundle
 by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
 `AgentManager`.
+
+## Adding a user-facing setting
+
+`settings.json` is the source of truth; `UserDefaults` is not. To add a setting:
+
+1. Add the (optional) key to `SopranoConfig` and apply it in `resolved()`,
+   reporting bad values as a `ConfigIssue` rather than failing — a typo must
+   never stop the app from launching.
+2. Document it in `ConfigFile.template`, which is what a new user actually reads.
+3. Have the settings screen write it with `configStore.write(_:at:)`; never
+   persist UI state on the side.
+4. Re-apply it in `MainWindowController.applyConfigChange()` so an edit made in
+   the file lands live.
+
+Window geometry, sidebar width, and saved workspaces stay in `UserDefaults` —
+they are app state, not configuration.
 
 ## Conventions
 

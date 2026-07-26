@@ -229,7 +229,7 @@ final class AgentManager: @unchecked Sendable {
         let workingDirectory = cwd ?? activeWorkingDirectory
         let paneId = nextPaneId()
         let tabId = nextTabId()
-        let profile = DefaultAgents.profile(for: profileId)
+        let profile = AgentCatalog.profile(for: profileId)
 
         let tab: PaneTab
         if let profile, profile.id != "terminal" {
@@ -660,7 +660,7 @@ final class AgentManager: @unchecked Sendable {
     @discardableResult
     func attachAgentIfNeeded(paneId: String, tabId: String, profileId: String) -> AgentInstance? {
         guard profileId != "terminal",
-              let profile = DefaultAgents.profile(for: profileId),
+              let profile = AgentCatalog.profile(for: profileId),
               let pane = panes[paneId],
               let tabIndex = pane.tabs.firstIndex(where: { $0.id == tabId })
         else { return nil }
@@ -973,7 +973,7 @@ final class AgentManager: @unchecked Sendable {
               let agent = tab.agent
         else { return nil }
 
-        return DefaultAgents.profile(for: agent.profileId)
+        return AgentCatalog.profile(for: agent.profileId)
     }
 
     // MARK: - Workspace Save/Restore
@@ -1226,6 +1226,14 @@ final class AgentManager: @unchecked Sendable {
         observers.removeValue(forKey: id)
     }
 
+    /// Redraw everything that renders an agent profile. Called after
+    /// `settings.json` changes an agent's name, color, or icon: the panes
+    /// themselves are untouched, but every view that resolves a profile from
+    /// `AgentCatalog` is now showing stale values.
+    func reloadAgentProfiles() {
+        notifyChange()
+    }
+
     func addTerminalLifecycleObserver(
         id: String,
         handler: @escaping (TerminalLifecycleAction) -> Void
@@ -1302,7 +1310,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     private static func suggestedWindowTitle(for tab: PaneTab?) -> String {
-        let profile = tab?.agent.flatMap { DefaultAgents.profile(for: $0.profileId) }
+        let profile = tab?.agent.flatMap { AgentCatalog.profile(for: $0.profileId) }
         let cwd = tab?.cwd
             ?? profile?.cwd
             ?? FileManager.default.currentDirectoryPath
@@ -1350,7 +1358,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     private func agentName(for profileId: String) -> String {
-        DefaultAgents.profile(for: profileId)?.name ?? "Agent"
+        AgentCatalog.profile(for: profileId)?.name ?? "Agent"
     }
 
     private func createPaneTab(
@@ -1361,7 +1369,7 @@ final class AgentManager: @unchecked Sendable {
         url: String? = nil,
         title: String? = nil
     ) -> PaneTab {
-        if type == .agent, let profileId, let profile = DefaultAgents.profile(for: profileId) {
+        if type == .agent, let profileId, let profile = AgentCatalog.profile(for: profileId) {
             let agent = AgentInstance(id: id, profileId: profile.id)
             let dirName = cwd?.split(separator: "/").last.map(String.init)
             let restoredTitle = title ?? dirName.map { "\(profile.name): \($0)" } ?? profile.name

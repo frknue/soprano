@@ -364,7 +364,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     private func agentName(for profileId: String?) -> String {
-        profileId.flatMap { DefaultAgents.profile(for: $0)?.name } ?? "Agent"
+        profileId.flatMap { AgentCatalog.profile(for: $0)?.name } ?? "Agent"
     }
 
     /// `window ▸ pane` for the notification subtitle. Several panes across

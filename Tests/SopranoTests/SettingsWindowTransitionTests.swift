@@ -39,9 +39,7 @@ struct SettingsWindowTransitionTests {
 
         contentViewController.showSettings(
             settings: .defaultSettings,
-            keybindingConfig: DefaultKeybindings.config,
-            onSettingsChanged: { _ in },
-            onKeybindingConfigChanged: { _ in }
+            keybindingConfig: DefaultKeybindings.config
         )
         await waitForDeferredAppKitLayout()
 

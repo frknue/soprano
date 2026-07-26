@@ -162,6 +162,7 @@ final class PaneHeaderView: NSView {
         let theme = themeManager.currentTheme
 
         titleLabel.stringValue = tab?.title ?? "Pane"
+        titleLabel.textColor = theme.colors.textPrimary
         closeButton.contentTintColor = theme.colors.textMuted
         depthOutButton.contentTintColor = theme.colors.textMuted
         depthInButton.contentTintColor = theme.colors.textMuted
