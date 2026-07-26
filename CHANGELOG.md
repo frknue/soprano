@@ -11,6 +11,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Soprano is now open source under the MIT license. The packaged app carries its own
+  `LICENSE` plus Ghostty's in `Soprano.app/Contents/Resources/`.
+
 - Soprano is configured by `~/.config/soprano/settings.json` (honors `XDG_CONFIG_HOME`;
   `SOPRANO_CONFIG` overrides the path). The file is created on first launch, seeded with
   your existing settings, and documents itself in comments. Saving it applies

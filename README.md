@@ -445,4 +445,9 @@ doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
 
 ## License
 
-Private.
+[MIT](LICENSE).
+
+Soprano statically links [libghostty](https://github.com/ghostty-org/ghostty) and bundles
+Ghostty's runtime resources (themes, shell integration, terminfo), which are MIT licensed —
+Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors. Their license travels with the
+packaged app in `Soprano.app/Contents/Resources/LICENSE-ghostty`.
