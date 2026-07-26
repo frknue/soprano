@@ -53,6 +53,43 @@ struct SessionPersistenceTests {
         #expect(restoredManager.panes[paneId]?.activeTab?.title == "Persistent title")
     }
 
+    @Test func lastSessionSwitchTogglesBetweenTheTwoMostRecentlyActiveWorkspaces() throws {
+        let (defaults, suiteName) = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.renameTab(paneId, tabId: tabId, to: "Saved workspace")
+
+        let sessionManager = SessionManager(agentManager: manager, defaults: defaults)
+        sessionManager.saveSession(name: "Saved")
+        let savedSessionId = try #require(sessionManager.sessions.first?.id)
+
+        manager.renameTab(paneId, tabId: tabId, to: "Current workspace")
+        sessionManager.loadSession(savedSessionId)
+        #expect(manager.panes[paneId]?.activeTab?.title == "Saved workspace")
+
+        sessionManager.switchToLastSession()
+        #expect(manager.panes[paneId]?.activeTab?.title == "Current workspace")
+
+        sessionManager.switchToLastSession()
+        #expect(manager.panes[paneId]?.activeTab?.title == "Saved workspace")
+    }
+
+    @Test func lastSessionSwitchDoesNothingUntilAWorkspaceHasBeenLeft() throws {
+        let (defaults, suiteName) = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let manager = AgentManager()
+        let initialGeneration = manager.workspaceRestoreGeneration
+        let sessionManager = SessionManager(agentManager: manager, defaults: defaults)
+
+        sessionManager.switchToLastSession()
+
+        #expect(manager.workspaceRestoreGeneration == initialGeneration)
+    }
+
     @Test func legacySavedTabsWithoutTitlesStillRestoreWithGeneratedTitles() throws {
         let legacyData = Data(
             #"{"id":"tab-9","type":"terminal","cwd":"/tmp/legacy-project"}"#.utf8

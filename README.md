@@ -202,6 +202,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
 | `⇧⌘S` | Save session as… |
+| `⌃A` → `⇧L` | Switch to the last session; press again to toggle back |
 | `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `⌃A` → `⌃A` | Send a literal `⌃A` to the terminal |

@@ -131,6 +131,24 @@ struct DefaultKeybindingsTests {
         #expect(mergedConfig.bindings.contains { $0.id == "last-window" })
     }
 
+    @Test func tmuxLastSessionUsesPrefixShiftL() throws {
+        let lastSession = try #require(binding("last-session"))
+
+        #expect(lastSession.mode == .prefix)
+        #expect(lastSession.key == "l")
+        #expect(lastSession.shift == true)
+        #expect(lastSession.defaultKeys == "Prefix → Shift+L")
+    }
+
+    @Test func savedConfigurationsGainTheLastSessionShortcut() {
+        var savedConfig = DefaultKeybindings.config
+        savedConfig.bindings.removeAll { $0.id == "last-session" }
+
+        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+
+        #expect(mergedConfig.bindings.contains { $0.id == "last-session" })
+    }
+
     @Test func paneTabCyclingUsesPrefixAngleBrackets() throws {
         let previousTab = try #require(binding("prev-pane-tab"))
         let nextTab = try #require(binding("next-pane-tab"))
