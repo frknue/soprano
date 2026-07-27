@@ -115,8 +115,9 @@ if [[ -n "$linked_ghostty_version" && -n "$resources_ghostty_version" ]]; then
     # Compare only X.Y.Z: the linked version carries a channel and commit suffix that a
     # released Ghostty.app never has.
     linked_release="${linked_ghostty_version%%-*}"
+    resources_release="${resources_ghostty_version%%-*}"
 
-    if [[ "$linked_release" != "$resources_ghostty_version" ]]; then
+    if [[ "$linked_release" != "$resources_release" ]]; then
         echo "Warning: resources are Ghostty $resources_ghostty_version but the linked" >&2
         echo "         libghostty is $linked_ghostty_version." >&2
         echo "         Build the submodule (scripts/build-ghostty.sh) so both come from one" >&2
