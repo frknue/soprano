@@ -157,7 +157,7 @@ they are app state, not configuration.
 - `lib/libghostty.a` is **gitignored** (141 MB, over GitHub's file limit). A fresh
   clone must build it with `scripts/build-ghostty.sh`, which needs **full Xcode**
   for the Metal toolchain — Command Line Tools alone cannot build it — plus Zig
-  at least the `minimum_zig_version` in `ghostty/build.zig.zon` (0.15.2 today).
+  exactly matching `minimum_zig_version` in `ghostty/build.zig.zon` (0.15.2 today).
 - **Never copy libghostty artifacts by hand.** `scripts/build-ghostty.sh` builds the
   submodule and refreshes `lib/libghostty.a`, `Sources/GhosttyKit/include/ghostty.h`,
   and `Support/ghostty-version.txt` together. Updating only some of them is how a

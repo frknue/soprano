@@ -61,19 +61,16 @@ if [[ ! -x "$developer_dir/usr/bin/xcodebuild" ]]; then
 fi
 
 if ! command -v zig >/dev/null 2>&1; then
-    echo "zig is not on PATH. Install it with: brew install zig" >&2
+    echo "zig is not on PATH. Install the version required by ghostty/build.zig.zon." >&2
     exit 1
 fi
 
 minimum_zig="$(sed -n 's/.*\.minimum_zig_version = "\([^"]*\)".*/\1/p' "$ghostty_dir/build.zig.zon" | head -1)"
 installed_zig="$(zig version)"
 
-if [[ -n "$minimum_zig" ]]; then
-    oldest="$(printf '%s\n%s\n' "$minimum_zig" "$installed_zig" | sort -V | head -1)"
-    if [[ "$oldest" != "$minimum_zig" ]]; then
-        echo "ghostty needs Zig >= $minimum_zig but zig $installed_zig is installed." >&2
-        exit 1
-    fi
+if [[ -n "$minimum_zig" && "$installed_zig" != "$minimum_zig" ]]; then
+    echo "ghostty needs Zig $minimum_zig exactly but zig $installed_zig is installed." >&2
+    exit 1
 fi
 
 if [[ -n "$requested_ref" ]]; then
@@ -95,19 +92,35 @@ echo "Building libghostty at $building_commit (this takes a while)..."
     cd "$ghostty_dir"
     DEVELOPER_DIR="$developer_dir" zig build \
         -Dapp-runtime=none \
-        -Demit-xcframework=false \
+        -Demit-xcframework=true \
+        -Dxcframework-target=native \
+        -Demit-macos-app=false \
         -Doptimize=ReleaseFast
 )
 
-built_library="$ghostty_dir/zig-out/lib/libghostty.a"
-built_header="$ghostty_dir/zig-out/include/ghostty.h"
+xcframework_dir="$ghostty_dir/macos/GhosttyKit.xcframework"
+built_libraries=()
+built_headers=()
 
-for artifact in "$built_library" "$built_header"; do
-    if [[ ! -f "$artifact" ]]; then
-        echo "The build did not produce: $artifact" >&2
-        exit 1
-    fi
-done
+if [[ -d "$xcframework_dir" ]]; then
+    while IFS= read -r artifact; do
+        built_libraries+=("$artifact")
+    done < <(find "$xcframework_dir" -type f -name 'libghostty*.a' -print)
+
+    while IFS= read -r artifact; do
+        built_headers+=("$artifact")
+    done < <(find "$xcframework_dir" -type f -name 'ghostty.h' -print)
+fi
+
+if [[ "${#built_libraries[@]}" -ne 1 || "${#built_headers[@]}" -ne 1 ]]; then
+    echo "The native Ghostty XCFramework did not contain one library and header." >&2
+    echo "Found ${#built_libraries[@]} libraries and ${#built_headers[@]} headers in:" >&2
+    echo "  $xcframework_dir" >&2
+    exit 1
+fi
+
+built_library="${built_libraries[0]}"
+built_header="${built_headers[0]}"
 
 # Read the version out of the artifact rather than recomputing it, so the stamp cannot
 # disagree with what ghostty_info() reports at runtime.

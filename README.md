@@ -80,13 +80,13 @@ Homebrew Swift is required because the system CLT Swift has broken SPM. Full Xco
 the Metal Toolchain is required to compile libghostty.
 
 ```bash
-brew install swift zig
+brew install swift zig@0.15
 xcodebuild -downloadComponent MetalToolchain
 
 git clone --recurse-submodules https://github.com/frknue/soprano.git
 cd soprano
 
-./scripts/build-ghostty.sh
+PATH="/opt/homebrew/opt/zig@0.15/bin:$PATH" ./scripts/build-ghostty.sh
 ./scripts/install.sh
 ```
 
@@ -94,7 +94,9 @@ cd soprano
 repeat it when the ghostty submodule moves. To move it, hand the script a ref
 (`./scripts/build-ghostty.sh v1.3.1`) and commit the submodule pin: it refreshes the
 library, the C header, and the recorded version together, and `swift test` fails if they
-ever disagree. Packaging also needs Ghostty's *runtime* resources (themes, shell
+ever disagree. Ghostty requires the exact Zig version declared by
+`ghostty/build.zig.zon`; update the versioned Homebrew formula and `PATH` above when that
+declaration changes. Packaging also needs Ghostty's *runtime* resources (themes, shell
 integration, terminfo); the Ghostty build produces them, an installed
 `/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
 both. Packaging says which source it used and warns when that source is a different
