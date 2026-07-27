@@ -210,7 +210,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
 | `⇧⌘S` | Save session as… |
-| `⌘=` / `⌘-` / `⌘0` | Zoom in / out / reset |
+| `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `⌃A` → `⌃A` | Send a literal `⌃A` to the terminal |
 
@@ -325,7 +325,7 @@ navigation always has a working fallback.
 ## Settings
 
 `⌘,` opens a four-tab settings screen: **General** (theme, restore-last-session, project
-directories), **Keyboard Shortcuts**, **Agent Profiles**, and **About**.
+directories, notifications), **Keyboard Shortcuts**, **Agent Profiles**, and **About**.
 
 Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
 the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking
@@ -347,6 +347,10 @@ default.
   "theme": "catppuccin-mocha",
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
+
+  "notifications": {
+    "sound": false                      // banners are silent unless you ask
+  },
 
   "keybindings": {
     "prefixKey": "a",                   // the prefix chord is Ctrl+<prefixKey>
