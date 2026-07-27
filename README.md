@@ -67,7 +67,7 @@ cd soprano
 ./scripts/build-ghostty.sh
 
 # 4 · Build the release app into /Applications
-./install.sh
+./scripts/install.sh
 ```
 
 **Requirements:** macOS 14 Sonoma or newer · full Xcode with the Metal Toolchain
@@ -85,11 +85,11 @@ works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides both. Packaging says wh
 source it used and warns when that source is a different Ghostty version than the
 library Soprano links.
 
-`install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
+`scripts/install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
 stable local identity so macOS keeps your notification permission across rebuilds, and
 replaces `/Applications/Soprano.app` **without** stopping a running instance — the
 update applies on the next launch. Install elsewhere with
-`SOPRANO_INSTALL_DIR="$HOME/Applications" ./install.sh`.
+`SOPRANO_INSTALL_DIR="$HOME/Applications" ./scripts/install.sh`.
 
 ### The first five minutes
 
@@ -404,16 +404,16 @@ unparseable chord, or conflicting shortcut appears at the top of **Settings ▸ 
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build          # debug build / type-check
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test           # swift-testing suite
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
-./dev.sh                 # build, package, and launch an isolated Soprano Dev.app
-./dev.sh --build-only    # same, without launching
-./install.sh             # release build → /Applications/Soprano.app
+./scripts/dev.sh                 # build, package, and launch an isolated Soprano Dev.app
+./scripts/dev.sh --build-only    # same, without launching
+./scripts/install.sh             # release build → /Applications/Soprano.app
 ```
 
-`dev.sh` produces `.build/debug/Soprano Dev.app` under the separate `com.soprano.dev`
+`scripts/dev.sh` produces `.build/debug/Soprano Dev.app` under the separate `com.soprano.dev`
 bundle identifier, so its preferences, window state, sessions, and notification
 permission stay isolated from the installed app. Both bundles embed the same Ghostty
 runtime resources, so themes and terminal behavior do not depend on how you launched
-them. The legacy `run.sh` forwards to `dev.sh`.
+them. The legacy `scripts/run.sh` forwards to `scripts/dev.sh`.
 
 macOS requires a real application bundle for native notifications. `swift run` and the
 raw `.build/debug/Soprano` executable are still useful for debugging, but notifications
@@ -447,7 +447,7 @@ soprano/
 │       ├── module.modulemap      # System library module map
 │       └── include/ghostty.h     # libghostty C API header (generated; see Try it)
 ├── Support/                      # Info.plist, agent hook templates, ghostty-version.txt
-├── scripts/                      # build-ghostty.sh, package-app.sh, sign-app.sh, signing helper
+├── scripts/                      # build, packaging, installation, and signing scripts
 └── ghostty/                      # Ghostty submodule (source for libghostty)
 ```
 

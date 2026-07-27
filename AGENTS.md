@@ -15,8 +15,8 @@ PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build            # debug build / 
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test
 PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test --filter SplitNodeTests
-./dev.sh [--build-only]   # package + launch isolated Soprano Dev.app (user-driven only)
-./install.sh              # release build → /Applications/Soprano.app
+./scripts/dev.sh [--build-only]   # package + launch isolated Soprano Dev.app (user-driven only)
+./scripts/install.sh              # release build → /Applications/Soprano.app
 bash Tests/Signing/LocalCodeSigningTests.sh   # signing-identity helper tests (mutates user keychain list)
 ```
 
@@ -31,15 +31,15 @@ There is no linter or formatter configured. Match surrounding style.
   anything a test covers. Do not launch the Soprano GUI during automated
   verification; launching terminal panes can trigger macOS permission prompts
   through the user's shell startup files.
-- `./dev.sh` builds, packages, and launches the isolated `Soprano Dev.app` with
+- `./scripts/dev.sh` builds, packages, and launches the isolated `Soprano Dev.app` with
   bundle identifier `com.soprano.dev`. It is for user-driven GUI testing. Agents
   must not run it unless the user explicitly requests a launch. Use
-  `./dev.sh --build-only` only when the development bundle itself needs testing.
+  `./scripts/dev.sh --build-only` only when the development bundle itself needs testing.
 
 ## Installing completed changes
 
 - After completing and successfully verifying a task that changes the app or its
-  packaging, run `./install.sh` as the final step unless the user asks not to.
+  packaging, run `./scripts/install.sh` as the final step unless the user asks not to.
 - The user has explicitly authorized this installation. The script builds the
   release configuration and replaces `/Applications/Soprano.app`, but does not
   terminate or launch Soprano. The running instance remains untouched and the
@@ -76,7 +76,7 @@ Scale for this app:
 2. Bump `CFBundleShortVersionString` **and** `CFBundleVersion` in `Support/Info.plist`.
    That plist is the single source of truth — `AppVersion` reads it at runtime, so no
    Swift file carries the number. `ChangelogVersionTests` fails if the two drift apart.
-3. `swift build && swift test`, then `./install.sh`.
+3. `swift build && swift test`, then `./scripts/install.sh`.
 4. Commit as `release: vX.Y.Z` and tag `vX.Y.Z`.
 
 ## Architecture

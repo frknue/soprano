@@ -2,6 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
 install_root="${SOPRANO_INSTALL_DIR:-/Applications}"
 
 if [[ "$install_root" != /* || "$install_root" == "/" ]]; then
@@ -12,11 +13,11 @@ fi
 export PATH="/opt/homebrew/opt/swift/bin:$PATH"
 
 echo "Building Soprano for release..."
-cd "$script_dir"
+cd "$repo_root"
 swift build -c release
 
 installed_app="$install_root/Soprano.app"
-"$script_dir/scripts/package-app.sh" \
+"$script_dir/package-app.sh" \
     release \
     "$installed_app" \
     "com.soprano.app" \

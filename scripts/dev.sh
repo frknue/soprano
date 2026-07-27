@@ -15,14 +15,15 @@ if [[ $# -eq 1 ]]; then
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
 export PATH="/opt/homebrew/opt/swift/bin:$PATH"
 
 echo "Building Soprano Dev..."
-cd "$script_dir"
+cd "$repo_root"
 swift build
 
-dev_app="$script_dir/.build/debug/Soprano Dev.app"
-"$script_dir/scripts/package-app.sh" \
+dev_app="$repo_root/.build/debug/Soprano Dev.app"
+"$script_dir/package-app.sh" \
     debug \
     "$dev_app" \
     "com.soprano.dev" \

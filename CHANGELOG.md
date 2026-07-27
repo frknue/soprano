@@ -44,6 +44,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Development, installation, and legacy run scripts now live together under `scripts/`.
 - Notifications are **silent by default**. A pane that wants you already shows a banner,
   an unread ring, and a status, and a chime on every finished turn gets old fast. Turn it
   back on in **Settings ▸ General ▸ Notifications** or with `notifications.sound` in
