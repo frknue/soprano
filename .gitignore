@@ -34,5 +34,8 @@ _archive/
 *.tsbuildinfo
 .worktrees/
 
+# Personal working notes. docs/superpowers/ plans and specs stay tracked.
+docs/notes/
+
 # Pre-built libghostty (rebuild from ghostty/ submodule)
 lib/
