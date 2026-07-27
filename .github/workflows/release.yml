@@ -56,6 +56,8 @@ jobs:
   build:
     name: Build ${{ matrix.architecture }}
     needs: preflight
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +83,7 @@ jobs:
       - name: Ensure the Metal toolchain is available
         run: |
           set -euo pipefail
+          xcodebuild -version
           if ! xcrun --find metal >/dev/null 2>&1; then
             xcodebuild -downloadComponent MetalToolchain
           fi
@@ -88,7 +91,7 @@ jobs:
       - name: Build libghostty
         run: |
           set -euo pipefail
-          SOPRANO_DEVELOPER_DIR="$(xcode-select -p)" ./scripts/build-ghostty.sh
+          ./scripts/build-ghostty.sh
 
       - name: Build Soprano
         run: swift build -c release
