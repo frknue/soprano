@@ -158,12 +158,22 @@ mkdir -p "$dmg_root"
 ln -s /Applications "$dmg_root/Applications"
 
 echo "Creating $(basename "$output_dmg")..."
-hdiutil create \
+dmg_create_attempt=1
+while ! hdiutil create \
     -volname "Soprano" \
     -srcfolder "$dmg_root" \
     -format UDZO \
     -ov \
-    "$unsigned_dmg"
+    "$unsigned_dmg"; do
+    if [[ "$dmg_create_attempt" -ge 3 ]]; then
+        echo "Disk image creation failed after $dmg_create_attempt attempts." >&2
+        exit 1
+    fi
+
+    dmg_create_attempt=$((dmg_create_attempt + 1))
+    echo "Disk image creation failed; retrying attempt $dmg_create_attempt of 3..." >&2
+    sleep 5
+done
 
 codesign_arguments=(
     --force
