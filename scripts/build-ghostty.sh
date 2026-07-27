@@ -87,6 +87,14 @@ if [[ -n "$recorded_commit" && "$building_commit" != "$recorded_commit" ]]; then
     echo "      Run 'git add ghostty' afterwards so the pin records what you built."
 fi
 
+version_arguments=()
+if [[ -n "$recorded_commit" && "$building_commit" == "$recorded_commit" ]]; then
+    recorded_version="$(tr -d '\r\n' < "$version_stamp")"
+    if [[ -n "$recorded_version" ]]; then
+        version_arguments+=("-Dversion-string=$recorded_version")
+    fi
+fi
+
 build_cache_dir="$(mktemp -d "$repo_root/.build-ghostty-cache.XXXXXX")"
 stage_dir="$(mktemp -d "$repo_root/.build-ghostty-stage.XXXXXX")"
 
@@ -106,7 +114,8 @@ build_status=0
         -Demit-xcframework=true \
         -Dxcframework-target=native \
         -Demit-macos-app=false \
-        -Doptimize=ReleaseFast
+        -Doptimize=ReleaseFast \
+        "${version_arguments[@]}"
 ) || build_status=$?
 
 xcframework_dir="$ghostty_dir/macos/GhosttyKit.xcframework"
@@ -163,7 +172,8 @@ fi
 built_versions="$(
     strings -a "$built_library" \
         | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-[a-z]+\+[0-9a-f]{7,}' \
-        | sort -u
+        | sort -u \
+        || true
 )"
 version_count="$(printf '%s' "$built_versions" | grep -c . || true)"
 
