@@ -15,6 +15,9 @@ struct WorkspaceSession: Identifiable, Codable {
         let id: String
         var title: String
         var isTitleCustom: Bool? = nil
+        /// Optional for backward compatibility with sessions saved before
+        /// sidebar disclosure state was persisted.
+        var isSidebarCollapsed: Bool? = nil
         var layout: SplitNode?
         var activePaneId: String
         /// Optional for backward compatibility with sessions saved before

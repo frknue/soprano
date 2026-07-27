@@ -62,6 +62,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Fixed
 
+- Collapsed window groups in the sidebar now stay collapsed after Soprano restarts or
+  their saved session is reopened.
 - Claude Code's *idle prompt* notifications now reach Soprano. The launch-scoped hook
   matched only permission prompts, so an agent that simply finished and sat waiting never
   fired one — the most common reason a pane wants you.

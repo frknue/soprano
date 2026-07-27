@@ -23,7 +23,6 @@ final class SidebarView: NSView {
     private var dashboardButton: NSButton!
     private var plusButton: NSButton!
     private var sessionsButton: NSButton!
-    private var collapsedWindowIds: Set<String> = []
     private var isControlKeyHeld = false
     private var paneRows: [String: SidebarPaneRowView] = [:]
 
@@ -417,7 +416,7 @@ final class SidebarView: NSView {
         for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
             let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
             let isExpanded = isControlKeyHeld
-                || !collapsedWindowIds.contains(terminalWindow.id)
+                || !terminalWindow.isSidebarCollapsed
             let windowRow = SidebarWindowRowView(theme: theme)
             windowRow.configure(
                 title: terminalWindow.title,
@@ -433,13 +432,7 @@ final class SidebarView: NSView {
                 highlighted: isActiveWindow,
                 isTitleCustom: terminalWindow.isTitleCustom,
                 onToggle: { [weak self] in
-                    guard let self else { return }
-                    if self.collapsedWindowIds.contains(terminalWindow.id) {
-                        self.collapsedWindowIds.remove(terminalWindow.id)
-                    } else {
-                        self.collapsedWindowIds.insert(terminalWindow.id)
-                    }
-                    self.refresh()
+                    self?.agentManager.toggleSidebarWindowCollapsed(terminalWindow.id)
                 },
                 onSelect: { [weak self] in
                     self?.agentManager.activateWindow(terminalWindow.id)
@@ -451,7 +444,6 @@ final class SidebarView: NSView {
                     self?.agentManager.resetWindowTitle(terminalWindow.id)
                 },
                 onClose: { [weak self] in
-                    self?.collapsedWindowIds.remove(terminalWindow.id)
                     self?.agentManager.closeWindow(terminalWindow.id)
                 }
             )

@@ -187,6 +187,12 @@ final class AgentManager: @unchecked Sendable {
         activateWindow(orderedWindows[number - 1].id)
     }
 
+    func toggleSidebarWindowCollapsed(_ windowId: String) {
+        guard let terminalWindow = windows[windowId] else { return }
+        terminalWindow.isSidebarCollapsed.toggle()
+        notifyChange()
+    }
+
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
         for paneId in terminalWindow.paneIds {
@@ -1043,6 +1049,7 @@ final class AgentManager: @unchecked Sendable {
                 id: terminalWindow.id,
                 title: terminalWindow.title,
                 isTitleCustom: terminalWindow.isTitleCustom,
+                isSidebarCollapsed: terminalWindow.isSidebarCollapsed,
                 layout: terminalWindow.rootLayout,
                 activePaneId: terminalWindow.activePaneId,
                 depthLayers: terminalWindow.depthLayers.map { layer in
@@ -1166,6 +1173,7 @@ final class AgentManager: @unchecked Sendable {
                     id: savedWindow.id,
                     title: restoredTitle,
                     isTitleCustom: isTitleCustom,
+                    isSidebarCollapsed: savedWindow.isSidebarCollapsed ?? false,
                     depthLayers: restoredDepthLayers,
                     activeDepthLayerIndex: savedWindow.activeDepthLayerIndex
                         ?? savedWindow.activeDepth

@@ -19,6 +19,7 @@ final class WorkspaceWindowState: Identifiable {
     let id: String
     var title: String
     var isTitleCustom: Bool
+    var isSidebarCollapsed: Bool
     private(set) var depthLayers: [WorkspaceDepthLayer]
     private(set) var activeDepthLayerIndex: Int
 
@@ -53,12 +54,14 @@ final class WorkspaceWindowState: Identifiable {
         id: String,
         title: String,
         isTitleCustom: Bool = false,
+        isSidebarCollapsed: Bool = false,
         layout: SplitNode?,
         activePaneId: String
     ) {
         self.id = id
         self.title = title
         self.isTitleCustom = isTitleCustom
+        self.isSidebarCollapsed = isSidebarCollapsed
         self.depthLayers = [
             WorkspaceDepthLayer(
                 parentPaneId: nil,
@@ -74,12 +77,14 @@ final class WorkspaceWindowState: Identifiable {
         id: String,
         title: String,
         isTitleCustom: Bool = false,
+        isSidebarCollapsed: Bool = false,
         depthLayers: [WorkspaceDepthLayer],
         activeDepthLayerIndex: Int
     ) {
         self.id = id
         self.title = title
         self.isTitleCustom = isTitleCustom
+        self.isSidebarCollapsed = isSidebarCollapsed
         self.depthLayers = depthLayers.isEmpty
             ? [
                 WorkspaceDepthLayer(
