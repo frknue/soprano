@@ -9,6 +9,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-28
+
+### Fixed
+
+- Homebrew and disk-image installations now open successfully instead of crashing while
+  loading Soprano's bundled terminal configuration.
+
 ## [0.3.0] - 2026-07-27
 
 ### Added

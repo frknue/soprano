@@ -186,6 +186,8 @@ jobs:
             "$PWD/dist/Soprano.app" \
             "com.soprano.app" \
             "Soprano"
+          test -f "$PWD/dist/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoCopyMode.conf"
+          test ! -e "$PWD/dist/Soprano.app/Soprano_Soprano.bundle"
 
       - name: Create release disk image and cask
         env:

@@ -55,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func installApplicationIcon() {
         MainActor.assumeIsolated {
             let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
-                ?? Bundle.module.url(forResource: "AppIcon", withExtension: "icns")
+                ?? SopranoResources.bundle.url(forResource: "AppIcon", withExtension: "icns")
             guard let iconURL, let icon = NSImage(contentsOf: iconURL) else { return }
             NSApp.applicationIconImage = icon
         }

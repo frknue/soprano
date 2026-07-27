@@ -109,7 +109,7 @@ final class GhosttyAppManager: @unchecked Sendable {
     }
 
     private func applySopranoCopyModeConfig(to config: ghostty_config_t) -> Bool {
-        guard let configURL = Bundle.module.url(
+        guard let configURL = SopranoResources.bundle.url(
             forResource: "SopranoCopyMode",
             withExtension: "conf"
         ) else {
