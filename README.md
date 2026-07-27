@@ -52,7 +52,7 @@ right now?*
 
 ## Install
 
-Install the latest signed and notarized universal build with Homebrew:
+Install the latest universal build with Homebrew:
 
 ```bash
 brew install --cask frknue/tap/soprano
@@ -61,6 +61,13 @@ brew install --cask frknue/tap/soprano
 Or download `Soprano-<version>.dmg` from
 [GitHub Releases](https://github.com/frknue/soprano/releases/latest), open it, and drag
 Soprano into **Applications**.
+
+> [!IMPORTANT]
+> Soprano is ad-hoc signed but not notarized because the project does not have a paid
+> Apple Developer membership. On first launch, macOS may block it. If that happens,
+> open **System Settings → Privacy & Security**, scroll to **Security**, click
+> **Open Anyway** for Soprano, then confirm **Open**. Apple documents this
+> [one-time override](https://support.apple.com/guide/mac-help/mh40616/mac).
 
 **Requirements:** macOS 14 Sonoma or newer on Apple Silicon or Intel. The release
 contains Soprano, libghostty, and Ghostty's runtime resources; installing it does not
@@ -458,7 +465,7 @@ soprano/
 │       ├── module.modulemap      # System library module map
 │       └── include/ghostty.h     # libghostty C API header (see Build from source)
 ├── Support/                      # Info.plist, agent hook templates, ghostty-version.txt
-├── .github/workflows/release.yml # universal, signed, notarized release automation
+├── .github/workflows/release.yml # universal release and cask-asset automation
 ├── scripts/                      # build, packaging, installation, and signing scripts
 └── ghostty/                      # Ghostty submodule (source for libghostty)
 ```

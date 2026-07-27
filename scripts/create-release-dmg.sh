@@ -19,6 +19,7 @@ notary_keychain="${SOPRANO_NOTARY_KEYCHAIN:-}"
 notary_key_path="${SOPRANO_NOTARY_KEY_PATH:-}"
 notary_key_id="${SOPRANO_NOTARY_KEY_ID:-}"
 notary_issuer_id="${SOPRANO_NOTARY_ISSUER_ID:-}"
+unnotarized_release="${SOPRANO_UNNOTARIZED_RELEASE:-0}"
 
 if [[ "$app_path" != /* || ! -d "$app_path" || "$app_path" != *.app ]]; then
     echo "Expected an existing absolute .app path: $app_path" >&2
@@ -30,6 +31,10 @@ if [[ "$output_dmg" != /* || "$output_dmg" != *.dmg ]]; then
 fi
 if [[ -z "$signing_identity" ]]; then
     echo "SOPRANO_CODESIGN_IDENTITY is required." >&2
+    exit 2
+fi
+if [[ "$unnotarized_release" != "0" && "$unnotarized_release" != "1" ]]; then
+    echo "SOPRANO_UNNOTARIZED_RELEASE must be 0 or 1." >&2
     exit 2
 fi
 if [[ -n "$signing_keychain" && "$signing_keychain" != /* ]]; then
@@ -46,31 +51,38 @@ if [[ -n "$notary_key_path" && "$notary_key_path" != /* ]]; then
 fi
 
 notary_arguments=()
-if [[ -n "$notary_profile" ]]; then
-    if [[ -n "$notary_key_path" || -n "$notary_key_id" || -n "$notary_issuer_id" ]]; then
-        echo "Use either a notary keychain profile or an App Store Connect API key, not both." >&2
+if [[ "$unnotarized_release" == "1" ]]; then
+    if [[ "$signing_identity" != "-" ]]; then
+        echo "Unnotarized releases must use the ad-hoc signing identity '-'." >&2
         exit 2
     fi
-    notary_arguments+=(--keychain-profile "$notary_profile")
-    if [[ -n "$notary_keychain" ]]; then
-        notary_arguments+=(--keychain "$notary_keychain")
-    fi
-elif [[ -n "$notary_key_path" && -n "$notary_key_id" && -n "$notary_issuer_id" ]]; then
-    if [[ ! -f "$notary_key_path" ]]; then
-        echo "Notary API key does not exist: $notary_key_path" >&2
-        exit 2
-    fi
-    notary_arguments+=(
-        --key "$notary_key_path"
-        --key-id "$notary_key_id"
-        --issuer "$notary_issuer_id"
-    )
-elif [[ -n "$notary_key_path" || -n "$notary_key_id" || -n "$notary_issuer_id" ]]; then
-    echo "API-key notarization requires SOPRANO_NOTARY_KEY_PATH, _KEY_ID, and _ISSUER_ID." >&2
-    exit 2
 else
-    echo "Configure SOPRANO_NOTARY_KEYCHAIN_PROFILE or the three API-key variables." >&2
-    exit 2
+    if [[ -n "$notary_profile" ]]; then
+        if [[ -n "$notary_key_path" || -n "$notary_key_id" || -n "$notary_issuer_id" ]]; then
+            echo "Use either a notary keychain profile or an App Store Connect API key, not both." >&2
+            exit 2
+        fi
+        notary_arguments+=(--keychain-profile "$notary_profile")
+        if [[ -n "$notary_keychain" ]]; then
+            notary_arguments+=(--keychain "$notary_keychain")
+        fi
+    elif [[ -n "$notary_key_path" && -n "$notary_key_id" && -n "$notary_issuer_id" ]]; then
+        if [[ ! -f "$notary_key_path" ]]; then
+            echo "Notary API key does not exist: $notary_key_path" >&2
+            exit 2
+        fi
+        notary_arguments+=(
+            --key "$notary_key_path"
+            --key-id "$notary_key_id"
+            --issuer "$notary_issuer_id"
+        )
+    elif [[ -n "$notary_key_path" || -n "$notary_key_id" || -n "$notary_issuer_id" ]]; then
+        echo "API-key notarization requires SOPRANO_NOTARY_KEY_PATH, _KEY_ID, and _ISSUER_ID." >&2
+        exit 2
+    else
+        echo "Configure SOPRANO_NOTARY_KEYCHAIN_PROFILE or the three API-key variables." >&2
+        exit 2
+    fi
 fi
 
 app_binary="$app_path/Contents/MacOS/Soprano"
@@ -101,17 +113,24 @@ if ! /usr/bin/codesign --verify --deep --strict "$app_path"; then
 fi
 
 signature_details="$(/usr/bin/codesign --display --verbose=4 "$app_path" 2>&1)"
-if [[ "$signature_details" != *"Authority=Developer ID Application:"* ]]; then
-    echo "The app must be signed with a Developer ID Application certificate." >&2
-    exit 1
-fi
-if [[ "$signature_details" != *"flags=0x10000(runtime)"* ]]; then
-    echo "The app signature must enable the hardened runtime." >&2
-    exit 1
-fi
-if [[ "$signature_details" != *"Timestamp="* ]]; then
-    echo "The app signature must include a secure timestamp." >&2
-    exit 1
+if [[ "$unnotarized_release" == "1" ]]; then
+    if [[ "$signature_details" != *"Signature=adhoc"* ]]; then
+        echo "The unnotarized app must carry an ad-hoc code signature." >&2
+        exit 1
+    fi
+else
+    if [[ "$signature_details" != *"Authority=Developer ID Application:"* ]]; then
+        echo "The app must be signed with a Developer ID Application certificate." >&2
+        exit 1
+    fi
+    if [[ "$signature_details" != *"flags=0x10000(runtime)"* ]]; then
+        echo "The app signature must enable the hardened runtime." >&2
+        exit 1
+    fi
+    if [[ "$signature_details" != *"Timestamp="* ]]; then
+        echo "The app signature must include a secure timestamp." >&2
+        exit 1
+    fi
 fi
 
 output_parent="$(dirname "$output_dmg")"
@@ -123,12 +142,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-notarization_zip="$stage_dir/Soprano.zip"
-echo "Submitting Soprano.app for notarization..."
-/usr/bin/ditto -c -k --keepParent "$app_path" "$notarization_zip"
-xcrun notarytool submit "$notarization_zip" "${notary_arguments[@]}" --wait
-xcrun stapler staple "$app_path"
-xcrun stapler validate "$app_path"
+if [[ "$unnotarized_release" == "0" ]]; then
+    notarization_zip="$stage_dir/Soprano.zip"
+    echo "Submitting Soprano.app for notarization..."
+    /usr/bin/ditto -c -k --keepParent "$app_path" "$notarization_zip"
+    xcrun notarytool submit "$notarization_zip" "${notary_arguments[@]}" --wait
+    xcrun stapler staple "$app_path"
+    xcrun stapler validate "$app_path"
+fi
 
 dmg_root="$stage_dir/dmg-root"
 unsigned_dmg="$stage_dir/Soprano.dmg"
@@ -146,27 +167,48 @@ hdiutil create \
 
 codesign_arguments=(
     --force
-    --timestamp
     --sign "$signing_identity"
 )
+if [[ "$unnotarized_release" == "0" ]]; then
+    codesign_arguments+=(--timestamp)
+fi
 if [[ -n "$signing_keychain" ]]; then
     codesign_arguments+=(--keychain "$signing_keychain")
 fi
 /usr/bin/codesign "${codesign_arguments[@]}" "$unsigned_dmg"
+/usr/bin/codesign --verify --strict "$unsigned_dmg"
 
-echo "Submitting the disk image for notarization..."
-xcrun notarytool submit "$unsigned_dmg" "${notary_arguments[@]}" --wait
-xcrun stapler staple "$unsigned_dmg"
-xcrun stapler validate "$unsigned_dmg"
+if [[ "$unnotarized_release" == "0" ]]; then
+    echo "Submitting the disk image for notarization..."
+    xcrun notarytool submit "$unsigned_dmg" "${notary_arguments[@]}" --wait
+    xcrun stapler staple "$unsigned_dmg"
+    xcrun stapler validate "$unsigned_dmg"
+else
+    if /usr/sbin/spctl \
+        --assess \
+        --type open \
+        --context context:primary-signature \
+        "$unsigned_dmg" >/dev/null 2>&1; then
+        echo "The unnotarized disk image unexpectedly passed Gatekeeper assessment." >&2
+        exit 1
+    fi
+    echo "Verified that Gatekeeper requires explicit user approval for this release."
+fi
 
 rm -f "$output_dmg"
 mv "$unsigned_dmg" "$output_dmg"
 
-/usr/sbin/spctl \
-    --assess \
-    --type open \
-    --context context:primary-signature \
-    --verbose=2 \
-    "$output_dmg"
+if [[ "$unnotarized_release" == "0" ]]; then
+    /usr/sbin/spctl \
+        --assess \
+        --type open \
+        --context context:primary-signature \
+        --verbose=2 \
+        "$output_dmg"
+fi
 
-echo "Created notarized release image at $output_dmg"
+if [[ "$unnotarized_release" == "1" ]]; then
+    echo "Created unnotarized release image at $output_dmg"
+else
+    echo "Created notarized release image at $output_dmg"
+fi

@@ -22,15 +22,8 @@ jobs:
       - name: Check out Soprano
         uses: actions/checkout@v7
 
-      - name: Validate tag, version, changelog, and secrets
+      - name: Validate tag, version, and changelog
         id: version
-        env:
-          MACOS_DEVELOPER_ID_CERTIFICATE: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE }}
-          MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-          APPLE_NOTARY_API_KEY: ${{ secrets.APPLE_NOTARY_API_KEY }}
-          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -57,21 +50,6 @@ jobs:
             echo "CHANGELOG.md has no release heading for $short_version." >&2
             exit 1
           fi
-
-          required_secrets=(
-            MACOS_DEVELOPER_ID_CERTIFICATE
-            MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD
-            APPLE_NOTARY_API_KEY
-            APPLE_NOTARY_KEY_ID
-            APPLE_NOTARY_ISSUER_ID
-            HOMEBREW_TAP_TOKEN
-          )
-          for secret_name in "${required_secrets[@]}"; do
-            if [[ -z "${!secret_name}" ]]; then
-              echo "Required GitHub Actions secret is missing: $secret_name" >&2
-              exit 1
-            fi
-          done
 
           echo "value=$short_version" >> "$GITHUB_OUTPUT"
 
@@ -150,16 +128,13 @@ jobs:
           retention-days: 1
 
   release:
-    name: Sign, notarize, and publish
+    name: Package and publish
     needs:
       - preflight
       - build
     runs-on: macos-15
     permissions:
       contents: write
-    outputs:
-      sha256: ${{ steps.notarize.outputs.sha256 }}
-      version: ${{ needs.preflight.outputs.version }}
     steps:
       - name: Check out Soprano
         uses: actions/checkout@v7
@@ -194,50 +169,9 @@ jobs:
             exit 1
           fi
 
-      - name: Import Developer ID certificate
+      - name: Package the ad-hoc-signed app
         env:
-          CERTIFICATE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE }}
-          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          certificate_path="$RUNNER_TEMP/soprano-developer-id.p12"
-          keychain_path="$RUNNER_TEMP/soprano-release.keychain-db"
-          keychain_password="$(openssl rand -hex 32)"
-          echo "::add-mask::$keychain_password"
-
-          printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate_path"
-          security create-keychain -p "$keychain_password" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security unlock-keychain -p "$keychain_password" "$keychain_path"
-          security import "$certificate_path" \
-            -k "$keychain_path" \
-            -f pkcs12 \
-            -P "$CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign
-          security set-key-partition-list \
-            -S "apple-tool:,apple:" \
-            -s \
-            -k "$keychain_password" \
-            "$keychain_path"
-
-          signing_identity="$(
-            security find-identity -v -p codesigning "$keychain_path" |
-              awk '/Developer ID Application:/ { print $2; exit }'
-          )"
-          if [[ ! "$signing_identity" =~ ^[0-9A-F]{40}$ ]]; then
-            echo "The certificate does not contain a Developer ID Application identity." >&2
-            exit 1
-          fi
-
-          echo "SOPRANO_CODESIGN_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
-          echo "SOPRANO_CODESIGN_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-          echo "SOPRANO_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
-          echo "SOPRANO_CERTIFICATE_PATH=$certificate_path" >> "$GITHUB_ENV"
-
-      - name: Package the signed app
-        env:
-          SOPRANO_DISTRIBUTION_SIGNING: "1"
+          SOPRANO_CODESIGN_IDENTITY: "-"
           SOPRANO_GHOSTTY_RESOURCES_DIR: ${{ github.workspace }}/ghostty/zig-out/share/ghostty
           SOPRANO_STRICT_GHOSTTY_RESOURCES: "1"
         run: |
@@ -249,20 +183,13 @@ jobs:
             "com.soprano.app" \
             "Soprano"
 
-      - name: Notarize the app and disk image
-        id: notarize
+      - name: Create release disk image and cask
         env:
-          NOTARY_API_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY }}
-          SOPRANO_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
-          SOPRANO_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          SOPRANO_CODESIGN_IDENTITY: "-"
+          SOPRANO_UNNOTARIZED_RELEASE: "1"
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-
-          notary_key_path="$RUNNER_TEMP/AuthKey_$SOPRANO_NOTARY_KEY_ID.p8"
-          printf '%s' "$NOTARY_API_KEY_BASE64" | /usr/bin/base64 -D > "$notary_key_path"
-          chmod 600 "$notary_key_path"
-          export SOPRANO_NOTARY_KEY_PATH="$notary_key_path"
 
           dmg_path="$PWD/dist/Soprano-$VERSION.dmg"
           ./scripts/create-release-dmg.sh "$PWD/dist/Soprano.app" "$dmg_path"
@@ -270,21 +197,9 @@ jobs:
           sha256="$(shasum -a 256 "$dmg_path" | awk '{ print $1 }')"
           printf '%s  %s\n' "$sha256" "$(basename "$dmg_path")" \
             > "$dmg_path.sha256"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
-          echo "SOPRANO_NOTARY_KEY_FILE=$notary_key_path" >> "$GITHUB_ENV"
-
-      - name: Remove temporary signing material
-        if: always()
-        run: |
-          if [[ -n "${SOPRANO_RELEASE_KEYCHAIN:-}" ]]; then
-            security delete-keychain "$SOPRANO_RELEASE_KEYCHAIN" || true
-          fi
-          if [[ -n "${SOPRANO_CERTIFICATE_PATH:-}" ]]; then
-            rm -f "$SOPRANO_CERTIFICATE_PATH"
-          fi
-          if [[ -n "${SOPRANO_NOTARY_KEY_FILE:-}" ]]; then
-            rm -f "$SOPRANO_NOTARY_KEY_FILE"
-          fi
+          ./scripts/generate-homebrew-cask.sh "$VERSION" "$sha256" \
+            > "$PWD/dist/soprano.rb"
+          ruby -c "$PWD/dist/soprano.rb"
 
       - name: Publish GitHub release
         env:
@@ -295,59 +210,8 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "dist/Soprano-$VERSION.dmg" \
             "dist/Soprano-$VERSION.dmg.sha256" \
+            "dist/soprano.rb" \
             --verify-tag \
             --title "Soprano $VERSION" \
+            --notes "⚠️ This free release is ad-hoc signed and cannot be notarized without a paid Apple Developer membership. On first launch, macOS may require approval under System Settings → Privacy & Security → Open Anyway." \
             --generate-notes
-
-  homebrew:
-    name: Update Homebrew cask
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out Soprano
-        uses: actions/checkout@v7
-
-      - name: Check out Homebrew tap
-        uses: actions/checkout@v7
-        with:
-          repository: frknue/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          path: homebrew-tap
-
-      - name: Update cask
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-          SHA256: ${{ needs.release.outputs.sha256 }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p homebrew-tap/Casks
-          ./scripts/generate-homebrew-cask.sh "$VERSION" "$SHA256" \
-            > homebrew-tap/Casks/soprano.rb
-          ruby -c homebrew-tap/Casks/soprano.rb
-
-          if ! grep -Fq "## Soprano" homebrew-tap/README.md; then
-            cat >> homebrew-tap/README.md <<'EOF'
-
-          ## Soprano
-
-          Install [Soprano](https://github.com/frknue/soprano):
-
-          ```sh
-          brew install --cask frknue/tap/soprano
-          ```
-          EOF
-          fi
-
-      - name: Publish cask
-        working-directory: homebrew-tap
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/soprano.rb README.md
-          git commit -m "soprano $VERSION"
-          git push
