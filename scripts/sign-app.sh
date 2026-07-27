@@ -14,7 +14,23 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 signing_identity="${SOPRANO_CODESIGN_IDENTITY:-}"
-signing_keychain=""
+signing_keychain="${SOPRANO_CODESIGN_KEYCHAIN:-}"
+distribution_signing="${SOPRANO_DISTRIBUTION_SIGNING:-0}"
+
+if [[ "$distribution_signing" != "0" && "$distribution_signing" != "1" ]]; then
+    echo "SOPRANO_DISTRIBUTION_SIGNING must be 0 or 1." >&2
+    exit 2
+fi
+
+if [[ -n "$signing_keychain" && "$signing_keychain" != /* ]]; then
+    echo "SOPRANO_CODESIGN_KEYCHAIN must be an absolute path." >&2
+    exit 2
+fi
+
+if [[ "$distribution_signing" == "1" && -z "$signing_identity" ]]; then
+    echo "Distribution signing requires SOPRANO_CODESIGN_IDENTITY." >&2
+    exit 2
+fi
 
 if [[ -z "$signing_identity" ]]; then
     if ! signing_resolution="$("$script_dir/ensure-local-signing-identity.sh")"; then
@@ -28,6 +44,9 @@ codesign_arguments=(
     --force
     --sign "$signing_identity"
 )
+if [[ "$distribution_signing" == "1" ]]; then
+    codesign_arguments+=(--options runtime --timestamp)
+fi
 if [[ -n "$signing_keychain" ]]; then
     codesign_arguments+=(--keychain "$signing_keychain")
 fi

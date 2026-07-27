@@ -1,0 +1,353 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate release
+    runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Check out Soprano
+        uses: actions/checkout@v7
+
+      - name: Validate tag, version, changelog, and secrets
+        id: version
+        env:
+          MACOS_DEVELOPER_ID_CERTIFICATE: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE }}
+          MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_API_KEY: ${{ secrets.APPLE_NOTARY_API_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          short_version="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              Support/Info.plist
+          )"
+          build_version="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleVersion" \
+              Support/Info.plist
+          )"
+
+          if [[ "$GITHUB_REF_NAME" != "v$short_version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match Info.plist version $short_version." >&2
+            exit 1
+          fi
+          if [[ "$build_version" != "$short_version" ]]; then
+            echo "CFBundleVersion $build_version does not match $short_version." >&2
+            exit 1
+          fi
+          if ! grep -Fq "## [$short_version] -" CHANGELOG.md; then
+            echo "CHANGELOG.md has no release heading for $short_version." >&2
+            exit 1
+          fi
+
+          required_secrets=(
+            MACOS_DEVELOPER_ID_CERTIFICATE
+            MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD
+            APPLE_NOTARY_API_KEY
+            APPLE_NOTARY_KEY_ID
+            APPLE_NOTARY_ISSUER_ID
+            HOMEBREW_TAP_TOKEN
+          )
+          for secret_name in "${required_secrets[@]}"; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Required GitHub Actions secret is missing: $secret_name" >&2
+              exit 1
+            fi
+          done
+
+          echo "value=$short_version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.architecture }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: arm64
+            runner: macos-15
+          - architecture: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out Soprano and Ghostty
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install Homebrew Swift and Zig
+        run: |
+          set -euo pipefail
+          brew install swift zig
+          echo "$(brew --prefix swift)/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure the Metal toolchain is available
+        run: |
+          set -euo pipefail
+          if ! xcrun --find metal >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
+      - name: Build libghostty
+        run: |
+          set -euo pipefail
+          SOPRANO_DEVELOPER_DIR="$(xcode-select -p)" ./scripts/build-ghostty.sh
+
+      - name: Build Soprano
+        run: swift build -c release
+
+      - name: Run tests
+        if: matrix.architecture == 'arm64'
+        run: swift test
+
+      - name: Prepare build output
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+        run: |
+          set -euo pipefail
+
+          artifact_dir="$RUNNER_TEMP/soprano-$ARCHITECTURE"
+          mkdir -p "$artifact_dir"
+          cp ".build/release/Soprano" "$artifact_dir/Soprano-$ARCHITECTURE"
+
+          actual_architecture="$(lipo -archs "$artifact_dir/Soprano-$ARCHITECTURE")"
+          if [[ "$actual_architecture" != "$ARCHITECTURE" ]]; then
+            echo "Expected $ARCHITECTURE, built $actual_architecture." >&2
+            exit 1
+          fi
+
+          if [[ "$ARCHITECTURE" == "arm64" ]]; then
+            tar -czf "$artifact_dir/release-resources.tar.gz" \
+              .build/release/Soprano_Soprano.bundle \
+              ghostty/zig-out/share/ghostty \
+              ghostty/zig-out/share/terminfo
+          fi
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/soprano-${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Sign, notarize, and publish
+    needs:
+      - preflight
+      - build
+    runs-on: macos-15
+    permissions:
+      contents: write
+    outputs:
+      sha256: ${{ steps.notarize.outputs.sha256 }}
+      version: ${{ needs.preflight.outputs.version }}
+    steps:
+      - name: Check out Soprano
+        uses: actions/checkout@v7
+
+      - name: Download arm64 build
+        uses: actions/download-artifact@v8
+        with:
+          name: build-arm64
+          path: artifacts/arm64
+
+      - name: Download x86_64 build
+        uses: actions/download-artifact@v8
+        with:
+          name: build-x86_64
+          path: artifacts/x86_64
+
+      - name: Assemble universal release build
+        run: |
+          set -euo pipefail
+
+          mkdir -p .build/release
+          lipo -create \
+            artifacts/arm64/Soprano-arm64 \
+            artifacts/x86_64/Soprano-x86_64 \
+            -output .build/release/Soprano
+          chmod 755 .build/release/Soprano
+          tar -xzf artifacts/arm64/release-resources.tar.gz
+
+          architectures="$(lipo -archs .build/release/Soprano)"
+          if [[ " $architectures " != *" arm64 "* || " $architectures " != *" x86_64 "* ]]; then
+            echo "Universal build is incomplete: $architectures" >&2
+            exit 1
+          fi
+
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          certificate_path="$RUNNER_TEMP/soprano-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/soprano-release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+
+          printf '%s' "$CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -f pkcs12 \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S "apple-tool:,apple:" \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+
+          signing_identity="$(
+            security find-identity -v -p codesigning "$keychain_path" |
+              awk '/Developer ID Application:/ { print $2; exit }'
+          )"
+          if [[ ! "$signing_identity" =~ ^[0-9A-F]{40}$ ]]; then
+            echo "The certificate does not contain a Developer ID Application identity." >&2
+            exit 1
+          fi
+
+          echo "SOPRANO_CODESIGN_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+          echo "SOPRANO_CODESIGN_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "SOPRANO_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          echo "SOPRANO_CERTIFICATE_PATH=$certificate_path" >> "$GITHUB_ENV"
+
+      - name: Package the signed app
+        env:
+          SOPRANO_DISTRIBUTION_SIGNING: "1"
+          SOPRANO_GHOSTTY_RESOURCES_DIR: ${{ github.workspace }}/ghostty/zig-out/share/ghostty
+          SOPRANO_STRICT_GHOSTTY_RESOURCES: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ./scripts/package-app.sh \
+            release \
+            "$PWD/dist/Soprano.app" \
+            "com.soprano.app" \
+            "Soprano"
+
+      - name: Notarize the app and disk image
+        id: notarize
+        env:
+          NOTARY_API_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY }}
+          SOPRANO_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          SOPRANO_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          notary_key_path="$RUNNER_TEMP/AuthKey_$SOPRANO_NOTARY_KEY_ID.p8"
+          printf '%s' "$NOTARY_API_KEY_BASE64" | /usr/bin/base64 -D > "$notary_key_path"
+          chmod 600 "$notary_key_path"
+          export SOPRANO_NOTARY_KEY_PATH="$notary_key_path"
+
+          dmg_path="$PWD/dist/Soprano-$VERSION.dmg"
+          ./scripts/create-release-dmg.sh "$PWD/dist/Soprano.app" "$dmg_path"
+
+          sha256="$(shasum -a 256 "$dmg_path" | awk '{ print $1 }')"
+          printf '%s  %s\n' "$sha256" "$(basename "$dmg_path")" \
+            > "$dmg_path.sha256"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "SOPRANO_NOTARY_KEY_FILE=$notary_key_path" >> "$GITHUB_ENV"
+
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [[ -n "${SOPRANO_RELEASE_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$SOPRANO_RELEASE_KEYCHAIN" || true
+          fi
+          if [[ -n "${SOPRANO_CERTIFICATE_PATH:-}" ]]; then
+            rm -f "$SOPRANO_CERTIFICATE_PATH"
+          fi
+          if [[ -n "${SOPRANO_NOTARY_KEY_FILE:-}" ]]; then
+            rm -f "$SOPRANO_NOTARY_KEY_FILE"
+          fi
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/Soprano-$VERSION.dmg" \
+            "dist/Soprano-$VERSION.dmg.sha256" \
+            --verify-tag \
+            --title "Soprano $VERSION" \
+            --generate-notes
+
+  homebrew:
+    name: Update Homebrew cask
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Soprano
+        uses: actions/checkout@v7
+
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: frknue/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update cask
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SHA256: ${{ needs.release.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p homebrew-tap/Casks
+          ./scripts/generate-homebrew-cask.sh "$VERSION" "$SHA256" \
+            > homebrew-tap/Casks/soprano.rb
+          ruby -c homebrew-tap/Casks/soprano.rb
+
+          if ! grep -Fq "## Soprano" homebrew-tap/README.md; then
+            cat >> homebrew-tap/README.md <<'EOF'
+
+          ## Soprano
+
+          Install [Soprano](https://github.com/frknue/soprano):
+
+          ```sh
+          brew install --cask frknue/tap/soprano
+          ```
+          EOF
+          fi
+
+      - name: Publish cask
+        working-directory: homebrew-tap
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/soprano.rb README.md
+          git commit -m "soprano $VERSION"
+          git push

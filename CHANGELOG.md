@@ -11,6 +11,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Signed and notarized universal release disk images, plus automatic Homebrew cask
+  publishing for `brew install --cask frknue/tap/soprano`.
 - **Settings ▸ General ▸ Notifications**: a *Play a sound* toggle, and a line reporting
   whether macOS is actually allowing banners. When permission has been refused it says so
   and offers **Open System Settings** — macOS only ever prompts once, so an app that has

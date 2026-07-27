@@ -50,46 +50,56 @@ right now?*
 - **Layouts that come back.** The last workspace restores on launch, and `⇧⌘S` saves
   named sessions.
 
-## Try it
+## Install
 
-Fresh clone to installed app, four steps:
+Install the latest signed and notarized universal build with Homebrew:
 
 ```bash
-# 1 · Toolchain. Homebrew Swift is required — the system CLT Swift has broken SPM.
+brew install --cask frknue/tap/soprano
+```
+
+Or download `Soprano-<version>.dmg` from
+[GitHub Releases](https://github.com/frknue/soprano/releases/latest), open it, and drag
+Soprano into **Applications**.
+
+**Requirements:** macOS 14 Sonoma or newer on Apple Silicon or Intel. The release
+contains Soprano, libghostty, and Ghostty's runtime resources; installing it does not
+require Xcode, Swift, Zig, Ghostty, or a source checkout.
+
+<details>
+<summary><b>Build from source</b></summary>
+
+Homebrew Swift is required because the system CLT Swift has broken SPM. Full Xcode with
+the Metal Toolchain is required to compile libghostty.
+
+```bash
 brew install swift zig
 xcodebuild -downloadComponent MetalToolchain
 
-# 2 · Clone with the ghostty submodule
 git clone --recurse-submodules https://github.com/frknue/soprano.git
 cd soprano
 
-# 3 · Build libghostty once (a few minutes, needs Xcode's Metal Toolchain)
 ./scripts/build-ghostty.sh
-
-# 4 · Build the release app into /Applications
 ./scripts/install.sh
 ```
 
-**Requirements:** macOS 14 Sonoma or newer · full Xcode with the Metal Toolchain
-(Command Line Tools alone cannot build libghostty) ·
-[Homebrew Swift](https://formulae.brew.sh/formula/swift) 6.2+ ·
-[Zig](https://ziglang.org/download/) 0.15.2+.
-
-`lib/` is not tracked, so step 3 is mandatory on a fresh clone — but you only repeat it
-when the ghostty submodule moves. To move it, hand the script a ref
+`lib/` is not tracked, so the Ghostty build is mandatory on a fresh clone, but you only
+repeat it when the ghostty submodule moves. To move it, hand the script a ref
 (`./scripts/build-ghostty.sh v1.3.1`) and commit the submodule pin: it refreshes the
 library, the C header, and the recorded version together, and `swift test` fails if they
 ever disagree. Packaging also needs Ghostty's *runtime* resources (themes, shell
-integration, terminfo); step 3 produces them, an installed `/Applications/Ghostty.app`
-works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides both. Packaging says which
-source it used and warns when that source is a different Ghostty version than the
-library Soprano links.
+integration, terminfo); the Ghostty build produces them, an installed
+`/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
+both. Packaging says which source it used and warns when that source is a different
+Ghostty version than the library Soprano links.
 
 `scripts/install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
 stable local identity so macOS keeps your notification permission across rebuilds, and
 replaces `/Applications/Soprano.app` **without** stopping a running instance — the
 update applies on the next launch. Install elsewhere with
 `SOPRANO_INSTALL_DIR="$HOME/Applications" ./scripts/install.sh`.
+
+</details>
 
 ### The first five minutes
 
@@ -424,7 +434,8 @@ warnings appear on every build and are expected.
 
 Release history lives in [`CHANGELOG.md`](CHANGELOG.md); user-visible changes land under
 `Unreleased` until a release is cut. [`AGENTS.md`](AGENTS.md) is the full contributor
-briefing — architecture, conventions, and the release workflow.
+briefing — architecture and conventions — and
+[`docs/RELEASING.md`](docs/RELEASING.md) documents the signed release workflow.
 
 <details>
 <summary><b>Project layout</b></summary>
@@ -432,7 +443,7 @@ briefing — architecture, conventions, and the release workflow.
 ```
 soprano/
 ├── Package.swift                 # SPM package (swift-tools-version: 6.0, macOS 14+)
-├── lib/libghostty.a              # Pre-built ghostty static library (not tracked; see Try it)
+├── lib/libghostty.a              # Pre-built ghostty library (not tracked; build from source)
 ├── Sources/
 │   ├── Soprano/
 │   │   ├── main.swift            # CLI subcommand dispatch, then NSApplication
@@ -445,8 +456,9 @@ soprano/
 │   │   └── Utilities/            # NSColor+Hex extension
 │   └── GhosttyKit/
 │       ├── module.modulemap      # System library module map
-│       └── include/ghostty.h     # libghostty C API header (generated; see Try it)
+│       └── include/ghostty.h     # libghostty C API header (see Build from source)
 ├── Support/                      # Info.plist, agent hook templates, ghostty-version.txt
+├── .github/workflows/release.yml # universal, signed, notarized release automation
 ├── scripts/                      # build, packaging, installation, and signing scripts
 └── ghostty/                      # Ghostty submodule (source for libghostty)
 ```

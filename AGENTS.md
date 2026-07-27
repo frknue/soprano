@@ -77,7 +77,10 @@ Scale for this app:
    That plist is the single source of truth — `AppVersion` reads it at runtime, so no
    Swift file carries the number. `ChangelogVersionTests` fails if the two drift apart.
 3. `swift build && swift test`, then `./scripts/install.sh`.
-4. Commit as `release: vX.Y.Z` and tag `vX.Y.Z`.
+4. Commit as `release: vX.Y.Z` and push tag `vX.Y.Z`.
+5. `.github/workflows/release.yml` builds arm64 and x86_64, signs and notarizes a
+   universal DMG, publishes it to GitHub Releases, and updates the cask in
+   `frknue/homebrew-tap`. See `docs/RELEASING.md` for the required repository secrets.
 
 ## Architecture
 
@@ -112,7 +115,8 @@ Scale for this app:
 
 `Support/Info.plist` and `Support/AgentHooks/*.json` are copied into the bundle
 by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
-`AgentManager`.
+`AgentManager`. `scripts/create-release-dmg.sh` accepts only a universal,
+Developer ID-signed app and notarizes both the app and its release disk image.
 
 ## Adding a user-facing setting
 
