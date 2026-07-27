@@ -71,11 +71,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Homebrew Swift and Zig
+      - name: Install Homebrew Swift and compatible Zig
         run: |
           set -euo pipefail
-          brew install swift zig
+          brew install swift zig@0.15
           echo "$(brew --prefix swift)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
 
       - name: Ensure the Metal toolchain is available
         run: |
