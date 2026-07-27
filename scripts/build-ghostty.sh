@@ -87,40 +87,76 @@ if [[ -n "$recorded_commit" && "$building_commit" != "$recorded_commit" ]]; then
     echo "      Run 'git add ghostty' afterwards so the pin records what you built."
 fi
 
+build_cache_dir="$(mktemp -d "$repo_root/.build-ghostty-cache.XXXXXX")"
+stage_dir="$(mktemp -d "$repo_root/.build-ghostty-stage.XXXXXX")"
+
+cleanup() {
+    rm -rf "$build_cache_dir" "$stage_dir"
+}
+trap cleanup EXIT
+
 echo "Building libghostty at $building_commit (this takes a while)..."
+build_status=0
 (
     cd "$ghostty_dir"
-    DEVELOPER_DIR="$developer_dir" zig build \
+    DEVELOPER_DIR="$developer_dir" \
+    ZIG_LOCAL_CACHE_DIR="$build_cache_dir" \
+        zig build \
         -Dapp-runtime=none \
         -Demit-xcframework=true \
         -Dxcframework-target=native \
         -Demit-macos-app=false \
         -Doptimize=ReleaseFast
-)
+) || build_status=$?
 
 xcframework_dir="$ghostty_dir/macos/GhosttyKit.xcframework"
 built_libraries=()
-built_headers=()
+native_architecture="$(uname -m)"
 
 if [[ -d "$xcframework_dir" ]]; then
     while IFS= read -r artifact; do
-        built_libraries+=("$artifact")
+        if [[ "$(lipo -archs "$artifact")" == "$native_architecture" ]]; then
+            built_libraries+=("$artifact")
+        fi
     done < <(find "$xcframework_dir" -type f -name 'libghostty*.a' -print)
-
-    while IFS= read -r artifact; do
-        built_headers+=("$artifact")
-    done < <(find "$xcframework_dir" -type f -name 'ghostty.h' -print)
 fi
 
-if [[ "${#built_libraries[@]}" -ne 1 || "${#built_headers[@]}" -ne 1 ]]; then
-    echo "The native Ghostty XCFramework did not contain one library and header." >&2
-    echo "Found ${#built_libraries[@]} libraries and ${#built_headers[@]} headers in:" >&2
-    echo "  $xcframework_dir" >&2
+if [[ "${#built_libraries[@]}" -eq 0 ]]; then
+    while IFS= read -r artifact; do
+        if [[ "$(lipo -archs "$artifact")" == "$native_architecture" ]]; then
+            built_libraries+=("$artifact")
+        fi
+    done < <(find "$build_cache_dir" -type f -name 'libghostty-fat.a' -print)
+fi
+
+if [[ "${#built_libraries[@]}" -ne 1 ]]; then
+    echo "The Ghostty build did not produce one $native_architecture library." >&2
+    echo "Found ${#built_libraries[@]} matching libraries." >&2
     exit 1
 fi
 
+for resource in \
+    "$ghostty_dir/zig-out/share/ghostty/themes" \
+    "$ghostty_dir/zig-out/share/ghostty/shell-integration" \
+    "$ghostty_dir/zig-out/share/terminfo"; do
+    if [[ ! -d "$resource" ]]; then
+        echo "The Ghostty build did not produce required runtime resources: $resource" >&2
+        exit 1
+    fi
+done
+
+if [[ "$build_status" -ne 0 ]]; then
+    echo "Ghostty's XCFramework wrapper exited $build_status after producing the native archive."
+    echo "Continuing with the validated archive Soprano links directly."
+fi
+
 built_library="${built_libraries[0]}"
-built_header="${built_headers[0]}"
+built_header="$ghostty_dir/include/ghostty.h"
+
+if [[ ! -f "$built_header" ]]; then
+    echo "The Ghostty source tree is missing its public header: $built_header" >&2
+    exit 1
+fi
 
 # Read the version out of the artifact rather than recomputing it, so the stamp cannot
 # disagree with what ghostty_info() reports at runtime.
@@ -138,13 +174,6 @@ if [[ "$version_count" -ne 1 ]]; then
 fi
 
 built_version="$built_versions"
-
-stage_dir="$(mktemp -d "$repo_root/.build-ghostty.XXXXXX")"
-
-cleanup() {
-    rm -rf "$stage_dir"
-}
-trap cleanup EXIT
 
 # Stage first so a failure cannot leave a new library next to an old header.
 cp "$built_library" "$stage_dir/libghostty.a"
