@@ -13,6 +13,10 @@ pane says what its agent is doing, and macOS tells you which one is waiting on y
 <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
 <img alt="AppKit, programmatic" src="https://img.shields.io/badge/AppKit-programmatic-2b6cb0">
 <img alt="libghostty" src="https://img.shields.io/badge/terminal-libghostty-8f3f71">
+<img alt="MIT" src="https://img.shields.io/badge/license-MIT-b8bb26">
+
+**[frknue.github.io/soprano-site](https://frknue.github.io/soprano-site/)** ·
+[Changelog](CHANGELOG.md) · [Contributing](AGENTS.md)
 
 </div>
 
@@ -445,6 +449,13 @@ Release history lives in [`CHANGELOG.md`](CHANGELOG.md); user-visible changes la
 `Unreleased` until a release is cut. [`AGENTS.md`](AGENTS.md) is the full contributor
 briefing — architecture and conventions — and
 [`docs/RELEASING.md`](docs/RELEASING.md) documents the signed release workflow.
+
+The website at **[frknue.github.io/soprano-site](https://frknue.github.io/soprano-site/)**
+lives in its own repository,
+[`frknue/soprano-site`](https://github.com/frknue/soprano-site) — one self-contained
+`index.html` with no build step, so fixing a typo there needs none of this toolchain. Its
+palette is copied from `Sources/Soprano/Config/Theme.swift`, so the site and the app stay
+in the same colors.
 
 <details>
 <summary><b>Project layout</b></summary>
