@@ -9,6 +9,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Changed
+
+- Pane headers now show the focused z-depth as a highlighted `DEPTH n` badge, and the
+  status bar spells out the active depth instead of abbreviating it.
+
 ### Fixed
 
 - Pane creation in one window is no longer blocked when other windows collectively

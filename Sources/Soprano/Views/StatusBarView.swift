@@ -157,7 +157,7 @@ final class StatusBarView: NSView {
         if terminalWindow.maximumDepth > 0 {
             let depth = terminalWindow.depth(containingPane: paneId) ?? 0
             text.append(NSAttributedString(
-                string: " · Z\(depth)",
+                string: " · DEPTH \(depth)",
                 attributes: [.font: bold, .foregroundColor: theme.colors.accent]
             ))
         }

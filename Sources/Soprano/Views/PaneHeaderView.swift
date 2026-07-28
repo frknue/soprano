@@ -11,6 +11,7 @@ final class PaneHeaderView: NSView {
     private var statusDot: NSView!
     private var statusLabel: NSTextField!
     private var depthOutButton: NSButton!
+    private var depthBadgeView: NSView!
     private var depthLabel: NSTextField!
     private var depthInButton: NSButton!
     private var closeButton: NSButton!
@@ -80,13 +81,21 @@ final class PaneHeaderView: NSView {
         )
         addSubview(depthOutButton)
 
-        depthLabel = NSTextField(labelWithString: "Z0")
-        depthLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        depthBadgeView = NSView()
+        depthBadgeView.wantsLayer = true
+        depthBadgeView.layer?.cornerRadius = 5
+        depthBadgeView.layer?.borderWidth = 1
+        depthBadgeView.identifier = NSUserInterfaceItemIdentifier("pane-depth-indicator")
+        depthBadgeView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(depthBadgeView)
+
+        depthLabel = NSTextField(labelWithString: "DEPTH 0")
+        depthLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
         depthLabel.textColor = theme.colors.textMuted
         depthLabel.alignment = .center
-        depthLabel.toolTip = "Window depth"
+        depthLabel.identifier = NSUserInterfaceItemIdentifier("pane-depth-label")
         depthLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(depthLabel)
+        depthBadgeView.addSubview(depthLabel)
 
         depthInButton = makeDepthButton(
             title: "›",
@@ -141,11 +150,21 @@ final class PaneHeaderView: NSView {
             depthOutButton.widthAnchor.constraint(equalToConstant: 20),
             depthOutButton.heightAnchor.constraint(equalToConstant: 24),
 
-            depthLabel.leadingAnchor.constraint(equalTo: depthOutButton.trailingAnchor),
-            depthLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            depthLabel.widthAnchor.constraint(equalToConstant: 22),
+            depthBadgeView.leadingAnchor.constraint(
+                equalTo: depthOutButton.trailingAnchor,
+                constant: 2
+            ),
+            depthBadgeView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            depthBadgeView.heightAnchor.constraint(equalToConstant: 18),
 
-            depthInButton.leadingAnchor.constraint(equalTo: depthLabel.trailingAnchor),
+            depthLabel.leadingAnchor.constraint(equalTo: depthBadgeView.leadingAnchor, constant: 6),
+            depthLabel.trailingAnchor.constraint(equalTo: depthBadgeView.trailingAnchor, constant: -6),
+            depthLabel.centerYAnchor.constraint(equalTo: depthBadgeView.centerYAnchor),
+
+            depthInButton.leadingAnchor.constraint(
+                equalTo: depthBadgeView.trailingAnchor,
+                constant: 2
+            ),
             depthInButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             depthInButton.widthAnchor.constraint(equalToConstant: 20),
             depthInButton.heightAnchor.constraint(equalToConstant: 24),
@@ -182,15 +201,34 @@ final class PaneHeaderView: NSView {
         depthInButton.contentTintColor = theme.colors.textMuted
         let terminalWindow = agentManager.window(containingPane: paneId)
         let depth = terminalWindow?.depth(containingPane: paneId) ?? 0
+        let maximumDepth = terminalWindow?.maximumDepth ?? 0
+        let isFocused = agentManager.activePaneId == paneId
         depthOutButton.isEnabled = depth > 0
         depthInButton.isEnabled = terminalWindow.map {
             $0.hasDepthBranch(from: paneId)
                 || agentManager.canAddPane(to: $0.id)
         } ?? false
-        depthLabel.stringValue = "Z\(depth)"
-        depthLabel.textColor = depth > 0
+        depthLabel.stringValue = "DEPTH \(depth)"
+        depthLabel.textColor = isFocused
             ? theme.colors.accent
             : theme.colors.textMuted
+        depthBadgeView.layer?.backgroundColor = (
+            isFocused
+                ? theme.colors.accent.withAlphaComponent(0.18)
+                : theme.colors.bgOverlay
+        ).cgColor
+        depthBadgeView.layer?.borderColor = (
+            isFocused
+                ? theme.colors.accent.withAlphaComponent(0.72)
+                : theme.colors.borderSubtle
+        ).cgColor
+        let depthToolTip = maximumDepth > 0
+            ? "Depth layer \(depth) of \(maximumDepth)"
+            : "Depth layer \(depth)"
+        depthBadgeView.toolTip = isFocused
+            ? "Focused pane · \(depthToolTip)"
+            : depthToolTip
+        depthLabel.toolTip = depthBadgeView.toolTip
 
         if let agent = tab?.agent {
             statusDot.layer?.backgroundColor = colorForStatus(agent.status, theme: theme).cgColor
@@ -213,7 +251,6 @@ final class PaneHeaderView: NSView {
             clearTabButtons()
         }
 
-        let isFocused = agentManager.activePaneId == paneId
         layer?.backgroundColor = isFocused
             ? theme.colors.bgRaised.cgColor
             : theme.colors.bgPanel.cgColor

@@ -56,11 +56,11 @@ struct ActiveLocationIndicatorTests {
 
         _ = try #require(manager.goIn(manager.activePaneId))
         let innerPaneId = manager.activePaneId
-        #expect(locationText(in: statusBar)?.hasSuffix("· Z1") == true)
+        #expect(locationText(in: statusBar)?.hasSuffix("· DEPTH 1") == true)
 
         // The branch survives Go Out, so the layer stays worth reporting at Z0.
         #expect(manager.goOut(innerPaneId))
-        #expect(locationText(in: statusBar)?.hasSuffix("· Z0") == true)
+        #expect(locationText(in: statusBar)?.hasSuffix("· DEPTH 0") == true)
     }
 
     // MARK: - Helpers
