@@ -36,6 +36,39 @@ There is no linter or formatter configured. Match surrounding style.
   must not run it unless the user explicitly requests a launch. Use
   `./scripts/dev.sh --build-only` only when the development bundle itself needs testing.
 
+## GitHub development workflow
+
+`main` is the only long-lived branch and must stay releasable. Do not create
+`develop`, permanent release branches, or permanent hotfix branches.
+
+- Use a short-lived branch for each GitHub-bound change, named
+  `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, `chore/<topic>`, or
+  `refactor/<topic>`. Preserve the current branch and any user work already in
+  the worktree; do not switch branches just to satisfy this convention.
+- Routine maintainer work does not need an issue, design document, or approval.
+  Use a draft PR only when a larger change benefits from early discussion.
+- Merge into `main` with a squash merge and delete the topic branch. The PR
+  title becomes the commit subject, so keep it short and imperative; the
+  existing `feat:` / `fix:` style is preferred when it fits.
+- Once auto-merge is enabled in the repository settings, enable it after local
+  verification instead of waiting synchronously on CI. Do not require a branch
+  to be rebased merely because `main` advanced unless the changes conflict or
+  interact.
+- Keep unfinished work on its topic branch. For dependent work, stack a
+  temporary branch or draft PR rather than introducing another long-lived
+  integration branch.
+- Before PR CI exists, the local build and test requirements above are the
+  merge gate. Once CI reports a required check, never merge while it is failing.
+- Do not commit, push, open a PR, merge, tag, or otherwise mutate GitHub unless
+  the user requested that remote action. When authorized and auto-merge is
+  available, the fast path is:
+
+  ```bash
+  git push -u origin HEAD
+  gh pr create --fill
+  gh pr merge --auto --squash --delete-branch
+  ```
+
 ## Installing completed changes
 
 - After completing and successfully verifying a task that changes the app or its
