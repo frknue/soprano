@@ -18,6 +18,13 @@ pane says what its agent is doing, and macOS tells you which one is waiting on y
 **[frknue.github.io/soprano-site](https://frknue.github.io/soprano-site/)** ·
 [Changelog](CHANGELOG.md) · [Contributing](AGENTS.md)
 
+```bash
+brew install --cask frknue/tap/soprano
+```
+
+[Install options](#install) · [First five minutes](#the-first-five-minutes) ·
+[Shortcuts](#keyboard-shortcuts) · [Settings](#settings)
+
 </div>
 
 ```
@@ -114,7 +121,9 @@ update applies on the next launch. Install elsewhere with
 
 </details>
 
-### The first five minutes
+## The first five minutes
+
+Launch Soprano, then:
 
 | Press | And |
 |---|---|
