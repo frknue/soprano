@@ -185,7 +185,7 @@ final class PaneHeaderView: NSView {
         depthOutButton.isEnabled = depth > 0
         depthInButton.isEnabled = terminalWindow.map {
             $0.hasDepthBranch(from: paneId)
-                || agentManager.paneCount < AgentManager.maxPanes
+                || agentManager.canAddPane(to: $0.id)
         } ?? false
         depthLabel.stringValue = "Z\(depth)"
         depthLabel.textColor = depth > 0

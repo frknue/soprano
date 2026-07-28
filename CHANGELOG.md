@@ -9,6 +9,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Fixed
+
+- Pane creation in one window is no longer blocked when other windows collectively
+  reach 20 panes; each logical window now has its own capacity.
+
 ## [0.3.1] - 2026-07-28
 
 ### Fixed

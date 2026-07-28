@@ -20,32 +20,51 @@ struct AgentManagerPaneTests {
         #expect(changeCount == 0)
     }
 
-    @Test func spawnResultsAreTruthfulAndBecomeNilAtPaneCapacityWithoutConsumingAnID() throws {
+    @Test func spawnResultsAreTruthfulAndBecomeNilAtWindowPaneCapacityWithoutConsumingAnID() throws {
         let manager = AgentManager()
         var createdPaneIds: [String] = []
 
-        for _ in 1..<AgentManager.maxPanes {
+        for _ in 1..<AgentManager.maxPanesPerWindow {
             createdPaneIds.append(try #require(manager.spawnTerminal()))
         }
 
-        #expect(manager.paneCount == AgentManager.maxPanes)
+        #expect(manager.paneCount == AgentManager.maxPanesPerWindow)
         #expect(manager.spawnTerminal() == nil)
         #expect(manager.spawnAgent("codex") == nil)
         #expect(manager.spawnBrowser() == nil)
-        #expect(manager.paneCount == AgentManager.maxPanes)
+        #expect(manager.paneCount == AgentManager.maxPanesPerWindow)
 
         manager.closePane(createdPaneIds[0])
         #expect(manager.spawnTerminal() == "pane-41")
     }
 
-    @Test func splitPaneReturnsNilAtCapacityWithoutAddingAPane() {
+    @Test func splitPaneReturnsNilAtWindowCapacityWithoutAddingAPane() {
         let manager = AgentManager()
-        for _ in 1..<AgentManager.maxPanes {
+        for _ in 1..<AgentManager.maxPanesPerWindow {
             #expect(manager.spawnTerminal() != nil)
         }
 
         #expect(manager.splitPane(direction: .horizontal, paneId: manager.activePaneId) == nil)
-        #expect(manager.paneCount == AgentManager.maxPanes)
+        #expect(manager.paneCount == AgentManager.maxPanesPerWindow)
+    }
+
+    @Test func aFullWindowDoesNotBlockSplittingOrGoingIntoAnotherWindow() throws {
+        let manager = AgentManager()
+        for _ in 1..<AgentManager.maxPanesPerWindow {
+            _ = try #require(manager.spawnTerminal())
+        }
+        let fullWindowId = manager.activeWindowId
+
+        let secondWindowId = try #require(manager.createWindow())
+        let secondWindowPaneId = manager.activePaneId
+        _ = try #require(
+            manager.splitPane(direction: .horizontal, paneId: secondWindowPaneId)
+        )
+        _ = try #require(manager.goIn(secondWindowPaneId))
+
+        #expect(manager.windows[fullWindowId]?.paneIds.count == AgentManager.maxPanesPerWindow)
+        #expect(manager.windows[secondWindowId]?.paneIds.count == 3)
+        #expect(manager.paneCount == AgentManager.maxPanesPerWindow + 3)
     }
 
     @Test func terminalSplitPreservesWorkingDirectoryWithoutCloningAttachedAgent() throws {

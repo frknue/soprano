@@ -71,7 +71,10 @@ final class AgentManager: @unchecked Sendable {
     private(set) var workspaceRestoreGeneration: Int = 0
     private var ghosttyCloseObserver: NSObjectProtocol?
 
-    static let maxPanes = 20
+    /// Bounds one logical window's complete pane tree, including depth layers.
+    /// Other windows keep independent capacity so a busy workspace cannot
+    /// silently disable pane creation everywhere else.
+    static let maxPanesPerWindow = 20
     private static let paneShortcutKeys = Array("bdefgimnopqrstuvwxyz")
 
     // MARK: - Initialization
@@ -136,7 +139,6 @@ final class AgentManager: @unchecked Sendable {
 
     @discardableResult
     func createWindow(cwd: String? = nil) -> String? {
-        guard panes.count < Self.maxPanes else { return nil }
         let workingDirectory = cwd ?? activeWorkingDirectory
         let windowId = nextWindowId()
         let paneId = nextPaneId()
@@ -249,7 +251,7 @@ final class AgentManager: @unchecked Sendable {
 
     @discardableResult
     func spawnAgent(_ profileId: String, cwd: String? = nil) -> String? {
-        guard panes.count < Self.maxPanes else { return nil }
+        guard canAddPane(to: activeWindowId) else { return nil }
         let workingDirectory = cwd ?? activeWorkingDirectory
         let paneId = nextPaneId()
         let tabId = nextTabId()
@@ -288,7 +290,7 @@ final class AgentManager: @unchecked Sendable {
 
     @discardableResult
     func spawnBrowser(url: String? = nil) -> String? {
-        guard panes.count < Self.maxPanes else { return nil }
+        guard canAddPane(to: activeWindowId) else { return nil }
         let paneId = nextPaneId()
         let tabId = nextTabId()
         let tab = PaneTab(
@@ -308,7 +310,7 @@ final class AgentManager: @unchecked Sendable {
         guard let sourcePane = panes[paneId],
               let sourceTab = sourcePane.activeTab,
               let terminalWindow = window(containingPane: paneId),
-              panes.count < Self.maxPanes
+              terminalWindow.paneIds.count < Self.maxPanesPerWindow
         else { return nil }
         _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
@@ -802,7 +804,7 @@ final class AgentManager: @unchecked Sendable {
             return panes[targetPaneId]?.activeTab?.id
         }
 
-        guard panes.count < Self.maxPanes,
+        guard terminalWindow.paneIds.count < Self.maxPanesPerWindow,
               let activeTab = pane.activeTab
         else { return nil }
         let newPaneId = nextPaneId()
@@ -1227,12 +1229,13 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Private Helpers
 
     private func insertPane(_ pane: PaneState) -> Bool {
-        guard panes.count < Self.maxPanes else { return false }
+        guard let terminalWindow = windows[activeWindowId],
+              terminalWindow.paneIds.count < Self.maxPanesPerWindow
+        else { return false }
         exitMaximize()
 
         panes[pane.id] = pane
 
-        guard let terminalWindow = windows[activeWindowId] else { return false }
         if terminalWindow.layout == nil {
             terminalWindow.layout = .leaf(pane.id)
             activePaneId = pane.id
@@ -1254,6 +1257,11 @@ final class AgentManager: @unchecked Sendable {
 
         notifyChange(layoutChanged: true)
         return true
+    }
+
+    func canAddPane(to windowId: String) -> Bool {
+        guard let terminalWindow = windows[windowId] else { return false }
+        return terminalWindow.paneIds.count < Self.maxPanesPerWindow
     }
 
     private func cancelAgentReadinessGeneration(for target: TerminalTarget) {
