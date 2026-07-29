@@ -4,6 +4,12 @@ import PackageDescription
 let package = Package(
     name: "Soprano",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        .package(
+            url: "https://github.com/swiftlang/swift-markdown.git",
+            exact: "0.8.0"
+        ),
+    ],
     targets: [
         .systemLibrary(
             name: "GhosttyKit",
@@ -13,7 +19,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "Soprano",
-            dependencies: ["GhosttyKit"],
+            dependencies: [
+                "GhosttyKit",
+                .product(name: "Markdown", package: "swift-markdown"),
+            ],
             path: "Sources/Soprano",
             resources: [
                 .copy("Resources/AppIcon.icns"),

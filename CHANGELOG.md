@@ -9,6 +9,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Added
+
+- A live GitHub-flavored Markdown reader, opened from **Open Markdown…**,
+  `soprano <file.md>`, or `soprano markdown <file>`, reloads as files change, follows
+  local document links, and restores with the workspace without modifying shell
+  configuration.
+
 ### Changed
 
 - Pane headers now show the focused z-depth as a highlighted `DEPTH n` badge, and the

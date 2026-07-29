@@ -297,6 +297,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "open-markdown",
+                icon: "doc.richtext",
+                label: "Open Markdown…",
+                description: "Open a local Markdown file in a live reader",
+                shortcut: nil,
+                searchText: "read preview documentation readme md",
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.chooseMarkdownFile()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "split-horizontal",
                 icon: "rectangle.split.1x2",
                 label: "Split Horizontal",
@@ -646,6 +659,13 @@ private extension MainWindowController {
         }
     }
 
+    func chooseMarkdownFile() {
+        guard let window else { return }
+        MarkdownFilePicker.begin(relativeTo: window) { [weak self] fileURL in
+            _ = self?.agentManager.spawnMarkdown(fileURL: fileURL)
+        }
+    }
+
     func installCommandsMenu() {
         guard let mainMenu = NSApp.mainMenu else { return }
 
@@ -679,6 +699,14 @@ private extension MainWindowController {
             bindingId: "open-project"
         )
         commandsMenu.addItem(projectItem)
+
+        let markdownItem = NSMenuItem(
+            title: "Open Markdown…",
+            action: #selector(openMarkdownMenuItemSelected),
+            keyEquivalent: ""
+        )
+        markdownItem.target = self
+        commandsMenu.addItem(markdownItem)
 
         let dashboardItem = makeCommandsMenuItem(
             title: "Agent Dashboard",
@@ -740,6 +768,10 @@ private extension MainWindowController {
 
     @objc func openProjectMenuItemSelected() {
         keybindingOpenProjectSearch()
+    }
+
+    @objc func openMarkdownMenuItemSelected() {
+        chooseMarkdownFile()
     }
 
     @objc func openSettingsFileMenuItemSelected() {
