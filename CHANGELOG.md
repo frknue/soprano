@@ -9,6 +9,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-29
+
 ### Added
 
 - A live GitHub-flavored Markdown reader, opened from **Open Markdown…**,
