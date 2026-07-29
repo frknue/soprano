@@ -1,5 +1,9 @@
 import Foundation
 
+enum PaneContentKind {
+    static let markdown = "markdown"
+}
+
 /// The type of content in a pane tab.
 enum PaneType: String, Codable {
     case agent
@@ -41,6 +45,17 @@ struct PaneTab: Identifiable {
     /// Last committed browser location. Used to restore browser tabs without
     /// coupling session persistence to the live WKWebView.
     var url: String? = nil
+    /// Optional specialization for browser-backed content. Kept as a string
+    /// instead of adding a persisted `PaneType` case so older Soprano builds
+    /// can still decode workspaces containing a Markdown reader.
+    var contentKind: String? = nil
+    /// Terminal pane that owns this reusable preview. Nil readers are standalone
+    /// panes opened from the UI or with `markdown --new`.
+    var previewOwnerPaneId: String? = nil
+
+    var isMarkdown: Bool {
+        type == .browser && contentKind == PaneContentKind.markdown
+    }
 }
 
 /// A pane in one z-axis layout, containing one or more logical tabs.

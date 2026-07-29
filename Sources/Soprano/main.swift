@@ -1,6 +1,8 @@
 import AppKit
 
-if let browserCommandExitCode = BrowserCommand.run() {
+if let markdownCommandExitCode = MarkdownCommand.run() {
+    exit(markdownCommandExitCode)
+} else if let browserCommandExitCode = BrowserCommand.run() {
     exit(browserCommandExitCode)
 } else if !AgentEventCommand.handle() && !PaneNavigationCommand.handle() {
     let app = NSApplication.shared

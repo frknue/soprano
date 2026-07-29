@@ -27,6 +27,7 @@ enum AgentManagerChange: Equatable, Sendable {
     case tabTitle(TerminalTarget)
     case tabWorkingDirectory(TerminalTarget)
     case browserURL(TerminalTarget)
+    case markdownDocument(TerminalTarget)
 }
 
 /// Central controller for pane/tab/agent lifecycle and tiling layout.
@@ -303,6 +304,39 @@ final class AgentManager: @unchecked Sendable {
         return insertPane(pane) ? paneId : nil
     }
 
+    @discardableResult
+    func spawnMarkdown(
+        fileURL: URL,
+        previewOwnerPaneId: String? = nil
+    ) -> String? {
+        guard canAddPane(to: activeWindowId) else { return nil }
+        let standardizedURL = fileURL.standardizedFileURL
+        let paneId = nextPaneId()
+        let tabId = nextTabId()
+        let tab = PaneTab(
+            id: tabId,
+            type: .browser,
+            title: standardizedURL.lastPathComponent,
+            cwd: standardizedURL.deletingLastPathComponent().path,
+            url: standardizedURL.absoluteString,
+            contentKind: PaneContentKind.markdown,
+            previewOwnerPaneId: previewOwnerPaneId
+        )
+        let pane = PaneState(id: paneId, tabs: [tab])
+        return insertPane(pane) ? paneId : nil
+    }
+
+    func markdownPreviewTarget(ownerPaneId: String) -> TerminalTarget? {
+        guard let terminalWindow = window(containingPane: ownerPaneId) else { return nil }
+        for paneId in terminalWindow.paneIds {
+            guard let tab = panes[paneId]?.tabs.first(where: {
+                $0.isMarkdown && $0.previewOwnerPaneId == ownerPaneId
+            }) else { continue }
+            return TerminalTarget(paneId: paneId, tabId: tab.id)
+        }
+        return nil
+    }
+
     // MARK: - Pane Splitting
 
     @discardableResult
@@ -335,7 +369,10 @@ final class AgentManager: @unchecked Sendable {
                 id: newTabId,
                 type: .browser,
                 title: sourceTab.title,
-                url: sourceTab.url
+                cwd: sourceTab.cwd,
+                url: sourceTab.url,
+                contentKind: sourceTab.contentKind,
+                previewOwnerPaneId: nil
             )
         } else {
             newTab = PaneTab(
@@ -1013,6 +1050,33 @@ final class AgentManager: @unchecked Sendable {
         notifyChange(.browserURL(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
+    func updateMarkdownDocument(
+        paneId: String,
+        tabId: String,
+        to fileURL: URL
+    ) {
+        let standardizedURL = fileURL.standardizedFileURL
+        guard let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
+              pane.tabs[index].isMarkdown
+        else { return }
+
+        let absoluteString = standardizedURL.absoluteString
+        let title = standardizedURL.lastPathComponent
+        let directory = standardizedURL.deletingLastPathComponent().path
+        guard pane.tabs[index].url != absoluteString
+                || pane.tabs[index].title != title
+                || pane.tabs[index].cwd != directory
+        else { return }
+
+        pane.tabs[index].url = absoluteString
+        pane.tabs[index].title = title
+        pane.tabs[index].cwd = directory
+        notifyChange(.markdownDocument(
+            TerminalTarget(paneId: paneId, tabId: tabId)
+        ))
+    }
+
     // MARK: - Agent Profile Lookup
 
     func agentProfile(for paneId: String) -> AgentProfile? {
@@ -1041,6 +1105,8 @@ final class AgentManager: @unchecked Sendable {
                             cwd: tab.cwd,
                             url: tab.url,
                             title: tab.title,
+                            contentKind: tab.contentKind,
+                            previewOwnerPaneId: tab.previewOwnerPaneId,
                             depthParentId: nil
                         )
                     }
@@ -1102,7 +1168,9 @@ final class AgentManager: @unchecked Sendable {
                     profileId: savedTab.profileId,
                     cwd: savedTab.cwd,
                     url: savedTab.url,
-                    title: savedTab.title
+                    title: savedTab.title,
+                    contentKind: savedTab.contentKind,
+                    previewOwnerPaneId: savedTab.previewOwnerPaneId
                 )
                 return tab
             }
@@ -1450,7 +1518,9 @@ final class AgentManager: @unchecked Sendable {
         profileId: String? = nil,
         cwd: String? = nil,
         url: String? = nil,
-        title: String? = nil
+        title: String? = nil,
+        contentKind: String? = nil,
+        previewOwnerPaneId: String? = nil
     ) -> PaneTab {
         if type == .agent, let profileId, let profile = AgentCatalog.profile(for: profileId) {
             let agent = AgentInstance(id: id, profileId: profile.id)
@@ -1470,7 +1540,10 @@ final class AgentManager: @unchecked Sendable {
                 id: id,
                 type: .browser,
                 title: title ?? "Browser",
-                url: url
+                cwd: cwd,
+                url: url,
+                contentKind: contentKind,
+                previewOwnerPaneId: previewOwnerPaneId
             )
         }
 

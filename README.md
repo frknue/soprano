@@ -58,6 +58,8 @@ right now?*
   becomes a whole layout while its siblings keep running.
 - **A browser your agents can drive.** `⌘B` splits a WebKit pane;
   `"$SOPRANO_BIN" browser click @e1` works from inside any terminal.
+- **Documentation beside the work.** Open a local Markdown file in a themed reader that
+  follows edits as an agent writes them.
 - **Layouts that come back.** The last workspace restores on launch, and `⇧⌘S` saves
   named sessions.
 
@@ -294,6 +296,34 @@ Use `⌃A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or **Go
 **Go Out** in the command palette. Sidebar panes are labeled with their window depth and
 can be selected directly.
 
+## Markdown reader
+
+Choose **Open Markdown…** from the sidebar **+** menu, the **Commands** menu, or the
+command palette to split a read-only Markdown pane to the right. The reader supports
+GitHub-flavored tables, task lists, fenced code, heading links, and relative images. It
+tracks external saves automatically, keeps the reading position across reloads, follows
+links to other Markdown files, and restores the current file with the workspace.
+
+Every packaged Soprano terminal puts a pane-local `soprano` helper on `PATH`; Soprano
+injects it into the child process without modifying `.zshrc` or another shell file:
+
+```bash
+soprano README.md
+soprano --new docs/architecture.markdown
+soprano markdown README.md
+soprano md docs/architecture.md
+soprano markdown --new CHANGELOG.md
+```
+
+Paths are resolved from the calling terminal's working directory. By default, these
+forms reuse that terminal's reader so repeated previews do not fill the layout;
+`--new` always opens another pane. Agents can use the shell-independent equivalent
+`"$SOPRANO_BIN" markdown README.md`.
+
+The toolbar navigates between linked documents, reloads on demand, reveals the source in
+Finder, and opens it in the default editor. Web links open in a regular Soprano browser
+pane. Source-provided HTML is displayed as source rather than executed.
+
 ## In-app browser
 
 `⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a native
@@ -506,3 +536,7 @@ Soprano statically links [libghostty](https://github.com/ghostty-org/ghostty) an
 Ghostty's runtime resources (themes, shell integration, terminfo), which are MIT licensed —
 Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors. Their license travels with the
 packaged app in `Soprano.app/Contents/Resources/LICENSE-ghostty`.
+
+Markdown parsing uses [Swift Markdown](https://github.com/swiftlang/swift-markdown) and
+its cmark-gfm backend. The cmark notices travel with the packaged app in
+`Soprano.app/Contents/Resources/LICENSE-swift-cmark`.

@@ -49,6 +49,10 @@ struct WorkspaceSession: Identifiable, Codable {
         var cwd: String?
         var url: String? = nil
         var title: String? = nil
+        /// Optional so pre-reader sessions keep decoding, and older builds
+        /// ignore this specialization while retaining the browser pane.
+        var contentKind: String? = nil
+        var previewOwnerPaneId: String? = nil
         /// Retained only to decode sessions from the earlier pane-local depth
         /// implementation. Restored entries are migrated to regular tabs.
         var depthParentId: String? = nil

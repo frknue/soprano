@@ -238,6 +238,19 @@ final class TerminalSurfaceView: NSView {
         scopedConfig.env["SOPRANO_PANE_ID"] = paneId
         scopedConfig.env["SOPRANO_TAB_ID"] = tabId
         scopedConfig.env["TERM_PROGRAM"] = "Soprano"
+        if let resourceURL = Bundle.main.resourceURL {
+            let cliDirectory = resourceURL.appendingPathComponent("bin", isDirectory: true)
+            let cliExecutable = cliDirectory.appendingPathComponent("soprano")
+            if FileManager.default.isExecutableFile(atPath: cliExecutable.path) {
+                let inheritedPath = scopedConfig.env["PATH"]
+                    ?? ProcessInfo.processInfo.environment["PATH"]
+                    ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+                let pathEntries = inheritedPath.split(separator: ":").map(String.init)
+                scopedConfig.env["PATH"] = pathEntries.contains(cliDirectory.path)
+                    ? inheritedPath
+                    : "\(cliDirectory.path):\(inheritedPath)"
+            }
+        }
         self.config = scopedConfig
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         setup()

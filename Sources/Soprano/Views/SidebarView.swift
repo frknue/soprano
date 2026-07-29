@@ -287,6 +287,13 @@ final class SidebarView: NSView {
         )
         browserItem.target = self
         menu.addItem(browserItem)
+        let markdownItem = NSMenuItem(
+            title: "Open Markdown…",
+            action: #selector(openMarkdownMenuItemClicked),
+            keyEquivalent: ""
+        )
+        markdownItem.target = self
+        menu.addItem(markdownItem)
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: plusButton)
     }
 
@@ -301,6 +308,13 @@ final class SidebarView: NSView {
 
     @objc private func spawnBrowserMenuItemClicked() {
         _ = agentManager.spawnBrowser()
+    }
+
+    @objc private func openMarkdownMenuItemClicked() {
+        guard let window else { return }
+        MarkdownFilePicker.begin(relativeTo: window) { [weak self] fileURL in
+            _ = self?.agentManager.spawnMarkdown(fileURL: fileURL)
+        }
     }
 
     @objc private func sessionsClicked() {
@@ -399,6 +413,12 @@ final class SidebarView: NSView {
 
         case .browserURL:
             break
+
+        case .markdownDocument(let target):
+            guard let pane = agentManager.panes[target.paneId],
+                  pane.activeTab?.id == target.tabId
+            else { return }
+            paneRows[target.paneId]?.setTitle(sidebarTitle(for: pane))
         }
     }
 

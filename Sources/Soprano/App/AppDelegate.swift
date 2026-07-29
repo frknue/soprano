@@ -4,6 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
     private var agentNotificationManager: AgentNotificationManager?
     private var browserAutomationController: BrowserAutomationController?
+    private var markdownCommandController: MarkdownCommandController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -42,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindowController = controller
         self.agentNotificationManager = agentNotificationManager
         browserAutomationController = BrowserAutomationController(agentManager: agentManager)
+        markdownCommandController = MarkdownCommandController(agentManager: agentManager)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

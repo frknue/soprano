@@ -119,6 +119,19 @@ final class SplitTreeView: NSView {
 
         case .tabWorkingDirectory, .browserURL:
             break
+
+        case .markdownDocument(let target):
+            paneContainers[target.paneId]?.updateHeader()
+            guard let value = agentManager.panes[target.paneId]?.tabs.first(
+                where: { $0.id == target.tabId }
+            )?.url,
+                  let fileURL = URL(string: value),
+                  fileURL.isFileURL
+            else { return }
+            MarkdownPaneRegistry.shared.view(for: target)?.openDocument(
+                fileURL,
+                recordHistory: true
+            )
         }
     }
 
@@ -219,6 +232,8 @@ final class SplitTreeView: NSView {
 
         if let terminalView = findTerminalView(in: container) {
             window.makeFirstResponder(terminalView)
+        } else if let markdownView = findMarkdownView(in: container) {
+            markdownView.focusPreferredControl()
         } else {
             findBrowserView(in: container)?.focusPreferredControl()
         }
@@ -383,6 +398,37 @@ final class SplitTreeView: NSView {
         let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
         switch tab.type {
         case .browser:
+            if tab.isMarkdown,
+               let value = tab.url,
+               let fileURL = URL(string: value),
+               fileURL.isFileURL
+            {
+                let markdownView = MarkdownPaneView(
+                    target: target,
+                    fileURL: fileURL,
+                    themeManager: themeManager
+                )
+                markdownView.onFocusRequested = { [weak self] in
+                    self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
+                }
+                markdownView.onTitleChanged = { [weak self] title in
+                    self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+                }
+                markdownView.onDocumentChanged = { [weak self] fileURL in
+                    self?.agentManager.updateMarkdownDocument(
+                        paneId: paneId,
+                        tabId: tab.id,
+                        to: fileURL
+                    )
+                }
+                markdownView.onExternalURLRequested = { [weak self] url in
+                    DispatchQueue.main.async {
+                        _ = self?.agentManager.spawnBrowser(url: url.absoluteString)
+                    }
+                }
+                view = markdownView
+                break
+            }
             let browserView = BrowserPaneView(
                 target: BrowserTarget(paneId: paneId, tabId: tab.id),
                 initialURL: tab.url,
@@ -516,6 +562,18 @@ final class SplitTreeView: NSView {
         return nil
     }
 
+    private func findMarkdownView(in view: NSView) -> MarkdownPaneView? {
+        if let markdownView = view as? MarkdownPaneView {
+            return markdownView
+        }
+        for subview in view.subviews {
+            if let found = findMarkdownView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func cancelCopyModeOutsideActiveTerminal() {
         guard let copyModeTarget else { return }
         let activeTarget = agentManager.panes[agentManager.activePaneId]?.activeTab.map {
@@ -587,6 +645,7 @@ final class SplitTreeView: NSView {
     func refreshTheme() {
         for view in tabContentViews.values {
             findBrowserView(in: view)?.applyTheme()
+            findMarkdownView(in: view)?.applyTheme()
         }
         rebuildLayout()
     }
