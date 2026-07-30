@@ -51,11 +51,14 @@ struct SettingsWindowTransitionTests {
         #expect(generalButton?.isHidden == false)
         #expect(generalButton?.frame.width ?? 0 > 0)
         #expect(generalButton?.frame.height ?? 0 > 0)
+        // Sections cap at the 660pt reading measure instead of stretching
+        // across a wide window; anything past ~600 proves layout settled.
         let appearanceCard = cardContainingLabel(
             "Appearance",
             in: contentViewController.view
         )
-        #expect(appearanceCard?.frame.width ?? 0 > 900)
+        #expect(appearanceCard?.frame.width ?? 0 > 600)
+        #expect(appearanceCard?.frame.width ?? 0 < 700)
 
         let keyboardShortcutsButton = allSubviews(in: contentViewController.view)
             .compactMap { $0 as? NSButton }
@@ -68,7 +71,8 @@ struct SettingsWindowTransitionTests {
             "Navigation",
             in: contentViewController.view
         )
-        #expect(navigationCard?.frame.width ?? 0 > 900)
+        #expect(navigationCard?.frame.width ?? 0 > 600)
+        #expect(navigationCard?.frame.width ?? 0 < 700)
 
         let userResizedFrame = NSRect(
             x: 260,
@@ -102,9 +106,11 @@ struct SettingsWindowTransitionTests {
     }
 
     private func cardContainingLabel(_ text: String, in view: NSView) -> NSView? {
+        // Section titles render as uppercase eyebrows whose superview is the
+        // section container, which shares the card's width.
         let label = allSubviews(in: view)
             .compactMap { $0 as? NSTextField }
-            .first { $0.stringValue == text }
-        return label?.superview?.superview
+            .first { $0.stringValue == text.uppercased() }
+        return label?.superview
     }
 }
