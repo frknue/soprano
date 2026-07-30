@@ -182,6 +182,15 @@ struct AgentDashboardViewTests {
             terminalScrollView.documentView as? NSTextView
         )
         #expect(terminalText.string == "Codex is ready for your reply.")
+        let readyRange = (terminalText.string as NSString).range(of: "ready")
+        let readyColor = terminalText.textStorage?.attribute(
+            .foregroundColor,
+            at: readyRange.location,
+            effectiveRange: nil
+        ) as? NSColor
+        let expectedTheme = ThemeManager(themeId: "gruvbox-dark").currentTheme
+        #expect(terminalText.isRichText)
+        #expect(readyColor?.isEqual(expectedTheme.colors.success) == true)
 
         let replyField = try #require(
             allSubviews(in: contentViewController.view)
