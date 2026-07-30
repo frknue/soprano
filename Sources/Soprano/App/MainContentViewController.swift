@@ -312,7 +312,14 @@ final class MainContentViewController: NSViewController {
         preservingWindowFrame {
             let controller = AgentDashboardViewController(
                 agentManager: agentManager,
-                themeManager: themeManager
+                themeManager: themeManager,
+                terminalStateProvider: { [weak splitTreeView] target in
+                    splitTreeView?.terminalInteractionState(for: target)
+                        ?? .unavailable
+                },
+                promptSender: { [weak splitTreeView] target, prompt in
+                    splitTreeView?.submitAgentPrompt(prompt, to: target) ?? false
+                }
             )
             controller.onDismiss = { [weak self] in
                 self?.closeDashboard()

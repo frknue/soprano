@@ -443,6 +443,37 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
+    @Test func dashboardTerminalInteractionUsesTheExactCachedTabTarget() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let codexTabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "codex")
+        )
+        _ = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "claude-code")
+        )
+        let codexTarget = TerminalTarget(paneId: paneId, tabId: codexTabId)
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+
+        manager.focusTab(paneId: paneId, tabId: codexTabId)
+
+        let state = splitTree.terminalInteractionState(for: codexTarget)
+        #expect(state.isAvailable)
+        #expect(state.visibleText == "screen:\(codexTarget)")
+        #expect(splitTree.submitAgentPrompt("Run the focused tests", to: codexTarget))
+        #expect(spy.submittedPrompts.count == 1)
+        #expect(spy.submittedPrompts[0].target == codexTarget)
+        #expect(spy.submittedPrompts[0].prompt == "Run the focused tests")
+
+        let missingTarget = TerminalTarget(paneId: paneId, tabId: "missing")
+        #expect(
+            splitTree.terminalInteractionState(for: missingTarget)
+                == .unavailable
+        )
+        #expect(!splitTree.submitAgentPrompt("Do not send", to: missingTarget))
+    }
+
     private func makeSplitTree(
         manager: AgentManager,
         spy: SurfaceLifecycleSpy,
@@ -475,6 +506,16 @@ struct SplitTreeTerminalLifecycleTests {
                 return restartSucceeds
             },
             terminalViewHasLiveSurface: { _ in true },
+            terminalVisibleText: { view in
+                spy.targetsByView[ObjectIdentifier(view)].map { "screen:\($0)" }
+            },
+            terminalPromptSubmitter: { view, prompt in
+                guard let target = spy.targetsByView[ObjectIdentifier(view)] else {
+                    return false
+                }
+                spy.submittedPrompts.append((target, prompt))
+                return true
+            },
             scheduleCodexReadiness: scheduleCodexReadiness
         )
     }
@@ -488,6 +529,7 @@ private final class SurfaceLifecycleSpy {
     var createdViewsByTarget: [TerminalTarget: [NSView]] = [:]
     var destroyedTargets: [TerminalTarget] = []
     var restartedTargets: [TerminalTarget] = []
+    var submittedPrompts: [(target: TerminalTarget, prompt: String)] = []
 }
 
 @MainActor

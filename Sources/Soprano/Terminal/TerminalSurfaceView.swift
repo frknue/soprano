@@ -1643,6 +1643,74 @@ final class TerminalSurfaceView: NSView {
         }
     }
 
+    func visibleText() -> String? {
+        guard let surface else { return nil }
+        var text = ghostty_text_s()
+        let selection = ghostty_selection_s(
+            top_left: ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT,
+                coord: GHOSTTY_POINT_COORD_TOP_LEFT,
+                x: 0,
+                y: 0
+            ),
+            bottom_right: ghostty_point_s(
+                tag: GHOSTTY_POINT_VIEWPORT,
+                coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT,
+                x: 0,
+                y: 0
+            ),
+            rectangle: false
+        )
+        guard ghostty_surface_read_text(surface, selection, &text),
+              let textPointer = text.text
+        else {
+            return nil
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        let bytes = UnsafeRawPointer(textPointer)
+            .assumingMemoryBound(to: UInt8.self)
+        return String(
+            decoding: UnsafeBufferPointer(
+                start: bytes,
+                count: Int(text.text_len)
+            ),
+            as: UTF8.self
+        )
+    }
+
+    @discardableResult
+    func submitText(_ rawText: String) -> Bool {
+        guard let surface else { return false }
+        let text = rawText
+            .split(whereSeparator: \.isNewline)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+
+        if copyModeSession != nil {
+            finishCopyMode(copySelection: false)
+        }
+        unmarkText()
+        sendText(text)
+
+        var keyEvent = ghostty_input_key_s()
+        keyEvent.action = GHOSTTY_ACTION_PRESS
+        keyEvent.mods = ghostty_input_mods_e(rawValue: GHOSTTY_MODS_NONE.rawValue)
+        keyEvent.consumed_mods = ghostty_input_mods_e(
+            rawValue: GHOSTTY_MODS_NONE.rawValue
+        )
+        keyEvent.keycode = 36
+        keyEvent.text = nil
+        keyEvent.unshifted_codepoint = 13
+        keyEvent.composing = false
+        _ = ghostty_surface_key(surface, keyEvent)
+        keyEvent.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, keyEvent)
+        onAgentInputSubmitted?()
+        return true
+    }
+
     @discardableResult
     func recreateSurface() -> Bool {
         destroySurface()

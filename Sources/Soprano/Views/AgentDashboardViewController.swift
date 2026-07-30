@@ -1,26 +1,44 @@
 import AppKit
 
-/// Full-window, read-only operational view over every attached agent.
+/// Full-window operational view over every attached agent.
 final class AgentDashboardViewController: NSViewController {
+    typealias TerminalStateProvider = (TerminalTarget) -> TerminalInteractionState
+    typealias PromptSender = (TerminalTarget, String) -> Bool
+
     let agentManager: AgentManager
     let themeManager: ThemeManager
 
     var onDismiss: (() -> Void)?
     var onAgentSelected: ((String, String) -> Void)?
 
+    private let terminalStateProvider: TerminalStateProvider
+    private let promptSender: PromptSender
     private var headerView: NSView!
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
     private var doneButton: NSButton!
-    private var contentStack: NSStackView!
+    private var summaryContainer: NSView!
+    private var leftPanel: NSView!
+    private var agentListTitleLabel: NSTextField!
+    private var keyboardHintLabel: NSTextField!
+    private var rowsStack: NSStackView!
+    private var detailView: AgentDashboardDetailView!
     private var agentRows: [AgentDashboardRowView] = []
+    private var entriesById: [String: AgentDashboardEntry] = [:]
     private var selectedEntryId: String?
     nonisolated(unsafe) private var elapsedTimer: Timer?
     private let observerId = "AgentDashboardViewController"
 
-    init(agentManager: AgentManager, themeManager: ThemeManager) {
+    init(
+        agentManager: AgentManager,
+        themeManager: ThemeManager,
+        terminalStateProvider: @escaping TerminalStateProvider = { _ in .unavailable },
+        promptSender: @escaping PromptSender = { _, _ in false }
+    ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        self.terminalStateProvider = terminalStateProvider
+        self.promptSender = promptSender
         super.init(nibName: nil, bundle: nil)
         agentManager.addObserver(id: observerId) { [weak self] change in
             switch change {
@@ -54,6 +72,9 @@ final class AgentDashboardViewController: NSViewController {
         }
         root.onActivateSelection = { [weak self] in
             self?.activateSelection()
+        }
+        root.onFocusReply = { [weak self] in
+            self?.detailView.focusReply()
         }
         root.wantsLayer = true
         root.layer?.backgroundColor = theme.colors.bgBase.cgColor
@@ -94,33 +115,47 @@ final class AgentDashboardViewController: NSViewController {
         separator.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(separator)
 
-        let scrollView = NSScrollView()
-        scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(scrollView)
+        let contentView = NSView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(contentView)
 
-        let documentView = AgentDashboardFlippedView()
-        documentView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = documentView
+        summaryContainer = NSView()
+        summaryContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(summaryContainer)
 
-        contentStack = NSStackView()
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = 20
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        documentView.addSubview(contentStack)
+        let workspaceStack = NSStackView()
+        workspaceStack.orientation = .horizontal
+        workspaceStack.alignment = .top
+        workspaceStack.distribution = .fill
+        workspaceStack.spacing = 16
+        workspaceStack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(workspaceStack)
 
-        let preferredMaximumWidth = contentStack.widthAnchor.constraint(
-            equalToConstant: 960
-        )
-        preferredMaximumWidth.priority = .defaultHigh
-        let preferredFittingWidth = contentStack.widthAnchor.constraint(
-            equalTo: documentView.widthAnchor,
-            constant: -56
-        )
-        preferredFittingWidth.priority = .defaultLow
+        leftPanel = makeAgentListPanel(theme: theme)
+        workspaceStack.addArrangedSubview(leftPanel)
+        let preferredListWidth = leftPanel.widthAnchor.constraint(equalToConstant: 380)
+        preferredListWidth.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            leftPanel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300),
+            leftPanel.widthAnchor.constraint(lessThanOrEqualToConstant: 440),
+            preferredListWidth,
+        ])
+
+        detailView = AgentDashboardDetailView(theme: theme)
+        detailView.onOpen = { [weak self] target in
+            self?.onAgentSelected?(target.paneId, target.tabId)
+        }
+        detailView.onStop = { [weak agentManager] target in
+            agentManager?.stopAgent(target: target)
+        }
+        detailView.onRestart = { [weak agentManager] target in
+            agentManager?.restartAgent(target: target)
+        }
+        detailView.onSend = { [weak self] target, prompt in
+            self?.promptSender(target, prompt) ?? false
+        }
+        workspaceStack.addArrangedSubview(detailView)
+        detailView.widthAnchor.constraint(greaterThanOrEqualToConstant: 400).isActive = true
 
         NSLayoutConstraint.activate([
             headerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -141,37 +176,26 @@ final class AgentDashboardViewController: NSViewController {
             separator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
             separator.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
 
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
+            contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
+            contentView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 24),
+            contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -28),
 
-            documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            documentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            documentView.bottomAnchor.constraint(
-                greaterThanOrEqualTo: scrollView.contentView.bottomAnchor
-            ),
-            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            summaryContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            summaryContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            summaryContainer.topAnchor.constraint(equalTo: contentView.topAnchor),
+            summaryContainer.heightAnchor.constraint(equalToConstant: 92),
 
-            contentStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 28),
-            contentStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -32),
-            contentStack.centerXAnchor.constraint(equalTo: documentView.centerXAnchor),
-            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 960),
-            contentStack.widthAnchor.constraint(
-                lessThanOrEqualTo: documentView.widthAnchor,
-                constant: -56
+            workspaceStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            workspaceStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            workspaceStack.topAnchor.constraint(
+                equalTo: summaryContainer.bottomAnchor,
+                constant: 18
             ),
-            preferredMaximumWidth,
-            preferredFittingWidth,
-            contentStack.leadingAnchor.constraint(
-                greaterThanOrEqualTo: documentView.leadingAnchor,
-                constant: 28
-            ),
-            contentStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: documentView.trailingAnchor,
-                constant: -28
-            ),
+            workspaceStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            leftPanel.heightAnchor.constraint(equalTo: workspaceStack.heightAnchor),
+            detailView.heightAnchor.constraint(equalTo: workspaceStack.heightAnchor),
         ])
 
         self.view = root
@@ -184,6 +208,7 @@ final class AgentDashboardViewController: NSViewController {
                 guard let self else { return }
                 let now = Date()
                 self.agentRows.forEach { $0.updateElapsed(now: now) }
+                self.refreshDetailTerminal()
             }
         }
     }
@@ -195,6 +220,11 @@ final class AgentDashboardViewController: NSViewController {
         titleLabel.textColor = theme.colors.textPrimary
         subtitleLabel.textColor = theme.colors.textMuted
         doneButton.contentTintColor = theme.colors.textPrimary
+        leftPanel.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        leftPanel.layer?.borderColor = theme.colors.borderSubtle.cgColor
+        agentListTitleLabel.textColor = theme.colors.textPrimary
+        keyboardHintLabel.textColor = theme.colors.textMuted
+        detailView.apply(theme: theme)
         refresh()
     }
 
@@ -203,6 +233,9 @@ final class AgentDashboardViewController: NSViewController {
         let snapshot = agentManager.agentDashboardSnapshot()
         let theme = themeManager.currentTheme
         let previousSelection = selectedEntryId
+        entriesById = Dictionary(
+            uniqueKeysWithValues: snapshot.entries.map { ($0.id, $0) }
+        )
         selectedEntryId = snapshot.entries.contains {
             $0.id == previousSelection
         } ? previousSelection : snapshot.entries.first?.id
@@ -211,40 +244,27 @@ final class AgentDashboardViewController: NSViewController {
             windowCount: agentManager.windowCount
         )
 
-        for arrangedView in contentStack.arrangedSubviews {
-            contentStack.removeArrangedSubview(arrangedView)
+        replaceContents(
+            of: summaryContainer,
+            with: makeSummary(snapshot: snapshot, theme: theme)
+        )
+        for arrangedView in rowsStack.arrangedSubviews {
+            rowsStack.removeArrangedSubview(arrangedView)
             arrangedView.removeFromSuperview()
         }
         agentRows.removeAll()
 
-        let summary = makeSummary(snapshot: snapshot, theme: theme)
-        contentStack.addArrangedSubview(summary)
-        summary.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-
-        let sectionHeader = makeSectionHeader(
-            title: "Agents",
-            count: snapshot.totalCount,
-            theme: theme
-        )
-        contentStack.addArrangedSubview(sectionHeader)
-        sectionHeader.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-
         if snapshot.entries.isEmpty {
             let emptyState = makeEmptyState(theme: theme)
-            contentStack.addArrangedSubview(emptyState)
-            emptyState.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+            rowsStack.addArrangedSubview(emptyState)
+            emptyState.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         } else {
-            let rowsStack = NSStackView()
-            rowsStack.orientation = .vertical
-            rowsStack.alignment = .leading
-            rowsStack.spacing = 10
-            rowsStack.translatesAutoresizingMaskIntoConstraints = false
-            contentStack.addArrangedSubview(rowsStack)
-            rowsStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-
             for entry in snapshot.entries {
                 let row = AgentDashboardRowView(entry: entry, theme: theme)
                 row.onSelect = { [weak self] in
+                    self?.selectEntry(entry.id)
+                }
+                row.onOpen = { [weak self] in
                     self?.onAgentSelected?(entry.paneId, entry.tabId)
                 }
                 rowsStack.addArrangedSubview(row)
@@ -253,6 +273,83 @@ final class AgentDashboardViewController: NSViewController {
             }
         }
         updateRowSelection(scrollIntoView: previousSelection != nil)
+        updateDetail()
+    }
+
+    private func makeAgentListPanel(theme: AppTheme) -> NSView {
+        let panel = NSView()
+        panel.wantsLayer = true
+        panel.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        panel.layer?.borderColor = theme.colors.borderSubtle.cgColor
+        panel.layer?.borderWidth = 1
+        panel.layer?.cornerRadius = 10
+        panel.translatesAutoresizingMaskIntoConstraints = false
+
+        let sectionHeader = makeSectionHeader(theme: theme)
+        panel.addSubview(sectionHeader)
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        panel.addSubview(scrollView)
+
+        let documentView = AgentDashboardFlippedView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+
+        rowsStack = NSStackView()
+        rowsStack.orientation = .vertical
+        rowsStack.alignment = .leading
+        rowsStack.spacing = 10
+        rowsStack.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(rowsStack)
+
+        NSLayoutConstraint.activate([
+            sectionHeader.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
+            sectionHeader.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+            sectionHeader.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
+            sectionHeader.heightAnchor.constraint(equalToConstant: 24),
+
+            scrollView.leadingAnchor.constraint(equalTo: panel.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: sectionHeader.bottomAnchor, constant: 6),
+            scrollView.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
+
+            documentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            documentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            documentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            documentView.bottomAnchor.constraint(
+                greaterThanOrEqualTo: scrollView.contentView.bottomAnchor
+            ),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+
+            rowsStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 10),
+            rowsStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -10),
+            rowsStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 8),
+            rowsStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -12),
+        ])
+        return panel
+    }
+
+    private func replaceContents(of container: NSView, with content: NSView) {
+        container.subviews.forEach { $0.removeFromSuperview() }
+        content.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+    }
+
+    private func selectEntry(_ entryId: String) {
+        guard entriesById[entryId] != nil else { return }
+        selectedEntryId = entryId
+        updateRowSelection(scrollIntoView: false)
+        updateDetail()
     }
 
     private func moveSelection(by delta: Int) {
@@ -263,6 +360,7 @@ final class AgentDashboardViewController: NSViewController {
         let nextIndex = min(max(0, currentIndex + delta), agentRows.count - 1)
         selectedEntryId = agentRows[nextIndex].entry.id
         updateRowSelection(scrollIntoView: true)
+        updateDetail()
     }
 
     private func activateSelection() {
@@ -272,6 +370,28 @@ final class AgentDashboardViewController: NSViewController {
               })?.entry
         else { return }
         onAgentSelected?(entry.paneId, entry.tabId)
+    }
+
+    private func updateDetail() {
+        guard let selectedEntryId,
+              let entry = entriesById[selectedEntryId]
+        else {
+            detailView.update(entry: nil, terminal: .unavailable)
+            return
+        }
+        let target = TerminalTarget(paneId: entry.paneId, tabId: entry.tabId)
+        detailView.update(
+            entry: entry,
+            terminal: terminalStateProvider(target)
+        )
+    }
+
+    private func refreshDetailTerminal() {
+        guard let selectedEntryId,
+              let entry = entriesById[selectedEntryId]
+        else { return }
+        let target = TerminalTarget(paneId: entry.paneId, tabId: entry.tabId)
+        detailView.updateTerminal(terminalStateProvider(target))
     }
 
     private func updateRowSelection(scrollIntoView: Bool) {
@@ -321,45 +441,39 @@ final class AgentDashboardViewController: NSViewController {
         return stack
     }
 
-    private func makeSectionHeader(title: String, count: Int, theme: AppTheme) -> NSView {
+    private func makeSectionHeader(theme: AppTheme) -> NSView {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.heightAnchor.constraint(equalToConstant: 22).isActive = true
 
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 15, weight: .semibold)
-        label.textColor = theme.colors.textPrimary
-        label.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
+        agentListTitleLabel = NSTextField(labelWithString: "AGENTS")
+        agentListTitleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        agentListTitleLabel.textColor = theme.colors.textPrimary
+        agentListTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(agentListTitleLabel)
 
-        let countLabel = NSTextField(labelWithString: "\(count)")
-        countLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
-        countLabel.textColor = theme.colors.textMuted
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(countLabel)
-
-        let keyboardHint = NSTextField(
-            labelWithString: "J/K MOVE  ·  ↩ OPEN  ·  ESC CLOSE"
+        keyboardHintLabel = NSTextField(
+            labelWithString: "J/K  ·  R REPLY  ·  ↩ OPEN"
         )
-        keyboardHint.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
-        keyboardHint.textColor = theme.colors.textMuted
-        keyboardHint.alignment = .right
-        keyboardHint.lineBreakMode = .byTruncatingHead
-        keyboardHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        keyboardHint.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(keyboardHint)
+        keyboardHintLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
+        keyboardHintLabel.textColor = theme.colors.textMuted
+        keyboardHintLabel.alignment = .right
+        keyboardHintLabel.lineBreakMode = .byTruncatingHead
+        keyboardHintLabel.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        keyboardHintLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(keyboardHintLabel)
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            countLabel.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
-            countLabel.centerYAnchor.constraint(equalTo: label.centerYAnchor),
-            keyboardHint.leadingAnchor.constraint(
-                greaterThanOrEqualTo: countLabel.trailingAnchor,
+            agentListTitleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            agentListTitleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            keyboardHintLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: agentListTitleLabel.trailingAnchor,
                 constant: 12
             ),
-            keyboardHint.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            keyboardHint.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            keyboardHintLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            keyboardHintLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
         return container
     }
@@ -416,6 +530,424 @@ final class AgentDashboardViewController: NSViewController {
     }
 }
 
+private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
+    var onOpen: ((TerminalTarget) -> Void)?
+    var onStop: ((TerminalTarget) -> Void)?
+    var onRestart: ((TerminalTarget) -> Void)?
+    var onSend: ((TerminalTarget, String) -> Bool)?
+
+    private var theme: AppTheme
+    private var entry: AgentDashboardEntry?
+    private var terminal = TerminalInteractionState.unavailable
+
+    private let titleLabel = NSTextField(labelWithString: "No agent selected")
+    private let locationLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let terminalTitleLabel = NSTextField(labelWithString: "LIVE TERMINAL")
+    private let terminalStateLabel = NSTextField(labelWithString: "UNAVAILABLE")
+    private let replyHintLabel = NSTextField(labelWithString: "")
+    private let openButton = NSButton()
+    private let stopButton = NSButton()
+    private let restartButton = NSButton()
+    private let sendButton = NSButton()
+    private let replyField = NSTextField()
+    private var terminalTextView: NSTextView!
+
+    init(theme: AppTheme) {
+        self.theme = theme
+        super.init(frame: .zero)
+        identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail")
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
+        build()
+        apply(theme: theme)
+        update(entry: nil, terminal: .unavailable)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        layer?.borderColor = theme.colors.borderSubtle.cgColor
+        titleLabel.textColor = theme.colors.textPrimary
+        locationLabel.textColor = theme.colors.textMuted
+        terminalTitleLabel.textColor = theme.colors.textPrimary
+        replyHintLabel.textColor = theme.colors.textMuted
+        terminalTextView.backgroundColor = theme.colors.bgBase
+        terminalTextView.insertionPointColor = theme.colors.textPrimary
+        replyField.backgroundColor = theme.colors.bgBase
+        replyField.textColor = theme.colors.textPrimary
+        [openButton, stopButton, restartButton, sendButton].forEach {
+            $0.contentTintColor = theme.colors.textPrimary
+        }
+        refreshStatusColors()
+        updateTerminalText()
+    }
+
+    func update(
+        entry: AgentDashboardEntry?,
+        terminal: TerminalInteractionState
+    ) {
+        let previousId = self.entry?.id
+        self.entry = entry
+        self.terminal = terminal
+        if entry?.id != previousId {
+            replyField.stringValue = ""
+        }
+
+        guard let entry else {
+            titleLabel.stringValue = "No agent selected"
+            locationLabel.stringValue = "Choose an agent to inspect its terminal."
+            statusLabel.stringValue = ""
+            updateTerminalText()
+            updateControls()
+            return
+        }
+
+        titleLabel.stringValue = entry.profileName
+        let location = "\(entry.windowTitle) ▸ \(entry.tabTitle)"
+        let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
+        locationLabel.stringValue = [location, path]
+            .compactMap { $0 }
+            .joined(separator: "  ·  ")
+        statusLabel.stringValue = entry.status.displayLabel
+        replyField.placeholderString = "Reply to \(entry.profileName)…"
+        refreshStatusColors()
+        updateTerminalText()
+        updateControls()
+    }
+
+    func updateTerminal(_ terminal: TerminalInteractionState) {
+        guard entry != nil, terminal != self.terminal else { return }
+        self.terminal = terminal
+        updateTerminalText()
+        updateControls()
+    }
+
+    func focusReply() {
+        guard replyField.isEnabled else { return }
+        window?.makeFirstResponder(replyField)
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        updateSendButton()
+    }
+
+    private func build() {
+        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        locationLabel.font = .systemFont(ofSize: 11)
+        locationLabel.lineBreakMode = .byTruncatingMiddle
+        locationLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(locationLabel)
+
+        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        statusLabel.alignment = .right
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
+
+        configureButton(
+            openButton,
+            title: "Open",
+            identifier: "agent-dashboard-open",
+            action: #selector(openClicked)
+        )
+        configureButton(
+            stopButton,
+            title: "Stop",
+            identifier: "agent-dashboard-stop",
+            action: #selector(stopClicked)
+        )
+        configureButton(
+            restartButton,
+            title: "Restart",
+            identifier: "agent-dashboard-restart",
+            action: #selector(restartClicked)
+        )
+
+        let actionStack = NSStackView(views: [
+            openButton,
+            stopButton,
+            restartButton,
+        ])
+        actionStack.orientation = .horizontal
+        actionStack.alignment = .centerY
+        actionStack.spacing = 8
+        actionStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(actionStack)
+
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separator)
+
+        terminalTitleLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        terminalTitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(terminalTitleLabel)
+
+        terminalStateLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+        terminalStateLabel.alignment = .right
+        terminalStateLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(terminalStateLabel)
+
+        let terminalScrollView = NSTextView.scrollableTextView()
+        terminalScrollView.identifier = NSUserInterfaceItemIdentifier(
+            "agent-dashboard-terminal"
+        )
+        terminalScrollView.borderType = .noBorder
+        terminalScrollView.drawsBackground = true
+        terminalScrollView.hasVerticalScroller = true
+        terminalScrollView.hasHorizontalScroller = false
+        terminalScrollView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(terminalScrollView)
+
+        terminalTextView = terminalScrollView.documentView as? NSTextView
+        terminalTextView.isEditable = false
+        terminalTextView.isSelectable = true
+        terminalTextView.isRichText = false
+        terminalTextView.importsGraphics = false
+        terminalTextView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        terminalTextView.textContainerInset = NSSize(width: 10, height: 10)
+        terminalTextView.textContainer?.widthTracksTextView = true
+
+        replyField.identifier = NSUserInterfaceItemIdentifier(
+            "agent-dashboard-reply"
+        )
+        replyField.font = .systemFont(ofSize: 12)
+        replyField.focusRingType = .default
+        replyField.delegate = self
+        replyField.target = self
+        replyField.action = #selector(sendClicked)
+        replyField.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(replyField)
+
+        configureButton(
+            sendButton,
+            title: "Send",
+            identifier: "agent-dashboard-send",
+            action: #selector(sendClicked)
+        )
+        addSubview(sendButton)
+
+        replyHintLabel.font = .systemFont(ofSize: 10)
+        replyHintLabel.lineBreakMode = .byTruncatingTail
+        replyHintLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(replyHintLabel)
+
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: statusLabel.leadingAnchor,
+                constant: -16
+            ),
+
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            statusLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 90),
+
+            locationLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            locationLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            locationLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
+
+            actionStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            actionStack.topAnchor.constraint(equalTo: locationLabel.bottomAnchor, constant: 14),
+
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: actionStack.bottomAnchor, constant: 16),
+
+            terminalTitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            terminalTitleLabel.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 14),
+            terminalStateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            terminalStateLabel.centerYAnchor.constraint(equalTo: terminalTitleLabel.centerYAnchor),
+
+            terminalScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            terminalScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            terminalScrollView.topAnchor.constraint(
+                equalTo: terminalTitleLabel.bottomAnchor,
+                constant: 9
+            ),
+            terminalScrollView.bottomAnchor.constraint(
+                equalTo: replyField.topAnchor,
+                constant: -14
+            ),
+            terminalScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 150),
+
+            replyField.leadingAnchor.constraint(equalTo: terminalScrollView.leadingAnchor),
+            replyField.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
+            replyField.heightAnchor.constraint(equalToConstant: 30),
+
+            sendButton.trailingAnchor.constraint(equalTo: terminalScrollView.trailingAnchor),
+            sendButton.centerYAnchor.constraint(equalTo: replyField.centerYAnchor),
+            sendButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 70),
+
+            replyHintLabel.leadingAnchor.constraint(equalTo: replyField.leadingAnchor),
+            replyHintLabel.trailingAnchor.constraint(equalTo: sendButton.trailingAnchor),
+            replyHintLabel.topAnchor.constraint(equalTo: replyField.bottomAnchor, constant: 6),
+            replyHintLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -13),
+        ])
+    }
+
+    private func configureButton(
+        _ button: NSButton,
+        title: String,
+        identifier: String,
+        action: Selector
+    ) {
+        button.title = title
+        button.identifier = NSUserInterfaceItemIdentifier(identifier)
+        button.target = self
+        button.action = action
+        button.bezelStyle = .rounded
+        button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func updateTerminalText() {
+        guard terminalTextView != nil else { return }
+        let displayText: String
+        if entry == nil {
+            displayText = "Select an agent to see its current terminal."
+        } else if !terminal.isAvailable {
+            displayText = "This terminal is not currently available."
+        } else if terminal.visibleText.isEmpty {
+            displayText = "No terminal output yet."
+        } else {
+            displayText = terminal.visibleText
+        }
+
+        if terminalTextView.string != displayText {
+            terminalTextView.string = displayText
+            terminalTextView.scrollRangeToVisible(
+                NSRange(location: displayText.utf16.count, length: 0)
+            )
+        }
+        terminalTextView.textColor = terminal.isAvailable
+            && !terminal.visibleText.isEmpty
+            ? theme.colors.textPrimary
+            : theme.colors.textMuted
+        terminalStateLabel.stringValue = terminal.isAvailable ? "LIVE" : "UNAVAILABLE"
+        terminalStateLabel.textColor = terminal.isAvailable
+            ? theme.colors.success
+            : theme.colors.textMuted
+    }
+
+    private func refreshStatusColors() {
+        guard let entry else {
+            statusLabel.textColor = theme.colors.textMuted
+            return
+        }
+        statusLabel.textColor = Self.statusColor(for: entry, theme: theme)
+    }
+
+    private func updateControls() {
+        replyHintLabel.textColor = theme.colors.textMuted
+        guard let entry else {
+            openButton.isEnabled = false
+            stopButton.isEnabled = false
+            restartButton.isEnabled = false
+            replyField.isEnabled = false
+            replyHintLabel.stringValue = ""
+            updateSendButton()
+            return
+        }
+
+        openButton.isEnabled = true
+        stopButton.isEnabled = entry.status != .stopped
+        restartButton.isEnabled = entry.status != .starting
+        replyField.isEnabled = canReply
+
+        if !terminal.isAvailable {
+            replyHintLabel.stringValue = "Open the agent to initialize its terminal."
+        } else {
+            switch entry.status {
+            case .starting:
+                replyHintLabel.stringValue = "Waiting for the agent to become ready."
+            case .stopped:
+                replyHintLabel.stringValue = "Restart the agent before replying."
+            case .running, .idle, .waiting, .error:
+                replyHintLabel.stringValue = "Press Return to send this single-line reply."
+            }
+        }
+        updateSendButton()
+    }
+
+    private var canReply: Bool {
+        guard terminal.isAvailable, let status = entry?.status else { return false }
+        switch status {
+        case .running, .idle, .waiting, .error:
+            return true
+        case .starting, .stopped:
+            return false
+        }
+    }
+
+    private func updateSendButton() {
+        sendButton.isEnabled = canReply
+            && !replyField.stringValue
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+    }
+
+    private var target: TerminalTarget? {
+        entry.map { TerminalTarget(paneId: $0.paneId, tabId: $0.tabId) }
+    }
+
+    @objc private func openClicked() {
+        guard let target else { return }
+        onOpen?(target)
+    }
+
+    @objc private func stopClicked() {
+        guard let target else { return }
+        onStop?(target)
+    }
+
+    @objc private func restartClicked() {
+        guard let target else { return }
+        onRestart?(target)
+    }
+
+    @objc private func sendClicked() {
+        guard canReply, let target else { return }
+        let prompt = replyField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+
+        if onSend?(target, prompt) == true {
+            replyField.stringValue = ""
+            updateSendButton()
+        } else {
+            replyHintLabel.stringValue = "Could not send to this terminal."
+            replyHintLabel.textColor = theme.colors.danger
+        }
+    }
+
+    private static func statusColor(
+        for entry: AgentDashboardEntry,
+        theme: AppTheme
+    ) -> NSColor {
+        if entry.needsAttention { return theme.colors.blue }
+        switch entry.status {
+        case .idle: return theme.colors.blue
+        case .starting: return theme.colors.yellow
+        case .running: return theme.colors.success
+        case .waiting: return theme.colors.yellow
+        case .error: return theme.colors.danger
+        case .stopped: return theme.colors.gray
+        }
+    }
+}
+
 private final class AgentDashboardSummaryCard: NSView {
     init(title: String, value: Int, color: NSColor, theme: AppTheme) {
         super.init(frame: .zero)
@@ -457,6 +989,7 @@ private final class AgentDashboardSummaryCard: NSView {
 private final class AgentDashboardRowView: NSControl {
     let entry: AgentDashboardEntry
     var onSelect: (() -> Void)?
+    var onOpen: (() -> Void)?
 
     private let theme: AppTheme
     private let elapsedLabel = NSTextField(labelWithString: "")
@@ -508,11 +1041,17 @@ private final class AgentDashboardRowView: NSControl {
 
     override func mouseDown(with event: NSEvent) {
         guard event.buttonNumber == 0 else { return }
-        onSelect?()
+        if event.clickCount >= 2 {
+            onOpen?()
+        } else {
+            onSelect?()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36 || event.charactersIgnoringModifiers == " " {
+        if event.keyCode == 36 {
+            onOpen?()
+        } else if event.charactersIgnoringModifiers == " " {
             onSelect?()
         } else {
             super.keyDown(with: event)
@@ -643,7 +1182,7 @@ private final class AgentDashboardRowView: NSControl {
             elapsedLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 5),
         ])
 
-        toolTip = "Focus \(entry.profileName) in \(location)"
+        toolTip = "Select \(entry.profileName); double-click to open it"
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(
@@ -704,6 +1243,7 @@ private final class AgentDashboardRootView: NSView {
     var onEscape: (() -> Void)?
     var onMoveSelection: ((Int) -> Void)?
     var onActivateSelection: (() -> Void)?
+    var onFocusReply: (() -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -727,10 +1267,16 @@ private final class AgentDashboardRootView: NSView {
         case dismiss
         case move(Int)
         case activate
+        case focusReply
     }
 
     private func keyboardAction(for event: NSEvent) -> KeyboardAction? {
         guard event.type == .keyDown else { return nil }
+        if let editor = window?.firstResponder as? NSTextView,
+           editor.isFieldEditor
+        {
+            return event.keyCode == 53 ? .dismiss : nil
+        }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard !flags.contains(.command),
               !flags.contains(.control),
@@ -755,6 +1301,8 @@ private final class AgentDashboardRootView: NSView {
             return .move(1)
         case "k":
             return .move(-1)
+        case "r":
+            return .focusReply
         case " ":
             return .activate
         default:
@@ -770,6 +1318,8 @@ private final class AgentDashboardRootView: NSView {
             onMoveSelection?(delta)
         case .activate:
             onActivateSelection?()
+        case .focusReply:
+            onFocusReply?()
         }
     }
 }

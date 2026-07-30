@@ -111,7 +111,14 @@ struct AgentDashboardViewTests {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let agentManager = AgentManager()
-        _ = try #require(agentManager.spawnAgent("codex"))
+        let paneId = try #require(agentManager.spawnAgent("codex"))
+        let tabId = try #require(agentManager.panes[paneId]?.activeTab?.id)
+        agentManager.updateAgentStatus(
+            paneId: paneId,
+            tabId: tabId,
+            status: .running
+        )
+        var submittedPrompts: [String] = []
         let contentViewController = MainContentViewController(
             agentManager: agentManager,
             sessionManager: SessionManager(
@@ -125,7 +132,13 @@ struct AgentDashboardViewTests {
                 SplitTreeView(
                     agentManager: agentManager,
                     themeManager: themeManager,
-                    terminalViewFactory: { _, _, _ in NSView() }
+                    terminalViewFactory: { _, _, _ in NSView() },
+                    terminalViewHasLiveSurface: { _ in true },
+                    terminalVisibleText: { _ in "Codex is ready for your reply." },
+                    terminalPromptSubmitter: { _, prompt in
+                        submittedPrompts.append(prompt)
+                        return true
+                    }
                 )
             }
         )
@@ -147,7 +160,10 @@ struct AgentDashboardViewTests {
         #expect(labels(in: contentViewController.view).contains("Monitoring 1 agent across 1 window"))
         let agentRow = allSubviews(in: contentViewController.view)
             .first { $0.identifier?.rawValue == "agent-dashboard-row" }
-        #expect(agentRow?.frame.width ?? 0 > 800)
+        #expect(agentRow?.frame.width ?? 0 > 300)
+        let detail = allSubviews(in: contentViewController.view)
+            .first { $0.identifier?.rawValue == "agent-dashboard-detail" }
+        #expect(detail?.frame.width ?? 0 > 500)
         let totalCard = allSubviews(in: contentViewController.view)
             .first {
                 $0.identifier?.rawValue == "agent-dashboard-summary-total"
@@ -155,25 +171,69 @@ struct AgentDashboardViewTests {
         #expect(totalCard?.frame.width ?? 0 > 200)
         #expect(totalCard?.frame.height == 92)
 
-        let paneId = try #require(
-            agentManager.agentDashboardSnapshot().entries.first?.paneId
+        let terminalScrollView = try #require(
+            allSubviews(in: contentViewController.view)
+                .compactMap { $0 as? NSScrollView }
+                .first {
+                    $0.identifier?.rawValue == "agent-dashboard-terminal"
+                }
         )
-        let tabId = try #require(
-            agentManager.agentDashboardSnapshot().entries.first?.tabId
+        let terminalText = try #require(
+            terminalScrollView.documentView as? NSTextView
         )
-        agentManager.updateAgentStatus(
-            paneId: paneId,
-            tabId: tabId,
-            status: .waiting
+        #expect(terminalText.string == "Codex is ready for your reply.")
+
+        let replyField = try #require(
+            allSubviews(in: contentViewController.view)
+                .compactMap { $0 as? NSTextField }
+                .first {
+                    $0.identifier?.rawValue == "agent-dashboard-reply"
+                }
         )
-        contentViewController.view.layoutSubtreeIfNeeded()
+        #expect(replyField.isEnabled)
+        replyField.stringValue = "Run the focused tests"
+        _ = NSApp.sendAction(
+            try #require(replyField.action),
+            to: replyField.target,
+            from: replyField
+        )
+        #expect(submittedPrompts == ["Run the focused tests"])
+        #expect(
+            agentManager.agent(paneId: paneId, tabId: tabId)?.status == .running
+        )
+        #expect(replyField.stringValue.isEmpty)
+
+        let stopButton = try #require(
+            allSubviews(in: contentViewController.view)
+                .compactMap { $0 as? NSButton }
+                .first {
+                    $0.identifier?.rawValue == "agent-dashboard-stop"
+                }
+        )
+        stopButton.performClick(nil)
+        #expect(
+            agentManager.agent(paneId: paneId, tabId: tabId)?.status == .stopped
+        )
+
+        let restartButton = try #require(
+            allSubviews(in: contentViewController.view)
+                .compactMap { $0 as? NSButton }
+                .first {
+                    $0.identifier?.rawValue == "agent-dashboard-restart"
+                }
+        )
+        restartButton.performClick(nil)
+        #expect(
+            agentManager.agent(paneId: paneId, tabId: tabId)?.status == .starting
+        )
+
         let needsInputCardLabels = allSubviews(in: contentViewController.view)
             .first {
                 $0.identifier?.rawValue == "agent-dashboard-summary-needs-input"
             }?
             .subviews
             .compactMap { ($0 as? NSTextField)?.stringValue }
-        #expect(needsInputCardLabels?.contains("1") == true)
+        #expect(needsInputCardLabels?.contains("0") == true)
 
         let dashboardRoot = try #require(
             allSubviews(in: contentViewController.view)

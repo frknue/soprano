@@ -23,6 +23,8 @@ final class SplitTreeView: NSView {
     private let destroyTerminalView: (NSView) -> Void
     private let restartTerminalView: (NSView) -> Bool
     private let terminalViewHasLiveSurface: (NSView) -> Bool
+    private let terminalVisibleText: (NSView) -> String?
+    private let terminalPromptSubmitter: (NSView, String) -> Bool
     private let scheduleCodexReadiness: CodexReadinessScheduler
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
 
@@ -70,6 +72,12 @@ final class SplitTreeView: NSView {
         terminalViewHasLiveSurface: @escaping (NSView) -> Bool = { view in
             (view as? TerminalSurfaceView)?.surface != nil
         },
+        terminalVisibleText: @escaping (NSView) -> String? = { view in
+            (view as? TerminalSurfaceView)?.visibleText()
+        },
+        terminalPromptSubmitter: @escaping (NSView, String) -> Bool = { view, prompt in
+            (view as? TerminalSurfaceView)?.submitText(prompt) ?? false
+        },
         scheduleCodexReadiness: @escaping CodexReadinessScheduler = { callback in
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 callback()
@@ -82,6 +90,8 @@ final class SplitTreeView: NSView {
         self.destroyTerminalView = destroyTerminalView
         self.restartTerminalView = restartTerminalView
         self.terminalViewHasLiveSurface = terminalViewHasLiveSurface
+        self.terminalVisibleText = terminalVisibleText
+        self.terminalPromptSubmitter = terminalPromptSubmitter
         self.scheduleCodexReadiness = scheduleCodexReadiness
         self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
@@ -197,6 +207,40 @@ final class SplitTreeView: NSView {
 
     func beginActiveTerminalCopyMode() {
         activeTerminalView()?.beginCopyMode()
+    }
+
+    func terminalInteractionState(
+        for target: TerminalTarget
+    ) -> TerminalInteractionState {
+        guard let contentView = tabContentViews[target],
+              terminalViewHasLiveSurface(contentView)
+        else {
+            return .unavailable
+        }
+        return TerminalInteractionState(
+            isAvailable: true,
+            visibleText: terminalVisibleText(contentView) ?? ""
+        )
+    }
+
+    @discardableResult
+    func submitAgentPrompt(
+        _ prompt: String,
+        to target: TerminalTarget
+    ) -> Bool {
+        guard let contentView = tabContentViews[target],
+              terminalViewHasLiveSurface(contentView)
+        else {
+            return false
+        }
+        guard terminalPromptSubmitter(contentView, prompt) else { return false }
+        agentManager.updateAgentStatus(
+            paneId: target.paneId,
+            tabId: target.tabId,
+            status: .running,
+            needsAttention: false
+        )
+        return true
     }
 
     private func activeTerminalView() -> TerminalSurfaceView? {

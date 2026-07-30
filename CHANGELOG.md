@@ -9,6 +9,12 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Added
+
+- The Agent Dashboard now shows the selected agent's live terminal and can reply
+  without leaving the dashboard, with **Open**, **Stop**, and **Restart** actions for
+  Codex, Claude Code, OpenCode, and custom terminal agents.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added
