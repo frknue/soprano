@@ -386,8 +386,9 @@ navigation always has a working fallback.
 
 ## Settings
 
-`⌘,` opens a four-tab settings screen: **General** (theme, restore-last-session, project
-directories, notifications), **Keyboard Shortcuts**, **Agent Profiles**, and **About**.
+`⌘,` opens a four-tab settings screen: **General** (theme, window bar,
+restore-last-session, project directories, notifications), **Keyboard Shortcuts**,
+**Agent Profiles**, and **About**.
 
 Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
 the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking
@@ -407,6 +408,7 @@ default.
   // gruvbox-dark | catppuccin-mocha | dracula | solarized-dark | nord
   // tokyo-night | atom-one-dark
   "theme": "catppuccin-mocha",
+  "hideWindowBar": false,               // opt in to full-window panes
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
 

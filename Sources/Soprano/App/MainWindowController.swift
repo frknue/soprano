@@ -1,5 +1,27 @@
 import AppKit
 
+@MainActor
+enum MainWindowAppearance {
+    /// Applies the optional compact chrome without changing the outer frame.
+    ///
+    /// AppKit's content safe area tracks these style bits: removing them makes
+    /// the existing full-size content view fill the window, while inserting
+    /// them restores the title bar and traffic-light controls.
+    static func apply(hideWindowBar: Bool, to window: NSWindow) {
+        // Native fullscreen has its own transient style mask. The controller
+        // applies the configured choice after AppKit exits fullscreen instead.
+        guard !window.styleMask.contains(.fullScreen) else { return }
+
+        if hideWindowBar {
+            window.styleMask.remove([.titled, .fullSizeContentView])
+        } else {
+            window.styleMask.insert([.titled, .fullSizeContentView])
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+        }
+    }
+}
+
 final class MainWindowController: NSWindowController {
     let agentManager: AgentManager
     let sessionManager: SessionManager
@@ -43,6 +65,7 @@ final class MainWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
 
         super.init(window: window)
+        applyWindowBarSetting()
 
         let contentVC = MainContentViewController(
             agentManager: agentManager,
@@ -113,6 +136,7 @@ final class MainWindowController: NSWindowController {
             themeManager.setTheme(id: settings.themeId)
         }
 
+        applyWindowBarSetting()
         reloadKeybindingManager()
         // The Commands menu carries key equivalents for the actions AppKit
         // dispatches itself; rebuild it so a rebound chord takes effect and the
@@ -147,6 +171,14 @@ final class MainWindowController: NSWindowController {
         let theme = themeManager.currentTheme
         window?.backgroundColor = theme.backgroundColor
         window?.appearance = NSAppearance(named: .darkAqua)
+    }
+
+    private func applyWindowBarSetting() {
+        guard let window else { return }
+        MainWindowAppearance.apply(
+            hideWindowBar: settings.hideWindowBar,
+            to: window
+        )
     }
 
     private func palettePanel() -> CommandPalettePanel {
@@ -469,6 +501,10 @@ extension MainWindowController: NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         saveWindowFrame()
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
+        applyWindowBarSetting()
     }
 }
 

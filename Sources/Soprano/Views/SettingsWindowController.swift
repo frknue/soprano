@@ -52,6 +52,7 @@ final class SettingsViewController: NSViewController {
     private var tabButtons: [SettingsTab: NSButton] = [:]
 
     private var themePopup: NSPopUpButton?
+    private var hideWindowBarButton: NSButton?
     private var restoreSessionButton: NSButton?
     private var notificationSoundButton: NSButton?
     private var notificationStatusLabel: NSTextField?
@@ -470,7 +471,10 @@ final class SettingsViewController: NSViewController {
 
         addConfigFileCard()
 
-        let (appearanceCard, appearanceStack) = makeSectionCard(title: "Appearance", subtitle: "Switch between available app themes.")
+        let (appearanceCard, appearanceStack) = makeSectionCard(
+            title: "Appearance",
+            subtitle: "Choose an app theme and how much macOS window chrome to show."
+        )
         let themeRow = NSStackView()
         themeRow.orientation = .horizontal
         themeRow.alignment = .centerY
@@ -494,6 +498,25 @@ final class SettingsViewController: NSViewController {
         themeRow.addArrangedSubview(popup)
         popup.widthAnchor.constraint(equalToConstant: 230).isActive = true
         appearanceStack.addArrangedSubview(themeRow)
+
+        let hideWindowBarButton = NSButton(
+            checkboxWithTitle: "Hide window bar",
+            target: self,
+            action: #selector(hideWindowBarChanged(_:))
+        )
+        hideWindowBarButton.state = settings.hideWindowBar ? .on : .off
+        hideWindowBarButton.contentTintColor = currentTheme.colors.accent
+        hideWindowBarButton.attributedTitle = NSAttributedString(
+            string: "Hide window bar",
+            attributes: [
+                .foregroundColor: currentTheme.colors.textPrimary,
+                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+            ]
+        )
+        hideWindowBarButton.toolTip =
+            "Hide the title bar and traffic-light controls so panes use the full window"
+        self.hideWindowBarButton = hideWindowBarButton
+        appearanceStack.addArrangedSubview(hideWindowBarButton)
         addContentSubview(appearanceCard, widthInset: -36)
 
         let (sessionCard, sessionStack) = makeSectionCard(title: "Session", subtitle: "Restore workspace state from the previous app launch.")
@@ -790,6 +813,11 @@ final class SettingsViewController: NSViewController {
     @objc private func restoreSessionChanged(_ sender: NSButton) {
         settings.restoreLastSession = sender.state == .on
         configStore.write(settings.restoreLastSession, at: ["restoreLastSession"])
+    }
+
+    @objc private func hideWindowBarChanged(_ sender: NSButton) {
+        settings.hideWindowBar = sender.state == .on
+        configStore.write(settings.hideWindowBar, at: ["hideWindowBar"])
     }
 
     @objc private func notificationSoundChanged(_ sender: NSButton) {

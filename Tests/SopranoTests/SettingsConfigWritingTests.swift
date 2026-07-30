@@ -74,6 +74,22 @@ struct SettingsConfigWritingTests {
         #expect(fileText(store).contains("\"restoreLastSession\": false"))
     }
 
+    @Test func togglingHideWindowBarRewritesItsKeyInTheFile() {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = makeController(store)
+        let checkbox = controls(NSButton.self, in: controller.view)
+            .first { $0.title == "Hide window bar" }
+        #expect(checkbox != nil)
+
+        checkbox?.state = .on
+        send(checkbox!)
+
+        #expect(store.settings.hideWindowBar == true)
+        #expect(fileText(store).contains("\"hideWindowBar\": true"))
+    }
+
     @Test func addingAProjectDirectoryWritesItHomeRelativeAndResolvesItBack() {
         let (store, directory) = makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
