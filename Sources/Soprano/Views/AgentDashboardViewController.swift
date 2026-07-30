@@ -713,7 +713,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         terminalTextView = terminalScrollView.documentView as? NSTextView
         terminalTextView.isEditable = false
         terminalTextView.isSelectable = true
-        terminalTextView.isRichText = false
+        terminalTextView.isRichText = true
         terminalTextView.importsGraphics = false
         terminalTextView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         terminalTextView.textContainerInset = NSSize(width: 10, height: 10)
@@ -825,16 +825,32 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             displayText = terminal.visibleText
         }
 
-        if terminalTextView.string != displayText {
-            terminalTextView.string = displayText
+        let textChanged = terminalTextView.string != displayText
+        let attributedText: NSAttributedString
+        if terminal.isAvailable, !terminal.visibleText.isEmpty {
+            attributedText = AgentOutputHighlighter.highlight(
+                displayText,
+                theme: theme,
+                font: .monospacedSystemFont(ofSize: 11, weight: .regular)
+            )
+        } else {
+            attributedText = NSAttributedString(
+                string: displayText,
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(
+                        ofSize: 11,
+                        weight: .regular
+                    ),
+                    .foregroundColor: theme.colors.textMuted,
+                ]
+            )
+        }
+        terminalTextView.textStorage?.setAttributedString(attributedText)
+        if textChanged {
             terminalTextView.scrollRangeToVisible(
                 NSRange(location: displayText.utf16.count, length: 0)
             )
         }
-        terminalTextView.textColor = terminal.isAvailable
-            && !terminal.visibleText.isEmpty
-            ? theme.colors.textPrimary
-            : theme.colors.textMuted
         terminalStateLabel.stringValue = terminal.isAvailable ? "LIVE" : "UNAVAILABLE"
         terminalStateLabel.textColor = terminal.isAvailable
             ? theme.colors.success

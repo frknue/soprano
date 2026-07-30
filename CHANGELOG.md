@@ -9,6 +9,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Added
+
+- The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
+  flags, diffs, and common fenced-code syntax using the active theme.
+
 ### Changed
 
 - Redesigned the Settings screen: a narrower reading column, section titles above flat

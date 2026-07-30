@@ -271,11 +271,12 @@ Open the **Agent Dashboard** from the sidebar chart button, the **Commands** men
 in an error state across every logical window. Entries are ordered by urgency, update
 from the same lifecycle events as pane headers and notifications, and show elapsed
 runtime and working directory. Selecting an entry opens a live terminal inspector with
-**Reply**, **Open**, **Stop**, and **Restart** controls; replies are available while the
-agent is working, ready, waiting for input, or in an error state and are sent to that exact
-pane tab. Use `J` / `K` or the arrow keys to move through agents, `R` to focus the reply
-field, `Return` to open the selected agent, and `Esc` to close the dashboard without
-changing the active agent.
+theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code, plus
+**Reply**, **Open**, **Stop**, and **Restart** controls. Replies are available while the
+agent is working, ready, waiting for input, or in an error state and are sent to that
+exact pane tab. Use `J` / `K` or the arrow keys to move through agents, `R` to focus the
+reply field, `Return` to open the selected agent, and `Esc` to close the dashboard
+without changing the active agent.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow
