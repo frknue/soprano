@@ -7,6 +7,7 @@ import Foundation
 /// user should never have to paste a complete document to change one value.
 struct SopranoConfig: Codable, Equatable {
     var theme: String?
+    var hideWindowBar: Bool?
     var restoreLastSession: Bool?
     var projectDirectories: [String]?
     var notifications: Notifications?
@@ -164,6 +165,10 @@ extension SopranoConfig {
 
         if let restoreLastSession {
             settings.restoreLastSession = restoreLastSession
+        }
+
+        if let hideWindowBar {
+            settings.hideWindowBar = hideWindowBar
         }
 
         if let sound = notifications?.sound {

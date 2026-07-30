@@ -8,6 +8,7 @@ import Foundation
 struct AppSettings: Codable, Equatable {
     var restoreLastSession: Bool
     var themeId: String
+    var hideWindowBar: Bool
     var projectDirectories: [String]
     /// Off by default. A pane that wants you is already announced by the banner,
     /// the unread ring, and the pane header; adding a chime to every finished
@@ -17,6 +18,7 @@ struct AppSettings: Codable, Equatable {
     static let defaultSettings = AppSettings(
         restoreLastSession: true,
         themeId: "gruvbox-dark",
+        hideWindowBar: false,
         projectDirectories: [],
         notificationSound: false
     )
@@ -32,6 +34,8 @@ struct AppSettings: Codable, Equatable {
             ?? defaults.restoreLastSession
         themeId = try container.decodeIfPresent(String.self, forKey: .themeId)
             ?? defaults.themeId
+        hideWindowBar = try container.decodeIfPresent(Bool.self, forKey: .hideWindowBar)
+            ?? defaults.hideWindowBar
         projectDirectories = try container.decodeIfPresent([String].self, forKey: .projectDirectories)
             ?? defaults.projectDirectories
         notificationSound = try container.decodeIfPresent(Bool.self, forKey: .notificationSound)
@@ -41,11 +45,13 @@ struct AppSettings: Codable, Equatable {
     init(
         restoreLastSession: Bool,
         themeId: String,
+        hideWindowBar: Bool,
         projectDirectories: [String],
         notificationSound: Bool
     ) {
         self.restoreLastSession = restoreLastSession
         self.themeId = themeId
+        self.hideWindowBar = hideWindowBar
         self.projectDirectories = projectDirectories
         self.notificationSound = notificationSound
     }

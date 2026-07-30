@@ -127,6 +127,10 @@ enum ConfigFile {
           // Color theme: \(themes)
           "theme": "\(settings.themeId)",
 
+          // Remove the macOS title bar and window controls so panes can use
+          // the full window. Off by default.
+          "hideWindowBar": \(settings.hideWindowBar),
+
           // Restore the previous workspace on launch.
           "restoreLastSession": \(settings.restoreLastSession),
 

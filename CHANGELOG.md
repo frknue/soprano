@@ -9,6 +9,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Added
+
+- **Settings ▸ General ▸ Appearance** can hide the macOS window bar and its controls,
+  letting panes use the full window; the standard bar remains visible by default.
+
 ## [0.4.0] - 2026-07-29
 
 ### Added
