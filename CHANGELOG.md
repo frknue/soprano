@@ -9,6 +9,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+### Changed
+
+- Redesigned the Settings screen: a narrower reading column, section titles above flat
+  cards, aligned label/control rows, keyboard shortcuts drawn as per-key keycaps with
+  the prefix step highlighted in the accent color, and buttons that match the active
+  theme.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added

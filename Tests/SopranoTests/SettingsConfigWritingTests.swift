@@ -63,8 +63,10 @@ struct SettingsConfigWritingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = makeController(store)
+        // Checkboxes sit at the trailing edge of a labeled row, so the
+        // accessibility label is what names them now.
         let checkbox = controls(NSButton.self, in: controller.view)
-            .first { $0.title == "Restore Last Session" }
+            .first { $0.accessibilityLabel() == "Restore last session" }
         #expect(checkbox != nil)
 
         checkbox?.state = .off
@@ -80,7 +82,7 @@ struct SettingsConfigWritingTests {
 
         let controller = makeController(store)
         let checkbox = controls(NSButton.self, in: controller.view)
-            .first { $0.title == "Hide window bar" }
+            .first { $0.accessibilityLabel() == "Hide window bar" }
         #expect(checkbox != nil)
 
         checkbox?.state = .on

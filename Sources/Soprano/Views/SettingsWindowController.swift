@@ -162,8 +162,8 @@ final class SettingsViewController: NSViewController {
         contentStack = NSStackView()
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 10
-        contentStack.edgeInsets = NSEdgeInsets(top: 18, left: 18, bottom: 18, right: 18)
+        contentStack.spacing = 24
+        contentStack.edgeInsets = NSEdgeInsets(top: 24, left: 18, bottom: 28, right: 18)
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         scrollDocumentView.addSubview(contentStack)
 
@@ -214,7 +214,9 @@ final class SettingsViewController: NSViewController {
             contentStack.trailingAnchor.constraint(
                 lessThanOrEqualTo: scrollDocumentView.trailingAnchor
             ),
-            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 960),
+            // A settings form is a reading column, not a canvas: capping the
+            // measure keeps labels and their controls near each other.
+            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: 660),
             fillDocumentWidth,
             contentStack.topAnchor.constraint(equalTo: scrollDocumentView.topAnchor),
             contentStack.bottomAnchor.constraint(equalTo: scrollDocumentView.bottomAnchor),
@@ -265,7 +267,7 @@ final class SettingsViewController: NSViewController {
 
     private func styleTabButton(_ button: NSButton, tab: SettingsTab, active: Bool) {
         let theme = currentTheme
-        button.layer?.backgroundColor = active ? theme.colors.accent.withAlphaComponent(0.22).cgColor : NSColor.clear.cgColor
+        button.layer?.backgroundColor = active ? theme.colors.bgSelected.cgColor : NSColor.clear.cgColor
         button.contentTintColor = active ? theme.colors.accent : theme.colors.textMuted
         button.attributedTitle = NSAttributedString(
             string: tab.title,
@@ -329,7 +331,7 @@ final class SettingsViewController: NSViewController {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
         titleLabel.textColor = currentTheme.colors.textPrimary
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
@@ -348,7 +350,7 @@ final class SettingsViewController: NSViewController {
 
             subtitleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             subtitleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
             subtitleLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
 
@@ -362,7 +364,37 @@ final class SettingsViewController: NSViewController {
         )
     }
 
+    /// A titled settings section: an uppercase monospaced eyebrow and optional
+    /// subtitle sit *above* a flat card, so the section name provides hierarchy
+    /// instead of competing with the controls inside the box.
     private func makeSectionCard(title: String, subtitle: String? = nil) -> (NSView, NSStackView) {
+        let container = NSStackView()
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 8
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let eyebrow = NSTextField(labelWithString: title)
+        eyebrow.attributedStringValue = NSAttributedString(
+            string: title.uppercased(),
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: currentTheme.colors.textMuted,
+                .kern: 1.3,
+            ]
+        )
+        container.addArrangedSubview(eyebrow)
+
+        if let subtitle, !subtitle.isEmpty {
+            let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
+            subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+            subtitleLabel.textColor = currentTheme.colors.textMuted
+            subtitleLabel.maximumNumberOfLines = 0
+            container.addArrangedSubview(subtitleLabel)
+            container.setCustomSpacing(3, after: eyebrow)
+            subtitleLabel.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        }
+
         let card = NSView()
         card.wantsLayer = true
         card.layer?.cornerRadius = 10
@@ -370,27 +402,16 @@ final class SettingsViewController: NSViewController {
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
         card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
+        container.addArrangedSubview(card)
+        card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.textColor = currentTheme.colors.textPrimary
-        stack.addArrangedSubview(titleLabel)
-
-        if let subtitle, !subtitle.isEmpty {
-            let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-            subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
-            subtitleLabel.textColor = currentTheme.colors.textMuted
-            subtitleLabel.maximumNumberOfLines = 0
-            stack.addArrangedSubview(subtitleLabel)
-        }
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
@@ -398,7 +419,7 @@ final class SettingsViewController: NSViewController {
             stack.topAnchor.constraint(equalTo: card.topAnchor),
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
-        return (card, stack)
+        return (container, stack)
     }
 
     private func addContentSubview(_ view: NSView, widthInset: CGFloat? = nil) {
@@ -408,11 +429,61 @@ final class SettingsViewController: NSViewController {
         }
     }
 
-    private func makeFieldLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = currentTheme.colors.textMuted
-        return label
+    /// A System Settings-style form row: label on the left, control pinned to
+    /// the trailing edge, so every card shares one alignment line.
+    private func makeSettingRow(label: String, control: NSView) -> NSView {
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let labelField = NSTextField(labelWithString: label)
+        labelField.font = .systemFont(ofSize: 12.5, weight: .regular)
+        labelField.textColor = currentTheme.colors.textPrimary
+        labelField.lineBreakMode = .byTruncatingTail
+        labelField.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(labelField)
+
+        control.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(control)
+
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
+            labelField.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            labelField.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            control.leadingAnchor.constraint(
+                greaterThanOrEqualTo: labelField.trailingAnchor,
+                constant: 16
+            ),
+            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 2),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor, constant: 2),
+        ])
+        return row
+    }
+
+    /// Adds rows to a card stack separated by inset hairlines, each spanning
+    /// the card's content width.
+    private func addSettingRows(_ rows: [NSView], to stack: NSStackView) {
+        for (index, row) in rows.enumerated() {
+            if index > 0 {
+                let separator = makeHairline()
+                stack.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(
+                    equalTo: stack.widthAnchor,
+                    constant: -28
+                ).isActive = true
+            }
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+        }
+    }
+
+    private func makeCheckbox(action: Selector, isOn: Bool, accessibilityLabel: String) -> NSButton {
+        let box = NSButton(checkboxWithTitle: "", target: self, action: action)
+        box.state = isOn ? .on : .off
+        box.contentTintColor = currentTheme.colors.accent
+        box.setAccessibilityLabel(accessibilityLabel)
+        return box
     }
 
     private func makeTextField(value: String) -> NSTextField {
@@ -456,11 +527,36 @@ final class SettingsViewController: NSViewController {
         return Int(field.stringValue)
     }
 
+    /// A flat, theme-derived button: the stock Aqua bezel is the one control
+    /// that ignores the app theme entirely, so buttons draw their own surface.
     private func makeActionButton(title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
+        let button = PaddedFlatButton(title: title, target: self, action: action)
+        button.isBordered = false
+        button.setButtonType(.momentaryPushIn)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
+        button.layer?.borderWidth = 1
+        button.layer?.backgroundColor = currentTheme.colors.bgOverlay.withAlphaComponent(0.6).cgColor
+        button.layer?.borderColor = currentTheme.colors.borderStrong.withAlphaComponent(0.7).cgColor
+        button.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
+                .foregroundColor: currentTheme.colors.textPrimary,
+            ]
+        )
         button.translatesAutoresizingMaskIntoConstraints = false
+        button.heightAnchor.constraint(equalToConstant: 26).isActive = true
         return button
+    }
+
+    private func makeHairline() -> NSView {
+        let separator = NSView()
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = currentTheme.colors.borderSubtle.withAlphaComponent(0.7).cgColor
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        return separator
     }
 
     private func buildGeneralTab() {
@@ -471,19 +567,8 @@ final class SettingsViewController: NSViewController {
 
         addConfigFileCard()
 
-        let (appearanceCard, appearanceStack) = makeSectionCard(
-            title: "Appearance",
-            subtitle: "Choose an app theme and how much macOS window chrome to show."
-        )
-        let themeRow = NSStackView()
-        themeRow.orientation = .horizontal
-        themeRow.alignment = .centerY
-        themeRow.distribution = .fill
-        themeRow.spacing = 10
-
-        let themeLabel = makeFieldLabel("Theme")
-        themeLabel.setContentHuggingPriority(.required, for: .horizontal)
-        themeRow.addArrangedSubview(themeLabel)
+        let (appearanceCard, appearanceStack) = makeSectionCard(title: "Appearance")
+        appearanceStack.spacing = 4
 
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
         popup.target = self
@@ -495,66 +580,53 @@ final class SettingsViewController: NSViewController {
             popup.selectItem(at: selectedIndex)
         }
         themePopup = popup
-        themeRow.addArrangedSubview(popup)
-        popup.widthAnchor.constraint(equalToConstant: 230).isActive = true
-        appearanceStack.addArrangedSubview(themeRow)
+        popup.widthAnchor.constraint(equalToConstant: 190).isActive = true
 
-        let hideWindowBarButton = NSButton(
-            checkboxWithTitle: "Hide window bar",
-            target: self,
-            action: #selector(hideWindowBarChanged(_:))
+        let hideWindowBarBox = makeCheckbox(
+            action: #selector(hideWindowBarChanged(_:)),
+            isOn: settings.hideWindowBar,
+            accessibilityLabel: "Hide window bar"
         )
-        hideWindowBarButton.state = settings.hideWindowBar ? .on : .off
-        hideWindowBarButton.contentTintColor = currentTheme.colors.accent
-        hideWindowBarButton.attributedTitle = NSAttributedString(
-            string: "Hide window bar",
-            attributes: [
-                .foregroundColor: currentTheme.colors.textPrimary,
-                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-            ]
-        )
-        hideWindowBarButton.toolTip =
+        self.hideWindowBarButton = hideWindowBarBox
+        let hideWindowBarRow = makeSettingRow(label: "Hide window bar", control: hideWindowBarBox)
+        hideWindowBarRow.toolTip =
             "Hide the title bar and traffic-light controls so panes use the full window"
-        self.hideWindowBarButton = hideWindowBarButton
-        appearanceStack.addArrangedSubview(hideWindowBarButton)
+
+        addSettingRows(
+            [
+                makeSettingRow(label: "Theme", control: popup),
+                hideWindowBarRow,
+            ],
+            to: appearanceStack
+        )
         addContentSubview(appearanceCard, widthInset: -36)
 
-        let (sessionCard, sessionStack) = makeSectionCard(title: "Session", subtitle: "Restore workspace state from the previous app launch.")
-        let restoreButton = NSButton(checkboxWithTitle: "Restore Last Session", target: self, action: #selector(restoreSessionChanged(_:)))
-        restoreButton.state = settings.restoreLastSession ? .on : .off
-        restoreButton.contentTintColor = currentTheme.colors.accent
-        restoreButton.attributedTitle = NSAttributedString(
-            string: "Restore Last Session",
-            attributes: [
-                .foregroundColor: currentTheme.colors.textPrimary,
-                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-            ]
+        let (sessionCard, sessionStack) = makeSectionCard(title: "Session")
+        sessionStack.spacing = 4
+        let restoreBox = makeCheckbox(
+            action: #selector(restoreSessionChanged(_:)),
+            isOn: settings.restoreLastSession,
+            accessibilityLabel: "Restore last session"
         )
-        restoreSessionButton = restoreButton
-        sessionStack.addArrangedSubview(restoreButton)
+        restoreSessionButton = restoreBox
+        addSettingRows(
+            [makeSettingRow(label: "Restore workspace from the previous launch", control: restoreBox)],
+            to: sessionStack
+        )
         addContentSubview(sessionCard, widthInset: -36)
 
         let (notificationCard, notificationStack) = makeSectionCard(
             title: "Notifications",
             subtitle: "Banners for panes that are not focused, named window ▸ pane."
         )
+        notificationStack.spacing = 4
 
-        let soundButton = NSButton(
-            checkboxWithTitle: "Play a sound",
-            target: self,
-            action: #selector(notificationSoundChanged(_:))
+        let soundBox = makeCheckbox(
+            action: #selector(notificationSoundChanged(_:)),
+            isOn: settings.notificationSound,
+            accessibilityLabel: "Play a sound"
         )
-        soundButton.state = settings.notificationSound ? .on : .off
-        soundButton.contentTintColor = currentTheme.colors.accent
-        soundButton.attributedTitle = NSAttributedString(
-            string: "Play a sound",
-            attributes: [
-                .foregroundColor: currentTheme.colors.textPrimary,
-                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
-            ]
-        )
-        notificationSoundButton = soundButton
-        notificationStack.addArrangedSubview(soundButton)
+        notificationSoundButton = soundBox
 
         // Permission lives in System Settings, and macOS only ever prompts
         // once. When it has been refused the app can only say so and offer the
@@ -572,28 +644,39 @@ final class SettingsViewController: NSViewController {
         notificationStatusLabel = statusLabel
         statusRow.addArrangedSubview(statusLabel)
 
-        let fixButton = NSButton(
+        let fixButton = makeActionButton(
             title: "Open System Settings",
-            target: self,
             action: #selector(openNotificationSystemSettings)
         )
-        fixButton.bezelStyle = .rounded
-        fixButton.controlSize = .small
         fixButton.isHidden = true
         notificationFixButton = fixButton
         statusRow.addArrangedSubview(fixButton)
 
-        notificationStack.addArrangedSubview(statusRow)
+        addSettingRows(
+            [
+                makeSettingRow(label: "Play a sound", control: soundBox),
+                statusRow,
+            ],
+            to: notificationStack
+        )
         addContentSubview(notificationCard, widthInset: -36)
         refreshNotificationAuthorizationRow()
 
-        let (projectCard, projectStack) = makeSectionCard(title: "Project Directories", subtitle: "Directories available to project-aware features.")
+        let (projectCard, projectStack) = makeSectionCard(
+            title: "Project Directories",
+            subtitle: "Directories available to project-aware features."
+        )
+        projectStack.spacing = 4
         let listStack = NSStackView()
         listStack.orientation = .vertical
         listStack.alignment = .leading
-        listStack.spacing = 6
+        listStack.spacing = 4
         projectDirectoriesStack = listStack
         projectStack.addArrangedSubview(listStack)
+        listStack.widthAnchor.constraint(
+            equalTo: projectStack.widthAnchor,
+            constant: -28
+        ).isActive = true
         rebuildProjectDirectoriesList()
 
         let addRow = NSStackView()
@@ -603,49 +686,65 @@ final class SettingsViewController: NSViewController {
 
         let input = makeTextField(value: "")
         input.placeholderString = "Folder path"
+        input.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         input.target = self
         input.action = #selector(addProjectDirectory)
         input.cell?.sendsActionOnEndEditing = false
+        input.setContentHuggingPriority(.defaultLow, for: .horizontal)
         projectDirectoryInput = input
         addRow.addArrangedSubview(input)
 
-        let browseButton = makeActionButton(title: "Browse", action: #selector(browseProjectDirectory))
+        let browseButton = makeActionButton(title: "Browse…", action: #selector(browseProjectDirectory))
         addRow.addArrangedSubview(browseButton)
 
         let addButton = makeActionButton(title: "Add", action: #selector(addProjectDirectory))
         addRow.addArrangedSubview(addButton)
+
         projectStack.addArrangedSubview(addRow)
+        addRow.widthAnchor.constraint(equalTo: projectStack.widthAnchor, constant: -28).isActive = true
+        input.heightAnchor.constraint(equalToConstant: 24).isActive = true
 
         addContentSubview(projectCard, widthInset: -36)
 
-        let (keybindingCard, keybindingStack) = makeSectionCard(title: "Keybinding Behavior", subtitle: "Adjust prefix trigger and pane resize granularity.")
-        let grid = NSGridView(views: [
-            [makeFieldLabel("Prefix Key"), makeTextField(value: keybindingConfig.prefixKey)],
-            [makeFieldLabel("Prefix Timeout (ms)"), makeNumberField(value: "\(keybindingConfig.prefixTimeoutMs)")],
-            [makeFieldLabel("Resize Step (%)"), makeNumberField(value: "\(Int(keybindingConfig.resizeTickPercent))")],
-        ])
-        grid.rowSpacing = 8
-        grid.columnSpacing = 10
-        grid.translatesAutoresizingMaskIntoConstraints = false
-        keybindingStack.addArrangedSubview(grid)
+        let (keybindingCard, keybindingStack) = makeSectionCard(
+            title: "Keybinding Behavior",
+            subtitle: "Adjust prefix trigger and pane resize granularity."
+        )
+        keybindingStack.spacing = 4
 
-        if let prefixField = (grid.cell(atColumnIndex: 1, rowIndex: 0).contentView as? NSTextField),
-           let timeoutField = (grid.cell(atColumnIndex: 1, rowIndex: 1).contentView as? NSTextField),
-           let resizeField = (grid.cell(atColumnIndex: 1, rowIndex: 2).contentView as? NSTextField) {
-            prefixKeyField = prefixField
-            prefixTimeoutField = timeoutField
-            resizeStepField = resizeField
+        let prefixField = makeTextField(value: keybindingConfig.prefixKey)
+        prefixField.alignment = .center
+        prefixField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        prefixField.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        prefixField.target = self
+        prefixField.action = #selector(prefixKeyCommitted(_:))
+        prefixField.cell?.sendsActionOnEndEditing = true
+        prefixKeyField = prefixField
 
-            prefixField.target = self
-            prefixField.action = #selector(prefixKeyCommitted(_:))
-            prefixField.cell?.sendsActionOnEndEditing = true
-            timeoutField.target = self
-            timeoutField.action = #selector(prefixTimeoutCommitted(_:))
-            timeoutField.cell?.sendsActionOnEndEditing = true
-            resizeField.target = self
-            resizeField.action = #selector(resizeStepCommitted(_:))
-            resizeField.cell?.sendsActionOnEndEditing = true
-        }
+        let timeoutField = makeNumberField(value: "\(keybindingConfig.prefixTimeoutMs)")
+        timeoutField.alignment = .right
+        timeoutField.widthAnchor.constraint(equalToConstant: 84).isActive = true
+        timeoutField.target = self
+        timeoutField.action = #selector(prefixTimeoutCommitted(_:))
+        timeoutField.cell?.sendsActionOnEndEditing = true
+        prefixTimeoutField = timeoutField
+
+        let resizeField = makeNumberField(value: "\(Int(keybindingConfig.resizeTickPercent))")
+        resizeField.alignment = .right
+        resizeField.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        resizeField.target = self
+        resizeField.action = #selector(resizeStepCommitted(_:))
+        resizeField.cell?.sendsActionOnEndEditing = true
+        resizeStepField = resizeField
+
+        addSettingRows(
+            [
+                makeSettingRow(label: "Prefix key", control: prefixField),
+                makeSettingRow(label: "Prefix timeout (ms)", control: timeoutField),
+                makeSettingRow(label: "Resize step (%)", control: resizeField),
+            ],
+            to: keybindingStack
+        )
 
         addContentSubview(keybindingCard, widthInset: -36)
     }
@@ -660,7 +759,9 @@ final class SettingsViewController: NSViewController {
         )
 
         for issue in configStore.issues {
-            stack.addArrangedSubview(makeIssueRow(issue))
+            let row = makeIssueRow(issue)
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
         }
 
         let buttonRow = NSStackView()
@@ -745,12 +846,13 @@ final class SettingsViewController: NSViewController {
         }
 
         for (index, directory) in directories.enumerated() {
+            if index > 0 {
+                let separator = makeHairline()
+                list.addArrangedSubview(separator)
+                separator.widthAnchor.constraint(equalTo: list.widthAnchor).isActive = true
+            }
+
             let row = NSView()
-            row.wantsLayer = true
-            row.layer?.cornerRadius = 6
-            row.layer?.borderWidth = 1
-            row.layer?.backgroundColor = currentTheme.colors.bgRaised.cgColor
-            row.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
             row.translatesAutoresizingMaskIntoConstraints = false
 
             var isDirectory: ObjCBool = false
@@ -762,7 +864,7 @@ final class SettingsViewController: NSViewController {
             let pathLabel = NSTextField(
                 labelWithString: isReachable ? directory : "\(directory)  ·  not found"
             )
-            pathLabel.font = .systemFont(ofSize: 11, weight: .regular)
+            pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             pathLabel.textColor = isReachable
                 ? currentTheme.colors.textPrimary
                 : currentTheme.colors.textMuted
@@ -771,7 +873,15 @@ final class SettingsViewController: NSViewController {
             row.addSubview(pathLabel)
 
             let removeButton = NSButton(title: "Remove", target: self, action: #selector(removeProjectDirectory(_:)))
-            removeButton.bezelStyle = .inline
+            removeButton.isBordered = false
+            removeButton.setButtonType(.momentaryPushIn)
+            removeButton.attributedTitle = NSAttributedString(
+                string: "Remove",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                    .foregroundColor: currentTheme.colors.textMuted,
+                ]
+            )
             removeButton.tag = index
             removeButton.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(removeButton)
@@ -780,16 +890,15 @@ final class SettingsViewController: NSViewController {
 
             NSLayoutConstraint.activate([
                 row.widthAnchor.constraint(equalTo: list.widthAnchor),
-                row.heightAnchor.constraint(equalToConstant: 32),
+                row.heightAnchor.constraint(equalToConstant: 26),
 
-                pathLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+                pathLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor),
                 pathLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
                 pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: removeButton.leadingAnchor, constant: -8),
 
-                removeButton.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
+                removeButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
                 removeButton.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             ])
-
         }
     }
 
@@ -1006,30 +1115,26 @@ final class SettingsViewController: NSViewController {
 
             let (card, stack) = makeSectionCard(title: groupTitle)
             stack.spacing = 0
-            if let titleLabel = stack.arrangedSubviews.first {
-                stack.setCustomSpacing(8, after: titleLabel)
-            }
 
             for (index, entry) in rows.enumerated() {
                 let (binding, isDisabled) = entry
                 if index > 0 {
-                    let separator = makeShortcutSeparator()
+                    let separator = makeHairline()
                     stack.addArrangedSubview(separator)
                     separator.widthAnchor.constraint(
                         equalTo: stack.widthAnchor,
-                        constant: -24
+                        constant: -28
                     ).isActive = true
                 }
                 let row = makeShortcutRow(
                     action: binding.label,
                     description: "\(binding.id) · \(binding.description)",
-                    mode: isDisabled ? "OFF" : (binding.mode == .direct ? "DIRECT" : "PREFIX"),
-                    keys: isDisabled ? "disabled" : binding.defaultKeys,
+                    keys: binding.defaultKeys,
                     isCustomized: customized.contains(binding.id),
                     isDisabled: isDisabled
                 )
                 stack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24).isActive = true
+                row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
             }
             addContentSubview(card, widthInset: -36)
         }
@@ -1052,7 +1157,6 @@ final class SettingsViewController: NSViewController {
     private func makeShortcutRow(
         action: String,
         description: String,
-        mode: String,
         keys: String,
         isCustomized: Bool = false,
         isDisabled: Bool = false
@@ -1062,7 +1166,9 @@ final class SettingsViewController: NSViewController {
 
         let actionLabel = NSTextField(labelWithString: action)
         actionLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        actionLabel.textColor = currentTheme.colors.textPrimary
+        actionLabel.textColor = isDisabled
+            ? currentTheme.colors.textMuted
+            : currentTheme.colors.textPrimary
         actionLabel.lineBreakMode = .byTruncatingTail
         actionLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(actionLabel)
@@ -1074,73 +1180,120 @@ final class SettingsViewController: NSViewController {
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(descriptionLabel)
 
-        let modeLabel = NSTextField(labelWithString: mode)
-        modeLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
-        modeLabel.textColor = currentTheme.colors.textMuted
-        modeLabel.alignment = .center
-        modeLabel.wantsLayer = true
-        modeLabel.layer?.cornerRadius = 5
-        modeLabel.layer?.backgroundColor = currentTheme.colors.bgRaised.cgColor
-        modeLabel.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(modeLabel)
-
-        // Customized bindings get the stronger tint so a glance down the list
-        // shows what settings.json changed; disabled ones read as inert.
-        let badgeTint = isDisabled
-            ? currentTheme.colors.gray
-            : (isCustomized ? currentTheme.colors.accentStrong : currentTheme.colors.accent)
-
-        let keyBadge = NSTextField(labelWithString: keys)
-        keyBadge.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        keyBadge.textColor = isDisabled ? currentTheme.colors.textMuted : currentTheme.colors.textPrimary
-        keyBadge.alignment = .center
-        keyBadge.wantsLayer = true
-        keyBadge.layer?.cornerRadius = 6
-        keyBadge.layer?.borderWidth = isCustomized && !isDisabled ? 2 : 1
-        keyBadge.layer?.borderColor = badgeTint.withAlphaComponent(0.35).cgColor
-        keyBadge.layer?.backgroundColor = badgeTint.withAlphaComponent(isDisabled ? 0.06 : 0.12).cgColor
-        keyBadge.toolTip = isCustomized ? "Customized in settings.json" : nil
-        keyBadge.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(keyBadge)
+        let chips = makeKeycapChips(keys, isDisabled: isDisabled, isCustomized: isCustomized)
+        row.addSubview(chips)
 
         NSLayoutConstraint.activate([
-            row.heightAnchor.constraint(equalToConstant: 48),
+            row.heightAnchor.constraint(equalToConstant: 46),
 
-            actionLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
+            actionLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             actionLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 7),
             actionLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: modeLabel.leadingAnchor,
+                lessThanOrEqualTo: chips.leadingAnchor,
                 constant: -12
             ),
 
             descriptionLabel.leadingAnchor.constraint(equalTo: actionLabel.leadingAnchor),
             descriptionLabel.topAnchor.constraint(equalTo: actionLabel.bottomAnchor, constant: 2),
             descriptionLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: modeLabel.leadingAnchor,
+                lessThanOrEqualTo: chips.leadingAnchor,
                 constant: -12
             ),
-            descriptionLabel.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -7),
+            descriptionLabel.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -7),
 
-            modeLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            modeLabel.trailingAnchor.constraint(equalTo: keyBadge.leadingAnchor, constant: -8),
-            modeLabel.widthAnchor.constraint(equalToConstant: 58),
-            modeLabel.heightAnchor.constraint(equalToConstant: 20),
-
-            keyBadge.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            keyBadge.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            keyBadge.widthAnchor.constraint(equalToConstant: 112),
-            keyBadge.heightAnchor.constraint(equalToConstant: 24),
+            chips.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            chips.centerYAnchor.constraint(equalTo: row.centerYAnchor),
         ])
         return row
     }
 
-    private func makeShortcutSeparator() -> NSView {
-        let separator = NSView()
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = currentTheme.colors.borderSubtle.withAlphaComponent(0.7).cgColor
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        return separator
+    /// Renders a chord as individual keycaps: "Ctrl+Shift+H" becomes three
+    /// caps, "Prefix → P" keeps the arrow between its two steps and tints the
+    /// Prefix cap in the accent color, which is what marks a prefix chord —
+    /// there is no separate mode badge. Falls back to one cap for chords whose
+    /// key itself contains a separator ("⌘+ / ⌘=").
+    private func makeKeycapChips(_ keys: String, isDisabled: Bool, isCustomized: Bool) -> NSView {
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        if isDisabled {
+            let off = NSTextField(labelWithString: "OFF")
+            off.attributedStringValue = NSAttributedString(
+                string: "OFF",
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
+                    .foregroundColor: currentTheme.colors.textMuted,
+                    .kern: 0.6,
+                ]
+            )
+            off.alignment = .center
+            off.wantsLayer = true
+            off.layer?.cornerRadius = 4
+            off.layer?.backgroundColor = currentTheme.colors.gray.withAlphaComponent(0.18).cgColor
+            off.translatesAutoresizingMaskIntoConstraints = false
+            off.widthAnchor.constraint(
+                equalToConstant: off.intrinsicContentSize.width + 12
+            ).isActive = true
+            off.heightAnchor.constraint(equalToConstant: 17).isActive = true
+            stack.addArrangedSubview(off)
+            return stack
+        }
+
+        if isCustomized {
+            stack.toolTip = "Customized in settings.json"
+        }
+
+        let sequences = keys.components(separatedBy: " → ")
+        for (sequenceIndex, sequence) in sequences.enumerated() {
+            if sequenceIndex > 0 {
+                let arrow = NSTextField(labelWithString: "→")
+                arrow.font = .systemFont(ofSize: 10, weight: .medium)
+                arrow.textColor = currentTheme.colors.textMuted
+                stack.addArrangedSubview(arrow)
+            }
+            let parts = sequence.components(separatedBy: "+").filter { !$0.isEmpty }
+            let caps = parts.isEmpty || parts.joined(separator: "+") != sequence
+                ? [sequence]
+                : parts
+            for cap in caps {
+                stack.addArrangedSubview(makeKeycap(cap, isCustomized: isCustomized))
+            }
+        }
+        return stack
+    }
+
+    private func makeKeycap(_ text: String, isCustomized: Bool) -> NSView {
+        // The prefix step is the one distinction worth color: an accent-tinted
+        // first cap says "wait for the prefix" without a separate badge.
+        let isPrefixCap = text == "Prefix"
+        let highlighted = isCustomized || isPrefixCap
+
+        let label = NSTextField(labelWithString: text)
+        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        label.textColor = highlighted
+            ? currentTheme.colors.accent
+            : currentTheme.colors.textPrimary
+        label.alignment = .center
+        label.wantsLayer = true
+        label.layer?.cornerRadius = 5
+        label.layer?.borderWidth = 1
+        label.layer?.backgroundColor = isPrefixCap
+            ? currentTheme.colors.accent.withAlphaComponent(0.10).cgColor
+            : currentTheme.colors.bgOverlay.withAlphaComponent(0.7).cgColor
+        label.layer?.borderColor = highlighted
+            ? currentTheme.colors.accent.withAlphaComponent(0.5).cgColor
+            : currentTheme.colors.borderStrong.withAlphaComponent(0.8).cgColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            label.widthAnchor.constraint(
+                equalToConstant: max(20, label.intrinsicContentSize.width + 12)
+            ),
+            label.heightAnchor.constraint(equalToConstant: 20),
+        ])
+        return label
     }
 
     private func buildAgentProfilesTab() {
@@ -1198,7 +1351,7 @@ final class SettingsViewController: NSViewController {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         stack.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(stack)
 
@@ -1240,7 +1393,7 @@ final class SettingsViewController: NSViewController {
         description.maximumNumberOfLines = 0
         stack.addArrangedSubview(description)
 
-        let command = NSTextField(labelWithString: "Command: \(profile.command) \(profile.args.joined(separator: " "))")
+        let command = NSTextField(labelWithString: "$ \(profile.command) \(profile.args.joined(separator: " "))")
         command.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         command.textColor = currentTheme.colors.textPrimary
         command.lineBreakMode = .byTruncatingMiddle
@@ -1249,7 +1402,7 @@ final class SettingsViewController: NSViewController {
         let ready = profile.patterns?.ready?.joined(separator: ", ") ?? "-"
         let error = profile.patterns?.error?.joined(separator: ", ") ?? "-"
         let patterns = NSTextField(wrappingLabelWithString: "Patterns\nReady: \(ready)\nError: \(error)")
-        patterns.font = .systemFont(ofSize: 10, weight: .regular)
+        patterns.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
         patterns.textColor = currentTheme.colors.textMuted
         patterns.maximumNumberOfLines = 0
         stack.addArrangedSubview(patterns)
@@ -1315,47 +1468,14 @@ final class SettingsViewController: NSViewController {
         contentStack.addArrangedSubview(hero)
 
         let (quickRefCard, quickRefStack) = makeSectionCard(title: "Quick Reference")
-        let quickRows = quickReferenceBindings()
-        for (key, label) in quickRows {
-            let row = NSView()
-            row.wantsLayer = true
-            row.layer?.cornerRadius = 6
-            row.layer?.backgroundColor = currentTheme.colors.bgRaised.cgColor
-            row.translatesAutoresizingMaskIntoConstraints = false
-
-            let keyLabel = NSTextField(labelWithString: key)
-            keyLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-            keyLabel.textColor = currentTheme.colors.textPrimary
-            keyLabel.alignment = .center
-            keyLabel.wantsLayer = true
-            keyLabel.layer?.cornerRadius = 5
-            keyLabel.layer?.backgroundColor = currentTheme.colors.bgOverlay.cgColor
-            keyLabel.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(keyLabel)
-
-            let actionLabel = NSTextField(labelWithString: label)
-            actionLabel.font = .systemFont(ofSize: 11, weight: .medium)
-            actionLabel.textColor = currentTheme.colors.textMuted
-            actionLabel.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(actionLabel)
-
-            quickRefStack.addArrangedSubview(row)
-
-            NSLayoutConstraint.activate([
-                row.widthAnchor.constraint(equalTo: quickRefStack.widthAnchor, constant: -24),
-                row.heightAnchor.constraint(equalToConstant: 28),
-
-                keyLabel.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
-                keyLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                keyLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
-                keyLabel.heightAnchor.constraint(equalToConstant: 18),
-
-                actionLabel.leadingAnchor.constraint(equalTo: keyLabel.trailingAnchor, constant: 8),
-                actionLabel.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                actionLabel.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            ])
-
+        quickRefStack.spacing = 2
+        let rows = quickReferenceBindings().map { key, label in
+            makeSettingRow(
+                label: label,
+                control: makeKeycapChips(key, isDisabled: false, isCustomized: false)
+            )
         }
+        addSettingRows(rows, to: quickRefStack)
         addContentSubview(quickRefCard, widthInset: -36)
     }
 
@@ -1392,5 +1512,16 @@ private final class SettingsScrollDocumentView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+}
+
+/// A borderless button whose intrinsic size includes horizontal padding, so a
+/// flat layer-drawn surface still gives the title room to breathe. The cell's
+/// default momentary highlight dims the title while pressed.
+private final class PaddedFlatButton: NSButton {
+    override var intrinsicContentSize: NSSize {
+        var size = super.intrinsicContentSize
+        size.width += 20
+        return size
     }
 }
