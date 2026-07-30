@@ -9,6 +9,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-30
+
 ### Added
 
 - **Settings ▸ General ▸ Appearance** can hide the macOS window bar and its controls,
