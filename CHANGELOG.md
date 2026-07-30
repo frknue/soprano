@@ -9,6 +9,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-31
+
 ### Added
 
 - The Agent Dashboard now shows the selected agent's live terminal and can reply
