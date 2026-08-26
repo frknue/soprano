@@ -194,6 +194,27 @@ private struct TerminalCopyModeGridMetrics {
     }
 }
 
+struct TerminalMouseButtonState {
+    private(set) var isLeftButtonPressed = false
+
+    mutating func pressLeftButton() {
+        isLeftButtonPressed = true
+    }
+
+    @discardableResult
+    mutating func releaseLeftButton() -> Bool {
+        let wasPressed = isLeftButtonPressed
+        isLeftButtonPressed = false
+        return wasPressed
+    }
+
+    mutating func reconcile(pressedMouseButtons: Int) -> Bool {
+        guard isLeftButtonPressed, pressedMouseButtons & 1 == 0 else { return false }
+        isLeftButtonPressed = false
+        return true
+    }
+}
+
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
@@ -219,6 +240,7 @@ final class TerminalSurfaceView: NSView {
     private var copyModeGridMetrics: TerminalCopyModeGridMetrics?
     private var copyModeCursorLayer: CALayer?
     private var copyModeLineSelectionMouseHeld = false
+    private var mouseButtonState = TerminalMouseButtonState()
     private var suppressedCopyModeKeyUps: Set<UInt16> = []
 
     init(
@@ -955,9 +977,11 @@ final class TerminalSurfaceView: NSView {
     override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
         if result, let surface {
+            releaseTrackedLeftMouseButton(surface: surface)
             ghostty_surface_set_focus(surface, false)
         }
         if result {
+            mouseButtonState.releaseLeftButton()
             keyEquivalentRouter.reset()
             suppressedCopyModeKeyUps.removeAll()
         }
@@ -1235,10 +1259,12 @@ final class TerminalSurfaceView: NSView {
         onFocusRequested?()
         window?.makeFirstResponder(self)
         sendMousePosition(event, surface: surface)
+        mouseButtonState.pressLeftButton()
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
     }
 
     override func mouseUp(with event: NSEvent) {
+        mouseButtonState.releaseLeftButton()
         guard let surface else {
             super.mouseUp(with: event)
             return
@@ -1250,12 +1276,14 @@ final class TerminalSurfaceView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
     }
 
     override func mouseMoved(with event: NSEvent) {
         guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
     }
 
@@ -1263,25 +1291,30 @@ final class TerminalSurfaceView: NSView {
         super.mouseEntered(with: event)
         guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         guard !copyModeLineSelectionMouseHeld else { return }
-        guard let surface, NSEvent.pressedMouseButtons == 0 else { return }
+        guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
+        guard NSEvent.pressedMouseButtons == 0 else { return }
         ghostty_surface_mouse_pos(surface, -1, -1, modsFromEvent(event))
     }
 
     override func rightMouseDragged(with event: NSEvent) {
         guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
     }
 
     override func otherMouseDragged(with event: NSEvent) {
         guard !copyModeLineSelectionMouseHeld else { return }
         guard let surface else { return }
+        reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
     }
 
@@ -1412,6 +1445,31 @@ final class TerminalSurfaceView: NSView {
             point.x,
             bounds.height - point.y,
             modsFromEvent(event)
+        )
+    }
+
+    private func reconcileMouseButtonState(
+        with event: NSEvent,
+        surface: ghostty_surface_t
+    ) {
+        guard mouseButtonState.reconcile(
+            pressedMouseButtons: NSEvent.pressedMouseButtons
+        ) else { return }
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_LEFT,
+            modsFromEvent(event)
+        )
+    }
+
+    private func releaseTrackedLeftMouseButton(surface: ghostty_surface_t) {
+        guard mouseButtonState.releaseLeftButton() else { return }
+        _ = ghostty_surface_mouse_button(
+            surface,
+            GHOSTTY_MOUSE_RELEASE,
+            GHOSTTY_MOUSE_LEFT,
+            ghostty_input_mods_e(rawValue: GHOSTTY_MODS_NONE.rawValue)
         )
     }
 
@@ -1622,6 +1680,7 @@ final class TerminalSurfaceView: NSView {
     func destroySurface() {
         surfaceDestructionGate.perform {
             finishCopyMode(copySelection: false, scrollToBottom: false)
+            mouseButtonState.releaseLeftButton()
             removeKeyUpMonitor()
             keyEquivalentRouter.reset()
             suppressedCopyModeKeyUps.removeAll()
