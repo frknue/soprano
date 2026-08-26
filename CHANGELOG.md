@@ -21,6 +21,11 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   the prefix step highlighted in the accent color, and buttons that match the active
   theme.
 
+### Fixed
+
+- Moving the pointer between split terminals no longer leaves mouse text selection
+  stuck as though the button were still held.
+
 ## [0.6.0] - 2026-07-31
 
 ### Added
