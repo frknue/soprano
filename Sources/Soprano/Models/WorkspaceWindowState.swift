@@ -17,6 +17,7 @@ struct WorkspaceDepthLayer {
 /// layout, leaving sibling regions visible and alive.
 final class WorkspaceWindowState: Identifiable {
     let id: String
+    let sessionId: String
     var title: String
     var isTitleCustom: Bool
     var isSidebarCollapsed: Bool
@@ -52,6 +53,7 @@ final class WorkspaceWindowState: Identifiable {
 
     init(
         id: String,
+        sessionId: String = TerminalSessionState.defaultID,
         title: String,
         isTitleCustom: Bool = false,
         isSidebarCollapsed: Bool = false,
@@ -59,6 +61,7 @@ final class WorkspaceWindowState: Identifiable {
         activePaneId: String
     ) {
         self.id = id
+        self.sessionId = sessionId
         self.title = title
         self.isTitleCustom = isTitleCustom
         self.isSidebarCollapsed = isSidebarCollapsed
@@ -75,6 +78,7 @@ final class WorkspaceWindowState: Identifiable {
 
     init(
         id: String,
+        sessionId: String = TerminalSessionState.defaultID,
         title: String,
         isTitleCustom: Bool = false,
         isSidebarCollapsed: Bool = false,
@@ -82,6 +86,7 @@ final class WorkspaceWindowState: Identifiable {
         activeDepthLayerIndex: Int
     ) {
         self.id = id
+        self.sessionId = sessionId
         self.title = title
         self.isTitleCustom = isTitleCustom
         self.isSidebarCollapsed = isSidebarCollapsed

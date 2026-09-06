@@ -13,6 +13,7 @@ final class MainContentViewController: NSViewController {
 
     private var sidebarView: SidebarView!
     private var splitTreeView: SplitTreeView!
+    private var windowTabBarView: WindowTabBarView!
     private var statusBarView: StatusBarView!
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var sidebarResizeHandle: SidebarResizeHandleView!
@@ -66,6 +67,10 @@ final class MainContentViewController: NSViewController {
         splitTreeView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(splitTreeView)
 
+        windowTabBarView = WindowTabBarView(agentManager: agentManager, themeManager: themeManager)
+        windowTabBarView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(windowTabBarView)
+
         // Sidebar
         sidebarView = SidebarView(
             agentManager: agentManager,
@@ -114,10 +119,17 @@ final class MainContentViewController: NSViewController {
             sidebarView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
             sidebarWidthConstraint,
 
-            // Split tree: right of sidebar, above status bar
+            // Window tabs remain visible above the terminal layout, including
+            // when the sidebar or native window bar is hidden.
+            windowTabBarView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+            windowTabBarView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            windowTabBarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            windowTabBarView.heightAnchor.constraint(equalToConstant: WindowTabBarView.height),
+
+            // Split tree: right of sidebar, below tabs, above status bar
             splitTreeView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             splitTreeView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            splitTreeView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            splitTreeView.topAnchor.constraint(equalTo: windowTabBarView.bottomAnchor),
             splitTreeView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
 
             // Status bar: full width, bottom
@@ -147,6 +159,18 @@ final class MainContentViewController: NSViewController {
                 : 0
             self.view.layoutSubtreeIfNeeded()
         }
+    }
+
+    func createSession() {
+        sidebarView.promptToCreateSession()
+    }
+
+    func renameActiveSession() {
+        sidebarView.promptToRenameSession()
+    }
+
+    func closeActiveSession() {
+        sidebarView.promptToCloseSession()
     }
 
     // MARK: - Sidebar Resizing
@@ -365,6 +389,7 @@ final class MainContentViewController: NSViewController {
         applyTheme()
         sidebarView.refreshTheme()
         splitTreeView.refreshTheme()
+        windowTabBarView.refreshTheme()
         statusBarView.refreshTheme()
         dashboardViewController?.apply(theme: themeManager.currentTheme)
     }

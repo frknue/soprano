@@ -34,6 +34,8 @@ enum DefaultKeybindings {
             KeyBinding(id: "resize-right", label: "Grow Right", description: "Grow the active pane to the right", category: .layout, defaultKeys: "Prefix → L", mode: .prefix, key: "l"),
 
             // Layout (prefix)
+            KeyBinding(id: "new-session", label: "New Session…", description: "Create a named session with its own windows", category: .general, defaultKeys: "Prefix → Shift+C", mode: .prefix, key: "c", shift: true),
+            KeyBinding(id: "find-session", label: "Switch Session…", description: "Switch between running sessions", category: .navigation, defaultKeys: "Prefix → S", mode: .prefix, key: "s"),
             KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → -", mode: .prefix, key: "-"),
             KeyBinding(id: "split-vertical", label: "Split Vertical", description: "Split the active pane vertically", category: .layout, defaultKeys: "Prefix → |", mode: .prefix, key: "|", shift: true),
             KeyBinding(id: "close-pane", label: "Close Pane", description: "Close the active pane", category: .layout, defaultKeys: "Prefix → Q", mode: .prefix, key: "q"),
@@ -67,7 +69,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "new-terminal", label: "New Terminal", description: "Open a new terminal pane", category: .general, defaultKeys: "⌘T", mode: .direct, key: "t", meta: true),
             KeyBinding(id: "new-browser", label: "New Browser", description: "Split a browser pane to the right", category: .general, defaultKeys: "⌘B", mode: .direct, key: "b", meta: true),
             KeyBinding(id: "close-active", label: "Close Pane", description: "Close the active pane", category: .general, defaultKeys: "⌘W", mode: .direct, key: "w", meta: true),
-            KeyBinding(id: "save-session", label: "Save Session As…", description: "Save the current workspace as a named session", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
+            KeyBinding(id: "save-session", label: "Save Workspace As…", description: "Save all sessions and their layouts as a workspace snapshot", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
             KeyBinding(id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar", category: .general, defaultKeys: "⌘E", mode: .direct, key: "e", meta: true),
             KeyBinding(id: "open-settings", label: "Settings", description: "Open the settings page", category: .general, defaultKeys: "⌘,", mode: .direct, key: ",", meta: true),
             KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘+ / ⌘=", mode: .direct, key: "=", meta: true),

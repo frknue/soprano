@@ -42,6 +42,8 @@ struct PaneNavigationClaimRegistry {
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
     func keybindingSaveSession()
+    func keybindingNewSession()
+    func keybindingFindSession()
     func keybindingRenameWindow()
     func keybindingOpenSettings()
     func keybindingOpenAgentDashboard()
@@ -471,6 +473,10 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingStartCopyMode() }
         case "new-window-current-directory":
             _ = agentManager.createWindow()
+        case "new-session":
+            invokeDelegate { $0.keybindingNewSession() }
+        case "find-session":
+            invokeDelegate { $0.keybindingFindSession() }
         case "pane-depth-in":
             _ = agentManager.goIn(agentManager.activePaneId)
         case "pane-depth-out":

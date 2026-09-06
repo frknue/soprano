@@ -22,7 +22,8 @@ extension AgentManager {
                         status: agent.status,
                         needsAttention: agent.needsAttention,
                         startedAt: agent.startedAt,
-                        cwd: cwd
+                        cwd: cwd,
+                        sessionName: terminalSessions[terminalWindow.sessionId]?.name
                     )
                 }
             }

@@ -42,7 +42,7 @@ struct ActiveLocationIndicatorTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
 
-        #expect(locationText(in: statusBar) == "Soprano ▸ Claude")
+        #expect(locationText(in: statusBar) == "Session 1 ▸ Soprano ▸ Claude")
     }
 
     @Test func statusBarAppendsTheDepthLayerOnlyForWindowsWithInnerWorkspaces() throws {

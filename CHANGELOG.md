@@ -11,6 +11,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Windows now appear as numbered tabs above the terminals, with the active tab
+  highlighted, clickable switching, a **+** button, and horizontal scrolling when
+  the row fills up. The tabs remain visible with the sidebar or macOS window bar hidden.
+- Named live sessions group windows: create one with `Ctrl+A` then `Shift+C`,
+  switch with `Ctrl+A` then `S` or the sidebar selector, and use `Ctrl+A` then `C`
+  to create windows inside it. Window navigation stays within the current session,
+  and switching sessions preserves their running terminals, layouts, and z-depth.
 - The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
   flags, diffs, and common fenced-code syntax using the active theme.
 
@@ -23,6 +30,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Fixed
 
+- Hiding the window bar no longer stops keyboard input after reopening Soprano,
+  and toggling the setting preserves the focused terminal or input field.
 - Moving the pointer between split terminals no longer leaves mouse text selection
   stuck as though the button were still held.
 

@@ -14,6 +14,11 @@ struct AgentDashboardEntry: Identifiable {
     let needsAttention: Bool
     let startedAt: Date?
     let cwd: String?
+    var sessionName: String? = nil
+
+    var location: String {
+        [sessionName, windowTitle, tabTitle].compactMap { $0 }.joined(separator: " ▸ ")
+    }
 }
 
 /// A point-in-time, presentation-ready view of every attached agent.

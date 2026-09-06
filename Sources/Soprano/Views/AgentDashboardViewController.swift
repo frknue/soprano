@@ -611,7 +611,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         }
 
         titleLabel.stringValue = entry.profileName
-        let location = "\(entry.windowTitle) ▸ \(entry.tabTitle)"
+        let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         locationLabel.stringValue = [location, path]
             .compactMap { $0 }
@@ -1133,7 +1133,7 @@ private final class AgentDashboardRowView: NSControl {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        let location = "\(entry.windowTitle) ▸ \(entry.tabTitle)"
+        let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         let details = [location, path].compactMap { $0 }.joined(separator: "  ·  ")
         let detailLabel = NSTextField(labelWithString: details)

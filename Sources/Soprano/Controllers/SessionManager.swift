@@ -1,6 +1,6 @@
 import Foundation
 
-/// Manages named workspace sessions — save, load, delete.
+/// Manages named workspace snapshots — save, load, delete.
 final class SessionManager: @unchecked Sendable {
     private(set) var sessions: [WorkspaceSession] = []
     private let agentManager: AgentManager
@@ -28,7 +28,8 @@ final class SessionManager: @unchecked Sendable {
             panes: session.panes,
             activePaneId: session.activePaneId,
             windows: session.windows,
-            activeWindowId: session.activeWindowId
+            activeWindowId: session.activeWindowId,
+            terminalSessions: session.terminalSessions
         )
 
         sessions.insert(namedSession, at: 0)

@@ -137,8 +137,11 @@ Launch Soprano, then:
 | *drag a file from Finder onto a terminal* | Its shell-safe path is inserted at the cursor |
 | `⌃A` then `M` | Maximize the active pane, and again to restore it |
 | `⌃A` then `I` | Dive into that pane's private inner workspace; `O` comes back out |
+| `⌃A` then `⇧C` | Create a named session for a separate project |
+| `⌃A` then `C` | Create a window inside the current session; `P` / `N` moves between its windows |
+| `⌃A` then `S` | Switch sessions while their terminals keep running |
 | *hold* `⌃` | The sidebar reveals its window and pane jump hints |
-| *switch away, let an agent finish* | macOS notification titled `window ▸ pane`, plus a blue unread ring on the pane |
+| *switch away, let an agent finish* | macOS notification subtitled `session ▸ window ▸ pane`, plus a blue unread ring on the pane |
 | `⌘P` | Command palette for everything above |
 
 ## Agents that report in
@@ -152,7 +155,7 @@ launchers configure those hooks per launch, without changing your global configu
 - **OpenCode** — a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
 
 When a background agent finishes, macOS shows a notification and the pane gets a blue
-unread ring. The notification is subtitled `window ▸ pane` so it names the location that
+unread ring. The notification is subtitled `session ▸ window ▸ pane` so it names the location that
 wants attention, and its body quotes the agent itself — `Needs input — Drop the legacy
 column? [y/n]` — rather than a generic phrase, so you can often answer without switching
 at all. A pane's banners group together rather than stacking. Clicking one
@@ -209,15 +212,17 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌃A` → `I` / `O` | Go one complete layout in / out on the window z-axis |
 | `⌘W` | Close the active pane |
 
-**Windows and tabs**
+**Sessions, windows, and tabs**
 
 | Shortcut | Action |
 |---|---|
+| `⌃A` → `⇧C` | Create a named session |
+| `⌃A` → `S` | Search and switch sessions |
 | `⌃⇧H` / `⌃⇧L` | Previous / next logical window |
 | `⌃A` → `P` / `N` | Previous / next logical window |
 | `⌃A` → `⇧L` | Jump to the most recently active logical window; press again to toggle back |
 | `⌃1`…`⌃9` | Select logical window 1–9 |
-| `⌃⇧` + the letter shown in the sidebar | Select the matching pane across logical windows |
+| `⌃⇧` + the letter shown in the sidebar | Select the matching pane across windows in the current session |
 | `⌘N` | New logical window |
 | `⌃A` → `C` | New logical window in the active terminal's directory |
 | `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
@@ -243,7 +248,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
-| `⇧⌘S` | Save session as… |
+| `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
 | `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
 | `⌃A` → `⌃A` | Send a literal `⌃A` to the terminal |
@@ -252,16 +257,48 @@ Holding Control reveals the window and pane hints in the sidebar. Pane hints inc
 because they require Control+Shift; unmodified alphabetic Control chords remain available
 to the terminal.
 
+## Sessions and windows
+
+A session is a named group of windows. Each window has its own split panes, tabs,
+and z-depth. Use sessions for separate projects, and windows for the tasks inside
+one project.
+
+The session's windows appear as numbered tabs across the top of the terminal area,
+such as `1:Editor`, `2:Server`, and `3:Logs`. The active tab is highlighted. Click a
+tab to switch windows or **+** to create one. The row scrolls when it fills up and
+keeps the active tab in view as you navigate with the keyboard. It stays visible
+when the sidebar or macOS window bar is hidden.
+
+Press `Ctrl+A`, release it, then press `Shift+C` to create a session. `Ctrl+A` then
+lowercase `c` creates a window inside the current session, starting in the active
+terminal's directory. Move left or right through its windows with `Ctrl+Shift+H/L`
+or `Ctrl+A` then `p/n`. Window numbers (`Ctrl+1`…`9`), pane hints, and `Cmd+F`
+search stay within that session.
+
+Switch sessions with `Ctrl+A` then `s`, or the selector at the top of the sidebar.
+Returning to a session restores its last selected window and focused pane; its
+terminals continue running while you work elsewhere. The selector and command
+palette also offer **New Session…**, **Rename Session…**, and **Close Session…**.
+Closing a session closes all its terminals. Closing its last window creates a
+fresh window in that same session.
+
+Session names, window membership, and layouts restore on the next app launch when
+**Restore workspace from the previous launch** is enabled. Existing saved layouts
+open as one session.
+**Save Workspace As…** (`Shift+Cmd+S`) saves a snapshot of all sessions; the sidebar's
+**Saved Workspaces** menu restores those snapshots. Quitting the app ends terminal
+processes, and restoring a workspace starts new ones.
+
 ## Knowing where you are
 
 The active logical window and pane are marked in three places: the sidebar draws an
 accent rail down the active window and its panes and tints the focused row, the status
-bar names the location as `window ▸ pane · Z<depth>`, and the focused pane carries an
+bar names the location as `session ▸ window ▸ pane · DEPTH n`, and the focused pane carries an
 accent frame while the others keep a hairline border. Panes in inactive windows are
 dimmed. Sidebar rows also show each pane's current git branch, refreshed as `HEAD`
 changes on disk.
 
-Press `⌘F` to search logical windows by window title, pane or tab title, working
+Press `⌘F` to search the current session's windows by window title, pane or tab title, working
 directory, browser URL, or agent name. Window-title matches rank ahead of matches found
 only inside a split pane; selecting a result restores that window's remembered active
 pane.

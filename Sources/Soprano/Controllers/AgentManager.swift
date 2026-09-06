@@ -35,8 +35,12 @@ enum AgentManagerChange: Equatable, Sendable {
 final class AgentManager: @unchecked Sendable {
     private(set) var panes: [String: PaneState] = [:]
     private(set) var windows: [String: WorkspaceWindowState] = [:]
+    private(set) var terminalSessions: [String: TerminalSessionState] = [:]
     private(set) var activeWindowId: String = ""
-    private var lastActiveWindowId: String?
+    var activeSessionId: String {
+        windows[activeWindowId]?.sessionId ?? TerminalSessionState.defaultID
+    }
+    var activeSession: TerminalSessionState? { terminalSessions[activeSessionId] }
     private(set) var activePaneId: String {
         get { windows[activeWindowId]?.activePaneId ?? "" }
         set { windows[activeWindowId]?.activePaneId = newValue }
@@ -94,6 +98,11 @@ final class AgentManager: @unchecked Sendable {
             activePaneId: paneId
         )
         activeWindowId = windowId
+        terminalSessions[TerminalSessionState.defaultID] = TerminalSessionState(
+            id: TerminalSessionState.defaultID,
+            name: "Session 1",
+            activeWindowId: windowId
+        )
 
         ghosttyCloseObserver = NotificationCenter.default.addObserver(
             forName: .ghosttyCloseSurface,
@@ -132,6 +141,73 @@ final class AgentManager: @unchecked Sendable {
         return "window-\(nextId)"
     }
 
+    // MARK: - Live Sessions
+
+    var orderedSessions: [TerminalSessionState] {
+        terminalSessions.values.sorted {
+            (parseIdNumber($0.id) ?? Int.max, $0.id)
+                < (parseIdNumber($1.id) ?? Int.max, $1.id)
+        }
+    }
+
+    var activeSessionWindows: [WorkspaceWindowState] {
+        orderedWindows(in: activeSessionId)
+    }
+
+    func orderedWindows(in sessionId: String) -> [WorkspaceWindowState] {
+        sortedWindows().filter { $0.sessionId == sessionId }
+    }
+
+    @discardableResult
+    func createSession(name: String, cwd: String? = nil) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let workingDirectory = cwd ?? activeWorkingDirectory
+        nextId += 1
+        let sessionId = "session-\(nextId)"
+        terminalSessions[sessionId] = TerminalSessionState(
+            id: sessionId,
+            name: trimmed,
+            activeWindowId: ""
+        )
+        _ = createWindow(in: sessionId, cwd: workingDirectory)
+        return sessionId
+    }
+
+    func activateSession(_ sessionId: String) {
+        guard let session = terminalSessions[sessionId] else { return }
+        activateWindow(session.activeWindowId)
+    }
+
+    func renameSession(_ sessionId: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, terminalSessions[sessionId] != nil else { return }
+        terminalSessions[sessionId]?.name = trimmed
+        notifyChange()
+    }
+
+    func closeSession(_ sessionId: String) {
+        guard terminalSessions[sessionId] != nil else { return }
+        let wasActive = activeSessionId == sessionId
+        for terminalWindow in orderedWindows(in: sessionId) {
+            for paneId in terminalWindow.paneIds {
+                cancelAgentReadinessGenerations(in: paneId)
+                panes.removeValue(forKey: paneId)
+            }
+            windows.removeValue(forKey: terminalWindow.id)
+        }
+        terminalSessions.removeValue(forKey: sessionId)
+        if terminalSessions.isEmpty {
+            _ = createSession(name: "Session 1")
+            return
+        }
+        if wasActive, let nextSession = orderedSessions.first {
+            activeWindowId = nextSession.activeWindowId
+            maximizedPaneId = nil
+        }
+        notifyChange(layoutChanged: true)
+    }
+
     // MARK: - Windows
 
     var activeWorkingDirectory: String? {
@@ -140,7 +216,16 @@ final class AgentManager: @unchecked Sendable {
 
     @discardableResult
     func createWindow(cwd: String? = nil) -> String? {
-        let workingDirectory = cwd ?? activeWorkingDirectory
+        createWindow(in: activeSessionId, cwd: cwd ?? activeWorkingDirectory)
+    }
+
+    @discardableResult
+    private func createWindow(
+        in sessionId: String,
+        cwd workingDirectory: String?,
+        activate: Bool = true
+    ) -> String? {
+        guard terminalSessions[sessionId] != nil else { return nil }
         let windowId = nextWindowId()
         let paneId = nextPaneId()
         let tabId = nextTabId()
@@ -152,15 +237,22 @@ final class AgentManager: @unchecked Sendable {
             cwd: workingDirectory
         )
         panes[paneId] = PaneState(id: paneId, tabs: [tab])
-        let windowTitle = uniqueAutomaticWindowTitle(Self.suggestedWindowTitle(for: tab))
+        let windowTitle = uniqueAutomaticWindowTitle(
+            Self.suggestedWindowTitle(for: tab), in: sessionId
+        )
         windows[windowId] = WorkspaceWindowState(
             id: windowId,
+            sessionId: sessionId,
             title: windowTitle,
             layout: .leaf(paneId),
             activePaneId: paneId
         )
-        _ = setActiveWindow(windowId)
-        maximizedPaneId = nil
+        if activate {
+            _ = setActiveWindow(windowId)
+            maximizedPaneId = nil
+        } else {
+            terminalSessions[sessionId]?.activeWindowId = windowId
+        }
         notifyChange(layoutChanged: true)
         return windowId
     }
@@ -172,7 +264,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     func activateLastWindow() {
-        guard let lastActiveWindowId else { return }
+        guard let lastActiveWindowId = activeSession?.lastActiveWindowId else { return }
         activateWindow(lastActiveWindowId)
     }
 
@@ -185,7 +277,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     func activateWindow(number: Int) {
-        let orderedWindows = sortedWindows()
+        let orderedWindows = activeSessionWindows
         guard number >= 1, number <= orderedWindows.count else { return }
         activateWindow(orderedWindows[number - 1].id)
     }
@@ -203,20 +295,26 @@ final class AgentManager: @unchecked Sendable {
             panes.removeValue(forKey: paneId)
         }
         windows.removeValue(forKey: windowId)
-        if lastActiveWindowId == windowId {
-            lastActiveWindowId = nil
+        let sessionId = terminalWindow.sessionId
+        if terminalSessions[sessionId]?.lastActiveWindowId == windowId {
+            terminalSessions[sessionId]?.lastActiveWindowId = nil
         }
 
-        if windows.isEmpty {
-            _ = createWindow()
+        let remainingWindows = orderedWindows(in: sessionId)
+        if remainingWindows.isEmpty {
+            // Keep the session usable without jumping into another session.
+            _ = createWindow(in: sessionId, cwd: nil, activate: activeWindowId == windowId)
             return
         }
 
-        if activeWindowId == windowId {
-            activeWindowId = sortedWindows().first?.id ?? ""
-            if lastActiveWindowId == activeWindowId {
-                lastActiveWindowId = nil
+        if terminalSessions[sessionId]?.activeWindowId == windowId {
+            terminalSessions[sessionId]?.activeWindowId = remainingWindows[0].id
+            if terminalSessions[sessionId]?.lastActiveWindowId == remainingWindows[0].id {
+                terminalSessions[sessionId]?.lastActiveWindowId = nil
             }
+        }
+        if activeWindowId == windowId {
+            activeWindowId = remainingWindows[0].id
         }
         maximizedPaneId = nil
         notifyChange(layoutChanged: true)
@@ -478,7 +576,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     var paneShortcutAssignments: [(key: String, paneId: String)] {
-        let orderedPaneIds = orderedWindows.flatMap { terminalWindow in
+        let orderedPaneIds = activeSessionWindows.flatMap { terminalWindow in
             orderedPanes(in: terminalWindow.id).map(\.id)
         }
         return zip(Self.paneShortcutKeys, orderedPaneIds).map {
@@ -1115,6 +1213,7 @@ final class AgentManager: @unchecked Sendable {
         let savedWindows = orderedWindows.map { terminalWindow in
             WorkspaceSession.SavedWindow(
                 id: terminalWindow.id,
+                sessionId: terminalWindow.sessionId,
                 title: terminalWindow.title,
                 isTitleCustom: terminalWindow.isTitleCustom,
                 isSidebarCollapsed: terminalWindow.isSidebarCollapsed,
@@ -1141,7 +1240,8 @@ final class AgentManager: @unchecked Sendable {
             panes: savedPanes,
             activePaneId: activePaneId,
             windows: savedWindows,
-            activeWindowId: activeWindowId
+            activeWindowId: activeWindowId,
+            terminalSessions: orderedSessions
         )
     }
 
@@ -1188,6 +1288,11 @@ final class AgentManager: @unchecked Sendable {
             newPanes[savedPane.id] = pane
         }
 
+        var savedSessionsById: [String: TerminalSessionState] = [:]
+        for savedSession in session.terminalSessions ?? [] {
+            savedSessionsById[savedSession.id] = savedSession
+            maxId = max(maxId, parseIdNumber(savedSession.id) ?? 0)
+        }
         var newWindows: [String: WorkspaceWindowState] = [:]
         if let savedWindows = session.windows, !savedWindows.isEmpty {
             for savedWindow in savedWindows {
@@ -1228,6 +1333,9 @@ final class AgentManager: @unchecked Sendable {
                 guard let firstPaneId = restoredDepthLayers.first?.layout?.firstLeaf else {
                     continue
                 }
+                let sessionId = savedWindow.sessionId.flatMap {
+                    savedSessionsById[$0]?.id
+                } ?? TerminalSessionState.defaultID
                 let wasGeneratedPlaceholder = Self.isGeneratedWindowTitle(savedWindow.title)
                 let isTitleCustom = savedWindow.isTitleCustom ?? !wasGeneratedPlaceholder
                 let baseTitle = wasGeneratedPlaceholder
@@ -1237,10 +1345,13 @@ final class AgentManager: @unchecked Sendable {
                     ? savedWindow.title
                     : Self.uniqueAutomaticWindowTitle(
                         baseTitle,
-                        existingTitles: newWindows.values.map(\.title)
+                        existingTitles: newWindows.values
+                            .filter { $0.sessionId == sessionId }
+                            .map(\.title)
                     )
                 newWindows[savedWindow.id] = WorkspaceWindowState(
                     id: savedWindow.id,
+                    sessionId: sessionId,
                     title: restoredTitle,
                     isTitleCustom: isTitleCustom,
                     isSidebarCollapsed: savedWindow.isSidebarCollapsed ?? false,
@@ -1273,10 +1384,31 @@ final class AgentManager: @unchecked Sendable {
         let referencedPaneIds = Set(newWindows.values.flatMap(\.paneIds))
         panes = newPanes.filter { referencedPaneIds.contains($0.key) }
         windows = newWindows
+        // Older snapshots become one session. Repair missing or stale active
+        // window references within each group without dropping their windows.
+        terminalSessions = [:]
+        for terminalWindow in sortedWindows() {
+            let sessionId = terminalWindow.sessionId
+            guard terminalSessions[sessionId] == nil else { continue }
+            var restoredSession = savedSessionsById[sessionId] ?? TerminalSessionState(
+                id: sessionId,
+                name: "Session 1",
+                activeWindowId: terminalWindow.id
+            )
+            if windows[restoredSession.activeWindowId]?.sessionId != sessionId {
+                restoredSession.activeWindowId = terminalWindow.id
+            }
+            if let lastWindowId = restoredSession.lastActiveWindowId,
+               windows[lastWindowId]?.sessionId != sessionId
+                    || lastWindowId == restoredSession.activeWindowId {
+                restoredSession.lastActiveWindowId = nil
+            }
+            terminalSessions[sessionId] = restoredSession
+        }
         activeWindowId = session.activeWindowId.flatMap { newWindows[$0] }?.id
             ?? sortedWindows().first?.id
             ?? ""
-        lastActiveWindowId = nil
+        terminalSessions[activeSessionId]?.activeWindowId = activeWindowId
         nextId = maxId
 
         maximizedPaneId = nil
@@ -1397,7 +1529,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     private func parseIdNumber(_ id: String) -> Int? {
-        let pattern = /^(?:window|pane|tab)-(\d+)$/
+        let pattern = /^(?:session|window|pane|tab)-(\d+)$/
         guard let match = id.firstMatch(of: pattern),
               let num = Int(match.1)
         else { return nil }
@@ -1412,19 +1544,22 @@ final class AgentManager: @unchecked Sendable {
 
     @discardableResult
     private func setActiveWindow(_ windowId: String) -> Bool {
-        guard windows[windowId] != nil, activeWindowId != windowId else {
+        guard let target = windows[windowId], activeWindowId != windowId else {
             return false
         }
-        let previousWindowId = activeWindowId
+        let previousWindowId = terminalSessions[target.sessionId]?.activeWindowId
         activeWindowId = windowId
-        lastActiveWindowId = windows[previousWindowId] != nil
-            ? previousWindowId
-            : nil
+        if previousWindowId != windowId {
+            terminalSessions[target.sessionId]?.lastActiveWindowId = previousWindowId.flatMap {
+                windows[$0]?.sessionId == target.sessionId ? $0 : nil
+            }
+        }
+        terminalSessions[target.sessionId]?.activeWindowId = windowId
         return true
     }
 
     private func activateWindow(offset: Int) {
-        let orderedWindows = sortedWindows()
+        let orderedWindows = activeSessionWindows
         guard orderedWindows.count > 1,
               let currentIndex = orderedWindows.firstIndex(where: { $0.id == activeWindowId })
         else { return }
@@ -1435,10 +1570,12 @@ final class AgentManager: @unchecked Sendable {
 
     private func uniqueAutomaticWindowTitle(
         _ baseTitle: String,
-        excluding windowId: String? = nil
+        excluding windowId: String? = nil,
+        in sessionId: String? = nil
     ) -> String {
+        let ownerId = sessionId ?? windowId.flatMap { windows[$0]?.sessionId } ?? activeSessionId
         let existingTitles = windows.values
-            .filter { $0.id != windowId }
+            .filter { $0.id != windowId && $0.sessionId == ownerId }
             .map(\.title)
         return Self.uniqueAutomaticWindowTitle(
             baseTitle,

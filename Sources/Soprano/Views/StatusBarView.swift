@@ -46,7 +46,7 @@ final class StatusBarView: NSView {
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(modeLabel)
 
-        // Active window ▸ pane breadcrumb
+        // Active session ▸ window ▸ pane breadcrumb
         locationLabel = NSTextField(labelWithString: "")
         locationLabel.identifier = NSUserInterfaceItemIdentifier("status-location")
         locationLabel.lineBreakMode = .byTruncatingTail
@@ -134,7 +134,7 @@ final class StatusBarView: NSView {
         }
     }
 
-    /// `window ▸ pane` for the focused location, with the depth layer appended
+    /// `session ▸ window ▸ pane` for the focused location, with the depth layer appended
     /// when the window has any inner workspace. Nil when nothing is open.
     private func locationText(theme: AppTheme) -> NSAttributedString? {
         guard let terminalWindow = agentManager.windows[agentManager.activeWindowId] else {
@@ -144,7 +144,7 @@ final class StatusBarView: NSView {
         let bold = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
         let regular = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
         let text = NSMutableAttributedString(
-            string: terminalWindow.title,
+            string: "\(agentManager.activeSession?.name ?? "Session") ▸ \(terminalWindow.title)",
             attributes: [.font: bold, .foregroundColor: theme.colors.accent]
         )
 
@@ -175,11 +175,13 @@ final class StatusBarView: NSView {
         let theme = themeManager.currentTheme
         locationLabel.attributedStringValue = locationText(theme: theme)
             ?? NSAttributedString(string: "")
+        let sessionCount = agentManager.terminalSessions.count
         let paneCount = agentManager.paneCount
         let windowCount = agentManager.windowCount
+        let sessions = "\(sessionCount) session\(sessionCount == 1 ? "" : "s")"
         let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
         let windows = "\(windowCount) window\(windowCount == 1 ? "" : "s")"
-        var components = [windows, panes]
+        var components = [sessions, windows, panes]
         if agentManager.readyAgentCount > 0 {
             components.append("\(agentManager.readyAgentCount) READY")
         }

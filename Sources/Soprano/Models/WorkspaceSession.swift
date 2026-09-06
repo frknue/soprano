@@ -1,6 +1,6 @@
 import Foundation
 
-/// A saved workspace session for save/restore.
+/// A workspace snapshot containing every live session for save/restore.
 struct WorkspaceSession: Identifiable, Codable {
     let id: String
     var name: String
@@ -10,9 +10,12 @@ struct WorkspaceSession: Identifiable, Codable {
     var activePaneId: String
     var windows: [SavedWindow]? = nil
     var activeWindowId: String? = nil
+    /// Missing in older snapshots, whose windows belong to one default session.
+    var terminalSessions: [TerminalSessionState]? = nil
 
     struct SavedWindow: Codable {
         let id: String
+        var sessionId: String? = nil
         var title: String
         var isTitleCustom: Bool? = nil
         /// Optional for backward compatibility with sessions saved before

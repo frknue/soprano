@@ -1,5 +1,12 @@
 import AppKit
 
+final class MainWindow: NSWindow {
+    // Untitled windows must explicitly opt in to keyboard focus and main-window
+    // status, including when the saved configuration hides the bar at launch.
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 enum MainWindowAppearance {
     /// Applies the optional compact chrome without changing the outer frame.
@@ -12,10 +19,20 @@ enum MainWindowAppearance {
         // applies the configured choice after AppKit exits fullscreen instead.
         guard !window.styleMask.contains(.fullScreen) else { return }
 
-        if hideWindowBar {
-            window.styleMask.remove([.titled, .fullSizeContentView])
-        } else {
-            window.styleMask.insert([.titled, .fullSizeContentView])
+        let windowBarStyle: NSWindow.StyleMask = [.titled, .fullSizeContentView]
+        let styleMask = hideWindowBar
+            ? window.styleMask.subtracting(windowBarStyle)
+            : window.styleMask.union(windowBarStyle)
+        if window.styleMask != styleMask {
+            // Replacing the window frame view resets AppKit's first responder.
+            // Keep the focused terminal or settings input across the change.
+            let firstResponder = window.firstResponder
+            window.styleMask = styleMask
+            if let firstResponder, window.firstResponder !== firstResponder {
+                window.makeFirstResponder(firstResponder)
+            }
+        }
+        if !hideWindowBar {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
         }
@@ -52,7 +69,7 @@ final class MainWindowController: NSWindowController {
         let startupFrame = MainWindowFrameStore.load(
             visibleFrames: visibleFrames
         ) ?? MainWindowSizing.initialFrame(in: mainVisibleFrame)
-        let window = NSWindow(
+        let window = MainWindow(
             contentRect: NSRect(origin: .zero, size: startupFrame.size),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -218,6 +235,46 @@ final class MainWindowController: NSWindowController {
 
     private func buildCommandPaletteItems() -> [CommandItem] {
         agentLaunchPaletteItems() + [
+            CommandItem(
+                id: "new-session",
+                icon: "rectangle.stack.badge.plus",
+                label: "New Session…",
+                description: "Create a named group of windows",
+                shortcut: commandShortcut(for: "new-session"),
+                action: { [weak self] in
+                    DispatchQueue.main.async { self?.keybindingNewSession() }
+                }
+            ),
+            CommandItem(
+                id: "find-session",
+                icon: "rectangle.stack",
+                label: "Switch Session…",
+                description: "Return to a running session",
+                shortcut: commandShortcut(for: "find-session"),
+                action: { [weak self] in
+                    DispatchQueue.main.async { self?.keybindingFindSession() }
+                }
+            ),
+            CommandItem(
+                id: "rename-session",
+                icon: "pencil",
+                label: "Rename Session…",
+                description: "Rename the current session",
+                shortcut: nil,
+                action: { [weak self] in
+                    DispatchQueue.main.async { self?.mainContentVC?.renameActiveSession() }
+                }
+            ),
+            CommandItem(
+                id: "close-session",
+                icon: "rectangle.stack.badge.minus",
+                label: "Close Session…",
+                description: "Close the current session and its terminals",
+                shortcut: nil,
+                action: { [weak self] in
+                    DispatchQueue.main.async { self?.mainContentVC?.closeActiveSession() }
+                }
+            ),
             CommandItem(
                 id: "new-window",
                 icon: "macwindow.badge.plus",
@@ -433,8 +490,8 @@ final class MainWindowController: NSWindowController {
             CommandItem(
                 id: "save-session",
                 icon: "square.and.arrow.down",
-                label: "Save Session As…",
-                description: "Save the current workspace as a named session",
+                label: "Save Workspace As…",
+                description: "Save all sessions and their layouts as a workspace snapshot",
                 shortcut: commandShortcut(for: "save-session"),
                 action: { [weak self] in
                     self?.keybindingSaveSession()
@@ -517,6 +574,35 @@ extension MainWindowController: KeybindingDelegate {
         mainContentVC?.saveSessionAs()
     }
 
+    func keybindingNewSession() {
+        mainContentVC?.createSession()
+    }
+
+    func keybindingFindSession() {
+        guard let window else { return }
+        palettePanel().show(
+            relativeTo: window,
+            commands: buildSessionPaletteItems(),
+            placeholder: "Search sessions..."
+        )
+    }
+
+    private func buildSessionPaletteItems() -> [CommandItem] {
+        agentManager.orderedSessions.map { session in
+            let windows = agentManager.orderedWindows(in: session.id)
+            let current = session.id == agentManager.activeSessionId ? "Current · " : ""
+            return CommandItem(
+                id: "activate-\(session.id)",
+                icon: "rectangle.stack",
+                label: session.name,
+                description: "\(current)\(windows.count) window\(windows.count == 1 ? "" : "s")",
+                shortcut: nil,
+                searchText: windows.map(\.title).joined(separator: " "),
+                action: { [weak self] in self?.agentManager.activateSession(session.id) }
+            )
+        }
+    }
+
     func keybindingRenameWindow() {
         mainContentVC?.renameActiveWindow()
     }
@@ -583,7 +669,7 @@ private extension MainWindowController {
     }
 
     func buildWindowPaletteItems() -> [CommandItem] {
-        agentManager.orderedWindows.enumerated().map { index, terminalWindow in
+        agentManager.activeSessionWindows.enumerated().map { index, terminalWindow in
             let panes = agentManager.orderedPanes(in: terminalWindow.id)
             let activePaneTitle = agentManager.panes[terminalWindow.activePaneId]?
                 .activeTab?.title ?? "No active pane"

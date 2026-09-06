@@ -44,9 +44,43 @@ struct WindowBarSettingsTests {
 
 @MainActor
 struct MainWindowAppearanceTests {
+    @Test func theWindowCanReceiveKeyboardFocusWithTheBarHiddenAtStartup() {
+        let window = MainWindow(
+            contentRect: NSRect(x: 160, y: 120, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+
+        MainWindowAppearance.apply(hideWindowBar: true, to: window)
+
+        #expect(window.canBecomeKey)
+        #expect(window.canBecomeMain)
+    }
+
+    @Test func togglingTheWindowBarPreservesKeyboardFocus() {
+        let window = MainWindow(
+            contentRect: NSRect(x: 160, y: 120, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        let inputView = WindowBarInputView(frame: window.contentView?.bounds ?? .zero)
+        window.contentView = inputView
+        #expect(window.makeFirstResponder(inputView))
+
+        for hideWindowBar in [true, false, true] {
+            MainWindowAppearance.apply(hideWindowBar: hideWindowBar, to: window)
+
+            #expect(window.canBecomeKey)
+            #expect(window.canBecomeMain)
+            #expect(window.firstResponder === inputView)
+        }
+    }
+
     @Test func hidingAndRestoringTheWindowBarPreservesTheFrame() {
         let frame = NSRect(x: 160, y: 120, width: 1200, height: 800)
-        let window = NSWindow(
+        let window = MainWindow(
             contentRect: frame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -70,4 +104,9 @@ struct MainWindowAppearanceTests {
         #expect(contentView.safeAreaInsets.top > 0)
         #expect(window.frame == frame)
     }
+}
+
+@MainActor
+private final class WindowBarInputView: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }

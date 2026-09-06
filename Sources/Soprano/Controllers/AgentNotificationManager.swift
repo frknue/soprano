@@ -472,11 +472,13 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         profileId.flatMap { AgentCatalog.profile(for: $0)?.name } ?? "Agent"
     }
 
-    /// `window ▸ pane` for the notification subtitle. Several panes across
-    /// several logical windows can be waiting at once, so the banner has to say
-    /// which one is asking.
-    static func locationSubtitle(windowTitle: String?, tabTitle: String?) -> String? {
-        let parts = [windowTitle, tabTitle]
+    /// Names the session, window, and pane asking for attention.
+    static func locationSubtitle(
+        sessionName: String? = nil,
+        windowTitle: String?,
+        tabTitle: String?
+    ) -> String? {
+        let parts = [sessionName, windowTitle, tabTitle]
             .compactMap { $0 }
             .filter { !$0.isEmpty }
         return parts.isEmpty ? nil : parts.joined(separator: " ▸ ")
@@ -484,8 +486,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
 
     @MainActor
     private func locationSubtitle(paneId: String, tabId: String) -> String? {
-        Self.locationSubtitle(
-            windowTitle: agentManager.window(containingPane: paneId)?.title,
+        let terminalWindow = agentManager.window(containingPane: paneId)
+        return Self.locationSubtitle(
+            sessionName: terminalWindow.flatMap { agentManager.terminalSessions[$0.sessionId]?.name },
+            windowTitle: terminalWindow?.title,
             tabTitle: agentManager.panes[paneId]?.tabs.first { $0.id == tabId }?.title
         )
     }

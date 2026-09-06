@@ -418,6 +418,28 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
+    @Test func switchingSessionsKeepsTerminalsAliveAndClosingASessionDestroysOnlyItsSurfaces() throws {
+        let manager = AgentManager()
+        let firstSessionId = manager.activeSessionId
+        let spy = SurfaceLifecycleSpy()
+        let splitTree = makeSplitTree(manager: manager, spy: spy)
+        let firstTarget = try #require(spy.createdTargets.first)
+        let firstView = try #require(spy.createdViewsByTarget[firstTarget]?.first)
+        let otherSessionId = try #require(manager.createSession(name: "Other"))
+        let otherTarget = try #require(spy.createdTargets.last)
+
+        manager.activateSession(firstSessionId)
+        manager.activateSession(otherSessionId)
+        manager.activateSession(firstSessionId)
+        #expect(spy.createdTargets.count == 2)
+        #expect(spy.createdViewsByTarget[firstTarget]?.first === firstView)
+        #expect(spy.destroyedTargets.isEmpty)
+        manager.closeSession(otherSessionId)
+        #expect(spy.destroyedTargets == [otherTarget])
+        #expect(manager.activeSessionId == firstSessionId)
+        _ = splitTree
+    }
+
     @Test func windowDepthNavigationPreservesBothLiveTerminalSurfaces() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId

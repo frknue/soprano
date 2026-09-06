@@ -13,6 +13,7 @@ final class SidebarView: NSView {
     private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
     private var headerLabel: NSTextField!
+    private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
     private var listContentView: NSView!
     private var rowsStack: NSStackView!
@@ -74,6 +75,16 @@ final class SidebarView: NSView {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
 
+        sessionSelector = NSPopUpButton(frame: .zero, pullsDown: false)
+        sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
+        sessionSelector.setAccessibilityLabel("Current Session")
+        sessionSelector.font = .systemFont(ofSize: 12, weight: .semibold)
+        sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sessionSelector.target = self
+        sessionSelector.action = #selector(sessionSelected(_:))
+        sessionSelector.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(sessionSelector)
+
         headerLabel = NSTextField(labelWithString: "WINDOWS")
         headerLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -123,7 +134,7 @@ final class SidebarView: NSView {
 
         sessionsButton = makeIconButton(
             symbolName: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-            accessibilityLabel: "Sessions",
+            accessibilityLabel: "Saved Workspaces",
             action: #selector(sessionsClicked)
         )
         footerView.addSubview(sessionsButton)
@@ -150,7 +161,10 @@ final class SidebarView: NSView {
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentWidthConstraint,
 
-            headerLabel.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 14),
+            sessionSelector.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
+            sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 10),
+            sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -10),
+            headerLabel.topAnchor.constraint(equalTo: sessionSelector.bottomAnchor, constant: 14),
             headerLabel.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
 
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
@@ -323,7 +337,7 @@ final class SidebarView: NSView {
         dateFormatter.dateStyle = .short
         dateFormatter.timeStyle = .short
         if sessionManager.sessions.isEmpty {
-            menu.addItem(NSMenuItem(title: "No Saved Sessions", action: nil, keyEquivalent: ""))
+            menu.addItem(NSMenuItem(title: "No Saved Workspaces", action: nil, keyEquivalent: ""))
         }
         for session in sessionManager.sessions {
             let item = NSMenuItem(
@@ -337,7 +351,7 @@ final class SidebarView: NSView {
         }
         menu.addItem(.separator())
         let saveItem = NSMenuItem(
-            title: "Save Session As…",
+            title: "Save Workspace As…",
             action: #selector(saveSessionClicked),
             keyEquivalent: ""
         )
@@ -357,12 +371,12 @@ final class SidebarView: NSView {
 
     func saveSessionAs() {
         let alert = NSAlert()
-        alert.messageText = "Save Session"
-        alert.informativeText = "Name this workspace session:"
+        alert.messageText = "Save Workspace"
+        alert.informativeText = "Save a snapshot of all sessions and their window layouts:"
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.placeholderString = "Session name"
+        field.placeholderString = "Workspace name"
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -387,6 +401,7 @@ final class SidebarView: NSView {
         dashboardButton.contentTintColor = theme.colors.textMuted
         plusButton.contentTintColor = theme.colors.textMuted
         sessionsButton.contentTintColor = theme.colors.textMuted
+        rebuildSessionSelector()
 
         // Reconcile watchers first so rows read freshly-invalidated caches.
         gitBranchMonitor.setWatchedPaths(watchedCwds())
@@ -433,7 +448,7 @@ final class SidebarView: NSView {
             rowsStack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        for (index, terminalWindow) in agentManager.orderedWindows.enumerated() {
+        for (index, terminalWindow) in agentManager.activeSessionWindows.enumerated() {
             let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
             let isExpanded = isControlKeyHeld
                 || !terminalWindow.isSidebarCollapsed
@@ -514,6 +529,80 @@ final class SidebarView: NSView {
 
     func promptToRenameActiveWindow() {
         promptToRenameWindow(agentManager.activeWindowId)
+    }
+
+    private func rebuildSessionSelector() {
+        sessionSelector.removeAllItems()
+        for session in agentManager.orderedSessions {
+            let item = NSMenuItem(title: session.name, action: nil, keyEquivalent: "")
+            item.representedObject = session.id
+            sessionSelector.menu?.addItem(item)
+            if session.id == agentManager.activeSessionId {
+                sessionSelector.select(item)
+            }
+        }
+        sessionSelector.menu?.addItem(.separator())
+        for (title, action) in [
+            ("New Session…", #selector(promptToCreateSession)),
+            ("Rename Session…", #selector(promptToRenameSession)),
+            ("Close Session…", #selector(promptToCloseSession)),
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            sessionSelector.menu?.addItem(item)
+        }
+    }
+
+    @objc private func sessionSelected(_ sender: NSPopUpButton) {
+        guard let sessionId = sender.selectedItem?.representedObject as? String else { return }
+        agentManager.activateSession(sessionId)
+    }
+
+    @objc func promptToCreateSession() {
+        guard let name = promptForSessionName(title: "New Session", initialName: "") else {
+            rebuildSessionSelector()
+            return
+        }
+        _ = agentManager.createSession(name: name)
+    }
+
+    @objc func promptToRenameSession() {
+        guard let session = agentManager.activeSession else { return }
+        guard let name = promptForSessionName(title: "Rename Session", initialName: session.name) else {
+            rebuildSessionSelector()
+            return
+        }
+        agentManager.renameSession(session.id, to: name)
+    }
+
+    private func promptForSessionName(title: String, initialName: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = "Name this group of windows."
+        alert.addButton(withTitle: initialName.isEmpty ? "Create" : "Rename")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "Session name"
+        field.stringValue = initialName
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
+    }
+
+    @objc func promptToCloseSession() {
+        guard let session = agentManager.activeSession else { return }
+        let alert = NSAlert()
+        alert.messageText = "Close \"\(session.name)\"?"
+        alert.informativeText = "All windows and running terminals in this session will close."
+        alert.addButton(withTitle: "Close Session")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            rebuildSessionSelector()
+            return
+        }
+        agentManager.closeSession(session.id)
     }
 
     private func promptToRenameWindow(_ windowId: String) {
