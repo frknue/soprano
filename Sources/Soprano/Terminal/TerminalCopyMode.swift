@@ -198,6 +198,14 @@ struct TerminalCopyModeSession {
         selectionStyle = style
     }
 
+    mutating func updateMouseSelection(column: Int, row: Int, hasSelection: Bool) {
+        self.column = min(max(0, column), columnCount - 1)
+        self.row = min(max(0, row), rowCount - 1)
+        phase = hasSelection ? .selecting : .navigating
+        selectionStyle = hasSelection ? .character : nil
+        awaitsSecondG = false
+    }
+
     @discardableResult
     mutating func moveHorizontal(_ delta: Int) -> Bool {
         let next = min(max(0, column + delta), columnCount - 1)

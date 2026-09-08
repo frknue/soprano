@@ -30,6 +30,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Fixed
 
+- `y` now copies mouse-selected terminal text, and selecting with the mouse keeps
+  copy mode active without jumping to the bottom of scrollback.
 - Hiding the window bar no longer stops keyboard input after reopening Soprano,
   and toggling the setting preserves the focused terminal or input field.
 - Moving the pointer between split terminals no longer leaves mouse text selection

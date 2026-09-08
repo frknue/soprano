@@ -885,6 +885,7 @@ final class TerminalSurfaceView: NSView {
         guard let session = copyModeSession else { return }
         if let surface {
             releaseKeyboardLineSelection(surface: surface)
+            releaseTrackedLeftMouseButton(surface: surface)
             if session.phase == .selecting {
                 if copySelection {
                     _ = performBindingAction("copy_to_clipboard")
@@ -1249,18 +1250,17 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if copyModeSession != nil {
-            finishCopyMode(copySelection: false)
-        }
         guard let surface else {
             super.mouseDown(with: event)
             return
         }
+        releaseKeyboardLineSelection(surface: surface)
         onFocusRequested?()
         window?.makeFirstResponder(self)
         sendMousePosition(event, surface: surface)
         mouseButtonState.pressLeftButton()
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
+        updateCopyModeMouseSelection(with: event, surface: surface)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1271,6 +1271,7 @@ final class TerminalSurfaceView: NSView {
         }
         sendMousePosition(event, surface: surface)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, modsFromEvent(event))
+        updateCopyModeMouseSelection(with: event, surface: surface)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1278,6 +1279,7 @@ final class TerminalSurfaceView: NSView {
         guard let surface else { return }
         reconcileMouseButtonState(with: event, surface: surface)
         sendMousePosition(event, surface: surface)
+        updateCopyModeMouseSelection(with: event, surface: surface)
     }
 
     override func mouseMoved(with event: NSEvent) {
@@ -1446,6 +1448,22 @@ final class TerminalSurfaceView: NSView {
             bounds.height - point.y,
             modsFromEvent(event)
         )
+    }
+
+    private func updateCopyModeMouseSelection(with event: NSEvent, surface: ghostty_surface_t) {
+        guard var session = copyModeSession, let metrics = copyModeGridMetrics else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let previousPhase = session.phase
+        session.updateMouseSelection(
+            column: Int(floor((point.x - metrics.originX) / metrics.cellWidth)),
+            row: Int(floor((bounds.height - point.y - metrics.originY) / metrics.cellHeight)),
+            hasSelection: ghostty_surface_has_selection(surface)
+        )
+        copyModeSession = session
+        updateCopyModeCursor()
+        if session.phase != previousPhase {
+            onCopyModeStateChanged?(session.phase == .selecting ? .copySelection : .copy)
+        }
     }
 
     private func reconcileMouseButtonState(

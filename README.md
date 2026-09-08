@@ -396,7 +396,8 @@ shell or TUI. Move with `h/j/k/l` or the arrow keys, use `0`/`$` for line bounda
 `H/M/L` for viewport positions, `gg`/`G` for scrollback boundaries, and `Ctrl+U/D` or
 `Ctrl+B/F` for paging. Press `v` to begin a character selection or `Shift+V` to select
 whole lines, then `y` or Enter to copy it to the macOS clipboard and exit. Escape, `q`,
-or `Ctrl+C` cancels.
+or `Ctrl+C` cancels. You can also select text with the mouse without leaving copy mode.
+Outside copy mode, `y` copies highlighted text too; with no selection, it types normally.
 
 ## Nested pane navigation
 

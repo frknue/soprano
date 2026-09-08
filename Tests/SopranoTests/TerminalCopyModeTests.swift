@@ -57,6 +57,63 @@ struct TerminalCopyModeTests {
         #expect(session.command(for: .init(key: "g", shift: true)) == .historyBottom)
     }
 
+    @Test func draggingWithTheMouseStartsASelectionThatCanBeYankedOrExtendedWithTheKeyboard() {
+        var session = TerminalCopyModeSession(
+            column: 3,
+            row: 4,
+            columnCount: 80,
+            rowCount: 24
+        )
+
+        session.updateMouseSelection(column: 12, row: 8, hasSelection: true)
+
+        #expect(session.phase == .selecting)
+        #expect(session.selectionStyle == .character)
+        #expect(session.column == 12)
+        #expect(session.row == 8)
+        #expect(session.command(for: .init(key: "y")) == .copyAndExit)
+        #expect(session.command(for: .init(key: "", keyCode: 36)) == .copyAndExit)
+        _ = session.moveHorizontal(1)
+        #expect(session.column == 13)
+    }
+
+    @Test func clickingWithoutASelectionReturnsToNavigationAtTheMousePosition() {
+        var session = TerminalCopyModeSession(
+            column: 3,
+            row: 4,
+            columnCount: 80,
+            rowCount: 24
+        )
+        session.beginSelection(style: .line)
+        #expect(session.command(for: .init(key: "g")) == .awaitMore)
+
+        session.updateMouseSelection(column: 12, row: 8, hasSelection: false)
+
+        #expect(session.phase == .navigating)
+        #expect(session.selectionStyle == nil)
+        #expect(session.column == 12)
+        #expect(session.row == 8)
+        #expect(session.command(for: .init(key: "g")) == .awaitMore)
+    }
+
+    @Test func mouseSelectionReplacesKeyboardLineSelectionAndClampsOutsideTheGrid() {
+        var session = TerminalCopyModeSession(
+            column: 3,
+            row: 4,
+            columnCount: 80,
+            rowCount: 24
+        )
+        session.beginSelection(style: .line)
+
+        session.updateMouseSelection(column: -5, row: 30, hasSelection: true)
+
+        #expect(session.phase == .selecting)
+        #expect(session.selectionStyle == .character)
+        #expect(session.column == 0)
+        #expect(session.row == 23)
+        #expect(session.command(for: .init(key: "q")) == .cancel)
+    }
+
     @Test func cursorClampsHorizontallyAndRequestsVerticalScrollAtEdges() {
         var session = TerminalCopyModeSession(
             column: 0,
