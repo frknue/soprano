@@ -269,9 +269,11 @@ tab to switch windows or **+** to create one. The row scrolls when it fills up a
 keeps the active tab in view as you navigate with the keyboard. It stays visible
 when the sidebar or macOS window bar is hidden.
 
-A green dot beside a window's title means at least one agent inside it is starting
-or working, including agents in hidden pane tabs and depth layers. Hover over the
-window tab to see the count; the dot clears when none are starting or working.
+A compact agent badge beside a window's title counts open agents, including those
+in hidden pane tabs and depth layers. It stays visible while agents are ready or
+waiting for input, and clears when they stop or exit. Its color reflects the most
+urgent state: red for errors, yellow for input or startup, green for working, and
+blue for ready. Hover over the window tab for a breakdown by status.
 
 Press `Ctrl+A`, release it, then press `Shift+C` to create a session. `Ctrl+A` then
 lowercase `c` creates a window inside the current session, starting in the active

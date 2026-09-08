@@ -95,15 +95,15 @@ final class WindowTabBarView: NSView {
         addButton.contentTintColor = theme.colors.textMuted
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
-            let workingAgentCount = agentManager.orderedPanes(in: terminalWindow.id)
+            let agents = agentManager.orderedPanes(in: terminalWindow.id)
                 .flatMap(\.tabs)
-                .filter { $0.agent?.status == .starting || $0.agent?.status == .running }
-                .count
+                .compactMap(\.agent)
+                .filter { $0.status != .stopped }
             buttons[index].configure(
                 number: index + 1,
                 title: terminalWindow.title,
                 isSelected: terminalWindow.id == activeWindowId,
-                workingAgentCount: workingAgentCount,
+                agents: agents,
                 theme: theme
             )
             if buttons[index].tabWidth != previousWidth {
@@ -146,16 +146,14 @@ final class WindowTabBarView: NSView {
 private final class WindowTabButton: NSButton {
     let windowId: String
     private let onSelect: () -> Void
-    private let activityImage = NSImage(
-        systemSymbolName: "circle.fill",
-        accessibilityDescription: nil
-    )?.withSymbolConfiguration(.init(pointSize: 7, weight: .regular))
+    private let agentBadge = WindowAgentBadgeView()
     private(set) var tabWidth: CGFloat = 80
 
     init(windowId: String, onSelect: @escaping () -> Void) {
         self.windowId = windowId
         self.onSelect = onSelect
         super.init(frame: .zero)
+        cell = WindowTabButtonCell()
         identifier = NSUserInterfaceItemIdentifier("window-tab-\(windowId)")
         isBordered = false
         refusesFirstResponder = true
@@ -164,6 +162,7 @@ private final class WindowTabButton: NSButton {
         target = self
         action = #selector(selectWindow)
         setAccessibilityRole(.radioButton)
+        addSubview(agentBadge)
     }
 
     @available(*, unavailable)
@@ -175,38 +174,130 @@ private final class WindowTabButton: NSButton {
         number: Int,
         title: String,
         isSelected: Bool,
-        workingAgentCount: Int,
+        agents: [AgentInstance],
         theme: AppTheme
     ) {
         let text = "\(number):\(title)"
         self.title = text
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        paragraph.alignment = .left
         attributedTitle = NSAttributedString(
             string: text,
             attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: 11, weight: isSelected ? .bold : .medium),
                 .foregroundColor: isSelected ? theme.colors.accent : theme.colors.textMuted,
+                .paragraphStyle: paragraph,
             ]
         )
-        image = workingAgentCount > 0 ? activityImage : nil
-        imagePosition = workingAgentCount > 0 ? .imageLeading : .noImage
-        contentTintColor = theme.colors.success
-        (cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-        let indicatorWidth: CGFloat = workingAgentCount > 0 ? 14 : 0
-        tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24 + indicatorWidth))
+        let statuses: [AgentStatus] = [.error, .waiting, .running, .starting, .idle]
+        let status = statuses.first { status in agents.contains { $0.status == status } }
+        let color: NSColor = switch status {
+        case .error: theme.colors.danger
+        case .waiting, .starting: theme.colors.yellow
+        case .running: theme.colors.success
+        default: theme.colors.blue
+        }
+        agentBadge.configure(count: agents.count, color: color)
+        let indicatorWidth = agents.isEmpty ? 0 : agentBadge.badgeWidth + 8
+        (cell as? WindowTabButtonCell)?.trailingInset = indicatorWidth
+        tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24)) + indicatorWidth
         layer?.backgroundColor = isSelected ? theme.colors.bgSelectedStrong.cgColor : NSColor.clear.cgColor
         layer?.borderWidth = isSelected ? 1 : 0
         layer?.borderColor = theme.colors.railMuted.cgColor
         var description = "Window \(number): \(title)"
-        if workingAgentCount > 0 {
-            let noun = workingAgentCount == 1 ? "agent" : "agents"
-            description += " — \(workingAgentCount) \(noun) starting or working"
+        if !agents.isEmpty {
+            let noun = agents.count == 1 ? "agent" : "agents"
+            let counts = statuses.compactMap { status -> String? in
+                let count = agents.filter { $0.status == status }.count
+                return count > 0 ? "\(count) \(status.displayLabel.lowercased())" : nil
+            }
+            description += " — \(agents.count) \(noun): \(counts.joined(separator: ", "))"
         }
         toolTip = description
         setAccessibilityLabel(description)
         setAccessibilityValue(isSelected)
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        agentBadge.frame = NSRect(
+            x: bounds.maxX - 12 - agentBadge.badgeWidth,
+            y: floor(bounds.midY - 8),
+            width: agentBadge.badgeWidth,
+            height: 16
+        )
     }
 
     @objc private func selectWindow() {
         onSelect()
     }
+}
+
+/// Draw the title in a fixed padded area so the badge never crowds or clips it.
+private final class WindowTabButtonCell: NSButtonCell {
+    var trailingInset: CGFloat = 0
+
+    override func titleRect(forBounds rect: NSRect) -> NSRect {
+        let height = ceil(attributedTitle.size().height)
+        return NSRect(
+            x: rect.minX + 12,
+            y: floor(rect.midY - height / 2),
+            width: max(0, rect.width - 24 - trailingInset),
+            height: height
+        )
+    }
+
+    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
+        attributedTitle.draw(in: titleRect(forBounds: cellFrame))
+    }
+}
+
+private final class WindowAgentBadgeView: NSView {
+    private let icon = NSImageView()
+    private let countLabel = NSTextField(labelWithString: "")
+    private(set) var badgeWidth: CGFloat = 28
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        identifier = NSUserInterfaceItemIdentifier("window-agent-badge")
+        wantsLayer = true
+        layer?.cornerRadius = 4
+        icon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 9, weight: .medium)
+        addSubview(icon)
+        countLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+        addSubview(countLabel)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func configure(count: Int, color: NSColor) {
+        isHidden = count == 0
+        countLabel.stringValue = "\(count)"
+        countLabel.textColor = color
+        icon.contentTintColor = color
+        layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
+        badgeWidth = 22 + ceil(countLabel.intrinsicContentSize.width)
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        icon.frame = NSRect(x: 5, y: 3, width: 10, height: 10)
+        let size = countLabel.intrinsicContentSize
+        countLabel.frame = NSRect(
+            x: 17,
+            y: floor((bounds.height - size.height) / 2),
+            width: ceil(size.width),
+            height: size.height
+        )
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

@@ -48,16 +48,16 @@ struct WindowTabBarTests {
         manager.renameWindow(manager.activeWindowId, to: "Editor")
         let bar = makeBar(manager: manager)
         let button = try #require(tabs(in: bar).first)
-        #expect(button.image == nil)
+        #expect(agentBadge(in: button) == nil)
         let paneId = manager.activePaneId
         let tabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "codex"))
 
         for status: AgentStatus in [.starting, .running, .idle, .waiting, .error, .running, .stopped] {
             manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: status)
-            let isWorking = status == .starting || status == .running
-            #expect((button.image != nil) == isWorking)
-            let description = isWorking
-                ? "Window 1: Editor — 1 agent starting or working"
+            let isOpen = status != .stopped
+            #expect((agentBadge(in: button) != nil) == isOpen)
+            let description = isOpen
+                ? "Window 1: Editor — 1 agent: 1 \(status.displayLabel.lowercased())"
                 : "Window 1: Editor"
             #expect(button.toolTip == description)
             #expect(button.accessibilityLabel() == description)
@@ -66,9 +66,9 @@ struct WindowTabBarTests {
         }
 
         manager.restartAgent(target: TerminalTarget(paneId: paneId, tabId: tabId))
-        #expect(button.image != nil)
+        #expect(agentBadge(in: button) != nil)
         manager.removeTabFromPane(paneId, tabId: tabId)
-        #expect(button.image == nil)
+        #expect(agentBadge(in: button) == nil)
     }
 
     @Test func backgroundWindowsCountAgentsInInactiveTabsAndHiddenDepthLayers() throws {
@@ -86,15 +86,18 @@ struct WindowTabBarTests {
         _ = try #require(manager.createWindow())
         let bar = makeBar(manager: manager)
         let button = tabs(in: bar)[0]
-        #expect(button.image != nil)
-        #expect(button.toolTip == "Window 1: Work — 2 agents starting or working")
-        #expect(tabs(in: bar)[1].image == nil)
+        #expect(agentBadge(in: button) != nil)
+        #expect(button.toolTip == "Window 1: Work — 2 agents: 1 working, 1 starting")
+        #expect(agentBadge(in: tabs(in: bar)[1]) == nil)
 
         manager.updateAgentStatus(paneId: paneId, tabId: agentTabId, status: .idle)
-        #expect(button.image != nil)
-        #expect(button.toolTip == "Window 1: Work — 1 agent starting or working")
+        #expect(agentBadge(in: button) != nil)
+        #expect(button.toolTip == "Window 1: Work — 2 agents: 1 starting, 1 ready")
         manager.removeTabFromPane(innerPaneId, tabId: innerTabId)
-        #expect(button.image == nil)
+        #expect(agentBadge(in: button) != nil)
+        #expect(button.toolTip == "Window 1: Work — 1 agent: 1 ready")
+        manager.stopAgent(target: TerminalTarget(paneId: paneId, tabId: agentTabId))
+        #expect(agentBadge(in: button) == nil)
         #expect(button.toolTip == "Window 1: Work")
     }
 
@@ -105,16 +108,52 @@ struct WindowTabBarTests {
         let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
         let bar = makeBar(manager: manager)
         _ = try #require(manager.attachAgentIfNeeded(paneId: paneId, tabId: tabId, profileId: "codex"))
-        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
-        #expect(tabs(in: bar)[0].image != nil)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .idle)
+        #expect(agentBadge(in: tabs(in: bar)[0]) != nil)
 
         _ = try #require(manager.createSession(name: "Personal"))
         #expect(tabs(in: bar).count == 1)
-        #expect(tabs(in: bar)[0].image == nil)
+        #expect(agentBadge(in: tabs(in: bar)[0]) == nil)
         manager.activateSession(sessionId)
-        #expect(tabs(in: bar)[0].image != nil)
+        #expect(agentBadge(in: tabs(in: bar)[0]) != nil)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .waiting)
+        #expect(agentBadge(in: tabs(in: bar)[0]) != nil)
         manager.agentProcessDidExit(target: TerminalTarget(paneId: paneId, tabId: tabId))
-        #expect(tabs(in: bar)[0].image == nil)
+        #expect(agentBadge(in: tabs(in: bar)[0]) == nil)
+    }
+
+    @Test func agentBadgesStayInsideLongTabsAndPrioritizeInputAndErrorsOverWorkingAgents() throws {
+        let manager = AgentManager()
+        manager.renameWindow(manager.activeWindowId, to: String(repeating: "Long project name ", count: 4))
+        for _ in 0..<12 {
+            _ = try #require(manager.spawnAgent("codex"))
+            manager.updateAgentStatus(paneId: manager.activePaneId, status: .running)
+        }
+        let paneId = manager.activePaneId
+        let bar = makeBar(manager: manager, width: 260)
+        let button = try #require(tabs(in: bar).first)
+        let badge = try #require(agentBadge(in: button))
+        let theme = ThemeManager(themeId: "gruvbox-dark").currentTheme
+        #expect(badge.layer?.backgroundColor == theme.colors.success.withAlphaComponent(0.14).cgColor)
+        #expect(descendants(in: badge).compactMap { ($0 as? NSTextField)?.stringValue } == ["12"])
+        #expect(button.bounds.contains(badge.frame))
+        #expect(button.bounds.maxX - badge.frame.maxX == 12)
+        #expect(badge.frame.midY == button.bounds.midY)
+        let titleRect = try #require(button.cell?.titleRect(forBounds: button.bounds))
+        #expect(titleRect.maxX + 8 == badge.frame.minX)
+        #expect(titleRect.width > 0)
+        #expect(button.hitTest(NSPoint(
+            x: button.frame.minX + badge.frame.midX,
+            y: button.frame.minY + badge.frame.midY
+        )) === button)
+
+        manager.updateAgentStatus(paneId: paneId, status: .waiting)
+        bar.layoutSubtreeIfNeeded()
+        #expect(badge.layer?.backgroundColor == theme.colors.yellow.withAlphaComponent(0.14).cgColor)
+        #expect(button.toolTip?.contains("1 needs input, 11 working") == true)
+        #expect(button.cell?.titleRect(forBounds: button.bounds) == titleRect)
+        manager.updateAgentStatus(paneId: paneId, status: .error)
+        #expect(badge.layer?.backgroundColor == theme.colors.danger.withAlphaComponent(0.14).cgColor)
     }
 
     @Test func overflowingTabsScrollToKeepTheKeyboardSelectedWindowVisible() throws {
@@ -202,6 +241,12 @@ struct WindowTabBarTests {
 
     private func selectedTabs(in view: NSView) -> [NSButton] {
         tabs(in: view).filter { $0.accessibilityValue() as? Bool == true }
+    }
+
+    private func agentBadge(in view: NSView) -> NSView? {
+        descendants(in: view).first {
+            $0.identifier?.rawValue == "window-agent-badge" && !$0.isHidden
+        }
     }
 }
 

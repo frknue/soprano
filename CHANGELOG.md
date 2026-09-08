@@ -11,8 +11,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
-- Window tabs show a green dot while agents inside them are starting or working,
-  including hidden tabs and depth layers; hover over a tab to see the count.
+- Window tabs show a compact badge counting open agents, including hidden tabs and
+  depth layers, with status colors and a breakdown on hover.
 - Windows now appear as numbered tabs above the terminals, with the active tab
   highlighted, clickable switching, a **+** button, and horizontal scrolling when
   the row fills up. The tabs remain visible with the sidebar or macOS window bar hidden.
@@ -34,6 +34,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Fixed
 
+- Window agent indicators stay visible between turns and while waiting for input,
+  and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps
   copy mode active without jumping to the bottom of scrollback.
 - Hiding the window bar no longer stops keyboard input after reopening Soprano,
