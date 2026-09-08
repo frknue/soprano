@@ -95,10 +95,15 @@ final class WindowTabBarView: NSView {
         addButton.contentTintColor = theme.colors.textMuted
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
+            let workingAgentCount = agentManager.orderedPanes(in: terminalWindow.id)
+                .flatMap(\.tabs)
+                .filter { $0.agent?.status == .starting || $0.agent?.status == .running }
+                .count
             buttons[index].configure(
                 number: index + 1,
                 title: terminalWindow.title,
                 isSelected: terminalWindow.id == activeWindowId,
+                workingAgentCount: workingAgentCount,
                 theme: theme
             )
             if buttons[index].tabWidth != previousWidth {
@@ -141,6 +146,10 @@ final class WindowTabBarView: NSView {
 private final class WindowTabButton: NSButton {
     let windowId: String
     private let onSelect: () -> Void
+    private let activityImage = NSImage(
+        systemSymbolName: "circle.fill",
+        accessibilityDescription: nil
+    )?.withSymbolConfiguration(.init(pointSize: 7, weight: .regular))
     private(set) var tabWidth: CGFloat = 80
 
     init(windowId: String, onSelect: @escaping () -> Void) {
@@ -162,7 +171,13 @@ private final class WindowTabButton: NSButton {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(number: Int, title: String, isSelected: Bool, theme: AppTheme) {
+    func configure(
+        number: Int,
+        title: String,
+        isSelected: Bool,
+        workingAgentCount: Int,
+        theme: AppTheme
+    ) {
         let text = "\(number):\(title)"
         self.title = text
         attributedTitle = NSAttributedString(
@@ -172,13 +187,22 @@ private final class WindowTabButton: NSButton {
                 .foregroundColor: isSelected ? theme.colors.accent : theme.colors.textMuted,
             ]
         )
+        image = workingAgentCount > 0 ? activityImage : nil
+        imagePosition = workingAgentCount > 0 ? .imageLeading : .noImage
+        contentTintColor = theme.colors.success
         (cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
-        tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24))
+        let indicatorWidth: CGFloat = workingAgentCount > 0 ? 14 : 0
+        tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24 + indicatorWidth))
         layer?.backgroundColor = isSelected ? theme.colors.bgSelectedStrong.cgColor : NSColor.clear.cgColor
         layer?.borderWidth = isSelected ? 1 : 0
         layer?.borderColor = theme.colors.railMuted.cgColor
-        toolTip = "Window \(number): \(title)"
-        setAccessibilityLabel("Window \(number): \(title)")
+        var description = "Window \(number): \(title)"
+        if workingAgentCount > 0 {
+            let noun = workingAgentCount == 1 ? "agent" : "agents"
+            description += " — \(workingAgentCount) \(noun) starting or working"
+        }
+        toolTip = description
+        setAccessibilityLabel(description)
         setAccessibilityValue(isSelected)
     }
 

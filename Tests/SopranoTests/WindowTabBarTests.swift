@@ -43,6 +43,80 @@ struct WindowTabBarTests {
         #expect(tabs(in: bar).map(\.title) == ["1:Work"])
     }
 
+    @Test func activityIndicatorsFollowAgentLifecycleWithoutChangingTheWindowTitle() throws {
+        let manager = AgentManager()
+        manager.renameWindow(manager.activeWindowId, to: "Editor")
+        let bar = makeBar(manager: manager)
+        let button = try #require(tabs(in: bar).first)
+        #expect(button.image == nil)
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "codex"))
+
+        for status: AgentStatus in [.starting, .running, .idle, .waiting, .error, .running, .stopped] {
+            manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: status)
+            let isWorking = status == .starting || status == .running
+            #expect((button.image != nil) == isWorking)
+            let description = isWorking
+                ? "Window 1: Editor — 1 agent starting or working"
+                : "Window 1: Editor"
+            #expect(button.toolTip == description)
+            #expect(button.accessibilityLabel() == description)
+            #expect(button.title == "1:Editor")
+            #expect(selectedTabs(in: bar) == [button])
+        }
+
+        manager.restartAgent(target: TerminalTarget(paneId: paneId, tabId: tabId))
+        #expect(button.image != nil)
+        manager.removeTabFromPane(paneId, tabId: tabId)
+        #expect(button.image == nil)
+    }
+
+    @Test func backgroundWindowsCountAgentsInInactiveTabsAndHiddenDepthLayers() throws {
+        let manager = AgentManager()
+        let windowId = manager.activeWindowId
+        manager.renameWindow(windowId, to: "Work")
+        let paneId = manager.activePaneId
+        let agentTabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "codex"))
+        manager.updateAgentStatus(paneId: paneId, tabId: agentTabId, status: .running)
+        manager.switchTab(paneId, index: 0)
+        _ = try #require(manager.goIn(paneId))
+        let innerPaneId = manager.activePaneId
+        let innerTabId = try #require(manager.addTabToPane(innerPaneId, type: .agent, profileId: "claude-code"))
+        #expect(manager.goOut(innerPaneId))
+        _ = try #require(manager.createWindow())
+        let bar = makeBar(manager: manager)
+        let button = tabs(in: bar)[0]
+        #expect(button.image != nil)
+        #expect(button.toolTip == "Window 1: Work — 2 agents starting or working")
+        #expect(tabs(in: bar)[1].image == nil)
+
+        manager.updateAgentStatus(paneId: paneId, tabId: agentTabId, status: .idle)
+        #expect(button.image != nil)
+        #expect(button.toolTip == "Window 1: Work — 1 agent starting or working")
+        manager.removeTabFromPane(innerPaneId, tabId: innerTabId)
+        #expect(button.image == nil)
+        #expect(button.toolTip == "Window 1: Work")
+    }
+
+    @Test func agentsAttachedToShellsOnlyIndicateActivityInTheirOwnSessionAndClearOnExit() throws {
+        let manager = AgentManager()
+        let sessionId = manager.activeSessionId
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let bar = makeBar(manager: manager)
+        _ = try #require(manager.attachAgentIfNeeded(paneId: paneId, tabId: tabId, profileId: "codex"))
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        #expect(tabs(in: bar)[0].image != nil)
+
+        _ = try #require(manager.createSession(name: "Personal"))
+        #expect(tabs(in: bar).count == 1)
+        #expect(tabs(in: bar)[0].image == nil)
+        manager.activateSession(sessionId)
+        #expect(tabs(in: bar)[0].image != nil)
+        manager.agentProcessDidExit(target: TerminalTarget(paneId: paneId, tabId: tabId))
+        #expect(tabs(in: bar)[0].image == nil)
+    }
+
     @Test func overflowingTabsScrollToKeepTheKeyboardSelectedWindowVisible() throws {
         let manager = AgentManager()
         for index in 1...12 {

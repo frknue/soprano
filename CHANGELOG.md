@@ -11,6 +11,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Window tabs show a green dot while agents inside them are starting or working,
+  including hidden tabs and depth layers; hover over a tab to see the count.
 - Windows now appear as numbered tabs above the terminals, with the active tab
   highlighted, clickable switching, a **+** button, and horizontal scrolling when
   the row fills up. The tabs remain visible with the sidebar or macOS window bar hidden.

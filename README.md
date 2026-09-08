@@ -269,6 +269,10 @@ tab to switch windows or **+** to create one. The row scrolls when it fills up a
 keeps the active tab in view as you navigate with the keyboard. It stays visible
 when the sidebar or macOS window bar is hidden.
 
+A green dot beside a window's title means at least one agent inside it is starting
+or working, including agents in hidden pane tabs and depth layers. Hover over the
+window tab to see the count; the dot clears when none are starting or working.
+
 Press `Ctrl+A`, release it, then press `Shift+C` to create a session. `Ctrl+A` then
 lowercase `c` creates a window inside the current session, starting in the active
 terminal's directory. Move left or right through its windows with `Ctrl+Shift+H/L`
