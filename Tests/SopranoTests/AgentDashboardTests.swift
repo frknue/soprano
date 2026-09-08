@@ -58,6 +58,15 @@ struct AgentDashboardSnapshotTests {
         #expect(snapshot.entries[0].windowTitle == manager.windows[secondWindowId]?.title)
         #expect(snapshot.entries[0].cwd == "/tmp/two")
         #expect(snapshot.entries[1].cwd == "/tmp/one")
+        #expect(snapshot.entries.map(\.projectName) == ["two", "one"])
+
+        manager.renameWindow(secondWindowId, to: "Storefront")
+        manager.updateWorkingDirectory(paneId: claudePaneId, tabId: claudeTabId, to: "/tmp/two/src")
+        #expect(manager.agentDashboardSnapshot().entries[0].projectName == "Storefront")
+    }
+
+    @Test func projectsWithoutAWorkingFolderFallBackToTheirWindowName() {
+        #expect(entry(id: "codex", status: .idle).projectName == "Window")
     }
 
     @Test func focusingADashboardTargetRevealsItsHiddenDepthBranchAndExactTab() throws {
@@ -105,6 +114,55 @@ struct AgentDashboardSnapshotTests {
 
 @MainActor
 struct AgentDashboardViewTests {
+    @Test func projectRowsKeepNamesAboveAgentDetailsAndRefreshWhenTheDirectoryChanges() throws {
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .waiting)
+        let controller = AgentDashboardViewController(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
+            styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false
+        )
+        window.contentViewController = controller
+        controller.view.layoutSubtreeIfNeeded()
+
+        let row = try #require(allSubviews(in: controller.view).first {
+            $0.identifier?.rawValue == "agent-dashboard-row"
+        })
+        let fields = allSubviews(in: row).compactMap { $0 as? NSTextField }
+        let project = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-project" })
+        let agent = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-agent" })
+        let directory = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-directory" })
+        let status = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-status" })
+        #expect(project.stringValue == "storefront")
+        #expect(agent.stringValue == "Codex  ·  Session 1")
+        #expect(directory.stringValue == "/tmp/projects/storefront")
+        #expect(status.stringValue == "NEEDS INPUT")
+        #expect(project.frame.width > agent.frame.width)
+        #expect(project.frame.minY > agent.frame.maxY)
+        #expect(agent.frame.minY > directory.frame.maxY)
+        #expect(agent.frame.maxX < status.frame.minX)
+        #expect(fields.allSatisfy { row.bounds.contains($0.frame) })
+        #expect(row.toolTip?.contains("/tmp/projects/storefront") == true)
+        #expect(row.accessibilityLabel()?.hasPrefix("storefront, Codex") == true)
+
+        manager.updateWorkingDirectory(paneId: paneId, tabId: tabId, to: "/tmp/projects/payments")
+        let projectNames = allSubviews(in: controller.view).compactMap { view -> String? in
+            guard let label = view as? NSTextField,
+                  ["agent-dashboard-project", "agent-dashboard-detail-project"].contains(label.identifier?.rawValue)
+            else { return nil }
+            return label.stringValue
+        }
+        #expect(projectNames == ["payments", "payments"])
+        manager.renameWindow(manager.activeWindowId, to: "Payments App")
+        #expect(labels(in: controller.view).filter { $0 == "Payments App" }.count == 2)
+    }
+
     @Test func dashboardOpensWithoutResizingTheMainWindowAndShowsLiveCounts() throws {
         let suiteName = "AgentDashboardViewTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

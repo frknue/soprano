@@ -42,9 +42,9 @@ final class AgentDashboardViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         agentManager.addObserver(id: observerId) { [weak self] change in
             switch change {
-            case .model, .tabTitle:
+            case .model, .tabTitle, .tabWorkingDirectory:
                 self?.refresh()
-            case .tabWorkingDirectory, .browserURL, .markdownDocument:
+            case .browserURL, .markdownDocument:
                 break
             }
         }
@@ -603,19 +603,23 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
         guard let entry else {
             titleLabel.stringValue = "No agent selected"
+            titleLabel.toolTip = nil
             locationLabel.stringValue = "Choose an agent to inspect its terminal."
+            locationLabel.toolTip = nil
             statusLabel.stringValue = ""
             updateTerminalText()
             updateControls()
             return
         }
 
-        titleLabel.stringValue = entry.profileName
+        titleLabel.stringValue = entry.projectName
+        titleLabel.toolTip = entry.projectName
         let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        locationLabel.stringValue = [location, path]
+        locationLabel.stringValue = [entry.profileName, location, path]
             .compactMap { $0 }
             .joined(separator: "  ·  ")
+        locationLabel.toolTip = locationLabel.stringValue
         statusLabel.stringValue = entry.status.displayLabel
         replyField.placeholderString = "Reply to \(entry.profileName)…"
         refreshStatusColors()
@@ -640,6 +644,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     }
 
     private func build() {
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail-project")
         titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1021,7 +1026,7 @@ private final class AgentDashboardRowView: NSControl {
         layer?.cornerRadius = 9
         layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 72).isActive = true
+        heightAnchor.constraint(equalToConstant: 92).isActive = true
         setup()
         updateElapsed(now: Date())
     }
@@ -1126,24 +1131,39 @@ private final class AgentDashboardRowView: NSControl {
         icon.translatesAutoresizingMaskIntoConstraints = false
         iconContainer.addSubview(icon)
 
-        let titleLabel = NSTextField(labelWithString: entry.profileName)
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        let titleLabel = NSTextField(labelWithString: entry.projectName)
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-project")
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.textColor = theme.colors.textPrimary
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        let details = [location, path].compactMap { $0 }.joined(separator: "  ·  ")
-        let detailLabel = NSTextField(labelWithString: details)
+        let agentDescription = [entry.profileName, entry.sessionName]
+            .compactMap { $0 }.joined(separator: "  ·  ")
+        let detailLabel = NSTextField(labelWithString: agentDescription)
+        detailLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-agent")
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = theme.colors.textMuted
-        detailLabel.lineBreakMode = .byTruncatingMiddle
+        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(detailLabel)
 
+        let pathLabel = NSTextField(labelWithString: path ?? location)
+        pathLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-directory")
+        pathLabel.font = .systemFont(ofSize: 11)
+        pathLabel.textColor = theme.colors.textMuted
+        pathLabel.lineBreakMode = .byTruncatingHead
+        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        pathLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pathLabel)
+
         let statusLabel = NSTextField(labelWithString: entry.status.displayLabel)
+        statusLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-status")
         statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
         statusLabel.textColor = statusColor
         statusLabel.alignment = .right
@@ -1168,9 +1188,9 @@ private final class AgentDashboardRowView: NSControl {
 
         NSLayoutConstraint.activate([
             iconContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            iconContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconContainer.widthAnchor.constraint(equalToConstant: 36),
-            iconContainer.heightAnchor.constraint(equalToConstant: 36),
+            iconContainer.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            iconContainer.widthAnchor.constraint(equalToConstant: 28),
+            iconContainer.heightAnchor.constraint(equalToConstant: 28),
 
             icon.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
             icon.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
@@ -1178,31 +1198,35 @@ private final class AgentDashboardRowView: NSControl {
             icon.heightAnchor.constraint(equalToConstant: 20),
 
             titleLabel.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 12),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 17),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -16),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            titleLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -12),
 
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
-            detailLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -16),
+            detailLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -12),
+
+            pathLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            pathLabel.topAnchor.constraint(equalTo: detailLabel.bottomAnchor, constant: 5),
+            pathLabel.trailingAnchor.constraint(equalTo: elapsedLabel.leadingAnchor, constant: -12),
 
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             chevron.widthAnchor.constraint(equalToConstant: 10),
             chevron.heightAnchor.constraint(equalToConstant: 14),
 
-            statusLabel.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -14),
-            statusLabel.topAnchor.constraint(equalTo: topAnchor, constant: 17),
-            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 82),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            statusLabel.centerYAnchor.constraint(equalTo: detailLabel.centerYAnchor),
 
             elapsedLabel.trailingAnchor.constraint(equalTo: statusLabel.trailingAnchor),
-            elapsedLabel.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 5),
+            elapsedLabel.centerYAnchor.constraint(equalTo: pathLabel.centerYAnchor),
         ])
 
-        toolTip = "Select \(entry.profileName); double-click to open it"
+        toolTip = [entry.projectName, agentDescription, location, path, "Double-click to open agent"]
+            .compactMap { $0 }.joined(separator: "\n")
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(
-            "\(entry.profileName), \(entry.status.displayLabel), \(location)"
+            "\(entry.projectName), \(entry.profileName), \(entry.status.displayLabel), \(location)"
         )
     }
 

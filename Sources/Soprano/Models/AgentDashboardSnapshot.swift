@@ -15,6 +15,12 @@ struct AgentDashboardEntry: Identifiable {
     let startedAt: Date?
     let cwd: String?
     var sessionName: String? = nil
+    var isWindowTitleCustom: Bool = false
+
+    var projectName: String {
+        if isWindowTitleCustom { return windowTitle }
+        return cwd?.split(separator: "/").last.map(String.init) ?? windowTitle
+    }
 
     var location: String {
         [sessionName, windowTitle, tabTitle].compactMap { $0 }.joined(separator: " ▸ ")

@@ -25,6 +25,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Agent Dashboard entries lead with the project or custom window name, with the
+  agent, status, and directory on separate lines for easier scanning.
 - Redesigned the Settings screen: a narrower reading column, section titles above flat
   cards, aligned label/control rows, keyboard shortcuts drawn as per-key keycaps with
   the prefix step highlighted in the accent color, and buttons that match the active

@@ -311,7 +311,9 @@ Open the **Agent Dashboard** from the sidebar chart button, the **Commands** men
 `⇧⌘D` (`agent-dashboard`). It summarizes agents that are working, waiting for input, or
 in an error state across every logical window. Entries are ordered by urgency, update
 from the same lifecycle events as pane headers and notifications, and show elapsed
-runtime and working directory. Selecting an entry opens a live terminal inspector with
+runtime and working directory. Each entry leads with its custom window name or project
+folder, followed by the agent and session, then the directory on its own line.
+Selecting an entry opens a live terminal inspector with
 theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code, plus
 **Reply**, **Open**, **Stop**, and **Restart** controls. Replies are available while the
 agent is working, ready, waiting for input, or in an error state and are sent to that
