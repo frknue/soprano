@@ -9,6 +9,7 @@ final class AgentInstance: Identifiable {
     var exitCode: Int32?
     var restartCount: Int
     var needsAttention: Bool
+    var conversation: AgentConversation?
 
     init(id: String, profileId: String) {
         self.id = id

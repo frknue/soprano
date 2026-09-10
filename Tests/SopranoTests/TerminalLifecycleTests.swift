@@ -521,7 +521,7 @@ struct SplitTreeTerminalLifecycleTests {
                     spy.destroyedTargets.append(target)
                 }
             },
-            restartTerminalView: { view in
+            restartTerminalView: { view, _ in
                 if let target = spy.targetsByView[ObjectIdentifier(view)] {
                     spy.restartedTargets.append(target)
                 }

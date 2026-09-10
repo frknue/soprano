@@ -11,6 +11,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Added
 
+- Reopening Soprano resumes recorded Codex, Claude Code, and OpenCode conversations
+  in their panes and restores the selected session; **Restart** resumes the recorded
+  conversation too.
 - Window tabs show a compact badge counting open agents, including hidden tabs and
   depth layers, with status colors and a breakdown on hover.
 - Windows now appear as numbered tabs above the terminals, with the active tab

@@ -850,8 +850,8 @@ final class AgentManager: @unchecked Sendable {
     }
 
     /// Associate an agent started manually inside a regular terminal tab with
-    /// Soprano's lifecycle model. The tab remains a terminal for persistence,
-    /// so restoring the workspace does not unexpectedly relaunch the agent.
+    /// Soprano's lifecycle model. A live supported conversation can be resumed
+    /// as an agent tab on restore; unrecognized shells remain ordinary terminals.
     @discardableResult
     func attachAgentIfNeeded(paneId: String, tabId: String, profileId: String) -> AgentInstance? {
         guard profileId != "terminal",
@@ -901,6 +901,29 @@ final class AgentManager: @unchecked Sendable {
                 layoutChanged: windowChanged || depthChanged || visibilityChanged
             )
         }
+    }
+
+    func recordAgentConversation(
+        _ conversation: AgentConversation,
+        paneId: String,
+        tabId: String,
+        profileId: String? = nil
+    ) {
+        guard let agent = agent(paneId: paneId, tabId: tabId),
+              agent.status != .stopped,
+              profileId == nil || profileId == agent.profileId,
+              AgentConversation.supports(profileId: agent.profileId),
+              AgentConversation.validID(conversation.id)
+        else { return }
+
+        var value = conversation
+        if value.cwd == nil {
+            value.cwd = agent.conversation?.id == value.id
+                ? agent.conversation?.cwd : nil
+        }
+        guard agent.conversation != value else { return }
+        agent.conversation = value
+        notifyChange()
     }
 
     func clearAttention(paneId: String, tabId: String) {
@@ -1239,7 +1262,8 @@ final class AgentManager: @unchecked Sendable {
                             title: tab.title,
                             contentKind: tab.contentKind,
                             previewOwnerPaneId: tab.previewOwnerPaneId,
-                            depthParentId: nil
+                            depthParentId: nil,
+                            conversation: tab.agent?.conversation
                         )
                     }
                 )
@@ -1296,9 +1320,13 @@ final class AgentManager: @unchecked Sendable {
                 }
                 // Old pane-local depth surfaces remain available as ordinary
                 // tabs after migrating to pane-owned depth workspaces.
+                let conversation = savedTab.conversation.flatMap {
+                    AgentConversation.validID($0.id)
+                        && AgentConversation.supports(profileId: savedTab.profileId ?? "") ? $0 : nil
+                }
                 let tab = createPaneTab(
                     id: savedTab.id,
-                    type: savedTab.type,
+                    type: savedTab.type == .terminal && conversation != nil ? .agent : savedTab.type,
                     profileId: savedTab.profileId,
                     cwd: savedTab.cwd,
                     url: savedTab.url,
@@ -1306,6 +1334,7 @@ final class AgentManager: @unchecked Sendable {
                     contentKind: savedTab.contentKind,
                     previewOwnerPaneId: savedTab.previewOwnerPaneId
                 )
+                tab.agent?.conversation = conversation
                 return tab
             }
 

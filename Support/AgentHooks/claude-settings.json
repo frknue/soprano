@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile claude-code --title \"Claude Code\" --body \"Ready for a prompt\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile claude-code --title \"Claude Code\" --body \"Ready for a prompt\" --message-from-stdin",
             "timeout": 5
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile claude-code --title \"Claude Code\" --body \"Working\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile claude-code --title \"Claude Code\" --body \"Working\" --message-from-stdin",
             "timeout": 5
           }
         ]
@@ -41,6 +41,17 @@
             "type": "command",
             "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile claude-code --notify --title \"Claude Code\" --message-from-stdin --body \"Approval or input required\"",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped --profile claude-code --title \"Claude Code\" --body \"Stopped\" --message-from-stdin",
+            "timeout": 3
           }
         ]
       }

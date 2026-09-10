@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile codex --title \"Codex\" --body \"Ready for a prompt\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile codex --title \"Codex\" --body \"Ready for a prompt\" --message-from-stdin",
             "timeout": 5
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile codex --title \"Codex\" --body \"Working\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile codex --title \"Codex\" --body \"Working\" --message-from-stdin",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped --profile codex --title \"Codex\" --body \"Stopped\"",
+            "command": "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped --profile codex --title \"Codex\" --body \"Stopped\" --message-from-stdin",
             "timeout": 3
           }
         ]

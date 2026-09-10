@@ -21,7 +21,7 @@ final class SplitTreeView: NSView {
     let themeManager: ThemeManager
     private let terminalViewFactory: TerminalViewFactory
     private let destroyTerminalView: (NSView) -> Void
-    private let restartTerminalView: (NSView) -> Bool
+    private let restartTerminalView: (NSView, TerminalConfig) -> Bool
     private let terminalViewHasLiveSurface: (NSView) -> Bool
     private let terminalVisibleText: (NSView) -> String?
     private let terminalPromptSubmitter: (NSView, String) -> Bool
@@ -65,9 +65,9 @@ final class SplitTreeView: NSView {
         destroyTerminalView: @escaping (NSView) -> Void = { view in
             (view as? TerminalSurfaceView)?.destroySurface()
         },
-        restartTerminalView: @escaping (NSView) -> Bool = { view in
+        restartTerminalView: @escaping (NSView, TerminalConfig) -> Bool = { view, config in
             guard let terminalView = view as? TerminalSurfaceView else { return false }
-            return terminalView.recreateSurface()
+            return terminalView.recreateSurface(config: config)
         },
         terminalViewHasLiveSurface: @escaping (NSView) -> Bool = { view in
             (view as? TerminalSurfaceView)?.surface != nil
@@ -173,15 +173,16 @@ final class SplitTreeView: NSView {
             destroyTerminalSurface(in: view)
 
         case .restart:
+            guard let tab = agentManager.panes[target.paneId]?.tabs.first(
+                where: { $0.id == target.tabId }
+            ) else { return }
             if let view = tabContentViews[target] {
-                guard restartTerminalView(view) else { return }
+                guard restartTerminalView(view, terminalConfig(for: tab, paneId: target.paneId))
+                else { return }
                 scheduleCodexReadinessIfNeeded(for: target)
                 return
             }
 
-            guard let tab = agentManager.panes[target.paneId]?.tabs.first(
-                where: { $0.id == target.tabId }
-            ) else { return }
             _ = contentViewForTab(tab, paneId: target.paneId)
         }
     }
@@ -432,6 +433,20 @@ final class SplitTreeView: NSView {
         container.setContentView(content, tabId: tab.id)
     }
 
+    private func terminalConfig(for tab: PaneTab, paneId: String) -> TerminalConfig {
+        guard tab.type == .agent,
+              let agent = tab.agent,
+              let profile = AgentCatalog.profile(for: agent.profileId)
+        else { return TerminalConfig(workingDirectory: tab.cwd) }
+        return .forAgent(
+            profile,
+            cwd: tab.cwd,
+            paneId: paneId,
+            tabId: tab.id,
+            conversation: agent.conversation
+        )
+    }
+
     private func contentViewForTab(_ tab: PaneTab, paneId: String) -> NSView {
         let target = TerminalTarget(paneId: paneId, tabId: tab.id)
         if let existing = tabContentViews[target] {
@@ -494,20 +509,7 @@ final class SplitTreeView: NSView {
             view = browserView
 
         case .terminal, .agent:
-            let terminalConfig: TerminalConfig
-            if tab.type == .agent,
-               let agent = tab.agent,
-               let profile = AgentCatalog.profile(for: agent.profileId)
-            {
-                terminalConfig = .forAgent(
-                    profile,
-                    cwd: tab.cwd,
-                    paneId: paneId,
-                    tabId: tab.id
-                )
-            } else {
-                terminalConfig = TerminalConfig(workingDirectory: tab.cwd)
-            }
+            let terminalConfig = terminalConfig(for: tab, paneId: paneId)
 
             let terminalView = terminalViewFactory(
                 target,

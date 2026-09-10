@@ -16,10 +16,15 @@ struct TerminalConfig {
         _ profile: AgentProfile,
         cwd: String? = nil,
         paneId: String,
-        tabId: String
+        tabId: String,
+        conversation: AgentConversation? = nil
     ) -> TerminalConfig {
         var config = TerminalConfig()
-        config.workingDirectory = cwd ?? profile.cwd
+        let conversation = conversation.flatMap {
+            AgentConversation.supports(profileId: profile.id) && AgentConversation.validID($0.id)
+                ? $0 : nil
+        }
+        config.workingDirectory = conversation?.cwd ?? cwd ?? profile.cwd
         config.waitAfterCommand = true
         config.env = profile.env ?? [:]
 
@@ -32,7 +37,12 @@ struct TerminalConfig {
         config.env["SOPRANO_AGENT_NAME"] = profile.name
         config.env["TERM_PROGRAM"] = "Soprano"
 
-        var arguments = profile.args
+        var arguments = conversation?.resumeArguments(profileId: profile.id, arguments: profile.args)
+            ?? profile.args
+        if let conversation {
+            // Custom launch scripts can opt into the same exact-session recovery.
+            config.env["SOPRANO_RESUME_SESSION_ID"] = conversation.id
+        }
         switch profile.id {
         case "codex":
             arguments.append(contentsOf: codexIntegrationArguments(executable: executable))
@@ -94,9 +104,9 @@ struct TerminalConfig {
         // asked; `--body` stays as the fallback when the payload carries no
         // readable message.
         func command(_ state: String, notify: Bool = false, body: String? = nil) -> String {
-            var value = "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event \(state)"
+            var value = "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event \(state) --message-from-stdin"
             if notify {
-                value += " --notify --title \"Claude Code\" --message-from-stdin"
+                value += " --notify --title \"Claude Code\""
             }
             if let body {
                 value += " --body \"\(body)\""
@@ -112,6 +122,7 @@ struct TerminalConfig {
             "hooks": [
                 "SessionStart": hook(command("ready")),
                 "UserPromptSubmit": hook(command("running")),
+                "SessionEnd": hook(command("stopped")),
                 "Stop": hook(command("needs-input", notify: true, body: "Response ready")),
                 "Notification": [[
                     // idle_prompt is what Claude Code sends when it finishes and
@@ -225,7 +236,7 @@ final class TerminalSurfaceView: NSView {
     var onAgentInputSubmitted: (() -> Void)?
     var onAgentProcessExited: ((Int32?) -> Void)?
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
-    private let config: TerminalConfig
+    private var config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
     private var lastPixelHeight: UInt32 = 0
     private var lastXScale: CGFloat = 0
@@ -252,6 +263,32 @@ final class TerminalSurfaceView: NSView {
         self.paneId = paneId
         self.tabId = tabId
 
+        self.config = Self.scopedConfig(config, paneId: paneId, tabId: tabId)
+        super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        setup()
+        if startsSurface {
+            createSurface()
+        }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeScreen(_:)),
+            name: NSWindow.didChangeScreenNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeOcclusionState(_:)),
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: nil
+        )
+    }
+
+    private static func scopedConfig(
+        _ config: TerminalConfig,
+        paneId: String,
+        tabId: String
+    ) -> TerminalConfig {
         var scopedConfig = config
         let executable = Bundle.main.executableURL?.path
             ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
@@ -273,25 +310,7 @@ final class TerminalSurfaceView: NSView {
                     : "\(cliDirectory.path):\(inheritedPath)"
             }
         }
-        self.config = scopedConfig
-        super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
-        setup()
-        if startsSurface {
-            createSurface()
-        }
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(windowDidChangeScreen(_:)),
-            name: NSWindow.didChangeScreenNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(windowDidChangeOcclusionState(_:)),
-            name: NSWindow.didChangeOcclusionStateNotification,
-            object: nil
-        )
+        return scopedConfig
     }
 
     @available(*, unavailable)
@@ -1789,7 +1808,10 @@ final class TerminalSurfaceView: NSView {
     }
 
     @discardableResult
-    func recreateSurface() -> Bool {
+    func recreateSurface(config: TerminalConfig? = nil) -> Bool {
+        if let config {
+            self.config = Self.scopedConfig(config, paneId: paneId, tabId: tabId)
+        }
         destroySurface()
         createSurface()
         return surface != nil

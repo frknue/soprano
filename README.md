@@ -293,7 +293,26 @@ Session names, window membership, and layouts restore on the next app launch whe
 open as one session.
 **Save Workspace As…** (`Shift+Cmd+S`) saves a snapshot of all sessions; the sidebar's
 **Saved Workspaces** menu restores those snapshots. Quitting the app ends terminal
-processes, and restoring a workspace starts new ones.
+processes. Reopening Soprano restores the selected session, window, pane tab, and depth,
+and relaunches Codex, Claude Code, and OpenCode into their recorded conversations.
+**Restart** also resumes the agent's recorded conversation. Agents wait for your next
+input; closing the app does not keep their processes working in the background.
+
+Conversation IDs are recorded per tab, so two agents in the same project resume their
+own conversations. Claude Code reports its ID through launch-scoped lifecycle hooks;
+OpenCode reports its main conversation through the bundled plugin. Codex records its ID
+after a completed response through its built-in notifier; the optional lifecycle hooks
+above can record it earlier, including when a conversation starts. Update previously
+installed hook templates to forward their JSON payloads, and review changed Codex hooks
+in `/hooks` before using them.
+
+A supported agent still running inside a regular shell also restores as an agent tab
+when its hooks have reported a conversation ID. A shell whose agent already exited
+restores as a shell. Older workspace snapshots and agents that have not reported an ID
+start fresh; Soprano never guesses from the most recent conversation in a directory.
+If a recorded conversation has been deleted, the agent reports its normal resume error.
+Custom `launchScript` profiles receive `SOPRANO_RESUME_SESSION_ID` when a conversation
+was recorded and must use it in their own resume command.
 
 ## Knowing where you are
 

@@ -59,6 +59,8 @@ struct WorkspaceSession: Identifiable, Codable {
         /// Retained only to decode sessions from the earlier pane-local depth
         /// implementation. Restored entries are migrated to regular tabs.
         var depthParentId: String? = nil
+        /// Missing in older workspaces, which continue to start fresh agents.
+        var conversation: AgentConversation? = nil
     }
 
     // MARK: - Session List Persistence

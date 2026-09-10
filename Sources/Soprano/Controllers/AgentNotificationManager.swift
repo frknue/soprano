@@ -28,6 +28,7 @@ struct AgentEventPayload {
     let shouldNotify: Bool
     let title: String
     let body: String
+    var conversation: AgentConversation? = nil
 }
 
 /// A distributed notification prepared for delivery by a command bridge.
@@ -138,6 +139,10 @@ enum AgentEventCommand {
         ]
         if let profileId {
             userInfo["profileId"] = profileId
+        }
+        if let conversation = payloads.lazy.compactMap(AgentConversation.fromPayload).first {
+            userInfo["conversationId"] = conversation.id
+            userInfo["conversationCwd"] = conversation.cwd
         }
 
         return DistributedNotificationEnvelope(
@@ -347,7 +352,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         agentManager.removeObserver(id: observerId)
     }
 
-    private func handleDistributedEvent(_ notification: Notification) {
+    func handleDistributedEvent(_ notification: Notification) {
         guard let info = notification.userInfo,
               let paneId = info["paneId"] as? String,
               let tabId = info["tabId"] as? String,
@@ -362,7 +367,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             state: state,
             shouldNotify: info["notify"] as? String == "1",
             title: info["title"] as? String ?? "Agent",
-            body: info["body"] as? String ?? "Ready for a prompt"
+            body: info["body"] as? String ?? "Ready for a prompt",
+            conversation: (info["conversationId"] as? String).map {
+                AgentConversation(id: $0, cwd: info["conversationCwd"] as? String)
+            }
         ))
     }
 
@@ -413,7 +421,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         notificationCenter?.removeDeliveredNotifications(withIdentifiers: Array(identifiers))
     }
 
-    private func handle(_ event: AgentEventPayload) {
+    func handle(_ event: AgentEventPayload) {
         if let profileId = event.profileId {
             agentManager.attachAgentIfNeeded(
                 paneId: event.paneId,
@@ -423,6 +431,16 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         }
 
         guard agentManager.agent(paneId: event.paneId, tabId: event.tabId) != nil else { return }
+        // Identity must survive even if the status/message is a duplicate, or
+        // if the event is SessionEnd just before the workspace is saved.
+        if let conversation = event.conversation {
+            agentManager.recordAgentConversation(
+                conversation,
+                paneId: event.paneId,
+                tabId: event.tabId,
+                profileId: event.profileId
+            )
+        }
         let target = Target(paneId: event.paneId, tabId: event.tabId)
         let fingerprint = EventFingerprint(
             state: event.state,
@@ -668,7 +686,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
 
     @MainActor
     private func focusedSurfaceTarget() -> Target? {
-        guard NSApp.isActive,
+        guard NSApp?.isActive == true,
               var view = NSApp.keyWindow?.firstResponder as? NSView
         else { return nil }
 

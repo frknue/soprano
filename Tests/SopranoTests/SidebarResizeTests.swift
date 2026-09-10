@@ -156,7 +156,7 @@ struct SidebarResizeTests {
                     themeManager: themeManager,
                     terminalViewFactory: { _, _, _ in NSView() },
                     destroyTerminalView: { _ in },
-                    restartTerminalView: { _ in true },
+                    restartTerminalView: { _, _ in true },
                     terminalViewHasLiveSurface: { _ in false },
                     scheduleCodexReadiness: { _ in }
                 )
