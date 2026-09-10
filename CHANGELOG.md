@@ -25,6 +25,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- `soprano <file.md>` and `soprano markdown <file>` now open a reusable reader tab
+  in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
 - Agent Dashboard entries lead with the project or custom window name, with the
   agent, status, and directory on separate lines for easier scanning.
 - Redesigned the Settings screen: a narrower reading column, section titles above flat

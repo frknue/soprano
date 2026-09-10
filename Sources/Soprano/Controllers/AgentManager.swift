@@ -408,11 +408,51 @@ final class AgentManager: @unchecked Sendable {
         previewOwnerPaneId: String? = nil
     ) -> String? {
         guard canAddPane(to: activeWindowId) else { return nil }
-        let standardizedURL = fileURL.standardizedFileURL
         let paneId = nextPaneId()
-        let tabId = nextTabId()
-        let tab = PaneTab(
-            id: tabId,
+        let tab = createMarkdownTab(fileURL: fileURL, previewOwnerPaneId: previewOwnerPaneId)
+        let pane = PaneState(id: paneId, tabs: [tab])
+        return insertPane(pane) ? paneId : nil
+    }
+
+    /// Shows a reusable reader in the caller's pane while retaining its terminal tabs.
+    @discardableResult
+    func previewMarkdown(fileURL: URL, in paneId: String) -> String? {
+        guard let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId)
+        else { return nil }
+
+        let tabId: String
+        if let target = markdownPreviewTarget(ownerPaneId: paneId) {
+            tabId = target.tabId
+            updateMarkdownDocument(paneId: paneId, tabId: tabId, to: fileURL)
+        } else {
+            guard pane.tabs.count < PaneState.maxTabsPerPane else { return nil }
+            let tab = createMarkdownTab(fileURL: fileURL, previewOwnerPaneId: paneId)
+            pane.tabs.append(tab)
+            tabId = tab.id
+        }
+
+        // Keep a maximized caller at its current size when displaying its reader.
+        if let maximizedPaneId, maximizedPaneId != paneId {
+            exitMaximize()
+        }
+        let windowChanged = activeWindowId != terminalWindow.id
+        _ = setActiveWindow(terminalWindow.id)
+        let previousDepth = terminalWindow.activeDepth
+        let visibilityChanged = terminalWindow.revealPane(paneId)
+        terminalWindow.activePaneId = paneId
+        pane.activeTabIndex = pane.tabs.firstIndex { $0.id == tabId } ?? 0
+        notifyChange(
+            layoutChanged: windowChanged || visibilityChanged
+                || previousDepth != terminalWindow.activeDepth
+        )
+        return tabId
+    }
+
+    private func createMarkdownTab(fileURL: URL, previewOwnerPaneId: String?) -> PaneTab {
+        let standardizedURL = fileURL.standardizedFileURL
+        return PaneTab(
+            id: nextTabId(),
             type: .browser,
             title: standardizedURL.lastPathComponent,
             cwd: standardizedURL.deletingLastPathComponent().path,
@@ -420,19 +460,13 @@ final class AgentManager: @unchecked Sendable {
             contentKind: PaneContentKind.markdown,
             previewOwnerPaneId: previewOwnerPaneId
         )
-        let pane = PaneState(id: paneId, tabs: [tab])
-        return insertPane(pane) ? paneId : nil
     }
 
     func markdownPreviewTarget(ownerPaneId: String) -> TerminalTarget? {
-        guard let terminalWindow = window(containingPane: ownerPaneId) else { return nil }
-        for paneId in terminalWindow.paneIds {
-            guard let tab = panes[paneId]?.tabs.first(where: {
-                $0.isMarkdown && $0.previewOwnerPaneId == ownerPaneId
-            }) else { continue }
-            return TerminalTarget(paneId: paneId, tabId: tab.id)
-        }
-        return nil
+        guard let tab = panes[ownerPaneId]?.tabs.first(where: {
+            $0.isMarkdown && $0.previewOwnerPaneId == ownerPaneId
+        }) else { return nil }
+        return TerminalTarget(paneId: ownerPaneId, tabId: tab.id)
     }
 
     // MARK: - Pane Splitting

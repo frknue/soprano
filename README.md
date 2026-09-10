@@ -365,9 +365,10 @@ soprano markdown --new CHANGELOG.md
 ```
 
 Paths are resolved from the calling terminal's working directory. By default, these
-forms reuse that terminal's reader so repeated previews do not fill the layout;
-`--new` always opens another pane. Agents can use the shell-independent equivalent
-`"$SOPRANO_BIN" markdown README.md`.
+forms open a reader tab in the same pane and reuse it for subsequent files. The terminal
+keeps running in its original tab; click that tab to return, or close the reader tab with
+`⌃A` then `W`. `--new` always opens a separate pane to the right. Agents can use the
+shell-independent equivalent `"$SOPRANO_BIN" markdown README.md`.
 
 The toolbar navigates between linked documents, reloads on demand, reveals the source in
 Finder, and opens it in the default editor. Web links open in a regular Soprano browser

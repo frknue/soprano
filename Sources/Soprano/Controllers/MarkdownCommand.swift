@@ -102,8 +102,8 @@ enum MarkdownCommand {
       soprano markdown [--new] <file>
       soprano md [--new] <file>
 
-    Opens a live Markdown reader to the right of the calling terminal.
-    Reuses that terminal's reader unless --new is supplied.
+    Opens a live Markdown reader tab in the calling terminal's pane.
+    Reuses that reader tab; --new opens a separate pane to the right.
     """
 
     static func requestName(appProcessId: String) -> Notification.Name {
@@ -302,43 +302,55 @@ final class MarkdownCommandController: @unchecked Sendable {
             return
         }
 
-        if !payload.opensNewPane,
-           let callerPaneId = payload.callerPaneId,
-           let target = agentManager.markdownPreviewTarget(ownerPaneId: callerPaneId)
-        {
-            agentManager.focusTab(paneId: target.paneId, tabId: target.tabId)
-            agentManager.updateMarkdownDocument(
-                paneId: target.paneId,
-                tabId: target.tabId,
-                to: payload.fileURL
+        do {
+            let paneId = try Self.open(
+                MarkdownCommandRequest(
+                    fileURL: payload.fileURL,
+                    opensNewPane: payload.opensNewPane
+                ),
+                callerPaneId: payload.callerPaneId,
+                callerTabId: payload.callerTabId,
+                using: agentManager
             )
-            respond(requestId: payload.requestId, result: .success(target.paneId))
-            return
+            respond(requestId: payload.requestId, result: .success(paneId))
+        } catch {
+            respond(requestId: payload.requestId, result: .failure(error))
+        }
+    }
+
+    static func open(
+        _ request: MarkdownCommandRequest,
+        callerPaneId: String?,
+        callerTabId: String?,
+        using agentManager: AgentManager
+    ) throws -> String {
+        let ownerPaneId = callerPaneId ?? agentManager.activePaneId
+        guard let pane = agentManager.panes[ownerPaneId],
+              callerTabId.map({ id in pane.tabs.contains { $0.id == id } }) ?? true
+        else {
+            throw MarkdownCommandError.invalidArguments("The calling terminal is no longer available.")
         }
 
-        if let callerPaneId = payload.callerPaneId,
-           let callerTabId = payload.callerTabId,
-           agentManager.panes[callerPaneId]?.tabs.contains(where: {
-               $0.id == callerTabId
-           }) == true
-        {
-            agentManager.focusTab(paneId: callerPaneId, tabId: callerTabId)
+        if !request.opensNewPane {
+            guard agentManager.previewMarkdown(fileURL: request.fileURL, in: ownerPaneId) != nil else {
+                throw MarkdownCommandError.invalidArguments(
+                    "Could not open a Markdown reader (tab limit reached)."
+                )
+            }
+            return ownerPaneId
         }
 
-        let ownerPaneId = payload.opensNewPane ? nil : payload.callerPaneId
-        guard let paneId = agentManager.spawnMarkdown(
-            fileURL: payload.fileURL,
-            previewOwnerPaneId: ownerPaneId
-        ) else {
-            respond(
-                requestId: payload.requestId,
-                result: .failure(MarkdownCommandError.invalidArguments(
-                    "Could not create a Markdown reader (pane limit reached)."
-                ))
-            )
-            return
+        if let callerTabId {
+            agentManager.focusTab(paneId: ownerPaneId, tabId: callerTabId)
+        } else {
+            agentManager.focusPane(ownerPaneId)
         }
-        respond(requestId: payload.requestId, result: .success(paneId))
+        guard let paneId = agentManager.spawnMarkdown(fileURL: request.fileURL) else {
+            throw MarkdownCommandError.invalidArguments(
+                "Could not create a Markdown reader (pane limit reached)."
+            )
+        }
+        return paneId
     }
 
     private func respond(requestId: String, result: Result<String, Error>) {

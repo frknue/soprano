@@ -49,8 +49,9 @@ struct PaneTab: Identifiable {
     /// instead of adding a persisted `PaneType` case so older Soprano builds
     /// can still decode workspaces containing a Markdown reader.
     var contentKind: String? = nil
-    /// Terminal pane that owns this reusable preview. Nil readers are standalone
-    /// panes opened from the UI or with `markdown --new`.
+    /// Terminal pane that owns this reusable preview tab. Older workspaces may
+    /// keep it in a separate pane. Nil readers are standalone panes opened from
+    /// the UI or with `markdown --new`.
     var previewOwnerPaneId: String? = nil
 
     var isMarkdown: Bool {
