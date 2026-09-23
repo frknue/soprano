@@ -51,6 +51,21 @@ struct AgentConversationTests {
         let paneId = manager.activePaneId
         let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
         _ = try #require(manager.addTabToPane(paneId, type: .terminal))
+        manager.focusTab(paneId: paneId, tabId: tabId)
+        var terminalView: TerminalSurfaceView?
+        let tree = SplitTreeView(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            terminalViewFactory: { target, config, _ in
+                let view = TerminalSurfaceView(
+                    paneId: target.paneId, tabId: target.tabId,
+                    config: config, startsSurface: false
+                )
+                if target.tabId == tabId { terminalView = view }
+                return view
+            }
+        )
+        _ = tree
         let notifications = AgentNotificationManager(agentManager: manager)
         let environment = environment(paneId: paneId, tabId: tabId)
         let session = #"{"session_id":"0199-aaaa","cwd":"/tmp/project"}"#
@@ -69,6 +84,9 @@ struct AgentConversationTests {
         #expect(manager.agentDashboardSnapshot().entries.first?.profileName == "omp")
         #expect(manager.agentDashboardSnapshot().entries.first?.status == .idle)
         #expect(manager.agent(paneId: paneId, tabId: tabId)?.conversation?.id == "0199-aaaa")
+        // Shell command-completion events are not proof that omp has exited.
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agentDashboardSnapshot().entries.first?.profileName == "omp")
 
         _ = try deliver("running")
         #expect(manager.agentDashboardSnapshot().workingCount == 1)
@@ -95,6 +113,28 @@ struct AgentConversationTests {
         _ = try deliver("stopped")
         #expect(manager.agentDashboardSnapshot().totalCount == 0)
         #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.agent == nil)
+    }
+
+    @Test func dedicatedAgentTabStillStopsWhenItsTerminalCommandExits() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "omp"))
+        var terminalView: TerminalSurfaceView?
+        let tree = SplitTreeView(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            terminalViewFactory: { target, config, _ in
+                let view = TerminalSurfaceView(
+                    paneId: target.paneId, tabId: target.tabId,
+                    config: config, startsSurface: false
+                )
+                if target.tabId == tabId { terminalView = view }
+                return view
+            }
+        )
+        _ = tree
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .stopped)
     }
 
     @Test func duplicateStatusMessagesStillUpdateTheConversationAfterStartingANewChat() throws {

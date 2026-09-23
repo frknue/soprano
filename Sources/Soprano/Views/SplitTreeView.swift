@@ -542,11 +542,15 @@ final class SplitTreeView: NSView {
                         needsAttention: false
                     )
                 }
-                terminalView.onAgentProcessExited = { [weak self] exitCode in
-                    self?.agentManager.agentProcessDidExit(
-                        target: target,
-                        exitCode: exitCode
-                    )
+                // Shell command completion is not process exit for an agent
+                // attached to a regular terminal; its lifecycle hook detaches it.
+                if tab.type == .agent {
+                    terminalView.onAgentProcessExited = { [weak self] exitCode in
+                        self?.agentManager.agentProcessDidExit(
+                            target: target,
+                            exitCode: exitCode
+                        )
+                    }
                 }
                 terminalView.onCopyModeStateChanged = { [weak self] state in
                     guard let self else { return }

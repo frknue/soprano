@@ -4,6 +4,8 @@ export default function (omp) {
   if (!binary) return
 
   const report = async (state, ctx, options = []) => {
+    // Headless subagents inherit the pane environment but do not own its terminal.
+    if (ctx.mode !== "tui") return
     const sessionId = ctx.sessionManager.getSessionId()
     const payload = JSON.stringify({ session_id: sessionId, cwd: ctx.cwd })
     try {

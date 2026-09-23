@@ -39,8 +39,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   theme.
 
 ### Fixed
-- omp started directly in a Soprano terminal can appear in the window tab and Agent
-  Dashboard and report notifications after enabling its ambient extension.
+- omp started directly in a Soprano terminal stays visible in window tabs and the
+  Agent Dashboard, and reports notifications instead of disappearing after launch.
 - Window agent indicators stay visible between turns and while waiting for input,
   and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps
