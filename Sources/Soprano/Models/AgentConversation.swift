@@ -6,7 +6,7 @@ struct AgentConversation: Codable, Equatable {
     var cwd: String? = nil
 
     static func supports(profileId: String) -> Bool {
-        ["codex", "claude-code", "opencode"].contains(profileId)
+        ["codex", "claude-code", "opencode", "omp"].contains(profileId)
     }
 
     static func validID(_ value: String) -> Bool {
@@ -45,6 +45,9 @@ struct AgentConversation: Codable, Equatable {
         case "opencode":
             valuedSelectors = ["--session", "-s"]
             switches = ["--continue", "-c", "--fork"]
+        case "omp":
+            valuedSelectors = ["--resume", "-r"]
+            switches = ["--continue", "-c"]
         default:
             return arguments
         }
@@ -68,6 +71,7 @@ struct AgentConversation: Codable, Equatable {
         case "codex": return ["resume", id] + remaining
         case "claude-code": return ["--resume", id] + remaining
         case "opencode": return ["--session", id] + remaining
+        case "omp": return ["--resume", id] + remaining
         default: return remaining
         }
     }

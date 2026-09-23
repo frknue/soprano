@@ -59,6 +59,13 @@ struct TerminalConfig {
                let configContent = openCodeConfigContent(pluginURL: pluginURL) {
                 config.env["OPENCODE_CONFIG_CONTENT"] = configContent
             }
+        case "omp":
+            if let extensionURL = SopranoResources.bundle.url(
+                forResource: "SopranoOmpExtension",
+                withExtension: "js"
+            ) {
+                arguments.append(contentsOf: ["--extension", extensionURL.path])
+            }
         default:
             break
         }

@@ -44,6 +44,16 @@ enum DefaultAgents {
         )
     )
 
+    static let omp = AgentProfile(
+        id: "omp",
+        name: "omp",
+        icon: "sparkles",
+        color: "#b8a4ff",
+        description: "Oh My Pi terminal coding agent",
+        command: "omp",
+        args: []
+    )
+
     static let terminal = AgentProfile(
         id: "terminal",
         name: "Terminal",
@@ -54,7 +64,7 @@ enum DefaultAgents {
         args: ["--login"]
     )
 
-    static let all: [AgentProfile] = [codex, claudeCode, openCode, terminal]
+    static let all: [AgentProfile] = [codex, claudeCode, openCode, omp, terminal]
 
     static func profile(for id: String) -> AgentProfile? {
         all.first { $0.id == id }
