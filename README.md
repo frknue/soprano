@@ -132,6 +132,7 @@ Launch Soprano, then:
 | `⌘2` | Claude Code launches in the active pane; the header takes its color and starts reporting status |
 | `⌃A` then `\|` | Split vertically. `⌃A` is the tmux-style prefix; `-` splits horizontally |
 | `⌘1` | Codex starts in the new pane |
+| `⌘4` | omp (Oh My Pi) starts in a new agent pane |
 | `⌃H` `⌃J` `⌃K` `⌃L` | Move between panes — no prefix needed |
 | `⌘B` | A WebKit browser pane splits off to the right |
 | *drag a file from Finder onto a terminal* | Its shell-safe path is inserted at the cursor |
@@ -153,6 +154,9 @@ launchers configure those hooks per launch, without changing your global configu
 - **Claude Code** — launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`, and
   permission hooks.
 - **OpenCode** — a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
+- **omp (Oh My Pi)** — a launch-scoped extension reports session, turn, and tool
+  approval events; install the [`omp` CLI](https://omp.sh/docs/cli) separately.
+  Soprano runs its interactive terminal client, not the Bun-only SDK.
 
 When a background agent finishes, macOS shows a notification and the pane gets a blue
 unread ring. The notification is subtitled `session ▸ window ▸ pane` so it names the location that
@@ -175,10 +179,10 @@ Soprano cannot re-prompt — the section links straight to
 **System Settings → Notifications → Soprano** instead.
 
 <details>
-<summary><b>Agents you start yourself — aliases, scripts, plain <code>codex</code> in a shell</b></summary>
+<summary><b>Agents you start yourself — aliases, scripts, plain <code>omp</code> in a shell</b></summary>
 
-To recognize agents started outside the built-in launchers, merge the supplied lifecycle
-hooks into the corresponding user configuration:
+To recognize agents started outside the built-in launchers, install their lifecycle
+integration separately:
 
 - **Codex:** merge [`Support/AgentHooks/codex-hooks.json`](Support/AgentHooks/codex-hooks.json)
   into `$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`). Start Codex once, open
@@ -186,11 +190,25 @@ hooks into the corresponding user configuration:
 - **Claude Code:** merge the `hooks` entries from
   [`Support/AgentHooks/claude-settings.json`](Support/AgentHooks/claude-settings.json)
   into `~/.claude/settings.json`.
+- **omp:** enable its ambient extension once after installing Soprano:
 
-Preserve existing hook groups when merging. The commands no-op outside Soprano, and the
-first lifecycle event automatically associates the current terminal tab with the
-reported agent. This works for any launcher whose underlying agent process inherits the
-Soprano terminal environment.
+  ```bash
+  mkdir -p ~/.omp/agent/extensions
+  ln -s /Applications/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoOmpAmbient.js \
+    ~/.omp/agent/extensions/soprano-omp.js
+  ```
+
+  From a source checkout, `./scripts/install-omp-extension.sh` does the same
+  without replacing an existing file. Set `PI_CODING_AGENT_DIR` for an isolated
+  omp profile. The extension does nothing outside Soprano and does not duplicate
+  events from the `⌘4` launcher. An omp process already running when you install
+  it must exit and resume (`omp --resume <session-id>` or `omp --continue`) to
+  load it; restarting Soprano alone does not inject hooks into that process.
+
+Preserve existing hook groups when merging Codex or Claude Code hooks. The commands
+no-op outside Soprano, and the first lifecycle event automatically associates the
+current terminal tab with the reported agent. This works for any launcher whose
+underlying agent process inherits the Soprano terminal environment.
 
 </details>
 
@@ -232,7 +250,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 
 | Shortcut | Action |
 |---|---|
-| `⌘1` / `⌘2` / `⌘3` | Launch Codex / Claude Code / OpenCode |
+| `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude Code / OpenCode / omp |
 | `⌘T` | New terminal pane |
 | `⌘B` | New browser pane |
 | `⌘L` | Focus the address bar of the focused browser pane |
@@ -501,8 +519,8 @@ default.
   },
 
   // Add your own agents. Reusing a built-in id ("codex", "claude-code",
-  // "opencode") patches that profile field by field instead. Plain terminal
-  // panes are not configured here — they run your login shell.
+  // "opencode", "omp") patches that profile field by field instead. Plain
+  // terminal panes are not configured here — they run your login shell.
   "agents": [
     {
       "id": "aider",
@@ -510,7 +528,7 @@ default.
       "command": "aider",
       "args": ["--no-auto-commits"],
       "color": "#8bd5ca",
-      "launchKey": "cmd+4",
+      "launchKey": "cmd+5",
       "env": { "AIDER_DARK_MODE": "1" },
       "cwd": "~/git"
     }
@@ -524,7 +542,7 @@ shortcut, and its panes restore with the workspace. Instead of `command`/`args` 
 give a `launchScript` to run something multi-step (`nvm use 22 && aider`).
 
 What it does *not* get automatically is status reporting — `WORKING` / `NEEDS INPUT`
-come from lifecycle hooks, and Soprano only injects those for the three built-in
+come from lifecycle hooks, and Soprano only injects those for its four built-in
 launchers. Every pane exports `SOPRANO_BIN`, `SOPRANO_PANE_ID`, and `SOPRANO_TAB_ID`, so
 an agent with its own hook mechanism can report in the same way the built-ins do.
 

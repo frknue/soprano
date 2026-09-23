@@ -46,6 +46,57 @@ struct AgentConversationTests {
         #expect(manager.panes[paneId]?.activeTab?.id == claudeTab)
     }
 
+    @Test func manuallyLaunchedOmpAttachesToTheShellAndReportsThroughTheDashboard() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        _ = try #require(manager.addTabToPane(paneId, type: .terminal))
+        let notifications = AgentNotificationManager(agentManager: manager)
+        let environment = environment(paneId: paneId, tabId: tabId)
+        let session = #"{"session_id":"0199-aaaa","cwd":"/tmp/project"}"#
+
+        func deliver(_ state: String, options: [String] = []) throws -> [String: String] {
+            let envelope = try #require(AgentEventCommand.notificationEnvelope(
+                arguments: ["soprano", "agent-event", state, "--profile", "omp"] + options + ["--message-json", session],
+                environment: environment
+            ))
+            notifications.handleDistributedEvent(Notification(name: envelope.name, userInfo: envelope.userInfo))
+            return envelope.userInfo
+        }
+
+        _ = try deliver("ready")
+        #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.type == .terminal)
+        #expect(manager.agentDashboardSnapshot().entries.first?.profileName == "omp")
+        #expect(manager.agentDashboardSnapshot().entries.first?.status == .idle)
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.conversation?.id == "0199-aaaa")
+
+        _ = try deliver("running")
+        #expect(manager.agentDashboardSnapshot().workingCount == 1)
+
+        let notification = try deliver("needs-input", options: [
+            "--notify", "--title", "omp", "--body", "Response ready",
+            "--message-json", #"{"message":"Please confirm the deployment"}"#
+        ])
+        #expect(notification["notify"] == "1")
+        #expect(notification["body"] == "Needs input — Please confirm the deployment")
+        #expect(notification["title"] == "omp")
+        #expect(AgentNotificationManager.locationSubtitle(
+            windowTitle: manager.window(containingPane: paneId)?.title,
+            tabTitle: manager.panes[paneId]?.tabs.first { $0.id == tabId }?.title
+        )?.contains("Terminal 1") == true)
+        #expect(manager.agentDashboardSnapshot().needsInputCount == 1)
+        #expect(manager.agentDashboardSnapshot().entries.first?.needsAttention == true)
+
+        _ = try deliver("running")
+        #expect(manager.agentDashboardSnapshot().workingCount == 1)
+        #expect(manager.agentDashboardSnapshot().entries.first?.needsAttention == false)
+        #expect(NSImage(systemSymbolName: DefaultAgents.omp.icon, accessibilityDescription: "omp") != nil)
+
+        _ = try deliver("stopped")
+        #expect(manager.agentDashboardSnapshot().totalCount == 0)
+        #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.agent == nil)
+    }
+
     @Test func duplicateStatusMessagesStillUpdateTheConversationAfterStartingANewChat() throws {
         let manager = AgentManager()
         let paneId = manager.activePaneId
@@ -151,7 +202,7 @@ struct AgentConversationTests {
 
     @Test func resumeCommandsTargetTheSavedIDAndKeepModelOptionsAndHooks() {
         let conversation = AgentConversation(id: "saved-chat", cwd: "/tmp/original repo")
-        for (profile, selector) in [(DefaultAgents.codex, "resume"), (DefaultAgents.claudeCode, "--resume"), (DefaultAgents.openCode, "--session")] {
+        for (profile, selector) in [(DefaultAgents.codex, "resume"), (DefaultAgents.claudeCode, "--resume"), (DefaultAgents.openCode, "--session"), (DefaultAgents.omp, "--resume")] {
             let config = TerminalConfig.forAgent(profile, cwd: "/tmp/other", paneId: "pane-1", tabId: "tab-2", conversation: conversation)
             #expect(config.command?.hasPrefix("'\(profile.command)' '\(selector)' 'saved-chat'") == true)
             #expect(config.workingDirectory == "/tmp/original repo")
@@ -161,10 +212,12 @@ struct AgentConversationTests {
             if profile.id == "codex" { #expect(config.command?.contains("notify=") == true) }
             if profile.id == "claude-code" { #expect(config.command?.contains("'--settings'") == true) }
             if profile.id == "opencode" { #expect(config.env["OPENCODE_CONFIG_CONTENT"]?.contains("SopranoOpenCodePlugin") == true) }
+            if profile.id == "omp" { #expect(config.command?.contains("'--extension'") == true) }
         }
         #expect(conversation.resumeArguments(profileId: "codex", arguments: ["resume", "--last", "--model", "chosen-model"]) == ["resume", "saved-chat", "--model", "chosen-model"])
         #expect(conversation.resumeArguments(profileId: "claude-code", arguments: ["--resume=old-chat", "--fork-session", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
         #expect(conversation.resumeArguments(profileId: "opencode", arguments: ["--continue", "--session", "old-chat", "--fork"]) == ["--session", "saved-chat"])
+        #expect(conversation.resumeArguments(profileId: "omp", arguments: ["--continue", "--resume=old-chat", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
     }
 
     @Test func malformedAndUnrelatedEventIDsCannotBecomeConversationSelectors() {

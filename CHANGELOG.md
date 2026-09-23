@@ -10,7 +10,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
-
+- Launch omp (Oh My Pi) with `⌘4`; its pane reports turn and approval status,
+  notifies when input is needed, and resumes its recorded conversation on restart.
 - Reopening Soprano resumes recorded Codex, Claude Code, and OpenCode conversations
   in their panes and restores the selected session; **Restart** resumes the recorded
   conversation too.
@@ -38,7 +39,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   theme.
 
 ### Fixed
-
+- omp started directly in a Soprano terminal can appear in the window tab and Agent
+  Dashboard and report notifications after enabling its ambient extension.
 - Window agent indicators stay visible between turns and while waiting for input,
   and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps

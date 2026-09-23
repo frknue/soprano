@@ -28,6 +28,8 @@ let package = Package(
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/SopranoCopyMode.conf"),
                 .copy("Resources/SopranoOpenCodePlugin.js"),
+                .copy("Resources/SopranoOmpExtension.js"),
+                .copy("Resources/SopranoOmpAmbient.js"),
             ],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/lib"]),

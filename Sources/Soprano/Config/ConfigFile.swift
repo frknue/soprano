@@ -164,8 +164,8 @@ enum ConfigFile {
           },
 
           // Your own agents. Reusing a built-in id ("codex", "claude-code",
-          // "opencode") patches that profile field by field; a new id defines a
-          // new agent and needs at least "command". Plain terminal panes are
+          // "opencode", "omp") patches that profile field by field; a new id
+          // defines a new agent and needs at least "command". Plain terminal panes are
           // not configured here — they run your login shell.
           //
           //   {
@@ -174,7 +174,7 @@ enum ConfigFile {
           //     "command": "aider",
           //     "args": ["--no-auto-commits"],
           //     "color": "#8bd5ca",
-          //     "launchKey": "cmd+4"
+          //     "launchKey": "cmd+5"
           //   }
           "agents": []
         }

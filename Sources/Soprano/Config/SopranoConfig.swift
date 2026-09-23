@@ -31,9 +31,9 @@ struct SopranoConfig: Codable, Equatable {
     }
 
     /// A user-declared agent. `id` is the only required field: reusing a
-    /// built-in id (`codex`, `claude-code`, `opencode`, `terminal`) patches that
-    /// profile field by field, while a new id defines a whole new agent and
-    /// then requires `command`.
+    /// built-in id (`codex`, `claude-code`, `opencode`, `omp`, `terminal`) patches
+    /// that profile field by field, while a new id defines a whole new agent
+    /// and then requires `command`.
     ///
     /// Deliberately narrower than `AgentProfile`: `autoRestart`,
     /// `restartDelayMs`, and `patterns` are not exposed because nothing reads

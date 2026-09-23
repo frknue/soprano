@@ -235,14 +235,14 @@ struct SopranoConfigTests {
 
     @Test func aLaunchKeySynthesizesAShortcutForANewAgent() {
         let resolved = resolve("""
-        { "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+4" } ] }
+        { "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+5" } ] }
         """)
 
         let binding = resolved.keybindings.bindings.first { $0.id == "launch-aider" }
-        #expect(binding?.key == "4")
+        #expect(binding?.key == "5")
         #expect(binding?.meta == true)
         #expect(binding?.category == .agents)
-        #expect(binding?.defaultKeys == "⌘4")
+        #expect(binding?.defaultKeys == "⌘5")
     }
 
     @Test func aLaunchKeyRetargetsABuiltInAgentShortcut() {
@@ -259,7 +259,7 @@ struct SopranoConfigTests {
         let resolved = resolve("""
         {
           "keybindings": { "bindings": { "launch-aider": "cmd+8" } },
-          "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+4" } ]
+          "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+5" } ]
         }
         """)
 
