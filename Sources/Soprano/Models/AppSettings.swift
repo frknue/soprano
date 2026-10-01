@@ -9,6 +9,9 @@ struct AppSettings: Codable, Equatable {
     var restoreLastSession: Bool
     var themeId: String
     var hideWindowBar: Bool
+    /// Scanlines and phosphor glow over terminal panes. Off by default: it is
+    /// a look, and a shader on every pane is not free.
+    var crtEffect: Bool
     var projectDirectories: [String]
     /// Off by default. A pane that wants you is already announced by the banner,
     /// the unread ring, and the pane header; adding a chime to every finished
@@ -17,8 +20,9 @@ struct AppSettings: Codable, Equatable {
 
     static let defaultSettings = AppSettings(
         restoreLastSession: true,
-        themeId: "gruvbox-dark",
+        themeId: "mission-control",
         hideWindowBar: false,
+        crtEffect: false,
         projectDirectories: [],
         notificationSound: false
     )
@@ -36,6 +40,8 @@ struct AppSettings: Codable, Equatable {
             ?? defaults.themeId
         hideWindowBar = try container.decodeIfPresent(Bool.self, forKey: .hideWindowBar)
             ?? defaults.hideWindowBar
+        crtEffect = try container.decodeIfPresent(Bool.self, forKey: .crtEffect)
+            ?? defaults.crtEffect
         projectDirectories = try container.decodeIfPresent([String].self, forKey: .projectDirectories)
             ?? defaults.projectDirectories
         notificationSound = try container.decodeIfPresent(Bool.self, forKey: .notificationSound)
@@ -46,12 +52,14 @@ struct AppSettings: Codable, Equatable {
         restoreLastSession: Bool,
         themeId: String,
         hideWindowBar: Bool,
+        crtEffect: Bool,
         projectDirectories: [String],
         notificationSound: Bool
     ) {
         self.restoreLastSession = restoreLastSession
         self.themeId = themeId
         self.hideWindowBar = hideWindowBar
+        self.crtEffect = crtEffect
         self.projectDirectories = projectDirectories
         self.notificationSound = notificationSound
     }

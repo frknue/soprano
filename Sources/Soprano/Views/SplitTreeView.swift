@@ -721,9 +721,8 @@ final class SplitTreeView: NSView {
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
 
         let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
-        label.textColor = theme.colors.textMuted
         label.alignment = .center
+        label.setRetroText(text, color: theme.colors.textMuted, size: 22)
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
 
@@ -742,9 +741,8 @@ final class SplitTreeView: NSView {
         placeholder.layer?.backgroundColor = theme.colors.bgBase.cgColor
 
         let label = NSTextField(labelWithString: "Empty")
-        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
-        label.textColor = theme.colors.textMuted
         label.alignment = .center
+        label.setRetroText("Empty", color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         placeholder.addSubview(label)
 
@@ -767,6 +765,7 @@ final class PaneContainerView: NSView {
     let themeManager: ThemeManager
 
     private var headerView: PaneHeaderView
+    private let headerRule = RetroRuleView(axis: .horizontal, style: .single)
     private var contentView: NSView
     private var displayedTabId: String?
 
@@ -843,8 +842,9 @@ final class PaneContainerView: NSView {
         } else if isActive {
             theme.accentColor.cgColor
         } else {
-            theme.colors.borderSubtle.cgColor
+            theme.colors.borderStrong.cgColor
         }
+        headerRule.color = theme.colors.borderStrong
         headerView.update()
     }
 
@@ -853,6 +853,7 @@ final class PaneContainerView: NSView {
         contentView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerView)
         addSubview(contentView)
+        addSubview(headerRule)
 
         let headerHeightConstraint = headerView.heightAnchor.constraint(equalToConstant: 32)
         headerHeightConstraint.priority = .defaultHigh
@@ -862,6 +863,10 @@ final class PaneContainerView: NSView {
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
             headerHeightConstraint,
+
+            headerRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            headerRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            headerRule.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
 
             contentView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -912,7 +917,7 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
     }
 
     override var dividerColor: NSColor {
-        themeManager.currentTheme.colors.borderSubtle
+        themeManager.currentTheme.colors.borderStrong
     }
 
     override var dividerThickness: CGFloat { 1 }

@@ -8,6 +8,7 @@ import Foundation
 struct SopranoConfig: Codable, Equatable {
     var theme: String?
     var hideWindowBar: Bool?
+    var crtEffect: Bool?
     var restoreLastSession: Bool?
     var projectDirectories: [String]?
     var notifications: Notifications?
@@ -169,6 +170,10 @@ extension SopranoConfig {
 
         if let hideWindowBar {
             settings.hideWindowBar = hideWindowBar
+        }
+
+        if let crtEffect {
+            settings.crtEffect = crtEffect
         }
 
         if let sound = notifications?.sound {

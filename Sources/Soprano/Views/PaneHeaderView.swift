@@ -16,6 +16,7 @@ final class PaneHeaderView: NSView {
     private var depthInButton: NSButton!
     private var closeButton: NSButton!
     private var tabStackView: NSStackView!
+    private var focusBar: NSView!
 
     init(paneId: String, agentManager: AgentManager, themeManager: ThemeManager) {
         self.paneId = paneId
@@ -31,32 +32,27 @@ final class PaneHeaderView: NSView {
     }
 
     private func setupViews() {
-        let theme = themeManager.currentTheme
         wantsLayer = true
 
         let pane = agentManager.panes[paneId]
         let tab = pane?.activeTab
 
-        // Status dot
+        focusBar = NSView()
+        focusBar.wantsLayer = true
+        focusBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(focusBar)
+
+        // Status lamp
         statusDot = NSView()
         statusDot.wantsLayer = true
         statusDot.layer?.cornerRadius = 4
         statusDot.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusDot)
 
-        let statusColor: NSColor
-        if let agent = tab?.agent {
-            statusColor = colorForStatus(agent.status, theme: theme)
-        } else {
-            statusColor = theme.colors.textMuted
-        }
-        statusDot.layer?.backgroundColor = statusColor.cgColor
-
         // Title
         titleLabel = NSTextField(labelWithString: tab?.title ?? "Pane")
-        titleLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        titleLabel.textColor = theme.colors.textPrimary
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
@@ -69,7 +65,6 @@ final class PaneHeaderView: NSView {
         addSubview(tabStackView)
 
         statusLabel = NSTextField(labelWithString: "")
-        statusLabel.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
         statusLabel.alignment = .right
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
@@ -83,15 +78,13 @@ final class PaneHeaderView: NSView {
 
         depthBadgeView = NSView()
         depthBadgeView.wantsLayer = true
-        depthBadgeView.layer?.cornerRadius = 5
-        depthBadgeView.layer?.borderWidth = 1
+        depthBadgeView.layer?.cornerRadius = Retro.cornerRadius
+        depthBadgeView.layer?.borderWidth = Retro.hairline
         depthBadgeView.identifier = NSUserInterfaceItemIdentifier("pane-depth-indicator")
         depthBadgeView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(depthBadgeView)
 
         depthLabel = NSTextField(labelWithString: "DEPTH 0")
-        depthLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
-        depthLabel.textColor = theme.colors.textMuted
         depthLabel.alignment = .center
         depthLabel.identifier = NSUserInterfaceItemIdentifier("pane-depth-label")
         depthLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -105,12 +98,11 @@ final class PaneHeaderView: NSView {
         addSubview(depthInButton)
 
         // Close button
-        closeButton = NSButton(title: "×", target: self, action: #selector(closePaneAction))
-        closeButton.isBordered = false
-        closeButton.font = .systemFont(ofSize: 14, weight: .regular)
-        closeButton.contentTintColor = theme.colors.textMuted
-        closeButton.toolTip = "Close active tab or depth layer"
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton = makeDepthButton(
+            title: "×",
+            action: #selector(closePaneAction),
+            toolTip: "Close active tab or depth layer"
+        )
         addSubview(closeButton)
 
         // Pane containers are briefly zero-width while AppKit reparents a
@@ -128,6 +120,13 @@ final class PaneHeaderView: NSView {
         tabsTrailingConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
+            // The pane frame covers the outer 2 pt when focused; the bar
+            // shows as a lit segment just inside it.
+            focusBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            focusBar.topAnchor.constraint(equalTo: topAnchor),
+            focusBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            focusBar.widthAnchor.constraint(equalToConstant: 4),
+
             statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             statusDot.centerYAnchor.constraint(equalTo: centerYAnchor),
             statusDot.widthAnchor.constraint(equalToConstant: 8),
@@ -194,33 +193,31 @@ final class PaneHeaderView: NSView {
         let tab = pane?.activeTab
         let theme = themeManager.currentTheme
 
-        titleLabel.stringValue = tab?.title ?? "Pane"
-        titleLabel.textColor = theme.colors.textPrimary
-        closeButton.contentTintColor = theme.colors.textMuted
-        depthOutButton.contentTintColor = theme.colors.textMuted
-        depthInButton.contentTintColor = theme.colors.textMuted
         let terminalWindow = agentManager.window(containingPane: paneId)
         let depth = terminalWindow?.depth(containingPane: paneId) ?? 0
         let maximumDepth = terminalWindow?.maximumDepth ?? 0
         let isFocused = agentManager.activePaneId == paneId
+
+        titleLabel.textColor = theme.colors.textPrimary
+        titleLabel.setRetroText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
         depthOutButton.isEnabled = depth > 0
         depthInButton.isEnabled = terminalWindow.map {
             $0.hasDepthBranch(from: paneId)
                 || agentManager.canAddPane(to: $0.id)
         } ?? false
-        depthLabel.stringValue = "DEPTH \(depth)"
-        depthLabel.textColor = isFocused
-            ? theme.colors.accent
-            : theme.colors.textMuted
+        styleGlyphButton(depthOutButton, theme: theme)
+        styleGlyphButton(depthInButton, theme: theme)
+        styleGlyphButton(closeButton, theme: theme)
+        let depthColor = isFocused ? theme.colors.accent : theme.colors.textMuted
+        depthLabel.textColor = depthColor
+        depthLabel.setRetroText("DEPTH \(depth)", color: depthColor, tracking: 0)
         depthBadgeView.layer?.backgroundColor = (
             isFocused
-                ? theme.colors.accent.withAlphaComponent(0.18)
+                ? theme.colors.accent.withAlphaComponent(0.14)
                 : theme.colors.bgOverlay
         ).cgColor
         depthBadgeView.layer?.borderColor = (
-            isFocused
-                ? theme.colors.accent.withAlphaComponent(0.72)
-                : theme.colors.borderSubtle
+            isFocused ? theme.colors.accent : theme.colors.borderStrong
         ).cgColor
         let depthToolTip = maximumDepth > 0
             ? "Depth layer \(depth) of \(maximumDepth)"
@@ -231,12 +228,18 @@ final class PaneHeaderView: NSView {
         depthLabel.toolTip = depthBadgeView.toolTip
 
         if let agent = tab?.agent {
-            statusDot.layer?.backgroundColor = colorForStatus(agent.status, theme: theme).cgColor
-            statusLabel.stringValue = agent.status.displayLabel
-            statusLabel.textColor = colorForStatus(agent.status, theme: theme)
+            let statusColor = colorForStatus(agent.status, theme: theme)
+            RetroLamp.light(statusDot, color: statusColor, lit: isLit(agent.status))
+            statusLabel.textColor = statusColor
+            statusLabel.setRetroText(
+                agent.status.displayLabel,
+                color: statusColor,
+                tracking: 0,
+                glow: agent.status == .running
+            )
             statusLabel.isHidden = false
         } else {
-            statusDot.layer?.backgroundColor = theme.colors.textMuted.cgColor
+            RetroLamp.light(statusDot, color: theme.colors.textMuted, lit: false)
             statusLabel.stringValue = ""
             statusLabel.isHidden = true
         }
@@ -254,6 +257,8 @@ final class PaneHeaderView: NSView {
         layer?.backgroundColor = isFocused
             ? theme.colors.bgRaised.cgColor
             : theme.colors.bgPanel.cgColor
+        focusBar.isHidden = !isFocused
+        focusBar.layer?.backgroundColor = theme.colors.accent.cgColor
     }
 
     @objc private func closePaneAction() {
@@ -294,40 +299,40 @@ final class PaneHeaderView: NSView {
         let activeTabId = pane.activeTab?.id
         for (index, tab) in pane.tabs.enumerated() {
             let needsAttention = tab.agent?.needsAttention == true
+            let isActive = tab.id == activeTabId
             let attentionPrefix = needsAttention ? "● " : ""
+            let title = "\(attentionPrefix)\(tab.title)"
+            let color = if needsAttention {
+                theme.colors.blue
+            } else if isActive {
+                theme.colors.accent
+            } else {
+                theme.colors.textMuted
+            }
             let button = NSButton(
-                title: "\(attentionPrefix)\(tab.title)",
+                title: title,
                 target: self,
                 action: #selector(tabClicked(_:))
             )
             button.tag = index
             button.isBordered = false
-            button.font = .systemFont(ofSize: 11, weight: .medium)
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
-            button.contentTintColor = if needsAttention {
-                theme.colors.blue
-            } else if tab.id == activeTabId {
-                theme.colors.accent
-            } else {
-                theme.colors.textMuted
-            }
+            button.contentTintColor = color
+            button.attributedTitle = RetroText.display(title, color: color)
             button.translatesAutoresizingMaskIntoConstraints = false
 
             let underline = NSView()
             underline.wantsLayer = true
-            underline.layer?.cornerRadius = 0.5
-            underline.layer?.backgroundColor = (
-                tab.id == activeTabId ? theme.colors.accent : NSColor.clear
-            ).cgColor
+            underline.layer?.backgroundColor = (isActive ? color : NSColor.clear).cgColor
             underline.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(underline)
 
             NSLayoutConstraint.activate([
-                underline.heightAnchor.constraint(equalToConstant: 1),
+                underline.heightAnchor.constraint(equalToConstant: 2),
                 underline.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 3),
                 underline.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -3),
-                underline.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -1),
+                underline.bottomAnchor.constraint(equalTo: button.bottomAnchor),
             ])
 
             tabStackView.addArrangedSubview(button)
@@ -341,11 +346,33 @@ final class PaneHeaderView: NSView {
     ) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
         button.isBordered = false
-        button.font = .systemFont(ofSize: 16, weight: .medium)
-        button.contentTintColor = themeManager.currentTheme.colors.textMuted
         button.toolTip = toolTip
         button.translatesAutoresizingMaskIntoConstraints = false
+        styleGlyphButton(button, theme: themeManager.currentTheme)
         return button
+    }
+
+    /// Bakes the muted display-face glyph into the title; a disabled key
+    /// dims because attributed titles ignore the control's enabled state.
+    private func styleGlyphButton(_ button: NSButton, theme: AppTheme) {
+        let color = button.isEnabled
+            ? theme.colors.textMuted
+            : theme.colors.textMuted.withAlphaComponent(0.35)
+        button.contentTintColor = color
+        button.attributedTitle = RetroText.display(
+            button.title,
+            color: color,
+            size: 22,
+            tracking: 0,
+            alignment: .center
+        )
+    }
+
+    private func isLit(_ status: AgentStatus) -> Bool {
+        switch status {
+        case .running, .waiting, .starting, .error: true
+        case .idle, .stopped: false
+        }
     }
 
     private func colorForStatus(_ status: AgentStatus, theme: AppTheme) -> NSColor {

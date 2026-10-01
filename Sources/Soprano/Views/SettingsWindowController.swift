@@ -44,15 +44,17 @@ final class SettingsViewController: NSViewController {
 
     private var rootContainer: NSView!
     private var sidebar: NSView!
+    private var sidebarRule: RetroRuleView!
     private var tabStack: NSStackView!
     private var contentBackgroundView: NSView!
     private var scrollView: NSScrollView!
     private var scrollDocumentView: NSView!
     private var contentStack: NSStackView!
-    private var tabButtons: [SettingsTab: NSButton] = [:]
+    private var tabButtons: [SettingsTab: SettingsTabButton] = [:]
 
     private var themePopup: NSPopUpButton?
     private var hideWindowBarButton: NSButton?
+    private var crtEffectButton: NSButton?
     private var restoreSessionButton: NSButton?
     private var notificationSoundButton: NSButton?
     private var notificationStatusLabel: NSTextField?
@@ -142,6 +144,13 @@ final class SettingsViewController: NSViewController {
             tabStack.addArrangedSubview(button)
         }
 
+        sidebarRule = RetroRuleView(
+            axis: .vertical,
+            style: .single,
+            color: currentTheme.colors.borderStrong
+        )
+        sidebar.addSubview(sidebarRule)
+
         contentBackgroundView = NSView()
         contentBackgroundView.wantsLayer = true
         contentBackgroundView.translatesAutoresizingMaskIntoConstraints = false
@@ -181,7 +190,7 @@ final class SettingsViewController: NSViewController {
             sidebar.leadingAnchor.constraint(equalTo: rootContainer.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: rootContainer.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: rootContainer.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 180),
+            sidebar.widthAnchor.constraint(equalToConstant: 200),
 
             contentBackgroundView.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             contentBackgroundView.trailingAnchor.constraint(equalTo: rootContainer.trailingAnchor),
@@ -191,6 +200,11 @@ final class SettingsViewController: NSViewController {
             tabStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
             tabStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             tabStack.topAnchor.constraint(equalTo: sidebar.topAnchor),
+
+            sidebarRule.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            sidebarRule.topAnchor.constraint(equalTo: sidebar.topAnchor),
+            sidebarRule.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+            sidebarRule.widthAnchor.constraint(equalToConstant: Retro.hairline),
 
             scrollView.leadingAnchor.constraint(equalTo: contentBackgroundView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentBackgroundView.trailingAnchor),
@@ -234,48 +248,31 @@ final class SettingsViewController: NSViewController {
         view.layer?.backgroundColor = theme.colors.bgBase.cgColor
         sidebar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         contentBackgroundView.layer?.backgroundColor = theme.colors.bgBase.cgColor
+        sidebarRule.color = theme.colors.borderStrong
 
         for (tab, button) in tabButtons {
-            styleTabButton(button, tab: tab, active: tab == currentTab)
+            button.apply(theme: theme)
+            button.isActive = tab == currentTab
         }
 
         rebuildCurrentTab()
     }
 
-    private func makeTabButton(for tab: SettingsTab) -> NSButton {
-        let button = NSButton(title: tab.title, target: self, action: #selector(tabClicked(_:)))
+    private func makeTabButton(for tab: SettingsTab) -> SettingsTabButton {
+        let button = SettingsTabButton(
+            tab: tab,
+            theme: currentTheme,
+            target: self,
+            action: #selector(tabClicked(_:))
+        )
         button.tag = tab.rawValue
-        button.isBordered = false
-        button.setButtonType(.momentaryPushIn)
-        button.font = .systemFont(ofSize: 13, weight: .medium)
-        button.imagePosition = .imageLeading
-        button.alignment = .left
-        button.contentTintColor = currentTheme.colors.textMuted
-        button.image = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.title)
-        button.image?.size = NSSize(width: 14, height: 14)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 8
+        button.isActive = tab == currentTab
 
         NSLayoutConstraint.activate([
             button.heightAnchor.constraint(equalToConstant: 34),
-            button.widthAnchor.constraint(equalToConstant: 160),
+            button.widthAnchor.constraint(equalToConstant: 180),
         ])
-        styleTabButton(button, tab: tab, active: tab == currentTab)
         return button
-    }
-
-    private func styleTabButton(_ button: NSButton, tab: SettingsTab, active: Bool) {
-        let theme = currentTheme
-        button.layer?.backgroundColor = active ? theme.colors.bgSelected.cgColor : NSColor.clear.cgColor
-        button.contentTintColor = active ? theme.colors.accent : theme.colors.textMuted
-        button.attributedTitle = NSAttributedString(
-            string: tab.title,
-            attributes: [
-                .foregroundColor: active ? theme.colors.textPrimary : theme.colors.textMuted,
-                .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-            ]
-        )
     }
 
     @objc private func tabClicked(_ sender: NSButton) {
@@ -283,7 +280,7 @@ final class SettingsViewController: NSViewController {
         view.window?.endEditing(for: nil)
         currentTab = tab
         for (item, button) in tabButtons {
-            styleTabButton(button, tab: item, active: item == tab)
+            button.isActive = item == tab
         }
         rebuildCurrentTab()
     }
@@ -331,13 +328,12 @@ final class SettingsViewController: NSViewController {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
-        titleLabel.textColor = currentTheme.colors.textPrimary
+        titleLabel.setRetroText(title, color: currentTheme.colors.textPrimary, size: 22)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-        subtitleLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        subtitleLabel.font = RetroFont.body(11)
         subtitleLabel.textColor = currentTheme.colors.textMuted
         subtitleLabel.maximumNumberOfLines = 0
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -364,9 +360,9 @@ final class SettingsViewController: NSViewController {
         )
     }
 
-    /// A titled settings section: an uppercase monospaced eyebrow and optional
-    /// subtitle sit *above* a flat card, so the section name provides hierarchy
-    /// instead of competing with the controls inside the box.
+    /// A titled settings section: a console heading and optional subtitle sit
+    /// *above* a flat card, so the section name provides hierarchy instead of
+    /// competing with the controls inside the box.
     private func makeSectionCard(title: String, subtitle: String? = nil) -> (NSView, NSStackView) {
         let container = NSStackView()
         container.orientation = .vertical
@@ -374,34 +370,26 @@ final class SettingsViewController: NSViewController {
         container.spacing = 8
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        let eyebrow = NSTextField(labelWithString: title)
-        eyebrow.attributedStringValue = NSAttributedString(
-            string: title.uppercased(),
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: currentTheme.colors.textMuted,
-                .kern: 1.3,
-            ]
-        )
-        container.addArrangedSubview(eyebrow)
+        let heading = RetroHeadingView(title: title.uppercased(), theme: currentTheme)
+        container.addArrangedSubview(heading)
+        heading.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         if let subtitle, !subtitle.isEmpty {
             let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-            subtitleLabel.font = .systemFont(ofSize: 11, weight: .regular)
+            subtitleLabel.font = RetroFont.body(11)
             subtitleLabel.textColor = currentTheme.colors.textMuted
             subtitleLabel.maximumNumberOfLines = 0
             container.addArrangedSubview(subtitleLabel)
-            container.setCustomSpacing(3, after: eyebrow)
+            container.setCustomSpacing(4, after: heading)
             subtitleLabel.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
         }
 
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.borderWidth = 1
+        card.layer?.cornerRadius = Retro.cornerRadius
+        card.layer?.borderWidth = Retro.hairline
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
-        card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
-        card.translatesAutoresizingMaskIntoConstraints = false
+        card.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         container.addArrangedSubview(card)
         card.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
@@ -436,9 +424,8 @@ final class SettingsViewController: NSViewController {
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let labelField = NSTextField(labelWithString: label)
-        labelField.font = .systemFont(ofSize: 12.5, weight: .regular)
-        labelField.textColor = currentTheme.colors.textPrimary
         labelField.lineBreakMode = .byTruncatingTail
+        labelField.setRetroText(label, color: currentTheme.colors.textPrimary)
         labelField.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(labelField)
 
@@ -458,6 +445,11 @@ final class SettingsViewController: NSViewController {
             control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 2),
             row.bottomAnchor.constraint(greaterThanOrEqualTo: control.bottomAnchor, constant: 2),
         ])
+        // Rows hug their content so the trailing flexible space, not a row,
+        // absorbs the slack on tabs shorter than the viewport.
+        let hugContent = row.heightAnchor.constraint(equalToConstant: 30)
+        hugContent.priority = .defaultLow
+        hugContent.isActive = true
         return row
     }
 
@@ -492,12 +484,12 @@ final class SettingsViewController: NSViewController {
         field.focusRingType = .none
         field.drawsBackground = true
         field.wantsLayer = true
-        field.layer?.cornerRadius = 6
-        field.layer?.borderWidth = 1
-        field.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
+        field.layer?.cornerRadius = Retro.cornerRadius
+        field.layer?.borderWidth = Retro.hairline
+        field.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         field.backgroundColor = currentTheme.colors.bgRaised
         field.textColor = currentTheme.colors.textPrimary
-        field.font = .systemFont(ofSize: 12, weight: .regular)
+        field.font = RetroFont.body(11)
         field.translatesAutoresizingMaskIntoConstraints = false
         return field
     }
@@ -527,36 +519,18 @@ final class SettingsViewController: NSViewController {
         return Int(field.stringValue)
     }
 
-    /// A flat, theme-derived button: the stock Aqua bezel is the one control
-    /// that ignores the app theme entirely, so buttons draw their own surface.
-    private func makeActionButton(title: String, action: Selector) -> NSButton {
-        let button = PaddedFlatButton(title: title, target: self, action: action)
-        button.isBordered = false
-        button.setButtonType(.momentaryPushIn)
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 6
-        button.layer?.borderWidth = 1
-        button.layer?.backgroundColor = currentTheme.colors.bgOverlay.withAlphaComponent(0.6).cgColor
-        button.layer?.borderColor = currentTheme.colors.borderStrong.withAlphaComponent(0.7).cgColor
-        button.attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11.5, weight: .medium),
-                .foregroundColor: currentTheme.colors.textPrimary,
-            ]
-        )
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.heightAnchor.constraint(equalToConstant: 26).isActive = true
-        return button
+    /// A console key: the stock Aqua bezel is the one control that ignores the
+    /// app theme entirely, so buttons draw their own surface.
+    private func makeActionButton(
+        title: String,
+        action: Selector,
+        kind: RetroButton.Kind = .standard
+    ) -> NSButton {
+        RetroButton(title: title, theme: currentTheme, kind: kind, target: self, action: action)
     }
 
     private func makeHairline() -> NSView {
-        let separator = NSView()
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = currentTheme.colors.borderSubtle.withAlphaComponent(0.7).cgColor
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        return separator
+        RetroRuleView(axis: .horizontal, style: .single, color: currentTheme.colors.borderSubtle)
     }
 
     private func buildGeneralTab() {
@@ -592,10 +566,21 @@ final class SettingsViewController: NSViewController {
         hideWindowBarRow.toolTip =
             "Hide the title bar and traffic-light controls so panes use the full window"
 
+        let crtEffectBox = makeCheckbox(
+            action: #selector(crtEffectChanged(_:)),
+            isOn: settings.crtEffect,
+            accessibilityLabel: "CRT effect"
+        )
+        self.crtEffectButton = crtEffectBox
+        let crtEffectRow = makeSettingRow(label: "CRT effect", control: crtEffectBox)
+        crtEffectRow.toolTip =
+            "Scanlines and phosphor glow over terminal panes, like an old CRT monitor"
+
         addSettingRows(
             [
                 makeSettingRow(label: "Theme", control: popup),
                 hideWindowBarRow,
+                crtEffectRow,
             ],
             to: appearanceStack
         )
@@ -637,7 +622,7 @@ final class SettingsViewController: NSViewController {
         statusRow.spacing = 10
 
         let statusLabel = NSTextField(labelWithString: "")
-        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
+        statusLabel.font = RetroFont.body(11)
         statusLabel.textColor = currentTheme.colors.textMuted
         statusLabel.lineBreakMode = .byWordWrapping
         statusLabel.maximumNumberOfLines = 2
@@ -646,7 +631,8 @@ final class SettingsViewController: NSViewController {
 
         let fixButton = makeActionButton(
             title: "Open System Settings",
-            action: #selector(openNotificationSystemSettings)
+            action: #selector(openNotificationSystemSettings),
+            kind: .prominent
         )
         fixButton.isHidden = true
         notificationFixButton = fixButton
@@ -686,7 +672,6 @@ final class SettingsViewController: NSViewController {
 
         let input = makeTextField(value: "")
         input.placeholderString = "Folder path"
-        input.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         input.target = self
         input.action = #selector(addProjectDirectory)
         input.cell?.sendsActionOnEndEditing = false
@@ -697,7 +682,11 @@ final class SettingsViewController: NSViewController {
         let browseButton = makeActionButton(title: "Browse…", action: #selector(browseProjectDirectory))
         addRow.addArrangedSubview(browseButton)
 
-        let addButton = makeActionButton(title: "Add", action: #selector(addProjectDirectory))
+        let addButton = makeActionButton(
+            title: "Add",
+            action: #selector(addProjectDirectory),
+            kind: .prominent
+        )
         addRow.addArrangedSubview(addButton)
 
         projectStack.addArrangedSubview(addRow)
@@ -714,7 +703,6 @@ final class SettingsViewController: NSViewController {
 
         let prefixField = makeTextField(value: keybindingConfig.prefixKey)
         prefixField.alignment = .center
-        prefixField.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
         prefixField.widthAnchor.constraint(equalToConstant: 56).isActive = true
         prefixField.target = self
         prefixField.action = #selector(prefixKeyCommitted(_:))
@@ -785,8 +773,8 @@ final class SettingsViewController: NSViewController {
     private func makeIssueRow(_ issue: ConfigIssue) -> NSView {
         let row = NSView()
         row.wantsLayer = true
-        row.layer?.cornerRadius = 6
-        row.layer?.borderWidth = 1
+        row.layer?.cornerRadius = Retro.cornerRadius
+        row.layer?.borderWidth = Retro.hairline
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let tint = issue.severity == .error
@@ -797,7 +785,7 @@ final class SettingsViewController: NSViewController {
 
         let location = issue.line.map { "Line \($0): " } ?? ""
         let label = NSTextField(wrappingLabelWithString: location + issue.message)
-        label.font = .systemFont(ofSize: 11, weight: .regular)
+        label.font = RetroFont.body(11)
         label.textColor = currentTheme.colors.textPrimary
         label.maximumNumberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -839,7 +827,7 @@ final class SettingsViewController: NSViewController {
         let directories = configuredProjectDirectories
         if directories.isEmpty {
             let empty = NSTextField(labelWithString: "No project directories configured")
-            empty.font = .systemFont(ofSize: 11, weight: .regular)
+            empty.font = RetroFont.body(11)
             empty.textColor = currentTheme.colors.textMuted
             list.addArrangedSubview(empty)
             return
@@ -864,7 +852,7 @@ final class SettingsViewController: NSViewController {
             let pathLabel = NSTextField(
                 labelWithString: isReachable ? directory : "\(directory)  ·  not found"
             )
-            pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            pathLabel.font = RetroFont.body(11)
             pathLabel.textColor = isReachable
                 ? currentTheme.colors.textPrimary
                 : currentTheme.colors.textMuted
@@ -872,15 +860,9 @@ final class SettingsViewController: NSViewController {
             pathLabel.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(pathLabel)
 
-            let removeButton = NSButton(title: "Remove", target: self, action: #selector(removeProjectDirectory(_:)))
-            removeButton.isBordered = false
-            removeButton.setButtonType(.momentaryPushIn)
-            removeButton.attributedTitle = NSAttributedString(
-                string: "Remove",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: currentTheme.colors.textMuted,
-                ]
+            let removeButton = makeActionButton(
+                title: "Remove",
+                action: #selector(removeProjectDirectory(_:))
             )
             removeButton.tag = index
             removeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -927,6 +909,11 @@ final class SettingsViewController: NSViewController {
     @objc private func hideWindowBarChanged(_ sender: NSButton) {
         settings.hideWindowBar = sender.state == .on
         configStore.write(settings.hideWindowBar, at: ["hideWindowBar"])
+    }
+
+    @objc private func crtEffectChanged(_ sender: NSButton) {
+        settings.crtEffect = sender.state == .on
+        configStore.write(settings.crtEffect, at: ["crtEffect"])
     }
 
     @objc private func notificationSoundChanged(_ sender: NSButton) {
@@ -1165,16 +1152,16 @@ final class SettingsViewController: NSViewController {
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let actionLabel = NSTextField(labelWithString: action)
-        actionLabel.font = .systemFont(ofSize: 12, weight: .semibold)
-        actionLabel.textColor = isDisabled
-            ? currentTheme.colors.textMuted
-            : currentTheme.colors.textPrimary
         actionLabel.lineBreakMode = .byTruncatingTail
+        actionLabel.setRetroText(
+            action,
+            color: isDisabled ? currentTheme.colors.textMuted : currentTheme.colors.textPrimary
+        )
         actionLabel.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(actionLabel)
 
         let descriptionLabel = NSTextField(labelWithString: description)
-        descriptionLabel.font = .systemFont(ofSize: 10, weight: .regular)
+        descriptionLabel.font = RetroFont.body(10)
         descriptionLabel.textColor = currentTheme.colors.textMuted
         descriptionLabel.lineBreakMode = .byTruncatingTail
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1221,23 +1208,18 @@ final class SettingsViewController: NSViewController {
 
         if isDisabled {
             let off = NSTextField(labelWithString: "OFF")
-            off.attributedStringValue = NSAttributedString(
-                string: "OFF",
-                attributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
-                    .foregroundColor: currentTheme.colors.textMuted,
-                    .kern: 0.6,
-                ]
-            )
             off.alignment = .center
+            off.setRetroText("OFF", color: currentTheme.colors.textMuted)
             off.wantsLayer = true
-            off.layer?.cornerRadius = 4
-            off.layer?.backgroundColor = currentTheme.colors.gray.withAlphaComponent(0.18).cgColor
+            off.layer?.cornerRadius = Retro.cornerRadius
+            off.layer?.borderWidth = Retro.hairline
+            off.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
+            off.layer?.backgroundColor = currentTheme.colors.gray.withAlphaComponent(0.14).cgColor
             off.translatesAutoresizingMaskIntoConstraints = false
             off.widthAnchor.constraint(
                 equalToConstant: off.intrinsicContentSize.width + 12
             ).isActive = true
-            off.heightAnchor.constraint(equalToConstant: 17).isActive = true
+            off.heightAnchor.constraint(equalToConstant: 20).isActive = true
             stack.addArrangedSubview(off)
             return stack
         }
@@ -1250,8 +1232,7 @@ final class SettingsViewController: NSViewController {
         for (sequenceIndex, sequence) in sequences.enumerated() {
             if sequenceIndex > 0 {
                 let arrow = NSTextField(labelWithString: "→")
-                arrow.font = .systemFont(ofSize: 10, weight: .medium)
-                arrow.textColor = currentTheme.colors.textMuted
+                arrow.setRetroText("→", color: currentTheme.colors.textMuted)
                 stack.addArrangedSubview(arrow)
             }
             let parts = sequence.components(separatedBy: "+").filter { !$0.isEmpty }
@@ -1272,20 +1253,20 @@ final class SettingsViewController: NSViewController {
         let highlighted = isCustomized || isPrefixCap
 
         let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        label.textColor = highlighted
-            ? currentTheme.colors.accent
-            : currentTheme.colors.textPrimary
         label.alignment = .center
+        label.setRetroText(
+            text,
+            color: highlighted ? currentTheme.colors.accent : currentTheme.colors.textPrimary
+        )
         label.wantsLayer = true
-        label.layer?.cornerRadius = 5
-        label.layer?.borderWidth = 1
+        label.layer?.cornerRadius = Retro.cornerRadius
+        label.layer?.borderWidth = Retro.hairline
         label.layer?.backgroundColor = isPrefixCap
-            ? currentTheme.colors.accent.withAlphaComponent(0.10).cgColor
-            : currentTheme.colors.bgOverlay.withAlphaComponent(0.7).cgColor
+            ? currentTheme.colors.accent.withAlphaComponent(0.14).cgColor
+            : currentTheme.colors.bgRaised.cgColor
         label.layer?.borderColor = highlighted
-            ? currentTheme.colors.accent.withAlphaComponent(0.5).cgColor
-            : currentTheme.colors.borderStrong.withAlphaComponent(0.8).cgColor
+            ? currentTheme.colors.accent.cgColor
+            : currentTheme.colors.borderStrong.cgColor
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             label.widthAnchor.constraint(
@@ -1341,10 +1322,10 @@ final class SettingsViewController: NSViewController {
     private func makeAgentCard(_ profile: AgentProfile) -> NSView {
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = 10
-        card.layer?.borderWidth = 1
+        card.layer?.cornerRadius = Retro.cornerRadius
+        card.layer?.borderWidth = Retro.hairline
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
-        card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
+        card.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView()
@@ -1360,41 +1341,48 @@ final class SettingsViewController: NSViewController {
         titleRow.alignment = .centerY
         titleRow.spacing = 6
 
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 4
-        dot.layer?.backgroundColor = profile.nsColor.cgColor
-        dot.translatesAutoresizingMaskIntoConstraints = false
-        dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
-        dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
-        titleRow.addArrangedSubview(dot)
+        let lamp = NSView()
+        lamp.wantsLayer = true
+        lamp.layer?.cornerRadius = 4
+        RetroLamp.light(lamp, color: profile.nsColor)
+        lamp.translatesAutoresizingMaskIntoConstraints = false
+        lamp.widthAnchor.constraint(equalToConstant: 8).isActive = true
+        lamp.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        titleRow.addArrangedSubview(lamp)
 
-        let title = NSTextField(labelWithString: "\(profile.icon)  \(profile.name)")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-        title.textColor = currentTheme.colors.textPrimary
+        let titleText = "\(profile.icon)  \(profile.name)"
+        let title = NSTextField(labelWithString: titleText)
+        title.lineBreakMode = .byTruncatingTail
+        title.setRetroText(titleText, color: currentTheme.colors.textPrimary)
         titleRow.addArrangedSubview(title)
 
         if configStore.resolved.configuredAgentIds.contains(profile.id) {
             let badge = NSTextField(labelWithString: "settings.json")
-            badge.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
-            badge.textColor = currentTheme.colors.accent
             badge.alignment = .center
+            badge.setRetroText("settings.json", color: currentTheme.colors.accent)
             badge.wantsLayer = true
-            badge.layer?.cornerRadius = 5
+            badge.layer?.cornerRadius = Retro.cornerRadius
+            badge.layer?.borderWidth = Retro.hairline
+            badge.layer?.borderColor = currentTheme.colors.accent.cgColor
             badge.layer?.backgroundColor = currentTheme.colors.accent.withAlphaComponent(0.14).cgColor
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            badge.widthAnchor.constraint(
+                equalToConstant: badge.intrinsicContentSize.width + 12
+            ).isActive = true
+            badge.heightAnchor.constraint(equalToConstant: 18).isActive = true
             titleRow.addArrangedSubview(badge)
         }
 
         stack.addArrangedSubview(titleRow)
 
         let description = NSTextField(wrappingLabelWithString: profile.description)
-        description.font = .systemFont(ofSize: 11, weight: .regular)
+        description.font = RetroFont.body(11)
         description.textColor = currentTheme.colors.textMuted
         description.maximumNumberOfLines = 0
         stack.addArrangedSubview(description)
 
         let command = NSTextField(labelWithString: "$ \(profile.command) \(profile.args.joined(separator: " "))")
-        command.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        command.font = RetroFont.body(10)
         command.textColor = currentTheme.colors.textPrimary
         command.lineBreakMode = .byTruncatingMiddle
         stack.addArrangedSubview(command)
@@ -1402,7 +1390,7 @@ final class SettingsViewController: NSViewController {
         let ready = profile.patterns?.ready?.joined(separator: ", ") ?? "-"
         let error = profile.patterns?.error?.joined(separator: ", ") ?? "-"
         let patterns = NSTextField(wrappingLabelWithString: "Patterns\nReady: \(ready)\nError: \(error)")
-        patterns.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
+        patterns.font = RetroFont.body(10)
         patterns.textColor = currentTheme.colors.textMuted
         patterns.maximumNumberOfLines = 0
         stack.addArrangedSubview(patterns)
@@ -1423,25 +1411,26 @@ final class SettingsViewController: NSViewController {
         hero.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "Soprano")
-        title.font = .systemFont(ofSize: 34, weight: .bold)
-        title.textColor = currentTheme.colors.textPrimary
+        title.setRetroText("Soprano", color: currentTheme.colors.textPrimary, size: 33, glow: true)
         title.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(title)
 
+        let stripe = RetroStripeView(layout: .slanted, colors: currentTheme.colors.stripe)
+        hero.addSubview(stripe)
+
         let tagline = NSTextField(labelWithString: "AI Agent Orchestration Platform")
-        tagline.font = .systemFont(ofSize: 14, weight: .medium)
-        tagline.textColor = currentTheme.colors.textMuted
+        tagline.setRetroText("AI Agent Orchestration Platform", color: currentTheme.colors.textMuted)
         tagline.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(tagline)
 
         let version = NSTextField(labelWithString: "Version: \(AppVersion.current)")
-        version.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        version.font = RetroFont.body(11)
         version.textColor = currentTheme.colors.textPrimary
         version.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(version)
 
         let runtime = NSTextField(labelWithString: "Runtime: Swift + AppKit + libghostty")
-        runtime.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        runtime.font = RetroFont.body(11)
         runtime.textColor = currentTheme.colors.textMuted
         runtime.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(runtime)
@@ -1449,7 +1438,12 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
             title.topAnchor.constraint(equalTo: hero.topAnchor),
-            title.trailingAnchor.constraint(equalTo: hero.trailingAnchor),
+
+            stripe.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 14),
+            stripe.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            stripe.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
+            stripe.widthAnchor.constraint(equalToConstant: 44),
+            stripe.heightAnchor.constraint(equalToConstant: 22),
 
             tagline.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
             tagline.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
@@ -1515,13 +1509,107 @@ private final class SettingsScrollDocumentView: NSView {
     }
 }
 
-/// A borderless button whose intrinsic size includes horizontal padding, so a
-/// flat layer-drawn surface still gives the title room to breathe. The cell's
-/// default momentary highlight dims the title while pressed.
-private final class PaddedFlatButton: NSButton {
-    override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize
-        size.width += 20
-        return size
+/// A settings tab: a square strip key. The active tab is a lit block, the
+/// accent filled in behind panel-colored ink.
+private final class SettingsTabButton: NSButton {
+    private static let inset: CGFloat = 12
+    private static let symbolSlot: CGFloat = 16
+
+    var isActive = false {
+        didSet { needsDisplay = true }
+    }
+    private var theme: AppTheme
+    private let symbol: NSImage?
+    private var isHovered = false {
+        didSet { needsDisplay = true }
+    }
+    private var hoverArea: NSTrackingArea?
+
+    init(tab: SettingsTab, theme: AppTheme, target: AnyObject?, action: Selector) {
+        self.theme = theme
+        self.symbol = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.title)
+        super.init(frame: .zero)
+        self.title = tab.title
+        self.target = target
+        self.action = action
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colors = theme.colors
+        let fill: NSColor = if isActive {
+            colors.accent
+        } else {
+            isHovered ? colors.bgOverlay : .clear
+        }
+        let ink = isActive ? colors.bgPanel : colors.textMuted
+
+        fill.setFill()
+        bounds.fill()
+
+        var x = Self.inset
+        if let symbol {
+            let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [ink]))
+            let tinted = symbol.withSymbolConfiguration(configuration) ?? symbol
+            let size = tinted.size
+            tinted.draw(
+                in: NSRect(
+                    x: x + floor((Self.symbolSlot - size.width) / 2),
+                    y: floor((bounds.height - size.height) / 2),
+                    width: size.width,
+                    height: size.height
+                ),
+                from: .zero,
+                operation: .sourceOver,
+                fraction: 1,
+                respectFlipped: true,
+                hints: nil
+            )
+            x += Self.symbolSlot + 10
+        }
+
+        let label = RetroText.display(title, color: ink, tracking: 0)
+        let height = ceil(label.size().height)
+        label.draw(in: NSRect(
+            x: x,
+            y: floor((bounds.height - height) / 2),
+            width: max(0, bounds.width - x - Self.inset),
+            height: height
+        ))
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea {
+            removeTrackingArea(hoverArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
     }
 }

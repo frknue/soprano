@@ -131,6 +131,10 @@ enum ConfigFile {
           // the full window. Off by default.
           "hideWindowBar": \(settings.hideWindowBar),
 
+          // Scanlines and phosphor glow over terminal panes, like an old CRT
+          // monitor. Off by default.
+          "crtEffect": \(settings.crtEffect),
+
           // Restore the previous workspace on launch.
           "restoreLastSession": \(settings.restoreLastSession),
 

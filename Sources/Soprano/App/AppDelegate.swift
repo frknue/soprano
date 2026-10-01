@@ -20,7 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let settings = configStore.settings
         let themeManager = ThemeManager(themeId: settings.themeId)
-        GhosttyAppManager.shared.initialize(theme: themeManager.currentTheme)
+        GhosttyAppManager.shared.initialize(
+            theme: themeManager.currentTheme,
+            crtEffect: settings.crtEffect
+        )
         let agentManager = AgentManager()
         let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
         agentNotificationManager.requestAuthorizationIfNeeded()

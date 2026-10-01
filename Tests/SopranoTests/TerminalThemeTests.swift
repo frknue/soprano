@@ -4,8 +4,9 @@ import Testing
 
 @MainActor
 struct TerminalThemeTests {
-    @Test func builtInThemeCatalogIncludesTheFivePopularAdditions() {
+    @Test func builtInThemeCatalogLeadsWithMissionControlAndKeepsEveryExistingId() {
         #expect(AppTheme.allThemes.map(\.id) == [
+            "mission-control",
             "gruvbox-dark",
             "catppuccin-mocha",
             "dracula",

@@ -474,7 +474,7 @@ navigation always has a working fallback.
 
 ## Settings
 
-`⌘,` opens a four-tab settings screen: **General** (theme, window bar,
+`⌘,` opens a four-tab settings screen: **General** (theme, window bar, CRT effect,
 restore-last-session, project directories, notifications), **Keyboard Shortcuts**,
 **Agent Profiles**, and **About**.
 
@@ -493,10 +493,11 @@ default.
 {
   // Comments and trailing commas are allowed. The UI preserves both when it
   // writes to this file.
-  // gruvbox-dark | catppuccin-mocha | dracula | solarized-dark | nord
-  // tokyo-night | atom-one-dark
-  "theme": "catppuccin-mocha",
+  // mission-control (default) | gruvbox-dark | catppuccin-mocha | dracula
+  // solarized-dark | nord | tokyo-night | atom-one-dark
+  "theme": "mission-control",
   "hideWindowBar": false,               // opt in to full-window panes
+  "crtEffect": false,                   // scanlines + phosphor glow on terminals
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
 
@@ -630,3 +631,7 @@ packaged app in `Soprano.app/Contents/Resources/LICENSE-ghostty`.
 Markdown parsing uses [Swift Markdown](https://github.com/swiftlang/swift-markdown) and
 its cmark-gfm backend. The cmark notices travel with the packaged app in
 `Soprano.app/Contents/Resources/LICENSE-swift-cmark`.
+
+The interface font is [Departure Mono](https://departuremono.com) by Helena Zhang,
+bundled under the SIL Open Font License 1.1. Its license travels with the packaged app in
+`Soprano.app/Contents/Resources/LICENSE-departure-mono`.

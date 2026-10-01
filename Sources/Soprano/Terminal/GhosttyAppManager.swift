@@ -23,9 +23,9 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private init() {}
 
-    func initialize(theme: AppTheme) {
+    func initialize(theme: AppTheme, crtEffect: Bool) {
         if isInitialized {
-            applyTheme(theme)
+            applyAppearance(theme: theme, crtEffect: crtEffect)
             return
         }
 
@@ -35,7 +35,11 @@ final class GhosttyAppManager: @unchecked Sendable {
             return
         }
 
-        guard let primary = createConfig(theme: theme, loadDefaultFiles: true) else {
+        guard let primary = createConfig(
+            theme: theme,
+            crtEffect: crtEffect,
+            loadDefaultFiles: true
+        ) else {
             print("[Soprano] Failed to create ghostty config")
             return
         }
@@ -48,7 +52,11 @@ final class GhosttyAppManager: @unchecked Sendable {
             app = primaryApp
         } else {
             ghostty_config_free(primary.config)
-            guard let fallback = createConfig(theme: theme, loadDefaultFiles: false) else {
+            guard let fallback = createConfig(
+                theme: theme,
+                crtEffect: crtEffect,
+                loadDefaultFiles: false
+            ) else {
                 print("[Soprano] Failed to allocate fallback ghostty config")
                 return
             }
@@ -71,9 +79,16 @@ final class GhosttyAppManager: @unchecked Sendable {
         isInitialized = true
     }
 
-    func applyTheme(_ theme: AppTheme) {
+    /// Rebuilds the terminal config for every surface. The theme and the CRT
+    /// shader travel together because ghostty takes one finalized config:
+    /// applying either alone would drop the other.
+    func applyAppearance(theme: AppTheme, crtEffect: Bool) {
         guard isInitialized, let app else { return }
-        guard let updated = createConfig(theme: theme, loadDefaultFiles: true) else {
+        guard let updated = createConfig(
+            theme: theme,
+            crtEffect: crtEffect,
+            loadDefaultFiles: true
+        ) else {
             print("[Soprano] Failed to apply terminal theme \(theme.id)")
             return
         }
@@ -93,6 +108,7 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private func createConfig(
         theme: AppTheme,
+        crtEffect: Bool,
         loadDefaultFiles: Bool
     ) -> (config: ghostty_config_t, clearsSelectionOnCopy: Bool)? {
         guard let cfg = ghostty_config_new() else { return nil }
@@ -103,6 +119,9 @@ final class GhosttyAppManager: @unchecked Sendable {
         guard applyTerminalThemeConfig(theme, to: cfg) else {
             ghostty_config_free(cfg)
             return nil
+        }
+        if crtEffect {
+            applyCrtShaderConfig(to: cfg)
         }
         ghostty_config_finalize(cfg)
         return (cfg, clearsSelectionOnCopy)
@@ -126,26 +145,64 @@ final class GhosttyAppManager: @unchecked Sendable {
         _ theme: AppTheme,
         to config: ghostty_config_t
     ) -> Bool {
+        guard loadGeneratedConfig(
+            theme.terminalColors.ghosttyConfiguration,
+            named: "terminal-theme",
+            into: config
+        ) else {
+            print("[Soprano] Failed to prepare terminal theme \(theme.id)")
+            return false
+        }
+        return true
+    }
+
+    /// Appends Soprano's CRT shader. Loaded after the user's ghostty config,
+    /// so it stacks on any `custom-shader` they already run. When the effect is
+    /// off nothing is emitted, leaving their own shader settings in charge.
+    private func applyCrtShaderConfig(to config: ghostty_config_t) {
+        guard let shaderURL = SopranoResources.bundle.url(
+            forResource: "SopranoCRT",
+            withExtension: "glsl"
+        ) else {
+            print("[Soprano] CRT shader resource missing; skipping CRT effect")
+            return
+        }
+
+        // Ghostty strips one pair of surrounding double quotes and keeps inner
+        // spaces verbatim, so a path inside "Soprano Dev.app" survives intact.
+        // The shader is static, so the per-frame animation loop is disabled.
+        let lines = """
+        custom-shader = "\(shaderURL.path)"
+        custom-shader-animation = false
+        """
+        if !loadGeneratedConfig(lines, named: "crt-shader", into: config) {
+            print("[Soprano] Failed to prepare CRT shader config; skipping CRT effect")
+        }
+    }
+
+    /// Ghostty only loads configuration from files, so generated lines go
+    /// through a throwaway temp file that is removed once loaded.
+    private func loadGeneratedConfig(
+        _ contents: String,
+        named name: String,
+        into config: ghostty_config_t
+    ) -> Bool {
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(
-                "soprano-terminal-theme-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString).conf"
+                "soprano-\(name)-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString).conf"
             )
 
         do {
-            try theme.terminalColors.ghosttyConfiguration.write(
-                to: fileURL,
-                atomically: true,
-                encoding: .utf8
-            )
-            defer { try? FileManager.default.removeItem(at: fileURL) }
-            fileURL.path.withCString {
-                ghostty_config_load_file(config, $0)
-            }
-            return true
+            try contents.write(to: fileURL, atomically: true, encoding: .utf8)
         } catch {
-            print("[Soprano] Failed to prepare terminal theme \(theme.id): \(error)")
+            print("[Soprano] Failed to write generated ghostty config \(name): \(error)")
             return false
         }
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        fileURL.path.withCString {
+            ghostty_config_load_file(config, $0)
+        }
+        return true
     }
 
     private func observeApplicationFocusChanges() {

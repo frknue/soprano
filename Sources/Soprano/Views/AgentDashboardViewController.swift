@@ -14,12 +14,14 @@ final class AgentDashboardViewController: NSViewController {
     private let terminalStateProvider: TerminalStateProvider
     private let promptSender: PromptSender
     private var headerView: NSView!
+    private var headerStripe: RetroStripeView!
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
-    private var doneButton: NSButton!
+    private var doneButton: RetroButton!
+    private var headerRule: RetroRuleView!
     private var summaryContainer: NSView!
     private var leftPanel: NSView!
-    private var agentListTitleLabel: NSTextField!
+    private var agentListHeading: RetroHeadingView!
     private var keyboardHintLabel: NSTextField!
     private var rowsStack: NSStackView!
     private var detailView: AgentDashboardDetailView!
@@ -85,35 +87,43 @@ final class AgentDashboardViewController: NSViewController {
         headerView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(headerView)
 
+        headerStripe = RetroStripeView(layout: .slanted, colors: theme.colors.stripe)
+        headerView.addSubview(headerStripe)
+
         titleLabel = NSTextField(labelWithString: "Agent Dashboard")
-        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        titleLabel.textColor = theme.colors.textPrimary
+        titleLabel.setRetroText(
+            "Agent Dashboard",
+            color: theme.colors.textPrimary,
+            size: 22,
+            glow: true
+        )
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(titleLabel)
 
         subtitleLabel = NSTextField(labelWithString: "")
-        subtitleLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        subtitleLabel.font = RetroFont.body(11)
         subtitleLabel.textColor = theme.colors.textMuted
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(subtitleLabel)
 
-        doneButton = NSButton(
+        doneButton = RetroButton(
             title: "Done",
+            theme: theme,
+            kind: .standard,
             target: self,
             action: #selector(doneClicked)
         )
-        doneButton.bezelStyle = .rounded
         doneButton.keyEquivalent = "\u{1b}"
         doneButton.keyEquivalentModifierMask = []
-        doneButton.contentTintColor = theme.colors.textPrimary
         doneButton.toolTip = "Return to the workspace (Esc)"
-        doneButton.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(doneButton)
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        headerView.addSubview(separator)
+        headerRule = RetroRuleView(
+            axis: .horizontal,
+            style: .double,
+            color: theme.colors.borderStrong
+        )
+        headerView.addSubview(headerRule)
 
         let contentView = NSView()
         contentView.translatesAutoresizingMaskIntoConstraints = false
@@ -163,18 +173,31 @@ final class AgentDashboardViewController: NSViewController {
             headerView.topAnchor.constraint(equalTo: root.topAnchor),
             headerView.heightAnchor.constraint(equalToConstant: 68),
 
-            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 28),
-            titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 13),
+            headerStripe.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 28),
+            headerStripe.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            headerStripe.widthAnchor.constraint(equalToConstant: 22),
+            headerStripe.heightAnchor.constraint(equalToConstant: 12),
+
+            titleLabel.leadingAnchor.constraint(equalTo: headerStripe.trailingAnchor, constant: 10),
+            titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 9),
+            titleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: doneButton.leadingAnchor,
+                constant: -16
+            ),
 
             subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
+            subtitleLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: doneButton.leadingAnchor,
+                constant: -16
+            ),
 
             doneButton.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -28),
             doneButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
-            separator.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
+            headerRule.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
+            headerRule.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
+            headerRule.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
 
             contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 28),
             contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -28),
@@ -215,15 +238,23 @@ final class AgentDashboardViewController: NSViewController {
 
     func apply(theme: AppTheme) {
         guard isViewLoaded else { return }
-        view.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        headerView.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        titleLabel.textColor = theme.colors.textPrimary
-        subtitleLabel.textColor = theme.colors.textMuted
-        doneButton.contentTintColor = theme.colors.textPrimary
-        leftPanel.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        leftPanel.layer?.borderColor = theme.colors.borderSubtle.cgColor
-        agentListTitleLabel.textColor = theme.colors.textPrimary
-        keyboardHintLabel.textColor = theme.colors.textMuted
+        let colors = theme.colors
+        view.layer?.backgroundColor = colors.bgBase.cgColor
+        headerView.layer?.backgroundColor = colors.bgPanel.cgColor
+        headerStripe.colors = colors.stripe
+        titleLabel.setRetroText(
+            titleLabel.stringValue,
+            color: colors.textPrimary,
+            size: 22,
+            glow: true
+        )
+        subtitleLabel.textColor = colors.textMuted
+        doneButton.apply(theme: theme)
+        headerRule.color = colors.borderStrong
+        leftPanel.layer?.backgroundColor = colors.bgPanel.cgColor
+        leftPanel.layer?.borderColor = colors.borderStrong.cgColor
+        agentListHeading.apply(theme: theme)
+        keyboardHintLabel.setRetroText(keyboardHintLabel.stringValue, color: colors.textMuted)
         detailView.apply(theme: theme)
         refresh()
     }
@@ -280,9 +311,9 @@ final class AgentDashboardViewController: NSViewController {
         let panel = NSView()
         panel.wantsLayer = true
         panel.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        panel.layer?.borderColor = theme.colors.borderSubtle.cgColor
-        panel.layer?.borderWidth = 1
-        panel.layer?.cornerRadius = 10
+        panel.layer?.borderColor = theme.colors.borderStrong.cgColor
+        panel.layer?.borderWidth = Retro.hairline
+        panel.layer?.cornerRadius = Retro.cornerRadius
         panel.translatesAutoresizingMaskIntoConstraints = false
 
         let sectionHeader = makeSectionHeader(theme: theme)
@@ -445,31 +476,27 @@ final class AgentDashboardViewController: NSViewController {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        agentListTitleLabel = NSTextField(labelWithString: "AGENTS")
-        agentListTitleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        agentListTitleLabel.textColor = theme.colors.textPrimary
-        agentListTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(agentListTitleLabel)
+        agentListHeading = RetroHeadingView(title: "AGENTS", theme: theme)
+        container.addSubview(agentListHeading)
 
-        keyboardHintLabel = NSTextField(
-            labelWithString: "J/K  ·  R REPLY  ·  ↩ OPEN"
-        )
-        keyboardHintLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
-        keyboardHintLabel.textColor = theme.colors.textMuted
+        let keyboardHint = "J/K  ·  R REPLY  ·  ↩ OPEN"
+        keyboardHintLabel = NSTextField(labelWithString: keyboardHint)
         keyboardHintLabel.alignment = .right
         keyboardHintLabel.lineBreakMode = .byTruncatingHead
+        keyboardHintLabel.setRetroText(keyboardHint, color: theme.colors.textMuted)
         keyboardHintLabel.setContentCompressionResistancePriority(
             .defaultLow,
             for: .horizontal
         )
+        keyboardHintLabel.setContentHuggingPriority(.required, for: .horizontal)
         keyboardHintLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(keyboardHintLabel)
 
         NSLayoutConstraint.activate([
-            agentListTitleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            agentListTitleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            agentListHeading.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            agentListHeading.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             keyboardHintLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: agentListTitleLabel.trailingAnchor,
+                equalTo: agentListHeading.trailingAnchor,
                 constant: 12
             ),
             keyboardHintLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -484,7 +511,7 @@ final class AgentDashboardViewController: NSViewController {
         card.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         card.layer?.borderColor = theme.colors.borderSubtle.cgColor
         card.layer?.borderWidth = 1
-        card.layer?.cornerRadius = 10
+        card.layer?.cornerRadius = Retro.cornerRadius
         card.translatesAutoresizingMaskIntoConstraints = false
         card.heightAnchor.constraint(equalToConstant: 150).isActive = true
 
@@ -498,16 +525,16 @@ final class AgentDashboardViewController: NSViewController {
         icon.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(icon)
 
-        let title = NSTextField(labelWithString: "No agents to monitor")
-        title.font = .systemFont(ofSize: 14, weight: .semibold)
-        title.textColor = theme.colors.textPrimary
+        let titleText = "No agents to monitor"
+        let title = NSTextField(labelWithString: titleText)
+        title.setRetroText(titleText, color: theme.colors.textPrimary)
         title.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(title)
 
         let detail = NSTextField(
             labelWithString: "Launch an agent from the sidebar or command palette."
         )
-        detail.font = .systemFont(ofSize: 12)
+        detail.font = RetroFont.body(11)
         detail.textColor = theme.colors.textMuted
         detail.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(detail)
@@ -543,23 +570,35 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     private let titleLabel = NSTextField(labelWithString: "No agent selected")
     private let locationLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
-    private let terminalTitleLabel = NSTextField(labelWithString: "LIVE TERMINAL")
+    private let terminalHeading: RetroHeadingView
     private let terminalStateLabel = NSTextField(labelWithString: "UNAVAILABLE")
     private let replyHintLabel = NSTextField(labelWithString: "")
-    private let openButton = NSButton()
-    private let stopButton = NSButton()
-    private let restartButton = NSButton()
-    private let sendButton = NSButton()
+    private let openButton: RetroButton
+    private let stopButton: RetroButton
+    private let restartButton: RetroButton
+    private let sendButton: RetroButton
+    private let separator: RetroRuleView
     private let replyField = NSTextField()
+    private var terminalScrollView: NSScrollView!
     private var terminalTextView: NSTextView!
 
     init(theme: AppTheme) {
         self.theme = theme
+        terminalHeading = RetroHeadingView(title: "LIVE TERMINAL", theme: theme)
+        openButton = RetroButton(title: "Open", theme: theme)
+        stopButton = RetroButton(title: "Stop", theme: theme)
+        restartButton = RetroButton(title: "Restart", theme: theme)
+        sendButton = RetroButton(title: "Send", theme: theme, kind: .prominent)
+        separator = RetroRuleView(
+            axis: .horizontal,
+            style: .single,
+            color: theme.colors.borderSubtle
+        )
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail")
         wantsLayer = true
-        layer?.cornerRadius = 10
-        layer?.borderWidth = 1
+        layer?.cornerRadius = Retro.cornerRadius
+        layer?.borderWidth = Retro.hairline
         translatesAutoresizingMaskIntoConstraints = false
         build()
         apply(theme: theme)
@@ -573,18 +612,24 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
     func apply(theme: AppTheme) {
         self.theme = theme
-        layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        layer?.borderColor = theme.colors.borderSubtle.cgColor
-        titleLabel.textColor = theme.colors.textPrimary
-        locationLabel.textColor = theme.colors.textMuted
-        terminalTitleLabel.textColor = theme.colors.textPrimary
-        replyHintLabel.textColor = theme.colors.textMuted
-        terminalTextView.backgroundColor = theme.colors.bgBase
-        terminalTextView.insertionPointColor = theme.colors.textPrimary
-        replyField.backgroundColor = theme.colors.bgBase
-        replyField.textColor = theme.colors.textPrimary
+        let colors = theme.colors
+        layer?.backgroundColor = colors.bgPanel.cgColor
+        layer?.borderColor = colors.borderStrong.cgColor
+        refreshTitle()
+        locationLabel.textColor = colors.textMuted
+        terminalHeading.apply(theme: theme)
+        separator.color = colors.borderSubtle
+        replyHintLabel.textColor = colors.textMuted
+        terminalScrollView.backgroundColor = colors.bgBase
+        terminalScrollView.layer?.borderColor = colors.borderStrong.cgColor
+        terminalTextView.backgroundColor = colors.bgBase
+        terminalTextView.insertionPointColor = colors.textPrimary
+        replyField.backgroundColor = colors.bgBase
+        replyField.textColor = colors.textPrimary
+        replyField.layer?.borderColor = colors.borderStrong.cgColor
+        setReplyPlaceholder(replyField.placeholderAttributedString?.string)
         [openButton, stopButton, restartButton, sendButton].forEach {
-            $0.contentTintColor = theme.colors.textPrimary
+            $0.apply(theme: theme)
         }
         refreshStatusColors()
         updateTerminalText()
@@ -602,17 +647,17 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         }
 
         guard let entry else {
-            titleLabel.stringValue = "No agent selected"
+            refreshTitle()
             titleLabel.toolTip = nil
             locationLabel.stringValue = "Choose an agent to inspect its terminal."
             locationLabel.toolTip = nil
-            statusLabel.stringValue = ""
+            refreshStatusColors()
             updateTerminalText()
             updateControls()
             return
         }
 
-        titleLabel.stringValue = entry.projectName
+        refreshTitle()
         titleLabel.toolTip = entry.projectName
         let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
@@ -620,8 +665,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             .compactMap { $0 }
             .joined(separator: "  ·  ")
         locationLabel.toolTip = locationLabel.stringValue
-        statusLabel.stringValue = entry.status.displayLabel
-        replyField.placeholderString = "Reply to \(entry.profileName)…"
+        setReplyPlaceholder("Reply to \(entry.profileName)…")
         refreshStatusColors()
         updateTerminalText()
         updateControls()
@@ -645,36 +689,33 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
     private func build() {
         titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail-project")
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        locationLabel.font = .systemFont(ofSize: 11)
+        locationLabel.font = RetroFont.body(11)
         locationLabel.lineBreakMode = .byTruncatingMiddle
         locationLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(locationLabel)
 
-        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.alignment = .right
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
         configureButton(
             openButton,
-            title: "Open",
             identifier: "agent-dashboard-open",
             action: #selector(openClicked)
         )
         configureButton(
             stopButton,
-            title: "Stop",
             identifier: "agent-dashboard-stop",
             action: #selector(stopClicked)
         )
         configureButton(
             restartButton,
-            title: "Restart",
             identifier: "agent-dashboard-restart",
             action: #selector(restartClicked)
         )
@@ -690,26 +731,25 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(actionStack)
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
         addSubview(separator)
 
-        terminalTitleLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        terminalTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(terminalTitleLabel)
+        addSubview(terminalHeading)
 
-        terminalStateLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
         terminalStateLabel.alignment = .right
+        terminalStateLabel.setContentHuggingPriority(.required, for: .horizontal)
+        terminalStateLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         terminalStateLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalStateLabel)
 
-        let terminalScrollView = NSTextView.scrollableTextView()
+        terminalScrollView = NSTextView.scrollableTextView()
         terminalScrollView.identifier = NSUserInterfaceItemIdentifier(
             "agent-dashboard-terminal"
         )
         terminalScrollView.borderType = .noBorder
         terminalScrollView.drawsBackground = true
+        terminalScrollView.wantsLayer = true
+        terminalScrollView.layer?.borderWidth = Retro.hairline
+        terminalScrollView.layer?.cornerRadius = Retro.cornerRadius
         terminalScrollView.hasVerticalScroller = true
         terminalScrollView.hasHorizontalScroller = false
         terminalScrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -720,14 +760,26 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         terminalTextView.isSelectable = true
         terminalTextView.isRichText = true
         terminalTextView.importsGraphics = false
-        terminalTextView.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        terminalTextView.font = RetroFont.body(11)
         terminalTextView.textContainerInset = NSSize(width: 10, height: 10)
         terminalTextView.textContainer?.widthTracksTextView = true
 
+        replyField.cell = AgentDashboardReplyFieldCell(textCell: "")
         replyField.identifier = NSUserInterfaceItemIdentifier(
             "agent-dashboard-reply"
         )
-        replyField.font = .systemFont(ofSize: 12)
+        replyField.isEditable = true
+        replyField.isSelectable = true
+        replyField.isBezeled = false
+        replyField.isBordered = false
+        replyField.drawsBackground = true
+        replyField.usesSingleLineMode = true
+        replyField.cell?.isScrollable = true
+        replyField.cell?.wraps = false
+        replyField.font = RetroFont.body(11)
+        replyField.wantsLayer = true
+        replyField.layer?.borderWidth = Retro.hairline
+        replyField.layer?.cornerRadius = Retro.cornerRadius
         replyField.focusRingType = .default
         replyField.delegate = self
         replyField.target = self
@@ -737,13 +789,12 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
         configureButton(
             sendButton,
-            title: "Send",
             identifier: "agent-dashboard-send",
             action: #selector(sendClicked)
         )
         addSubview(sendButton)
 
-        replyHintLabel.font = .systemFont(ofSize: 10)
+        replyHintLabel.font = RetroFont.body(10)
         replyHintLabel.lineBreakMode = .byTruncatingTail
         replyHintLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(replyHintLabel)
@@ -762,7 +813,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
             locationLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             locationLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            locationLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
+            locationLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
 
             actionStack.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             actionStack.topAnchor.constraint(equalTo: locationLabel.bottomAnchor, constant: 14),
@@ -771,15 +822,19 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             separator.trailingAnchor.constraint(equalTo: trailingAnchor),
             separator.topAnchor.constraint(equalTo: actionStack.bottomAnchor, constant: 16),
 
-            terminalTitleLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            terminalTitleLabel.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 14),
+            terminalHeading.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            terminalHeading.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 14),
+            terminalHeading.trailingAnchor.constraint(
+                equalTo: terminalStateLabel.leadingAnchor,
+                constant: -12
+            ),
             terminalStateLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            terminalStateLabel.centerYAnchor.constraint(equalTo: terminalTitleLabel.centerYAnchor),
+            terminalStateLabel.centerYAnchor.constraint(equalTo: terminalHeading.centerYAnchor),
 
             terminalScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
             terminalScrollView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
             terminalScrollView.topAnchor.constraint(
-                equalTo: terminalTitleLabel.bottomAnchor,
+                equalTo: terminalHeading.bottomAnchor,
                 constant: 9
             ),
             terminalScrollView.bottomAnchor.constraint(
@@ -790,7 +845,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
             replyField.leadingAnchor.constraint(equalTo: terminalScrollView.leadingAnchor),
             replyField.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
-            replyField.heightAnchor.constraint(equalToConstant: 30),
+            replyField.heightAnchor.constraint(equalToConstant: Retro.controlHeight),
 
             sendButton.trailingAnchor.constraint(equalTo: terminalScrollView.trailingAnchor),
             sendButton.centerYAnchor.constraint(equalTo: replyField.centerYAnchor),
@@ -804,17 +859,30 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     }
 
     private func configureButton(
-        _ button: NSButton,
-        title: String,
+        _ button: RetroButton,
         identifier: String,
         action: Selector
     ) {
-        button.title = title
         button.identifier = NSUserInterfaceItemIdentifier(identifier)
         button.target = self
         button.action = action
-        button.bezelStyle = .rounded
-        button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func refreshTitle() {
+        titleLabel.setRetroText(
+            entry?.projectName ?? "No agent selected",
+            color: theme.colors.textPrimary,
+            size: 22
+        )
+    }
+
+    private func setReplyPlaceholder(_ placeholder: String?) {
+        replyField.placeholderAttributedString = placeholder.map {
+            NSAttributedString(string: $0, attributes: [
+                .font: RetroFont.body(11),
+                .foregroundColor: theme.colors.textMuted,
+            ])
+        }
     }
 
     private func updateTerminalText() {
@@ -836,16 +904,13 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             attributedText = AgentOutputHighlighter.highlight(
                 displayText,
                 theme: theme,
-                font: .monospacedSystemFont(ofSize: 11, weight: .regular)
+                font: RetroFont.body(11)
             )
         } else {
             attributedText = NSAttributedString(
                 string: displayText,
                 attributes: [
-                    .font: NSFont.monospacedSystemFont(
-                        ofSize: 11,
-                        weight: .regular
-                    ),
+                    .font: RetroFont.body(11),
                     .foregroundColor: theme.colors.textMuted,
                 ]
             )
@@ -856,18 +921,23 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
                 NSRange(location: displayText.utf16.count, length: 0)
             )
         }
-        terminalStateLabel.stringValue = terminal.isAvailable ? "LIVE" : "UNAVAILABLE"
-        terminalStateLabel.textColor = terminal.isAvailable
-            ? theme.colors.success
-            : theme.colors.textMuted
+        terminalStateLabel.setRetroText(
+            terminal.isAvailable ? "LIVE" : "UNAVAILABLE",
+            color: terminal.isAvailable ? theme.colors.success : theme.colors.textMuted,
+            glow: terminal.isAvailable
+        )
     }
 
     private func refreshStatusColors() {
         guard let entry else {
-            statusLabel.textColor = theme.colors.textMuted
+            statusLabel.setRetroText("", color: theme.colors.textMuted)
             return
         }
-        statusLabel.textColor = Self.statusColor(for: entry, theme: theme)
+        statusLabel.setRetroText(
+            entry.status.displayLabel,
+            color: Self.statusColor(for: entry, theme: theme),
+            glow: entry.status == .running
+        )
     }
 
     private func updateControls() {
@@ -977,27 +1047,41 @@ private final class AgentDashboardSummaryCard: NSView {
         )
         wantsLayer = true
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        layer?.borderColor = theme.colors.borderSubtle.cgColor
-        layer?.borderWidth = 1
-        layer?.cornerRadius = 10
+        layer?.borderColor = theme.colors.borderStrong.cgColor
+        layer?.borderWidth = Retro.hairline
+        layer?.cornerRadius = Retro.cornerRadius
+
+        let segmentBar = NSView()
+        segmentBar.wantsLayer = true
+        segmentBar.layer?.backgroundColor = color.cgColor
+        segmentBar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(segmentBar)
 
         let valueLabel = NSTextField(labelWithString: "\(value)")
-        valueLabel.font = .monospacedSystemFont(ofSize: 25, weight: .semibold)
-        valueLabel.textColor = value == 0 ? theme.colors.textMuted : color
+        valueLabel.setRetroText(
+            "\(value)",
+            color: value == 0 ? theme.colors.textMuted : color,
+            size: 22,
+            glow: value != 0
+        )
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(valueLabel)
 
-        let titleLabel = NSTextField(labelWithString: title.uppercased())
-        titleLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-        titleLabel.textColor = theme.colors.textMuted
+        let titleText = title.uppercased()
+        let titleLabel = NSTextField(labelWithString: titleText)
+        titleLabel.setRetroText(titleText, color: theme.colors.textMuted)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         NSLayoutConstraint.activate([
+            segmentBar.leadingAnchor.constraint(equalTo: leadingAnchor),
+            segmentBar.trailingAnchor.constraint(equalTo: trailingAnchor),
+            segmentBar.topAnchor.constraint(equalTo: topAnchor),
+            segmentBar.heightAnchor.constraint(equalToConstant: 2),
             valueLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            valueLabel.topAnchor.constraint(equalTo: topAnchor, constant: 15),
+            valueLabel.topAnchor.constraint(equalTo: segmentBar.bottomAnchor, constant: 16),
             titleLabel.leadingAnchor.constraint(equalTo: valueLabel.leadingAnchor),
-            titleLabel.topAnchor.constraint(equalTo: valueLabel.bottomAnchor, constant: 5),
+            titleLabel.topAnchor.constraint(equalTo: valueLabel.bottomAnchor, constant: 6),
         ])
     }
 
@@ -1013,6 +1097,7 @@ private final class AgentDashboardRowView: NSControl {
     var onOpen: (() -> Void)?
 
     private let theme: AppTheme
+    private let statusColor: NSColor
     private let elapsedLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var isKeyboardSelected = false
@@ -1020,10 +1105,11 @@ private final class AgentDashboardRowView: NSControl {
     init(entry: AgentDashboardEntry, theme: AppTheme) {
         self.entry = entry
         self.theme = theme
+        self.statusColor = Self.statusColor(for: entry, theme: theme)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-row")
         wantsLayer = true
-        layer?.cornerRadius = 9
+        layer?.cornerRadius = Retro.cornerRadius
         layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 92).isActive = true
@@ -1080,10 +1166,14 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     func updateElapsed(now: Date) {
-        elapsedLabel.stringValue = Self.elapsedText(
-            status: entry.status,
-            startedAt: entry.startedAt,
-            now: now
+        elapsedLabel.setRetroText(
+            Self.elapsedText(
+                status: entry.status,
+                startedAt: entry.startedAt,
+                now: now
+            ),
+            color: statusColor,
+            glow: entry.status == .running
         )
     }
 
@@ -1102,7 +1192,6 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     private func setup() {
-        let statusColor = Self.statusColor(for: entry, theme: theme)
         layer?.borderColor = (
             entry.needsAttention
                 ? theme.colors.blue
@@ -1112,8 +1201,10 @@ private final class AgentDashboardRowView: NSControl {
 
         let iconContainer = NSView()
         iconContainer.wantsLayer = true
-        iconContainer.layer?.backgroundColor = statusColor.withAlphaComponent(0.13).cgColor
-        iconContainer.layer?.cornerRadius = 8
+        iconContainer.layer?.backgroundColor = statusColor.withAlphaComponent(0.14).cgColor
+        iconContainer.layer?.borderColor = statusColor.cgColor
+        iconContainer.layer?.borderWidth = Retro.hairline
+        iconContainer.layer?.cornerRadius = Retro.cornerRadius
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconContainer)
 
@@ -1133,9 +1224,8 @@ private final class AgentDashboardRowView: NSControl {
 
         let titleLabel = NSTextField(labelWithString: entry.projectName)
         titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-project")
-        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-        titleLabel.textColor = theme.colors.textPrimary
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setRetroText(entry.projectName, color: theme.colors.textPrimary)
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
@@ -1146,7 +1236,7 @@ private final class AgentDashboardRowView: NSControl {
             .compactMap { $0 }.joined(separator: "  ·  ")
         let detailLabel = NSTextField(labelWithString: agentDescription)
         detailLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-agent")
-        detailLabel.font = .systemFont(ofSize: 11)
+        detailLabel.font = RetroFont.body(11)
         detailLabel.textColor = theme.colors.textMuted
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1155,7 +1245,7 @@ private final class AgentDashboardRowView: NSControl {
 
         let pathLabel = NSTextField(labelWithString: path ?? location)
         pathLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-directory")
-        pathLabel.font = .systemFont(ofSize: 11)
+        pathLabel.font = RetroFont.body(11)
         pathLabel.textColor = theme.colors.textMuted
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1164,14 +1254,23 @@ private final class AgentDashboardRowView: NSControl {
 
         let statusLabel = NSTextField(labelWithString: entry.status.displayLabel)
         statusLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-status")
-        statusLabel.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        statusLabel.textColor = statusColor
         statusLabel.alignment = .right
+        statusLabel.setRetroText(
+            entry.status.displayLabel,
+            color: statusColor,
+            glow: entry.status == .running
+        )
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
-        elapsedLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        elapsedLabel.textColor = theme.colors.textMuted
+        let lamp = NSView()
+        lamp.wantsLayer = true
+        lamp.layer?.cornerRadius = 3
+        RetroLamp.light(lamp, color: statusColor, lit: isStatusLit)
+        lamp.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(lamp)
+
         elapsedLabel.alignment = .right
         elapsedLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(elapsedLabel)
@@ -1203,7 +1302,7 @@ private final class AgentDashboardRowView: NSControl {
 
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
-            detailLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -12),
+            detailLabel.trailingAnchor.constraint(equalTo: lamp.leadingAnchor, constant: -10),
 
             pathLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             pathLabel.topAnchor.constraint(equalTo: detailLabel.bottomAnchor, constant: 5),
@@ -1216,6 +1315,11 @@ private final class AgentDashboardRowView: NSControl {
 
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
             statusLabel.centerYAnchor.constraint(equalTo: detailLabel.centerYAnchor),
+
+            lamp.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -6),
+            lamp.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
+            lamp.widthAnchor.constraint(equalToConstant: 6),
+            lamp.heightAnchor.constraint(equalToConstant: 6),
 
             elapsedLabel.trailingAnchor.constraint(equalTo: statusLabel.trailingAnchor),
             elapsedLabel.centerYAnchor.constraint(equalTo: pathLabel.centerYAnchor),
@@ -1238,6 +1342,14 @@ private final class AgentDashboardRowView: NSControl {
                     ? theme.colors.bgOverlay
                     : theme.colors.bgPanel
         ).cgColor
+    }
+
+    private var isStatusLit: Bool {
+        if entry.needsAttention { return true }
+        switch entry.status {
+        case .running, .waiting, .starting, .error: return true
+        case .idle, .stopped: return false
+        }
     }
 
     private static func statusColor(
@@ -1277,6 +1389,25 @@ private final class AgentDashboardRowView: NSControl {
 
 private final class AgentDashboardFlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// Draws and edits the reply text centered vertically with side padding,
+/// since the square console field has no bezel to inset it.
+private final class AgentDashboardReplyFieldCell: NSTextFieldCell {
+    private static let horizontalPadding: CGFloat = 8
+
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        let padded = rect.insetBy(dx: Self.horizontalPadding, dy: 0)
+        guard let font else { return padded }
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        guard lineHeight < padded.height else { return padded }
+        return NSRect(
+            x: padded.minX,
+            y: padded.minY + floor((padded.height - lineHeight) / 2),
+            width: padded.width,
+            height: lineHeight
+        )
+    }
 }
 
 private final class AgentDashboardRootView: NSView {

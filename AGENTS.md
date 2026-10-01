@@ -136,6 +136,8 @@ Scale for this app:
   routing, drag-and-drop, env export, copy mode); `GhosttyAppManager` owns the
   single global `ghostty_app_t`.
 - `Views/` — `SplitTreeView` renders a `SplitNode`; browser panes are WebKit.
+  `RetroChrome.swift` is the chrome design system ("Mission Control"): fonts,
+  rules, racing stripe, lamps, buttons, headings. New chrome builds on it.
 - `Config/` — built-in defaults (agent profiles, keybindings, themes) **and** the
   user configuration layer. `ConfigStore` is the runtime authority for every
   user-facing setting: it loads `~/.config/soprano/settings.json`, resolves it
@@ -171,6 +173,10 @@ they are app state, not configuration.
 
 ## Conventions
 
+- Chrome is square (`Retro.cornerRadius`), colored only from `ThemeColors`, and
+  set in the bundled Departure Mono via `RetroFont.display` at 11/22/33 pt only
+  (other sizes blur its pixel grid); running text uses `RetroFont.body`. Never
+  rewrite strings to uppercase — the display face renders small caps.
 - Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`), not XCTest,
   with long sentence-style test names. One `struct …Tests` per file in
   `Tests/SopranoTests/`.

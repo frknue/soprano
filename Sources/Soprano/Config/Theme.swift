@@ -46,6 +46,10 @@ extension ThemeColors {
 
     /// Leading edge rail marking rows that belong to the active window.
     var railMuted: NSColor { accent.withAlphaComponent(0.45) }
+
+    /// The 70s racing stripe Soprano's chrome uses as its signature ornament:
+    /// warning red, accent, and the strong accent, read left to right.
+    var stripe: [NSColor] { [danger, accent, accentStrong] }
 }
 
 struct TerminalColors {
@@ -135,6 +139,54 @@ private extension NSColor {
 // MARK: - Built-in Themes
 
 extension AppTheme {
+    /// Soprano's own palette: cream on deep space black, international orange
+    /// and mustard, after 1960s mission-control consoles.
+    static let missionControl = AppTheme(
+        id: "mission-control",
+        name: "Mission Control",
+        colors: ThemeColors(
+            bgBase: .fromHex("#0f1115"),
+            bgPanel: .fromHex("#0a0b0e"),
+            bgRaised: .fromHex("#171a20"),
+            bgOverlay: .fromHex("#222630"),
+            textPrimary: .fromHex("#f1e7cf"),
+            textMuted: .fromHex("#8c8778"),
+            accent: .fromHex("#ff6b1a"),
+            accentStrong: .fromHex("#f4b63f"),
+            borderSubtle: .fromHex("#23262d"),
+            borderStrong: .fromHex("#3b3f48"),
+            success: .fromHex("#9ccc65"),
+            danger: .fromHex("#ef4136"),
+            blue: .fromHex("#5ea7d1"),
+            cyan: .fromHex("#5ec4b6"),
+            yellow: .fromHex("#f4b63f"),
+            gray: .fromHex("#4b4f58")
+        ),
+        terminalColors: TerminalColors(
+            background: .fromHex("#0f1115"),
+            foreground: .fromHex("#ebe1c8"),
+            cursor: .fromHex("#ff6b1a"),
+            cursorAccent: .fromHex("#0f1115"),
+            selectionBackground: .fromHex("#3d2a1c"),
+            black: .fromHex("#1b1e24"),
+            red: .fromHex("#ef4136"),
+            green: .fromHex("#8db55a"),
+            yellow: .fromHex("#f4b63f"),
+            blue: .fromHex("#4f93c2"),
+            magenta: .fromHex("#c9719a"),
+            cyan: .fromHex("#4fb5a8"),
+            white: .fromHex("#cdc4ad"),
+            brightBlack: .fromHex("#5d616b"),
+            brightRed: .fromHex("#ff6b5e"),
+            brightGreen: .fromHex("#b5d978"),
+            brightYellow: .fromHex("#ffd36e"),
+            brightBlue: .fromHex("#84c0e6"),
+            brightMagenta: .fromHex("#e597ba"),
+            brightCyan: .fromHex("#84dccf"),
+            brightWhite: .fromHex("#fff7e3")
+        )
+    )
+
     static let gruvboxDark = AppTheme(
         id: "gruvbox-dark",
         name: "Gruvbox Dark",
@@ -458,6 +510,7 @@ extension AppTheme {
     )
 
     static let allThemes: [AppTheme] = [
+        missionControl,
         gruvboxDark,
         catppuccinMocha,
         dracula,
@@ -468,6 +521,6 @@ extension AppTheme {
     ]
 
     static func theme(for id: String) -> AppTheme {
-        allThemes.first { $0.id == id } ?? gruvboxDark
+        allThemes.first { $0.id == id } ?? missionControl
     }
 }

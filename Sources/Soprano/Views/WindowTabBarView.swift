@@ -10,7 +10,7 @@ final class WindowTabBarView: NSView {
     private let scrollView = NSScrollView()
     private let tabContainer = NSView()
     private let addButton = NSButton(title: "+", target: nil, action: nil)
-    private let bottomBorder = NSView()
+    private let bottomRule = RetroRuleView(axis: .horizontal, style: .double)
     private var buttons: [WindowTabButton] = []
     private var activeWindowId: String?
     private var revealActiveTab = true
@@ -37,15 +37,14 @@ final class WindowTabBarView: NSView {
         addButton.identifier = NSUserInterfaceItemIdentifier("new-window-tab")
         addButton.isBordered = false
         addButton.refusesFirstResponder = true
-        addButton.font = .systemFont(ofSize: 18, weight: .regular)
         addButton.target = self
         addButton.action = #selector(addWindow)
         addButton.toolTip = "New Window"
         addButton.setAccessibilityLabel("New Window")
         addSubview(addButton)
 
-        bottomBorder.wantsLayer = true
-        addSubview(bottomBorder)
+        bottomRule.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(bottomRule)
 
         agentManager.addObserver(id: observerId) { [weak self] change in
             switch change {
@@ -91,8 +90,13 @@ final class WindowTabBarView: NSView {
 
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        bottomBorder.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
-        addButton.contentTintColor = theme.colors.textMuted
+        bottomRule.color = theme.colors.borderStrong
+        addButton.attributedTitle = RetroText.display(
+            "+",
+            color: theme.colors.textMuted,
+            size: 22,
+            alignment: .center
+        )
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
             let agents = agentManager.orderedPanes(in: terminalWindow.id)
@@ -115,18 +119,25 @@ final class WindowTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        let viewportWidth = max(0, bounds.width - 44)
-        scrollView.frame = NSRect(x: 6, y: 1, width: viewportWidth, height: max(0, bounds.height - 2))
-        addButton.frame = NSRect(x: max(0, bounds.width - 34), y: 3, width: 28, height: 28)
-        bottomBorder.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
+        let rule = Retro.doubleRule
+        let stripHeight = max(0, bounds.height - rule)
+        let viewportWidth = max(0, bounds.width - 38)
+        scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
+        addButton.frame = NSRect(
+            x: max(0, bounds.width - 34),
+            y: rule + floor((stripHeight - 28) / 2),
+            width: 28,
+            height: 28
+        )
+        bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
 
         var x: CGFloat = 0
         for button in buttons {
-            button.frame = NSRect(x: x, y: 3, width: button.tabWidth, height: 26)
-            x += button.tabWidth + 4
+            button.frame = NSRect(x: x, y: 0, width: button.tabWidth, height: stripHeight)
+            x += button.tabWidth
         }
-        let documentWidth = max(viewportWidth, max(0, x - 4))
-        tabContainer.setFrameSize(NSSize(width: documentWidth, height: max(0, bounds.height - 2)))
+        let documentWidth = max(viewportWidth, x)
+        tabContainer.setFrameSize(NSSize(width: documentWidth, height: stripHeight))
         if viewportWidth != previousViewportWidth {
             previousViewportWidth = viewportWidth
             revealActiveTab = true
@@ -146,6 +157,8 @@ final class WindowTabBarView: NSView {
 private final class WindowTabButton: NSButton {
     let windowId: String
     private let onSelect: () -> Void
+    private let separator = WindowTabPlateView()
+    private let badgeUnderlay = WindowTabPlateView()
     private let agentBadge = WindowAgentBadgeView()
     private(set) var tabWidth: CGFloat = 80
 
@@ -158,10 +171,12 @@ private final class WindowTabButton: NSButton {
         isBordered = false
         refusesFirstResponder = true
         wantsLayer = true
-        layer?.cornerRadius = 4
+        layer?.cornerRadius = Retro.cornerRadius
         target = self
         action = #selector(selectWindow)
         setAccessibilityRole(.radioButton)
+        addSubview(separator)
+        addSubview(badgeUnderlay)
         addSubview(agentBadge)
     }
 
@@ -179,16 +194,11 @@ private final class WindowTabButton: NSButton {
     ) {
         let text = "\(number):\(title)"
         self.title = text
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        paragraph.alignment = .left
-        attributedTitle = NSAttributedString(
-            string: text,
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: isSelected ? .bold : .medium),
-                .foregroundColor: isSelected ? theme.colors.accent : theme.colors.textMuted,
-                .paragraphStyle: paragraph,
-            ]
+        attributedTitle = RetroText.display(
+            text,
+            color: isSelected ? theme.colors.bgPanel : theme.colors.textMuted,
+            alignment: .left,
+            lineBreakMode: .byTruncatingTail
         )
         let statuses: [AgentStatus] = [.error, .waiting, .running, .starting, .idle]
         let status = statuses.first { status in agents.contains { $0.status == status } }
@@ -199,12 +209,14 @@ private final class WindowTabButton: NSButton {
         default: theme.colors.blue
         }
         agentBadge.configure(count: agents.count, color: color)
+        badgeUnderlay.isHidden = agentBadge.isHidden
+        badgeUnderlay.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         let indicatorWidth = agents.isEmpty ? 0 : agentBadge.badgeWidth + 8
         (cell as? WindowTabButtonCell)?.trailingInset = indicatorWidth
         tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24)) + indicatorWidth
-        layer?.backgroundColor = isSelected ? theme.colors.bgSelectedStrong.cgColor : NSColor.clear.cgColor
-        layer?.borderWidth = isSelected ? 1 : 0
-        layer?.borderColor = theme.colors.railMuted.cgColor
+        layer?.backgroundColor = isSelected ? theme.colors.accent.cgColor : NSColor.clear.cgColor
+        separator.isHidden = isSelected
+        separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         var description = "Window \(number): \(title)"
         if !agents.isEmpty {
             let noun = agents.count == 1 ? "agent" : "agents"
@@ -228,6 +240,13 @@ private final class WindowTabButton: NSButton {
             y: floor(bounds.midY - 8),
             width: agentBadge.badgeWidth,
             height: 16
+        )
+        badgeUnderlay.frame = agentBadge.frame
+        separator.frame = NSRect(
+            x: bounds.maxX - Retro.hairline,
+            y: 7,
+            width: Retro.hairline,
+            height: max(0, bounds.height - 14)
         )
     }
 
@@ -256,7 +275,9 @@ private final class WindowTabButtonCell: NSButtonCell {
 }
 
 private final class WindowAgentBadgeView: NSView {
-    private let icon = NSImageView()
+    private static let lampSize: CGFloat = 6
+
+    private let lamp = NSView()
     private let countLabel = NSTextField(labelWithString: "")
     private(set) var badgeWidth: CGFloat = 28
 
@@ -264,11 +285,11 @@ private final class WindowAgentBadgeView: NSView {
         super.init(frame: frameRect)
         identifier = NSUserInterfaceItemIdentifier("window-agent-badge")
         wantsLayer = true
-        layer?.cornerRadius = 4
-        icon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
-        icon.symbolConfiguration = .init(pointSize: 9, weight: .medium)
-        addSubview(icon)
-        countLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+        layer?.cornerRadius = Retro.cornerRadius
+        layer?.borderWidth = Retro.hairline
+        lamp.wantsLayer = true
+        lamp.layer?.cornerRadius = Self.lampSize / 2
+        addSubview(lamp)
         addSubview(countLabel)
     }
 
@@ -279,24 +300,44 @@ private final class WindowAgentBadgeView: NSView {
 
     func configure(count: Int, color: NSColor) {
         isHidden = count == 0
-        countLabel.stringValue = "\(count)"
-        countLabel.textColor = color
-        icon.contentTintColor = color
+        countLabel.setRetroText("\(count)", color: color)
+        RetroLamp.light(lamp, color: color)
         layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
-        badgeWidth = 22 + ceil(countLabel.intrinsicContentSize.width)
+        layer?.borderColor = color.cgColor
+        badgeWidth = 20 + ceil(countLabel.intrinsicContentSize.width)
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        icon.frame = NSRect(x: 5, y: 3, width: 10, height: 10)
+        lamp.frame = NSRect(
+            x: 5,
+            y: floor((bounds.height - Self.lampSize) / 2),
+            width: Self.lampSize,
+            height: Self.lampSize
+        )
         let size = countLabel.intrinsicContentSize
         countLabel.frame = NSRect(
-            x: 17,
+            x: 15,
             y: floor((bounds.height - size.height) / 2),
             width: ceil(size.width),
             height: size.height
         )
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// A flat colored plate inside a tab that never takes clicks from it.
+private final class WindowTabPlateView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

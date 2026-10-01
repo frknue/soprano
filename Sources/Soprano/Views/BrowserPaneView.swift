@@ -105,6 +105,8 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
     private let themeManager: ThemeManager
     private let webView: SopranoWebView
     private let navigationBar = NSView()
+    private let navigationRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let addressFrame = NSView()
     private let addressField = NSTextField()
     private let backButton = NSButton()
     private let forwardButton = NSButton()
@@ -150,7 +152,9 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgBase.cgColor
         navigationBar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        addressField.backgroundColor = theme.colors.bgBase
+        navigationRule.color = theme.colors.borderStrong
+        addressFrame.layer?.backgroundColor = theme.colors.bgBase.cgColor
+        addressFrame.layer?.borderColor = theme.colors.borderStrong.cgColor
         addressField.textColor = theme.colors.textPrimary
         addressField.placeholderString = "Search or enter address"
         backButton.contentTintColor = theme.colors.textMuted
@@ -326,15 +330,26 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             action: #selector(reloadPage)
         )
 
-        addressField.font = .systemFont(ofSize: 12)
-        addressField.isBezeled = true
-        addressField.bezelStyle = .roundedBezel
+        addressFrame.wantsLayer = true
+        addressFrame.layer?.cornerRadius = Retro.cornerRadius
+        addressFrame.layer?.borderWidth = Retro.hairline
+        addressFrame.translatesAutoresizingMaskIntoConstraints = false
+        navigationBar.addSubview(addressFrame)
+
+        addressField.font = RetroFont.body(12)
+        addressField.isBezeled = false
+        addressField.isBordered = false
+        addressField.drawsBackground = false
         addressField.focusRingType = .none
+        addressField.usesSingleLineMode = true
+        addressField.cell?.isScrollable = true
         addressField.target = self
         addressField.action = #selector(addressSubmitted)
         addressField.delegate = self
         addressField.translatesAutoresizingMaskIntoConstraints = false
-        navigationBar.addSubview(addressField)
+        addressFrame.addSubview(addressField)
+
+        navigationBar.addSubview(navigationRule)
 
         progressIndicator.style = .spinning
         progressIndicator.controlSize = .small
@@ -385,10 +400,18 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             reloadButton.widthAnchor.constraint(equalToConstant: 26),
             reloadButton.heightAnchor.constraint(equalToConstant: 26),
 
-            addressField.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
-            addressField.trailingAnchor.constraint(equalTo: progressIndicator.leadingAnchor, constant: -7),
-            addressField.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            addressField.heightAnchor.constraint(equalToConstant: 25),
+            addressFrame.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
+            addressFrame.trailingAnchor.constraint(equalTo: progressIndicator.leadingAnchor, constant: -7),
+            addressFrame.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
+            addressFrame.heightAnchor.constraint(equalToConstant: Retro.controlHeight),
+
+            addressField.leadingAnchor.constraint(equalTo: addressFrame.leadingAnchor, constant: 6),
+            addressField.trailingAnchor.constraint(equalTo: addressFrame.trailingAnchor, constant: -6),
+            addressField.centerYAnchor.constraint(equalTo: addressFrame.centerYAnchor),
+
+            navigationRule.leadingAnchor.constraint(equalTo: navigationBar.leadingAnchor),
+            navigationRule.trailingAnchor.constraint(equalTo: navigationBar.trailingAnchor),
+            navigationRule.bottomAnchor.constraint(equalTo: navigationBar.bottomAnchor),
 
             progressIndicator.trailingAnchor.constraint(
                 equalTo: navigationBar.trailingAnchor,

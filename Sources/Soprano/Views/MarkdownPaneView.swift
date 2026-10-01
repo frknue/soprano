@@ -49,6 +49,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     private let schemeHandler: MarkdownSchemeHandler
     private let webView: MarkdownWebView
     private let toolbar = NSView()
+    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
     private let pathLabel = NSTextField(labelWithString: "")
     private let backButton = NSButton()
     private let forwardButton = NSButton()
@@ -111,6 +112,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgBase.cgColor
         toolbar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        toolbarRule.color = theme.colors.borderStrong
         pathLabel.textColor = theme.colors.textMuted
         for button in [backButton, forwardButton, reloadButton, revealButton, editButton] {
             button.contentTintColor = theme.colors.textMuted
@@ -188,11 +190,12 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             action: #selector(openInEditor)
         )
 
-        pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        pathLabel.font = RetroFont.body(11)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(pathLabel)
+        toolbar.addSubview(toolbarRule)
 
         webView.navigationDelegate = self
         webView.onFocusRequested = { [weak self] in
@@ -228,6 +231,10 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             editButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             revealButton.trailingAnchor.constraint(equalTo: editButton.leadingAnchor, constant: -4),
             revealButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+
+            toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
+            toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
+            toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
 
             webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -323,9 +330,10 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <meta http-equiv="Content-Security-Policy"
                 content="default-src 'none'; img-src soprano-markdown: data: https:;
-                         style-src 'unsafe-inline'; script-src 'none'; object-src 'none';
-                         frame-src 'none'; form-action 'none'; base-uri 'none'">
+                         style-src 'unsafe-inline'; font-src data:; script-src 'none';
+                         object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
           <style>
+            \(RetroFont.cssFontFace)
             :root {
               color-scheme: dark;
               --bg: \(colors.bgBase.markdownCSS);
@@ -357,25 +365,36 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
               margin: 1.5em 0 0.6em;
               scroll-margin-top: 20px;
             }
-            h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
-            h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
-            h3 { font-size: 1.25em; }
-            h4 { font-size: 1em; }
+            h1, h2 {
+              font-family: "Departure Mono", ui-monospace, monospace;
+              font-variant-caps: small-caps;
+              font-weight: 400;
+              letter-spacing: 1px;
+              padding-bottom: .3em;
+            }
+            h1 { font-size: 33px; border-bottom: 3px double var(--border-strong); }
+            h2 { font-size: 22px; border-bottom: 1px solid var(--border-strong); }
+            h3 { font-size: 1.25em; font-weight: 700; }
+            h4 { font-size: 1em; font-weight: 700; }
             p, blockquote, ul, ol, pre, .table-scroll { margin: 0 0 1em; }
-            a { color: var(--accent); text-decoration: none; }
-            a:hover { text-decoration: underline; }
+            a {
+              color: var(--accent);
+              text-decoration: underline dotted;
+              text-underline-offset: 3px;
+            }
+            a:hover { text-decoration-style: solid; }
             code {
               background: var(--raised);
               border: 1px solid var(--border);
-              border-radius: 5px;
+              border-radius: 0;
               font-family: "SFMono-Regular", Menlo, Monaco, monospace;
               font-size: .88em;
               padding: .15em .35em;
             }
             pre {
               background: var(--panel);
-              border: 1px solid var(--border);
-              border-radius: 8px;
+              border: 1px solid var(--border-strong);
+              border-radius: 0;
               line-height: 1.5;
               overflow: auto;
               padding: 16px;
@@ -392,8 +411,8 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             ul, ol { padding-left: 2em; }
             li + li { margin-top: .25em; }
             input[type="checkbox"] { accent-color: var(--accent); margin-right: .35em; }
-            hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
-            img { border-radius: 6px; height: auto; max-width: 100%; }
+            hr { border: 0; border-top: 3px double var(--border-strong); margin: 24px 0; }
+            img { border-radius: 0; height: auto; max-width: 100%; }
             .table-scroll { overflow-x: auto; }
             table { border-collapse: collapse; width: max-content; min-width: 100%; }
             th, td { border: 1px solid var(--border); padding: 7px 12px; }

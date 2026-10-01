@@ -21,7 +21,9 @@ final class MainContentViewController: NSViewController {
     private var settingsContainerView: NSView!
     private var settingsHeaderView: NSView!
     private var settingsTitleLabel: NSTextField!
-    private var settingsCloseButton: NSButton!
+    private var settingsStripeView: RetroStripeView!
+    private var settingsCloseButton: RetroButton!
+    private var settingsHeaderRule: RetroRuleView!
     private var settingsViewController: SettingsViewController?
     private var settingsViewConstraints: [NSLayoutConstraint] = []
     private var dashboardViewController: AgentDashboardViewController?
@@ -136,7 +138,7 @@ final class MainContentViewController: NSViewController {
             statusBarView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             statusBarView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             statusBarView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            statusBarView.heightAnchor.constraint(equalToConstant: 28),
+            statusBarView.heightAnchor.constraint(equalToConstant: StatusBarView.height),
         ])
 
         buildSettingsScreen(in: root, below: safeArea.topAnchor)
@@ -399,8 +401,10 @@ final class MainContentViewController: NSViewController {
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
         settingsContainerView?.layer?.backgroundColor = theme.colors.bgBase.cgColor
         settingsHeaderView?.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        settingsTitleLabel?.textColor = theme.colors.textPrimary
-        settingsCloseButton?.contentTintColor = theme.colors.textPrimary
+        settingsTitleLabel?.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
+        settingsStripeView?.colors = theme.colors.stripe
+        settingsCloseButton?.apply(theme: theme)
+        settingsHeaderRule?.color = theme.colors.borderStrong
         settingsViewController?.apply(theme: theme)
         dashboardViewController?.apply(theme: theme)
     }
@@ -425,23 +429,29 @@ final class MainContentViewController: NSViewController {
         settingsHeaderView.translatesAutoresizingMaskIntoConstraints = false
         settingsContainerView.addSubview(settingsHeaderView)
 
+        let theme = themeManager.currentTheme
         settingsTitleLabel = NSTextField(labelWithString: "Settings")
-        settingsTitleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        settingsTitleLabel.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
         settingsTitleLabel.translatesAutoresizingMaskIntoConstraints = false
         settingsHeaderView.addSubview(settingsTitleLabel)
 
-        settingsCloseButton = NSButton(title: "Done", target: self, action: #selector(settingsCloseClicked))
-        settingsCloseButton.bezelStyle = .rounded
+        settingsStripeView = RetroStripeView(layout: .slanted, colors: theme.colors.stripe)
+        settingsHeaderView.addSubview(settingsStripeView)
+
+        settingsCloseButton = RetroButton(
+            title: "Done",
+            theme: theme,
+            kind: .standard,
+            target: self,
+            action: #selector(settingsCloseClicked)
+        )
         settingsCloseButton.keyEquivalent = "\u{1b}"
         settingsCloseButton.keyEquivalentModifierMask = []
         settingsCloseButton.toolTip = "Return to the workspace (Esc)"
-        settingsCloseButton.translatesAutoresizingMaskIntoConstraints = false
         settingsHeaderView.addSubview(settingsCloseButton)
 
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        settingsHeaderView.addSubview(separator)
+        settingsHeaderRule = RetroRuleView(axis: .horizontal, style: .double, color: theme.colors.borderStrong)
+        settingsHeaderView.addSubview(settingsHeaderRule)
 
         NSLayoutConstraint.activate([
             settingsContainerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -457,12 +467,17 @@ final class MainContentViewController: NSViewController {
             settingsTitleLabel.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor, constant: 20),
             settingsTitleLabel.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
 
+            settingsStripeView.leadingAnchor.constraint(equalTo: settingsTitleLabel.trailingAnchor, constant: 12),
+            settingsStripeView.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
+            settingsStripeView.widthAnchor.constraint(equalToConstant: 22),
+            settingsStripeView.heightAnchor.constraint(equalToConstant: 12),
+
             settingsCloseButton.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor, constant: -20),
             settingsCloseButton.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
 
-            separator.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor),
-            separator.bottomAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
+            settingsHeaderRule.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor),
+            settingsHeaderRule.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor),
+            settingsHeaderRule.bottomAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
         ])
     }
 

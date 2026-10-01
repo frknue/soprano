@@ -14,7 +14,7 @@ struct SidebarCollapsePersistenceTests {
         let sourceSidebar = makeSidebar(manager: sourceManager, defaults: defaults)
         let collapseButton = try #require(
             descendants(of: sourceSidebar, as: NSButton.self).first {
-                $0.image?.accessibilityDescription == "Collapse Window"
+                $0.accessibilityLabel() == "Collapse Window"
             }
         )
         collapseButton.performClick(nil)

@@ -26,9 +26,18 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   and switching sessions preserves their running terminals, layouts, and z-depth.
 - The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
   flags, diffs, and common fenced-code syntax using the active theme.
+- New **Mission Control** theme, now the default: cream on deep-space black with
+  international orange and mustard, plus a matching terminal palette.
+- Optional CRT effect for terminal panes — scanlines, phosphor glow, and a soft
+  vignette — under **Settings ▸ General ▸ Appearance** or `"crtEffect": true` in
+  `settings.json`. Off by default.
 
 ### Changed
 
+- New retro "Mission Control" look for the whole app with every theme: square
+  corners, the bundled Departure Mono pixel font in small caps, double-rule dividers,
+  glowing status lamps, lit-block selection for tabs and menus, a racing stripe, and
+  a mission clock (`T+HH:MM:SS` since launch) in the status bar.
 - `soprano <file.md>` and `soprano markdown <file>` now open a reusable reader tab
   in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
 - Agent Dashboard entries lead with the project or custom window name, with the

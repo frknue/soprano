@@ -12,18 +12,19 @@ final class SidebarView: NSView {
 
     private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
-    private var headerLabel: NSTextField!
+    private var headerView: RetroHeadingView!
     private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
     private var listContentView: NSView!
     private var rowsStack: NSStackView!
     private var footerView: NSView!
-    private var footerSeparator: NSView!
-    private var trailingBorder: NSView!
-    private var settingsButton: NSButton!
-    private var dashboardButton: NSButton!
-    private var plusButton: NSButton!
-    private var sessionsButton: NSButton!
+    private var footerSeparator: RetroRuleView!
+    private var trailingBorder: RetroRuleView!
+    private var settingsButton: SidebarIconButton!
+    private var dashboardButton: SidebarIconButton!
+    private var plusButton: SidebarIconButton!
+    private var sessionsButton: SidebarIconButton!
+    private var isResizeHighlighted = false
     private var isControlKeyHeld = false
     private var paneRows: [String: SidebarPaneRowView] = [:]
 
@@ -78,17 +79,15 @@ final class SidebarView: NSView {
         sessionSelector = NSPopUpButton(frame: .zero, pullsDown: false)
         sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
         sessionSelector.setAccessibilityLabel("Current Session")
-        sessionSelector.font = .systemFont(ofSize: 12, weight: .semibold)
+        sessionSelector.font = RetroFont.display(11)
         sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         sessionSelector.target = self
         sessionSelector.action = #selector(sessionSelected(_:))
         sessionSelector.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(sessionSelector)
 
-        headerLabel = NSTextField(labelWithString: "WINDOWS")
-        headerLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
-        headerLabel.translatesAutoresizingMaskIntoConstraints = false
-        contentContainer.addSubview(headerLabel)
+        headerView = RetroHeadingView(title: "WINDOWS", theme: themeManager.currentTheme)
+        contentContainer.addSubview(headerView)
 
         plusButton = makeIconButton(
             symbolName: "plus",
@@ -120,9 +119,7 @@ final class SidebarView: NSView {
         footerView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(footerView)
 
-        footerSeparator = NSView()
-        footerSeparator.wantsLayer = true
-        footerSeparator.translatesAutoresizingMaskIntoConstraints = false
+        footerSeparator = RetroRuleView(axis: .horizontal, style: .single)
         footerView.addSubview(footerSeparator)
 
         settingsButton = makeIconButton(
@@ -146,9 +143,7 @@ final class SidebarView: NSView {
         )
         footerView.addSubview(dashboardButton)
 
-        trailingBorder = NSView()
-        trailingBorder.wantsLayer = true
-        trailingBorder.translatesAutoresizingMaskIntoConstraints = false
+        trailingBorder = RetroRuleView(axis: .vertical, style: .double)
         addSubview(trailingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
@@ -164,10 +159,11 @@ final class SidebarView: NSView {
             sessionSelector.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
             sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 10),
             sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -10),
-            headerLabel.topAnchor.constraint(equalTo: sessionSelector.bottomAnchor, constant: 14),
-            headerLabel.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
+            headerView.topAnchor.constraint(equalTo: sessionSelector.bottomAnchor, constant: 14),
+            headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
+            headerView.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -6),
 
-            scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
@@ -191,13 +187,13 @@ final class SidebarView: NSView {
             footerSeparator.topAnchor.constraint(equalTo: footerView.topAnchor),
             footerSeparator.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
             footerSeparator.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
-            footerSeparator.heightAnchor.constraint(equalToConstant: 1),
+            footerSeparator.heightAnchor.constraint(equalToConstant: Retro.hairline),
 
             settingsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -8),
             settingsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
 
             plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
-            plusButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            plusButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
             sessionsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: 8),
             sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
@@ -208,7 +204,7 @@ final class SidebarView: NSView {
             trailingBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             trailingBorder.topAnchor.constraint(equalTo: topAnchor),
             trailingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailingBorder.widthAnchor.constraint(equalToConstant: 1),
+            trailingBorder.widthAnchor.constraint(equalToConstant: Retro.doubleRule),
         ])
     }
 
@@ -216,8 +212,8 @@ final class SidebarView: NSView {
         symbolName: String,
         accessibilityLabel: String,
         action: Selector
-    ) -> NSButton {
-        let button = NSButton(title: "", target: self, action: action)
+    ) -> SidebarIconButton {
+        let button = SidebarIconButton(title: "", target: self, action: action)
         button.isBordered = false
         let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         button.image = NSImage(
@@ -243,10 +239,14 @@ final class SidebarView: NSView {
     /// Accents the trailing border while the resize handle is hovered or dragged,
     /// so the draggable edge is visible before the mouse goes down.
     func setResizeHighlighted(_ isHighlighted: Bool) {
-        let theme = themeManager.currentTheme
-        trailingBorder.layer?.backgroundColor = isHighlighted
-            ? theme.colors.accent.cgColor
-            : theme.colors.borderSubtle.cgColor
+        isResizeHighlighted = isHighlighted
+        applyTrailingBorderColor(theme: themeManager.currentTheme)
+    }
+
+    private func applyTrailingBorderColor(theme: AppTheme) {
+        trailingBorder.color = isResizeHighlighted
+            ? theme.colors.accent
+            : theme.colors.borderStrong
     }
 
     func setControlKeyHeld(_ isHeld: Bool) {
@@ -394,13 +394,12 @@ final class SidebarView: NSView {
     private func refresh() {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        headerLabel.textColor = theme.colors.textMuted
-        footerSeparator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
-        trailingBorder.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
-        settingsButton.contentTintColor = theme.colors.textMuted
-        dashboardButton.contentTintColor = theme.colors.textMuted
-        plusButton.contentTintColor = theme.colors.textMuted
-        sessionsButton.contentTintColor = theme.colors.textMuted
+        headerView.apply(theme: theme)
+        footerSeparator.color = theme.colors.borderStrong
+        applyTrailingBorderColor(theme: theme)
+        for button in [settingsButton, dashboardButton, plusButton, sessionsButton] {
+            button?.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
+        }
         rebuildSessionSelector()
 
         // Reconcile watchers first so rows read freshly-invalidated caches.
@@ -499,6 +498,7 @@ final class SidebarView: NSView {
                     title: sidebarTitle(for: pane),
                     branch: branchForPane(pane),
                     dotColor: paneStatusColor(for: pane, theme: theme),
+                    dotLit: paneLampLit(for: pane),
                     agentStatus: pane.activeTab?.agent?.status,
                     tabCount: pane.tabs.count,
                     depthLevel: hasDepth ? depth : nil,
@@ -680,6 +680,20 @@ final class SidebarView: NSView {
         return tabStatusColor(for: tab, theme: theme)
     }
 
+    /// Whether the pane's status lamp glows: something is happening or wants
+    /// attention. Idle, stopped, and plain panes stay dark.
+    private func paneLampLit(for pane: PaneState) -> Bool {
+        if pane.tabs.contains(where: { $0.agent?.needsAttention == true }) {
+            return true
+        }
+        switch pane.activeTab?.agent?.status {
+        case .starting, .running, .waiting, .error:
+            return true
+        case .idle, .stopped, nil:
+            return false
+        }
+    }
+
     private func tabStatusColor(for tab: PaneTab, theme: AppTheme) -> NSColor {
         if let agent = tab.agent {
             switch agent.status {
@@ -719,7 +733,6 @@ private final class SidebarRailView: NSView {
     init() {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Self.width / 2
         identifier = NSUserInterfaceItemIdentifier("sidebar-selection-rail")
         translatesAutoresizingMaskIntoConstraints = false
         widthAnchor.constraint(equalToConstant: Self.width).isActive = true
@@ -758,12 +771,13 @@ private final class SidebarWindowRowView: NSView {
     private var attentionCount = 0
     private var shortcutNumber: Int?
     private var showShortcutHint = false
+    private var shortcutBlockWidthConstraint: NSLayoutConstraint!
 
     init(theme: AppTheme) {
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = Retro.cornerRadius
         translatesAutoresizingMaskIntoConstraints = false
         setup()
     }
@@ -779,17 +793,17 @@ private final class SidebarWindowRowView: NSView {
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
         disclosureButton.isBordered = false
-        disclosureButton.imagePosition = .imageOnly
+        disclosureButton.imagePosition = .noImage
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(disclosureButton)
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = RetroFont.display(11)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
+        countLabel.font = RetroFont.display(11)
         countLabel.alignment = .right
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -798,7 +812,7 @@ private final class SidebarWindowRowView: NSView {
         closeButton.target = self
         closeButton.action = #selector(handleClose)
         closeButton.isBordered = false
-        closeButton.font = .systemFont(ofSize: 14, weight: .regular)
+        closeButton.font = RetroFont.display(11)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
@@ -825,6 +839,9 @@ private final class SidebarWindowRowView: NSView {
             countLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
             countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+        shortcutBlockWidthConstraint = countLabel.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: 16
+        )
     }
 
     func configure(
@@ -851,20 +868,22 @@ private final class SidebarWindowRowView: NSView {
         self.attentionCount = attentionCount
         self.shortcutNumber = shortcutNumber
         self.showShortcutHint = showShortcutHint
-        titleLabel.stringValue = title
         updateTrailingLabel()
-        let symbolName = expanded ? "chevron.down" : "chevron.right"
-        disclosureButton.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: expanded ? "Collapse Window" : "Expand Window"
-        )?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
-        titleLabel.textColor = highlighted ? theme.colors.accent : theme.colors.textMuted
-        disclosureButton.contentTintColor = highlighted
-            ? theme.colors.accent
-            : theme.colors.textMuted
-        closeButton.contentTintColor = highlighted
-            ? theme.colors.textPrimary
-            : theme.colors.textMuted
+        let accessibilityLabel = expanded ? "Collapse Window" : "Expand Window"
+        let markerColor = highlighted ? theme.colors.accent : theme.colors.textMuted
+        disclosureButton.attributedTitle = RetroText.display(
+            expanded ? "▼" : "❯",
+            color: markerColor,
+            alignment: .center
+        )
+        disclosureButton.setAccessibilityLabel(accessibilityLabel)
+        disclosureButton.toolTip = accessibilityLabel
+        titleLabel.setRetroText(title, color: markerColor)
+        closeButton.attributedTitle = RetroText.display(
+            "×",
+            color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
+            alignment: .center
+        )
         layer?.backgroundColor = highlighted
             ? theme.colors.bgSelected.cgColor
             : NSColor.clear.cgColor
@@ -892,16 +911,25 @@ private final class SidebarWindowRowView: NSView {
 
     private func updateTrailingLabel() {
         if showShortcutHint {
-            countLabel.stringValue = shortcutNumber.map(String.init) ?? ""
-            countLabel.font = .monospacedSystemFont(ofSize: 11, weight: .bold)
-            countLabel.textColor = theme.colors.accent
+            countLabel.alignment = .center
+            countLabel.drawsBackground = shortcutNumber != nil
+            countLabel.backgroundColor = theme.colors.accent
+            shortcutBlockWidthConstraint.isActive = shortcutNumber != nil
+            countLabel.setRetroText(
+                shortcutNumber.map(String.init) ?? "",
+                color: theme.colors.bgPanel
+            )
             countLabel.toolTip = shortcutNumber.map { "Ctrl+\($0)" }
         } else {
-            countLabel.stringValue = attentionCount > 0
-                ? "\(paneCount) · \(attentionCount)!"
-                : "\(paneCount)"
-            countLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
-            countLabel.textColor = attentionCount > 0 ? theme.colors.blue : theme.colors.textMuted
+            countLabel.alignment = .right
+            countLabel.drawsBackground = false
+            shortcutBlockWidthConstraint.isActive = false
+            countLabel.setRetroText(
+                attentionCount > 0
+                    ? "\(paneCount) · \(attentionCount)!"
+                    : "\(paneCount)",
+                color: attentionCount > 0 ? theme.colors.blue : theme.colors.textMuted
+            )
             let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
             countLabel.toolTip = attentionCount > 0
                 ? "\(panes), \(attentionCount) agent\(attentionCount == 1 ? "" : "s") ready"
@@ -970,13 +998,15 @@ private final class SidebarPaneRowView: NSView {
     private let hierarchyIndent: CGFloat
     private var displayedBranch: String?
     private var hasConfiguredBranch = false
+    private var titleColor: NSColor
 
     init(theme: AppTheme, hierarchyIndent: CGFloat = 0) {
         self.theme = theme
         self.hierarchyIndent = hierarchyIndent
+        self.titleColor = theme.colors.textPrimary
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = Retro.cornerRadius
         translatesAutoresizingMaskIntoConstraints = false
         setup()
     }
@@ -992,7 +1022,7 @@ private final class SidebarPaneRowView: NSView {
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
         disclosureButton.isBordered = false
-        disclosureButton.imagePosition = .imageOnly
+        disclosureButton.imagePosition = .noImage
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(disclosureButton)
 
@@ -1001,21 +1031,19 @@ private final class SidebarPaneRowView: NSView {
         dotView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(dotView)
 
-        titleLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        titleLabel.textColor = theme.colors.textPrimary
+        titleLabel.font = RetroFont.display(11)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         badgeContainer.wantsLayer = true
-        badgeContainer.layer?.cornerRadius = 8
-        badgeContainer.layer?.backgroundColor = theme.colors.bgRaised.cgColor
+        badgeContainer.layer?.cornerRadius = Retro.cornerRadius
+        badgeContainer.layer?.borderWidth = Retro.hairline
         badgeContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(badgeContainer)
 
-        badgeLabel.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
-        badgeLabel.textColor = theme.colors.textMuted
+        badgeLabel.font = RetroFont.display(11)
         badgeLabel.alignment = .center
         badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1024,12 +1052,11 @@ private final class SidebarPaneRowView: NSView {
         closeButton.target = self
         closeButton.action = #selector(handleClose)
         closeButton.isBordered = false
-        closeButton.font = .systemFont(ofSize: 14, weight: .regular)
-        closeButton.contentTintColor = theme.colors.textMuted
+        closeButton.font = RetroFont.display(11)
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
-        branchLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+        branchLabel.font = RetroFont.body(10)
         branchLabel.textColor = theme.colors.textMuted
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1097,6 +1124,7 @@ private final class SidebarPaneRowView: NSView {
         title: String,
         branch: String?,
         dotColor: NSColor,
+        dotLit: Bool,
         agentStatus: AgentStatus?,
         tabCount: Int,
         depthLevel: Int?,
@@ -1115,23 +1143,24 @@ private final class SidebarPaneRowView: NSView {
         self.onToggle = onToggle
         self.onSelect = onSelect
         self.onClose = onClose
-        setTitle(title)
-        dotView.layer?.backgroundColor = dotColor.cgColor
+        RetroLamp.light(dotView, color: dotColor, lit: dotLit)
 
         disclosureButton.isHidden = !showsDisclosure
         disclosureButton.identifier = showsDisclosure
             ? NSUserInterfaceItemIdentifier("pane-depth-disclosure")
             : nil
         if showsDisclosure {
-            let symbolName = expanded ? "chevron.down" : "chevron.right"
-            disclosureButton.image = NSImage(
-                systemSymbolName: symbolName,
-                accessibilityDescription: expanded
-                    ? "Collapse Pane Depth"
-                    : "Expand Pane Depth"
-            )?.withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
+            let accessibilityLabel = expanded
+                ? "Collapse Pane Depth"
+                : "Expand Pane Depth"
+            disclosureButton.attributedTitle = RetroText.display(
+                expanded ? "▼" : "❯",
+                color: theme.colors.textMuted,
+                alignment: .center
+            )
+            disclosureButton.setAccessibilityLabel(accessibilityLabel)
+            disclosureButton.toolTip = accessibilityLabel
         }
-        disclosureButton.contentTintColor = theme.colors.textMuted
         closeButton.isHidden = !showsClose
 
         let depthText = depthLevel.flatMap { depth in
@@ -1142,9 +1171,7 @@ private final class SidebarPaneRowView: NSView {
             : NSUserInterfaceItemIdentifier("pane-depth-badge")
         if showShortcutHint, let shortcutKey {
             badgeContainer.isHidden = false
-            badgeContainer.layer?.backgroundColor = theme.colors.accent.withAlphaComponent(0.2).cgColor
-            badgeLabel.stringValue = "⇧\(shortcutKey.uppercased())"
-            badgeLabel.textColor = theme.colors.accent
+            applyBadge("⇧\(shortcutKey.uppercased())", tint: theme.colors.accent)
             badgeContainer.toolTip = "Ctrl+Shift+\(shortcutKey.uppercased())"
         } else {
             var badgeParts: [String] = []
@@ -1158,28 +1185,26 @@ private final class SidebarPaneRowView: NSView {
                 badgeParts.append(depthText)
             }
             badgeContainer.isHidden = badgeParts.isEmpty
-            badgeContainer.layer?.backgroundColor = agentStatus == nil
-                ? theme.colors.bgRaised.cgColor
-                : dotColor.withAlphaComponent(0.16).cgColor
-            badgeLabel.stringValue = badgeParts.joined(separator: " · ")
-            badgeLabel.textColor = agentStatus == nil ? theme.colors.textMuted : dotColor
+            applyBadge(
+                badgeParts.joined(separator: " · "),
+                tint: agentStatus == nil ? theme.colors.textMuted : dotColor
+            )
             badgeContainer.toolTip = maximumDepth.map {
                 "Window depth Z\(depthLevel ?? 0) of Z\($0)"
             }
         }
-        closeButton.contentTintColor = highlighted
-            ? theme.colors.textPrimary
-            : theme.colors.textMuted
+        closeButton.attributedTitle = RetroText.display(
+            "×",
+            color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
+            alignment: .center
+        )
 
         // The rail runs down every pane of the active window so the group reads as
         // one unit; only the focused pane also gets a filled background.
-        titleLabel.textColor = inActiveWindow
+        titleColor = inActiveWindow
             ? theme.colors.textPrimary
             : theme.colors.textMuted
-        titleLabel.font = .systemFont(
-            ofSize: 12,
-            weight: highlighted ? .semibold : .medium
-        )
+        titleLabel.setRetroText(title, color: titleColor, tracking: 0)
         layer?.backgroundColor = highlighted
             ? theme.colors.bgSelectedStrong.cgColor
             : NSColor.clear.cgColor
@@ -1192,9 +1217,15 @@ private final class SidebarPaneRowView: NSView {
         setBranch(branch)
     }
 
+    private func applyBadge(_ text: String, tint: NSColor) {
+        badgeContainer.layer?.backgroundColor = tint.withAlphaComponent(0.14).cgColor
+        badgeContainer.layer?.borderColor = tint.cgColor
+        badgeLabel.setRetroText(text, color: tint, tracking: 0)
+    }
+
     func setTitle(_ title: String) {
         guard titleLabel.stringValue != title else { return }
-        titleLabel.stringValue = title
+        titleLabel.setRetroText(title, color: titleColor, tracking: 0)
     }
 
     func setBranch(_ branch: String?) {
@@ -1245,6 +1276,51 @@ private final class SidebarPaneRowView: NSView {
             current = candidate.superview
         }
         return false
+    }
+}
+
+// MARK: - Icon Button
+
+/// Borderless SF Symbol button for the sidebar header and footer; its tint
+/// switches to the hover color while the pointer is over it.
+private final class SidebarIconButton: NSButton {
+    private var normalTint: NSColor?
+    private var hoverTint: NSColor?
+    private var isHovered = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    func setTints(normal: NSColor, hover: NSColor) {
+        normalTint = normal
+        hoverTint = hover
+        applyTint()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        applyTint()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        applyTint()
+    }
+
+    private func applyTint() {
+        contentTintColor = isHovered ? hoverTint : normalTint
     }
 }
 

@@ -180,8 +180,11 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     var onExecute: ((CommandItem) -> Void)?
 
     private var currentTheme: AppTheme
+    private var headerLabel: NSTextField!
+    private var headerStripe: RetroStripeView!
+    private var headerRule: RetroRuleView!
     private var searchContainer: NSView!
-    private var searchIcon: NSImageView!
+    private var promptLabel: NSTextField!
     private var searchField: NSTextField!
     private var scrollView: NSScrollView!
     private var stackView: NSStackView!
@@ -203,33 +206,39 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.cornerRadius = 12
-        root.layer?.borderWidth = 1
+        root.layer?.cornerRadius = Retro.cornerRadius
+        root.layer?.borderWidth = Retro.hairline
         root.layer?.masksToBounds = true
+
+        headerLabel = NSTextField(labelWithString: "COMMAND")
+        headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(headerLabel)
+
+        headerStripe = RetroStripeView(layout: .slanted)
+        root.addSubview(headerStripe)
+
+        headerRule = RetroRuleView(axis: .horizontal, style: .double)
+        root.addSubview(headerRule)
 
         searchContainer = NSView()
         searchContainer.wantsLayer = true
-        searchContainer.layer?.cornerRadius = 9
-        searchContainer.layer?.borderWidth = 1
+        searchContainer.layer?.cornerRadius = Retro.cornerRadius
+        searchContainer.layer?.borderWidth = Retro.hairline
         searchContainer.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(searchContainer)
 
-        searchIcon = NSImageView()
-        searchIcon.image = NSImage(
-            systemSymbolName: "magnifyingglass",
-            accessibilityDescription: "Search"
-        )
-        searchIcon.symbolConfiguration = .init(pointSize: 14, weight: .medium)
-        searchIcon.imageScaling = .scaleProportionallyDown
-        searchIcon.translatesAutoresizingMaskIntoConstraints = false
-        searchContainer.addSubview(searchIcon)
+        promptLabel = NSTextField(labelWithString: "❯")
+        promptLabel.setAccessibilityElement(false)
+        promptLabel.setContentHuggingPriority(.required, for: .horizontal)
+        promptLabel.translatesAutoresizingMaskIntoConstraints = false
+        searchContainer.addSubview(promptLabel)
 
         searchField = NSTextField(string: "")
         searchField.placeholderString = "Type a command..."
         searchField.isBordered = false
         searchField.drawsBackground = false
         searchField.focusRingType = .none
-        searchField.font = .systemFont(ofSize: 14, weight: .medium)
+        searchField.font = RetroFont.body(13)
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.delegate = self
         searchContainer.addSubview(searchField)
@@ -260,28 +269,37 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         root.addSubview(footerView)
 
         resultCountLabel = NSTextField(labelWithString: "")
-        resultCountLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
         resultCountLabel.translatesAutoresizingMaskIntoConstraints = false
         footerView.addSubview(resultCountLabel)
 
         keyboardHintLabel = NSTextField(labelWithString: "↑↓  Navigate    ↵  Run    esc  Close")
-        keyboardHintLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
         keyboardHintLabel.alignment = .right
         keyboardHintLabel.translatesAutoresizingMaskIntoConstraints = false
         footerView.addSubview(keyboardHintLabel)
 
         NSLayoutConstraint.activate([
-            searchContainer.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            headerLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            headerLabel.centerYAnchor.constraint(equalTo: root.topAnchor, constant: 11),
+            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerStripe.leadingAnchor, constant: -12),
+
+            headerStripe.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            headerStripe.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            headerStripe.widthAnchor.constraint(equalToConstant: 22),
+            headerStripe.heightAnchor.constraint(equalToConstant: 12),
+
+            headerRule.topAnchor.constraint(equalTo: root.topAnchor, constant: 22),
+            headerRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            headerRule.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+
+            searchContainer.topAnchor.constraint(equalTo: headerRule.bottomAnchor, constant: 12),
             searchContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
             searchContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
             searchContainer.heightAnchor.constraint(equalToConstant: 44),
 
-            searchIcon.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: 13),
-            searchIcon.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
-            searchIcon.widthAnchor.constraint(equalToConstant: 18),
-            searchIcon.heightAnchor.constraint(equalToConstant: 18),
+            promptLabel.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: 13),
+            promptLabel.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
 
-            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 9),
+            searchField.leadingAnchor.constraint(equalTo: promptLabel.trailingAnchor, constant: 10),
             searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor, constant: -12),
             searchField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
 
@@ -324,15 +342,19 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         currentTheme = theme
         guard isViewLoaded else { return }
 
-        view.layer?.backgroundColor = theme.colors.bgPanel.withAlphaComponent(0.985).cgColor
-        view.layer?.borderColor = theme.colors.borderStrong.cgColor
+        let colors = theme.colors
+        view.layer?.backgroundColor = colors.bgPanel.withAlphaComponent(0.985).cgColor
+        view.layer?.borderColor = colors.borderStrong.cgColor
 
-        searchField.textColor = theme.colors.textPrimary
-        searchContainer.layer?.backgroundColor = theme.colors.bgRaised.cgColor
-        searchContainer.layer?.borderColor = theme.colors.borderStrong.cgColor
-        searchIcon.contentTintColor = theme.colors.textMuted
-        resultCountLabel.textColor = theme.colors.textMuted
-        keyboardHintLabel.textColor = theme.colors.textMuted
+        headerLabel.setRetroText("COMMAND", color: colors.accent, glow: true)
+        headerStripe.colors = colors.stripe
+        headerRule.color = colors.borderStrong
+
+        searchField.textColor = colors.textPrimary
+        searchContainer.layer?.backgroundColor = colors.bgRaised.cgColor
+        searchContainer.layer?.borderColor = colors.borderStrong.cgColor
+        promptLabel.setRetroText("❯", color: colors.accent)
+        keyboardHintLabel.setRetroText(keyboardHintLabel.stringValue, color: colors.textMuted)
 
         refreshRows()
     }
@@ -387,13 +409,15 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
             row.removeFromSuperview()
         }
         resultRows.removeAll(keepingCapacity: true)
-        resultCountLabel.stringValue = "\(filtered.count) result\(filtered.count == 1 ? "" : "s")"
+        resultCountLabel.setRetroText(
+            "\(filtered.count) result\(filtered.count == 1 ? "" : "s")",
+            color: currentTheme.colors.textMuted
+        )
 
         if filtered.isEmpty {
-            let emptyLabel = NSTextField(labelWithString: "No matching results")
-            emptyLabel.font = .systemFont(ofSize: 12, weight: .regular)
-            emptyLabel.textColor = currentTheme.colors.textMuted
+            let emptyLabel = NSTextField(labelWithString: "")
             emptyLabel.alignment = .center
+            emptyLabel.setRetroText("No matching results", color: currentTheme.colors.textMuted)
             emptyLabel.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(emptyLabel)
             emptyLabel.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
@@ -454,14 +478,16 @@ private final class CommandPaletteRowView: NSView {
     private let descriptionLabel = NSTextField(labelWithString: "")
     private let shortcutLabel = NSTextField(labelWithString: "")
     private let shortcutContainer = NSView()
-    private var theme: AppTheme
+    private let theme: AppTheme
+    private var title = ""
+    private var shortcut = ""
 
     init(theme: AppTheme) {
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = Retro.cornerRadius
         setupViews()
     }
 
@@ -477,25 +503,23 @@ private final class CommandPaletteRowView: NSView {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        descriptionLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        descriptionLabel.font = RetroFont.body(11)
         descriptionLabel.lineBreakMode = .byTruncatingTail
         descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(descriptionLabel)
 
         shortcutContainer.wantsLayer = true
-        shortcutContainer.layer?.cornerRadius = 6
-        shortcutContainer.layer?.borderWidth = 1
+        shortcutContainer.layer?.cornerRadius = Retro.cornerRadius
+        shortcutContainer.layer?.borderWidth = Retro.hairline
         shortcutContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(shortcutContainer)
 
-        shortcutLabel.font = .monospacedSystemFont(ofSize: 10, weight: .medium)
         shortcutLabel.alignment = .center
         shortcutLabel.translatesAutoresizingMaskIntoConstraints = false
         shortcutContainer.addSubview(shortcutLabel)
@@ -518,13 +542,13 @@ private final class CommandPaletteRowView: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutContainer.leadingAnchor, constant: -8),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
 
             descriptionLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             descriptionLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: shortcutContainer.leadingAnchor, constant: -8
             ),
-            descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
+            descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
         ])
 
         let clickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
@@ -533,33 +557,28 @@ private final class CommandPaletteRowView: NSView {
 
     func configure(item: CommandItem, highlighted: Bool) {
         iconView.image = NSImage(systemSymbolName: item.icon, accessibilityDescription: item.label)
-        titleLabel.stringValue = item.label
+        title = item.label
+        shortcut = item.shortcut ?? ""
         descriptionLabel.stringValue = item.description
-        shortcutLabel.stringValue = item.shortcut ?? ""
         shortcutContainer.isHidden = item.shortcut == nil
-
-        iconView.contentTintColor = theme.colors.textMuted
-        titleLabel.textColor = theme.colors.textPrimary
-        descriptionLabel.textColor = theme.colors.textMuted
-        shortcutLabel.textColor = theme.colors.textMuted
-        shortcutContainer.layer?.backgroundColor = theme.colors.bgRaised.cgColor
-        shortcutContainer.layer?.borderColor = theme.colors.borderSubtle.cgColor
 
         setHighlighted(highlighted)
     }
 
     func setHighlighted(_ highlighted: Bool) {
-        layer?.backgroundColor = highlighted
-            ? theme.colors.accent.withAlphaComponent(0.13).cgColor
-            : NSColor.clear.cgColor
-        iconView.contentTintColor = highlighted ? theme.colors.accent : theme.colors.textMuted
-        shortcutLabel.textColor = highlighted ? theme.colors.accent : theme.colors.textMuted
+        let colors = theme.colors
+        let ink = highlighted ? colors.bgPanel : colors.textMuted
+        layer?.backgroundColor = highlighted ? colors.accent.cgColor : NSColor.clear.cgColor
+        iconView.contentTintColor = ink
+        titleLabel.setRetroText(title, color: highlighted ? colors.bgPanel : colors.textPrimary)
+        descriptionLabel.textColor = ink
+        shortcutLabel.setRetroText(shortcut, color: ink)
         shortcutContainer.layer?.backgroundColor = highlighted
-            ? theme.colors.accent.withAlphaComponent(0.1).cgColor
-            : theme.colors.bgRaised.cgColor
+            ? NSColor.clear.cgColor
+            : colors.bgRaised.cgColor
         shortcutContainer.layer?.borderColor = highlighted
-            ? theme.colors.accent.withAlphaComponent(0.35).cgColor
-            : theme.colors.borderSubtle.cgColor
+            ? colors.bgPanel.cgColor
+            : colors.borderSubtle.cgColor
     }
 
     @objc private func handleClick() {
