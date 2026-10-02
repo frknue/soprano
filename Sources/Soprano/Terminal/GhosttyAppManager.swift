@@ -317,7 +317,7 @@ private func ghosttyAction(
             truncatingIfNeeded: action.action.child_exited.exit_code
         )
         MainActor.assumeIsolated {
-            surfaceView.terminalCommandDidFinish(exitCode: exitCode)
+            surfaceView.terminalChildDidExit(exitCode: exitCode)
         }
         return false
 

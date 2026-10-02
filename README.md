@@ -312,9 +312,11 @@ open as one session.
 **Save Workspace As…** (`Shift+Cmd+S`) saves a snapshot of all sessions; the sidebar's
 **Saved Workspaces** menu restores those snapshots. Quitting the app ends terminal
 processes. Reopening Soprano restores the selected session, window, pane tab, and depth,
-and relaunches Codex, Claude Code, and OpenCode into their recorded conversations.
-**Restart** also resumes the agent's recorded conversation. Agents wait for your next
-input; closing the app does not keep their processes working in the background.
+and relaunches Codex, Claude Code, OpenCode, and omp into their recorded conversations.
+**Restart** also resumes the agent's recorded conversation. Profile `command`/`args`
+launches use your interactive login shell, so executables added to its `PATH` remain
+available when Soprano reopens a workspace. Agents wait for your next input; closing
+the app does not keep their processes working in the background.
 
 Conversation IDs are recorded per tab, so two agents in the same project resume their
 own conversations. Claude Code reports its ID through launch-scoped lifecycle hooks;

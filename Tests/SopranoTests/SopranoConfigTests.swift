@@ -186,12 +186,13 @@ struct SopranoConfigTests {
         """)
 
         let profile = resolved.agents.first { $0.id == "aider" }!
-        let config = TerminalConfig.forAgent(profile, paneId: "pane-1", tabId: "tab-1")
+        let config = TerminalConfig.forAgent(
+            profile, paneId: "pane-1", tabId: "tab-1", loginShell: "/bin/zsh"
+        )
 
-        // Each component is shell-quoted independently, so a path with a space
-        // survives and a command string cannot smuggle in extra shell syntax —
-        // multi-step launches are what `launchScript` is for.
-        #expect(config.command == "'aider' '--no-auto-commits' 'a file.py'")
+        // Both shell layers quote arguments, so a path with spaces survives and
+        // command text cannot smuggle shell syntax; use launchScript for that.
+        #expect(config.command == #"'/bin/zsh' '-lic' 'exec '\''aider'\'' '\''--no-auto-commits'\'' '\''a file.py'\'''"#)
         #expect(config.env["AIDER_DARK_MODE"] == "1")
         #expect(config.env["SOPRANO_AGENT_PROFILE"] == "aider")
         #expect(config.env["SOPRANO_AGENT_NAME"] == "Aider")

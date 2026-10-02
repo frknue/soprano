@@ -7,6 +7,7 @@ final class AgentInstance: Identifiable {
     var status: AgentStatus
     var startedAt: Date?
     var exitCode: Int32?
+    var processId: Int32?
     var restartCount: Int
     var needsAttention: Bool
     var conversation: AgentConversation?

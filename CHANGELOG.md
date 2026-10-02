@@ -48,8 +48,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   theme.
 
 ### Fixed
-- omp started directly in a Soprano terminal stays visible in window tabs and the
-  Agent Dashboard, and reports notifications instead of disappearing after launch.
+- Claude Code, Codex, and other agents started in a Soprano terminal no longer stay in
+  window tabs and the Agent Dashboard after you quit them with `Ctrl+C`, even when
+  their merged hooks lack an exit event.
+- Restored omp and other agent panes find CLIs installed on the user's shell `PATH`
+  instead of failing with “command not found” after reopening Soprano.
+- omp started directly in a Soprano terminal appears in window tabs and the Agent
+  Dashboard while running, reports notifications, and clears its badge when it exits.
 - Window agent indicators stay visible between turns and while waiting for input,
   and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps

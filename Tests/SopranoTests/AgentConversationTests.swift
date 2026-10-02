@@ -115,6 +115,123 @@ struct AgentConversationTests {
         #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.agent == nil)
     }
 
+    @Test func manualOmpClearsItsBadgeWhenItsProcessExitsWithoutShutdownHook() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        var terminalView: TerminalSurfaceView?
+        let tree = SplitTreeView(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            terminalViewFactory: { target, config, _ in
+                let view = TerminalSurfaceView(
+                    paneId: target.paneId, tabId: target.tabId,
+                    config: config, startsSurface: false
+                )
+                terminalView = view
+                return view
+            }
+        )
+        _ = tree
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/cat")
+        process.standardInput = Pipe()
+        process.standardOutput = Pipe()
+        try process.run()
+        defer {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+        let notifications = AgentNotificationManager(agentManager: manager)
+        let envelope = try #require(AgentEventCommand.notificationEnvelope(
+            arguments: ["soprano", "agent-event", "ready", "--profile", "omp",
+                        "--pid", String(process.processIdentifier),
+                        "--message-json", #"{"session_id":"live-omp"}"#],
+            environment: environment(paneId: paneId, tabId: tabId)
+        ))
+        notifications.handleDistributedEvent(Notification(name: envelope.name, userInfo: envelope.userInfo))
+        #expect(manager.agentDashboardSnapshot().totalCount == 1)
+
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agentDashboardSnapshot().totalCount == 1)
+
+        process.terminate()
+        process.waitUntilExit()
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agentDashboardSnapshot().totalCount == 0)
+        #expect(manager.panes[paneId]?.activeTab?.type == .terminal)
+    }
+
+    @Test func shellStartedClaudeWithoutExitHookOrPidClearsItsBadgeOnceTheHookOwnerHasExited() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        var terminalView: TerminalSurfaceView?
+        let tree = SplitTreeView(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            terminalViewFactory: { target, config, _ in
+                let view = TerminalSurfaceView(
+                    paneId: target.paneId, tabId: target.tabId,
+                    config: config, startsSurface: false
+                )
+                terminalView = view
+                return view
+            }
+        )
+        _ = tree
+        let claude = Process()
+        claude.executableURL = URL(fileURLWithPath: "/bin/cat")
+        claude.standardInput = Pipe()
+        claude.standardOutput = Pipe()
+        try claude.run()
+        defer {
+            if claude.isRunning {
+                claude.terminate()
+                claude.waitUntilExit()
+            }
+        }
+        // An older merged Claude hook set: SessionStart without --pid, and no SessionEnd.
+        let notifications = AgentNotificationManager(agentManager: manager)
+        let envelope = try #require(AgentEventCommand.notificationEnvelope(
+            arguments: ["soprano", "agent-event", "ready", "--profile", "claude-code",
+                        "--title", "Claude Code", "--body", "Ready for a prompt"],
+            environment: environment(paneId: paneId, tabId: tabId),
+            hookOwnerProcessId: { claude.processIdentifier }
+        ))
+        notifications.handleDistributedEvent(Notification(name: envelope.name, userInfo: envelope.userInfo))
+        #expect(manager.agentDashboardSnapshot().totalCount == 1)
+
+        // Agents such as omp emit their own OSC 133 marks mid-session.
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agentDashboardSnapshot().totalCount == 1)
+
+        claude.terminate()
+        claude.waitUntilExit()
+        try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
+        #expect(manager.agentDashboardSnapshot().totalCount == 0)
+        #expect(manager.panes[paneId]?.activeTab?.type == .terminal)
+    }
+
+    @Test func hookOwnerIsTheNearestNonShellAncestorButNeverThePaneShellsLoginOrTheApp() {
+        let processes: [Int32: (parent: Int32, name: String)] = [
+            50: (40, "sh"), 40: (30, "claude"), 30: (20, "-zsh"), 20: (10, "login"), 10: (1, "Soprano"),
+            60: (30, "codex"), 31: (10, "zsh"),
+        ]
+        func owner(from processId: Int32) -> Int32? {
+            AgentEventCommand.hookOwnerProcessId(
+                startingAt: processId, appProcessId: 10, lookup: { processes[$0] }
+            )
+        }
+        #expect(owner(from: 50) == 40)
+        #expect(owner(from: 60) == 60)
+        #expect(owner(from: 30) == nil)
+        #expect(owner(from: 31) == nil)
+        #expect(owner(from: 99) == nil)
+    }
+
     @Test func dedicatedAgentTabStillStopsWhenItsTerminalCommandExits() throws {
         let manager = AgentManager()
         let paneId = manager.activePaneId
@@ -223,10 +340,11 @@ struct AgentConversationTests {
             terminalViewHasLiveSurface: { _ in true },
             scheduleCodexReadiness: { _ in }
         )
-        #expect(commands.last?.contains("'resume' 'saved-chat'") == true)
+        #expect(commands.last?.contains("saved-chat") == true)
         manager.recordAgentConversation(.init(id: "new-chat"), paneId: paneId, tabId: tabId)
         manager.restartAgent(paneId: paneId)
-        #expect(commands.last?.contains("'resume' 'new-chat'") == true)
+        #expect(commands.last?.contains("new-chat") == true)
+        #expect(commands.last?.contains("saved-chat") == false)
         #expect(commands.count == 2)
         _ = tree
     }
@@ -242,9 +360,8 @@ struct AgentConversationTests {
 
     @Test func resumeCommandsTargetTheSavedIDAndKeepModelOptionsAndHooks() {
         let conversation = AgentConversation(id: "saved-chat", cwd: "/tmp/original repo")
-        for (profile, selector) in [(DefaultAgents.codex, "resume"), (DefaultAgents.claudeCode, "--resume"), (DefaultAgents.openCode, "--session"), (DefaultAgents.omp, "--resume")] {
+        for profile in [DefaultAgents.codex, DefaultAgents.claudeCode, DefaultAgents.openCode, DefaultAgents.omp] {
             let config = TerminalConfig.forAgent(profile, cwd: "/tmp/other", paneId: "pane-1", tabId: "tab-2", conversation: conversation)
-            #expect(config.command?.hasPrefix("'\(profile.command)' '\(selector)' 'saved-chat'") == true)
             #expect(config.workingDirectory == "/tmp/original repo")
             #expect(config.env["SOPRANO_RESUME_SESSION_ID"] == "saved-chat")
             #expect(config.env["SOPRANO_PANE_ID"] == "pane-1")
@@ -258,6 +375,40 @@ struct AgentConversationTests {
         #expect(conversation.resumeArguments(profileId: "claude-code", arguments: ["--resume=old-chat", "--fork-session", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
         #expect(conversation.resumeArguments(profileId: "opencode", arguments: ["--continue", "--session", "old-chat", "--fork"]) == ["--session", "saved-chat"])
         #expect(conversation.resumeArguments(profileId: "omp", arguments: ["--continue", "--resume=old-chat", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
+    }
+
+    @Test func restoredOmpFindsExecutableAddedByInteractiveShell() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-omp-path-\(UUID().uuidString)")
+        let bin = directory.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try Data("export PATH=\"$ZDOTDIR/bin:$PATH\"\n".utf8)
+            .write(to: directory.appendingPathComponent(".zshrc"))
+        let executable = bin.appendingPathComponent("omp")
+        try Data("#!/bin/sh\nprintf '%s\\n' \"$@\"\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+        let config = TerminalConfig.forAgent(
+            DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2",
+            conversation: AgentConversation(id: "saved-chat"), loginShell: "/bin/zsh"
+        )
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
+        process.environment = [
+            "HOME": directory.path, "ZDOTDIR": directory.path,
+            "PATH": "/usr/bin:/bin", "TERM": "dumb",
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        let arguments = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .split(separator: "\n").map(String.init)
+        #expect(process.terminationStatus == 0)
+        #expect(arguments.prefix(3) == ["--resume", "saved-chat", "--extension"])
     }
 
     @Test func malformedAndUnrelatedEventIDsCannotBecomeConversationSelectors() {

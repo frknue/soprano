@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct TerminalTarget: Hashable, Sendable {
@@ -736,6 +737,7 @@ final class AgentManager: @unchecked Sendable {
         agent.status = .starting
         agent.needsAttention = false
         agent.exitCode = nil
+        agent.processId = nil
         agent.startedAt = Date()
         agent.restartCount += 1
         notifyTerminalLifecycle(.restart(target))
@@ -775,6 +777,20 @@ final class AgentManager: @unchecked Sendable {
             notifyChange()
         } else {
             removeTabFromPane(target.paneId, tabId: target.tabId)
+        }
+    }
+
+    /// Ghostty also reports commands run by an ordinary shell. Only detach an
+    /// attached agent when its own reported process is gone; a prior command's
+    /// delayed completion must not hide an agent that is still running.
+    func agentCommandDidFinish(target: TerminalTarget, exitCode: Int32?) {
+        guard let tab = panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
+              let agent = tab.agent else { return }
+        if tab.type == .agent {
+            agentProcessDidExit(target: target, exitCode: exitCode)
+        } else if let processId = agent.processId,
+                  kill(processId, 0) == -1, errno == ESRCH {
+            agentProcessDidExit(target: target, exitCode: exitCode)
         }
     }
 

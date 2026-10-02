@@ -10,7 +10,8 @@ export default function (omp) {
     const payload = JSON.stringify({ session_id: sessionId, cwd: ctx.cwd })
     try {
       const child = Bun.spawn(
-        [binary, "agent-event", state, "--profile", "omp", ...options, "--message-json", payload],
+        [binary, "agent-event", state, "--profile", "omp", "--pid", String(process.pid),
+          ...options, "--message-json", payload],
         { env: process.env, stdin: "ignore", stdout: "ignore", stderr: "ignore" },
       )
       await child.exited

@@ -29,6 +29,7 @@ struct AgentEventPayload {
     let title: String
     let body: String
     var conversation: AgentConversation? = nil
+    var processId: Int32? = nil
 }
 
 /// A distributed notification prepared for delivery by a command bridge.
@@ -59,7 +60,13 @@ enum AgentEventCommand {
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
         guard arguments.count >= 2, arguments[1] == "agent-event" else { return false }
-        guard let envelope = notificationEnvelope(arguments: arguments, environment: environment)
+        guard let envelope = notificationEnvelope(
+            arguments: arguments,
+            environment: environment,
+            hookOwnerProcessId: {
+                hookOwnerProcessId(appProcessId: environment["SOPRANO_APP_PID"].flatMap(Int32.init))
+            }
+        )
         else { return true }
 
         DistributedNotificationCenter.default().postNotificationName(
@@ -74,7 +81,8 @@ enum AgentEventCommand {
     static func notificationEnvelope(
         arguments: [String],
         environment: [String: String],
-        standardInput: () -> Data? = { readStandardInput() }
+        standardInput: () -> Data? = { readStandardInput() },
+        hookOwnerProcessId: () -> Int32? = { nil }
     ) -> DistributedNotificationEnvelope? {
         guard arguments.count >= 3,
               let state = AgentEventState(rawValue: arguments[2]),
@@ -87,6 +95,7 @@ enum AgentEventCommand {
         var profileId = environment["SOPRANO_AGENT_PROFILE"]
         var title = environment["SOPRANO_AGENT_NAME"] ?? "Agent"
         var body = defaultBody(for: state)
+        var processId: Int32?
         var readsStandardInput = false
         var payloads: [String] = []
         var index = 3
@@ -105,6 +114,9 @@ enum AgentEventCommand {
             case "--body" where index + 1 < arguments.count:
                 body = arguments[index + 1]
                 index += 2
+            case "--pid" where index + 1 < arguments.count:
+                processId = Int32(arguments[index + 1]).flatMap { $0 > 0 ? $0 : nil }
+                index += 2
             case "--message-from-stdin":
                 readsStandardInput = true
                 index += 1
@@ -117,6 +129,13 @@ enum AgentEventCommand {
                 payloads.append(arguments[index])
                 index += 1
             }
+        }
+
+        // Lifecycle hooks rarely pass --pid, and some never report exit (an older
+        // Claude Code merge has no SessionEnd). The process that ran the hook lets
+        // the app detach the agent once its shell prompt returns.
+        if processId == nil {
+            processId = hookOwnerProcessId()
         }
 
         if readsStandardInput, let data = standardInput(), !data.isEmpty {
@@ -139,6 +158,9 @@ enum AgentEventCommand {
         ]
         if let profileId {
             userInfo["profileId"] = profileId
+        }
+        if let processId {
+            userInfo["processId"] = String(processId)
         }
         if let conversation = payloads.lazy.compactMap(AgentConversation.fromPayload).first {
             userInfo["conversationId"] = conversation.id
@@ -233,6 +255,37 @@ enum AgentEventCommand {
     private static func readStandardInput() -> Data? {
         guard isatty(FileHandle.standardInput.fileDescriptor) == 0 else { return nil }
         return try? FileHandle.standardInput.readToEnd()
+    }
+
+    private static let shellNames: Set<String> = ["sh", "bash", "zsh", "dash", "fish", "ksh", "tcsh", "csh"]
+
+    /// Hooks run this command directly or through `sh -c`, so the agent is the
+    /// nearest ancestor that is not a shell. Reaching `login` or the app means it
+    /// was typed into the pane's own shell, where no agent owns the event.
+    static func hookOwnerProcessId(
+        startingAt processId: Int32 = getppid(),
+        appProcessId: Int32?,
+        lookup: (Int32) -> (parent: Int32, name: String)? = processParentAndName
+    ) -> Int32? {
+        var current = processId
+        for _ in 0..<8 {
+            guard current > 1, current != appProcessId, let process = lookup(current) else { return nil }
+            let name = process.name.hasPrefix("-") ? String(process.name.dropFirst()) : process.name
+            guard shellNames.contains(name) else { return name == "login" ? nil : current }
+            current = process.parent
+        }
+        return nil
+    }
+
+    private static func processParentAndName(_ processId: Int32) -> (parent: Int32, name: String)? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, processId]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
+        let name = withUnsafeBytes(of: info.kp_proc.p_comm) { bytes in
+            String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return (info.kp_eproc.e_ppid, name)
     }
 }
 
@@ -370,7 +423,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             body: info["body"] as? String ?? "Ready for a prompt",
             conversation: (info["conversationId"] as? String).map {
                 AgentConversation(id: $0, cwd: info["conversationCwd"] as? String)
-            }
+            },
+            processId: (info["processId"] as? String).flatMap(Int32.init)
         ))
     }
 
@@ -430,7 +484,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             )
         }
 
-        guard agentManager.agent(paneId: event.paneId, tabId: event.tabId) != nil else { return }
+        guard let agent = agentManager.agent(paneId: event.paneId, tabId: event.tabId) else { return }
+        if let processId = event.processId, agent.profileId == event.profileId {
+            agent.processId = processId
+        }
         // Identity must survive even if the status/message is a duplicate, or
         // if the event is SessionEnd just before the workspace is saved.
         if let conversation = event.conversation {

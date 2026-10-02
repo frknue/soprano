@@ -17,7 +17,8 @@ struct TerminalConfig {
         cwd: String? = nil,
         paneId: String,
         tabId: String,
-        conversation: AgentConversation? = nil
+        conversation: AgentConversation? = nil,
+        loginShell: String = DefaultAgents.terminal.command
     ) -> TerminalConfig {
         var config = TerminalConfig()
         let conversation = conversation.flatMap {
@@ -77,7 +78,12 @@ struct TerminalConfig {
             let fullCommand = ([profile.command] + arguments)
                 .map(shellQuoted)
                 .joined(separator: " ")
-            config.command = fullCommand.isEmpty ? nil : fullCommand
+            // Ghostty runs explicit commands through a clean, non-interactive bash.
+            // Use the same login shell as regular terminals so agent CLIs installed
+            // on the user's interactive PATH can also start after workspace restore.
+            config.command = fullCommand.isEmpty ? nil : [
+                loginShell, "-lic", "exec \(fullCommand)"
+            ].map(shellQuoted).joined(separator: " ")
         }
         return config
     }
@@ -242,6 +248,7 @@ final class TerminalSurfaceView: NSView {
     var onWorkingDirectoryChanged: ((String) -> Void)?
     var onAgentInputSubmitted: (() -> Void)?
     var onAgentProcessExited: ((Int32?) -> Void)?
+    var onShellCommandFinished: ((Int32?) -> Void)?
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
     private var config: TerminalConfig
     private var lastPixelWidth: UInt32 = 0
@@ -441,6 +448,10 @@ final class TerminalSurfaceView: NSView {
     }
 
     func terminalCommandDidFinish(exitCode: Int32?) {
+        onShellCommandFinished?(exitCode)
+    }
+
+    func terminalChildDidExit(exitCode: Int32?) {
         onAgentProcessExited?(exitCode)
     }
 
