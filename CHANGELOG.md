@@ -55,6 +55,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   instead of failing with “command not found” after reopening Soprano.
 - omp started directly in a Soprano terminal appears in window tabs and the Agent
   Dashboard while running, reports notifications, and clears its badge when it exits.
+- omp now sends a notification and marks its pane as waiting when it asks you a
+  question (its `ask` prompt), showing the question in the banner.
 - Window agent indicators stay visible between turns and while waiting for input,
   and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps

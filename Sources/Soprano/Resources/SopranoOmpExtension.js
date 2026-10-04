@@ -44,5 +44,18 @@ export default function (omp) {
   omp.on("tool_approval_resolved", async (event, ctx) => {
     if (event.sessionId === ctx.sessionManager.getSessionId()) await report("running", ctx)
   })
+  // `ask` blocks mid-turn on the user's answer, so agent_end never fires for it.
+  omp.on("tool_execution_start", async (event, ctx) => {
+    if (event.toolName !== "ask") return
+    const questions = (Array.isArray(event.args?.questions) ? event.args.questions : [])
+      .map((question) => question?.question).filter(Boolean).join("\n").slice(0, 4096)
+    await report("needs-input", ctx, [
+      "--notify", "--title", "omp", "--body", "Question",
+      ...(questions ? ["--message-json", JSON.stringify({ message: questions })] : []),
+    ])
+  })
+  omp.on("tool_execution_end", async (event, ctx) => {
+    if (event.toolName === "ask") await report("running", ctx)
+  })
   omp.on("session_shutdown", async (_event, ctx) => report("stopped", ctx))
 }
