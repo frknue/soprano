@@ -81,8 +81,18 @@ struct TerminalConfig {
             // Ghostty runs explicit commands through a clean, non-interactive bash.
             // Use the same login shell as regular terminals so agent CLIs installed
             // on the user's interactive PATH can also start after workspace restore.
+            // When the agent exits, report it and continue in an interactive login
+            // shell so the pane stays a usable terminal instead of a dead surface.
+            // The INT trap stops an interactive zsh from abandoning the rest of the
+            // line when Ctrl+C kills the agent; children still get default SIGINT.
+            let script = [
+                "trap true INT",
+                fullCommand,
+                "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped",
+                "exec \(shellQuoted(loginShell)) -l",
+            ].joined(separator: "; ")
             config.command = fullCommand.isEmpty ? nil : [
-                loginShell, "-lic", "exec \(fullCommand)"
+                loginShell, "-lic", script
             ].map(shellQuoted).joined(separator: " ")
         }
         return config

@@ -232,7 +232,7 @@ struct AgentConversationTests {
         #expect(owner(from: 99) == nil)
     }
 
-    @Test func dedicatedAgentTabStillStopsWhenItsTerminalCommandExits() throws {
+    @Test func dedicatedAgentTabBecomesATerminalWhenItsShellReportsTheCommandFinished() throws {
         let manager = AgentManager()
         let paneId = manager.activePaneId
         let tabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "omp"))
@@ -251,7 +251,8 @@ struct AgentConversationTests {
         )
         _ = tree
         try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
-        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: tabId) == nil)
+        #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.type == .terminal)
     }
 
     @Test func duplicateStatusMessagesStillUpdateTheConversationAfterStartingANewChat() throws {
@@ -378,37 +379,30 @@ struct AgentConversationTests {
     }
 
     @Test func restoredOmpFindsExecutableAddedByInteractiveShell() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("soprano-omp-path-\(UUID().uuidString)")
-        let bin = directory.appendingPathComponent("bin")
-        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        try Data("export PATH=\"$ZDOTDIR/bin:$PATH\"\n".utf8)
-            .write(to: directory.appendingPathComponent(".zshrc"))
-        let executable = bin.appendingPathComponent("omp")
-        try Data("#!/bin/sh\nprintf '%s\\n' \"$@\"\n".utf8).write(to: executable)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
-
         let config = TerminalConfig.forAgent(
             DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2",
             conversation: AgentConversation(id: "saved-chat"), loginShell: "/bin/zsh"
         )
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
-        process.environment = [
-            "HOME": directory.path, "ZDOTDIR": directory.path,
-            "PATH": "/usr/bin:/bin", "TERM": "dumb",
-        ]
-        let output = Pipe()
-        process.standardOutput = output
-        try process.run()
-        process.waitUntilExit()
-        let arguments = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-            .split(separator: "\n").map(String.init)
-        #expect(process.terminationStatus == 0)
-        #expect(arguments.prefix(3) == ["--resume", "saved-chat", "--extension"])
+        let run = try runAgentLaunchCommand(config, stubs: ["omp": "printf '%s\\n' \"$@\""])
+        #expect(run.status == 0)
+        #expect(run.lines.prefix(3) == ["--resume", "saved-chat", "--extension"])
+    }
+
+    @Test func aDedicatedAgentReportsItsExitAndLeavesTheLoginShellBehind() throws {
+        let config = TerminalConfig.forAgent(
+            DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2", loginShell: "/bin/zsh"
+        )
+        let run = try runAgentLaunchCommand(
+            config,
+            stubs: [
+                "omp": "echo agent-ran; exit 3",
+                "soprano-stub": "echo \"reported $*\"",
+            ],
+            reportsThrough: "soprano-stub",
+            // Only the fallback shell is a login shell without a -c command.
+            zprofile: "[[ -z $ZSH_EXECUTION_STRING ]] && echo fallback-shell"
+        )
+        #expect(run.lines == ["agent-ran", "reported agent-event stopped", "fallback-shell"])
     }
 
     @Test func malformedAndUnrelatedEventIDsCannotBecomeConversationSelectors() {
@@ -434,4 +428,51 @@ struct AgentConversationTests {
     private func environment(paneId: String, tabId: String) -> [String: String] {
         ["SOPRANO_APP_PID": "4242", "SOPRANO_PANE_ID": paneId, "SOPRANO_TAB_ID": tabId]
     }
+}
+
+/// Runs an agent tab's launch command the way Ghostty does, in an isolated zsh
+/// home whose interactive PATH holds `stubs` (name → sh body). `reportsThrough`
+/// names the stub standing in for `$SOPRANO_BIN`; without it the variable is
+/// unset so the real test binary is never invoked. Returns the printed lines.
+func runAgentLaunchCommand(
+    _ config: TerminalConfig,
+    stubs: [String: String],
+    reportsThrough: String? = nil,
+    zprofile: String = ""
+) throws -> (lines: [String], status: Int32) {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("soprano-agent-launch-\(UUID().uuidString)")
+    let bin = directory.appendingPathComponent("bin")
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    try Data("export PATH=\"$ZDOTDIR/bin:$PATH\"\n".utf8)
+        .write(to: directory.appendingPathComponent(".zshrc"))
+    try Data("\(zprofile)\n".utf8).write(to: directory.appendingPathComponent(".zprofile"))
+    for (name, body) in stubs {
+        let executable = bin.appendingPathComponent(name)
+        try Data("#!/bin/sh\n\(body)\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
+    var environment = [
+        "HOME": directory.path, "ZDOTDIR": directory.path,
+        "PATH": "/usr/bin:/bin", "TERM": "dumb",
+    ]
+    if let reportsThrough {
+        environment["SOPRANO_BIN"] = bin.appendingPathComponent(reportsThrough).path
+    }
+    process.environment = environment
+    // The fallback login shell reads commands from stdin; give it none.
+    process.standardInput = FileHandle.nullDevice
+    let output = Pipe()
+    process.standardOutput = output
+    try process.run()
+    process.waitUntilExit()
+    let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        .split(separator: "\n").map(String.init)
+    return (lines, process.terminationStatus)
 }

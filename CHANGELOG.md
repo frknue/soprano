@@ -59,6 +59,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   question (its `ask` prompt), showing the question in the banner.
 - Scripts and agents in Soprano panes can control other apps with AppleScript
   (`osascript`); macOS now asks for permission instead of silently refusing.
+- Quitting an agent with `Ctrl+C` — including one Soprano relaunched when reopening a
+  workspace — leaves you in your login shell instead of a "process exited" prompt; the
+  tab becomes a plain terminal.
 - Window agent indicators stay visible between turns and while waiting for input,
   and sit inside the tab with consistent spacing instead of against its border.
 - `y` now copies mouse-selected terminal text, and selecting with the mouse keeps

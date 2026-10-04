@@ -787,16 +787,17 @@ final class AgentManager: @unchecked Sendable {
         guard let tab = panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
               let agent = tab.agent else { return }
         if tab.type == .agent {
-            agentProcessDidExit(target: target, exitCode: exitCode)
+            agentReturnedToShell(target: target, exitCode: exitCode)
         } else if let processId = agent.processId,
                   kill(processId, 0) == -1, errno == ESRCH {
             agentProcessDidExit(target: target, exitCode: exitCode)
         }
     }
 
-    /// Reconciles an agent process that exited on its own. Agent tabs remain
-    /// restartable in the stopped state, while agents launched inside a regular
-    /// terminal are detached because the terminal has returned to its shell.
+    /// Reconciles an agent process that exited on its own. An agent tab whose
+    /// pane process is gone (no shell left) stays restartable in the stopped
+    /// state, while agents in a terminal are detached because it has returned
+    /// to its shell.
     func agentProcessDidExit(target: TerminalTarget, exitCode: Int32? = nil) {
         guard let pane = panes[target.paneId],
               let tabIndex = pane.tabs.firstIndex(where: { $0.id == target.tabId }),
@@ -820,6 +821,18 @@ final class AgentManager: @unchecked Sendable {
             agent.exitCode = exitCode
         }
         notifyChange()
+    }
+
+    /// The agent is gone but its pane still runs a shell: dedicated agent tabs
+    /// fall back to the user's shell after the agent exits. The tab becomes an
+    /// ordinary terminal, exactly like an agent that was typed into one.
+    func agentReturnedToShell(target: TerminalTarget, exitCode: Int32? = nil) {
+        guard let pane = panes[target.paneId],
+              let tabIndex = pane.tabs.firstIndex(where: { $0.id == target.tabId }),
+              pane.tabs[tabIndex].agent != nil
+        else { return }
+        pane.tabs[tabIndex].type = .terminal
+        agentProcessDidExit(target: target, exitCode: exitCode)
     }
 
     private func agentTab(for target: TerminalTarget) -> PaneTab? {

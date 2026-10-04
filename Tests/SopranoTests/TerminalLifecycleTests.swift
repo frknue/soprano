@@ -159,6 +159,34 @@ struct TerminalLifecycleTests {
         #expect(manager.agent(paneId: paneId, tabId: tabId)?.exitCode == 130)
         #expect(actions.isEmpty)
     }
+
+    @Test func aDedicatedAgentThatReturnsToItsShellBecomesATerminalThatRestoresAsOne() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(
+            manager.addTabToPane(paneId, type: .agent, profileId: "omp")
+        )
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        manager.recordAgentConversation(.init(id: "0199-chat"), paneId: paneId, tabId: tabId)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        var actions: [TerminalLifecycleAction] = []
+        manager.addTerminalLifecycleObserver(id: "test-spy") { actions.append($0) }
+
+        manager.agentReturnedToShell(target: target, exitCode: 0)
+
+        let tab = try #require(manager.panes[paneId]?.tabs.first { $0.id == tabId })
+        #expect(tab.type == .terminal)
+        #expect(tab.agent == nil)
+        #expect(manager.agentDashboardSnapshot().totalCount == 0)
+        // The shell keeps running in the same surface.
+        #expect(actions.isEmpty)
+
+        let restored = AgentManager()
+        restored.restoreWorkspace(manager.snapshotWorkspace())
+        let restoredTab = try #require(restored.panes[paneId]?.tabs.first { $0.id == tabId })
+        #expect(restoredTab.type == .terminal)
+        #expect(restoredTab.agent == nil)
+    }
 }
 
 @MainActor

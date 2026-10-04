@@ -170,14 +170,14 @@ struct SopranoConfigTests {
 
     /// The end of the chain that matters most: a agent someone typed into
     /// settings.json has to reach the terminal as the command they asked for.
-    @Test func aConfiguredAgentReachesTheTerminalAsTheCommandItDeclared() {
+    @Test func aConfiguredAgentReachesTheTerminalAsTheCommandItDeclared() throws {
         let resolved = resolve("""
         {
           "agents": [
             {
               "id": "aider",
               "command": "aider",
-              "args": ["--no-auto-commits", "a file.py"],
+              "args": ["--no-auto-commits", "a file.py", "$(echo smuggled)"],
               "env": { "AIDER_DARK_MODE": "1" },
               "cwd": "~"
             }
@@ -192,7 +192,8 @@ struct SopranoConfigTests {
 
         // Both shell layers quote arguments, so a path with spaces survives and
         // command text cannot smuggle shell syntax; use launchScript for that.
-        #expect(config.command == #"'/bin/zsh' '-lic' 'exec '\''aider'\'' '\''--no-auto-commits'\'' '\''a file.py'\'''"#)
+        let run = try runAgentLaunchCommand(config, stubs: ["aider": "printf '%s\\n' \"$@\""])
+        #expect(run.lines == ["--no-auto-commits", "a file.py", "$(echo smuggled)"])
         #expect(config.env["AIDER_DARK_MODE"] == "1")
         #expect(config.env["SOPRANO_AGENT_PROFILE"] == "aider")
         #expect(config.env["SOPRANO_AGENT_NAME"] == "Aider")

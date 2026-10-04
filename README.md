@@ -315,8 +315,10 @@ processes. Reopening Soprano restores the selected session, window, pane tab, an
 and relaunches Codex, Claude Code, OpenCode, and omp into their recorded conversations.
 **Restart** also resumes the agent's recorded conversation. Profile `command`/`args`
 launches use your interactive login shell, so executables added to its `PATH` remain
-available when Soprano reopens a workspace. Agents wait for your next input; closing
-the app does not keep their processes working in the background.
+available when Soprano reopens a workspace. When an agent exits (for example after
+`Ctrl+C`), its pane continues in that login shell and the tab becomes a plain terminal.
+Agents wait for your next input; closing the app does not keep their processes working
+in the background.
 
 Conversation IDs are recorded per tab, so two agents in the same project resume their
 own conversations. Claude Code reports its ID through launch-scoped lifecycle hooks;

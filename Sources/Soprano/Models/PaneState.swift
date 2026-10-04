@@ -38,7 +38,7 @@ enum PaneType: String, Codable {
 /// A single tab within a pane.
 struct PaneTab: Identifiable {
     let id: String
-    let type: PaneType
+    var type: PaneType
     var title: String
     var agent: AgentInstance?
     var cwd: String?

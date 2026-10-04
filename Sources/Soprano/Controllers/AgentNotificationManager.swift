@@ -476,7 +476,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     }
 
     func handle(_ event: AgentEventPayload) {
-        if let profileId = event.profileId {
+        // A stop never attaches: agent tabs report one again from their shell
+        // fallback after the agent's own shutdown hook has already detached it.
+        if let profileId = event.profileId, event.state != .stopped {
             agentManager.attachAgentIfNeeded(
                 paneId: event.paneId,
                 tabId: event.tabId,
@@ -520,7 +522,7 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         let needsAttention = event.shouldNotify && !isFocused
 
         if event.state == .stopped {
-            agentManager.agentProcessDidExit(
+            agentManager.agentReturnedToShell(
                 target: TerminalTarget(paneId: event.paneId, tabId: event.tabId)
             )
             return
