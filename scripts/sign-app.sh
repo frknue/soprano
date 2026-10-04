@@ -40,9 +40,12 @@ if [[ -z "$signing_identity" ]]; then
     IFS=$'\t' read -r signing_identity signing_keychain <<< "$signing_resolution"
 fi
 
+# Programs in panes (osascript, agent extensions) send Apple Events attributed to
+# Soprano; the hardened runtime blocks them without this entitlement.
 codesign_arguments=(
     --force
     --sign "$signing_identity"
+    --entitlements "$script_dir/../Support/Soprano.entitlements"
 )
 if [[ "$distribution_signing" == "1" ]]; then
     codesign_arguments+=(--options runtime --timestamp)

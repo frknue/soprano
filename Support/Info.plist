@@ -20,6 +20,8 @@
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>A program running within Soprano would like to use AppleScript.</string>
     <key>NSSupportsAutomaticTermination</key>
     <false/>
 </dict>
