@@ -101,8 +101,9 @@ final class PaneHeaderView: NSView {
         closeButton = makeDepthButton(
             title: "×",
             action: #selector(closePaneAction),
-            toolTip: "Close active tab or depth layer"
+            toolTip: "Close active tab"
         )
+        closeButton.identifier = NSUserInterfaceItemIdentifier("pane-close-button")
         addSubview(closeButton)
 
         // Pane containers are briefly zero-width while AppKit reparents a
@@ -264,16 +265,11 @@ final class PaneHeaderView: NSView {
         focusBar.layer?.backgroundColor = theme.colors.accent.cgColor
     }
 
+    /// Closes only this pane's active tab. The last tab closes the pane, and
+    /// the last pane of an inner depth layer takes that layer with it, so
+    /// split siblings inside the layer stay open.
     @objc private func closePaneAction() {
-        guard let pane = agentManager.panes[paneId],
-              let activeTab = pane.activeTab
-        else {
-            return
-        }
-
-        if agentManager.closeActiveDepthLayer(paneId) {
-            return
-        }
+        guard let activeTab = agentManager.panes[paneId]?.activeTab else { return }
         agentManager.removeTabFromPane(paneId, tabId: activeTab.id)
     }
 
