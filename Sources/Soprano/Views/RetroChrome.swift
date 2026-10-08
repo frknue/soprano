@@ -57,6 +57,16 @@ enum RetroFont {
     /// The pixel display face. Falls back to the system monospace when the
     /// bundled font cannot be loaded, so chrome never renders without text.
     static func display(_ size: CGFloat = grid, smallCaps: Bool = true) -> NSFont {
+        displayFonts.font(size: size, smallCaps: smallCaps) {
+            makeDisplay(size, smallCaps: smallCaps)
+        }
+    }
+
+    /// Labels restyle on every agent update, and building the small-caps face
+    /// from a font descriptor costs more than laying out the text it styles.
+    private static let displayFonts = DisplayFontCache()
+
+    private static func makeDisplay(_ size: CGFloat, smallCaps: Bool) -> NSFont {
         registerBundledFont()
         guard let font = NSFont(name: postScriptName, size: size) else {
             return .monospacedSystemFont(ofSize: size, weight: .semibold)
@@ -89,6 +99,30 @@ enum RetroFont {
         }
         """
     }()
+}
+
+/// Lock-protected rather than main-actor isolated because `RetroFont` is
+/// called from nonisolated text builders as well as from views.
+private final class DisplayFontCache: @unchecked Sendable {
+    private struct Key: Hashable {
+        let size: CGFloat
+        let smallCaps: Bool
+    }
+
+    private let lock = NSLock()
+    private var fonts: [Key: NSFont] = [:]
+
+    func font(size: CGFloat, smallCaps: Bool, make: () -> NSFont) -> NSFont {
+        let key = Key(size: size, smallCaps: smallCaps)
+        lock.lock()
+        defer { lock.unlock() }
+        if let font = fonts[key] {
+            return font
+        }
+        let font = make()
+        fonts[key] = font
+        return font
+    }
 }
 
 // MARK: - Text

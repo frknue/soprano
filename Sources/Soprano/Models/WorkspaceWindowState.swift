@@ -122,9 +122,15 @@ final class WorkspaceWindowState: Identifiable {
     }
 
     var paneIds: Set<String> {
-        depthLayers.reduce(into: Set<String>()) { result, layer in
-            result.formUnion(layer.layout?.leafIds ?? [])
+        var ids = Set<String>()
+        for layer in depthLayers {
+            layer.layout?.insertLeafIds(into: &ids)
         }
+        return ids
+    }
+
+    func containsPane(_ paneId: String) -> Bool {
+        layerIndex(containingPane: paneId) != nil
     }
 
     var maximumDepth: Int {
@@ -330,7 +336,7 @@ final class WorkspaceWindowState: Identifiable {
     }
 
     private func layerIndex(containingPane paneId: String) -> Int? {
-        depthLayers.firstIndex { $0.layout?.leafIds.contains(paneId) == true }
+        depthLayers.firstIndex { $0.layout?.containsLeaf(paneId) == true }
     }
 
     private func expanding(

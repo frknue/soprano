@@ -26,6 +26,8 @@ final class AgentDashboardViewController: NSViewController {
     private var rowsStack: NSStackView!
     private var detailView: AgentDashboardDetailView!
     private var agentRows: [AgentDashboardRowView] = []
+    private var emptyStateView: NSView?
+    private var summaryCards: [AgentDashboardSummaryCard] = []
     private var entriesById: [String: AgentDashboardEntry] = [:]
     private var selectedEntryId: String?
     nonisolated(unsafe) private var elapsedTimer: Timer?
@@ -44,8 +46,10 @@ final class AgentDashboardViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
         agentManager.addObserver(id: observerId) { [weak self] change in
             switch change {
-            case .model, .tabTitle, .tabWorkingDirectory:
+            case .model:
                 self?.refresh()
+            case .tabTitle(let target), .tabWorkingDirectory(let target):
+                self?.refreshEntry(target)
             case .browserURL, .document:
                 break
             }
@@ -256,55 +260,110 @@ final class AgentDashboardViewController: NSViewController {
         agentListHeading.apply(theme: theme)
         keyboardHintLabel.setRetroText(keyboardHintLabel.stringValue, color: colors.textMuted)
         detailView.apply(theme: theme)
+        // Rows, the empty state, and the summary cards take their colors when
+        // they are built, so a theme change rebuilds them.
+        rowsStack.setArrangedSubviews([])
+        agentRows.removeAll()
+        emptyStateView = nil
+        summaryCards.removeAll()
         refresh()
     }
 
+    /// Brings the dashboard up to date with the agent manager. This runs for
+    /// every model notification, and busy agents retitle their tabs several
+    /// times a second, so it only touches views whose content changed.
     private func refresh() {
         guard isViewLoaded else { return }
         let snapshot = agentManager.agentDashboardSnapshot()
         let theme = themeManager.currentTheme
         let previousSelection = selectedEntryId
+        let previousSelectedEntry = previousSelection.flatMap { entriesById[$0] }
         entriesById = Dictionary(
             uniqueKeysWithValues: snapshot.entries.map { ($0.id, $0) }
         )
         selectedEntryId = snapshot.entries.contains {
             $0.id == previousSelection
         } ? previousSelection : snapshot.entries.first?.id
-        subtitleLabel.stringValue = monitoringSubtitle(
+        let subtitle = monitoringSubtitle(
             agentCount: snapshot.totalCount,
             windowCount: agentManager.windowCount
         )
+        if subtitleLabel.stringValue != subtitle {
+            subtitleLabel.stringValue = subtitle
+        }
 
-        replaceContents(
-            of: summaryContainer,
-            with: makeSummary(snapshot: snapshot, theme: theme)
+        if summaryCards.isEmpty {
+            rebuildSummary(theme: theme)
+        }
+        let counts = [
+            snapshot.totalCount,
+            snapshot.workingCount,
+            snapshot.needsInputCount,
+            snapshot.errorCount,
+        ]
+        for (card, count) in zip(summaryCards, counts) {
+            card.update(value: count)
+        }
+        reconcileRows(with: snapshot.entries, theme: theme)
+        updateRowSelection(
+            scrollIntoView: previousSelection != nil && selectedEntryId != previousSelection
         )
-        for arrangedView in rowsStack.arrangedSubviews {
-            rowsStack.removeArrangedSubview(arrangedView)
-            arrangedView.removeFromSuperview()
+        if selectedEntryId.flatMap({ entriesById[$0] }) != previousSelectedEntry {
+            updateDetail()
         }
-        agentRows.removeAll()
+    }
 
-        if snapshot.entries.isEmpty {
-            let emptyState = makeEmptyState(theme: theme)
-            rowsStack.addArrangedSubview(emptyState)
-            emptyState.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
-        } else {
-            for entry in snapshot.entries {
-                let row = AgentDashboardRowView(entry: entry, theme: theme)
-                row.onSelect = { [weak self] in
-                    self?.selectEntry(entry.id)
-                }
-                row.onOpen = { [weak self] in
-                    self?.onAgentSelected?(entry.paneId, entry.tabId)
-                }
-                rowsStack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
-                agentRows.append(row)
-            }
+    /// Follows a title or directory change of one tab. Busy agents retitle
+    /// their tabs several times a second; neither change moves an agent in the
+    /// urgency order or alters the counts, so only its row and, while it is
+    /// selected, the detail view are redrawn.
+    private func refreshEntry(_ target: TerminalTarget) {
+        guard isViewLoaded,
+              let row = agentRows.first(where: {
+                  $0.entry.paneId == target.paneId && $0.entry.tabId == target.tabId
+              }),
+              let entry = agentManager.agentDashboardEntry(for: target)
+        else { return }
+        entriesById[entry.id] = entry
+        row.update(entry: entry)
+        if entry.id == selectedEntryId {
+            updateDetail()
         }
-        updateRowSelection(scrollIntoView: previousSelection != nil)
-        updateDetail()
+    }
+
+    /// Updates surviving rows in place, adds rows for new agents, drops rows
+    /// for agents that are gone, and moves rows whose urgency order changed.
+    private func reconcileRows(with entries: [AgentDashboardEntry], theme: AppTheme) {
+        var reusableRows = Dictionary(
+            uniqueKeysWithValues: agentRows.map { ($0.entry.id, $0) }
+        )
+        agentRows = entries.map { entry in
+            if let row = reusableRows.removeValue(forKey: entry.id) {
+                row.update(entry: entry)
+                return row
+            }
+            return makeRow(entry: entry, theme: theme)
+        }
+        if !entries.isEmpty {
+            emptyStateView = nil
+        } else if emptyStateView == nil {
+            emptyStateView = makeEmptyState(theme: theme)
+        }
+        let views: [NSView] = emptyStateView.map { [$0] } ?? agentRows
+        rowsStack.setArrangedSubviews(views) { view in
+            view.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
+        }
+    }
+
+    private func makeRow(entry: AgentDashboardEntry, theme: AppTheme) -> AgentDashboardRowView {
+        let row = AgentDashboardRowView(entry: entry, theme: theme)
+        row.onSelect = { [weak self] in
+            self?.selectEntry(entry.id)
+        }
+        row.onOpen = { [weak self] in
+            self?.onAgentSelected?(entry.paneId, entry.tabId)
+        }
+        return row
     }
 
     private func makeAgentListPanel(theme: AppTheme) -> NSView {
@@ -427,12 +486,14 @@ final class AgentDashboardViewController: NSViewController {
 
     private func updateRowSelection(scrollIntoView: Bool) {
         for row in agentRows {
-            let isSelected = row.entry.id == selectedEntryId
-            row.setKeyboardSelected(isSelected)
-            if isSelected, scrollIntoView {
-                row.scrollToVisible(row.bounds)
-            }
+            row.setKeyboardSelected(row.entry.id == selectedEntryId)
         }
+        guard scrollIntoView,
+              let selectedRow = agentRows.first(where: { $0.entry.id == selectedEntryId })
+        else { return }
+        // A row added by this refresh has no frame until layout runs.
+        view.layoutSubtreeIfNeeded()
+        selectedRow.scrollToVisible(selectedRow.bounds)
     }
 
     private func monitoringSubtitle(agentCount: Int, windowCount: Int) -> String {
@@ -441,10 +502,8 @@ final class AgentDashboardViewController: NSViewController {
         return "Monitoring \(agentCount) \(agentNoun) across \(windowCount) \(windowNoun)"
     }
 
-    private func makeSummary(
-        snapshot: AgentDashboardSnapshot,
-        theme: AppTheme
-    ) -> NSView {
+    /// Builds the four count cards; refresh() keeps their values current.
+    private func rebuildSummary(theme: AppTheme) {
         let stack = NSStackView()
         stack.orientation = .horizontal
         stack.alignment = .centerY
@@ -454,22 +513,22 @@ final class AgentDashboardViewController: NSViewController {
         stack.heightAnchor.constraint(equalToConstant: 92).isActive = true
 
         let cards = [
-            ("Total", snapshot.totalCount, theme.colors.accent),
-            ("Working", snapshot.workingCount, theme.colors.success),
-            ("Needs Input", snapshot.needsInputCount, theme.colors.yellow),
-            ("Errors", snapshot.errorCount, theme.colors.danger),
+            ("Total", theme.colors.accent),
+            ("Working", theme.colors.success),
+            ("Needs Input", theme.colors.yellow),
+            ("Errors", theme.colors.danger),
         ]
-        for (title, value, color) in cards {
+        summaryCards = cards.map { title, color in
             let card = AgentDashboardSummaryCard(
                 title: title,
-                value: value,
                 color: color,
                 theme: theme
             )
             stack.addArrangedSubview(card)
             card.heightAnchor.constraint(equalTo: stack.heightAnchor).isActive = true
+            return card
         }
-        return stack
+        replaceContents(of: summaryContainer, with: stack)
     }
 
     private func makeSectionHeader(theme: AppTheme) -> NSView {
@@ -602,7 +661,8 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         translatesAutoresizingMaskIntoConstraints = false
         build()
         apply(theme: theme)
-        update(entry: nil, terminal: .unavailable)
+        refreshEntryLabels()
+        updateControls()
     }
 
     @available(*, unavailable)
@@ -639,36 +699,41 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         entry: AgentDashboardEntry?,
         terminal: TerminalInteractionState
     ) {
-        let previousId = self.entry?.id
-        self.entry = entry
-        self.terminal = terminal
-        if entry?.id != previousId {
+        guard entry != self.entry || terminal != self.terminal else { return }
+        // Highlighting the terminal text is the expensive part; redo it only
+        // when the text shown in the terminal area can differ.
+        let terminalTextChanged = terminal != self.terminal
+            || (entry == nil) != (self.entry == nil)
+        if entry?.id != self.entry?.id {
             replyField.stringValue = ""
         }
+        self.entry = entry
+        self.terminal = terminal
+        refreshEntryLabels()
+        if terminalTextChanged {
+            updateTerminalText()
+        }
+        updateControls()
+    }
 
+    /// Redraws the labels that describe the selected entry itself.
+    private func refreshEntryLabels() {
+        refreshTitle()
+        refreshStatusColors()
         guard let entry else {
-            refreshTitle()
             titleLabel.toolTip = nil
             locationLabel.stringValue = "Choose an agent to inspect its terminal."
             locationLabel.toolTip = nil
-            refreshStatusColors()
-            updateTerminalText()
-            updateControls()
             return
         }
 
-        refreshTitle()
         titleLabel.toolTip = entry.projectName
-        let location = entry.location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        locationLabel.stringValue = [entry.profileName, location, path]
+        locationLabel.stringValue = [entry.profileName, entry.location, path]
             .compactMap { $0 }
             .joined(separator: "  ·  ")
         locationLabel.toolTip = locationLabel.stringValue
         setReplyPlaceholder("Reply to \(entry.profileName)…")
-        refreshStatusColors()
-        updateTerminalText()
-        updateControls()
     }
 
     func updateTerminal(_ terminal: TerminalInteractionState) {
@@ -1040,7 +1105,14 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 }
 
 private final class AgentDashboardSummaryCard: NSView {
-    init(title: String, value: Int, color: NSColor, theme: AppTheme) {
+    private let color: NSColor
+    private let theme: AppTheme
+    private let valueLabel = NSTextField(labelWithString: "")
+    private var value: Int?
+
+    init(title: String, color: NSColor, theme: AppTheme) {
+        self.color = color
+        self.theme = theme
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier(
             "agent-dashboard-summary-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))"
@@ -1057,13 +1129,6 @@ private final class AgentDashboardSummaryCard: NSView {
         segmentBar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(segmentBar)
 
-        let valueLabel = NSTextField(labelWithString: "\(value)")
-        valueLabel.setRetroText(
-            "\(value)",
-            color: value == 0 ? theme.colors.textMuted : color,
-            size: 22,
-            glow: value != 0
-        )
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(valueLabel)
 
@@ -1085,6 +1150,17 @@ private final class AgentDashboardSummaryCard: NSView {
         ])
     }
 
+    func update(value: Int) {
+        guard value != self.value else { return }
+        self.value = value
+        valueLabel.setRetroText(
+            "\(value)",
+            color: value == 0 ? theme.colors.textMuted : color,
+            size: 22,
+            glow: value != 0
+        )
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
@@ -1092,12 +1168,18 @@ private final class AgentDashboardSummaryCard: NSView {
 }
 
 private final class AgentDashboardRowView: NSControl {
-    let entry: AgentDashboardEntry
+    private(set) var entry: AgentDashboardEntry
     var onSelect: (() -> Void)?
     var onOpen: (() -> Void)?
 
     private let theme: AppTheme
-    private let statusColor: NSColor
+    private let iconContainer = NSView()
+    private let icon = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let detailLabel = NSTextField(labelWithString: "")
+    private let pathLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let lamp = NSView()
     private let elapsedLabel = NSTextField(labelWithString: "")
     private var isHovered = false
     private var isKeyboardSelected = false
@@ -1105,16 +1187,15 @@ private final class AgentDashboardRowView: NSControl {
     init(entry: AgentDashboardEntry, theme: AppTheme) {
         self.entry = entry
         self.theme = theme
-        self.statusColor = Self.statusColor(for: entry, theme: theme)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-row")
         wantsLayer = true
         layer?.cornerRadius = Retro.cornerRadius
-        layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 92).isActive = true
-        setup()
-        updateElapsed(now: Date())
+        build()
+        updateBackground()
+        render(previous: nil)
     }
 
     @available(*, unavailable)
@@ -1165,6 +1246,14 @@ private final class AgentDashboardRowView: NSControl {
         }
     }
 
+    /// Shows `entry` in this row; an unchanged entry leaves the row untouched.
+    func update(entry: AgentDashboardEntry) {
+        guard entry != self.entry else { return }
+        let previous = self.entry
+        self.entry = entry
+        render(previous: previous)
+    }
+
     func updateElapsed(now: Date) {
         elapsedLabel.setRetroText(
             Self.elapsedText(
@@ -1180,61 +1269,27 @@ private final class AgentDashboardRowView: NSControl {
     func setKeyboardSelected(_ isSelected: Bool) {
         guard isKeyboardSelected != isSelected else { return }
         isKeyboardSelected = isSelected
-        layer?.borderWidth = isSelected ? 2 : 1
-        layer?.borderColor = (
-            isSelected
-                ? theme.colors.accent
-                : entry.needsAttention
-                    ? theme.colors.blue
-                    : theme.colors.borderSubtle
-        ).cgColor
+        updateBorder()
         updateBackground()
     }
 
-    private func setup() {
-        layer?.borderColor = (
-            entry.needsAttention
-                ? theme.colors.blue
-                : theme.colors.borderSubtle
-        ).cgColor
-        updateBackground()
-
-        let iconContainer = NSView()
+    private func build() {
         iconContainer.wantsLayer = true
-        iconContainer.layer?.backgroundColor = statusColor.withAlphaComponent(0.14).cgColor
-        iconContainer.layer?.borderColor = statusColor.cgColor
         iconContainer.layer?.borderWidth = Retro.hairline
         iconContainer.layer?.cornerRadius = Retro.cornerRadius
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconContainer)
 
-        let icon = NSImageView()
-        let profileIcon = AgentCatalog.profile(for: entry.profileId)?.icon ?? "command.square"
-        icon.image = NSImage(
-            systemSymbolName: profileIcon,
-            accessibilityDescription: entry.profileName
-        ) ?? NSImage(
-            systemSymbolName: "command.square",
-            accessibilityDescription: entry.profileName
-        )
-        icon.contentTintColor = statusColor
         icon.symbolConfiguration = .init(pointSize: 15, weight: .medium)
         icon.translatesAutoresizingMaskIntoConstraints = false
         iconContainer.addSubview(icon)
 
-        let titleLabel = NSTextField(labelWithString: entry.projectName)
         titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-project")
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setRetroText(entry.projectName, color: theme.colors.textPrimary)
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        let location = entry.location
-        let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        let agentDescription = [entry.profileName, entry.sessionName]
-            .compactMap { $0 }.joined(separator: "  ·  ")
-        let detailLabel = NSTextField(labelWithString: agentDescription)
         detailLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-agent")
         detailLabel.font = RetroFont.body(11)
         detailLabel.textColor = theme.colors.textMuted
@@ -1243,7 +1298,6 @@ private final class AgentDashboardRowView: NSControl {
         detailLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(detailLabel)
 
-        let pathLabel = NSTextField(labelWithString: path ?? location)
         pathLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-directory")
         pathLabel.font = RetroFont.body(11)
         pathLabel.textColor = theme.colors.textMuted
@@ -1252,22 +1306,14 @@ private final class AgentDashboardRowView: NSControl {
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(pathLabel)
 
-        let statusLabel = NSTextField(labelWithString: entry.status.displayLabel)
         statusLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-status")
         statusLabel.alignment = .right
-        statusLabel.setRetroText(
-            entry.status.displayLabel,
-            color: statusColor,
-            glow: entry.status == .running
-        )
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
-        let lamp = NSView()
         lamp.wantsLayer = true
         lamp.layer?.cornerRadius = 3
-        RetroLamp.light(lamp, color: statusColor, lit: isStatusLit)
         lamp.translatesAutoresizingMaskIntoConstraints = false
         addSubview(lamp)
 
@@ -1325,13 +1371,70 @@ private final class AgentDashboardRowView: NSControl {
             elapsedLabel.centerYAnchor.constraint(equalTo: pathLabel.centerYAnchor),
         ])
 
-        toolTip = [entry.projectName, agentDescription, location, path, "Double-click to open agent"]
-            .compactMap { $0 }.joined(separator: "\n")
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
+    }
+
+    /// Redraws what depends on fields that differ from `previous`, or the
+    /// whole row when there is none. A busy agent mostly changes its tab
+    /// title, which only feeds the location text, so that path skips the
+    /// symbol image and the display-face labels.
+    private func render(previous: AgentDashboardEntry?) {
+        let statusChanged = previous?.status != entry.status
+            || previous?.needsAttention != entry.needsAttention
+        if statusChanged {
+            let statusColor = self.statusColor
+            updateBorder()
+            iconContainer.layer?.backgroundColor = statusColor.withAlphaComponent(0.14).cgColor
+            iconContainer.layer?.borderColor = statusColor.cgColor
+            icon.contentTintColor = statusColor
+            statusLabel.setRetroText(
+                entry.status.displayLabel,
+                color: statusColor,
+                glow: entry.status == .running
+            )
+            RetroLamp.light(lamp, color: statusColor, lit: isStatusLit)
+        }
+        if statusChanged || previous?.startedAt != entry.startedAt {
+            updateElapsed(now: Date())
+        }
+        if previous?.profileIcon != entry.profileIcon
+            || previous?.profileName != entry.profileName
+        {
+            icon.image = NSImage(
+                systemSymbolName: entry.profileIcon,
+                accessibilityDescription: entry.profileName
+            ) ?? NSImage(
+                systemSymbolName: AgentDashboardEntry.fallbackProfileIcon,
+                accessibilityDescription: entry.profileName
+            )
+        }
+        if previous?.projectName != entry.projectName {
+            titleLabel.setRetroText(entry.projectName, color: theme.colors.textPrimary)
+        }
+
+        let location = entry.location
+        let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
+        let agentDescription = [entry.profileName, entry.sessionName]
+            .compactMap { $0 }.joined(separator: "  ·  ")
+        detailLabel.stringValue = agentDescription
+        pathLabel.stringValue = path ?? location
+        toolTip = [entry.projectName, agentDescription, location, path, "Double-click to open agent"]
+            .compactMap { $0 }.joined(separator: "\n")
         setAccessibilityLabel(
             "\(entry.projectName), \(entry.profileName), \(entry.status.displayLabel), \(location)"
         )
+    }
+
+    private func updateBorder() {
+        layer?.borderWidth = isKeyboardSelected ? 2 : 1
+        layer?.borderColor = (
+            isKeyboardSelected
+                ? theme.colors.accent
+                : entry.needsAttention
+                    ? theme.colors.blue
+                    : theme.colors.borderSubtle
+        ).cgColor
     }
 
     private func updateBackground() {
@@ -1350,6 +1453,10 @@ private final class AgentDashboardRowView: NSControl {
         case .running, .waiting, .starting, .error: return true
         case .idle, .stopped: return false
         }
+    }
+
+    private var statusColor: NSColor {
+        Self.statusColor(for: entry, theme: theme)
     }
 
     private static func statusColor(

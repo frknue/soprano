@@ -383,6 +383,95 @@ struct AgentDashboardViewTests {
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
     }
 
+    @Test func busyAgentTitlesRedrawOnlyTheirOwnRowAndKeepTheListScrollPosition() throws {
+        let manager = AgentManager()
+        var targets: [TerminalTarget] = []
+        for index in 0..<12 {
+            let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/project-\(index)"))
+            let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+            targets.append(TerminalTarget(paneId: paneId, tabId: tabId))
+        }
+        let (controller, _) = openDashboard(for: manager, height: 600)
+        let rows = try arrangedRows(in: controller.view)
+        #expect(rows.count == 12)
+        let scrollView = try #require(rows.first?.enclosingScrollView)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: 300))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        // Busy agents retitle their tabs several times a second.
+        for frame in ["✳", "✶", "✻"] {
+            manager.renameTab(targets[5].paneId, tabId: targets[5].tabId, to: "\(frame) Running the tests")
+            controller.view.layoutSubtreeIfNeeded()
+        }
+
+        let rowsAfterTitles = try arrangedRows(in: controller.view)
+        #expect(rowsAfterTitles.elementsEqual(rows) { $0 === $1 })
+        let busyRow = try #require(rowsAfterTitles.first {
+            $0.toolTip?.contains("/tmp/projects/project-5") == true
+        })
+        #expect(busyRow.toolTip?.contains("✻ Running the tests") == true)
+        #expect(scrollView.contentView.bounds.origin.y == 300)
+    }
+
+    @Test func statusChangesMoveTheExistingRowsIntoUrgencyOrderAndRefreshTheCounts() throws {
+        let manager = AgentManager()
+        var targets: [TerminalTarget] = []
+        for index in 0..<3 {
+            let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/project-\(index)"))
+            let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+            manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+            targets.append(TerminalTarget(paneId: paneId, tabId: tabId))
+        }
+        let (controller, _) = openDashboard(for: manager, height: 700)
+        let rows = try arrangedRows(in: controller.view)
+        #expect(rows.map(projectName(of:)) == ["project-0", "project-1", "project-2"])
+
+        manager.updateAgentStatus(paneId: targets[2].paneId, tabId: targets[2].tabId, status: .waiting)
+        _ = try #require(manager.spawnAgent("claude-code", cwd: "/tmp/projects/project-3"))
+
+        let reordered = try arrangedRows(in: controller.view)
+        #expect(reordered.map(projectName(of:)) == ["project-2", "project-0", "project-1", "project-3"])
+        #expect(reordered.prefix(3).elementsEqual([rows[2], rows[0], rows[1]]) { $0 === $1 })
+        let needsInputCard = try #require(allSubviews(in: controller.view).first {
+            $0.identifier?.rawValue == "agent-dashboard-summary-needs-input"
+        })
+        #expect(needsInputCard.subviews.contains { ($0 as? NSTextField)?.stringValue == "1" })
+    }
+
+    private func openDashboard(
+        for manager: AgentManager,
+        height: CGFloat
+    ) -> (AgentDashboardViewController, NSWindow) {
+        let controller = AgentDashboardViewController(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: height),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = controller
+        controller.view.layoutSubtreeIfNeeded()
+        return (controller, window)
+    }
+
+    /// The agent rows in the order the list shows them.
+    private func arrangedRows(in view: NSView) throws -> [NSView] {
+        let row = try #require(allSubviews(in: view).first {
+            $0.identifier?.rawValue == "agent-dashboard-row"
+        })
+        return try #require(row.superview as? NSStackView).arrangedSubviews
+    }
+
+    private func projectName(of row: NSView) -> String? {
+        allSubviews(in: row)
+            .compactMap { $0 as? NSTextField }
+            .first { $0.identifier?.rawValue == "agent-dashboard-project" }?
+            .stringValue
+    }
+
     private func labels(in view: NSView) -> [String] {
         view.subviews.flatMap { subview -> [String] in
             let current = (subview as? NSTextField).map { [$0.stringValue] } ?? []

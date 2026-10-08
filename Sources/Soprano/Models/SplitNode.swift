@@ -58,11 +58,20 @@ indirect enum SplitNode: Codable, Equatable {
 
     /// Collect all leaf pane IDs in the tree.
     var leafIds: Set<String> {
+        var ids = Set<String>()
+        insertLeafIds(into: &ids)
+        return ids
+    }
+
+    /// Adds this tree's leaf pane IDs to `ids`, so callers collecting several
+    /// trees fill one set instead of merging one per subtree.
+    func insertLeafIds(into ids: inout Set<String>) {
         switch self {
         case .leaf(let id):
-            return [id]
+            ids.insert(id)
         case .split(let branch):
-            return branch.first.leafIds.union(branch.second.leafIds)
+            branch.first.insertLeafIds(into: &ids)
+            branch.second.insertLeafIds(into: &ids)
         }
     }
 
@@ -73,6 +82,17 @@ indirect enum SplitNode: Codable, Equatable {
             return [id]
         case .split(let branch):
             return branch.first.orderedLeafIds + branch.second.orderedLeafIds
+        }
+    }
+
+    /// Whether `paneId` is a leaf of this tree, without collecting the
+    /// leaves into a set first.
+    func containsLeaf(_ paneId: String) -> Bool {
+        switch self {
+        case .leaf(let id):
+            return id == paneId
+        case .split(let branch):
+            return branch.first.containsLeaf(paneId) || branch.second.containsLeaf(paneId)
         }
     }
 
