@@ -31,6 +31,17 @@ struct TerminalSessionTests {
         #expect(manager.activeSessionId == firstSessionId)
     }
 
+    @Test func windowsKeepTheirCreationOrderOnceIdsReachTwoDigits() throws {
+        let manager = AgentManager()
+        var createdWindowIds = [manager.activeWindowId]
+        for _ in 0..<10 {
+            createdWindowIds.append(try #require(manager.createWindow()))
+        }
+
+        #expect(manager.orderedWindows.map(\.id) == createdWindowIds)
+        #expect(manager.activeSessionWindows.map(\.id) == createdWindowIds)
+    }
+
     @Test func eachSessionRemembersItsOwnCurrentAndPreviousWindow() throws {
         let manager = AgentManager()
         let firstSessionId = manager.activeSessionId

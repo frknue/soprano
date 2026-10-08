@@ -1,7 +1,9 @@
 import Foundation
 
 /// One agent tab as presented by the global monitoring dashboard.
-struct AgentDashboardEntry: Identifiable {
+struct AgentDashboardEntry: Identifiable, Equatable {
+    static let fallbackProfileIcon = "command.square"
+
     var id: String { "\(paneId):\(tabId)" }
 
     let paneId: String
@@ -16,6 +18,9 @@ struct AgentDashboardEntry: Identifiable {
     let cwd: String?
     var sessionName: String? = nil
     var isWindowTitleCustom: Bool = false
+    /// Resolved when the snapshot is taken, so an icon edited in settings.json
+    /// makes the entry differ and the dashboard redraws it.
+    var profileIcon: String = fallbackProfileIcon
 
     var projectName: String {
         if isWindowTitleCustom { return windowTitle }
@@ -30,8 +35,8 @@ struct AgentDashboardEntry: Identifiable {
 /// A point-in-time, presentation-ready view of every attached agent.
 ///
 /// This deliberately contains no mutable state. AgentManager remains the source
-/// of truth and the dashboard rebuilds this snapshot after ordinary model
-/// notifications.
+/// of truth; the dashboard rebuilds this snapshot after ordinary model
+/// notifications and redraws only the entries that differ from the last one.
 struct AgentDashboardSnapshot {
     let entries: [AgentDashboardEntry]
 

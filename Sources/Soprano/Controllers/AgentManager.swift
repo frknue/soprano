@@ -326,7 +326,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     func window(containingPane paneId: String) -> WorkspaceWindowState? {
-        windows.values.first { $0.paneIds.contains(paneId) }
+        windows.values.first { $0.containsPane(paneId) }
     }
 
     func renameWindow(_ windowId: String, to title: String) {
@@ -1814,12 +1814,20 @@ final class AgentManager: @unchecked Sendable {
         }
     }
 
+    private static let idPrefixes = ["session-", "window-", "pane-", "tab-"]
+
+    /// The number in an id such as `pane-12`. Parsed by hand: a regex literal
+    /// is compiled again on every evaluation, and every view that lists
+    /// windows sorts them with this on each model change.
     private func parseIdNumber(_ id: String) -> Int? {
-        let pattern = /^(?:session|window|pane|tab)-(\d+)$/
-        guard let match = id.firstMatch(of: pattern),
-              let num = Int(match.1)
+        guard let prefix = Self.idPrefixes.first(where: { id.hasPrefix($0) }) else {
+            return nil
+        }
+        let digits = id.dropFirst(prefix.count)
+        guard !digits.isEmpty,
+              digits.allSatisfy({ $0.isASCII && $0.isNumber })
         else { return nil }
-        return num
+        return Int(digits)
     }
 
     private func sortedWindows() -> [WorkspaceWindowState] {

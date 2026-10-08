@@ -92,6 +92,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   and toggling the setting preserves the focused terminal or input field.
 - Moving the pointer between split terminals no longer leaves mouse text selection
   stuck as though the button were still held.
+- The Agent Dashboard no longer hangs with many agents: an agent retitling its tab
+  (busy agents animate a spinner there several times a second) redraws only that
+  agent's row instead of rebuilding the whole list, and the list keeps its scroll
+  position instead of jumping on every update.
+- Soprano no longer keeps a CPU core busy, spinning up the fans, while agents work:
+  their spinner titles no longer redraw the window tabs, and the sidebar updates its
+  rows in place, so focusing a pane or an agent status change no longer stalls the
+  window for tens of milliseconds with many panes open.
 
 ## [0.6.0] - 2026-07-31
 

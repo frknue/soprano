@@ -26,6 +26,7 @@ final class SidebarView: NSView {
     private var sessionsButton: RetroIconButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
+    private var windowRows: [String: SidebarWindowRowView] = [:]
     private var paneRows: [String: SidebarPaneRowView] = [:]
 
     init(
@@ -379,6 +380,10 @@ final class SidebarView: NSView {
     // MARK: - Refresh
 
     func refreshTheme() {
+        // Rows take their colors when they are built.
+        rowsStack.setArrangedSubviews([])
+        windowRows.removeAll()
+        paneRows.removeAll()
         refresh()
     }
 
@@ -427,26 +432,28 @@ final class SidebarView: NSView {
         }
     }
 
+    /// Brings the rows up to date with the workspace. This runs on every model
+    /// change, so rows that stay are reconfigured in place: building a row's
+    /// buttons costs far more than configuring one.
     private func rebuildRows(theme: AppTheme) {
         let paneShortcutKeysById = Dictionary(
             uniqueKeysWithValues: agentManager.paneShortcutAssignments.map {
                 ($0.paneId, $0.key)
             }
         )
-        paneRows.removeAll(keepingCapacity: true)
-        for view in rowsStack.arrangedSubviews {
-            rowsStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
+        var rows: [NSView] = []
+        var nextWindowRows: [String: SidebarWindowRowView] = [:]
+        var nextPaneRows: [String: SidebarPaneRowView] = [:]
         for (index, terminalWindow) in agentManager.activeSessionWindows.enumerated() {
             let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
             let isExpanded = isControlKeyHeld
                 || !terminalWindow.isSidebarCollapsed
-            let windowRow = SidebarWindowRowView(theme: theme)
+            let paneIds = terminalWindow.paneIds
+            let windowRow = windowRows[terminalWindow.id] ?? SidebarWindowRowView(theme: theme)
             windowRow.configure(
                 title: terminalWindow.title,
-                paneCount: terminalWindow.paneIds.count,
-                attentionCount: terminalWindow.paneIds.reduce(into: 0) { count, paneId in
+                paneCount: paneIds.count,
+                attentionCount: paneIds.reduce(into: 0) { count, paneId in
                     count += agentManager.panes[paneId]?.tabs.filter {
                         $0.agent?.needsAttention == true
                     }.count ?? 0
@@ -472,19 +479,19 @@ final class SidebarView: NSView {
                     self?.agentManager.closeWindow(terminalWindow.id)
                 }
             )
-            rowsStack.addArrangedSubview(windowRow)
-            windowRow.widthAnchor.constraint(
-                equalTo: rowsStack.widthAnchor,
-                constant: -20
-            ).isActive = true
+            rows.append(windowRow)
+            nextWindowRows[terminalWindow.id] = windowRow
 
             guard isExpanded else { continue }
+            let maximumDepth = terminalWindow.maximumDepth
+            let hasDepth = maximumDepth > 0
             for pane in agentManager.orderedPanes(in: terminalWindow.id) {
                 let depth = terminalWindow.depth(containingPane: pane.id) ?? 0
-                let maximumDepth = terminalWindow.maximumDepth
-                let hasDepth = maximumDepth > 0
-                let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
-                row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
+                let row = paneRows[pane.id] ?? {
+                    let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
+                    row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
+                    return row
+                }()
                 row.configure(
                     title: sidebarTitle(for: pane),
                     branch: branchForPane(pane),
@@ -508,13 +515,17 @@ final class SidebarView: NSView {
                         self?.agentManager.closePane(pane.id)
                     }
                 )
-                rowsStack.addArrangedSubview(row)
-                row.widthAnchor.constraint(
-                    equalTo: rowsStack.widthAnchor,
-                    constant: -20
-                ).isActive = true
-                paneRows[pane.id] = row
+                rows.append(row)
+                nextPaneRows[pane.id] = row
             }
+        }
+        windowRows = nextWindowRows
+        paneRows = nextPaneRows
+        rowsStack.setArrangedSubviews(rows) { row in
+            row.widthAnchor.constraint(
+                equalTo: rowsStack.widthAnchor,
+                constant: -20
+            ).isActive = true
         }
     }
 

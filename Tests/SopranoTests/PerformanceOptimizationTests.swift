@@ -86,6 +86,43 @@ struct PerformanceOptimizationTests {
     }
 
     @Test @MainActor
+    func agentStatusChangesReconfigureTheExistingSidebarRowsInPlace() throws {
+        let manager = AgentManager()
+        let firstPaneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/first"))
+        let secondPaneId = try #require(manager.spawnAgent("claude-code", cwd: "/tmp/second"))
+        let secondTabId = try #require(manager.panes[secondPaneId]?.activeTab?.id)
+        let sidebar = SidebarView(
+            agentManager: manager,
+            sessionManager: SessionManager(agentManager: manager),
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            gitBranchMonitor: GitBranchMonitor()
+        )
+        sidebar.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: SidebarWidthStore.left.defaultWidth,
+            height: 600
+        )
+        sidebar.layoutSubtreeIfNeeded()
+        let firstRow = try #require(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(firstPaneId)"))
+        let secondRow = try #require(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(secondPaneId)"))
+
+        manager.updateAgentStatus(paneId: secondPaneId, tabId: secondTabId, status: .waiting)
+
+        #expect(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(firstPaneId)") === firstRow)
+        #expect(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(secondPaneId)") === secondRow)
+        #expect(
+            descendants(of: secondRow, as: NSTextField.self)
+                .contains { $0.stringValue.contains(AgentStatus.waiting.displayLabel) }
+        )
+
+        manager.closePane(firstPaneId)
+
+        #expect(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(firstPaneId)") == nil)
+        #expect(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(secondPaneId)") === secondRow)
+    }
+
+    @Test @MainActor
     func terminalRenderingRequiresAnAttachedVisibleUnhiddenWindow() {
         #expect(TerminalSurfaceView.shouldRenderSurface(
             isAttachedToWindow: true,

@@ -72,9 +72,13 @@ final class WindowTabBarView: NSView {
 
         agentManager.addObserver(id: observerId) { [weak self] change in
             switch change {
-            case .model, .tabTitle, .tabWorkingDirectory:
+            case .model:
                 self?.refresh()
-            case .browserURL, .document:
+            case .tabTitle, .tabWorkingDirectory, .browserURL, .document:
+                // Window tabs show window titles and agent counts, never a
+                // tab's own title or directory. Busy agents retitle their tabs
+                // several times a second, so redrawing here kept the main
+                // thread saturated.
                 break
             }
         }
