@@ -74,7 +74,7 @@ final class WindowTabBarView: NSView {
             switch change {
             case .model, .tabTitle, .tabWorkingDirectory:
                 self?.refresh()
-            case .browserURL, .markdownDocument:
+            case .browserURL, .document:
                 break
             }
         }

@@ -299,25 +299,24 @@ final class BrowserAutomationController: @unchecked Sendable {
     private func resolveTarget(requestedPaneId: String?) -> BrowserTarget? {
         if let requestedPaneId {
             guard let pane = agentManager.panes[requestedPaneId] else { return nil }
-            if let active = pane.activeTab, active.type == .browser, !active.isMarkdown {
+            if let active = pane.activeTab, active.isWebBrowser {
                 return BrowserTarget(paneId: requestedPaneId, tabId: active.id)
             }
-            return pane.tabs.first(where: { $0.type == .browser && !$0.isMarkdown }).map {
+            return pane.tabs.first(where: \.isWebBrowser).map {
                 BrowserTarget(paneId: requestedPaneId, tabId: $0.id)
             }
         }
 
         let activePaneId = agentManager.activePaneId
         if let activeTab = agentManager.panes[activePaneId]?.activeTab,
-           activeTab.type == .browser,
-           !activeTab.isMarkdown
+           activeTab.isWebBrowser
         {
             return BrowserTarget(paneId: activePaneId, tabId: activeTab.id)
         }
 
         for paneId in agentManager.layout?.orderedLeafIds ?? [] {
             if let browser = agentManager.panes[paneId]?.tabs.first(where: {
-                $0.type == .browser && !$0.isMarkdown
+                $0.isWebBrowser
             }) {
                 return BrowserTarget(paneId: paneId, tabId: browser.id)
             }

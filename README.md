@@ -254,7 +254,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude Code / OpenCode / omp |
 | `⌘T` | New terminal pane |
 | `⌘B` | New browser pane |
-| `⌘L` | Focus the address bar of the focused browser pane |
+| `⌘L` | Focus the address bar of the focused browser pane (elsewhere it toggles the right sidebar) |
 | `⌘[` / `⌘]` / `⌘R` | Browser back / forward / reload |
 
 **App**
@@ -267,7 +267,9 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
+| `⌘L` | Toggle the right sidebar (in a browser pane, `⌘L` focuses its address bar) |
 | `⇧⌘E` | Show and focus the file explorer; press again while it has focus to hide it |
+| `⌘S` / `⌘F` | Save / find in the file editor |
 | `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
 | `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
@@ -380,12 +382,13 @@ terminal to insert their shell-safe paths.
 
 The right sidebar holds the **Explorer**, modeled on Orca's. It shows the project of the
 focused pane: the git working tree containing the pane's directory, or that directory
-itself outside a repository. Focusing another pane switches projects; browser and
-Markdown tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to open it and move
-the keyboard into the tree, and again to hide it. The **Toggle Explorer** palette
-command, the sidebar icon at the end of the window tabs, and the header's close button
-do the same. Drag its leading edge to resize it (220 points minimum, default 280,
-double-click to reset); its width and open state persist across launches.
+itself outside a repository. Focusing another pane switches projects; browser, Markdown,
+and editor tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to open it and move
+the keyboard into the tree, and again to hide it. `⌘L` (`toggle-right-sidebar`), the
+**Toggle Right Sidebar** palette command, the sidebar icon at the end of the window tabs,
+and the header's close button show or hide the sidebar without moving the keyboard. Drag
+its leading edge to resize it (220 points minimum, default 280, double-click to reset);
+its width and open state persist across launches.
 
 - Folders load as you expand them, folders first in natural order. `.git` and
   `node_modules` are never listed.
@@ -396,24 +399,57 @@ double-click to reset); its width and open state persist across launches.
   editor, git client, or terminal.
 - **Find files** filters the whole project by path: every word must appear, in any
   case. Results open as an expanded tree.
-- Click a folder to expand it. Double-click a file, or press `Space`, to open it:
-  Markdown opens in Soprano's reader in the focused pane, everything else in its
-  default app. Double-click empty space to create a file.
+- Click a folder to expand it. Click a file, or press `Space`, to open it in the
+  [file editor](#file-editor), in a split beside the focused pane; double-click to keep
+  its tab. Double-click empty space to create a file.
 - Keyboard: arrows move, `←` / `→` collapse, expand, and jump to the parent or first
   child, `Home` / `End` / `Page Up` / `Page Down` jump, `Return` renames, `⌘⌫` moves
   to the Trash, `⌘C` copies the files, `⌥⌘C` / `⇧⌥⌘C` copy absolute / relative paths,
   and `Esc` returns to the focused pane. `⌘Z` / `⇧⌘Z` undo and redo creating, renaming,
   moving, duplicating, and deleting.
-- The context menu adds **New File**, **New Folder**, **Duplicate**, **Open in
-  Terminal**, **Open Markdown Preview**, **Collapse Folder**, and **Reveal in Finder**.
-  New items and renames are typed inline; `Return` or clicking away commits, `Esc`
-  cancels.
+- The context menu adds **New File**, **New Folder**, **Open**, **Open with Default
+  App**, **Duplicate**, **Open in Terminal**, **Open Markdown Preview**, **Collapse
+  Folder**, and **Reveal in Finder**. New items and renames are typed inline; `Return`
+  or clicking away commits, `Esc` cancels. A new file opens in the editor.
 - Drag rows onto a terminal to insert their paths, onto a folder to move them (hold
   `⌥` to copy; hovering opens collapsed folders), or out to Finder. Files dropped in
   from Finder are copied.
 - The tree follows the disk: files that agents, git, or other programs create, rename,
   or delete appear without a refresh. Nothing is read or watched while the sidebar is
-  closed.
+  closed. Renaming or moving a file in the explorer takes its open editor and reader
+  tabs along.
+
+## File editor
+
+Files open in Soprano itself, like Orca's editor tabs, without covering the pane you are
+working in. Clicking a file in the explorer (or pressing `Space` on it) opens it in a
+split beside the focused pane; files opened after that join the same split as tabs,
+even when you click them from a terminal. The tab starts as a **preview**, shown
+slanted, which the next file you open that way replaces, so browsing does not pile up
+tabs. Double-clicking, choosing **Open**, or starting to edit keeps the tab. Opening a
+file that is already open focuses its tab. A full split gets a second one, and a window
+with no room for another pane gets the file as a tab of the focused pane.
+**Open Markdown Preview** opens the reader in the same split.
+
+- Syntax coloring for Swift, JavaScript/TypeScript, Python, Ruby, shell, Rust, Go,
+  C/C++/Objective-C, Java/Kotlin/C#, PHP, SQL, Lua, CSS/SCSS, JSON, YAML, TOML, INI,
+  `.env`, Dockerfiles, Makefiles, HTML/XML, Markdown, and diffs; line numbers; `⌘F` /
+  `⌘G` / `⇧⌘G` to find; undo; and indentation kept on `Return`.
+- `⌘S` or the toolbar's save button saves. `⌘S`, `⌘F`, and `⌘G` belong to the editor
+  only while it has the keyboard, so terminals and browsers still get them. A modified
+  file shows `●` on its tab and **Modified** in the editor's toolbar. Files keep their
+  permissions, and a symlink keeps pointing at the file it names.
+- Edits made by agents or other programs land in an unmodified editor automatically.
+  An editor with unsaved changes keeps them and shows **Changed on disk** with a
+  **Reload** button; saving over that version asks first.
+- Closing a tab, pane, window, or session, loading a workspace, or quitting asks
+  **Save**, **Don't Save**, or **Cancel** about unsaved files that no other tab shows.
+  Every tab of the same file shares one buffer, undo history, and saved state.
+- Images are shown at their size. Binary and non-UTF-8 files get a note and **Open with
+  Default App**, as do files over 8 MB (64 MB for images), which are not read at all.
+  The toolbar also offers **Reveal in Finder**, the default app, and, for Markdown,
+  **Open Markdown Preview** in Soprano's reader.
+- Editor tabs restore with the workspace.
 
 ## Window depth
 

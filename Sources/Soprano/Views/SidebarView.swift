@@ -419,7 +419,7 @@ final class SidebarView: NSView {
         case .browserURL:
             break
 
-        case .markdownDocument(let target):
+        case .document(let target):
             guard let pane = agentManager.panes[target.paneId],
                   pane.activeTab?.id == target.tabId
             else { return }

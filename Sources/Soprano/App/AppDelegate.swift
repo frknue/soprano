@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             crtEffect: settings.crtEffect
         )
         let agentManager = AgentManager()
+        // Unsaved editor changes are asked about before any tab showing them closes.
+        agentManager.closeConfirmation = { targets in
+            EditorDocumentStore.shared.confirmClosing(targets)
+        }
         let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
         agentNotificationManager.requestAuthorizationIfNeeded()
         let sessionManager = SessionManager(agentManager: agentManager)
@@ -51,6 +55,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        EditorDocumentStore.shared.confirmClosingAll() ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {

@@ -547,8 +547,18 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
-                id: "toggle-explorer",
+                id: "toggle-right-sidebar",
                 icon: "sidebar.trailing",
+                label: "Toggle Right Sidebar",
+                description: "Show or hide the right sidebar",
+                shortcut: commandShortcut(for: "toggle-right-sidebar"),
+                action: { [weak self] in
+                    self?.keybindingToggleRightSidebar()
+                }
+            ),
+            CommandItem(
+                id: "toggle-explorer",
+                icon: "doc.on.doc",
                 label: "Toggle Explorer",
                 description: "Show the file explorer sidebar, or hide it",
                 shortcut: commandShortcut(for: "toggle-explorer"),
@@ -595,6 +605,11 @@ extension MainWindowController: NSWindowDelegate {
         saveWindowFrame()
     }
 
+    /// Closing the window quits Soprano, so unsaved editors are asked about first.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        EditorDocumentStore.shared.confirmClosingAll()
+    }
+
     func windowWillClose(_ notification: Notification) {
         saveWindowFrame()
     }
@@ -609,8 +624,32 @@ extension MainWindowController: KeybindingDelegate {
         mainContentVC?.toggleSidebar()
     }
 
+    func keybindingToggleRightSidebar() {
+        mainContentVC?.toggleRightSidebar()
+    }
+
     func keybindingToggleExplorer() {
         mainContentVC?.toggleExplorer()
+    }
+
+    /// Which kind of pane holds the keyboard; a field editor counts as the
+    /// view it edits for (the browser's address bar, the editor's find bar).
+    func keybindingFocusedContent() -> KeybindingFocusedContent {
+        Self.focusedContent(of: window?.firstResponder)
+    }
+
+    static func focusedContent(of responder: NSResponder?) -> KeybindingFocusedContent {
+        var view = responder?.focusedView
+        while let current = view {
+            if current is BrowserPaneView {
+                return .browser
+            }
+            if current is EditorPaneView {
+                return .editor
+            }
+            view = current.superview
+        }
+        return .other
     }
 
     func keybindingSaveSession() {

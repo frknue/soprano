@@ -37,6 +37,9 @@ final class FileExplorerOperations {
     /// Undo or redo that could not be applied, typically because the item
     /// was moved or deleted outside the explorer in the meantime.
     var onUndoFailure: ((Error) -> Void)?
+    /// An item moved, by rename, move, undo, or redo, so open editors can
+    /// follow their files.
+    var onItemMoved: ((_ from: URL, _ to: URL) -> Void)?
 
     private let fileManager = FileManager.default
 
@@ -318,16 +321,17 @@ final class FileExplorerOperations {
                 }
                 throw FileExplorerOperationError.failed(String(cString: strerror(errno)))
             }
-            return
+        } else {
+            do {
+                // Fails rather than replace an existing destination.
+                try fileManager.moveItem(at: source, to: target)
+            } catch CocoaError.fileWriteFileExists {
+                throw FileExplorerOperationError.alreadyExists(target.lastPathComponent)
+            } catch {
+                throw FileExplorerOperationError.failed(error.localizedDescription)
+            }
         }
-        do {
-            // Fails rather than replace an existing destination.
-            try fileManager.moveItem(at: source, to: target)
-        } catch CocoaError.fileWriteFileExists {
-            throw FileExplorerOperationError.alreadyExists(target.lastPathComponent)
-        } catch {
-            throw FileExplorerOperationError.failed(error.localizedDescription)
-        }
+        onItemMoved?(source, target)
     }
 
     private func performTrash(_ url: URL) throws -> URL {

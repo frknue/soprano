@@ -130,7 +130,9 @@ final class SplitTreeView: NSView {
         case .tabWorkingDirectory, .browserURL:
             break
 
-        case .markdownDocument(let target):
+        case .document(let target):
+            // Editor views follow their document's own location; only a
+            // Markdown reader has to be told to load the new file.
             paneContainers[target.paneId]?.updateHeader()
             guard let value = agentManager.panes[target.paneId]?.tabs.first(
                 where: { $0.id == target.tabId }
@@ -279,6 +281,8 @@ final class SplitTreeView: NSView {
             window.makeFirstResponder(terminalView)
         } else if let markdownView = findMarkdownView(in: container) {
             markdownView.focusPreferredControl()
+        } else if let editorView = findEditorView(in: container) {
+            editorView.focusPreferredControl()
         } else {
             findBrowserView(in: container)?.focusPreferredControl()
         }
@@ -460,6 +464,36 @@ final class SplitTreeView: NSView {
         let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
         switch tab.type {
         case .browser:
+            if tab.isEditor,
+               let value = tab.url,
+               let fileURL = URL(string: value),
+               fileURL.isFileURL
+            {
+                let editorView = EditorPaneView(
+                    target: target,
+                    document: EditorDocumentStore.shared.document(for: fileURL),
+                    themeManager: themeManager
+                )
+                editorView.onFocusRequested = { [weak self] in
+                    self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
+                }
+                editorView.onTitleChanged = { [weak self] title in
+                    self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
+                }
+                editorView.onEdited = { [weak self] in
+                    self?.agentManager.keepEditorTab(paneId: paneId, tabId: tab.id)
+                }
+                editorView.onMarkdownPreviewRequested = { [weak self] fileURL in
+                    _ = self?.agentManager.previewMarkdown(fileURL: fileURL, in: paneId)
+                }
+                // A file already modified in another tab shows its ● here too;
+                // after this rebuild, not during it.
+                DispatchQueue.main.async { [weak editorView] in
+                    editorView?.publishTitle()
+                }
+                view = editorView
+                break
+            }
             if tab.isMarkdown,
                let value = tab.url,
                let fileURL = URL(string: value),
@@ -477,7 +511,7 @@ final class SplitTreeView: NSView {
                     self?.agentManager.renameTab(paneId, tabId: tab.id, to: title)
                 }
                 markdownView.onDocumentChanged = { [weak self] fileURL in
-                    self?.agentManager.updateMarkdownDocument(
+                    self?.agentManager.updateFileDocument(
                         paneId: paneId,
                         tabId: tab.id,
                         to: fileURL
@@ -623,6 +657,18 @@ final class SplitTreeView: NSView {
         return nil
     }
 
+    private func findEditorView(in view: NSView) -> EditorPaneView? {
+        if let editorView = view as? EditorPaneView {
+            return editorView
+        }
+        for subview in view.subviews {
+            if let found = findEditorView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func cancelCopyModeOutsideActiveTerminal() {
         guard let copyModeTarget else { return }
         let activeTarget = agentManager.panes[agentManager.activePaneId]?.activeTab.map {
@@ -695,6 +741,7 @@ final class SplitTreeView: NSView {
         for view in tabContentViews.values {
             findBrowserView(in: view)?.applyTheme()
             findMarkdownView(in: view)?.applyTheme()
+            findEditorView(in: view)?.applyTheme()
         }
         rebuildLayout()
     }

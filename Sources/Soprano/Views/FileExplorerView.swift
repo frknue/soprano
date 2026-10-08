@@ -22,7 +22,8 @@ final class FileExplorerView: NSView {
     private let defaults: UserDefaults
     private let observerId = "FileExplorerView-\(UUID().uuidString)"
 
-    /// Escape in the tree hands the keyboard back to the active pane.
+    /// Hands the keyboard to the active pane: Escape in the tree, and after
+    /// opening a file there.
     var onReturnFocus: (() -> Void)?
 
     // MARK: Views
@@ -119,7 +120,7 @@ final class FileExplorerView: NSView {
             switch change {
             case .model, .tabWorkingDirectory:
                 self?.syncRootWithActivePane()
-            case .tabTitle, .browserURL, .markdownDocument:
+            case .tabTitle, .browserURL, .document:
                 break
             }
         }
@@ -947,7 +948,7 @@ final class FileExplorerView: NSView {
         if node.isDirectory {
             toggle(node)
         } else {
-            open(node.url)
+            openInEditor(node.url, preview: true)
         }
     }
 
@@ -955,19 +956,25 @@ final class FileExplorerView: NSView {
         ["md", "markdown"].contains(url.pathExtension.lowercased())
     }
 
-    /// Markdown opens in Soprano's reader, like `soprano README.md` in the
-    /// focused pane; everything else in its default app.
-    private func open(_ url: URL) {
-        if Self.isMarkdown(url) {
-            openMarkdownPreview(url)
-        } else {
-            NSWorkspace.shared.open(url)
+    /// Opens the file in Soprano's editor in the focused pane, as Orca does:
+    /// a preview tab the next preview replaces, or a regular tab. The
+    /// keyboard follows into the editor unless `focus` is false.
+    private func openInEditor(_ url: URL, preview: Bool, focus: Bool = true) {
+        // A file with unsaved changes is never reopened as a throwaway preview.
+        let preview = preview && !EditorDocumentStore.shared.hasUnsavedChanges(url)
+        guard agentManager.openEditor(fileURL: url, preview: preview) != nil else {
+            showToast("No room for another tab or pane in this window.")
+            return
+        }
+        if focus {
+            onReturnFocus?()
         }
     }
 
+    /// The reader opens where files do, never over the focused terminal: in
+    /// the window's file pane, else in a new split beside it.
     private func openMarkdownPreview(_ url: URL) {
-        let paneId = agentManager.activePaneId
-        if agentManager.panes[paneId] != nil,
+        if let paneId = agentManager.filePane(in: agentManager.activeWindowId),
            agentManager.previewMarkdown(fileURL: url, in: paneId) != nil {
             return
         }
@@ -1040,6 +1047,12 @@ final class FileExplorerView: NSView {
         }
         operations.onUndoFailure = { [weak self] error in
             self?.showError(error)
+        }
+        operations.onItemMoved = { [weak self] from, to in
+            // Tabs first: the documents then re-title them, keeping the ● of
+            // unsaved changes.
+            self?.agentManager.relocateFileTabs(from: from, to: to)
+            EditorDocumentStore.shared.relocate(from: from, to: to)
         }
     }
 
@@ -1163,6 +1176,9 @@ final class FileExplorerView: NSView {
                         ? try operations.createFile(named: name, in: folder.url)
                         : try operations.createFolder(named: name, in: folder.url)
                     pendingSelectionPaths = [folder.childRelativePath(url.lastPathComponent)]
+                    if kind == .file {
+                        openInEditor(url, preview: false, focus: false)
+                    }
                 } catch {
                     showError(error)
                 }
@@ -1565,8 +1581,13 @@ final class FileExplorerView: NSView {
         let row = outlineView.clickedRow
         guard row >= 0, let node = outlineView.item(atRow: row) as? FileExplorerNode else { return }
         let modifiers = NSEvent.modifierFlags.intersection([.command, .shift])
-        guard modifiers.isEmpty, node.isDirectory else { return }
-        toggle(node)
+        // ⌘ and ⇧ clicks only change the selection.
+        guard modifiers.isEmpty, node.placeholder == nil else { return }
+        if node.isDirectory {
+            toggle(node)
+        } else {
+            openInEditor(node.url, preview: true)
+        }
     }
 
     @objc private func rowDoubleClicked() {
@@ -1581,7 +1602,8 @@ final class FileExplorerView: NSView {
               node.placeholder == nil,
               !node.isDirectory
         else { return }
-        open(node.url)
+        // A second click keeps the preview opened by the first, like Orca.
+        openInEditor(node.url, preview: false)
     }
 
     private func menuItem(_ title: String, action: Selector, keyEquivalent: String = "") -> NSMenuItem {
@@ -1819,6 +1841,9 @@ extension FileExplorerView: NSMenuDelegate {
             let open = menuItem("Open", action: #selector(openMenuItem))
             open.representedObject = single
             menu.addItem(open)
+            let openExternally = menuItem("Open with Default App", action: #selector(openWithDefaultAppMenuItem))
+            openExternally.representedObject = single
+            menu.addItem(openExternally)
             if Self.isMarkdown(single.url) {
                 let preview = menuItem("Open Markdown Preview", action: #selector(openMarkdownPreviewMenuItem))
                 preview.representedObject = single
@@ -1892,6 +1917,11 @@ extension FileExplorerView: NSMenuDelegate {
     }
 
     @objc private func openMenuItem(_ sender: NSMenuItem) {
+        guard let node = sender.representedObject as? FileExplorerNode else { return }
+        openInEditor(node.url, preview: false)
+    }
+
+    @objc private func openWithDefaultAppMenuItem(_ sender: NSMenuItem) {
         guard let node = sender.representedObject as? FileExplorerNode else { return }
         NSWorkspace.shared.open(node.url)
     }

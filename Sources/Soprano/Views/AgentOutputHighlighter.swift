@@ -423,62 +423,10 @@ enum AgentOutputHighlighter {
         }
     }
 
+    /// The editor's language table is the one source of keyword lists.
     private static func keywords(for language: String) -> [String] {
-        switch language {
-        case "swift":
-            return [
-                "actor", "as", "async", "await", "break", "case", "catch",
-                "class", "continue", "default", "defer", "do", "else", "enum",
-                "extension", "false", "fileprivate", "for", "func", "guard", "if",
-                "import", "in", "init", "internal", "is", "let", "nil", "open",
-                "operator", "private", "protocol", "public", "repeat", "rethrows",
-                "return", "self", "static", "struct", "subscript", "super", "switch",
-                "throw", "throws", "true", "try", "typealias", "var", "where", "while",
-            ]
-        case "javascript", "typescript":
-            return [
-                "async", "await", "break", "case", "catch", "class", "const",
-                "continue", "default", "delete", "do", "else", "enum", "export",
-                "extends", "false", "finally", "for", "function", "if", "implements",
-                "import", "in", "instanceof", "interface", "let", "new", "null",
-                "private", "protected", "public", "readonly", "return", "static",
-                "super", "switch", "this", "throw", "true", "try", "type", "typeof",
-                "undefined", "var", "void", "while", "yield",
-            ]
-        case "python":
-            return [
-                "False", "None", "True", "and", "as", "assert", "async", "await",
-                "break", "class", "continue", "def", "del", "elif", "else", "except",
-                "finally", "for", "from", "global", "if", "import", "in", "is",
-                "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
-                "while", "with", "yield",
-            ]
-        case "shell":
-            return [
-                "case", "do", "done", "elif", "else", "esac", "export", "fi",
-                "for", "function", "if", "in", "local", "readonly", "return",
-                "set", "then", "unset", "while",
-            ]
-        case "ruby":
-            return [
-                "begin", "break", "case", "class", "def", "do", "else", "elsif",
-                "end", "ensure", "false", "for", "if", "in", "module", "next",
-                "nil", "redo", "rescue", "retry", "return", "self", "super", "then",
-                "true", "unless", "until", "when", "while", "yield",
-            ]
-        case "json", "yaml":
-            return ["false", "null", "true"]
-        case "rust":
-            return [
-                "as", "async", "await", "break", "const", "continue", "crate",
-                "dyn", "else", "enum", "extern", "false", "fn", "for", "if",
-                "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub",
-                "ref", "return", "self", "static", "struct", "super", "trait", "true",
-                "type", "unsafe", "use", "where", "while",
-            ]
-        default:
-            return ["false", "nil", "null", "true"]
-        }
+        CodeLanguage.named(language).map { $0.keywords.sorted() }
+            ?? ["false", "nil", "null", "true"]
     }
 
     private enum Patterns {
@@ -533,7 +481,7 @@ enum AgentOutputHighlighter {
 
         static let keywordExpressions: [String: NSRegularExpression] = {
             let languages = [
-                "swift", "javascript", "python", "shell", "ruby",
+                "swift", "javascript", "typescript", "python", "shell", "ruby",
                 "json", "yaml", "rust", "generic",
             ]
             var output: [String: NSRegularExpression] = [:]
@@ -543,7 +491,6 @@ enum AgentOutputHighlighter {
                     .joined(separator: "|")
                 output[language] = expression("\\b(?:\(alternatives))\\b")
             }
-            output["typescript"] = output["javascript"]
             return output
         }()
 

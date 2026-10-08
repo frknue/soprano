@@ -16,6 +16,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   drop (onto terminals, folders, or Finder), and a context menu. Toggle and focus it
   with `⇧⌘E` (`toggle-explorer`), the **Toggle Explorer** palette command, or the
   icon at the end of the window tabs; drag its edge to resize it.
+- Files open in Soprano: clicking one in the Explorer opens a syntax-colored editor in a
+  split beside the focused pane, which later files join as tabs (a slanted preview tab
+  the next file replaces; double-click or edit to keep it), with line numbers, find
+  (`⌘F`), undo, and save (`⌘S`). Modified tabs show `●`; changes from agents land in
+  unmodified editors, and closing or quitting asks before unsaved changes are lost.
+  Images are shown; renaming in the Explorer moves open tabs along.
+- `⌘L` (`toggle-right-sidebar`) shows or hides the right sidebar; a focused browser
+  pane keeps `⌘L` for its address bar.
 - `omp web`, also available in the `⌘P` command palette, opens an editable,
   Soprano-owned ompweb workspace in your default browser, with local sessions,
   projects, files, and settings; its source ships in `web/`, and normal omp

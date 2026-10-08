@@ -38,9 +38,33 @@ struct PaneNavigationClaimRegistry {
     }
 }
 
+/// What has the keyboard, for chords a focused pane keeps for itself.
+enum KeybindingFocusedContent: Equatable, Sendable {
+    case browser
+    case editor
+    case other
+
+    /// Like Orca's scoped shortcuts: a browser keeps ⌘L (address bar),
+    /// ⌘[ / ⌘] and ⌘R; an editor keeps ⌘F / ⌘G / ⇧⌘G (find) and ⌘S. Soprano
+    /// bindings on those chords apply everywhere else.
+    func ownsChord(key: String, flags: NSEvent.ModifierFlags) -> Bool {
+        let modifiers = flags.intersection([.command, .control, .option, .shift])
+        switch self {
+        case .browser:
+            return modifiers == .command && ["l", "[", "]", "r"].contains(key)
+        case .editor:
+            return (modifiers == .command && ["f", "g", "s"].contains(key))
+                || (modifiers == [.command, .shift] && key == "g")
+        case .other:
+            return false
+        }
+    }
+}
+
 @MainActor
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
+    func keybindingToggleRightSidebar()
     func keybindingToggleExplorer()
     func keybindingSaveSession()
     func keybindingNewSession()
@@ -54,6 +78,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingZoom(delta: Int)
     func keybindingZoomReset()
     func keybindingStartCopyMode()
+    func keybindingFocusedContent() -> KeybindingFocusedContent
 }
 
 final class KeybindingManager: @unchecked Sendable {
@@ -243,6 +268,9 @@ final class KeybindingManager: @unchecked Sendable {
             // the main menu. This is more reliable than swallowing them in a
             // local monitor while a terminal surface is first responder.
             if Self.dispatchesThroughMainMenu(binding.id) {
+                return event
+            }
+            if focusedContent().ownsChord(key: key, flags: flags) {
                 return event
             }
             executeBinding(binding)
@@ -514,6 +542,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingSaveSession() }
         case "toggle-sidebar":
             invokeDelegate { $0.keybindingToggleSidebar() }
+        case "toggle-right-sidebar":
+            invokeDelegate { $0.keybindingToggleRightSidebar() }
         case "toggle-explorer":
             invokeDelegate { $0.keybindingToggleExplorer() }
         case "open-settings":
@@ -538,6 +568,13 @@ final class KeybindingManager: @unchecked Sendable {
         else { return }
 
         agentManager.removeTabFromPane(paneId, tabId: tab.id)
+    }
+
+    private func focusedContent() -> KeybindingFocusedContent {
+        guard let delegate else { return .other }
+        return MainActor.assumeIsolated {
+            delegate.keybindingFocusedContent()
+        }
     }
 
     private func invokeDelegate(_ action: @MainActor (KeybindingDelegate) -> Void) {

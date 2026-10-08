@@ -200,6 +200,9 @@ final class PaneHeaderView: NSView {
 
         titleLabel.textColor = theme.colors.textPrimary
         titleLabel.setRetroText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
+        if tab?.isEditorPreview == true {
+            titleLabel.attributedStringValue = Self.slanted(titleLabel.attributedStringValue)
+        }
         depthOutButton.isEnabled = depth > 0
         depthInButton.isEnabled = terminalWindow.map {
             $0.hasDepthBranch(from: paneId)
@@ -319,7 +322,9 @@ final class PaneHeaderView: NSView {
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
             button.contentTintColor = color
-            button.attributedTitle = RetroText.display(title, color: color)
+            button.attributedTitle = tab.isEditorPreview
+                ? Self.slanted(RetroText.display(title, color: color))
+                : RetroText.display(title, color: color)
             button.translatesAutoresizingMaskIntoConstraints = false
 
             let underline = NSView()
@@ -337,6 +342,14 @@ final class PaneHeaderView: NSView {
 
             tabStackView.addArrangedSubview(button)
         }
+    }
+
+    /// Preview tabs are set in italics, like Orca's; the pixel face has no
+    /// italic, so the glyphs are slanted.
+    private static func slanted(_ string: NSAttributedString) -> NSAttributedString {
+        let slanted = NSMutableAttributedString(attributedString: string)
+        slanted.addAttribute(.obliqueness, value: 0.22, range: NSRange(location: 0, length: slanted.length))
+        return slanted
     }
 
     private func makeDepthButton(

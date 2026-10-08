@@ -2,6 +2,8 @@ import Foundation
 
 enum PaneContentKind {
     static let markdown = "markdown"
+    /// A file open in Soprano's code editor.
+    static let editor = "editor"
 }
 
 /// The type of content in a pane tab.
@@ -58,6 +60,22 @@ struct PaneTab: Identifiable {
 
     var isMarkdown: Bool {
         type == .browser && contentKind == PaneContentKind.markdown
+    }
+
+    /// Stored as a specialized browser tab, like the Markdown reader, so older
+    /// builds can still decode a workspace with one (they show it as a page).
+    var isEditor: Bool {
+        type == .browser && contentKind == PaneContentKind.editor
+    }
+
+    /// An editor tab the next preview open reuses, like Orca's preview tabs.
+    var isEditorPreview: Bool {
+        isEditor && previewOwnerPaneId != nil
+    }
+
+    /// A real web page, as opposed to browser-backed file content.
+    var isWebBrowser: Bool {
+        type == .browser && contentKind == nil
     }
 
     /// The directory the tab's process actually started in: explicit tab cwd,

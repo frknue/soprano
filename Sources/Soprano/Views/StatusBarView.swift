@@ -217,7 +217,7 @@ final class StatusBarView: NSView {
         case .tabWorkingDirectory, .browserURL:
             break
 
-        case .markdownDocument(let target):
+        case .document(let target):
             guard target.paneId == agentManager.activePaneId,
                   agentManager.panes[target.paneId]?.activeTab?.id == target.tabId
             else { return }

@@ -249,8 +249,8 @@ struct FileExplorerTests {
         }
     }
 
-    @Test func undoingACaseOnlyRenameNeverReplacesAFileCreatedInTheMeantime() throws {
-        try withCaseSensitiveVolume { root in
+    @Test func undoingACaseOnlyRenameNeverReplacesAFileCreatedInTheMeantime() async throws {
+        try await withCaseSensitiveVolume { root in
             let operations = FileExplorerOperations()
             var undoFailures: [Error] = []
             operations.onUndoFailure = { undoFailures.append($0) }
@@ -408,30 +408,40 @@ struct FileExplorerTests {
 
     /// Runs the body in a scratch case-sensitive APFS volume, where `foo`
     /// and `Foo` can be two different files (the default volume cannot).
-    private func withCaseSensitiveVolume(_ body: (URL) throws -> Void) throws {
+    private func withCaseSensitiveVolume(_ body: (URL) throws -> Void) async throws {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("soprano-case-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let image = scratch.appendingPathComponent("volume")
         let mountPoint = scratch.appendingPathComponent("mnt")
-        try hdiutil(["create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "SopranoCase",
-                     "-type", "SPARSE", "-quiet", image.path])
-        try hdiutil(["attach", "-nobrowse", "-noverify", "-quiet", "-mountpoint", mountPoint.path,
-                     image.path + ".sparseimage"])
-        defer { try? hdiutil(["detach", "-force", "-quiet", mountPoint.path]) }
-        try body(mountPoint)
+        try await hdiutil(["create", "-size", "8m", "-fs", "Case-sensitive APFS", "-volname", "SopranoCase",
+                           "-type", "SPARSE", "-quiet", image.path])
+        try await hdiutil(["attach", "-nobrowse", "-noverify", "-quiet", "-mountpoint", mountPoint.path,
+                           image.path + ".sparseimage"])
+        do {
+            try body(mountPoint)
+        } catch {
+            try? await hdiutil(["detach", "-force", "-quiet", mountPoint.path])
+            throw error
+        }
+        try await hdiutil(["detach", "-force", "-quiet", mountPoint.path])
     }
 
-    private func hdiutil(_ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = arguments
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        try #require(process.terminationStatus == 0, "hdiutil \(arguments.first ?? "") failed")
+    /// Runs hdiutil off the main actor: a mount can take seconds, and the
+    /// main-actor work of tests running alongside must not stall meanwhile.
+    private func hdiutil(_ arguments: [String]) async throws {
+        let status = await Task.detached { () -> Int32 in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return -1 }
+            process.waitUntilExit()
+            return process.terminationStatus
+        }.value
+        try #require(status == 0, "hdiutil \(arguments.first ?? "") failed")
     }
 
     private func withTemporaryDirectory(_ body: (URL) throws -> Void) throws {

@@ -72,6 +72,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "close-active", label: "Close Pane", description: "Close the active pane", category: .general, defaultKeys: "⌘W", mode: .direct, key: "w", meta: true),
             KeyBinding(id: "save-session", label: "Save Workspace As…", description: "Save all sessions and their layouts as a workspace snapshot", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
             KeyBinding(id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar", category: .general, defaultKeys: "⌘E", mode: .direct, key: "e", meta: true),
+            KeyBinding(id: "toggle-right-sidebar", label: "Toggle Right Sidebar", description: "Show or hide the right sidebar (a focused browser pane keeps ⌘L for its address bar)", category: .general, defaultKeys: "⌘L", mode: .direct, key: "l", meta: true),
             KeyBinding(id: "toggle-explorer", label: "Toggle Explorer", description: "Show and focus the file explorer sidebar, or hide it while it has focus", category: .general, defaultKeys: "⇧⌘E", mode: .direct, key: "e", meta: true, shift: true),
             KeyBinding(id: "open-settings", label: "Settings", description: "Open the settings page", category: .general, defaultKeys: "⌘,", mode: .direct, key: ",", meta: true),
             KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘+ / ⌘=", mode: .direct, key: "=", meta: true),

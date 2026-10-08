@@ -107,6 +107,20 @@ final class WorkspaceWindowState: Identifiable {
         expandAncestors(ofLayerAt: self.activeDepthLayerIndex)
     }
 
+    /// An independent copy, for working out what a change would do without
+    /// making it.
+    func copy() -> WorkspaceWindowState {
+        WorkspaceWindowState(
+            id: id,
+            sessionId: sessionId,
+            title: title,
+            isTitleCustom: isTitleCustom,
+            isSidebarCollapsed: isSidebarCollapsed,
+            depthLayers: depthLayers,
+            activeDepthLayerIndex: activeDepthLayerIndex
+        )
+    }
+
     var paneIds: Set<String> {
         depthLayers.reduce(into: Set<String>()) { result, layer in
             result.formUnion(layer.layout?.leafIds ?? [])

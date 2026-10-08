@@ -46,7 +46,7 @@ final class AgentDashboardViewController: NSViewController {
             switch change {
             case .model, .tabTitle, .tabWorkingDirectory:
                 self?.refresh()
-            case .browserURL, .markdownDocument:
+            case .browserURL, .document:
                 break
             }
         }

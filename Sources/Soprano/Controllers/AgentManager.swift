@@ -28,7 +28,9 @@ enum AgentManagerChange: Equatable, Sendable {
     case tabTitle(TerminalTarget)
     case tabWorkingDirectory(TerminalTarget)
     case browserURL(TerminalTarget)
-    case markdownDocument(TerminalTarget)
+    /// A Markdown reader or editor tab now shows a different file (followed a
+    /// link, or the file was renamed or moved).
+    case document(TerminalTarget)
 }
 
 /// Central controller for pane/tab/agent lifecycle and tiling layout.
@@ -189,6 +191,7 @@ final class AgentManager: @unchecked Sendable {
 
     func closeSession(_ sessionId: String) {
         guard terminalSessions[sessionId] != nil else { return }
+        guard confirmClosing(paneIds: orderedWindows(in: sessionId).flatMap(\.paneIds)) else { return }
         let wasActive = activeSessionId == sessionId
         for terminalWindow in orderedWindows(in: sessionId) {
             for paneId in terminalWindow.paneIds {
@@ -291,6 +294,7 @@ final class AgentManager: @unchecked Sendable {
 
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
+        guard confirmClosing(paneIds: terminalWindow.paneIds) else { return }
         for paneId in terminalWindow.paneIds {
             cancelAgentReadinessGenerations(in: paneId)
             panes.removeValue(forKey: paneId)
@@ -439,32 +443,40 @@ final class AgentManager: @unchecked Sendable {
         let tabId: String
         if let target = markdownPreviewTarget(ownerPaneId: paneId) {
             tabId = target.tabId
-            updateMarkdownDocument(paneId: paneId, tabId: tabId, to: fileURL)
+            updateFileDocument(paneId: paneId, tabId: tabId, to: fileURL)
         } else {
             guard pane.tabs.count < PaneState.maxTabsPerPane else { return nil }
             let tab = createMarkdownTab(fileURL: fileURL, previewOwnerPaneId: paneId)
             pane.tabs.append(tab)
             tabId = tab.id
         }
+        showTab(tabId, in: pane, of: terminalWindow)
+        return tabId
+    }
 
-        // Keep a maximized caller at its current size when displaying its reader.
-        if let maximizedPaneId, maximizedPaneId != paneId {
+    /// Makes `tabId` the visible, focused tab of `pane`, revealing its depth
+    /// layer and window. A maximized caller keeps its size.
+    private func showTab(_ tabId: String, in pane: PaneState, of terminalWindow: WorkspaceWindowState) {
+        if let maximizedPaneId, maximizedPaneId != pane.id {
             exitMaximize()
         }
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
         let previousDepth = terminalWindow.activeDepth
-        let visibilityChanged = terminalWindow.revealPane(paneId)
-        terminalWindow.activePaneId = paneId
+        let visibilityChanged = terminalWindow.revealPane(pane.id)
+        terminalWindow.activePaneId = pane.id
         pane.activeTabIndex = pane.tabs.firstIndex { $0.id == tabId } ?? 0
         notifyChange(
             layoutChanged: windowChanged || visibilityChanged
                 || previousDepth != terminalWindow.activeDepth
         )
-        return tabId
     }
 
     private func createMarkdownTab(fileURL: URL, previewOwnerPaneId: String?) -> PaneTab {
+        createFileTab(fileURL: fileURL, contentKind: PaneContentKind.markdown, previewOwnerPaneId: previewOwnerPaneId)
+    }
+
+    private func createFileTab(fileURL: URL, contentKind: String, previewOwnerPaneId: String?) -> PaneTab {
         let standardizedURL = fileURL.standardizedFileURL
         return PaneTab(
             id: nextTabId(),
@@ -472,7 +484,7 @@ final class AgentManager: @unchecked Sendable {
             title: standardizedURL.lastPathComponent,
             cwd: standardizedURL.deletingLastPathComponent().path,
             url: standardizedURL.absoluteString,
-            contentKind: PaneContentKind.markdown,
+            contentKind: contentKind,
             previewOwnerPaneId: previewOwnerPaneId
         )
     }
@@ -482,6 +494,130 @@ final class AgentManager: @unchecked Sendable {
             $0.isMarkdown && $0.previewOwnerPaneId == ownerPaneId
         }) else { return nil }
         return TerminalTarget(paneId: ownerPaneId, tabId: tab.id)
+    }
+
+    // MARK: - Editor Tabs
+
+    /// Opens `fileURL` in an editor tab and shows it, like Orca's editor tabs,
+    /// without covering what the focused pane shows:
+    ///
+    /// - Files go to `paneId`, else the window's file pane (see `filePane(in:)`),
+    ///   else a new split beside the focused pane, which then becomes the
+    ///   file pane for the files that follow.
+    /// - A file already open in that pane gets its tab focused; opening it as
+    ///   permanent turns a preview tab into a regular one.
+    /// - A preview replaces the pane's existing preview tab, so browsing files
+    ///   does not pile up tabs.
+    /// - A file pane without room for another tab gets the file in a new split.
+    @discardableResult
+    func openEditor(fileURL: URL, preview: Bool, in paneId: String? = nil) -> TerminalTarget? {
+        let standardizedURL = fileURL.standardizedFileURL
+        let url = standardizedURL.absoluteString
+        guard let paneId = paneId ?? filePane(in: activeWindowId),
+              let pane = panes[paneId],
+              let terminalWindow = window(containingPane: paneId)
+        else { return spawnEditor(fileURL: standardizedURL, preview: preview) }
+
+        let tabId: String
+        if let index = pane.tabs.firstIndex(where: { $0.isEditor && $0.url == url }) {
+            if !preview {
+                pane.tabs[index].previewOwnerPaneId = nil
+            }
+            tabId = pane.tabs[index].id
+        } else {
+            let tab = createFileTab(
+                fileURL: standardizedURL,
+                contentKind: PaneContentKind.editor,
+                previewOwnerPaneId: preview ? paneId : nil
+            )
+            if preview, let index = pane.tabs.firstIndex(where: {
+                $0.isEditorPreview && $0.previewOwnerPaneId == paneId
+            }) {
+                // A new tab ID gives the new file its own editor view; the old
+                // preview's view is discarded with its tab.
+                pane.tabs[index] = tab
+            } else if pane.tabs.count < PaneState.maxTabsPerPane {
+                pane.tabs.insert(tab, at: min(pane.clampedActiveIndex() + 1, pane.tabs.count))
+            } else {
+                return spawnEditor(fileURL: standardizedURL, preview: preview)
+            }
+            tabId = tab.id
+        }
+        showTab(tabId, in: pane, of: terminalWindow)
+        return TerminalTarget(paneId: paneId, tabId: tabId)
+    }
+
+    /// Where files open in `windowId`: the focused pane when it holds only
+    /// files (editor and Markdown reader tabs), else the first such pane on
+    /// screen. Nil when there is none, so the next file gets its own split.
+    func filePane(in windowId: String) -> String? {
+        guard let terminalWindow = windows[windowId] else { return nil }
+        let isFilePane = { [panes] (paneId: String) -> Bool in
+            guard let tabs = panes[paneId]?.tabs, !tabs.isEmpty else { return false }
+            return tabs.allSatisfy { $0.isEditor || $0.isMarkdown }
+        }
+        let visible = terminalWindow.visibleLayout?.orderedLeafIds ?? []
+        if visible.contains(terminalWindow.activePaneId), isFilePane(terminalWindow.activePaneId) {
+            return terminalWindow.activePaneId
+        }
+        return visible.first(where: isFilePane)
+    }
+
+    /// Opens `fileURL` in a new split beside the focused pane. A window with
+    /// no room for another pane gets it as a tab of the focused pane instead.
+    @discardableResult
+    func spawnEditor(fileURL: URL, preview: Bool = false) -> TerminalTarget? {
+        guard canAddPane(to: activeWindowId) else {
+            guard let pane = panes[activePaneId],
+                  let terminalWindow = window(containingPane: pane.id),
+                  pane.tabs.count < PaneState.maxTabsPerPane
+            else { return nil }
+            let tab = createFileTab(fileURL: fileURL, contentKind: PaneContentKind.editor, previewOwnerPaneId: nil)
+            pane.tabs.insert(tab, at: min(pane.clampedActiveIndex() + 1, pane.tabs.count))
+            showTab(tab.id, in: pane, of: terminalWindow)
+            return TerminalTarget(paneId: pane.id, tabId: tab.id)
+        }
+        let paneId = nextPaneId()
+        let tab = createFileTab(
+            fileURL: fileURL,
+            contentKind: PaneContentKind.editor,
+            previewOwnerPaneId: preview ? paneId : nil
+        )
+        return insertPane(PaneState(id: paneId, tabs: [tab]))
+            ? TerminalTarget(paneId: paneId, tabId: tab.id)
+            : nil
+    }
+
+    /// Turns a preview editor tab into a regular one, as editing it does.
+    func keepEditorTab(paneId: String, tabId: String) {
+        guard let pane = panes[paneId],
+              let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
+              pane.tabs[index].isEditorPreview
+        else { return }
+        pane.tabs[index].previewOwnerPaneId = nil
+        notifyChange(.tabTitle(TerminalTarget(paneId: paneId, tabId: tabId)))
+    }
+
+    /// Points every editor and Markdown reader tab showing `oldURL`, or a file
+    /// inside it when it is a folder, at its new location after a rename or move.
+    func relocateFileTabs(from oldURL: URL, to newURL: URL) {
+        let oldPath = oldURL.standardizedFileURL.path
+        let newPath = newURL.standardizedFileURL.path
+        for pane in panes.values {
+            for tab in pane.tabs where tab.isEditor || tab.isMarkdown {
+                guard let value = tab.url, let url = URL(string: value), url.isFileURL else { continue }
+                let path = url.standardizedFileURL.path
+                let relocated: String
+                if path == oldPath {
+                    relocated = newPath
+                } else if path.hasPrefix(oldPath + "/") {
+                    relocated = newPath + path.dropFirst(oldPath.count)
+                } else {
+                    continue
+                }
+                updateFileDocument(paneId: pane.id, tabId: tab.id, to: URL(fileURLWithPath: relocated))
+            }
+        }
     }
 
     // MARK: - Pane Splitting
@@ -553,43 +689,80 @@ final class AgentManager: @unchecked Sendable {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return }
-        exitMaximize()
-        _ = terminalWindow.activateDepth(containingPane: paneId)
+        // Ask about exactly the tabs this close takes, worked out on a copy.
+        let closing = Self.detach(paneId, from: terminalWindow.copy())
+        guard confirmClosing(paneIds: closing.removedPaneIds) else { return }
 
-        // Closing the only pane in an inner workspace is equivalent to
-        // closing that depth layer: reveal its owning pane and clean up every
-        // nested branch without disturbing outer siblings.
+        performConfirmedClose {
+            exitMaximize()
+            let detached = Self.detach(paneId, from: terminalWindow)
+            for removedPaneId in detached.removedPaneIds {
+                cancelAgentReadinessGenerations(in: removedPaneId)
+                panes.removeValue(forKey: removedPaneId)
+            }
+            if detached.closesWindow {
+                closeWindow(terminalWindow.id)
+            } else {
+                notifyChange(layoutChanged: true)
+            }
+        }
+    }
+
+    /// Removes `paneId` from `terminalWindow`'s layouts the way closing it
+    /// does, returning every pane that leaves with it:
+    ///
+    /// - The only pane of an inner workspace takes that depth layer and every
+    ///   layer farther inward along, revealing the owning pane.
+    /// - Otherwise the pane leaves with its own depth branches; if that empties
+    ///   an inner layer, the layer goes too, and if it empties Z0 the whole
+    ///   window closes.
+    ///
+    /// Run on a copy, it answers which tabs a close would take before asking.
+    private static func detach(
+        _ paneId: String,
+        from terminalWindow: WorkspaceWindowState
+    ) -> (removedPaneIds: Set<String>, closesWindow: Bool) {
+        _ = terminalWindow.activateDepth(containingPane: paneId)
         if terminalWindow.activeDepth > 0,
            terminalWindow.layout?.leafIds == [paneId]
         {
-            removeActiveDepthAndDescendants(from: terminalWindow)
-            notifyChange(layoutChanged: true)
-            return
+            return (terminalWindow.removeActiveDepthAndDescendants(), false)
         }
 
-        let hiddenBranchPaneIds = terminalWindow.removeDepthBranches(
-            ownedBy: paneId
-        )
-        for hiddenPaneId in hiddenBranchPaneIds {
-            cancelAgentReadinessGenerations(in: hiddenPaneId)
-            panes.removeValue(forKey: hiddenPaneId)
-        }
-        cancelAgentReadinessGenerations(in: paneId)
-        panes.removeValue(forKey: paneId)
-
+        var removed = terminalWindow.removeDepthBranches(ownedBy: paneId)
+        removed.insert(paneId)
         _ = terminalWindow.removePaneFromOwningLayout(paneId)
-
-        guard terminalWindow.layout != nil else {
-            if terminalWindow.activeDepth > 0 {
-                removeActiveDepthAndDescendants(from: terminalWindow)
-                notifyChange(layoutChanged: true)
-                return
-            }
-            closeWindow(terminalWindow.id)
-            return
+        guard terminalWindow.layout == nil else { return (removed, false) }
+        if terminalWindow.activeDepth > 0 {
+            return (removed.union(terminalWindow.removeActiveDepthAndDescendants()), false)
         }
+        return (removed.union(terminalWindow.paneIds), true)
+    }
 
-        notifyChange(layoutChanged: true)
+    // MARK: - Close Confirmation
+
+    /// Consulted before tabs close, with every tab about to go. Returning
+    /// false cancels the close: an editor with unsaved changes whose user
+    /// picked Cancel. Closes nested inside an approved one are not asked again.
+    var closeConfirmation: (([TerminalTarget]) -> Bool)?
+    private var isPerformingConfirmedClose = false
+
+    private func confirmClosing(paneIds: some Sequence<String>) -> Bool {
+        confirmClosing(paneIds.flatMap { paneId in
+            panes[paneId]?.tabs.map { TerminalTarget(paneId: paneId, tabId: $0.id) } ?? []
+        })
+    }
+
+    private func confirmClosing(_ targets: [TerminalTarget]) -> Bool {
+        guard !isPerformingConfirmedClose, !targets.isEmpty, let closeConfirmation else { return true }
+        return closeConfirmation(targets)
+    }
+
+    private func performConfirmedClose(_ body: () -> Void) {
+        let wasPerforming = isPerformingConfirmedClose
+        isPerformingConfirmedClose = true
+        defer { isPerformingConfirmedClose = wasPerforming }
+        body()
     }
 
     // MARK: - Navigation
@@ -1098,6 +1271,11 @@ final class AgentManager: @unchecked Sendable {
         _ = setActiveWindow(terminalWindow.id)
         _ = terminalWindow.activateDepth(containingPane: paneId)
         guard terminalWindow.activeDepth > 0 else { return false }
+        // A cancelled close still counts as handled, so callers do not fall
+        // back to closing the pane instead.
+        guard confirmClosing(paneIds: terminalWindow.copy().removeActiveDepthAndDescendants()) else {
+            return true
+        }
 
         exitMaximize()
         removeActiveDepthAndDescendants(from: terminalWindow)
@@ -1145,14 +1323,13 @@ final class AgentManager: @unchecked Sendable {
     func removeTabFromPane(_ paneId: String, tabId: String) {
         guard let pane = panes[paneId] else { return }
         guard let index = pane.tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        cancelAgentReadinessGeneration(
-            for: TerminalTarget(paneId: paneId, tabId: tabId)
-        )
-
         if pane.tabs.count == 1 {
             closePane(paneId)
             return
         }
+        let target = TerminalTarget(paneId: paneId, tabId: tabId)
+        guard confirmClosing([target]) else { return }
+        cancelAgentReadinessGeneration(for: target)
 
         pane.tabs.remove(at: index)
         if index < pane.activeTabIndex {
@@ -1248,7 +1425,8 @@ final class AgentManager: @unchecked Sendable {
         notifyChange(.browserURL(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
-    func updateMarkdownDocument(
+    /// Points a Markdown reader or editor tab at `fileURL`.
+    func updateFileDocument(
         paneId: String,
         tabId: String,
         to fileURL: URL
@@ -1256,7 +1434,7 @@ final class AgentManager: @unchecked Sendable {
         let standardizedURL = fileURL.standardizedFileURL
         guard let pane = panes[paneId],
               let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
-              pane.tabs[index].isMarkdown
+              pane.tabs[index].isMarkdown || pane.tabs[index].isEditor
         else { return }
 
         let absoluteString = standardizedURL.absoluteString
@@ -1270,7 +1448,7 @@ final class AgentManager: @unchecked Sendable {
         pane.tabs[index].url = absoluteString
         pane.tabs[index].title = title
         pane.tabs[index].cwd = directory
-        notifyChange(.markdownDocument(
+        notifyChange(.document(
             TerminalTarget(paneId: paneId, tabId: tabId)
         ))
     }
@@ -1348,6 +1526,8 @@ final class AgentManager: @unchecked Sendable {
 
     func restoreWorkspace(_ session: WorkspaceSession) {
         guard !session.panes.isEmpty else { return }
+        // Restoring replaces every open tab.
+        guard confirmClosing(paneIds: panes.keys) else { return }
 
         var newPanes: [String: PaneState] = [:]
         var maxId = 1
