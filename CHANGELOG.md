@@ -67,6 +67,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   theme.
 
 ### Fixed
+- The **×** in a pane header inside a depth layer closes only that pane's active tab
+  instead of the whole layer, so a split sibling (and the agent running in it) stays
+  open; closing the layer's last pane still returns to the pane that owns it. `⌃A` →
+  `X` keeps closing the whole layer.
 - `⌃H/J/K/L` now moves to the pane that visually borders the focused one: in a 2×2 grid,
   `⌃L` from the bottom-left pane lands bottom-right instead of top-right. Wrapping at a
   layout edge stays in the same row or column instead of jumping to the opposite corner.
