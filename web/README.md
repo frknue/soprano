@@ -1,0 +1,340 @@
+# Soprano web (vendored ompweb)
+
+This directory is Soprano-owned, editable application source, not a downloaded
+web release or a link to a separate checkout. It vendors
+[kahme247/ompweb](https://github.com/kahme247/ompweb) at revision
+`9729c99cad13e1cb340a4217b0d81b30d992f59e`, with Soprano packaging adaptations.
+The private package is `@soprano/omp-web`. Upstream's MIT [license](./LICENSE)
+and credits are retained; upstream `AGENTS.md` and `.github/` are not imported.
+
+Web application updates are managed by Soprano, not the upstream npm updater.
+The installed omp runtime and its `omp update` flow remain independent.
+
+A clean, modern web UI for the [oh-my-pi (omp)](https://github.com/can1357/oh-my-pi) coding agent. It reads your local omp sessions and gives you a browser workspace to chat with the agent, browse projects, manage settings, and preview files.
+
+![ompweb — live session demo](docs/demo.gif)
+
+<details>
+<summary>Screenshots (light / dark)</summary>
+
+![ompweb — light theme](docs/screenshot-light.png)
+
+![ompweb — dark theme](docs/screenshot-dark.png)
+
+</details>
+
+## Requirements
+
+- [omp](https://github.com/can1357/oh-my-pi) installed and available on your `PATH` (or specified via `OMP_WEB_OMP_BIN`)
+- Node.js `>= 22.19.0`
+
+The **Steer** action on a queued follow-up requires an omp runtime with the `promote_queued_message` RPC command (not available in omp 18.1.16). Older runtimes report an error and leave the message queued as a follow-up; ompweb does not send a duplicate steering message.
+
+Queue **Delete** and **Edit** additionally require `remove_queued_message`. Deletion is confirmed by OMP before the chip disappears; editing recalls text only after cancellation succeeds. Unsupported runtimes or messages that are no longer pending leave the queue unchanged and display a notice.
+
+The queue panel shows omp's own queue (`queuedMessages` in `get_state` and `queue_update` events, omp 18.4.4 or later), so every device viewing a session sees the same queued messages. **Stop** moves the text of messages still waiting in the queue back into the composer instead of letting the agent run them; a steer the model already picked up through live steering still runs. Older omp runtimes show no queue panel, and Stop cannot take queued messages back.
+
+## App installation behind authentication
+
+To install the web app, sign in first and use your browser's installation menu.
+The single manifest link requests `/api/manifest` with credentials; that endpoint
+uses the existing web-password guard and private, revalidating caching. Its
+192×192 and 512×512 PNG icons are embedded from the packaged assets because
+Android's native installer fetches ordinary icon URLs without authentication
+cookies. The app still launches at `/` with scope `/`.
+
+Keep Cloudflare Access and application authentication enabled; no public
+manifest exception or Access bypass rule is needed. This does not add offline
+support. Local Chromium verification covered cookie-gated metadata with HTTP
+icon URLs blocked (zero installability errors). The owner also confirmed that
+installation on a physical phone works as expected behind Cloudflare Access.
+
+Skill startup notices require an OMP runtime with `get_skill_diagnostics`,
+`set_skill_startup_diagnostics`, and `skill_diagnostics_update`. Conflicts and
+redundant installations appear above the composer when its OMP session starts;
+an empty new-chat page does not start OMP just for diagnostics. **Details** shows
+the resolved default, variants, identical copies, backing paths, sources, and
+selection reason. The **×** button dismisses the notice for that session until
+the diagnostic report changes. **Turn off** and **Settings →
+Interface & Behavior → Skill startup notices** use OMP's persisted
+`skills.showStartupDiagnostics` preference, not a separate browser setting.
+**Settings → Extensions & Tools → Skills → View skill diagnostics** remains
+available for a selected running session when notices are off. Inspection does
+not resume stopped sessions. Missing support or no running session is unavailable,
+not a clean result.
+
+## Quick Start
+
+From an installed Soprano app:
+
+```bash
+omp web
+```
+
+Or build and launch this source checkout from Soprano's repository root:
+
+```bash
+cd web
+npm ci
+npm run build
+node bin/omp-web.js
+```
+
+The launcher opens the default browser unless `--no-open` is supplied.
+In the CLI examples below, `ompweb` means `node bin/omp-web.js` from this
+directory (or the corresponding packaged launcher); it does not mean the
+published upstream npm package.
+
+Open [http://127.0.0.1:30177](http://127.0.0.1:30177) in your browser.
+
+### CLI Options
+
+```bash
+ompweb --port 8080                         # Custom port
+ompweb --hostname 0.0.0.0                  # Listen on network
+ompweb --password "your-password"          # Enable password protection
+ompweb --no-open                           # Don't auto-open the browser
+ompweb --install-tray                      # Install Windows System Tray service & Desktop shortcuts
+ompweb --uninstall-tray                    # Uninstall Windows System Tray service & shortcuts
+ompweb --tray                              # Start background System Tray manager
+ompweb systemd install                     # Install Linux systemd user service
+ompweb --help                              # Show help
+ompweb --version                           # Show version
+```
+
+### Run as a Windows Service (System Tray)
+
+Install ompweb as a Windows background service with a system tray icon and autostart at login:
+
+```bash
+ompweb --install-tray
+```
+
+Manage it from **Settings → System & Updates → Windows Background Service**, or via CLI:
+
+```bash
+ompweb --tray          # Start the tray manager
+ompweb --uninstall-tray
+```
+
+Shortcuts are created on the Desktop and Start Menu. The service restarts automatically and shows the current port and status in the tray.
+
+### Run as a macOS Service (launchd)
+
+Install ompweb as a launchd user agent that starts at login and restarts on crash:
+
+```bash
+node bin/omp-web.js launchd install
+```
+
+Manage it with:
+
+```bash
+node bin/omp-web.js launchd status      # Show service state
+node bin/omp-web.js launchd uninstall   # Stop and remove
+```
+
+The service runs the absolute Node executable and local `bin/omp-web.js`;
+it never fetches a package at runtime. Package specs and `OMP_WEB_PKG` are
+rejected. The launcher and Node paths are frozen at installation, so reinstall
+the service after moving the app or Node installation. Supported
+[environment variables](#environment-variables) are baked into the plist.
+As a service, the browser is **not** auto-opened by default — install with
+`OMP_WEB_NO_OPEN=0` to restore that.
+
+```bash
+OMP_WEB_PASSWORD=secret node bin/omp-web.js launchd install
+```
+
+When binding to a non-loopback host, require authentication (`OMP_WEB_PASSWORD`
+or equivalent access control) and HTTPS through a trusted reverse proxy or VPN.
+Never expose the unauthenticated web UI or send its password/session cookie over
+plaintext HTTP.
+
+Logs go to `~/Library/Logs/ompweb/ompweb.log` and the plist lives at
+`~/Library/LaunchAgents/com.soprano.ompweb.plist` (mode 600; a configured
+password is stored there in plain text). Upstream's separate launchd label is
+not modified.
+
+### Run as a Linux Service (systemd)
+
+Install ompweb as a systemd **user** service that starts at login and restarts
+on crash:
+
+```bash
+node bin/omp-web.js systemd install
+```
+The installer creates `~/.omp/agent/web-service.env` automatically with mode
+`600`; no manual file creation is required.
+
+To bind the service to all IPv4 interfaces for LAN access, set a password while
+installing:
+
+```bash
+OMP_WEB_HOSTNAME=0.0.0.0 OMP_WEB_PASSWORD='change-me' \
+  node bin/omp-web.js systemd install
+```
+
+Manage it with:
+
+```bash
+node bin/omp-web.js systemd status    # Show service state
+node bin/omp-web.js systemd restart   # start / stop / restart
+node bin/omp-web.js systemd uninstall # Stop and remove
+```
+
+The service runs the absolute Node executable and local `bin/omp-web.js`.
+Runtime configuration lives in
+`~/.omp/agent/web-service.env` — the tray (or any editor) can change the port,
+hostname, and password there and just restart the service; no reinstall needed.
+Install-time [environment variables](#environment-variables) are baked into
+that file. As a service, the browser is **not** auto-opened by default. The
+unit lives at `~/.config/systemd/user/ompweb.service` and logs go to the
+journal:
+
+```bash
+journalctl --user -u ompweb -f
+```
+
+On a headless server, enable user lingering if the service must keep running
+after the last login session ends:
+
+```bash
+loginctl enable-linger "$USER"
+```
+
+### Linux System Tray (KDE Plasma and compatible)
+
+On Linux, `ompweb-tray` registers a StatusNotifierItem tray icon with a context
+menu: open the web UI, copy its URL, start/stop/restart the systemd service,
+view logs, expose the web UI to the network, change the port, set the web
+password, toggle autostart, and quit the tray.
+
+```bash
+node bin/omp-web-tray.js --install      # Icons + autostart + start tray
+node bin/omp-web-tray.js --status       # Tray and service status
+node bin/omp-web-tray.js --uninstall    # Remove autostart, stop tray
+```
+
+**Expose to Network** rebinds the service from `127.0.0.1` to `0.0.0.0` so the
+web UI is reachable from your LAN or VPN (e.g. Tailscale). Leaving loopback
+requires a web password — the tray prompts for one via `kdialog`/`zenity` when
+needed. **Change Port…** and **Set Web Password…** edit
+`~/.omp/agent/web-service.env` and restart the service. When binding to a
+non-loopback host, use HTTPS through a trusted reverse proxy or VPN for remote
+access.
+
+"Start with Plasma" in the tray menu toggles a desktop autostart entry at
+`~/.config/autostart/ompweb-tray.desktop`. Requires a running StatusNotifierItem
+host (KDE Plasma, and most Wayland/X11 desktops).
+
+## Features
+
+- **Interactive Chat**: Real-time streaming conversation with your local `omp` agent — tool calls, thinking levels, token counts, cost, context gauge, queue controls, and interrupt & retry.
+- **Message Copy**: Copy user messages and completed assistant replies as rendered plain text or original Markdown using the buttons below each message. Thinking, tool output, and message controls are excluded. Oversized messages that use the raw-text viewer copy their full source in either format.
+- **Queue Deletion Confirmation**: Preview and confirm before cancelling queued follow-ups or steered messages in OMP. Requires native `remove_queued_message` support; already-delivered messages cannot be recalled.
+- **Session Management**: Browse past conversations by project, fork sessions, branch within a session, archive/restore, import session files, and deep-link via URL.
+- **Draft Recovery**: Unsent text stays scoped to its conversation or new-session workspace and is restored after Back/Forward navigation or reload in the same tab when browser storage is available (up to 50 drafts). Images and file attachments remain in memory only.
+- **Live Plans & Subagents**: Collapsible panels pinned above the composer track live todo phases and running subagents (status, tool, retries, tokens/cost, nested tasks) with transcript dialogs and history recovery.
+- **Tool Preset Picker**: Choose the toolset for new sessions in the composer — `none` / `default` (`read,bash,edit,write`) / `full` (all tools including subagents). Persists to localStorage.
+- **File Explorer & Previews**: Browse workspaces side-by-side with chat; preview code, markdown, Mermaid, images, audio, PDFs, and diffs with allow-listed access.
+- **Git Worktree Support**: Create, switch, and manage Git worktrees directly from the sidebar; sessions and file roots stay grouped by project.
+- **Usage & Analytics**: Dashboard in **Settings → Usage** for tokens, costs, cache savings, and breakdowns by provider / model / day / project with SQLite persistence.
+- **Windows System Tray & Service**: Background service, tray icon, logon autostart, and Desktop/Start Menu shortcuts (Windows).
+- **macOS launchd Service**: LaunchAgent that starts at login, restarts on crash, and logs under `~/Library/Logs/ompweb`.
+- **Linux systemd Service & Tray**: User service that starts at login and restarts on crash, plus a StatusNotifierItem tray icon with service controls (KDE Plasma and compatible desktops).
+- **Web-based Settings** (8 tabs): Interface & Behavior, Safety & Approvals, AI Model Defaults, API Keys & Providers, Usage, Agent & Intelligence (advisor, memory, compaction), Agents, Extensions & Tools (MCP, skills, plugins), System & Updates.
+- **Slash Commands & Shortcuts**: Quick prompts (`/plan`, `/review`, `/fix`, `/test`, etc.), `⌘K` / `Ctrl+K` palette, and model/reasoning cycling.
+- **UI Themes & Localization**: Warm paper light/dark themes plus an omp.sh-inspired midnight (`omp`) theme, chat font size & interface scale, with full English, Chinese (简体中文), and Japanese (日本語) translations.
+
+## Environment Variables
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `PORT` | Server port | `30177` |
+| `OMP_WEB_HOSTNAME` | Server bind host | `127.0.0.1` |
+| `OMP_WEB_PASSWORD` | Optional password for web login | _None (auth disabled)_ |
+| `OMP_WEB_NO_OPEN` | Set to `1` to prevent auto-opening browser | `0` |
+| `OMP_WEB_DISABLE_AUTOUPDATE` | Set to `1` to disable omp update checks and in-app omp updates; web application updates are always Soprano-managed | `0` |
+| `OMP_WEB_OMP_BIN` | Path to `omp` binary if not on `PATH` | _auto-detected_ |
+| `OMP_WEB_DEV_ORIGIN` | Additional allowed hostname for the development server (no scheme or port); ignored in production | _None_ |
+| `PI_CODING_AGENT_DIR` | Custom omp agent directory | `~/.omp/agent` |
+| `OMP_WEB_STT_ENDPOINT` | OpenAI-compatible transcription endpoint URL | _None (disabled)_ |
+| `OMP_WEB_STT_KEY` | Optional API key for the STT endpoint | _None_ |
+| `OMP_WEB_STT_MODEL` | Optional model name for the STT endpoint | _None_ |
+
+## Development
+
+```bash
+cd web # from the Soprano repository root
+npm ci
+npm run dev
+```
+
+The dev server runs at [http://127.0.0.1:30178](http://127.0.0.1:30178).
+
+The development server allows loopback and RFC1918 private IPv4 origins
+(`10.0.0.0/8`, `172.16.0.0/12`, and `192.168.0.0/16`). When using a tunnel
+or reverse proxy with a custom hostname, set it without editing `next.config.ts`:
+
+```bash
+OMP_WEB_DEV_ORIGIN=dev.example.com npm run dev
+```
+
+For a persistent setup, set the variable in your local environment or service
+configuration and restart the dev server. This does not change the bind address
+or enable authentication. Next.js hostname patterns cannot express IPv6 CIDRs;
+a private IPv6 origin must be supplied explicitly (for example, `[fd00::1]`).
+
+### Checks
+
+```bash
+npm run typecheck   # Type check (TypeScript)
+npm run lint        # ESLint
+npm test            # Run test suite
+```
+
+> **Note**: Do not run `npm run build` during local dev — it populates `.next/` and can break `npm run dev`.
+
+### Standalone packaging contract
+
+`npm run build` emits `.next/standalone/server.js`. Copy the **contents** of
+`.next/standalone/` (including its hidden `.next/` and traced `node_modules/`)
+to `Contents/Resources/web/`, then overlay:
+
+- `bin/`, `lib/`, `scripts/macos-launchd.mts`, and `public/` at the same relative paths;
+- `.next/static/` at `Contents/Resources/web/.next/static/`;
+- this package's `package.json`, `package-lock.json`, and `LICENSE`.
+
+Launch with `node Contents/Resources/web/bin/omp-web.js`, supplying
+`OMP_WEB_OMP_BIN` as the absolute path of the real, external installed omp
+(not Soprano's dispatch wrapper). A root `server.js` selects the standalone
+server. Source checkouts retain the normal `next start` launcher because their
+standalone server remains nested in `.next/standalone/`. Port, hostname,
+password, browser opening, and child-process shutdown stay launcher-owned;
+the standalone child receives both `PORT`/`HOSTNAME` and the ompweb equivalents.
+Do not run `server.js` directly if these launcher semantics are required.
+
+The tracing configuration retains CLI-loaded files and the JS dependencies for
+jiti and Linux's tray. Sharp, SWC, and the optional Linux `usocket` addon are not
+shipped: the UI does not use Next Image optimization, and SQLite is supplied by
+the Node runtime. macOS packaging therefore needs a compatible Node executable
+for each supported architecture, not architecture-specific web addons.
+
+The signed bundle is read-only application code. Sessions, project registry,
+web settings, usage SQLite data, and credentials retain the external omp state
+layout (normally `~/.omp/agent`, with `PI_CODING_AGENT_DIR` and the existing XDG
+session rules). Diagnostics use `~/.omp/omp-web`; bundled-agent extraction and
+omp updater workers use temporary directories. A missing recorded workspace
+falls back to the user's home, never the standalone bundle directory. Do not
+point state overrides into the app bundle.
+
+Windows/Linux service and tray code remains available for source development;
+it is not a native macOS Soprano service integration.
+
+
+## License & Credits
+
+- Soprano vendors [kahme247/ompweb](https://github.com/kahme247/ompweb) at the revision recorded above and in `package.json`.
+- Forked from [agegr/pi-web](https://github.com/agegr/pi-web) (MIT) and adapted for [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi).
+- Released under the [MIT License](./LICENSE).

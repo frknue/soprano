@@ -434,6 +434,9 @@ final class SplitTreeView: NSView {
     }
 
     private func terminalConfig(for tab: PaneTab, paneId: String) -> TerminalConfig {
+        if tab.type == .terminal, let command = tab.startupCommand {
+            return .forCommand(command, cwd: tab.cwd)
+        }
         guard tab.type == .agent,
               let agent = tab.agent,
               let profile = AgentCatalog.profile(for: agent.profileId)

@@ -1,0 +1,52 @@
+#!/bin/bash
+set -euo pipefail
+
+# Soprano's PATH-scoped launcher; never replace the installed omp executable.
+launcher_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+real_omp=""
+IFS=: read -r -a path_entries <<< "$PATH"
+for entry in "${path_entries[@]}"; do
+    entry="${entry:-.}"
+    if [[ -d "$entry" && "$(cd "$entry" && pwd)" == "$launcher_dir" ]]; then
+        continue
+    fi
+    if [[ -f "$entry/omp" && -x "$entry/omp" ]]; then
+        real_omp="$(cd "$entry" && pwd)/omp"
+        break
+    fi
+done
+
+if [[ "${1:-}" != "web" ]]; then
+    if [[ -z "$real_omp" ]]; then
+        echo "Soprano: install the omp CLI and make it available on PATH." >&2
+        exit 127
+    fi
+    exec "$real_omp" "$@"
+fi
+shift
+
+web_dir="${SOPRANO_WEB_DIR:-$launcher_dir/../web}"
+if [[ -n "${SOPRANO_WEB_DIR:-}" && "$web_dir" != /* ]]; then
+    echo "SOPRANO_WEB_DIR must be an absolute directory." >&2
+    exit 2
+fi
+# Also permit running the tracked launcher directly from a source checkout.
+if [[ ! -f "$web_dir/bin/omp-web.js" && -z "${SOPRANO_WEB_DIR:-}" ]]; then
+    web_dir="$launcher_dir/../../web"
+fi
+if [[ ! -f "$web_dir/bin/omp-web.js" ]]; then
+    echo "Soprano: web runtime not found at $web_dir. Reinstall Soprano or set SOPRANO_WEB_DIR." >&2
+    exit 1
+fi
+if ! command -v node >/dev/null 2>&1; then
+    echo "Soprano: omp web requires Node.js >= 22.19.0. Install Node.js and retry." >&2
+    exit 127
+fi
+if [[ -z "${OMP_WEB_OMP_BIN:-}" ]]; then
+    if [[ -z "$real_omp" ]]; then
+        echo "Soprano: omp web requires the installed omp CLI on PATH (or OMP_WEB_OMP_BIN)." >&2
+        exit 127
+    fi
+    export OMP_WEB_OMP_BIN="$real_omp"
+fi
+exec node "$web_dir/bin/omp-web.js" "$@"

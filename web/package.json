@@ -1,0 +1,102 @@
+{
+  "name": "@soprano/omp-web",
+  "private": true,
+  "version": "0.5.1",
+  "description": "Soprano-owned web UI for the oh-my-pi (omp) coding agent",
+  "soprano": {
+    "managed": true,
+    "upstream": {
+      "repository": "https://github.com/kahme247/ompweb",
+      "revision": "9729c99cad13e1cb340a4217b0d81b30d992f59e"
+    }
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "ompweb": "bin/omp-web.js",
+    "ompweb-tray": "bin/omp-web-tray.js",
+    "ompweb-tray-linux": "bin/linux-tray.js",
+    "ompweb-launchd": "bin/omp-web-launchd.js",
+    "ompweb-systemd": "bin/omp-web-systemd.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    ".next",
+    "!.next/cache",
+    "!.next/dev",
+    "!.next/diagnostics",
+    "!.next/types",
+    "!.next/trace",
+    "!.next/trace-build",
+    "!.next/**/*.map",
+    "public",
+    "scripts",
+    "next.config.ts",
+    "package.json"
+  ],
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 30178",
+    "dev:lan": "next dev -H 0.0.0.0 -p 30178",
+    "build": "next build --webpack",
+    "start": "next start -H 127.0.0.1 -p 30177",
+    "start:lan": "next start -H 0.0.0.0 -p 30177",
+    "test": "node --experimental-strip-types --test lib/*.test.mjs lib/omp/*.test.mjs components/*.test.mjs components/ui/*.test.mjs hooks/*.test.mjs bin/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "tray:install": "node bin/omp-web-tray.js --install",
+    "tray:uninstall": "node bin/omp-web-tray.js --uninstall",
+    "tray:start": "node bin/omp-web-tray.js --start",
+    "tray:status": "node bin/omp-web-tray.js --status",
+    "systemd:install": "node bin/omp-web-systemd.js install",
+    "systemd:uninstall": "node bin/omp-web-systemd.js uninstall",
+    "systemd:start": "node bin/omp-web-systemd.js start",
+    "systemd:stop": "node bin/omp-web-systemd.js stop",
+    "systemd:status": "node bin/omp-web-systemd.js status",
+    "prepack": "npm run build",
+    "release:check": "npm run typecheck && npm run lint && npm test && npm run build"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "cmdk": "^1.1.1",
+    "dbus-next": "^0.10.2",
+    "katex": "^0.16.47",
+    "lucide-react": "^1.39.0",
+    "mammoth": "^1.12.2",
+    "mdast-util-find-and-replace": "^3.0.2",
+    "mermaid": "^11.17.2",
+    "next": "16.3.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "undici": "8.10.1",
+    "yaml": "^2",
+    "jiti": "^2.7.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^25",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.4",
+    "jsdom": "^29.1.1",
+    "postcss": "^8",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5",
+    "typescript-language-server": "^6.0.0"
+  }
+}

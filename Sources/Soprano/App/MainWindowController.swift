@@ -385,6 +385,22 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "open-omp-web",
+                icon: "globe",
+                label: "omp web",
+                description: "Start the omp web workspace in your default browser",
+                shortcut: nil,
+                searchText: "ompweb web ui browser coding agent",
+                action: { [weak self] in
+                    guard let self else { return }
+                    let resourcesURL = Bundle.main.resourceURL
+                        ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
+                    _ = self.agentManager.spawnOmpWeb(
+                        launcherURL: resourcesURL.appendingPathComponent("bin/omp")
+                    )
+                }
+            ),
+            CommandItem(
                 id: "new-browser",
                 icon: "globe",
                 label: "Open Browser",

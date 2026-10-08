@@ -3,7 +3,7 @@
 *.xcworkspace/
 xcuserdata/
 DerivedData/
-build/
+/build/
 *.pbxuser
 *.mode1v3
 *.mode2v3
@@ -38,4 +38,4 @@ _archive/
 docs/notes/
 
 # Pre-built libghostty (rebuild from ghostty/ submodule)
-lib/
+/lib/

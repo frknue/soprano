@@ -34,6 +34,8 @@ soprano_license="$repo_root/LICENSE"
 ghostty_license="$repo_root/Support/Licenses/LICENSE-ghostty"
 swift_cmark_license="$repo_root/Support/Licenses/LICENSE-swift-cmark"
 departure_mono_license="$repo_root/Support/Licenses/LICENSE-departure-mono"
+web_source="$repo_root/web"
+web_launcher="$repo_root/Support/bin/omp"
 
 ghostty_resources_dir=""
 ghostty_resource_candidates=(
@@ -135,12 +137,21 @@ elif [[ -z "$resources_ghostty_version" ]]; then
 fi
 
 for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" \
-    "$soprano_license" "$ghostty_license" "$swift_cmark_license" "$departure_mono_license"; do
+    "$soprano_license" "$ghostty_license" "$swift_cmark_license" "$departure_mono_license" \
+    "$web_launcher" "$web_source/package-lock.json"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing build artifact: $required_path" >&2
         exit 1
     fi
 done
+
+# Build our editable web fork, never download an upstream app at command runtime.
+"$script_dir/build-web.sh"
+web_standalone="$web_source/.next/standalone"
+if [[ ! -f "$web_standalone/server.js" ]]; then
+    echo "Missing standalone omp web server: $web_standalone/server.js" >&2
+    exit 1
+fi
 
 mkdir -p "$output_parent"
 stage_dir="$(mktemp -d "$output_parent/.soprano-package.XXXXXX")"
@@ -155,6 +166,21 @@ trap cleanup EXIT
 mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources/bin"
 cp "$binary_path" "$staged_app/Contents/MacOS/Soprano"
 ln -s "../../MacOS/Soprano" "$staged_app/Contents/Resources/bin/soprano"
+cp "$web_launcher" "$staged_app/Contents/Resources/bin/omp"
+chmod +x "$staged_app/Contents/Resources/bin/omp"
+web_destination="$staged_app/Contents/Resources/web"
+mkdir -p "$web_destination"
+# Standalone tracing may already include these directories. Merge their contents,
+# and leave development tests and Windows executables out of the macOS bundle.
+tar -C "$web_standalone" --exclude '*.test.mjs' --exclude '*.exe' -cf - . \
+    | tar -C "$web_destination" -xf -
+ditto "$web_source/.next/static" "$web_destination/.next/static"
+tar -C "$web_source" --exclude '*.test.mjs' --exclude '*.exe' -cf - bin lib public \
+    | tar -C "$web_destination" -xf -
+mkdir -p "$staged_app/Contents/Resources/web/scripts"
+cp "$web_source/scripts/macos-launchd.mts" "$staged_app/Contents/Resources/web/scripts/"
+cp "$web_source/package.json" "$web_source/package-lock.json" "$web_source/LICENSE" \
+    "$staged_app/Contents/Resources/web/"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
 cp "$soprano_license" "$staged_app/Contents/Resources/LICENSE"

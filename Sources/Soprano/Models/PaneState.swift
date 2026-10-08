@@ -53,6 +53,8 @@ struct PaneTab: Identifiable {
     /// keep it in a separate pane. Nil readers are standalone panes opened from
     /// the UI or with `markdown --new`.
     var previewOwnerPaneId: String? = nil
+    /// Initial terminal command. Restored workspaces open an ordinary shell instead.
+    var startupCommand: [String]? = nil
 
     var isMarkdown: Bool {
         type == .browser && contentKind == PaneContentKind.markdown

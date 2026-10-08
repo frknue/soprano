@@ -1,0 +1,94 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+coverage/
+
+# next.js
+/.next/
+/out/
+/build
+/dist
+.turbo/
+.cache/
+
+# rendered / generated artifacts (mockups, screenshots, images)
+/output/
+*.png.png
+screenshots/
+/mockups/
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+.logs/
+*.log
+/.next-dev.log
+/.next-dev-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# editor / IDE
+.idea/
+*.swp
+*.swo
+*~
+.factory.claude/worktrees/
+
+# editor/agent tooling
+.claude/
+.vscode/
+.pi/
+
+# ephemeral / temp dirs (auto-generated, not tracked)
+.tmp/
+tmp/
+tmp-agents/
+tmp-agents-test/
+.agent-teams/
+.freebuff/
+.jspace/
+
+# Claude Code UX artifacts
+.ux/
+
+# windows
+Thumbs.db
+Desktop.ini
+
+# local tooling cruft
+/.commandcode/
+/patch-paths.mjs
+
+# .NET / native build artifacts
+native/tray/bin/
+native/tray/obj/
+bin/tray-publish/
+*.pdb
+
+# npm packaging archives
+*.tgz

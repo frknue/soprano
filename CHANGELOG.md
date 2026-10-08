@@ -10,6 +10,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- `omp web`, also available in the `⌘P` command palette, opens an editable,
+  Soprano-owned ompweb workspace in your default browser, with local sessions,
+  projects, files, and settings; its source ships in `web/`, and normal omp
+  commands still use your installed CLI.
 - Launch omp (Oh My Pi) with `⌘4`; its pane reports turn and approval status,
   notifies when input is needed, and resumes its recorded conversation on restart.
 - Reopening Soprano resumes recorded Codex, Claude Code, and OpenCode conversations

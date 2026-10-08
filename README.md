@@ -90,10 +90,11 @@ require Xcode, Swift, Zig, Ghostty, or a source checkout.
 <summary><b>Build from source</b></summary>
 
 Homebrew Swift is required because the system CLT Swift has broken SPM. Full Xcode with
-the Metal Toolchain is required to compile libghostty.
+the Metal Toolchain is required to compile libghostty. Packaging the web app also
+requires Node.js 22.19.0 or newer and npm.
 
 ```bash
-brew install swift zig@0.15
+brew install swift zig@0.15 node
 xcodebuild -downloadComponent MetalToolchain
 
 git clone --recurse-submodules https://github.com/frknue/soprano.git
@@ -414,6 +415,71 @@ shell-independent equivalent `"$SOPRANO_BIN" markdown README.md`.
 The toolbar navigates between linked documents, reloads on demand, reveals the source in
 Finder, and opens it in the default editor. Web links open in a regular Soprano browser
 pane. Source-provided HTML is displayed as source rather than executed.
+
+## omp web
+
+`omp web` runs Soprano's editable fork of
+[ompweb](https://github.com/kahme247/ompweb) in your default web browser. It serves
+omp conversations, projects, files, and settings, not Soprano's native terminal
+panes. Node.js **22.19.0 or newer** and the separately installed omp CLI are required.
+
+In Soprano, press **`⌘P`**, search for **`omp web`**, and press Return. This opens a
+terminal pane running the server and opens its workspace in your default browser.
+The palette uses the bundled launcher directly, so it does not need any PATH edits.
+`Ctrl+C` in that pane stops the server and returns to your shell. Reopening a saved
+workspace restores an ordinary shell instead of restarting the web server.
+
+The app bundles an `omp` dispatcher alongside `soprano`. It forwards every command
+except `web` to your installed omp; it never replaces that executable. Soprano adds
+its CLI directory to terminal `PATH`, but a login shell can put another omp first.
+In that case, run this after your shell's other PATH setup (or add it at the end of
+`~/.zshrc`, guarded so it applies only inside Soprano):
+
+```bash
+if [ -n "${SOPRANO_BIN:-}" ]; then
+  export PATH="$(dirname "$SOPRANO_BIN")/../Resources/bin:$PATH"
+fi
+```
+
+For the current shell, or to launch outside Soprano:
+
+```bash
+export PATH="/Applications/Soprano.app/Contents/Resources/bin:$PATH"
+omp web                                  # http://127.0.0.1:30177
+omp web --port 8080 --no-open
+omp web --hostname 0.0.0.0 --password "your-password"
+```
+
+The server stays in the foreground; `Ctrl+C` stops it. Non-loopback hosts require
+a password; use HTTPS or a trusted VPN for remote access. Sessions and settings
+use omp's existing agent directory, normally `~/.omp/agent`; `PI_CODING_AGENT_DIR`
+selects an isolated directory. Web updates ship with Soprano, while omp updates
+remain independent.
+
+### Editing the web app
+
+All frontend and server source lives in `web/`, vendored from upstream commit
+`9729c99cad13e1cb340a4217b0d81b30d992f59e`. Edit `web/components/`, `web/app/`,
+`web/hooks/`, and `web/lib/` directly; see [web/README.md](web/README.md) for the
+inherited features and runtime requirements.
+
+```bash
+cd web
+npm ci
+npm run dev                              # http://127.0.0.1:30178, hot reload
+```
+
+Stop the development server before a production build. From the repository root,
+`./scripts/build-web.sh` builds the web app; `./scripts/install.sh` also rebuilds it
+and installs it with Soprano. To run your production source build without reinstalling:
+
+```bash
+SOPRANO_WEB_DIR="$PWD/web" ./Support/bin/omp web
+```
+
+Packaging ships a standalone JavaScript server and static assets; it does not
+download an upstream web release on first use. Node.js itself remains an external
+runtime dependency.
 
 ## In-app browser
 

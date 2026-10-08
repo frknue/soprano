@@ -98,6 +98,22 @@ struct TerminalConfig {
         return config
     }
 
+    static func forCommand(
+        _ arguments: [String],
+        cwd: String?,
+        loginShell: String = DefaultAgents.terminal.command
+    ) -> TerminalConfig {
+        let script = [
+            "trap true INT",
+            arguments.map(shellQuoted).joined(separator: " "),
+            "exec \(shellQuoted(loginShell)) -l",
+        ].joined(separator: "; ")
+        return TerminalConfig(
+            command: [loginShell, "-lic", script].map(shellQuoted).joined(separator: " "),
+            workingDirectory: cwd
+        )
+    }
+
     /// Codex appends its notification payload as a trailing JSON argument to the
     /// configured notify program, so `agent-event` picks the message out of the
     /// arguments without any extra flag here.

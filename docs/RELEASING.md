@@ -17,6 +17,18 @@ from the latest release, making it available as:
 brew install --cask frknue/tap/soprano
 ```
 
+The packaging job installs Node.js 24 and builds the editable `web/` source with
+`npm ci` and `npm run build` through `scripts/build-web.sh`. The app ships the Next.js
+standalone JavaScript server, assets, local launcher, and dependency closure; it does
+not ship Node.js or omp. `omp web` therefore requires Node.js >= 22.19.0 and the
+separately installed omp CLI on the user's machine. Image optimization is disabled
+and native-only web dependencies are excluded from tracing so the same packaged
+server can run with either architecture's Node.js.
+Packaging merges traced runtime directories with the editable source without nesting
+duplicate directories, and excludes web tests and Windows executables. Root ignore
+rules `/lib/` and `/build/` apply only to Soprano's generated artifacts; `web/lib/`
+is not ignored.
+
 ## Gatekeeper limitation
 
 The release is ad-hoc signed but not notarized because Soprano does not have a paid

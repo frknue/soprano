@@ -389,6 +389,20 @@ final class AgentManager: @unchecked Sendable {
     }
 
     @discardableResult
+    func spawnOmpWeb(launcherURL: URL) -> String? {
+        guard canAddPane(to: activeWindowId) else { return nil }
+        let paneId = nextPaneId()
+        let tab = PaneTab(
+            id: nextTabId(),
+            type: .terminal,
+            title: "omp web",
+            cwd: activeWorkingDirectory,
+            startupCommand: [launcherURL.path, "web"]
+        )
+        return insertPane(PaneState(id: paneId, tabs: [tab])) ? paneId : nil
+    }
+
+    @discardableResult
     func spawnBrowser(url: String? = nil) -> String? {
         guard canAddPane(to: activeWindowId) else { return nil }
         let paneId = nextPaneId()
