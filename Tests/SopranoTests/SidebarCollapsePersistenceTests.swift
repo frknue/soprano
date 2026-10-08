@@ -90,7 +90,7 @@ struct SidebarCollapsePersistenceTests {
         sidebar.frame = NSRect(
             x: 0,
             y: 0,
-            width: SidebarWidthStore.defaultWidth,
+            width: SidebarWidthStore.left.defaultWidth,
             height: 600
         )
         sidebar.layoutSubtreeIfNeeded()

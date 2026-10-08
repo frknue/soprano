@@ -267,6 +267,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
 | `⌘E` | Toggle sidebar |
+| `⇧⌘E` | Show and focus the file explorer; press again while it has focus to hide it |
 | `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
 | `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
 | `⌃A` → `[` / `]` | Enter Vim-style terminal copy mode |
@@ -369,10 +370,50 @@ Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cu
 changes to a resize arrow over the edge and the border accents while you drag. A narrow
 window caps the sidebar so at least 320 points stay available for panes. Double-click the
 edge to return to the default 220, and `⌘E` still toggles the sidebar, reopening at
-whatever width you last chose. The width persists across launches.
+whatever width you last chose. The width persists across launches. With the file
+explorer open too, dragging either sidebar still leaves panes those 320 points.
 
 Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly onto a
 terminal to insert their shell-safe paths.
+
+## File explorer
+
+The right sidebar holds the **Explorer**, modeled on Orca's. It shows the project of the
+focused pane: the git working tree containing the pane's directory, or that directory
+itself outside a repository. Focusing another pane switches projects; browser and
+Markdown tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to open it and move
+the keyboard into the tree, and again to hide it. The **Toggle Explorer** palette
+command, the sidebar icon at the end of the window tabs, and the header's close button
+do the same. Drag its leading edge to resize it (220 points minimum, default 280,
+double-click to reset); its width and open state persist across launches.
+
+- Folders load as you expand them, folders first in natural order. `.git` and
+  `node_modules` are never listed.
+- Git decorations follow `git status`: `M` modified, `A` added, `U` untracked, `R`
+  renamed, `C` copied, with folders showing their most important change. Ignored
+  files are dimmed in italics. **⋯ ▸ Show Dotfiles** (per project) and **Show Git
+  Ignored Files** hide them; **Open in** opens the project in Finder or an installed
+  editor, git client, or terminal.
+- **Find files** filters the whole project by path: every word must appear, in any
+  case. Results open as an expanded tree.
+- Click a folder to expand it. Double-click a file, or press `Space`, to open it:
+  Markdown opens in Soprano's reader in the focused pane, everything else in its
+  default app. Double-click empty space to create a file.
+- Keyboard: arrows move, `←` / `→` collapse, expand, and jump to the parent or first
+  child, `Home` / `End` / `Page Up` / `Page Down` jump, `Return` renames, `⌘⌫` moves
+  to the Trash, `⌘C` copies the files, `⌥⌘C` / `⇧⌥⌘C` copy absolute / relative paths,
+  and `Esc` returns to the focused pane. `⌘Z` / `⇧⌘Z` undo and redo creating, renaming,
+  moving, duplicating, and deleting.
+- The context menu adds **New File**, **New Folder**, **Duplicate**, **Open in
+  Terminal**, **Open Markdown Preview**, **Collapse Folder**, and **Reveal in Finder**.
+  New items and renames are typed inline; `Return` or clicking away commits, `Esc`
+  cancels.
+- Drag rows onto a terminal to insert their paths, onto a folder to move them (hold
+  `⌥` to copy; hovering opens collapsed folders), or out to Finder. Files dropped in
+  from Finder are copied.
+- The tree follows the disk: files that agents, git, or other programs create, rename,
+  or delete appear without a refresh. Nothing is read or watched while the sidebar is
+  closed.
 
 ## Window depth
 

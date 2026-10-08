@@ -72,7 +72,7 @@ struct ActiveLocationIndicatorTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark"),
             gitBranchMonitor: GitBranchMonitor()
         )
-        sidebar.frame = NSRect(x: 0, y: 0, width: SidebarWidthStore.defaultWidth, height: 800)
+        sidebar.frame = NSRect(x: 0, y: 0, width: SidebarWidthStore.left.defaultWidth, height: 800)
         sidebar.layoutSubtreeIfNeeded()
         return sidebar
     }

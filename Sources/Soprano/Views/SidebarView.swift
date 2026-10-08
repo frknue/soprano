@@ -20,10 +20,10 @@ final class SidebarView: NSView {
     private var footerView: NSView!
     private var footerSeparator: RetroRuleView!
     private var trailingBorder: RetroRuleView!
-    private var settingsButton: SidebarIconButton!
-    private var dashboardButton: SidebarIconButton!
-    private var plusButton: SidebarIconButton!
-    private var sessionsButton: SidebarIconButton!
+    private var settingsButton: RetroIconButton!
+    private var dashboardButton: RetroIconButton!
+    private var plusButton: RetroIconButton!
+    private var sessionsButton: RetroIconButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
     private var paneRows: [String: SidebarPaneRowView] = [:]
@@ -147,7 +147,7 @@ final class SidebarView: NSView {
         addSubview(trailingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
-            equalToConstant: SidebarWidthStore.defaultWidth
+            equalToConstant: SidebarWidthStore.left.defaultWidth
         )
 
         NSLayoutConstraint.activate([
@@ -212,22 +212,13 @@ final class SidebarView: NSView {
         symbolName: String,
         accessibilityLabel: String,
         action: Selector
-    ) -> SidebarIconButton {
-        let button = SidebarIconButton(title: "", target: self, action: action)
-        button.isBordered = false
-        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-        button.image = NSImage(
-            systemSymbolName: symbolName,
-            accessibilityDescription: accessibilityLabel
-        )?.withSymbolConfiguration(configuration)
-        button.imagePosition = .imageOnly
-        button.toolTip = accessibilityLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 26),
-            button.heightAnchor.constraint(equalToConstant: 26),
-        ])
-        return button
+    ) -> RetroIconButton {
+        RetroIconButton(
+            symbolName: symbolName,
+            accessibilityLabel: accessibilityLabel,
+            target: self,
+            action: action
+        )
     }
 
     /// Width of the sidebar's content. Kept in step with the view's own width so
@@ -644,29 +635,13 @@ final class SidebarView: NSView {
     }
 
     private func branchForTab(_ tab: PaneTab) -> String? {
-        guard let cwd = effectiveCwd(for: tab) else { return nil }
+        guard let cwd = tab.effectiveWorkingDirectory else { return nil }
         return gitBranchMonitor.branch(for: cwd)
-    }
-
-    /// The directory the pane's process actually started in: explicit tab cwd,
-    /// else the profile's cwd, else the app process's cwd (ghostty inherits it
-    /// when workingDirectory is unset).
-    private func effectiveCwd(for tab: PaneTab) -> String? {
-        guard tab.type != .browser else { return nil }
-        if let cwd = tab.cwd {
-            return cwd
-        }
-        if let agent = tab.agent,
-           let profileCwd = AgentCatalog.profile(for: agent.profileId)?.cwd
-        {
-            return profileCwd
-        }
-        return FileManager.default.currentDirectoryPath
     }
 
     private func watchedCwds() -> [String] {
         agentManager.panes.values.flatMap { pane in
-            pane.tabs.compactMap { effectiveCwd(for: $0) }
+            pane.tabs.compactMap(\.effectiveWorkingDirectory)
         }
     }
 
@@ -1276,51 +1251,6 @@ private final class SidebarPaneRowView: NSView {
             current = candidate.superview
         }
         return false
-    }
-}
-
-// MARK: - Icon Button
-
-/// Borderless SF Symbol button for the sidebar header and footer; its tint
-/// switches to the hover color while the pointer is over it.
-private final class SidebarIconButton: NSButton {
-    private var normalTint: NSColor?
-    private var hoverTint: NSColor?
-    private var isHovered = false
-    private var hoverTrackingArea: NSTrackingArea?
-
-    func setTints(normal: NSColor, hover: NSColor) {
-        normalTint = normal
-        hoverTint = hover
-        applyTint()
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverTrackingArea {
-            removeTrackingArea(hoverTrackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        hoverTrackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        applyTint()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        applyTint()
-    }
-
-    private func applyTint() {
-        contentTintColor = isHovered ? hoverTint : normalTint
     }
 }
 

@@ -5,41 +5,41 @@ import Testing
 @MainActor
 struct SidebarResizeTests {
     @Test func widthClampsToTheAllowedRange() {
-        #expect(SidebarWidthStore.clamp(300) == 300)
-        #expect(SidebarWidthStore.clamp(10) == SidebarWidthStore.minimumWidth)
-        #expect(SidebarWidthStore.clamp(5000) == SidebarWidthStore.maximumWidth)
-        #expect(SidebarWidthStore.clamp(.nan) == SidebarWidthStore.defaultWidth)
-        #expect(SidebarWidthStore.clamp(.infinity) == SidebarWidthStore.defaultWidth)
+        let store = SidebarWidthStore.left
+        #expect(store.clamp(300) == 300)
+        #expect(store.clamp(10) == store.minimumWidth)
+        #expect(store.clamp(5000) == store.maximumWidth)
+        #expect(store.clamp(.nan) == store.defaultWidth)
+        #expect(store.clamp(.infinity) == store.defaultWidth)
     }
 
     @Test func widthLeavesRoomForPanesInNarrowWindows() {
+        let store = SidebarWidthStore.left
         // 700 wide window: the reserve binds before the absolute maximum does.
-        #expect(SidebarWidthStore.clamp(800, availableWidth: 700) == 380)
-        #expect(SidebarWidthStore.clamp(200, availableWidth: 700) == 200)
+        #expect(store.clamp(800, availableWidth: 700) == 380)
+        #expect(store.clamp(200, availableWidth: 700) == 200)
 
         // Wide window: the absolute maximum is what stops the drag.
-        #expect(
-            SidebarWidthStore.clamp(800, availableWidth: 1800)
-                == SidebarWidthStore.maximumWidth
-        )
+        #expect(store.clamp(800, availableWidth: 1800) == store.maximumWidth)
 
         // Narrower than minimum + reserved: the minimum still wins.
-        #expect(
-            SidebarWidthStore.clamp(400, availableWidth: 300)
-                == SidebarWidthStore.minimumWidth
-        )
+        #expect(store.clamp(400, availableWidth: 300) == store.minimumWidth)
     }
 
     @Test func widthRoundTripsThroughDefaultsAndFallsBackWhenUnset() throws {
         try withIsolatedDefaults { defaults in
-            #expect(SidebarWidthStore.load(from: defaults) == SidebarWidthStore.defaultWidth)
+            let store = SidebarWidthStore.left
+            #expect(store.load(from: defaults) == store.defaultWidth)
 
-            SidebarWidthStore.save(340, to: defaults)
-            #expect(SidebarWidthStore.load(from: defaults) == 340)
+            store.save(340, to: defaults)
+            #expect(store.load(from: defaults) == 340)
 
             // Values outside the current bounds are clamped on the way back in.
-            SidebarWidthStore.save(9000, to: defaults)
-            #expect(SidebarWidthStore.load(from: defaults) == SidebarWidthStore.maximumWidth)
+            store.save(9000, to: defaults)
+            #expect(store.load(from: defaults) == store.maximumWidth)
+
+            // Each sidebar keeps its own width.
+            #expect(SidebarWidthStore.right.load(from: defaults) == SidebarWidthStore.right.defaultWidth)
         }
     }
 
@@ -49,7 +49,7 @@ struct SidebarResizeTests {
             let sidebar = try #require(firstSidebar(in: controller.view))
             let handle = try #require(resizeHandle(in: controller.view))
             let startingWidth = sidebar.frame.width
-            #expect(startingWidth == SidebarWidthStore.defaultWidth)
+            #expect(startingWidth == SidebarWidthStore.left.defaultWidth)
 
             drag(handle, byX: 80)
             controller.view.layoutSubtreeIfNeeded()
@@ -68,11 +68,11 @@ struct SidebarResizeTests {
 
             drag(handle, byX: -500)
             controller.view.layoutSubtreeIfNeeded()
-            #expect(sidebar.frame.width == SidebarWidthStore.minimumWidth)
+            #expect(sidebar.frame.width == SidebarWidthStore.left.minimumWidth)
 
             drag(handle, byX: 5000)
             controller.view.layoutSubtreeIfNeeded()
-            #expect(sidebar.frame.width == SidebarWidthStore.maximumWidth)
+            #expect(sidebar.frame.width == SidebarWidthStore.left.maximumWidth)
         }
     }
 
@@ -84,7 +84,7 @@ struct SidebarResizeTests {
 
             let relaunched = makeController(defaults: defaults)
             let restoredSidebar = try #require(firstSidebar(in: relaunched.view))
-            #expect(restoredSidebar.frame.width == SidebarWidthStore.defaultWidth + 60)
+            #expect(restoredSidebar.frame.width == SidebarWidthStore.left.defaultWidth + 60)
         }
     }
 
@@ -96,11 +96,11 @@ struct SidebarResizeTests {
 
             drag(handle, byX: 120)
             controller.view.layoutSubtreeIfNeeded()
-            #expect(sidebar.frame.width != SidebarWidthStore.defaultWidth)
+            #expect(sidebar.frame.width != SidebarWidthStore.left.defaultWidth)
 
             handle.mouseDown(with: mouseEvent(at: .zero, clickCount: 2))
             controller.view.layoutSubtreeIfNeeded()
-            #expect(sidebar.frame.width == SidebarWidthStore.defaultWidth)
+            #expect(sidebar.frame.width == SidebarWidthStore.left.defaultWidth)
         }
     }
 
@@ -127,7 +127,67 @@ struct SidebarResizeTests {
             drag(handle, byX: 120)
 
             // The width the sidebar will reappear at must be untouched.
-            #expect(SidebarWidthStore.load(from: defaults) == SidebarWidthStore.defaultWidth)
+            #expect(SidebarWidthStore.left.load(from: defaults) == SidebarWidthStore.left.defaultWidth)
+        }
+    }
+
+    @Test func draggingTheRightSidebarsEdgeLeftWidensIt() throws {
+        try withIsolatedDefaults { defaults in
+            let controller = makeController(defaults: defaults)
+            let sidebar = try #require(rightSidebar(in: controller.view))
+            let handle = try #require(resizeHandle(in: controller.view, identifier: "right-sidebar-resize-handle"))
+            #expect(sidebar.frame.width == SidebarWidthStore.right.defaultWidth)
+
+            drag(handle, byX: -100)
+            controller.view.layoutSubtreeIfNeeded()
+            #expect(sidebar.frame.width == SidebarWidthStore.right.defaultWidth + 100)
+            // It stays pinned to the window's trailing edge.
+            #expect(sidebar.frame.maxX == controller.view.bounds.maxX)
+
+            drag(handle, byX: 500)
+            controller.view.layoutSubtreeIfNeeded()
+            #expect(sidebar.frame.width == SidebarWidthStore.right.minimumWidth)
+
+            let relaunched = makeController(defaults: defaults)
+            let restored = try #require(rightSidebar(in: relaunched.view))
+            #expect(restored.frame.width == SidebarWidthStore.right.minimumWidth)
+        }
+    }
+
+    @Test func bothSidebarsTogetherStillLeavePanesTheReservedWidth() throws {
+        try withIsolatedDefaults { defaults in
+            let controller = makeController(defaults: defaults, width: 1000)
+            let left = try #require(firstSidebar(in: controller.view))
+            let right = try #require(rightSidebar(in: controller.view))
+            let handle = try #require(resizeHandle(in: controller.view))
+
+            drag(handle, byX: 5000)
+            controller.view.layoutSubtreeIfNeeded()
+
+            #expect(left.frame.width == 1000 - right.frame.width - SidebarWidthStore.reservedContentWidth)
+        }
+    }
+
+    @Test func hidingTheRightSidebarCollapsesItAndReopensAtItsWidth() throws {
+        try withIsolatedDefaults { defaults in
+            let controller = makeController(defaults: defaults)
+            let sidebar = try #require(rightSidebar(in: controller.view))
+            let handle = try #require(resizeHandle(in: controller.view, identifier: "right-sidebar-resize-handle"))
+            drag(handle, byX: -40)
+
+            controller.toggleRightSidebar()
+            controller.view.layoutSubtreeIfNeeded()
+            #expect(sidebar.frame.width == 0)
+            #expect(handle.isHidden)
+
+            // The closed state survives a relaunch.
+            let relaunched = makeController(defaults: defaults)
+            #expect(try #require(rightSidebar(in: relaunched.view)).frame.width == 0)
+
+            controller.toggleRightSidebar()
+            controller.view.layoutSubtreeIfNeeded()
+            #expect(sidebar.frame.width == SidebarWidthStore.right.defaultWidth + 40)
+            #expect(!handle.isHidden)
         }
     }
 
@@ -142,7 +202,7 @@ struct SidebarResizeTests {
         return try body(defaults)
     }
 
-    private func makeController(defaults: UserDefaults) -> MainContentViewController {
+    private func makeController(defaults: UserDefaults, width: CGFloat = 1400) -> MainContentViewController {
         let agentManager = AgentManager()
         let controller = MainContentViewController(
             agentManager: agentManager,
@@ -163,7 +223,7 @@ struct SidebarResizeTests {
             }
         )
         controller.loadViewIfNeeded()
-        controller.view.frame = NSRect(x: 0, y: 0, width: 1400, height: 900)
+        controller.view.frame = NSRect(x: 0, y: 0, width: width, height: 900)
         controller.view.layoutSubtreeIfNeeded()
         return controller
     }
@@ -197,10 +257,12 @@ struct SidebarResizeTests {
         descendants(of: view, as: SidebarView.self).first
     }
 
-    private func resizeHandle(in view: NSView) -> NSView? {
-        descendants(of: view, as: NSView.self).first {
-            String(describing: type(of: $0)) == "SidebarResizeHandleView"
-        }
+    private func rightSidebar(in view: NSView) -> RightSidebarView? {
+        descendants(of: view, as: RightSidebarView.self).first
+    }
+
+    private func resizeHandle(in view: NSView, identifier: String = "sidebar-resize-handle") -> NSView? {
+        descendants(of: view, as: NSView.self).first { $0.identifier?.rawValue == identifier }
     }
 
     private func descendants<T: NSView>(of view: NSView, as type: T.Type) -> [T] {

@@ -547,6 +547,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "toggle-explorer",
+                icon: "sidebar.trailing",
+                label: "Toggle Explorer",
+                description: "Show the file explorer sidebar, or hide it",
+                shortcut: commandShortcut(for: "toggle-explorer"),
+                action: { [weak self] in
+                    // After the palette closes, so focus lands in the explorer.
+                    DispatchQueue.main.async {
+                        self?.keybindingToggleExplorer()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "open-settings",
                 icon: "gearshape",
                 label: "Settings",
@@ -594,6 +607,10 @@ extension MainWindowController: NSWindowDelegate {
 extension MainWindowController: KeybindingDelegate {
     func keybindingToggleSidebar() {
         mainContentVC?.toggleSidebar()
+    }
+
+    func keybindingToggleExplorer() {
+        mainContentVC?.toggleExplorer()
     }
 
     func keybindingSaveSession() {

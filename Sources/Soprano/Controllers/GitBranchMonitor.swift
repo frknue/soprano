@@ -112,26 +112,40 @@ final class GitBranchMonitor: @unchecked Sendable {
     /// directories and `.git` files containing a `gitdir:` pointer
     /// (worktrees and submodules).
     static func resolveHeadPath(startingAt path: String) -> String? {
+        guard let entry = findGitEntry(startingAt: path) else { return nil }
+        if entry.isDirectory {
+            return entry.gitURL.appendingPathComponent("HEAD").path
+        }
+        guard let contents = try? String(contentsOf: entry.gitURL, encoding: .utf8) else {
+            return nil
+        }
+        let line = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix("gitdir:") else { return nil }
+        let target = line.dropFirst("gitdir:".count)
+            .trimmingCharacters(in: .whitespaces)
+        let gitDirURL = target.hasPrefix("/")
+            ? URL(fileURLWithPath: target)
+            : entry.workingTree.appendingPathComponent(target).standardizedFileURL
+        return gitDirURL.appendingPathComponent("HEAD").path
+    }
+
+    /// The working tree containing `path`: the nearest directory, `path`
+    /// itself included, that holds a `.git` directory or `gitdir:` file. A
+    /// linked worktree or submodule is its own root.
+    static func repositoryRoot(startingAt path: String) -> String? {
+        findGitEntry(startingAt: path)?.workingTree.path
+    }
+
+    private static func findGitEntry(
+        startingAt path: String
+    ) -> (workingTree: URL, gitURL: URL, isDirectory: Bool)? {
         var dir = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
         let fm = FileManager.default
         while true {
             let gitURL = dir.appendingPathComponent(".git")
             var isDirectory: ObjCBool = false
             if fm.fileExists(atPath: gitURL.path, isDirectory: &isDirectory) {
-                if isDirectory.boolValue {
-                    return gitURL.appendingPathComponent("HEAD").path
-                }
-                guard let contents = try? String(contentsOf: gitURL, encoding: .utf8) else {
-                    return nil
-                }
-                let line = contents.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard line.hasPrefix("gitdir:") else { return nil }
-                let target = line.dropFirst("gitdir:".count)
-                    .trimmingCharacters(in: .whitespaces)
-                let gitDirURL = target.hasPrefix("/")
-                    ? URL(fileURLWithPath: target)
-                    : dir.appendingPathComponent(target).standardizedFileURL
-                return gitDirURL.appendingPathComponent("HEAD").path
+                return (dir, gitURL, isDirectory.boolValue)
             }
             let parent = dir.deletingLastPathComponent()
             if parent.path == dir.path {

@@ -15,6 +15,22 @@ final class WindowTabBarView: NSView {
     private var activeWindowId: String?
     private var revealActiveTab = true
     private var previousViewportWidth: CGFloat = 0
+    private let rightSidebarToggle = RetroIconButton(
+        symbolName: "sidebar.right",
+        accessibilityLabel: "Toggle Right Sidebar",
+        target: nil,
+        action: nil
+    )
+
+    /// Orca shows a toggle at the top right while the right sidebar is closed;
+    /// it lives at the end of this strip so it never covers a tab.
+    var showsRightSidebarToggle = false {
+        didSet {
+            rightSidebarToggle.isHidden = !showsRightSidebarToggle
+            needsLayout = true
+        }
+    }
+    var onRightSidebarToggle: (() -> Void)?
 
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
@@ -41,6 +57,15 @@ final class WindowTabBarView: NSView {
         addButton.toolTip = "New Window"
         addButton.setAccessibilityLabel("New Window")
         addSubview(addButton)
+
+        rightSidebarToggle.identifier = NSUserInterfaceItemIdentifier("right-sidebar-toggle")
+        rightSidebarToggle.refusesFirstResponder = true
+        rightSidebarToggle.target = self
+        rightSidebarToggle.action = #selector(toggleRightSidebar)
+        rightSidebarToggle.isHidden = true
+        // Positioned by frame like the rest of the strip.
+        rightSidebarToggle.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(rightSidebarToggle)
 
         bottomRule.translatesAutoresizingMaskIntoConstraints = true
         addSubview(bottomRule)
@@ -90,6 +115,7 @@ final class WindowTabBarView: NSView {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         bottomRule.color = theme.colors.borderStrong
+        rightSidebarToggle.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
         addButton.attributedTitle = RetroText.display(
             "+",
             color: theme.colors.textMuted,
@@ -120,13 +146,20 @@ final class WindowTabBarView: NSView {
         super.layout()
         let rule = Retro.doubleRule
         let stripHeight = max(0, bounds.height - rule)
-        let viewportWidth = max(0, bounds.width - 38)
+        let toggleWidth: CGFloat = showsRightSidebarToggle ? 30 : 0
+        let viewportWidth = max(0, bounds.width - 38 - toggleWidth)
         scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
         addButton.frame = NSRect(
-            x: max(0, bounds.width - 34),
+            x: max(0, bounds.width - 34 - toggleWidth),
             y: rule + floor((stripHeight - 28) / 2),
             width: 28,
             height: 28
+        )
+        rightSidebarToggle.frame = NSRect(
+            x: max(0, bounds.width - 31),
+            y: rule + floor((stripHeight - RetroIconButton.defaultSize) / 2),
+            width: RetroIconButton.defaultSize,
+            height: RetroIconButton.defaultSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
 
@@ -150,6 +183,10 @@ final class WindowTabBarView: NSView {
 
     @objc private func addWindow() {
         _ = agentManager.createWindow()
+    }
+
+    @objc private func toggleRightSidebar() {
+        onRightSidebarToggle?()
     }
 }
 

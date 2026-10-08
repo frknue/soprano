@@ -178,11 +178,12 @@ struct WindowTabBarTests {
         #expect(scrollView.documentVisibleRect.contains(try #require(selectedTabs(in: bar).first).frame))
     }
 
-    @Test func tabsStayVisibleAboveTheTerminalWhenBothWindowBarAndSidebarAreHidden() throws {
+    @Test func tabsStayVisibleAboveTheTerminalWhenTheWindowBarAndBothSidebarsAreHidden() throws {
         let suiteName = "WindowTabBarTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(false, forKey: "soprano-sidebar-visible")
+        defaults.set(false, forKey: "soprano-right-sidebar-visible")
         let manager = AgentManager()
         let controller = MainContentViewController(
             agentManager: manager,

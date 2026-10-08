@@ -441,6 +441,92 @@ final class RetroButton: NSButton {
     }
 }
 
+/// Borderless SF Symbol button for sidebar headers, toolbars and footers; its
+/// tint switches to the hover color while the pointer is over it.
+final class RetroIconButton: NSButton {
+    static let defaultSize: CGFloat = 26
+
+    private var normalTint: NSColor?
+    private var hoverTint: NSColor?
+    private var isHovered = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    init(
+        symbolName: String,
+        accessibilityLabel: String,
+        pointSize: CGFloat = 13,
+        size: CGFloat = RetroIconButton.defaultSize,
+        target: AnyObject?,
+        action: Selector?
+    ) {
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        title = ""
+        isBordered = false
+        imagePosition = .imageOnly
+        setSymbol(symbolName, accessibilityLabel: accessibilityLabel, pointSize: pointSize)
+        toolTip = accessibilityLabel
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: size),
+            heightAnchor.constraint(equalToConstant: size),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func setSymbol(_ symbolName: String, accessibilityLabel: String, pointSize: CGFloat = 13) {
+        let configuration = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
+        image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibilityLabel
+        )?.withSymbolConfiguration(configuration)
+        setAccessibilityLabel(accessibilityLabel)
+    }
+
+    func setTints(normal: NSColor, hover: NSColor) {
+        normalTint = normal
+        hoverTint = hover
+        applyTint()
+    }
+
+    override var isEnabled: Bool {
+        didSet { alphaValue = isEnabled ? 1 : 0.5 }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        applyTint()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        applyTint()
+    }
+
+    private func applyTint() {
+        contentTintColor = isHovered && isEnabled ? hoverTint : normalTint
+    }
+}
+
 // MARK: - Headings
 
 /// A section heading: a display-face title followed by a hairline running

@@ -10,6 +10,12 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- A right sidebar with Orca's file **Explorer** for the focused pane's project: a
+  lazily loaded tree with git status letters, ignored-file dimming, a **Find files**
+  filter, inline new file/folder and rename, Trash-backed delete with undo, drag and
+  drop (onto terminals, folders, or Finder), and a context menu. Toggle and focus it
+  with `⇧⌘E` (`toggle-explorer`), the **Toggle Explorer** palette command, or the
+  icon at the end of the window tabs; drag its edge to resize it.
 - `omp web`, also available in the `⌘P` command palette, opens an editable,
   Soprano-owned ompweb workspace in your default browser, with local sessions,
   projects, files, and settings; its source ships in `web/`, and normal omp

@@ -59,6 +59,22 @@ struct PaneTab: Identifiable {
     var isMarkdown: Bool {
         type == .browser && contentKind == PaneContentKind.markdown
     }
+
+    /// The directory the tab's process actually started in: explicit tab cwd,
+    /// else the profile's cwd, else the app process's cwd (ghostty inherits it
+    /// when workingDirectory is unset). Browser-backed tabs have none.
+    var effectiveWorkingDirectory: String? {
+        guard type != .browser else { return nil }
+        if let cwd {
+            return cwd
+        }
+        if let agent,
+           let profileCwd = AgentCatalog.profile(for: agent.profileId)?.cwd
+        {
+            return profileCwd
+        }
+        return FileManager.default.currentDirectoryPath
+    }
 }
 
 /// A pane in one z-axis layout, containing one or more logical tabs.

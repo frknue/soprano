@@ -41,6 +41,7 @@ struct PaneNavigationClaimRegistry {
 @MainActor
 protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
+    func keybindingToggleExplorer()
     func keybindingSaveSession()
     func keybindingNewSession()
     func keybindingFindSession()
@@ -513,6 +514,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingSaveSession() }
         case "toggle-sidebar":
             invokeDelegate { $0.keybindingToggleSidebar() }
+        case "toggle-explorer":
+            invokeDelegate { $0.keybindingToggleExplorer() }
         case "open-settings":
             invokeDelegate { $0.keybindingOpenSettings() }
         case "agent-dashboard":
