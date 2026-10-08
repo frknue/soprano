@@ -158,43 +158,25 @@ indirect enum SplitNode: Codable, Equatable {
         }
     }
 
-    /// Find the adjacent pane in a given direction.
+    /// Find the pane that visually borders the source in a given direction.
+    ///
+    /// Resolved from pane geometry, not tree shape: in `H[V[a, b], V[c, d]]`,
+    /// moving right from `b` lands on `d` beside it, not on `c`, the first leaf
+    /// of the neighbouring subtree.
     func adjacentPane(
         from sourceId: String,
         direction: NavigationDirection
     ) -> String? {
-        guard let sourcePath = pathTo(sourceId) else { return nil }
-
-        let axisDirection: SplitDirection = direction.isHorizontal ? .horizontal : .vertical
-        let seekFirst = direction == .left || direction == .up
-
-        // Walk up the path to find an ancestor split with the matching axis
-        for i in stride(from: sourcePath.count - 1, through: 0, by: -1) {
-            let ancestorPath = Array(sourcePath.prefix(i))
-            guard let ancestor = nodeAt(ancestorPath),
-                  case .split(let branch) = ancestor,
-                  branch.direction == axisDirection
-            else { continue }
-
-            let side = sourcePath[i]
-            if seekFirst && side == .second {
-                return branch.first.boundaryLeaf(seeking: direction)
-            }
-            if !seekFirst && side == .first {
-                return branch.second.boundaryLeaf(seeking: direction)
-            }
-        }
-
-        return nil
+        nearestPane(from: sourceId, direction: direction, wrapping: false)
     }
 
-    /// Find the pane at the opposite directional boundary for navigation wrapping.
+    /// Find the pane at the opposite boundary of the source's row (left/right)
+    /// or column (up/down), for navigation wrapping.
     func wrappingPane(
         from sourceId: String,
         direction: NavigationDirection
     ) -> String? {
-        guard pathTo(sourceId) != nil, leafIds.count > 1 else { return nil }
-        return boundaryLeaf(seeking: direction)
+        nearestPane(from: sourceId, direction: direction, wrapping: true)
     }
 
     /// Set the split percentage at a path, clamped to the supported bounds.
@@ -238,25 +220,92 @@ indirect enum SplitNode: Codable, Equatable {
 
     // MARK: - Private Helpers
 
-    private func nodeAt(_ path: [SplitBranchSide]) -> SplitNode? {
-        var current = self
-        for side in path {
-            guard case .split(let branch) = current else { return nil }
-            current = side == .first ? branch.first : branch.second
+    /// Pick the pane overlapping the source's row/column that is nearest in
+    /// `direction` (or, when wrapping, furthest back from the opposite edge).
+    /// Ties go to the pane covering the source's center, then to visual order.
+    private func nearestPane(
+        from sourceId: String,
+        direction: NavigationDirection,
+        wrapping: Bool
+    ) -> String? {
+        let frames = leafFrames(in: PaneFrame(minX: 0, minY: 0, maxX: 1, maxY: 1))
+        guard let source = frames.first(where: { $0.id == sourceId })?.frame else { return nil }
+
+        let epsilon = 1e-9
+        let sourceSpan = source.span(across: direction)
+        let sourceCenter = (sourceSpan.lo + sourceSpan.hi) / 2
+        var best: (id: String, distance: Double, centerOffset: Double)?
+
+        for (id, frame) in frames where id != sourceId {
+            let span = frame.span(across: direction)
+            guard min(span.hi, sourceSpan.hi) - max(span.lo, sourceSpan.lo) > epsilon else { continue }
+
+            let distance: Double
+            if wrapping {
+                switch direction {
+                case .right: distance = frame.minX
+                case .left: distance = 1 - frame.maxX
+                case .down: distance = frame.minY
+                case .up: distance = 1 - frame.maxY
+                }
+            } else {
+                switch direction {
+                case .right: distance = frame.minX - source.maxX
+                case .left: distance = source.minX - frame.maxX
+                case .down: distance = frame.minY - source.maxY
+                case .up: distance = source.minY - frame.maxY
+                }
+                guard distance > -epsilon else { continue }
+            }
+
+            let centerOffset = max(0, span.lo - sourceCenter, sourceCenter - span.hi)
+            if let current = best {
+                let isCloser = distance < current.distance - epsilon
+                let isTiedButCentered = abs(distance - current.distance) <= epsilon
+                    && centerOffset < current.centerOffset - epsilon
+                guard isCloser || isTiedButCentered else { continue }
+            }
+            best = (id, distance, centerOffset)
         }
-        return current
+
+        return best?.id
     }
 
-    private func boundaryLeaf(seeking direction: NavigationDirection) -> String? {
+    /// Leaf frames in visual order, laid out inside `frame` by split percentages
+    /// (y grows downward, matching first = top for vertical splits).
+    private func leafFrames(in frame: PaneFrame) -> [(id: String, frame: PaneFrame)] {
         switch self {
         case .leaf(let id):
-            return id
+            return [(id, frame)]
         case .split(let branch):
-            let goFirst = direction == .left || direction == .up
-            return goFirst
-                ? branch.second.boundaryLeaf(seeking: direction)
-                : branch.first.boundaryLeaf(seeking: direction)
+            let fraction = branch.splitPercentage / 100
+            var first = frame
+            var second = frame
+            switch branch.direction {
+            case .horizontal:
+                let x = frame.minX + (frame.maxX - frame.minX) * fraction
+                first.maxX = x
+                second.minX = x
+            case .vertical:
+                let y = frame.minY + (frame.maxY - frame.minY) * fraction
+                first.maxY = y
+                second.minY = y
+            }
+            return branch.first.leafFrames(in: first) + branch.second.leafFrames(in: second)
         }
+    }
+}
+
+/// A pane's rectangle in unit layout space (0...1 on both axes).
+private struct PaneFrame {
+    var minX: Double
+    var minY: Double
+    var maxX: Double
+    var maxY: Double
+
+    /// The extent perpendicular to `direction`'s axis.
+    func span(across direction: NavigationDirection) -> (lo: Double, hi: Double) {
+        direction.isHorizontal ? (minY, maxY) : (minX, maxX)
     }
 }
 

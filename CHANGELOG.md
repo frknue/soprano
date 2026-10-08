@@ -48,6 +48,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   theme.
 
 ### Fixed
+- `⌃H/J/K/L` now moves to the pane that visually borders the focused one: in a 2×2 grid,
+  `⌃L` from the bottom-left pane lands bottom-right instead of top-right. Wrapping at a
+  layout edge stays in the same row or column instead of jumping to the opposite corner.
 - Claude Code, Codex, and other agents started in a Soprano terminal no longer stay in
   window tabs and the Agent Dashboard after you quit them with `Ctrl+C`, even when
   their merged hooks lack an exit event.

@@ -16,13 +16,40 @@ struct SplitNodeTests {
         #expect(layout.orderedLeafIds == ["pane-3", "pane-1", "pane-2"])
     }
 
-    @Test func wrapQueryUsesOppositeBoundaryForEveryDirectionInNestedTree() {
+    @Test func directionalNavigationInTwoByTwoGridMovesToTheVisuallyBorderingPane() {
         let layout = nestedLayout
 
-        #expect(layout.wrappingPane(from: "a", direction: .left) == "d")
-        #expect(layout.wrappingPane(from: "a", direction: .up) == "d")
-        #expect(layout.wrappingPane(from: "d", direction: .right) == "a")
-        #expect(layout.wrappingPane(from: "d", direction: .down) == "a")
+        #expect(layout.adjacentPane(from: "b", direction: .right) == "d")
+        #expect(layout.adjacentPane(from: "a", direction: .right) == "c")
+        #expect(layout.adjacentPane(from: "d", direction: .left) == "b")
+        #expect(layout.adjacentPane(from: "c", direction: .left) == "a")
+        #expect(layout.adjacentPane(from: "a", direction: .down) == "b")
+        #expect(layout.adjacentPane(from: "d", direction: .up) == "c")
+        #expect(layout.adjacentPane(from: "b", direction: .left) == nil)
+    }
+
+    @Test func directionalNavigationFollowsUnevenSplitGeometryAcrossStacks() {
+        // Left column split at 70%, right column at 30%: from the bottom-left pane
+        // (y 0.7–1) the pane beside it on the right is the bottom-right one (y 0.3–1).
+        let layout = SplitNode.split(.init(
+            direction: .horizontal,
+            first: .split(.init(direction: .vertical, first: .leaf("a"), second: .leaf("b"), splitPercentage: 70)),
+            second: .split(.init(direction: .vertical, first: .leaf("c"), second: .leaf("d"), splitPercentage: 30))
+        ))
+
+        #expect(layout.adjacentPane(from: "b", direction: .right) == "d")
+        #expect(layout.adjacentPane(from: "a", direction: .right) == "d")
+        #expect(layout.adjacentPane(from: "c", direction: .left) == "a")
+    }
+
+    @Test func wrapQueryStaysInTheSourceRowOrColumn() {
+        let layout = nestedLayout
+
+        #expect(layout.wrappingPane(from: "c", direction: .right) == "a")
+        #expect(layout.wrappingPane(from: "d", direction: .right) == "b")
+        #expect(layout.wrappingPane(from: "b", direction: .left) == "d")
+        #expect(layout.wrappingPane(from: "b", direction: .down) == "a")
+        #expect(layout.wrappingPane(from: "c", direction: .up) == "d")
     }
 
     @Test func wrapQueryReturnsNilForSingletonAndUnknownSources() {
