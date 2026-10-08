@@ -4,6 +4,7 @@ private enum SettingsTab: Int, CaseIterable {
     case general
     case keyboardShortcuts
     case agentProfiles
+    case accounts
     case about
 
     var title: String {
@@ -11,6 +12,7 @@ private enum SettingsTab: Int, CaseIterable {
         case .general: return "General"
         case .keyboardShortcuts: return "Keyboard Shortcuts"
         case .agentProfiles: return "Agent Profiles"
+        case .accounts: return "Accounts"
         case .about: return "About"
         }
     }
@@ -20,6 +22,7 @@ private enum SettingsTab: Int, CaseIterable {
         case .general: return "gearshape"
         case .keyboardShortcuts: return "keyboard"
         case .agentProfiles: return "cpu"
+        case .accounts: return "person.2"
         case .about: return "info.circle"
         }
     }
@@ -64,6 +67,11 @@ final class SettingsViewController: NSViewController {
     private var prefixKeyField: NSTextField?
     private var prefixTimeoutField: NSTextField?
     private var resizeStepField: NSTextField?
+    /// Handlers for the Accounts tab's buttons, keyed by button tag: each row
+    /// acts on its own list and account, which a shared selector cannot carry.
+    /// Refilled on every rebuild of that tab.
+    private var accountActions: [Int: () -> Void] = [:]
+    private static let accountsObserverId = "SettingsViewController.accounts"
 
     init(
         themeManager: ThemeManager,
@@ -241,6 +249,39 @@ final class SettingsViewController: NSViewController {
         apply(theme: currentTheme)
     }
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // The controller keeps the handler by id; capturing weakly lets this
+        // screen go away without unregistering, which a deinit could not do.
+        AccountsController.shared.addObserver(id: Self.accountsObserverId) { [weak self] _ in
+            guard let self else { return }
+            // A snapshot can change from inside a button's own action; let
+            // that event finish before the button is torn down.
+            DispatchQueue.main.async { [weak self] in
+                self?.accountsSnapshotDidChange()
+            }
+        }
+    }
+
+    private func accountsSnapshotDidChange() {
+        guard isViewLoaded, currentTab == .accounts else { return }
+        // Usage refreshes arrive while the user reads further down; keep
+        // their place instead of jumping back to the top.
+        let clipView = scrollView.contentView
+        let origin = clipView.bounds.origin
+        rebuildCurrentTab()
+        let restored = clipView.constrainBoundsRect(
+            NSRect(origin: origin, size: clipView.bounds.size)
+        ).origin
+        clipView.scroll(to: restored)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    /// Opens the Accounts tab, e.g. from the status bar's usage readout.
+    func showAccountsTab() {
+        switchTab(to: .accounts)
+    }
+
     func apply(theme: AppTheme) {
         currentTheme = theme
         guard isViewLoaded else { return }
@@ -277,12 +318,22 @@ final class SettingsViewController: NSViewController {
 
     @objc private func tabClicked(_ sender: NSButton) {
         guard let tab = SettingsTab(rawValue: sender.tag) else { return }
-        view.window?.endEditing(for: nil)
+        switchTab(to: tab)
+    }
+
+    private func switchTab(to tab: SettingsTab) {
+        if isViewLoaded {
+            view.window?.endEditing(for: nil)
+        }
         currentTab = tab
         for (item, button) in tabButtons {
             button.isActive = item == tab
         }
         rebuildCurrentTab()
+        if tab == .accounts {
+            // Throttled by the controller, so flipping tabs does not refetch.
+            AccountsController.shared.refresh()
+        }
     }
 
     private func clearContent() {
@@ -307,6 +358,8 @@ final class SettingsViewController: NSViewController {
             buildKeyboardShortcutsTab()
         case .agentProfiles:
             buildAgentProfilesTab()
+        case .accounts:
+            buildAccountsTab()
         case .about:
             buildAboutTab()
         }
@@ -1404,6 +1457,441 @@ final class SettingsViewController: NSViewController {
         ])
 
         return card
+    }
+
+    // MARK: - Accounts
+
+    private func buildAccountsTab() {
+        accountActions.removeAll()
+        let snapshot = AccountsController.shared.snapshot
+
+        addTabHeader(
+            title: "Accounts",
+            subtitle: "Sign in to several Claude and Codex accounts. omp balances across its accounts; Claude Code and the Codex CLI use the one you choose."
+        )
+
+        let refreshRow = NSStackView()
+        refreshRow.orientation = .horizontal
+        refreshRow.alignment = .centerY
+        refreshRow.spacing = 10
+        refreshRow.translatesAutoresizingMaskIntoConstraints = false
+        let refreshButton = makeAccountButton(title: "Refresh") {
+            AccountsController.shared.refresh(force: true)
+        }
+        refreshButton.isEnabled = !snapshot.isRefreshing
+        refreshRow.addArrangedSubview(refreshButton)
+        let refreshLabel = NSTextField(labelWithString: Self.accountsRefreshText(snapshot))
+        refreshLabel.font = RetroFont.body(11)
+        refreshLabel.textColor = currentTheme.colors.textMuted
+        refreshRow.addArrangedSubview(refreshLabel)
+        addContentSubview(refreshRow, widthInset: -36)
+
+        for list in AccountListID.all {
+            addAccountListCard(list, snapshot: snapshot)
+        }
+    }
+
+    /// "Updated 4m ago": recomputed on every rebuild, which each refresh
+    /// triggers, so it never needs a timer of its own.
+    private static func accountsRefreshText(_ snapshot: AccountsSnapshot, now: Date = Date()) -> String {
+        if snapshot.isRefreshing { return "Updating…" }
+        guard let lastRefresh = snapshot.lastRefresh else { return "Not updated yet" }
+        let seconds = max(0, now.timeIntervalSince(lastRefresh))
+        if seconds < 60 { return "Updated just now" }
+        let minutes = Int(seconds / 60)
+        if minutes < 60 { return "Updated \(minutes)m ago" }
+        let hours = minutes / 60
+        if hours < 24 { return "Updated \(hours)h ago" }
+        return "Updated \(hours / 24)d ago"
+    }
+
+    private func addAccountListCard(_ listID: AccountListID, snapshot: AccountsSnapshot) {
+        let (card, stack) = makeSectionCard(
+            title: "\(listID.provider.displayName) · \(listID.tool.displayName)",
+            subtitle: Self.accountListSubtitle(listID.tool)
+        )
+
+        if let error = snapshot.errors[listID] {
+            let row = makeAccountErrorRow(error, in: listID)
+            stack.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+        }
+
+        let list = snapshot.lists[listID]
+        if let list, let reason = list.unavailableReason {
+            addAccountsNote(reason, to: stack)
+        } else if let list {
+            var rows = [makeDefaultAccountRow(list)]
+            rows += list.accounts.map { makeAccountRow($0, in: list, snapshot: snapshot) }
+            addSettingRows(rows, to: stack)
+        } else {
+            addAccountsNote(snapshot.isRefreshing ? "Loading accounts…" : "Accounts not loaded yet.", to: stack)
+        }
+
+        addAccountListFooter(listID, list: list, snapshot: snapshot, to: stack)
+        addContentSubview(card, widthInset: -36)
+    }
+
+    private static func accountListSubtitle(_ tool: AccountTool) -> String {
+        switch tool {
+        case .omp:
+            return "omp uses every account and fails over when one runs out. New omp panes try the preferred account first."
+        case .claudeCode:
+            return "Choosing an account signs Claude Code in with it on this Mac; running claude sessions switch too. System default is the login Claude Code had before."
+        case .codexCLI:
+            return "New codex panes use the chosen account; running panes keep theirs. History, config and skills stay shared."
+        }
+    }
+
+    private func addAccountsNote(_ text: String, to stack: NSStackView) {
+        let label = NSTextField(wrappingLabelWithString: text)
+        label.font = RetroFont.body(11)
+        label.textColor = currentTheme.colors.textMuted
+        label.maximumNumberOfLines = 0
+        stack.addArrangedSubview(label)
+        label.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+    }
+
+    /// "Automatic" for omp, "System default" for the CLIs: the choice that
+    /// leaves the tool to its own login.
+    private func makeDefaultAccountRow(_ list: AccountList) -> NSView {
+        let isSelected = list.selectedAccountId == nil
+        let title: String
+        let detail: String
+        var problem: String?
+        if list.id.tool == .omp {
+            title = "Automatic"
+            detail = "Balance by usage"
+        } else {
+            title = "System default"
+            if let systemDefault = list.systemDefault {
+                let email = systemDefault.identity.email
+                detail = ([email].filter { !$0.isEmpty } + Self.accountDetailParts(systemDefault))
+                    .joined(separator: "  ·  ")
+                problem = systemDefault.problem
+            } else {
+                detail = "Not signed in"
+            }
+        }
+
+        var buttons: [NSButton] = []
+        if !isSelected {
+            let listID = list.id
+            buttons.append(makeAccountButton(title: listID.tool == .omp ? "Automatic" : "Use") {
+                AccountsController.shared.select(accountId: nil, in: listID)
+            })
+        }
+        return makeAccountEntryRow(
+            title: title,
+            isSelected: isSelected,
+            badge: isSelected ? "Active" : nil,
+            detail: detail,
+            problem: problem,
+            buttons: buttons
+        )
+    }
+
+    private func makeAccountRow(_ account: AccountRow, in list: AccountList, snapshot: AccountsSnapshot) -> NSView {
+        let listID = list.id
+        let accountId = account.id
+        let isSelected = list.selectedAccountId == accountId
+
+        var buttons: [NSButton] = []
+        if !isSelected {
+            buttons.append(makeAccountButton(title: listID.tool == .omp ? "Prefer" : "Use") {
+                AccountsController.shared.select(accountId: accountId, in: listID)
+            })
+        }
+        let reauthenticate = makeAccountButton(title: "Re-authenticate") {
+            AccountsController.shared.reauthenticate(accountId: accountId, in: listID)
+        }
+        // One browser sign-in at a time, across every list.
+        reauthenticate.isEnabled = snapshot.pendingLogin == nil
+        buttons.append(reauthenticate)
+        buttons.append(makeAccountButton(title: "Remove") { [weak self] in
+            self?.confirmRemoveAccount(account, from: listID)
+        })
+
+        let detailParts = Self.accountDetailParts(account)
+        return makeAccountEntryRow(
+            title: account.identity.email,
+            isSelected: isSelected,
+            badge: isSelected ? (listID.tool == .omp ? "Preferred" : "Active") : nil,
+            detail: detailParts.joined(separator: "  ·  "),
+            problem: account.problem,
+            buttons: buttons
+        )
+    }
+
+    /// Organization, plan and usage. Windows are joined with a wider gap than
+    /// the " · " inside each one, so "5h 9% · 3h 54m" still reads as a unit.
+    private static func accountDetailParts(_ account: AccountRow) -> [String] {
+        // omp names a personal ChatGPT workspace after its plan, so org and
+        // plan can be the same word; say it once.
+        var parts: [String] = []
+        for part in [account.organizationName, account.plan].compactMap({ $0 })
+        where !part.isEmpty && !parts.contains(where: { $0.caseInsensitiveCompare(part) == .orderedSame }) {
+            parts.append(part)
+        }
+        if let usage = account.usage, !usage.windows.isEmpty {
+            parts.append(usage.windows.map { UsageFormat.window($0) }.joined(separator: "  ·  "))
+        } else {
+            parts.append("No usage data")
+        }
+        return parts
+    }
+
+    /// Lamp, display-face title with an optional badge, a wrapping detail
+    /// line, and the row's buttons pinned trailing.
+    private func makeAccountEntryRow(
+        title: String,
+        isSelected: Bool,
+        badge: String?,
+        detail: String,
+        problem: String?,
+        buttons: [NSButton]
+    ) -> NSView {
+        let colors = currentTheme.colors
+        let row = NSView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let lamp = NSView()
+        lamp.wantsLayer = true
+        lamp.layer?.cornerRadius = 4
+        RetroLamp.light(lamp, color: isSelected ? colors.accent : colors.borderStrong, lit: isSelected)
+        lamp.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(lamp)
+
+        let textStack = NSStackView()
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 3
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        textStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        row.addSubview(textStack)
+
+        let titleRow = NSStackView()
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 6
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.setRetroText(title, color: colors.textPrimary)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleRow.addArrangedSubview(titleLabel)
+        if let badge {
+            titleRow.addArrangedSubview(makeAccountBadge(badge))
+        }
+        textStack.addArrangedSubview(titleRow)
+        titleRow.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor).isActive = true
+
+        let detailLabel = NSTextField(wrappingLabelWithString: detail)
+        detailLabel.font = RetroFont.body(11)
+        detailLabel.textColor = colors.textMuted
+        detailLabel.maximumNumberOfLines = 0
+        textStack.addArrangedSubview(detailLabel)
+        detailLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
+
+        if let problem, !problem.isEmpty {
+            let problemLabel = NSTextField(wrappingLabelWithString: problem)
+            problemLabel.font = RetroFont.body(11)
+            problemLabel.textColor = colors.danger
+            problemLabel.maximumNumberOfLines = 0
+            textStack.addArrangedSubview(problemLabel)
+            problemLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
+        }
+
+        NSLayoutConstraint.activate([
+            lamp.widthAnchor.constraint(equalToConstant: 8),
+            lamp.heightAnchor.constraint(equalToConstant: 8),
+            lamp.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            lamp.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
+
+            textStack.leadingAnchor.constraint(equalTo: lamp.trailingAnchor, constant: 10),
+            textStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 6),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: textStack.bottomAnchor, constant: 6),
+        ])
+
+        if buttons.isEmpty {
+            textStack.trailingAnchor.constraint(equalTo: row.trailingAnchor).isActive = true
+        } else {
+            // The text column takes the slack: buttons keep their natural
+            // width and the stack sits flush against the trailing edge.
+            for button in buttons {
+                button.setContentHuggingPriority(.required, for: .horizontal)
+            }
+            let buttonStack = NSStackView(views: buttons)
+            buttonStack.orientation = .horizontal
+            buttonStack.alignment = .centerY
+            buttonStack.spacing = 6
+            buttonStack.translatesAutoresizingMaskIntoConstraints = false
+            buttonStack.setHuggingPriority(.required, for: .horizontal)
+            buttonStack.setContentHuggingPriority(.required, for: .horizontal)
+            buttonStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+            row.addSubview(buttonStack)
+            NSLayoutConstraint.activate([
+                buttonStack.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                buttonStack.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+                buttonStack.leadingAnchor.constraint(equalTo: textStack.trailingAnchor, constant: 12),
+                buttonStack.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 4),
+                row.bottomAnchor.constraint(greaterThanOrEqualTo: buttonStack.bottomAnchor, constant: 4),
+            ])
+        }
+
+        // Hug the content, as `makeSettingRow` does, so the tab's trailing
+        // spacer absorbs the slack instead of a stretched row.
+        let hugContent = row.heightAnchor.constraint(equalToConstant: 30)
+        hugContent.priority = .defaultLow
+        hugContent.isActive = true
+        return row
+    }
+
+    /// Same chip as the "settings.json" badge on agent cards.
+    private func makeAccountBadge(_ text: String) -> NSView {
+        let accent = currentTheme.colors.accent
+        let badge = NSTextField(labelWithString: text)
+        badge.alignment = .center
+        badge.setRetroText(text, color: accent)
+        badge.wantsLayer = true
+        badge.layer?.cornerRadius = Retro.cornerRadius
+        badge.layer?.borderWidth = Retro.hairline
+        badge.layer?.borderColor = accent.cgColor
+        badge.layer?.backgroundColor = accent.withAlphaComponent(0.14).cgColor
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badge.widthAnchor.constraint(
+            equalToConstant: badge.intrinsicContentSize.width + 12
+        ).isActive = true
+        badge.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        return badge
+    }
+
+    /// The failed action's message, tinted like a config error in `makeIssueRow`.
+    private func makeAccountErrorRow(_ message: String, in listID: AccountListID) -> NSView {
+        let tint = currentTheme.colors.danger
+        let row = NSView()
+        row.wantsLayer = true
+        row.layer?.cornerRadius = Retro.cornerRadius
+        row.layer?.borderWidth = Retro.hairline
+        row.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
+        row.layer?.borderColor = tint.withAlphaComponent(0.45).cgColor
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = RetroFont.body(11)
+        label.textColor = currentTheme.colors.textPrimary
+        label.maximumNumberOfLines = 0
+        label.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(label)
+
+        let dismiss = makeAccountButton(title: "Dismiss") {
+            AccountsController.shared.dismissError(in: listID)
+        }
+        dismiss.setContentCompressionResistancePriority(.required, for: .horizontal)
+        row.addSubview(dismiss)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 10),
+            label.topAnchor.constraint(equalTo: row.topAnchor, constant: 7),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: label.bottomAnchor, constant: 7),
+            dismiss.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
+            dismiss.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -6),
+            dismiss.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            dismiss.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 4),
+            row.bottomAnchor.constraint(greaterThanOrEqualTo: dismiss.bottomAnchor, constant: 4),
+        ])
+        let hugContent = row.heightAnchor.constraint(equalToConstant: 30)
+        hugContent.priority = .defaultLow
+        hugContent.isActive = true
+        return row
+    }
+
+    /// The running sign-in for this list, or the button that starts one.
+    private func addAccountListFooter(
+        _ listID: AccountListID,
+        list: AccountList?,
+        snapshot: AccountsSnapshot,
+        to stack: NSStackView
+    ) {
+        let buttonRow = NSStackView()
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.spacing = 8
+
+        if let pending = snapshot.pendingLogin, pending.list == listID {
+            let email = pending.accountId.flatMap { id in
+                list?.accounts.first { $0.id == id }?.identity.email
+            }
+            let text = email.map { "Waiting for sign-in in your browser to re-authenticate \($0)…" }
+                ?? "Waiting for sign-in in your browser…"
+            addAccountsNote(text, to: stack)
+
+            if let url = pending.signInURL {
+                buttonRow.addArrangedSubview(makeAccountButton(title: "Open Sign-in Page") {
+                    _ = NSWorkspace.shared.open(url)
+                })
+            }
+            buttonRow.addArrangedSubview(makeAccountButton(title: "Cancel") {
+                AccountsController.shared.cancelLogin()
+            })
+        } else {
+            let add = makeAccountButton(title: "Add Account", kind: .prominent) {
+                AccountsController.shared.addAccount(to: listID)
+            }
+            // One browser sign-in at a time, across every list.
+            add.isEnabled = snapshot.pendingLogin == nil
+            buttonRow.addArrangedSubview(add)
+        }
+        stack.addArrangedSubview(buttonRow)
+    }
+
+    private static func accountRemovalExplanation(_ tool: AccountTool) -> String {
+        switch tool {
+        case .omp:
+            return "omp signs this account out on this Mac."
+        case .claudeCode:
+            return "Soprano forgets this login. If it is active, Claude Code goes back to the System default."
+        case .codexCLI:
+            return "Soprano deletes this account's sign-in. If it is active, new codex panes use the System default."
+        }
+    }
+
+    private func confirmRemoveAccount(_ account: AccountRow, from listID: AccountListID) {
+        let alert = NSAlert()
+        alert.messageText = "Remove \(account.identity.email)?"
+        alert.informativeText = Self.accountRemovalExplanation(listID.tool)
+        alert.addButton(withTitle: "Remove").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+
+        let accountId = account.id
+        guard let window = view.window else {
+            if alert.runModal() == .alertFirstButtonReturn {
+                AccountsController.shared.remove(accountId: accountId, from: listID)
+            }
+            return
+        }
+        alert.beginSheetModal(for: window) { response in
+            guard response == .alertFirstButtonReturn else { return }
+            AccountsController.shared.remove(accountId: accountId, from: listID)
+        }
+    }
+
+    private func makeAccountButton(
+        title: String,
+        kind: RetroButton.Kind = .standard,
+        handler: @escaping () -> Void
+    ) -> NSButton {
+        let button = makeActionButton(title: title, action: #selector(accountButtonClicked(_:)), kind: kind)
+        let tag = accountActions.count + 1
+        button.tag = tag
+        accountActions[tag] = handler
+        return button
+    }
+
+    @objc private func accountButtonClicked(_ sender: NSButton) {
+        accountActions[sender.tag]?()
     }
 
     private func buildAboutTab() {

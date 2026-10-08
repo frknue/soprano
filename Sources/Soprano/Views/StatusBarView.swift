@@ -1,13 +1,16 @@
 import AppKit
 
-/// Bottom status bar showing keybinding mode, pane list, notification count,
-/// and the mission clock.
-final class StatusBarView: NSView {
+/// Bottom status bar showing keybinding mode, pane list, account usage,
+/// notification count, and the mission clock.
+final class StatusBarView: NSView, NSPopoverDelegate {
     /// A 28 pt content strip under the double rule along the top edge.
     static let height: CGFloat = 28 + Retro.doubleRule
 
     /// When the mission clock reads T+00:00:00.
     private static let missionStart = NSRunningApplication.current.launchDate ?? Date()
+    private static let accountsObserverId = "StatusBarView"
+    /// Gap between the usage segment and the pane counts while it is shown.
+    private static let usageGap: CGFloat = 16
 
     let agentManager: AgentManager
     let themeManager: ThemeManager
@@ -19,6 +22,20 @@ final class StatusBarView: NSView {
     private var modeLabel: NSTextField!
     private var locationLabel: NSTextField!
     private var paneCountLabel: NSTextField!
+    private var usageLabel: NSTextField!
+    private var usageGapConstraint: NSLayoutConstraint!
+    /// Collapses the usage segment to nothing when no provider has usage.
+    private var usageCollapsedConstraint: NSLayoutConstraint!
+    /// Countdowns in the usage segment are in minutes; the clock tick
+    /// re-renders it when this minute number changes.
+    private var usageRenderedMinute = 0
+    private var usagePopover: NSPopover?
+    /// When the usage popover last closed. A transient popover closes on the
+    /// mouse-down of the very click that would toggle it, so a click right
+    /// after a close is that toggle and must not reopen it.
+    private var usagePopoverClosedAt: Date?
+    /// Opens Settings on the Accounts tab.
+    var onManageAccounts: (() -> Void)?
     private var clockSeparatorLabel: NSTextField!
     private var clockLabel: NSTextField!
     private var mode: KeybindingState = .normal
@@ -52,7 +69,16 @@ final class StatusBarView: NSView {
         super.viewDidMoveToWindow()
         clockTimer?.invalidate()
         clockTimer = nil
-        guard window != nil else { return }
+        AccountsController.shared.removeObserver(id: Self.accountsObserverId)
+        guard window != nil else {
+            usagePopover?.close()
+            return
+        }
+        AccountsController.shared.addObserver(id: Self.accountsObserverId) { [weak self] _ in
+            self?.refreshUsage()
+        }
+        AccountsController.shared.refresh()
+        refreshUsage()
         updateClock()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
             guard let self else {
@@ -60,7 +86,7 @@ final class StatusBarView: NSView {
                 return
             }
             MainActor.assumeIsolated {
-                self.updateClock()
+                self.tick()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -96,6 +122,19 @@ final class StatusBarView: NSView {
         paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(paneCountLabel)
 
+        // Account usage: the tightest limit per provider; click for details
+        usageLabel = NSTextField(labelWithString: "")
+        usageLabel.identifier = NSUserInterfaceItemIdentifier("status-usage")
+        usageLabel.toolTip = "Account usage — click for details"
+        usageLabel.isHidden = true
+        usageLabel.setContentHuggingPriority(.required, for: .horizontal)
+        usageLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        usageLabel.translatesAutoresizingMaskIntoConstraints = false
+        usageLabel.addGestureRecognizer(
+            NSClickGestureRecognizer(target: self, action: #selector(usageClicked))
+        )
+        addSubview(usageLabel)
+
         clockSeparatorLabel = NSTextField(labelWithString: "▪")
         clockSeparatorLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(clockSeparatorLabel)
@@ -106,6 +145,8 @@ final class StatusBarView: NSView {
 
         let content = NSLayoutGuide()
         addLayoutGuide(content)
+        usageGapConstraint = usageLabel.trailingAnchor.constraint(equalTo: paneCountLabel.leadingAnchor)
+        usageCollapsedConstraint = usageLabel.widthAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
             topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -135,9 +176,13 @@ final class StatusBarView: NSView {
             locationLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: 14),
             locationLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             locationLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: paneCountLabel.leadingAnchor,
+                lessThanOrEqualTo: usageLabel.leadingAnchor,
                 constant: -16
             ),
+
+            usageLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            usageGapConstraint,
+            usageCollapsedConstraint,
 
             paneCountLabel.trailingAnchor.constraint(equalTo: clockSeparatorLabel.leadingAnchor, constant: -8),
             paneCountLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
@@ -165,6 +210,7 @@ final class StatusBarView: NSView {
         applyMode(theme: theme)
         updateClock()
         refresh()
+        refreshUsage()
     }
 
     private func applyMode(theme: AppTheme) {
@@ -201,6 +247,79 @@ final class StatusBarView: NSView {
             Self.missionElapsedText(Date().timeIntervalSince(Self.missionStart)),
             color: themeManager.currentTheme.colors.textMuted
         )
+    }
+
+    private func tick() {
+        updateClock()
+        if Self.minuteNumber(Date()) != usageRenderedMinute {
+            refreshUsage()
+        }
+    }
+
+    private static func minuteNumber(_ date: Date) -> Int {
+        Int(date.timeIntervalSinceReferenceDate / 60)
+    }
+
+    /// `Claude 9% · 4h 12m  Codex 15% · 5d 8h`: each provider's tightest
+    /// window. Nil when no provider has usage yet.
+    private func usageText(theme: AppTheme, now: Date) -> NSAttributedString? {
+        let colors = theme.colors
+        let snapshot = AccountsController.shared.snapshot
+        let text = NSMutableAttributedString()
+        for provider in AccountProvider.allCases {
+            guard let window = snapshot.headline(for: provider)?.usage.tightest else { continue }
+            if text.length > 0 {
+                text.append(RetroText.display("  ", color: colors.textMuted))
+            }
+            text.append(RetroText.display("\(provider.displayName) ", color: colors.textMuted))
+            text.append(RetroText.display(
+                UsageFormat.percent(window.usedFraction),
+                color: UsageSeverity.color(for: window.usedFraction, colors: colors)
+            ))
+            if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
+                text.append(RetroText.display(" · \(reset)", color: colors.textMuted))
+            }
+        }
+        return text.length > 0 ? text : nil
+    }
+
+    private func refreshUsage() {
+        let now = Date()
+        usageRenderedMinute = Self.minuteNumber(now)
+        let text = usageText(theme: themeManager.currentTheme, now: now)
+        usageLabel.attributedStringValue = text ?? NSAttributedString(string: "")
+        usageLabel.isHidden = text == nil
+        usageCollapsedConstraint.isActive = text == nil
+        usageGapConstraint.constant = text == nil ? 0 : -Self.usageGap
+    }
+
+    @objc private func usageClicked() {
+        if let usagePopover, usagePopover.isShown {
+            usagePopover.performClose(nil)
+            return
+        }
+        if let closedAt = usagePopoverClosedAt, Date().timeIntervalSince(closedAt) < 0.3 {
+            return
+        }
+        let controller = AccountUsagePopoverViewController(themeManager: themeManager)
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = false
+        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.contentViewController = controller
+        popover.delegate = self
+        controller.onManageAccounts = { [weak self, weak popover] in
+            popover?.performClose(nil)
+            self?.onManageAccounts?()
+        }
+        usagePopover = popover
+        AccountsController.shared.refresh()
+        popover.show(relativeTo: usageLabel.bounds, of: usageLabel, preferredEdge: .maxY)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        usagePopover = nil
+        usagePopoverClosedAt = Date()
     }
 
     private func handleAgentChange(_ change: AgentManagerChange) {

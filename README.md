@@ -619,11 +619,41 @@ Integrations explicitly enable key passthrough while active:
 Without an active passthrough claim, Soprano handles `⌃H/J/K/L` directly so pane
 navigation always has a working fallback.
 
+## Accounts
+
+**Settings → Accounts** (or `⌘P` → *Accounts*) keeps several Claude and Codex logins
+per tool, in the spirit of Orca's account switcher. Each list has **Add Account**
+(runs the tool's own sign-in in the background and opens your browser — one sign-in at a
+time), **Re-authenticate**, and **Remove**.
+
+| List | Where a login lives | Choosing one |
+|------|---------------------|--------------|
+| **omp** (Claude, Codex) | omp's own store (`omp login anthropic` / `openai-codex`); omp balances across all of them and fails over when one runs out | **Prefer** makes new omp panes try that account first, through an `auth.accountPolicies` overlay Soprano passes with `--config`. **Automatic** leaves it to omp. |
+| **Claude Code** | a `claude auth login` that Soprano keeps in its own Keychain item | **Use** signs `claude` in with it for the whole Mac (Keychain item `Claude Code-credentials` and `~/.claude.json`); running sessions switch too. **System default** puts Claude Code's own login back. |
+| **Codex CLI** | its own `CODEX_HOME` under `~/Library/Application Support/com.soprano.app/codex-accounts/` | New `codex` panes start in that home; running panes keep theirs. Everything except `auth.json` links back to `~/.codex`, so sessions, config, and skills stay shared. |
+
+Usage comes from `omp usage --json` for every account omp knows, and from the
+provider's own usage endpoint otherwise. It refreshes every five minutes while Soprano is
+in front. The status bar shows each provider's tightest limit, e.g.
+`Claude 18% · 3h 5m` — the preferred omp account's, else the one with the most room —
+and clicking it lists every account's 5-hour and weekly windows.
+
+- Claude Code tokens rotate when Claude Code refreshes them; Soprano copies the live
+  tokens back to their account before every switch, so a stored login never goes stale.
+  Signing `claude` in to another account in a terminal makes that login the new System
+  default.
+- Switch Claude Code accounts in one app only: Orca and Soprano both rewrite the same
+  Keychain item.
+- A preferred omp account applies to omp panes Soprano starts, from their next new
+  session; `omp` typed into a plain terminal does not load the overlay. Those panes
+  refuse `/logout` for the preferred account — choose **Automatic** first, or remove it
+  here.
+
 ## Settings
 
-`⌘,` opens a four-tab settings screen: **General** (theme, window bar, CRT effect,
+`⌘,` opens a five-tab settings screen: **General** (theme, window bar, CRT effect,
 restore-last-session, project directories, notifications), **Keyboard Shortcuts**,
-**Agent Profiles**, and **About**.
+**Agent Profiles**, **Accounts**, and **About**.
 
 Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
 the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking

@@ -119,6 +119,9 @@ final class MainContentViewController: NSViewController {
         statusBarView = StatusBarView(agentManager: agentManager, themeManager: themeManager)
         statusBarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(statusBarView)
+        statusBarView.onManageAccounts = { [weak self] in
+            self?.showAccountsSettings()
+        }
         splitTreeView.onCopyModeStateChanged = { [weak self] state in
             self?.setKeybindingMode(state)
         }
@@ -430,6 +433,16 @@ final class MainContentViewController: NSViewController {
             settingsContainerView.isHidden = false
         }
         view.window?.makeFirstResponder(settingsCloseButton)
+    }
+
+    /// Opens Settings on the Accounts tab, as the status bar's usage popover
+    /// asks for.
+    func showAccountsSettings() {
+        showSettings(
+            settings: ConfigStore.shared.settings,
+            keybindingConfig: ConfigStore.shared.keybindings
+        )
+        settingsViewController?.showAccountsTab()
     }
 
     /// Pushes new values into the settings screen while it is on screen, so a

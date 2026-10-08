@@ -10,6 +10,15 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- **Settings ▸ Accounts** (also `⌘P` → *Accounts*) keeps several Claude and Codex
+  logins, like Orca: **Add Account** signs in through the browser, with
+  **Re-authenticate** and **Remove**. omp keeps every account and balances them — mark
+  one **Preferred** and new omp panes try it first, falling back when it runs out.
+  Choosing a **Claude Code** account signs `claude` in with it on this Mac (**System
+  default** brings its own login back); a chosen **Codex CLI** account gives new `codex`
+  panes their own `CODEX_HOME` while sessions, config, and skills stay shared.
+- The status bar shows each provider's tightest usage limit, e.g. `Claude 18% · 3h 5m`;
+  click it for every account's 5-hour and weekly usage and **Manage Accounts…**.
 - A right sidebar with Orca's file **Explorer** for the focused pane's project: a
   lazily loaded tree with git status letters, ignored-file dimming, a **Find files**
   filter, inline new file/folder and rename, Trash-backed delete with undo, drag and
