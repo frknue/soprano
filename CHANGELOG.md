@@ -22,8 +22,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - Window tabs show a compact badge counting open agents, including hidden tabs and
   depth layers, with status colors and a breakdown on hover.
 - Windows now appear as numbered tabs above the terminals, with the active tab
-  highlighted, clickable switching, a **+** button, and horizontal scrolling when
-  the row fills up. The tabs remain visible with the sidebar or macOS window bar hidden.
+  highlighted, clickable switching, a **+** button, and trackpad or scroll-wheel
+  scrolling (no scrollbar) when the row fills up. The tabs remain visible with the
+  sidebar or macOS window bar hidden.
 - Named live sessions group windows: create one with `Ctrl+A` then `Shift+C`,
   switch with `Ctrl+A` then `S` or the sidebar selector, and use `Ctrl+A` then `C`
   to create windows inside it. Window navigation stays within the current session,

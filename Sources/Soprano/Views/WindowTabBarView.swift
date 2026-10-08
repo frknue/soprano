@@ -25,10 +25,9 @@ final class WindowTabBarView: NSView {
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.hasHorizontalScroller = true
+        // The strip is too short for a scroller to be useful; it still scrolls by trackpad/wheel.
+        scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
         scrollView.horizontalScrollElasticity = .allowed
         scrollView.verticalScrollElasticity = .none
         scrollView.documentView = tabContainer
