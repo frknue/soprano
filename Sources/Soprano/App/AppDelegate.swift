@@ -17,6 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // a setting, so the whole launch sees the user's configuration.
         let configStore = ConfigStore.shared
         configStore.start()
+        // Before any pane starts: omp panes load the account overlay, codex
+        // panes need the chosen CODEX_HOME.
+        AccountsController.shared.start()
 
         let settings = configStore.settings
         let themeManager = ThemeManager(themeId: settings.themeId)

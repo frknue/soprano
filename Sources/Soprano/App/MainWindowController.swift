@@ -582,6 +582,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "open-accounts",
+                icon: "person.2",
+                label: "Accounts",
+                description: "Claude and Codex logins and their usage",
+                shortcut: nil,
+                searchText: "account login usage claude codex omp switch",
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.mainContentVC?.showAccountsSettings()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "open-settings-json",
                 icon: "curlybraces",
                 label: "Open settings.json",

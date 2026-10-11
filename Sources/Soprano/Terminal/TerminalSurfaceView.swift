@@ -18,7 +18,8 @@ struct TerminalConfig {
         paneId: String,
         tabId: String,
         conversation: AgentConversation? = nil,
-        loginShell: String = DefaultAgents.terminal.command
+        loginShell: String = DefaultAgents.terminal.command,
+        accounts: AccountLaunchState = .shared
     ) -> TerminalConfig {
         var config = TerminalConfig()
         let conversation = conversation.flatMap {
@@ -71,6 +72,11 @@ struct TerminalConfig {
             break
         }
 
+        // The chosen account: CODEX_HOME for codex, the preference overlay for omp.
+        let accountAdjustments = accounts.adjustments(forProfile: profile.id)
+        arguments.append(contentsOf: accountAdjustments.arguments)
+        config.env.merge(accountAdjustments.environment) { _, chosen in chosen }
+
         if let launchScript = profile.launchScript, !launchScript.isEmpty {
             config.launchScript = launchScript
             config.command = nil
@@ -85,12 +91,16 @@ struct TerminalConfig {
             // shell so the pane stays a usable terminal instead of a dead surface.
             // The INT trap stops an interactive zsh from abandoning the rest of the
             // line when Ctrl+C kills the agent; children still get default SIGINT.
-            let script = [
-                "trap true INT",
+            // Account variables are exported again after the rc files ran, so a
+            // profile that sets, say, CODEX_HOME cannot override the chosen account.
+            let accountExports = accountAdjustments.environment.keys.sorted().map { key in
+                "export \(key)=\(shellQuoted(accountAdjustments.environment[key] ?? ""))"
+            }
+            let script = (["trap true INT"] + accountExports + [
                 fullCommand,
                 "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped",
                 "exec \(shellQuoted(loginShell)) -l",
-            ].joined(separator: "; ")
+            ]).joined(separator: "; ")
             config.command = fullCommand.isEmpty ? nil : [
                 loginShell, "-lic", script
             ].map(shellQuoted).joined(separator: " ")
