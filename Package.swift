@@ -32,6 +32,7 @@ let package = Package(
                 .copy("Resources/SopranoOmpAmbient.js"),
                 .copy("Resources/DepartureMono-Regular.woff2"),
                 .copy("Resources/SopranoCRT.glsl"),
+                .copy("Resources/SopranoZsh"),
             ],
             linkerSettings: [
                 .unsafeFlags(["-L\(Context.packageDirectory)/lib"]),

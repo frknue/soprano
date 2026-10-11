@@ -96,6 +96,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- Pressing `Ctrl+C` again while an agent shuts down no longer leaves its pane at a bare
+  zsh prompt: the shell the pane falls back to finishes loading your startup files
+  (Oh My Zsh, Powerlevel10k, aliases) before `Ctrl+C` takes effect again.
 - The **×** in a pane header closes only that pane's active pane tab, so a split
   sibling (and the agent running in it) stays open; closing the last pane tab closes
   the pane.

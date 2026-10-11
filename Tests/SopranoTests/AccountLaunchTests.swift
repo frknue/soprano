@@ -58,7 +58,7 @@ struct AccountLaunchTests {
 
         let command = try #require(config.command)
         #expect(!command.contains("--config"))
-        #expect(!command.contains("export "))
+        #expect(!command.contains("CODEX_HOME"))
         #expect(config.env["CODEX_HOME"] == nil)
     }
 }

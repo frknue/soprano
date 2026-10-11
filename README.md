@@ -325,6 +325,8 @@ and relaunches Codex, Claude Code, OpenCode, and omp into their recorded convers
 launches use your interactive login shell, so executables added to its `PATH` remain
 available when Soprano reopens a workspace. When an agent exits (for example after
 `Ctrl+C`), its pane continues in that login shell and the tab becomes a plain terminal.
+A zsh fallback ignores `Ctrl+C` while its startup files run, so an extra press while
+the agent shuts down cannot leave the pane without your theme and plugins.
 Agents wait for your next input; closing the app does not keep their processes working
 in the background.
 

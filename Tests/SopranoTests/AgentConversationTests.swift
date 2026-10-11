@@ -405,6 +405,32 @@ struct AgentConversationTests {
         #expect(run.lines == ["agent-ran", "reported agent-event stopped", "fallback-shell"])
     }
 
+    @Test func aCtrlCWhileTheFallbackShellStartsLeavesItsStartupFilesIntact() throws {
+        let config = TerminalConfig.forAgent(
+            DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2", loginShell: "/bin/zsh"
+        )
+        let run = try runAgentLaunchCommand(
+            config,
+            stubs: ["omp": "exit 0"],
+            // Only the fallback shell runs without a -c command. It takes a
+            // Ctrl+C halfway through .zshrc and reports at its first prompt.
+            zshrc: """
+            if [[ -z $ZSH_EXECUTION_STRING ]]; then
+                kill -INT $$
+                echo rc-finished
+                _report() { [[ $ZDOTDIR == $HOME ]] && echo zdotdir-restored; trap; exit }
+                precmd_functions+=(_report)
+            fi
+            """,
+            inTerminal: true
+        )
+        // `script` echoes the ^D it forwards from empty stdin ahead of the output.
+        #expect(run.lines.contains { $0.hasSuffix("rc-finished") })
+        #expect(run.lines.contains("zdotdir-restored"))
+        // Ctrl+C works again once the prompt is up.
+        #expect(!run.lines.contains { $0.contains("INT") })
+    }
+
     @Test func malformedAndUnrelatedEventIDsCannotBecomeConversationSelectors() {
         for payload in [#"{"id":"permission-123"}"#, #"{"session_id":"--last"}"#, #"{"session_id":""}"#, #"{"session_id":"a; echo bad"}"#, "not json"] {
             #expect(AgentConversation.fromPayload(payload) == nil)
@@ -433,12 +459,16 @@ struct AgentConversationTests {
 /// Runs an agent tab's launch command the way Ghostty does, in an isolated zsh
 /// home whose interactive PATH holds `stubs` (name → sh body). `reportsThrough`
 /// names the stub standing in for `$SOPRANO_BIN`; without it the variable is
-/// unset so the real test binary is never invoked. Returns the printed lines.
+/// unset so the real test binary is never invoked. `inTerminal` gives it a
+/// pseudo-terminal, which makes the fallback shell interactive. Returns the
+/// printed lines.
 func runAgentLaunchCommand(
     _ config: TerminalConfig,
     stubs: [String: String],
     reportsThrough: String? = nil,
-    zprofile: String = ""
+    zprofile: String = "",
+    zshrc: String = "",
+    inTerminal: Bool = false
 ) throws -> (lines: [String], status: Int32) {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("soprano-agent-launch-\(UUID().uuidString)")
@@ -446,7 +476,7 @@ func runAgentLaunchCommand(
     try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
 
-    try Data("export PATH=\"$ZDOTDIR/bin:$PATH\"\n".utf8)
+    try Data("export PATH=\"$ZDOTDIR/bin:$PATH\"\n\(zshrc)\n".utf8)
         .write(to: directory.appendingPathComponent(".zshrc"))
     try Data("\(zprofile)\n".utf8).write(to: directory.appendingPathComponent(".zprofile"))
     for (name, body) in stubs {
@@ -456,8 +486,9 @@ func runAgentLaunchCommand(
     }
 
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/bash")
-    process.arguments = ["--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
+    let launch = ["/bin/bash", "--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
+    process.executableURL = URL(fileURLWithPath: inTerminal ? "/usr/bin/script" : launch[0])
+    process.arguments = inTerminal ? ["-q", "/dev/null"] + launch : Array(launch.dropFirst())
     var environment = [
         "HOME": directory.path, "ZDOTDIR": directory.path,
         "PATH": "/usr/bin:/bin", "TERM": "dumb",
@@ -473,6 +504,6 @@ func runAgentLaunchCommand(
     try process.run()
     process.waitUntilExit()
     let lines = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        .split(separator: "\n").map(String.init)
+        .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     return (lines, process.terminationStatus)
 }

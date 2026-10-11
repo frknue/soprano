@@ -88,7 +88,8 @@ struct TerminalConfig {
             // Use the same login shell as regular terminals so agent CLIs installed
             // on the user's interactive PATH can also start after workspace restore.
             // When the agent exits, report it and continue in an interactive login
-            // shell so the pane stays a usable terminal instead of a dead surface.
+            // shell (see `fallbackShell`) so the pane stays a usable terminal
+            // instead of a dead surface.
             // The INT trap stops an interactive zsh from abandoning the rest of the
             // line when Ctrl+C kills the agent; children still get default SIGINT.
             // Account variables are exported again after the rc files ran, so a
@@ -99,7 +100,7 @@ struct TerminalConfig {
             let script = (["trap true INT"] + accountExports + [
                 fullCommand,
                 "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped",
-                "exec \(shellQuoted(loginShell)) -l",
+                fallbackShell(loginShell),
             ]).joined(separator: "; ")
             config.command = fullCommand.isEmpty ? nil : [
                 loginShell, "-lic", script
@@ -116,12 +117,32 @@ struct TerminalConfig {
         let script = [
             "trap true INT",
             arguments.map(shellQuoted).joined(separator: " "),
-            "exec \(shellQuoted(loginShell)) -l",
+            fallbackShell(loginShell),
         ].joined(separator: "; ")
         return TerminalConfig(
             command: [loginShell, "-lic", script].map(shellQuoted).joined(separator: " "),
             workingDirectory: cwd
         )
+    }
+
+    /// Replaces the launch script's shell with an interactive login shell once
+    /// the agent exits. Agents are quit with Ctrl+C, often pressed again while
+    /// they shut down, and a SIGINT that lands while zsh sources its startup
+    /// files aborts them, leaving a bare prompt without the user's theme or
+    /// plugins. zsh therefore starts from `SopranoZsh/.zshenv`, which ignores
+    /// SIGINT until the first prompt and then hands over to the user's own
+    /// files; only an exported ZDOTDIR is passed on, as plain `exec` would.
+    static func fallbackShell(
+        _ loginShell: String,
+        zshStartupDirectory: URL? = SopranoResources.bundle.url(forResource: "SopranoZsh", withExtension: nil)
+    ) -> String {
+        let exec = "exec \(shellQuoted(loginShell)) -l"
+        guard URL(fileURLWithPath: loginShell).lastPathComponent == "zsh",
+              let zshStartupDirectory
+        else { return exec }
+        return "if [[ ${(t)ZDOTDIR} == *export* ]]; then export SOPRANO_ZSH_ZDOTDIR=\"$ZDOTDIR\"; "
+            + "else unset SOPRANO_ZSH_ZDOTDIR; fi; "
+            + "ZDOTDIR=\(shellQuoted(zshStartupDirectory.path)) \(exec)"
     }
 
     /// Codex appends its notification payload as a trailing JSON argument to the
