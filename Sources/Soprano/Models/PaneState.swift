@@ -95,7 +95,7 @@ struct PaneTab: Identifiable {
     }
 }
 
-/// A pane in one z-axis layout, containing one or more logical tabs.
+/// A pane in one tab's split layout, containing one or more logical tabs.
 final class PaneState: Identifiable {
     let id: String
     var tabs: [PaneTab]

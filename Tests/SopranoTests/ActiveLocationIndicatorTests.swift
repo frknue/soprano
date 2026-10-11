@@ -45,22 +45,23 @@ struct ActiveLocationIndicatorTests {
         #expect(locationText(in: statusBar) == "Session 1 ▸ Soprano ▸ Claude")
     }
 
-    @Test func statusBarAppendsTheDepthLayerOnlyForWindowsWithInnerWorkspaces() throws {
+    @Test func statusBarNamesTheActiveTabOnlyForWindowsWithSeveralTabs() throws {
         let manager = AgentManager()
         manager.renameWindow(manager.activeWindowId, to: "Soprano")
         let statusBar = StatusBarView(
             agentManager: manager,
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
-        #expect(locationText(in: statusBar)?.contains("· Z") == false)
+        #expect(locationText(in: statusBar)?.contains("· TAB") == false)
 
-        _ = try #require(manager.goIn(manager.activePaneId))
-        let innerPaneId = manager.activePaneId
-        #expect(locationText(in: statusBar)?.hasSuffix("· DEPTH 1") == true)
+        _ = try #require(manager.createLayoutTab())
+        #expect(locationText(in: statusBar)?.hasSuffix("· TAB 2") == true)
 
-        // The branch survives Go Out, so the layer stays worth reporting at Z0.
-        #expect(manager.goOut(innerPaneId))
-        #expect(locationText(in: statusBar)?.hasSuffix("· DEPTH 0") == true)
+        manager.activatePreviousLayoutTab()
+        #expect(locationText(in: statusBar)?.hasSuffix("· TAB 1") == true)
+
+        manager.closeLayoutTab(try #require(manager.windows[manager.activeWindowId]?.tabs.last?.id))
+        #expect(locationText(in: statusBar)?.contains("· TAB") == false)
     }
 
     // MARK: - Helpers

@@ -85,6 +85,16 @@ indirect enum SplitNode: Codable, Equatable {
         }
     }
 
+    /// How many panes the tree holds, without collecting their IDs.
+    var leafCount: Int {
+        switch self {
+        case .leaf:
+            return 1
+        case .split(let branch):
+            return branch.first.leafCount + branch.second.leafCount
+        }
+    }
+
     /// Whether `paneId` is a leaf of this tree, without collecting the
     /// leaves into a set first.
     func containsLeaf(_ paneId: String) -> Bool {

@@ -483,40 +483,37 @@ final class SidebarView: NSView {
             nextWindowRows[terminalWindow.id] = windowRow
 
             guard isExpanded else { continue }
-            let maximumDepth = terminalWindow.maximumDepth
-            let hasDepth = maximumDepth > 0
-            for pane in agentManager.orderedPanes(in: terminalWindow.id) {
-                let depth = terminalWindow.depth(containingPane: pane.id) ?? 0
-                let row = paneRows[pane.id] ?? {
-                    let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
-                    row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
-                    return row
-                }()
-                row.configure(
-                    title: sidebarTitle(for: pane),
-                    branch: branchForPane(pane),
-                    dotColor: paneStatusColor(for: pane, theme: theme),
-                    dotLit: paneLampLit(for: pane),
-                    agentStatus: pane.activeTab?.agent?.status,
-                    tabCount: pane.tabs.count,
-                    depthLevel: hasDepth ? depth : nil,
-                    maximumDepth: hasDepth ? maximumDepth : nil,
-                    shortcutKey: paneShortcutKeysById[pane.id],
-                    showShortcutHint: isControlKeyHeld,
-                    showsDisclosure: false,
-                    expanded: false,
-                    highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
-                    inActiveWindow: isActiveWindow,
-                    onToggle: {},
-                    onSelect: { [weak self] in
-                        self?.agentManager.focusPane(pane.id)
-                    },
-                    onClose: { [weak self] in
-                        self?.agentManager.closePane(pane.id)
-                    }
-                )
-                rows.append(row)
-                nextPaneRows[pane.id] = row
+            let numbersLayoutTabs = terminalWindow.tabs.count > 1
+            for (layoutTabIndex, layoutTab) in terminalWindow.tabs.enumerated() {
+                for paneId in layoutTab.layout?.orderedLeafIds ?? [] {
+                    guard let pane = agentManager.panes[paneId] else { continue }
+                    let row = paneRows[pane.id] ?? {
+                        let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
+                        row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
+                        return row
+                    }()
+                    row.configure(
+                        title: sidebarTitle(for: pane),
+                        branch: branchForPane(pane),
+                        dotColor: paneStatusColor(for: pane, theme: theme),
+                        dotLit: paneLampLit(for: pane),
+                        agentStatus: pane.activeTab?.agent?.status,
+                        tabCount: pane.tabs.count,
+                        layoutTabNumber: numbersLayoutTabs ? layoutTabIndex + 1 : nil,
+                        shortcutKey: paneShortcutKeysById[pane.id],
+                        showShortcutHint: isControlKeyHeld,
+                        highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
+                        inActiveWindow: isActiveWindow,
+                        onSelect: { [weak self] in
+                            self?.agentManager.focusPane(pane.id)
+                        },
+                        onClose: { [weak self] in
+                            self?.agentManager.closePane(pane.id)
+                        }
+                    )
+                    rows.append(row)
+                    nextPaneRows[pane.id] = row
+                }
             }
         }
         windowRows = nextWindowRows
@@ -967,7 +964,6 @@ private final class SidebarWindowRowView: NSView {
 // MARK: - Pane Row
 
 private final class SidebarPaneRowView: NSView {
-    private let disclosureButton = NSButton(title: "", target: nil, action: nil)
     private let railView = SidebarRailView()
     private let dotView = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
@@ -977,7 +973,6 @@ private final class SidebarPaneRowView: NSView {
     private let branchLabel = NSTextField(labelWithString: "")
     private var titleBottomConstraint: NSLayoutConstraint!
     private var branchConstraints: [NSLayoutConstraint] = []
-    private var onToggle: (() -> Void)?
     private var onSelect: (() -> Void)?
     private var onClose: (() -> Void)?
     private let theme: AppTheme
@@ -1004,13 +999,6 @@ private final class SidebarPaneRowView: NSView {
 
     private func setup() {
         addSubview(railView)
-
-        disclosureButton.target = self
-        disclosureButton.action = #selector(handleToggle)
-        disclosureButton.isBordered = false
-        disclosureButton.imagePosition = .noImage
-        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(disclosureButton)
 
         dotView.wantsLayer = true
         dotView.layer?.cornerRadius = 3
@@ -1063,17 +1051,9 @@ private final class SidebarPaneRowView: NSView {
             railView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             railView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
 
-            disclosureButton.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: 2 + hierarchyIndent
-            ),
-            disclosureButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            disclosureButton.widthAnchor.constraint(equalToConstant: 18),
-            disclosureButton.heightAnchor.constraint(equalToConstant: 24),
-
             dotView.leadingAnchor.constraint(
-                equalTo: disclosureButton.trailingAnchor,
-                constant: 2
+                equalTo: leadingAnchor,
+                constant: 22 + hierarchyIndent
             ),
             dotView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             dotView.widthAnchor.constraint(equalToConstant: 6),
@@ -1113,48 +1093,23 @@ private final class SidebarPaneRowView: NSView {
         dotLit: Bool,
         agentStatus: AgentStatus?,
         tabCount: Int,
-        depthLevel: Int?,
-        maximumDepth: Int?,
+        layoutTabNumber: Int?,
         shortcutKey: String?,
         showShortcutHint: Bool,
-        showsDisclosure: Bool,
-        expanded: Bool,
         showsClose: Bool = true,
         highlighted: Bool,
         inActiveWindow: Bool,
-        onToggle: @escaping () -> Void,
         onSelect: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
-        self.onToggle = onToggle
         self.onSelect = onSelect
         self.onClose = onClose
         RetroLamp.light(dotView, color: dotColor, lit: dotLit)
-
-        disclosureButton.isHidden = !showsDisclosure
-        disclosureButton.identifier = showsDisclosure
-            ? NSUserInterfaceItemIdentifier("pane-depth-disclosure")
-            : nil
-        if showsDisclosure {
-            let accessibilityLabel = expanded
-                ? "Collapse Pane Depth"
-                : "Expand Pane Depth"
-            disclosureButton.attributedTitle = RetroText.display(
-                expanded ? "▼" : "❯",
-                color: theme.colors.textMuted,
-                alignment: .center
-            )
-            disclosureButton.setAccessibilityLabel(accessibilityLabel)
-            disclosureButton.toolTip = accessibilityLabel
-        }
         closeButton.isHidden = !showsClose
 
-        let depthText = depthLevel.flatMap { depth in
-            maximumDepth.map { "Z\(depth)/\($0)" }
-        }
-        badgeLabel.identifier = maximumDepth == nil
+        badgeLabel.identifier = layoutTabNumber == nil
             ? nil
-            : NSUserInterfaceItemIdentifier("pane-depth-badge")
+            : NSUserInterfaceItemIdentifier("pane-layout-tab-badge")
         if showShortcutHint, let shortcutKey {
             badgeContainer.isHidden = false
             applyBadge("⇧\(shortcutKey.uppercased())", tint: theme.colors.accent)
@@ -1167,17 +1122,15 @@ private final class SidebarPaneRowView: NSView {
             if tabCount > 1 {
                 badgeParts.append("\(tabCount)T")
             }
-            if let depthText {
-                badgeParts.append(depthText)
+            if let layoutTabNumber {
+                badgeParts.append("TAB \(layoutTabNumber)")
             }
             badgeContainer.isHidden = badgeParts.isEmpty
             applyBadge(
                 badgeParts.joined(separator: " · "),
                 tint: agentStatus == nil ? theme.colors.textMuted : dotColor
             )
-            badgeContainer.toolTip = maximumDepth.map {
-                "Window depth Z\(depthLevel ?? 0) of Z\($0)"
-            }
+            badgeContainer.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
         }
         closeButton.attributedTitle = RetroText.display(
             "×",
@@ -1232,10 +1185,6 @@ private final class SidebarPaneRowView: NSView {
         }
     }
 
-    @objc private func handleToggle() {
-        onToggle?()
-    }
-
     @objc private func handleClose() {
         onClose?()
     }
@@ -1246,11 +1195,7 @@ private final class SidebarPaneRowView: NSView {
             super.mouseDown(with: event)
             return
         }
-        if event.clickCount == 2, !disclosureButton.isHidden {
-            onToggle?()
-        } else {
-            onSelect?()
-        }
+        onSelect?()
     }
 
     private func isInteractiveSubview(_ view: NSView?) -> Bool {

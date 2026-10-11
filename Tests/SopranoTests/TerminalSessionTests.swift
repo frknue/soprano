@@ -62,22 +62,22 @@ struct TerminalSessionTests {
         #expect(manager.activeWindowId == otherFirstWindowId)
     }
 
-    @Test func switchingSessionsPreservesDepthAndFocusingAnExactPaneSwitchesItsSession() throws {
+    @Test func switchingSessionsPreservesTabsAndFocusingAnExactPaneSwitchesItsSession() throws {
         let manager = AgentManager()
         let firstSessionId = manager.activeSessionId
-        let rootPaneId = manager.activePaneId
-        let innerTabId = try #require(manager.goIn(rootPaneId))
+        _ = try #require(manager.createLayoutTab())
         let innerPaneId = manager.activePaneId
+        let innerTabId = try #require(manager.panes[innerPaneId]?.activeTab?.id)
         let innerPane = try #require(manager.panes[innerPaneId])
         let firstLayout = manager.layout
         let otherSessionId = try #require(manager.createSession(name: "Other"))
         let otherPaneId = manager.activePaneId
 
-        #expect(manager.activeDepth == 0)
+        #expect(manager.windows[manager.activeWindowId]?.tabs.count == 1)
         #expect(manager.paneShortcutAssignments.map(\.paneId) == [otherPaneId])
         manager.focusTab(paneId: innerPaneId, tabId: innerTabId)
         #expect(manager.activeSessionId == firstSessionId)
-        #expect(manager.activeDepth == 1)
+        #expect(manager.windows[manager.activeWindowId]?.activeTabIndex == 1)
         #expect(manager.layout == firstLayout)
         #expect(manager.panes[innerPaneId] === innerPane)
         manager.activateSession(otherSessionId)
@@ -152,8 +152,9 @@ struct TerminalSessionTests {
         let secondWindowId = try #require(manager.createWindow())
         let secondSessionId = try #require(manager.createSession(name: "Personal"))
         let personalWindowId = try #require(manager.createWindow())
-        let innerTabId = try #require(manager.goIn(manager.activePaneId))
+        _ = try #require(manager.createLayoutTab())
         let innerPaneId = manager.activePaneId
+        let innerTabId = try #require(manager.panes[innerPaneId]?.activeTab?.id)
         let encoded = try JSONEncoder().encode(manager.snapshotWorkspace())
         let restored = AgentManager()
         restored.restoreWorkspace(try JSONDecoder().decode(WorkspaceSession.self, from: encoded))
@@ -163,7 +164,7 @@ struct TerminalSessionTests {
         #expect(restored.activeWindowId == personalWindowId)
         #expect(restored.activePaneId == innerPaneId)
         #expect(restored.panes[innerPaneId]?.activeTab?.id == innerTabId)
-        #expect(restored.activeDepth == 1)
+        #expect(restored.windows[personalWindowId]?.activeTabIndex == 1)
         restored.activateSession(firstSessionId)
         #expect(restored.activeWindowId == secondWindowId)
         restored.activateLastWindow()

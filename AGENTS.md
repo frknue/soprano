@@ -128,7 +128,9 @@ Scale for this app:
   tree (every pane geometry question is answered here, not in views);
   `WorkspaceSession` / `WorkspaceWindowState` are the persistence formats.
 - `Controllers/` — `AgentManager` is the central mutable state owner (panes,
-  tabs, depth layers, splits) and the largest source of coupling.
+  layout tabs, pane tabs, splits) and the largest source of coupling. "Tab" has
+  two levels: a window's layout tabs (`LayoutTab`, each a whole split layout,
+  the `*LayoutTab` APIs) and pane tabs (`PaneState.tabs`, inside one pane).
   `SessionManager` persists/restores workspaces, `KeybindingManager` resolves the
   `Ctrl+A` prefix chords, `AgentNotificationManager` maps agent lifecycle hooks
   to pane status + notifications.

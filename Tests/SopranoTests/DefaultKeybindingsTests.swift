@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import Soprano
 
@@ -385,40 +386,59 @@ struct DefaultKeybindingsTests {
         #expect(newWindow.defaultKeys == "Prefix → C")
     }
 
-    @Test func paneDepthUsesMnemonicPrefixBindings() throws {
-        let goIn = try #require(binding("pane-depth-in"))
-        let goOut = try #require(binding("pane-depth-out"))
+    @Test func commandTOpensATabAndControlTabCyclesThem() throws {
+        let newTab = try #require(binding("new-tab-direct"))
+        let next = try #require(binding("next-tab"))
+        let previous = try #require(binding("previous-tab"))
 
-        #expect(goIn.mode == .prefix)
-        #expect(goIn.key == "i")
-        #expect(goIn.shift != true)
-        #expect(goIn.defaultKeys == "Prefix → I")
-        #expect(goOut.mode == .prefix)
-        #expect(goOut.key == "o")
-        #expect(goOut.shift != true)
-        #expect(goOut.defaultKeys == "Prefix → O")
+        #expect(KeyChord(binding: newTab) == KeyChord.parse("cmd+t"))
+        #expect(KeyChord(binding: try #require(binding("new-tab"))) == KeyChord.parse("prefix+t"))
+        #expect(KeyChord(binding: next) == KeyChord.parse("ctrl+tab"))
+        #expect(KeyChord(binding: previous) == KeyChord.parse("ctrl+shift+tab"))
     }
 
-    @Test func prefixXClosesADepthLayerBeforeKillingThePane() throws {
-        let killBinding = try #require(binding("kill-pane"))
+    @Test func controlShiftTabMatchesByItsKeyRatherThanTheBackTabCharacter() throws {
+        let controlShiftTab = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.control, .shift],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\u{19}",
+            charactersIgnoringModifiers: "\u{19}",
+            isARepeat: false,
+            keyCode: 48
+        ))
 
-        #expect(killBinding.mode == .prefix)
-        #expect(killBinding.key == "x")
-        #expect(killBinding.label == "Close Layer / Kill Pane")
-        #expect(killBinding.description.contains("depth layer"))
-        #expect(killBinding.description.contains("Z0"))
+        #expect(KeybindingManager.bindingKey(for: controlShiftTab) == "\t")
     }
 
-    @Test func savedConfigurationsGainPaneDepthBindings() {
+    @Test func savedDefaultsThatNowBelongToTabsMoveAside() throws {
         var savedConfig = DefaultKeybindings.config
-        savedConfig.bindings.removeAll {
-            $0.id == "pane-depth-in" || $0.id == "pane-depth-out"
+        savedConfig.bindings.removeAll { $0.id == "new-tab-direct" }
+        savedConfig.bindings = savedConfig.bindings.map { current in
+            switch current.id {
+            case "new-pane-tab":
+                legacyBinding(basedOn: current, display: "Prefix → T", mode: .prefix, key: "t")
+            case "close-pane-tab":
+                legacyBinding(basedOn: current, display: "Prefix → W", mode: .prefix, key: "w")
+            case "new-terminal":
+                legacyBinding(basedOn: current, display: "⌘T", mode: .direct, key: "t", meta: true)
+            default:
+                current
+            }
         }
 
-        let mergedConfig = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let merged = DefaultKeybindings.mergedConfig(with: savedConfig)
+        let chords = Dictionary(uniqueKeysWithValues: merged.bindings.map { ($0.id, KeyChord(binding: $0)) })
 
-        #expect(mergedConfig.bindings.contains { $0.id == "pane-depth-in" })
-        #expect(mergedConfig.bindings.contains { $0.id == "pane-depth-out" })
+        #expect(chords["new-pane-tab"] == KeyChord.parse("prefix+shift+t"))
+        #expect(chords["close-pane-tab"] == KeyChord.parse("prefix+shift+w"))
+        #expect(chords["new-terminal"] == KeyChord.parse("cmd+d"))
+        #expect(chords["new-tab"] == KeyChord.parse("prefix+t"))
+        #expect(chords["new-tab-direct"] == KeyChord.parse("cmd+t"))
+        #expect(chords["close-tab"] == KeyChord.parse("prefix+w"))
     }
 
     @Test func windowManagementUsesShiftedCommandShortcuts() throws {
@@ -535,6 +555,7 @@ struct DefaultKeybindingsTests {
         mode: KeyBindingMode,
         key: String,
         ctrl: Bool? = nil,
+        meta: Bool? = nil,
         shift: Bool? = nil
     ) -> KeyBinding {
         KeyBinding(
@@ -546,6 +567,7 @@ struct DefaultKeybindingsTests {
             mode: mode,
             key: key,
             ctrl: ctrl,
+            meta: meta,
             shift: shift
         )
     }

@@ -94,11 +94,20 @@ final class WindowTabBarView: NSView {
         agentManager.removeObserver(id: observerId)
     }
 
+    /// Hidden by the `hideWindowTabs` setting, the row ignores model changes,
+    /// which busy agents send many times a second, and catches up when shown.
+    override var isHidden: Bool {
+        didSet {
+            if oldValue, !isHidden { refresh() }
+        }
+    }
+
     func refreshTheme() {
         refresh()
     }
 
     private func refresh() {
+        guard !isHidden else { return }
         let windows = agentManager.activeSessionWindows
         if buttons.map(\.windowId) != windows.map(\.id) {
             for button in buttons { button.removeFromSuperview() }
@@ -197,9 +206,9 @@ final class WindowTabBarView: NSView {
 private final class WindowTabButton: NSButton {
     let windowId: String
     private let onSelect: () -> Void
-    private let separator = WindowTabPlateView()
-    private let badgeUnderlay = WindowTabPlateView()
-    private let agentBadge = WindowAgentBadgeView()
+    private let separator = TabPlateView()
+    private let badgeUnderlay = TabPlateView()
+    private let agentBadge = AgentCountBadgeView(identifier: "window-agent-badge")
     private(set) var tabWidth: CGFloat = 80
 
     init(windowId: String, onSelect: @escaping () -> Void) {
@@ -240,15 +249,7 @@ private final class WindowTabButton: NSButton {
             alignment: .left,
             lineBreakMode: .byTruncatingTail
         )
-        let statuses: [AgentStatus] = [.error, .waiting, .running, .starting, .idle]
-        let status = statuses.first { status in agents.contains { $0.status == status } }
-        let color: NSColor = switch status {
-        case .error: theme.colors.danger
-        case .waiting, .starting: theme.colors.yellow
-        case .running: theme.colors.success
-        default: theme.colors.blue
-        }
-        agentBadge.configure(count: agents.count, color: color)
+        agentBadge.configure(agents: agents, theme: theme)
         badgeUnderlay.isHidden = agentBadge.isHidden
         badgeUnderlay.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         let indicatorWidth = agents.isEmpty ? 0 : agentBadge.badgeWidth + 8
@@ -258,13 +259,8 @@ private final class WindowTabButton: NSButton {
         separator.isHidden = isSelected
         separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         var description = "Window \(number): \(title)"
-        if !agents.isEmpty {
-            let noun = agents.count == 1 ? "agent" : "agents"
-            let counts = statuses.compactMap { status -> String? in
-                let count = agents.filter { $0.status == status }.count
-                return count > 0 ? "\(count) \(status.displayLabel.lowercased())" : nil
-            }
-            description += " — \(agents.count) \(noun): \(counts.joined(separator: ", "))"
+        if let summary = AgentCountBadgeView.summary(of: agents) {
+            description += " — \(summary)"
         }
         toolTip = description
         setAccessibilityLabel(description)
@@ -312,73 +308,4 @@ private final class WindowTabButtonCell: NSButtonCell {
     override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
         attributedTitle.draw(in: titleRect(forBounds: cellFrame))
     }
-}
-
-private final class WindowAgentBadgeView: NSView {
-    private static let lampSize: CGFloat = 6
-
-    private let lamp = NSView()
-    private let countLabel = NSTextField(labelWithString: "")
-    private(set) var badgeWidth: CGFloat = 28
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        identifier = NSUserInterfaceItemIdentifier("window-agent-badge")
-        wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
-        layer?.borderWidth = Retro.hairline
-        lamp.wantsLayer = true
-        lamp.layer?.cornerRadius = Self.lampSize / 2
-        addSubview(lamp)
-        addSubview(countLabel)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func configure(count: Int, color: NSColor) {
-        isHidden = count == 0
-        countLabel.setRetroText("\(count)", color: color)
-        RetroLamp.light(lamp, color: color)
-        layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
-        layer?.borderColor = color.cgColor
-        badgeWidth = 20 + ceil(countLabel.intrinsicContentSize.width)
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        lamp.frame = NSRect(
-            x: 5,
-            y: floor((bounds.height - Self.lampSize) / 2),
-            width: Self.lampSize,
-            height: Self.lampSize
-        )
-        let size = countLabel.intrinsicContentSize
-        countLabel.frame = NSRect(
-            x: 15,
-            y: floor((bounds.height - size.height) / 2),
-            width: ceil(size.width),
-            height: size.height
-        )
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
-/// A flat colored plate inside a tab that never takes clicks from it.
-private final class WindowTabPlateView: NSView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }

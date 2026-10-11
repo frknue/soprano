@@ -468,7 +468,7 @@ struct SplitTreeTerminalLifecycleTests {
         _ = splitTree
     }
 
-    @Test func windowDepthNavigationPreservesBothLiveTerminalSurfaces() throws {
+    @Test func switchingTabsKeepsEveryTerminalSurfaceAliveAndClosingATabDestroysOnlyItsOwn() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId
         let rootTabId = try #require(manager.panes[rootPaneId]?.activeTab?.id)
@@ -477,19 +477,22 @@ struct SplitTreeTerminalLifecycleTests {
         let splitTree = makeSplitTree(manager: manager, spy: spy)
         let rootView = try #require(spy.createdViewsByTarget[rootTarget]?.first)
 
-        let childTabId = try #require(manager.goIn(rootPaneId))
+        let layoutTabId = try #require(manager.createLayoutTab())
         let childPaneId = manager.activePaneId
+        let childTabId = try #require(manager.panes[childPaneId]?.activeTab?.id)
         let childTarget = TerminalTarget(paneId: childPaneId, tabId: childTabId)
         let childView = try #require(spy.createdViewsByTarget[childTarget]?.first)
 
-        #expect(spy.destroyedTargets.isEmpty)
-        #expect(manager.goOut(childPaneId))
-        #expect(manager.goIn(rootPaneId) == childTabId)
+        manager.activatePreviousLayoutTab()
+        manager.activateNextLayoutTab()
         #expect(spy.createdViewsByTarget[rootTarget]?.count == 1)
         #expect(spy.createdViewsByTarget[childTarget]?.count == 1)
         #expect(spy.createdViewsByTarget[rootTarget]?.first === rootView)
         #expect(spy.createdViewsByTarget[childTarget]?.first === childView)
         #expect(spy.destroyedTargets.isEmpty)
+
+        manager.closeLayoutTab(layoutTabId)
+        #expect(spy.destroyedTargets == [childTarget])
         _ = splitTree
     }
 

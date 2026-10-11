@@ -141,13 +141,13 @@ struct SopranoConfigTests {
     }
 
     @Test func twoBindingsOnTheSameChordAreReportedAsAConflict() {
-        // ⌘T already belongs to new-terminal.
+        // ⌘T already belongs to new-tab-direct.
         let resolved = resolve("""
         { "keybindings": { "bindings": { "new-browser": "cmd+t" } } }
         """)
 
         #expect(resolved.issues.contains {
-            $0.message.contains("new-browser") && $0.message.contains("new-terminal")
+            $0.message.contains("new-browser") && $0.message.contains("new-tab-direct")
         })
     }
 

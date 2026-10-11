@@ -4,10 +4,10 @@ import Testing
 
 @MainActor
 struct PaneHeaderCloseButtonTests {
-    @Test func closingOnePaneOfASplitDepthLayerKeepsItsSiblingAndOnlyTheLastPaneLeavesTheLayer() throws {
+    @Test func closingOnePaneOfASplitTabKeepsItsSiblingAndOnlyTheLastPaneClosesTheTab() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId
-        _ = try #require(manager.goIn(rootPaneId))
+        _ = try #require(manager.createLayoutTab())
         let firstInnerPaneId = manager.activePaneId
         let secondInnerPaneId = try #require(
             manager.splitPane(direction: .horizontal, paneId: firstInnerPaneId)
@@ -18,21 +18,20 @@ struct PaneHeaderCloseButtonTests {
 
         #expect(manager.panes[secondInnerPaneId] == nil)
         #expect(manager.panes[firstInnerPaneId] != nil)
-        #expect(manager.activeDepth == 1)
+        #expect(manager.windows[manager.activeWindowId]?.activeTabIndex == 1)
         #expect(manager.layout?.leafIds == [firstInnerPaneId])
 
         try clickClose(on: firstInnerPaneId, manager: manager, themeManager: themeManager)
 
         #expect(manager.panes[firstInnerPaneId] == nil)
-        #expect(manager.activeDepth == 0)
+        #expect(manager.windows[manager.activeWindowId]?.tabs.count == 1)
         #expect(manager.activePaneId == rootPaneId)
         #expect(manager.layout?.leafIds == [rootPaneId])
     }
 
-    @Test func closingInsideADepthLayerClosesOnlyTheActiveTab() throws {
+    @Test func closingInATabClosesOnlyThePanesActivePaneTab() throws {
         let manager = AgentManager()
-        let rootPaneId = manager.activePaneId
-        _ = try #require(manager.goIn(rootPaneId))
+        _ = try #require(manager.createLayoutTab())
         let innerPaneId = manager.activePaneId
         let firstTabId = try #require(manager.panes[innerPaneId]?.activeTab?.id)
         _ = try #require(manager.addTabToPane(innerPaneId, type: .terminal))
@@ -44,7 +43,7 @@ struct PaneHeaderCloseButtonTests {
         )
 
         #expect(manager.panes[innerPaneId]?.tabs.map(\.id) == [firstTabId])
-        #expect(manager.activeDepth == 1)
+        #expect(manager.windows[manager.activeWindowId]?.activeTabIndex == 1)
     }
 
     private func clickClose(

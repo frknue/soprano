@@ -344,8 +344,8 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
     }
 
-    /// `session ▸ window ▸ pane` for the focused location, with the depth layer appended
-    /// when the window has any inner workspace. Nil when nothing is open.
+    /// `session ▸ window ▸ pane` for the focused location, with the active tab
+    /// appended when the window has more than one. Nil when nothing is open.
     private func locationText(theme: AppTheme) -> NSAttributedString? {
         guard let terminalWindow = agentManager.windows[agentManager.activeWindowId] else {
             return nil
@@ -366,9 +366,8 @@ final class StatusBarView: NSView, NSPopoverDelegate {
             append(title, theme.colors.textPrimary)
         }
 
-        if terminalWindow.maximumDepth > 0 {
-            let depth = terminalWindow.depth(containingPane: paneId) ?? 0
-            append(" · DEPTH \(depth)", theme.colors.accent)
+        if terminalWindow.tabs.count > 1 {
+            append(" · TAB \(terminalWindow.activeTabIndex + 1)", theme.colors.accent)
         }
 
         return text

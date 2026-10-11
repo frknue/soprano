@@ -28,7 +28,7 @@ brew install --cask frknue/tap/soprano
 </div>
 
 ```
-┌───────────────────────┬─ Codex ────── WORKING · Z0 ─┬─ Claude Code ─ NEEDS INPUT · Z0 ─┐
+┌───────────────────────┬─ Codex ─────────── WORKING ─┬─ Claude Code ────── NEEDS INPUT ─┐
 │ WINDOWS               │ • editing SplitNode.swift   │ Drop the legacy column? [y/n]    │
 │ ▍soprano              │ • 3 files changed           │ >                                │
 │ ▍ Codex    ⎇ main     │                             │                                  │
@@ -37,7 +37,7 @@ brew install --cask frknue/tap/soprano
 │  webapp               │ Executed 142 tests, 0 failures                                 │
 │   Terminal ⎇ main     │ >                                                              │
 ├───────────────────────┴────────────────────────────────────────────────────────────────┤
-│ soprano ▸ Claude Code · Z0                                     ⌘P commands   ⌃A prefix │
+│ soprano ▸ Claude Code · TAB 1                                  ⌘P commands   ⌃A prefix │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -54,8 +54,8 @@ right now?*
   Soprano and focuses that exact tab.
 - **A real terminal.** Every pane is a [libghostty](https://github.com/ghostty-org/ghostty)
   surface hosted in AppKit. No Electron, no web view, no reimplemented VT parser.
-- **Depth.** Any pane can open a private workspace on the window's z-axis, so one pane
-  becomes a whole layout while its siblings keep running.
+- **Tabs.** Every window holds a row of tabs, each with its own split layout, so one
+  window can carry several complete layouts while every agent in them keeps running.
 - **A browser your agents can drive.** `⌘B` splits a WebKit pane;
   `"$SOPRANO_BIN" browser click @e1` works from inside any terminal.
 - **Documentation beside the work.** Open a local Markdown file in a themed reader that
@@ -227,8 +227,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌃A` → `H/J/K/L` | Resize the active pane left / down / up / right by 5% |
 | `⌃A` → `M` | Toggle maximize for the active pane |
 | `⌃A` → `Q` | Close the active pane |
-| `⌃A` → `X` | Close the active depth layer, or kill the pane at `Z0` |
-| `⌃A` → `I` / `O` | Go one complete layout in / out on the window z-axis |
+| `⌃A` → `X` | Kill the active pane and every pane tab in it |
 | `⌘W` | Close the active pane |
 
 **Sessions, windows, and tabs**
@@ -245,14 +244,17 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘N` | New logical window |
 | `⌃A` → `C` | New logical window in the active terminal's directory |
 | `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
-| `⌃A` → `T` / `>` / `<` / `W` | New tab / next / previous / close tab |
+| `⌃Tab` / `⌃⇧Tab` | Next / previous tab (wraps around) |
+| `⌘T` or `⌃A` → `T` | New tab |
+| `⌃A` → `W` | Close tab |
+| `⌃A` → `⇧T` / `>` / `<` / `⇧W` | New pane tab / next / previous / close pane tab |
 
 **Agents and panes to open**
 
 | Shortcut | Action |
 |---|---|
 | `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude Code / OpenCode / omp |
-| `⌘T` | New terminal pane |
+| `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
 | `⌘L` | Focus the address bar of the focused browser pane (elsewhere it toggles the right sidebar) |
 | `⌘[` / `⌘]` / `⌘R` | Browser back / forward / reload |
@@ -281,18 +283,20 @@ to the terminal.
 
 ## Sessions and windows
 
-A session is a named group of windows. Each window has its own split panes, tabs,
-and z-depth. Use sessions for separate projects, and windows for the tasks inside
+A session is a named group of windows. Each window has its own tabs, and each tab its
+own split panes. Use sessions for separate projects, and windows for the tasks inside
 one project.
 
 The session's windows appear as numbered tabs across the top of the terminal area,
 such as `1:Editor`, `2:Server`, and `3:Logs`. The active tab is highlighted. Click a
 tab to switch windows or **+** to create one. The row scrolls when it fills up and
 keeps the active tab in view as you navigate with the keyboard. It stays visible
-when the sidebar or macOS window bar is hidden.
+when the sidebar or macOS window bar is hidden. **Hide window tabs** in **Settings ▸
+General** (`"hideWindowTabs": true`) turns the row off; the [tab row](#tabs) then moves up
+into its place, and you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`.
 
 A compact agent badge beside a window's title counts open agents, including those
-in hidden pane tabs and depth layers. It stays visible while agents are ready or
+in every tab and in hidden pane tabs. It stays visible while agents are ready or
 waiting for input, and clears when they stop or exit. Its color reflects the most
 urgent state: red for errors, yellow for input or startup, green for working, and
 blue for ready. Hover over the window tab for a breakdown by status.
@@ -315,7 +319,7 @@ Session names, window membership, and layouts restore on the next app launch whe
 open as one session.
 **Save Workspace As…** (`Shift+Cmd+S`) saves a snapshot of all sessions; the sidebar's
 **Saved Workspaces** menu restores those snapshots. Quitting the app ends terminal
-processes. Reopening Soprano restores the selected session, window, pane tab, and depth,
+processes. Reopening Soprano restores the selected session, window, tab, and pane tab,
 and relaunches Codex, Claude Code, OpenCode, and omp into their recorded conversations.
 **Restart** also resumes the agent's recorded conversation. Profile `command`/`args`
 launches use your interactive login shell, so executables added to its `PATH` remain
@@ -344,7 +348,8 @@ was recorded and must use it in their own resume command.
 
 The active logical window and pane are marked in three places: the sidebar draws an
 accent rail down the active window and its panes and tints the focused row, the status
-bar names the location as `session ▸ window ▸ pane · DEPTH n`, and the focused pane carries an
+bar names the location as `session ▸ window ▸ pane · TAB n` (the `· TAB n` only when the
+window has more than one tab), and the focused pane carries an
 accent frame while the others keep a hairline border. Panes in inactive windows are
 dimmed. Sidebar rows also show each pane's current git branch, refreshed as `HEAD`
 changes on disk.
@@ -451,18 +456,48 @@ with no room for another pane gets the file as a tab of the focused pane.
   **Open Markdown Preview** in Soprano's reader.
 - Editor tabs restore with the workspace.
 
-## Window depth
+## Tabs
 
-Each pane can own a private inner workspace on the window's z-axis. Going in replaces
-that pane's region with a fresh terminal while every sibling remains visible and live.
-Splits and tabs created there stay confined to the owning pane's region. Going out
-collapses only that branch; entering the same pane again restores its inner splits, tabs,
-and live terminal surfaces. Sibling panes keep independent branches and are never changed
-by another pane's Go In operation.
+There are two tab rows above the panes. The numbered **window tabs** (`1:Editor
+2:Server`) switch between logical windows; directly below them, the **tab row** switches
+between the tabs of the active window. Each tab holds its own split layout, and every
+terminal in a background tab keeps running.
 
-Use `⌃A` then `I` / `O`, the `‹ Z0 ›` controls in any pane header, or **Go In** /
-**Go Out** in the command palette. Sidebar panes are labeled with their window depth and
-can be selected directly.
+A tab is named after its focused pane, the same title the pane header shows. The active
+tab is lit with a raised background and an accent underline. A tab holding open agents
+shows the same badge as window tabs — a count and a lamp, red for errors, yellow for
+input or startup, green for working, blue for ready — with a breakdown by status on
+hover. Click `×` on a tab (or middle-click it) to close it, and `+` at the right end to
+open a new one. When the row fills up it scrolls with the trackpad or scroll wheel and
+keeps the active tab visible.
+
+`⌃Tab` / `⌃⇧Tab` move to the next / previous tab and wrap around. `⌘T` (or `⌃A` then
+`T`) opens a new tab at the end with one fresh terminal in the active terminal's
+directory; `⌃A` then `W` closes the active tab. The command palette offers **New Tab**,
+**Next Tab**, **Previous Tab**, and **Close Tab**; the actions are `new-tab-direct`,
+`new-tab`, `close-tab`, `next-tab`, and `previous-tab` in `settings.json`.
+
+Closing a tab closes every pane in it; unsaved editor files still ask to Save, Don't
+Save, or Cancel. Closing the last pane of a tab closes the tab, and its right neighbor
+(or the new last tab) comes to the front. Closing a window's last tab, or the last pane
+of its last tab, closes the window. A pane closing in a background tab, such as an agent
+exiting, does not switch tabs. Each tab holds up to 20 panes.
+
+Focusing a pane that lives in another tab — from its sidebar row, a `⌃⇧`+letter pane
+hint, a notification, **Open** in the Agent Dashboard, or a Markdown or editor open —
+switches to that tab (and window). Switching tabs clears a maximized pane (`⌃A` → `M`).
+In windows with more than one tab, sidebar pane rows carry a `TAB n` badge.
+
+Tabs and the active tab restore with the workspace, on relaunch and from Saved
+Workspaces. Workspaces saved by older builds with window depth reopen with each depth
+layer as its own tab, in the order the layers were created, with the active layer as
+the active tab.
+
+**Pane tabs** are different: they live inside a single pane, such as editor files or a
+Markdown reader sharing the pane with its terminal, and appear in the pane header only
+when the pane has more than one. `⌃A` then `⇧T` opens a terminal pane tab in the active
+pane, `>` / `<` cycle them, and `⇧W` closes the active one. The `×` in a pane header
+closes only that pane's active pane tab; closing the last one closes the pane.
 
 ## Markdown reader
 
@@ -486,7 +521,7 @@ soprano markdown --new CHANGELOG.md
 Paths are resolved from the calling terminal's working directory. By default, these
 forms open a reader tab in the same pane and reuse it for subsequent files. The terminal
 keeps running in its original tab; click that tab to return, or close the reader tab with
-`⌃A` then `W`. `--new` always opens a separate pane to the right. Agents can use the
+`⌃A` then `⇧W`. `--new` always opens a separate pane to the right. Agents can use the
 shell-independent equivalent `"$SOPRANO_BIN" markdown README.md`.
 
 The toolbar navigates between linked documents, reloads on demand, reveals the source in
@@ -674,6 +709,7 @@ default.
   // solarized-dark | nord | tokyo-night | atom-one-dark
   "theme": "mission-control",
   "hideWindowBar": false,               // opt in to full-window panes
+  "hideWindowTabs": false,              // true: the tab row takes the window tabs' place
   "crtEffect": false,                   // scanlines + phosphor glow on terminals
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
@@ -791,7 +827,7 @@ soprano/
 ```
 
 `SplitNode` is where every pane geometry question is answered; the views render it.
-`AgentManager` owns the mutable state — panes, tabs, depth layers, splits. The app binary
+`AgentManager` owns the mutable state — panes, tabs, pane tabs, splits. The app binary
 doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
 
 </details>

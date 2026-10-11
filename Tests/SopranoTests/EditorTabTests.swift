@@ -155,11 +155,11 @@ struct EditorTabTests {
         #expect(manager.windows[windowId] == nil)
     }
 
-    @Test func closingAnInnerWorkspaceAsksOnlyAboutItsPanes() throws {
+    @Test func closingATabOrItsLastPaneAsksOnlyAboutThatTabsPanes() throws {
         let manager = AgentManager()
         let outerPaneId = manager.activePaneId
         let outerTabId = try #require(manager.panes[outerPaneId]?.activeTab?.id)
-        _ = try #require(manager.goIn(outerPaneId))
+        let layoutTabId = try #require(manager.createLayoutTab())
         let innerPaneId = manager.activePaneId
         #expect(innerPaneId != outerPaneId)
         let innerTabs = Set(try #require(manager.panes[innerPaneId]).tabs.map {
@@ -171,13 +171,13 @@ struct EditorTabTests {
             return false
         }
 
-        // Cancelled, but handled: the caller must not close the pane instead.
-        #expect(manager.closeActiveDepthLayer(innerPaneId))
+        manager.closeLayoutTab(layoutTabId)
         manager.closePane(innerPaneId)
 
         #expect(questions == [innerTabs, innerTabs])
         #expect(!questions.contains { $0.contains(TerminalTarget(paneId: outerPaneId, tabId: outerTabId)) })
         #expect(manager.panes[innerPaneId] != nil)
+        #expect(manager.windows[manager.activeWindowId]?.tabs.count == 2)
     }
 
     @Test func closingAWindowOrSessionAsksAboutAllItsTabs() throws {

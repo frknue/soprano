@@ -39,19 +39,24 @@ enum DefaultKeybindings {
             KeyBinding(id: "split-horizontal", label: "Split Horizontal", description: "Split the active pane horizontally", category: .layout, defaultKeys: "Prefix → -", mode: .prefix, key: "-"),
             KeyBinding(id: "split-vertical", label: "Split Vertical", description: "Split the active pane vertically", category: .layout, defaultKeys: "Prefix → |", mode: .prefix, key: "|", shift: true),
             KeyBinding(id: "close-pane", label: "Close Pane", description: "Close the active pane", category: .layout, defaultKeys: "Prefix → Q", mode: .prefix, key: "q"),
-            KeyBinding(id: "kill-pane", label: "Close Layer / Kill Pane", description: "Close the active depth layer, or force-close the pane at Z0", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
+            KeyBinding(id: "kill-pane", label: "Kill Pane", description: "Close the active pane and every tab in it", category: .layout, defaultKeys: "Prefix → X", mode: .prefix, key: "x"),
             KeyBinding(id: "maximize-pane", label: "Maximize", description: "Toggle maximize for the active pane", category: .layout, defaultKeys: "Prefix → M", mode: .prefix, key: "m"),
             KeyBinding(id: "copy-mode", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → [", mode: .prefix, key: "["),
             KeyBinding(id: "copy-mode-right-bracket", label: "Copy Mode", description: "Browse scrollback and select text with Vim keys", category: .layout, defaultKeys: "Prefix → ]", mode: .prefix, key: "]"),
             KeyBinding(id: "new-window-current-directory", label: "New Window Here", description: "Create a logical window in the active terminal directory", category: .layout, defaultKeys: "Prefix → C", mode: .prefix, key: "c"),
-            KeyBinding(id: "pane-depth-in", label: "Go In", description: "Open or resume the active pane's private inner workspace", category: .layout, defaultKeys: "Prefix → I", mode: .prefix, key: "i"),
-            KeyBinding(id: "pane-depth-out", label: "Go Out", description: "Return to the workspace containing the active depth branch", category: .layout, defaultKeys: "Prefix → O", mode: .prefix, key: "o"),
 
-            // Tabs (prefix)
-            KeyBinding(id: "new-pane-tab", label: "New Tab", description: "Open a new terminal tab in the active pane", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),
-            KeyBinding(id: "next-pane-tab", label: "Next Tab", description: "Switch to the next tab", category: .layout, defaultKeys: "Prefix → >", mode: .prefix, key: ">", shift: true),
-            KeyBinding(id: "prev-pane-tab", label: "Prev Tab", description: "Switch to the previous tab", category: .layout, defaultKeys: "Prefix → <", mode: .prefix, key: "<", shift: true),
-            KeyBinding(id: "close-pane-tab", label: "Close Tab", description: "Close the active tab", category: .layout, defaultKeys: "Prefix → W", mode: .prefix, key: "w"),
+            // Tabs: each holds its own split layout (direct: ⌘T, Ctrl+Tab; prefix: T/W)
+            KeyBinding(id: "new-tab", label: "New Tab", description: "Open a tab with a new terminal in the active terminal's directory", category: .layout, defaultKeys: "Prefix → T", mode: .prefix, key: "t"),
+            KeyBinding(id: "new-tab-direct", label: "New Tab (Direct)", description: "Open a tab with a new terminal without the prefix", category: .layout, defaultKeys: "⌘T", mode: .direct, key: "t", meta: true),
+            KeyBinding(id: "close-tab", label: "Close Tab", description: "Close the active tab and every pane in it", category: .layout, defaultKeys: "Prefix → W", mode: .prefix, key: "w"),
+            KeyBinding(id: "next-tab", label: "Next Tab", description: "Switch to the next tab of the active window", category: .navigation, defaultKeys: "Ctrl+Tab", mode: .direct, key: "\t", ctrl: true),
+            KeyBinding(id: "previous-tab", label: "Previous Tab", description: "Switch to the previous tab of the active window", category: .navigation, defaultKeys: "Ctrl+Shift+Tab", mode: .direct, key: "\t", ctrl: true, shift: true),
+
+            // Pane tabs: tabs inside one pane, such as open files (prefix)
+            KeyBinding(id: "new-pane-tab", label: "New Pane Tab", description: "Open a terminal tab inside the active pane", category: .layout, defaultKeys: "Prefix → Shift+T", mode: .prefix, key: "t", shift: true),
+            KeyBinding(id: "next-pane-tab", label: "Next Pane Tab", description: "Switch to the next tab inside the active pane", category: .layout, defaultKeys: "Prefix → >", mode: .prefix, key: ">", shift: true),
+            KeyBinding(id: "prev-pane-tab", label: "Previous Pane Tab", description: "Switch to the previous tab inside the active pane", category: .layout, defaultKeys: "Prefix → <", mode: .prefix, key: "<", shift: true),
+            KeyBinding(id: "close-pane-tab", label: "Close Pane Tab", description: "Close the active tab inside the active pane", category: .layout, defaultKeys: "Prefix → Shift+W", mode: .prefix, key: "w", shift: true),
 
             // Agents (direct: Cmd+1/2/3/4)
             KeyBinding(id: "launch-codex", label: "Launch Codex", description: "Launch Codex agent", category: .agents, defaultKeys: "⌘1", mode: .direct, key: "1", meta: true),
@@ -67,7 +72,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "new-window", label: "New Window", description: "Create a new logical window", category: .general, defaultKeys: "⌘N", mode: .direct, key: "n", meta: true),
             KeyBinding(id: "rename-window", label: "Rename Window", description: "Rename the active logical window", category: .general, defaultKeys: "⇧⌘R", mode: .direct, key: "r", meta: true, shift: true),
             KeyBinding(id: "close-window", label: "Close Window", description: "Close the active logical window", category: .general, defaultKeys: "⇧⌘W", mode: .direct, key: "w", meta: true, shift: true),
-            KeyBinding(id: "new-terminal", label: "New Terminal", description: "Open a new terminal pane", category: .general, defaultKeys: "⌘T", mode: .direct, key: "t", meta: true),
+            KeyBinding(id: "new-terminal", label: "New Terminal", description: "Open a new terminal pane beside the focused pane", category: .general, defaultKeys: "⌘D", mode: .direct, key: "d", meta: true),
             KeyBinding(id: "new-browser", label: "New Browser", description: "Split a browser pane to the right", category: .general, defaultKeys: "⌘B", mode: .direct, key: "b", meta: true),
             KeyBinding(id: "close-active", label: "Close Pane", description: "Close the active pane", category: .general, defaultKeys: "⌘W", mode: .direct, key: "w", meta: true),
             KeyBinding(id: "save-session", label: "Save Workspace As…", description: "Save all sessions and their layouts as a workspace snapshot", category: .general, defaultKeys: "⇧⌘S", mode: .direct, key: "s", meta: true, shift: true),
@@ -166,6 +171,21 @@ enum DefaultKeybindings {
                 && savedBinding.key == "n"
                 && savedBinding.ctrl != true
                 && savedBinding.meta != true
+        case "new-pane-tab", "close-pane-tab":
+            // Prefix → T and W now open and close tabs; pane tabs took their
+            // Shift variants.
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .prefix
+                && savedBinding.key == (savedBinding.id == "new-pane-tab" ? "t" : "w")
+                && savedBinding.ctrl != true
+                && savedBinding.meta != true
+                && savedBinding.shift != true
+        case "new-terminal":
+            // ⌘T now opens a tab; a new terminal pane moved to ⌘D.
+            usesLegacyWindowTabOrResizeDefault = savedBinding.mode == .direct
+                && savedBinding.key == "t"
+                && savedBinding.meta == true
+                && savedBinding.ctrl != true
+                && savedBinding.shift != true
         case "resize-left", "resize-down", "resize-up", "resize-right":
             let oldKeyById = [
                 "resize-left": "h",
