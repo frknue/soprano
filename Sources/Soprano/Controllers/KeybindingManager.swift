@@ -231,7 +231,7 @@ final class KeybindingManager: @unchecked Sendable {
     }
 
     private func handleKeyDown(event: NSEvent) -> NSEvent? {
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        let key = Self.bindingKey(for: event)
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
         if isCtrlOnly(flags) && key == config.prefixKey.lowercased() {
@@ -387,13 +387,15 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
-    /// Prefix X pops one z-axis layer when possible, retaining its historic
-    /// whole-pane kill behavior at the outermost layer.
-    static func closeDepthLayerOrPane(using agentManager: AgentManager) {
-        let paneId = agentManager.activePaneId
-        if !agentManager.closeActiveDepthLayer(paneId) {
-            agentManager.closePane(paneId)
-        }
+    private static let tabKeyCode: UInt16 = 48
+
+    /// The key `event` names for binding lookups: the lowercased
+    /// `charactersIgnoringModifiers`, except for Tab. Shift turns Tab into the
+    /// back-tab character, so Tab is recognized by its key code and
+    /// Ctrl+Shift+Tab still matches a "ctrl+shift+tab" binding.
+    static func bindingKey(for event: NSEvent) -> String {
+        if event.keyCode == tabKeyCode { return "\t" }
+        return event.charactersIgnoringModifiers?.lowercased() ?? ""
     }
 
     private var activeTerminalTarget: TerminalTarget? {
@@ -492,10 +494,8 @@ final class KeybindingManager: @unchecked Sendable {
         case "resize-right":
             agentManager.resizePane(direction: .right, tickPercent: config.resizeTickPercent)
 
-        case "close-pane":
+        case "close-pane", "kill-pane":
             agentManager.closePane(agentManager.activePaneId)
-        case "kill-pane":
-            Self.closeDepthLayerOrPane(using: agentManager)
         case "maximize-pane":
             agentManager.toggleMaximize()
         case "copy-mode", "copy-mode-right-bracket":
@@ -506,10 +506,15 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingNewSession() }
         case "find-session":
             invokeDelegate { $0.keybindingFindSession() }
-        case "pane-depth-in":
-            _ = agentManager.goIn(agentManager.activePaneId)
-        case "pane-depth-out":
-            _ = agentManager.goOut(agentManager.activePaneId)
+
+        case "new-tab", "new-tab-direct":
+            _ = agentManager.createLayoutTab()
+        case "close-tab":
+            agentManager.closeActiveLayoutTab()
+        case "next-tab":
+            agentManager.activateNextLayoutTab()
+        case "previous-tab":
+            agentManager.activatePreviousLayoutTab()
 
         case "new-pane-tab":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)
@@ -518,7 +523,7 @@ final class KeybindingManager: @unchecked Sendable {
         case "prev-pane-tab":
             agentManager.prevTab(agentManager.activePaneId)
         case "close-pane-tab":
-            closeActiveTab()
+            closeActivePaneTab()
 
         case "command-palette":
             invokeDelegate { $0.keybindingOpenCommandPalette() }
@@ -561,7 +566,7 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
-    private func closeActiveTab() {
+    private func closeActivePaneTab() {
         let paneId = agentManager.activePaneId
         guard let pane = agentManager.panes[paneId],
               let tab = pane.activeTab

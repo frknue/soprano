@@ -619,6 +619,17 @@ final class SettingsViewController: NSViewController {
         hideWindowBarRow.toolTip =
             "Hide the title bar and traffic-light controls so panes use the full window"
 
+        let hideWindowTabsRow = makeSettingRow(
+            label: "Hide window tabs",
+            control: makeCheckbox(
+                action: #selector(hideWindowTabsChanged(_:)),
+                isOn: settings.hideWindowTabs,
+                accessibilityLabel: "Hide window tabs"
+            )
+        )
+        hideWindowTabsRow.toolTip =
+            "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F"
+
         let crtEffectBox = makeCheckbox(
             action: #selector(crtEffectChanged(_:)),
             isOn: settings.crtEffect,
@@ -633,6 +644,7 @@ final class SettingsViewController: NSViewController {
             [
                 makeSettingRow(label: "Theme", control: popup),
                 hideWindowBarRow,
+                hideWindowTabsRow,
                 crtEffectRow,
             ],
             to: appearanceStack
@@ -962,6 +974,11 @@ final class SettingsViewController: NSViewController {
     @objc private func hideWindowBarChanged(_ sender: NSButton) {
         settings.hideWindowBar = sender.state == .on
         configStore.write(settings.hideWindowBar, at: ["hideWindowBar"])
+    }
+
+    @objc private func hideWindowTabsChanged(_ sender: NSButton) {
+        settings.hideWindowTabs = sender.state == .on
+        configStore.write(settings.hideWindowTabs, at: ["hideWindowTabs"])
     }
 
     @objc private func crtEffectChanged(_ sender: NSButton) {

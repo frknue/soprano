@@ -1,54 +1,37 @@
 import Foundation
 
-/// One complete tiled workspace on a logical window's z-axis.
-///
-/// The root layer has no parent. Every inner layer belongs to the pane from
-/// which the user entered it, allowing sibling panes to retain independent
-/// depth branches in their existing regions.
-struct WorkspaceDepthLayer {
-    var parentPaneId: String?
+/// One tab of a logical window: a complete split layout of its own. Hidden
+/// tabs keep their panes, and so their terminals, alive.
+struct LayoutTab: Identifiable, Equatable {
+    let id: String
     var layout: SplitNode?
     var activePaneId: String
-    var isExpanded: Bool
 }
 
-/// A logical terminal window containing a root layout and pane-owned depth
-/// branches. Expanded branches replace only their owning leaf in the visible
-/// layout, leaving sibling regions visible and alive.
+/// A logical terminal window: an ordered row of tabs, each holding its own
+/// split layout. Only the active tab's layout is on screen.
 final class WorkspaceWindowState: Identifiable {
     let id: String
     let sessionId: String
     var title: String
     var isTitleCustom: Bool
     var isSidebarCollapsed: Bool
-    private(set) var depthLayers: [WorkspaceDepthLayer]
-    private(set) var activeDepthLayerIndex: Int
+    /// Never empty: closing a window's last tab closes the window instead.
+    private(set) var tabs: [LayoutTab]
+    private(set) var activeTabIndex: Int
 
+    var activeTab: LayoutTab { tabs[activeTabIndex] }
+
+    /// The active tab's split layout.
     var layout: SplitNode? {
-        get { depthLayers[activeDepthLayerIndex].layout }
-        set { depthLayers[activeDepthLayerIndex].layout = newValue }
+        get { tabs[activeTabIndex].layout }
+        set { tabs[activeTabIndex].layout = newValue }
     }
 
-    /// The root split with every expanded pane branch composed into its leaf.
-    var visibleLayout: SplitNode? {
-        guard let rootIndex = depthLayers.firstIndex(where: {
-            $0.parentPaneId == nil
-        }), let rootLayout = depthLayers[rootIndex].layout
-        else { return nil }
-        return expanding(rootLayout, visitedLayerIndices: [rootIndex])
-    }
-
-    var rootLayout: SplitNode? {
-        depthLayers.first(where: { $0.parentPaneId == nil })?.layout
-    }
-
+    /// The focused pane of the active tab.
     var activePaneId: String {
-        get { depthLayers[activeDepthLayerIndex].activePaneId }
-        set { depthLayers[activeDepthLayerIndex].activePaneId = newValue }
-    }
-
-    var activeDepth: Int {
-        depth(ofLayerAt: activeDepthLayerIndex)
+        get { tabs[activeTabIndex].activePaneId }
+        set { tabs[activeTabIndex].activePaneId = newValue }
     }
 
     init(
@@ -57,187 +40,94 @@ final class WorkspaceWindowState: Identifiable {
         title: String,
         isTitleCustom: Bool = false,
         isSidebarCollapsed: Bool = false,
-        layout: SplitNode?,
-        activePaneId: String
+        tabs: [LayoutTab],
+        activeTabIndex: Int = 0
     ) {
+        precondition(!tabs.isEmpty, "A window always has at least one tab")
         self.id = id
         self.sessionId = sessionId
         self.title = title
         self.isTitleCustom = isTitleCustom
         self.isSidebarCollapsed = isSidebarCollapsed
-        self.depthLayers = [
-            WorkspaceDepthLayer(
-                parentPaneId: nil,
-                layout: layout,
-                activePaneId: activePaneId,
-                isExpanded: true
-            )
-        ]
-        self.activeDepthLayerIndex = 0
+        self.tabs = tabs
+        self.activeTabIndex = min(max(0, activeTabIndex), tabs.count - 1)
     }
 
-    init(
-        id: String,
-        sessionId: String = TerminalSessionState.defaultID,
-        title: String,
-        isTitleCustom: Bool = false,
-        isSidebarCollapsed: Bool = false,
-        depthLayers: [WorkspaceDepthLayer],
-        activeDepthLayerIndex: Int
-    ) {
-        self.id = id
-        self.sessionId = sessionId
-        self.title = title
-        self.isTitleCustom = isTitleCustom
-        self.isSidebarCollapsed = isSidebarCollapsed
-        self.depthLayers = depthLayers.isEmpty
-            ? [
-                WorkspaceDepthLayer(
-                    parentPaneId: nil,
-                    layout: nil,
-                    activePaneId: "",
-                    isExpanded: true
-                )
-            ]
-            : depthLayers
-        self.activeDepthLayerIndex = min(
-            max(0, activeDepthLayerIndex),
-            self.depthLayers.count - 1
-        )
-        expandAncestors(ofLayerAt: self.activeDepthLayerIndex)
-    }
-
-    /// An independent copy, for working out what a change would do without
-    /// making it.
-    func copy() -> WorkspaceWindowState {
-        WorkspaceWindowState(
-            id: id,
-            sessionId: sessionId,
-            title: title,
-            isTitleCustom: isTitleCustom,
-            isSidebarCollapsed: isSidebarCollapsed,
-            depthLayers: depthLayers,
-            activeDepthLayerIndex: activeDepthLayerIndex
-        )
-    }
-
+    /// Every pane in every tab.
     var paneIds: Set<String> {
         var ids = Set<String>()
-        for layer in depthLayers {
-            layer.layout?.insertLeafIds(into: &ids)
+        for tab in tabs {
+            tab.layout?.insertLeafIds(into: &ids)
         }
         return ids
     }
 
+    /// Every pane, tab by tab, in each tab's on-screen order.
+    var orderedPaneIds: [String] {
+        tabs.flatMap { $0.layout?.orderedLeafIds ?? [] }
+    }
+
+    /// True once the last pane of the last tab has gone.
+    var isEmpty: Bool {
+        tabs.allSatisfy { $0.layout == nil }
+    }
+
     func containsPane(_ paneId: String) -> Bool {
-        layerIndex(containingPane: paneId) != nil
+        tabIndex(containingPane: paneId) != nil
     }
 
-    var maximumDepth: Int {
-        depthLayers.indices.map(depth(ofLayerAt:)).max() ?? 0
+    func tabIndex(containingPane paneId: String) -> Int? {
+        tabs.firstIndex { $0.layout?.containsLeaf(paneId) == true }
     }
 
-    func depth(containingPane paneId: String) -> Int? {
-        guard let index = layerIndex(containingPane: paneId) else { return nil }
-        return depth(ofLayerAt: index)
+    func tabIndex(of tabId: String) -> Int? {
+        tabs.firstIndex { $0.id == tabId }
     }
 
-    func hasDepthBranch(from paneId: String) -> Bool {
-        depthLayers.contains { $0.parentPaneId == paneId }
-    }
-
+    /// Brings the tab at `index` to the front. Returns whether the visible
+    /// tab changed.
     @discardableResult
-    func activateDepth(containingPane paneId: String) -> Bool {
-        guard let index = layerIndex(containingPane: paneId) else { return false }
-        let changed = activeDepthLayerIndex != index
-        activeDepthLayerIndex = index
-        return changed
+    func activateTab(at index: Int) -> Bool {
+        guard tabs.indices.contains(index), index != activeTabIndex else { return false }
+        activeTabIndex = index
+        return true
     }
 
-    /// Makes `paneId` part of the visible layout and activates its owning layer.
-    ///
-    /// Ancestor branches are expanded on the way in, while the pane's own child
-    /// branch is collapsed so it no longer replaces the pane being revealed.
+    /// Brings the tab holding `paneId` to the front.
     @discardableResult
-    func revealPane(_ paneId: String) -> Bool {
-        guard let index = layerIndex(containingPane: paneId) else { return false }
-        let previousVisibleLayout = visibleLayout
-        activeDepthLayerIndex = index
-        expandAncestors(ofLayerAt: index)
-        for childIndex in depthLayers.indices
-        where depthLayers[childIndex].parentPaneId == paneId {
-            depthLayers[childIndex].isExpanded = false
+    func activateTab(containingPane paneId: String) -> Bool {
+        guard let index = tabIndex(containingPane: paneId) else { return false }
+        return activateTab(at: index)
+    }
+
+    /// Brings the tab `offset` places away to the front, wrapping around the
+    /// ends of the row.
+    @discardableResult
+    func activateTab(offset: Int) -> Bool {
+        let count = tabs.count
+        guard count > 1 else { return false }
+        return activateTab(at: ((activeTabIndex + offset) % count + count) % count)
+    }
+
+    /// Adds `tab` at the end of the row and brings it to the front.
+    func appendTab(_ tab: LayoutTab) {
+        tabs.append(tab)
+        activeTabIndex = tabs.count - 1
+    }
+
+    /// Removes the tab at `index` and returns the panes it held. Removing the
+    /// active tab shows its right neighbor, or the new last tab. The last tab
+    /// is never removed; closing it closes the window.
+    @discardableResult
+    func removeTab(at index: Int) -> Set<String> {
+        guard tabs.count > 1, tabs.indices.contains(index) else { return [] }
+        let removed = tabs.remove(at: index)
+        if index < activeTabIndex {
+            activeTabIndex -= 1
+        } else {
+            activeTabIndex = min(activeTabIndex, tabs.count - 1)
         }
-        return visibleLayout != previousVisibleLayout
-    }
-
-    /// Enter the private child workspace owned by `paneId`.
-    @discardableResult
-    func goIn(from paneId: String) -> Bool {
-        guard let index = depthLayers.firstIndex(where: {
-            $0.parentPaneId == paneId
-        }) else { return false }
-        depthLayers[index].isExpanded = true
-        activeDepthLayerIndex = index
-        return true
-    }
-
-    /// Return to the workspace containing the pane that owns this layer.
-    @discardableResult
-    func goOut() -> Bool {
-        guard let parentPaneId = depthLayers[activeDepthLayerIndex].parentPaneId,
-              let parentIndex = layerIndex(containingPane: parentPaneId)
-        else { return false }
-        depthLayers[activeDepthLayerIndex].isExpanded = false
-        activeDepthLayerIndex = parentIndex
-        depthLayers[parentIndex].activePaneId = parentPaneId
-        return true
-    }
-
-    func appendDepth(
-        parentPaneId: String,
-        layout: SplitNode?,
-        activePaneId: String
-    ) {
-        depthLayers.append(
-            WorkspaceDepthLayer(
-                parentPaneId: parentPaneId,
-                layout: layout,
-                activePaneId: activePaneId,
-                isExpanded: true
-            )
-        )
-        activeDepthLayerIndex = depthLayers.count - 1
-    }
-
-    /// Removes the active layer and all branches nested below any pane in it,
-    /// then returns to its owning pane.
-    func removeActiveDepthAndDescendants() -> Set<String> {
-        guard let parentPaneId = depthLayers[activeDepthLayerIndex].parentPaneId,
-              let parentIndex = layerIndex(containingPane: parentPaneId)
-        else { return [] }
-
-        let result = removingLayers(startingWith: [activeDepthLayerIndex])
-        depthLayers = result.layers
-        activeDepthLayerIndex = layerIndex(containingPane: parentPaneId)
-            ?? min(parentIndex, depthLayers.count - 1)
-        depthLayers[activeDepthLayerIndex].activePaneId = parentPaneId
-        return result.removedPaneIds
-    }
-
-    /// Removes the hidden branch owned by a pane without affecting sibling
-    /// branches or the layer containing that pane.
-    func removeDepthBranches(ownedBy paneId: String) -> Set<String> {
-        let branchIndices = Set(depthLayers.indices.filter {
-            depthLayers[$0].parentPaneId == paneId
-        })
-        guard !branchIndices.isEmpty else { return [] }
-        let containingPaneIndex = layerIndex(containingPane: paneId) ?? 0
-        let result = removingLayers(startingWith: branchIndices)
-        depthLayers = result.layers
-        activeDepthLayerIndex = layerIndex(containingPane: paneId)
-            ?? min(containingPaneIndex, depthLayers.count - 1)
-        return result.removedPaneIds
+        return removed.layout?.leafIds ?? []
     }
 
     @discardableResult
@@ -246,205 +136,55 @@ final class WorkspaceWindowState: Identifiable {
         newPaneId: String,
         direction: SplitDirection
     ) -> Bool {
-        guard let index = layerIndex(containingPane: paneId),
-              let currentLayout = depthLayers[index].layout,
+        guard let index = tabIndex(containingPane: paneId),
+              let currentLayout = tabs[index].layout,
               let updated = currentLayout.insertingSplit(
                 at: paneId,
                 newId: newPaneId,
                 direction: direction
               )
         else { return false }
-        depthLayers[index].layout = updated
-        depthLayers[index].activePaneId = newPaneId
-        activeDepthLayerIndex = index
+        tabs[index].layout = updated
+        tabs[index].activePaneId = newPaneId
         return true
     }
 
-    @discardableResult
-    func removePaneFromOwningLayout(_ paneId: String) -> Bool {
-        guard let index = layerIndex(containingPane: paneId),
-              let currentLayout = depthLayers[index].layout
-        else { return false }
-        depthLayers[index].layout = currentLayout.removing(paneId)
-        if depthLayers[index].activePaneId == paneId,
-           let firstPaneId = depthLayers[index].layout?.firstLeaf
-        {
-            depthLayers[index].activePaneId = firstPaneId
+    /// Removes `paneId` from its tab without bringing that tab to the front.
+    /// A tab left without panes goes too, unless it is the last one: an empty
+    /// window is for the caller to close.
+    func removePane(_ paneId: String) {
+        guard let index = tabIndex(containingPane: paneId),
+              let currentLayout = tabs[index].layout
+        else { return }
+        guard let updated = currentLayout.removing(paneId) else {
+            tabs[index].layout = nil
+            removeTab(at: index)
+            return
         }
-        activeDepthLayerIndex = index
-        return true
+        tabs[index].layout = updated
+        if tabs[index].activePaneId == paneId, let firstPaneId = updated.firstLeaf {
+            tabs[index].activePaneId = firstPaneId
+        }
     }
 
     @discardableResult
     func setSplitPercentage(
-        atVisiblePath path: [SplitBranchSide],
+        at path: [SplitBranchSide],
         to percentage: Double
     ) -> Bool {
-        guard let location = splitLocation(atVisiblePath: path),
-              let currentLayout = depthLayers[location.layerIndex].layout
-        else { return false }
-        let updated = currentLayout.settingSplitPercentage(
-            at: location.localPath,
-            to: percentage
-        )
+        guard let currentLayout = layout else { return false }
+        let updated = currentLayout.settingSplitPercentage(at: path, to: percentage)
         guard updated != currentLayout else { return false }
-        depthLayers[location.layerIndex].layout = updated
+        layout = updated
         return true
     }
 
     @discardableResult
-    func adjustSplit(
-        atVisiblePath path: [SplitBranchSide],
-        delta: Double
-    ) -> Bool {
-        guard let location = splitLocation(atVisiblePath: path),
-              let currentLayout = depthLayers[location.layerIndex].layout
-        else { return false }
-        let updated = currentLayout.adjustingSplit(
-            at: location.localPath,
-            delta: delta
-        )
+    func adjustSplit(at path: [SplitBranchSide], delta: Double) -> Bool {
+        guard let currentLayout = layout else { return false }
+        let updated = currentLayout.adjustingSplit(at: path, delta: delta)
         guard updated != currentLayout else { return false }
-        depthLayers[location.layerIndex].layout = updated
+        layout = updated
         return true
-    }
-
-    private func removingLayers(
-        startingWith initialIndices: Set<Int>
-    ) -> (layers: [WorkspaceDepthLayer], removedPaneIds: Set<String>) {
-        var removedPaneIds = initialIndices.reduce(into: Set<String>()) { result, index in
-            result.formUnion(depthLayers[index].layout?.leafIds ?? [])
-        }
-        var removedLayerIndices = initialIndices
-        var foundDescendant = true
-        while foundDescendant {
-            foundDescendant = false
-            for index in depthLayers.indices where !removedLayerIndices.contains(index) {
-                guard let owner = depthLayers[index].parentPaneId,
-                      removedPaneIds.contains(owner)
-                else { continue }
-                removedLayerIndices.insert(index)
-                removedPaneIds.formUnion(depthLayers[index].layout?.leafIds ?? [])
-                foundDescendant = true
-            }
-        }
-
-        let remainingLayers = depthLayers.enumerated().compactMap { index, layer in
-            removedLayerIndices.contains(index) ? nil : layer
-        }
-        return (remainingLayers, removedPaneIds)
-    }
-
-    private func layerIndex(containingPane paneId: String) -> Int? {
-        depthLayers.firstIndex { $0.layout?.containsLeaf(paneId) == true }
-    }
-
-    private func expanding(
-        _ node: SplitNode,
-        visitedLayerIndices: Set<Int>
-    ) -> SplitNode {
-        switch node {
-        case .leaf(let paneId):
-            guard let childIndex = depthLayers.firstIndex(where: {
-                $0.parentPaneId == paneId && $0.isExpanded
-            }), !visitedLayerIndices.contains(childIndex),
-            let childLayout = depthLayers[childIndex].layout
-            else { return node }
-            return expanding(
-                childLayout,
-                visitedLayerIndices: visitedLayerIndices.union([childIndex])
-            )
-        case .split(let branch):
-            return .split(SplitNode.SplitBranch(
-                direction: branch.direction,
-                first: expanding(
-                    branch.first,
-                    visitedLayerIndices: visitedLayerIndices
-                ),
-                second: expanding(
-                    branch.second,
-                    visitedLayerIndices: visitedLayerIndices
-                ),
-                splitPercentage: branch.splitPercentage
-            ))
-        }
-    }
-
-    private func splitLocation(
-        atVisiblePath path: [SplitBranchSide]
-    ) -> (layerIndex: Int, localPath: [SplitBranchSide])? {
-        guard let rootIndex = depthLayers.firstIndex(where: {
-            $0.parentPaneId == nil
-        }), let rootLayout = depthLayers[rootIndex].layout
-        else { return nil }
-        return splitLocation(
-            in: rootLayout,
-            layerIndex: rootIndex,
-            localPath: [],
-            remainingVisiblePath: path,
-            visitedLayerIndices: [rootIndex]
-        )
-    }
-
-    private func splitLocation(
-        in node: SplitNode,
-        layerIndex: Int,
-        localPath: [SplitBranchSide],
-        remainingVisiblePath: [SplitBranchSide],
-        visitedLayerIndices: Set<Int>
-    ) -> (layerIndex: Int, localPath: [SplitBranchSide])? {
-        switch node {
-        case .split(let branch):
-            guard let side = remainingVisiblePath.first else {
-                return (layerIndex, localPath)
-            }
-            let child = side == .first ? branch.first : branch.second
-            return splitLocation(
-                in: child,
-                layerIndex: layerIndex,
-                localPath: localPath + [side],
-                remainingVisiblePath: Array(remainingVisiblePath.dropFirst()),
-                visitedLayerIndices: visitedLayerIndices
-            )
-        case .leaf(let paneId):
-            guard let childIndex = depthLayers.firstIndex(where: {
-                $0.parentPaneId == paneId && $0.isExpanded
-            }), !visitedLayerIndices.contains(childIndex),
-            let childLayout = depthLayers[childIndex].layout
-            else { return nil }
-            return splitLocation(
-                in: childLayout,
-                layerIndex: childIndex,
-                localPath: [],
-                remainingVisiblePath: remainingVisiblePath,
-                visitedLayerIndices: visitedLayerIndices.union([childIndex])
-            )
-        }
-    }
-
-    private func expandAncestors(ofLayerAt index: Int) {
-        var currentIndex = index
-        var visited: Set<Int> = []
-        while visited.insert(currentIndex).inserted {
-            depthLayers[currentIndex].isExpanded = true
-            guard let parentPaneId = depthLayers[currentIndex].parentPaneId,
-                  let parentIndex = layerIndex(containingPane: parentPaneId)
-            else { return }
-            currentIndex = parentIndex
-        }
-    }
-
-    private func depth(ofLayerAt index: Int) -> Int {
-        var depth = 0
-        var currentIndex = index
-        var visited: Set<Int> = []
-        while visited.insert(currentIndex).inserted,
-              let parentPaneId = depthLayers[currentIndex].parentPaneId,
-              let parentIndex = layerIndex(containingPane: parentPaneId)
-        {
-            depth += 1
-            currentIndex = parentIndex
-        }
-        return depth
     }
 }

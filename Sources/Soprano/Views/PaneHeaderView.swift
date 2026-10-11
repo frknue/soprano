@@ -10,10 +10,6 @@ final class PaneHeaderView: NSView {
     private var titleLabel: NSTextField!
     private var statusDot: NSView!
     private var statusLabel: NSTextField!
-    private var depthOutButton: NSButton!
-    private var depthBadgeView: NSView!
-    private var depthLabel: NSTextField!
-    private var depthInButton: NSButton!
     private var closeButton: NSButton!
     private var tabStackView: NSStackView!
     private var focusBar: NSView!
@@ -69,36 +65,8 @@ final class PaneHeaderView: NSView {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
-        depthOutButton = makeDepthButton(
-            title: "‹",
-            action: #selector(goOutAction),
-            toolTip: "Go Out (Prefix → O)"
-        )
-        addSubview(depthOutButton)
-
-        depthBadgeView = NSView()
-        depthBadgeView.wantsLayer = true
-        depthBadgeView.layer?.cornerRadius = Retro.cornerRadius
-        depthBadgeView.layer?.borderWidth = Retro.hairline
-        depthBadgeView.identifier = NSUserInterfaceItemIdentifier("pane-depth-indicator")
-        depthBadgeView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(depthBadgeView)
-
-        depthLabel = NSTextField(labelWithString: "DEPTH 0")
-        depthLabel.alignment = .center
-        depthLabel.identifier = NSUserInterfaceItemIdentifier("pane-depth-label")
-        depthLabel.translatesAutoresizingMaskIntoConstraints = false
-        depthBadgeView.addSubview(depthLabel)
-
-        depthInButton = makeDepthButton(
-            title: "›",
-            action: #selector(goInAction),
-            toolTip: "Go In (Prefix → I)"
-        )
-        addSubview(depthInButton)
-
         // Close button
-        closeButton = makeDepthButton(
+        closeButton = makeGlyphButton(
             title: "×",
             action: #selector(closePaneAction),
             toolTip: "Close active tab"
@@ -142,34 +110,10 @@ final class PaneHeaderView: NSView {
             tabsTrailingConstraint,
             tabStackView.heightAnchor.constraint(equalToConstant: 24),
 
-            statusLabel.trailingAnchor.constraint(equalTo: depthOutButton.leadingAnchor, constant: -2),
+            statusLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
 
-            depthOutButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            depthOutButton.widthAnchor.constraint(equalToConstant: 20),
-            depthOutButton.heightAnchor.constraint(equalToConstant: 24),
-
-            depthBadgeView.leadingAnchor.constraint(
-                equalTo: depthOutButton.trailingAnchor,
-                constant: 2
-            ),
-            depthBadgeView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            depthBadgeView.heightAnchor.constraint(equalToConstant: 18),
-
-            depthLabel.leadingAnchor.constraint(equalTo: depthBadgeView.leadingAnchor, constant: 6),
-            depthLabel.trailingAnchor.constraint(equalTo: depthBadgeView.trailingAnchor, constant: -6),
-            depthLabel.centerYAnchor.constraint(equalTo: depthBadgeView.centerYAnchor),
-
-            depthInButton.leadingAnchor.constraint(
-                equalTo: depthBadgeView.trailingAnchor,
-                constant: 2
-            ),
-            depthInButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            depthInButton.widthAnchor.constraint(equalToConstant: 20),
-            depthInButton.heightAnchor.constraint(equalToConstant: 24),
-
-            closeButton.leadingAnchor.constraint(equalTo: depthInButton.trailingAnchor, constant: 2),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 24),
@@ -193,10 +137,6 @@ final class PaneHeaderView: NSView {
         let pane = agentManager.panes[paneId]
         let tab = pane?.activeTab
         let theme = themeManager.currentTheme
-
-        let terminalWindow = agentManager.window(containingPane: paneId)
-        let depth = terminalWindow?.depth(containingPane: paneId) ?? 0
-        let maximumDepth = terminalWindow?.maximumDepth ?? 0
         let isFocused = agentManager.activePaneId == paneId
 
         titleLabel.textColor = theme.colors.textPrimary
@@ -204,32 +144,7 @@ final class PaneHeaderView: NSView {
         if tab?.isEditorPreview == true {
             titleLabel.attributedStringValue = Self.slanted(titleLabel.attributedStringValue)
         }
-        depthOutButton.isEnabled = depth > 0
-        depthInButton.isEnabled = terminalWindow.map {
-            $0.hasDepthBranch(from: paneId)
-                || agentManager.canAddPane(to: $0.id)
-        } ?? false
-        styleGlyphButton(depthOutButton, theme: theme)
-        styleGlyphButton(depthInButton, theme: theme)
         styleGlyphButton(closeButton, theme: theme)
-        let depthColor = isFocused ? theme.colors.accent : theme.colors.textMuted
-        depthLabel.textColor = depthColor
-        depthLabel.setRetroText("DEPTH \(depth)", color: depthColor, tracking: 0)
-        depthBadgeView.layer?.backgroundColor = (
-            isFocused
-                ? theme.colors.accent.withAlphaComponent(0.14)
-                : theme.colors.bgOverlay
-        ).cgColor
-        depthBadgeView.layer?.borderColor = (
-            isFocused ? theme.colors.accent : theme.colors.borderStrong
-        ).cgColor
-        let depthToolTip = maximumDepth > 0
-            ? "Depth layer \(depth) of \(maximumDepth)"
-            : "Depth layer \(depth)"
-        depthBadgeView.toolTip = isFocused
-            ? "Focused pane · \(depthToolTip)"
-            : depthToolTip
-        depthLabel.toolTip = depthBadgeView.toolTip
 
         if let agent = tab?.agent {
             let statusColor = colorForStatus(agent.status, theme: theme)
@@ -266,19 +181,11 @@ final class PaneHeaderView: NSView {
     }
 
     /// Closes only this pane's active tab. The last tab closes the pane, and
-    /// the last pane of an inner depth layer takes that layer with it, so
-    /// split siblings inside the layer stay open.
+    /// the last pane of a layout tab takes that tab with it, so split
+    /// siblings stay open.
     @objc private func closePaneAction() {
         guard let activeTab = agentManager.panes[paneId]?.activeTab else { return }
         agentManager.removeTabFromPane(paneId, tabId: activeTab.id)
-    }
-
-    @objc private func goOutAction() {
-        agentManager.goOut(paneId)
-    }
-
-    @objc private func goInAction() {
-        agentManager.goIn(paneId)
     }
 
     @objc private func tabClicked(_ sender: NSButton) {
@@ -348,7 +255,7 @@ final class PaneHeaderView: NSView {
         return slanted
     }
 
-    private func makeDepthButton(
+    private func makeGlyphButton(
         title: String,
         action: Selector,
         toolTip: String

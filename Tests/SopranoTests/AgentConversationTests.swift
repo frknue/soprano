@@ -270,7 +270,7 @@ struct AgentConversationTests {
         #expect(manager.agent(paneId: paneId, tabId: tabId)?.conversation?.id == "second-chat")
     }
 
-    @Test func quittingAndReopeningRestoresDistinctConversationsAndTheSelectedSessionAndDepth() throws {
+    @Test func quittingAndReopeningRestoresDistinctConversationsAndTheSelectedSessionAndTab() throws {
         let suiteName = "AgentConversationTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -281,7 +281,7 @@ struct AgentConversationTests {
         source.recordAgentConversation(.init(id: "codex-one", cwd: "/tmp/repo"), paneId: firstPane, tabId: firstTab)
         source.recordAgentConversation(.init(id: "codex-two", cwd: "/tmp/repo"), paneId: firstPane, tabId: secondTab)
         let sessionId = try #require(source.createSession(name: "Other project"))
-        _ = try #require(source.goIn(source.activePaneId))
+        _ = try #require(source.createLayoutTab())
         let innerPane = source.activePaneId
         let innerTab = try #require(source.addTabToPane(innerPane, type: .agent, profileId: "claude-code"))
         source.recordAgentConversation(.init(id: "claude-three"), paneId: innerPane, tabId: innerTab)
@@ -294,7 +294,7 @@ struct AgentConversationTests {
         #expect(restored.activeSessionId == sessionId)
         #expect(restored.activeWindowId == activeWindow)
         #expect(restored.activePaneId == innerPane)
-        #expect(restored.activeDepth == 1)
+        #expect(restored.windows[activeWindow]?.activeTabIndex == 1)
         #expect(restored.panes[innerPane]?.activeTab?.id == innerTab)
         #expect(restored.agent(paneId: firstPane, tabId: firstTab)?.conversation?.id == "codex-one")
         #expect(restored.agent(paneId: firstPane, tabId: secondTab)?.conversation?.id == "codex-two")

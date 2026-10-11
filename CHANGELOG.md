@@ -42,8 +42,17 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - Reopening Soprano resumes recorded Codex, Claude Code, and OpenCode conversations
   in their panes and restores the selected session; **Restart** resumes the recorded
   conversation too.
-- Window tabs show a compact badge counting open agents, including hidden tabs and
-  depth layers, with status colors and a breakdown on hover.
+- Window tabs show a compact badge counting open agents in every tab of the window,
+  including hidden pane tabs, with status colors and a breakdown on hover.
+- Tabs: a second row under the window tabs where each tab holds its own split layout,
+  named after its focused pane and showing the same agent badge as window tabs. Switch
+  with `⌃Tab` / `⌃⇧Tab`, open with `⌘T`, `⌃A` → `T`, or `+`, close with `⌃A` → `W`, `×`,
+  or a middle-click (**New Tab**, **Next Tab**, **Previous Tab**, **Close Tab** in the
+  palette; `new-tab-direct`, `new-tab`, `close-tab`, `next-tab`, `previous-tab` in
+  `settings.json`). Focusing a pane in another tab switches to it, the status bar and
+  sidebar show `TAB n` in windows with several tabs, and tabs restore with the workspace.
+- **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs": true`) turns off the
+  numbered window tabs; the tab row moves up into their place.
 - Windows now appear as numbered tabs above the terminals, with the active tab
   highlighted, clickable switching, a **+** button, and trackpad or scroll-wheel
   scrolling (no scrollbar) when the row fills up. The tabs remain visible with the
@@ -51,7 +60,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - Named live sessions group windows: create one with `Ctrl+A` then `Shift+C`,
   switch with `Ctrl+A` then `S` or the sidebar selector, and use `Ctrl+A` then `C`
   to create windows inside it. Window navigation stays within the current session,
-  and switching sessions preserves their running terminals, layouts, and z-depth.
+  and switching sessions preserves their running terminals, tabs, and layouts.
 - The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
   flags, diffs, and common fenced-code syntax using the active theme.
 - New **Mission Control** theme, now the default: cream on deep-space black with
@@ -74,12 +83,22 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   cards, aligned label/control rows, keyboard shortcuts drawn as per-key keycaps with
   the prefix step highlighted in the accent color, and buttons that match the active
   theme.
+- `⌃A` → `T` / `W` now open and close tabs, so pane tabs moved to Shift: `⌃A` → `⇧T`
+  opens a terminal tab inside the active pane and `⌃A` → `⇧W` closes the active pane
+  tab (`new-pane-tab`, `close-pane-tab`); `⌃A` → `>` / `<` still cycle them. `⌃A` →
+  `X` now simply kills the active pane with all its pane tabs.
+- `⌘T` now opens a tab; a new terminal pane beside the focused one moved to `⌘D`
+  (`new-terminal`).
+
+### Removed
+- Window depth: `⌃A` → `I` / `O`, the `‹ DEPTH n ›` pane header controls, the
+  **Go In** / **Go Out** palette commands, and the `pane-depth-in` / `pane-depth-out`
+  actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
-- The **×** in a pane header inside a depth layer closes only that pane's active tab
-  instead of the whole layer, so a split sibling (and the agent running in it) stays
-  open; closing the layer's last pane still returns to the pane that owns it. `⌃A` →
-  `X` keeps closing the whole layer.
+- The **×** in a pane header closes only that pane's active pane tab, so a split
+  sibling (and the agent running in it) stays open; closing the last pane tab closes
+  the pane.
 - `⌃H/J/K/L` now moves to the pane that visually borders the focused one: in a 2×2 grid,
   `⌃L` from the bottom-left pane lands bottom-right instead of top-right. Wrapping at a
   layout edge stays in the same row or column instead of jumping to the opposite corner.

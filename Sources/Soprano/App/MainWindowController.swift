@@ -99,6 +99,7 @@ final class MainWindowController: NSWindowController {
         window.setFrame(startupFrame, display: false)
         window.delegate = self
         self.mainContentVC = contentVC
+        contentVC.setWindowTabsHidden(settings.hideWindowTabs)
 
         let keybindingManager = KeybindingManager(
             agentManager: agentManager,
@@ -164,6 +165,7 @@ final class MainWindowController: NSWindowController {
         }
 
         applyWindowBarSetting()
+        mainContentVC?.setWindowTabsHidden(settings.hideWindowTabs)
         reloadKeybindingManager()
         // The Commands menu carries key equivalents for the actions AppKit
         // dispatches itself; rebuild it so a rebound chord takes effect and the
@@ -459,25 +461,43 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
-                id: "pane-depth-in",
-                icon: "arrow.down.right.and.arrow.up.left",
-                label: "Go In",
-                description: "Open or resume a terminal one level into the active pane",
-                shortcut: commandShortcut(for: "pane-depth-in"),
+                id: "new-tab",
+                icon: "plus.rectangle.on.rectangle",
+                label: "New Tab",
+                description: "Open a tab with a new terminal in the active window",
+                shortcut: commandShortcut(for: "new-tab-direct") ?? commandShortcut(for: "new-tab"),
                 action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.goIn(self.agentManager.activePaneId)
+                    _ = self?.agentManager.createLayoutTab()
                 }
             ),
             CommandItem(
-                id: "pane-depth-out",
-                icon: "arrow.up.left.and.arrow.down.right",
-                label: "Go Out",
-                description: "Return to the terminal one level out of the active pane",
-                shortcut: commandShortcut(for: "pane-depth-out"),
+                id: "next-tab",
+                icon: "arrow.right.square",
+                label: "Next Tab",
+                description: "Switch to the next tab of the active window",
+                shortcut: commandShortcut(for: "next-tab"),
                 action: { [weak self] in
-                    guard let self else { return }
-                    _ = self.agentManager.goOut(self.agentManager.activePaneId)
+                    self?.agentManager.activateNextLayoutTab()
+                }
+            ),
+            CommandItem(
+                id: "previous-tab",
+                icon: "arrow.left.square",
+                label: "Previous Tab",
+                description: "Switch to the previous tab of the active window",
+                shortcut: commandShortcut(for: "previous-tab"),
+                action: { [weak self] in
+                    self?.agentManager.activatePreviousLayoutTab()
+                }
+            ),
+            CommandItem(
+                id: "close-tab",
+                icon: "xmark.rectangle",
+                label: "Close Tab",
+                description: "Close the active tab and every pane in it",
+                shortcut: commandShortcut(for: "close-tab"),
+                action: { [weak self] in
+                    self?.agentManager.closeActiveLayoutTab()
                 }
             ),
             CommandItem(

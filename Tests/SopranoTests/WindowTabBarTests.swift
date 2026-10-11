@@ -71,7 +71,7 @@ struct WindowTabBarTests {
         #expect(agentBadge(in: button) == nil)
     }
 
-    @Test func backgroundWindowsCountAgentsInInactiveTabsAndHiddenDepthLayers() throws {
+    @Test func backgroundWindowsCountAgentsInInactivePaneTabsAndBackgroundTabs() throws {
         let manager = AgentManager()
         let windowId = manager.activeWindowId
         manager.renameWindow(windowId, to: "Work")
@@ -79,10 +79,10 @@ struct WindowTabBarTests {
         let agentTabId = try #require(manager.addTabToPane(paneId, type: .agent, profileId: "codex"))
         manager.updateAgentStatus(paneId: paneId, tabId: agentTabId, status: .running)
         manager.switchTab(paneId, index: 0)
-        _ = try #require(manager.goIn(paneId))
+        _ = try #require(manager.createLayoutTab())
         let innerPaneId = manager.activePaneId
         let innerTabId = try #require(manager.addTabToPane(innerPaneId, type: .agent, profileId: "claude-code"))
-        #expect(manager.goOut(innerPaneId))
+        manager.activatePreviousLayoutTab()
         _ = try #require(manager.createWindow())
         let bar = makeBar(manager: manager)
         let button = tabs(in: bar)[0]

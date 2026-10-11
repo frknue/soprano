@@ -21,22 +21,35 @@ struct WorkspaceSession: Identifiable, Codable {
         /// Optional for backward compatibility with sessions saved before
         /// sidebar disclosure state was persisted.
         var isSidebarCollapsed: Bool? = nil
+        /// The active tab's layout and focused pane. Builds without tabs
+        /// restore them as the window's only layout.
         var layout: SplitNode?
         var activePaneId: String
-        /// Optional for backward compatibility with sessions saved before
-        /// depth became a tree of pane-owned workspaces.
-        var depthLayers: [SavedDepthLayer]? = nil
-        /// Layer array index. `activeDepth` remains as a decoder fallback for
-        /// sessions written by the earlier linear-stack implementation.
+        /// Missing in workspaces saved before windows had tabs.
+        var tabs: [SavedLayoutTab]? = nil
+        var activeTabIndex: Int? = nil
+        /// Window depth from builds before tabs: one complete layout per
+        /// layer, which reopen as tabs in the same order. Read, never written.
+        var depthLayers: [SavedLayoutTab]? = nil
         var activeDepthLayerIndex: Int? = nil
+        /// The active layer of the first depth builds, which stacked layers.
         var activeDepth: Int? = nil
+
+        /// The tabs this window reopens with, from whichever format wrote it:
+        /// tabs, else depth layers, else the single layout of the oldest
+        /// workspaces.
+        var restorableTabs: [SavedLayoutTab] {
+            tabs ?? depthLayers ?? [SavedLayoutTab(layout: layout, activePaneId: activePaneId)]
+        }
+
+        var restorableActiveTabIndex: Int {
+            activeTabIndex ?? activeDepthLayerIndex ?? activeDepth ?? 0
+        }
     }
 
-    struct SavedDepthLayer: Codable {
-        var parentPaneId: String? = nil
+    struct SavedLayoutTab: Codable {
         var layout: SplitNode?
         var activePaneId: String
-        var isExpanded: Bool? = nil
     }
 
     struct SavedPane: Codable {
@@ -56,9 +69,6 @@ struct WorkspaceSession: Identifiable, Codable {
         /// ignore this specialization while retaining the browser pane.
         var contentKind: String? = nil
         var previewOwnerPaneId: String? = nil
-        /// Retained only to decode sessions from the earlier pane-local depth
-        /// implementation. Restored entries are migrated to regular tabs.
-        var depthParentId: String? = nil
         /// Missing in older workspaces, which continue to start fresh agents.
         var conversation: AgentConversation? = nil
     }

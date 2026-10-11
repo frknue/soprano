@@ -131,6 +131,10 @@ enum ConfigFile {
           // the full window. Off by default.
           "hideWindowBar": \(settings.hideWindowBar),
 
+          // Hide the numbered window tabs; the tab row moves up into their
+          // place. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F. Off by default.
+          "hideWindowTabs": \(settings.hideWindowTabs),
+
           // Scanlines and phosphor glow over terminal panes, like an old CRT
           // monitor. Off by default.
           "crtEffect": \(settings.crtEffect),

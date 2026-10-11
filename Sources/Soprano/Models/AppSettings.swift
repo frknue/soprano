@@ -9,6 +9,8 @@ struct AppSettings: Codable, Equatable {
     var restoreLastSession: Bool
     var themeId: String
     var hideWindowBar: Bool
+    /// Hides the numbered window tabs; the tab row moves up into their place.
+    var hideWindowTabs: Bool
     /// Scanlines and phosphor glow over terminal panes. Off by default: it is
     /// a look, and a shader on every pane is not free.
     var crtEffect: Bool
@@ -22,6 +24,7 @@ struct AppSettings: Codable, Equatable {
         restoreLastSession: true,
         themeId: "mission-control",
         hideWindowBar: false,
+        hideWindowTabs: false,
         crtEffect: false,
         projectDirectories: [],
         notificationSound: false
@@ -40,6 +43,8 @@ struct AppSettings: Codable, Equatable {
             ?? defaults.themeId
         hideWindowBar = try container.decodeIfPresent(Bool.self, forKey: .hideWindowBar)
             ?? defaults.hideWindowBar
+        hideWindowTabs = try container.decodeIfPresent(Bool.self, forKey: .hideWindowTabs)
+            ?? defaults.hideWindowTabs
         crtEffect = try container.decodeIfPresent(Bool.self, forKey: .crtEffect)
             ?? defaults.crtEffect
         projectDirectories = try container.decodeIfPresent([String].self, forKey: .projectDirectories)
@@ -52,6 +57,7 @@ struct AppSettings: Codable, Equatable {
         restoreLastSession: Bool,
         themeId: String,
         hideWindowBar: Bool,
+        hideWindowTabs: Bool,
         crtEffect: Bool,
         projectDirectories: [String],
         notificationSound: Bool
@@ -59,6 +65,7 @@ struct AppSettings: Codable, Equatable {
         self.restoreLastSession = restoreLastSession
         self.themeId = themeId
         self.hideWindowBar = hideWindowBar
+        self.hideWindowTabs = hideWindowTabs
         self.crtEffect = crtEffect
         self.projectDirectories = projectDirectories
         self.notificationSound = notificationSound

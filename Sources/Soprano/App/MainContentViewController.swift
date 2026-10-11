@@ -14,6 +14,10 @@ final class MainContentViewController: NSViewController {
     private var sidebarView: SidebarView!
     private var splitTreeView: SplitTreeView!
     private var windowTabBarView: WindowTabBarView!
+    private var layoutTabBarView: LayoutTabBarView!
+    private var windowTabBarHeightConstraint: NSLayoutConstraint!
+    private var layoutTabBarHeightConstraint: NSLayoutConstraint!
+    private var windowTabsHidden = false
     private var statusBarView: StatusBarView!
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var sidebarResizeHandle: SidebarResizeHandleView!
@@ -81,6 +85,10 @@ final class MainContentViewController: NSViewController {
         windowTabBarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(windowTabBarView)
 
+        layoutTabBarView = LayoutTabBarView(agentManager: agentManager, themeManager: themeManager)
+        layoutTabBarView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(layoutTabBarView)
+
         // Sidebar
         sidebarView = SidebarView(
             agentManager: agentManager,
@@ -110,10 +118,13 @@ final class MainContentViewController: NSViewController {
         rightSidebarView.setContentWidth(rightSidebarWidth)
         rightSidebarView.setOpen(rightSidebarVisible)
         root.addSubview(rightSidebarView, positioned: .above, relativeTo: splitTreeView)
-        windowTabBarView.showsRightSidebarToggle = !rightSidebarVisible
         windowTabBarView.onRightSidebarToggle = { [weak self] in
             self?.toggleRightSidebar()
         }
+        layoutTabBarView.onRightSidebarToggle = { [weak self] in
+            self?.toggleRightSidebar()
+        }
+        updateRightSidebarToggle()
 
         // Status bar
         statusBarView = StatusBarView(agentManager: agentManager, themeManager: themeManager)
@@ -143,6 +154,12 @@ final class MainContentViewController: NSViewController {
         rightSidebarWidthConstraint = rightSidebarView.widthAnchor.constraint(
             equalToConstant: rightSidebarVisible ? rightSidebarWidth : 0
         )
+        windowTabBarHeightConstraint = windowTabBarView.heightAnchor.constraint(
+            equalToConstant: WindowTabBarView.height
+        )
+        layoutTabBarHeightConstraint = layoutTabBarView.heightAnchor.constraint(
+            equalToConstant: LayoutTabBarView.height
+        )
 
         NSLayoutConstraint.activate([
             sidebarResizeHandle.centerXAnchor.constraint(equalTo: sidebarView.trailingAnchor),
@@ -169,17 +186,23 @@ final class MainContentViewController: NSViewController {
             rightSidebarView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
             rightSidebarWidthConstraint,
 
-            // Window tabs remain visible above the terminal layout, including
-            // when the sidebars or native window bar are hidden.
+            // Window tabs stay above the terminal layout with the sidebars or
+            // native window bar hidden; only `hideWindowTabs` collapses them.
             windowTabBarView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             windowTabBarView.trailingAnchor.constraint(equalTo: rightSidebarView.leadingAnchor),
             windowTabBarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
-            windowTabBarView.heightAnchor.constraint(equalToConstant: WindowTabBarView.height),
+            windowTabBarHeightConstraint,
 
-            // Split tree: between the sidebars, below tabs, above status bar
+            // The active window's own tabs, each a complete split layout.
+            layoutTabBarView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+            layoutTabBarView.trailingAnchor.constraint(equalTo: rightSidebarView.leadingAnchor),
+            layoutTabBarView.topAnchor.constraint(equalTo: windowTabBarView.bottomAnchor),
+            layoutTabBarHeightConstraint,
+
+            // Split tree: between the sidebars, below both tab rows, above status bar
             splitTreeView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             splitTreeView.trailingAnchor.constraint(equalTo: rightSidebarView.leadingAnchor),
-            splitTreeView.topAnchor.constraint(equalTo: windowTabBarView.bottomAnchor),
+            splitTreeView.topAnchor.constraint(equalTo: layoutTabBarView.bottomAnchor),
             splitTreeView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
 
             // Status bar: full width, bottom
@@ -261,7 +284,7 @@ final class MainContentViewController: NSViewController {
         defaults.set(visible, forKey: Self.rightSidebarVisibleKey)
         rightSidebarResizeHandle.isHidden = !visible
         rightSidebarView.setOpen(visible)
-        windowTabBarView.showsRightSidebarToggle = !visible
+        updateRightSidebarToggle()
         animateWidth(of: rightSidebarWidthConstraint, to: visible ? rightSidebarWidth : 0)
         // A collapsed sidebar must not keep the keyboard.
         if !visible, explorerHadFocus {
@@ -269,9 +292,32 @@ final class MainContentViewController: NSViewController {
         }
     }
 
+    /// The right sidebar's toggle sits at the end of the top tab row while
+    /// the sidebar is closed.
+    private func updateRightSidebarToggle() {
+        windowTabBarView.showsRightSidebarToggle = !rightSidebarVisible && !windowTabsHidden
+        layoutTabBarView.showsRightSidebarToggle = !rightSidebarVisible && windowTabsHidden
+    }
+
     private func returnKeyboardFocusToPanes() {
         view.window?.makeFirstResponder(nil)
         splitTreeView.restoreKeyboardFocus()
+    }
+
+    // MARK: - Window Tabs
+
+    /// Collapses or restores the numbered window tabs. Hidden, the tab row
+    /// moves up into their place, and windows are switched from the sidebar
+    /// or the keyboard.
+    func setWindowTabsHidden(_ hidden: Bool) {
+        loadViewIfNeeded()
+        guard hidden != windowTabsHidden else { return }
+        windowTabsHidden = hidden
+        windowTabBarView.isHidden = hidden
+        windowTabBarHeightConstraint.constant = hidden ? 0 : WindowTabBarView.height
+        layoutTabBarView.isTopRow = hidden
+        layoutTabBarHeightConstraint.constant = LayoutTabBarView.height(isTopRow: hidden)
+        updateRightSidebarToggle()
     }
 
     // MARK: - Sidebar Resizing
@@ -544,6 +590,7 @@ final class MainContentViewController: NSViewController {
         sidebarView.refreshTheme()
         splitTreeView.refreshTheme()
         windowTabBarView.refreshTheme()
+        layoutTabBarView.refreshTheme()
         rightSidebarView.refreshTheme()
         statusBarView.refreshTheme()
         dashboardViewController?.apply(theme: themeManager.currentTheme)

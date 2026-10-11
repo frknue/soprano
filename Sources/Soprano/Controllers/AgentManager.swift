@@ -48,15 +48,10 @@ final class AgentManager: @unchecked Sendable {
         get { windows[activeWindowId]?.activePaneId ?? "" }
         set { windows[activeWindowId]?.activePaneId = newValue }
     }
+    /// The active window's visible layout: its active tab's.
     private(set) var layout: SplitNode? {
-        get { windows[activeWindowId]?.visibleLayout }
+        get { windows[activeWindowId]?.layout }
         set { windows[activeWindowId]?.layout = newValue }
-    }
-    var activeDepth: Int {
-        windows[activeWindowId]?.activeDepth ?? 0
-    }
-    var maximumDepth: Int {
-        windows[activeWindowId]?.maximumDepth ?? 0
     }
     /// Pane rendered full-size instead of the split tree (nil = normal).
     /// Transient view state — never persisted in sessions.
@@ -79,10 +74,10 @@ final class AgentManager: @unchecked Sendable {
     private(set) var workspaceRestoreGeneration: Int = 0
     private var ghosttyCloseObserver: NSObjectProtocol?
 
-    /// Bounds one logical window's complete pane tree, including depth layers.
-    /// Other windows keep independent capacity so a busy workspace cannot
-    /// silently disable pane creation everywhere else.
-    static let maxPanesPerWindow = 20
+    /// Bounds one tab's split layout. Other tabs and windows keep their own
+    /// capacity, so a crowded layout cannot silently disable pane creation
+    /// everywhere else.
+    static let maxPanesPerTab = 20
     private static let paneShortcutKeys = Array("bdefgimnopqrstuvwxyz")
 
     // MARK: - Initialization
@@ -97,8 +92,7 @@ final class AgentManager: @unchecked Sendable {
         windows[windowId] = WorkspaceWindowState(
             id: windowId,
             title: Self.suggestedWindowTitle(for: tab),
-            layout: .leaf(paneId),
-            activePaneId: paneId
+            tabs: [LayoutTab(id: "layout-1", layout: .leaf(paneId), activePaneId: paneId)]
         )
         activeWindowId = windowId
         terminalSessions[TerminalSessionState.defaultID] = TerminalSessionState(
@@ -142,6 +136,11 @@ final class AgentManager: @unchecked Sendable {
     private func nextWindowId() -> String {
         nextId += 1
         return "window-\(nextId)"
+    }
+
+    private func nextLayoutTabId() -> String {
+        nextId += 1
+        return "layout-\(nextId)"
     }
 
     // MARK: - Live Sessions
@@ -231,25 +230,15 @@ final class AgentManager: @unchecked Sendable {
     ) -> String? {
         guard terminalSessions[sessionId] != nil else { return nil }
         let windowId = nextWindowId()
-        let paneId = nextPaneId()
-        let tabId = nextTabId()
-        let title = workingDirectory?.split(separator: "/").last.map(String.init) ?? "Terminal"
-        let tab = PaneTab(
-            id: tabId,
-            type: .terminal,
-            title: title,
-            cwd: workingDirectory
-        )
-        panes[paneId] = PaneState(id: paneId, tabs: [tab])
+        let pane = makeTerminalPane(cwd: workingDirectory)
         let windowTitle = uniqueAutomaticWindowTitle(
-            Self.suggestedWindowTitle(for: tab), in: sessionId
+            Self.suggestedWindowTitle(for: pane.activeTab), in: sessionId
         )
         windows[windowId] = WorkspaceWindowState(
             id: windowId,
             sessionId: sessionId,
             title: windowTitle,
-            layout: .leaf(paneId),
-            activePaneId: paneId
+            tabs: [LayoutTab(id: nextLayoutTabId(), layout: .leaf(pane.id), activePaneId: pane.id)]
         )
         if activate {
             _ = setActiveWindow(windowId)
@@ -340,7 +329,7 @@ final class AgentManager: @unchecked Sendable {
 
     func resetWindowTitle(_ windowId: String) {
         guard let terminalWindow = windows[windowId],
-              let firstPaneId = terminalWindow.rootLayout?.firstLeaf,
+              let firstPaneId = terminalWindow.tabs.first?.layout?.firstLeaf,
               let tab = panes[firstPaneId]?.tabs.first
         else { return }
         terminalWindow.title = uniqueAutomaticWindowTitle(
@@ -454,22 +443,18 @@ final class AgentManager: @unchecked Sendable {
         return tabId
     }
 
-    /// Makes `tabId` the visible, focused tab of `pane`, revealing its depth
-    /// layer and window. A maximized caller keeps its size.
+    /// Makes `tabId` the visible, focused tab of `pane`, bringing its window
+    /// and layout tab to the front. A maximized caller keeps its size.
     private func showTab(_ tabId: String, in pane: PaneState, of terminalWindow: WorkspaceWindowState) {
         if let maximizedPaneId, maximizedPaneId != pane.id {
             exitMaximize()
         }
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let previousDepth = terminalWindow.activeDepth
-        let visibilityChanged = terminalWindow.revealPane(pane.id)
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: pane.id)
         terminalWindow.activePaneId = pane.id
         pane.activeTabIndex = pane.tabs.firstIndex { $0.id == tabId } ?? 0
-        notifyChange(
-            layoutChanged: windowChanged || visibilityChanged
-                || previousDepth != terminalWindow.activeDepth
-        )
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
     }
 
     private func createMarkdownTab(fileURL: URL, previewOwnerPaneId: String?) -> PaneTab {
@@ -548,15 +533,16 @@ final class AgentManager: @unchecked Sendable {
     }
 
     /// Where files open in `windowId`: the focused pane when it holds only
-    /// files (editor and Markdown reader tabs), else the first such pane on
-    /// screen. Nil when there is none, so the next file gets its own split.
+    /// files (editor and Markdown reader tabs), else the first such pane in
+    /// the active layout tab. Nil when there is none, so the next file gets
+    /// its own split.
     func filePane(in windowId: String) -> String? {
         guard let terminalWindow = windows[windowId] else { return nil }
         let isFilePane = { [panes] (paneId: String) -> Bool in
             guard let tabs = panes[paneId]?.tabs, !tabs.isEmpty else { return false }
             return tabs.allSatisfy { $0.isEditor || $0.isMarkdown }
         }
-        let visible = terminalWindow.visibleLayout?.orderedLeafIds ?? []
+        let visible = terminalWindow.layout?.orderedLeafIds ?? []
         if visible.contains(terminalWindow.activePaneId), isFilePane(terminalWindow.activePaneId) {
             return terminalWindow.activePaneId
         }
@@ -627,10 +613,11 @@ final class AgentManager: @unchecked Sendable {
         guard let sourcePane = panes[paneId],
               let sourceTab = sourcePane.activeTab,
               let terminalWindow = window(containingPane: paneId),
-              terminalWindow.paneIds.count < Self.maxPanesPerWindow
+              let layoutTabIndex = terminalWindow.tabIndex(containingPane: paneId),
+              (terminalWindow.tabs[layoutTabIndex].layout?.leafCount ?? 0) < Self.maxPanesPerTab
         else { return nil }
         _ = setActiveWindow(terminalWindow.id)
-        _ = terminalWindow.activateDepth(containingPane: paneId)
+        _ = terminalWindow.activateTab(at: layoutTabIndex)
         terminalWindow.activePaneId = paneId
         exitMaximize()
 
@@ -685,58 +672,25 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Pane Closing
 
+    /// Closes `paneId` with all of its tabs. The last pane of a layout tab
+    /// takes that tab with it, and the last pane of a window the window.
     func closePane(_ paneId: String) {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return }
-        // Ask about exactly the tabs this close takes, worked out on a copy.
-        let closing = Self.detach(paneId, from: terminalWindow.copy())
-        guard confirmClosing(paneIds: closing.removedPaneIds) else { return }
+        guard confirmClosing(paneIds: [paneId]) else { return }
 
         performConfirmedClose {
             exitMaximize()
-            let detached = Self.detach(paneId, from: terminalWindow)
-            for removedPaneId in detached.removedPaneIds {
-                cancelAgentReadinessGenerations(in: removedPaneId)
-                panes.removeValue(forKey: removedPaneId)
-            }
-            if detached.closesWindow {
+            cancelAgentReadinessGenerations(in: paneId)
+            panes.removeValue(forKey: paneId)
+            terminalWindow.removePane(paneId)
+            if terminalWindow.isEmpty {
                 closeWindow(terminalWindow.id)
             } else {
                 notifyChange(layoutChanged: true)
             }
         }
-    }
-
-    /// Removes `paneId` from `terminalWindow`'s layouts the way closing it
-    /// does, returning every pane that leaves with it:
-    ///
-    /// - The only pane of an inner workspace takes that depth layer and every
-    ///   layer farther inward along, revealing the owning pane.
-    /// - Otherwise the pane leaves with its own depth branches; if that empties
-    ///   an inner layer, the layer goes too, and if it empties Z0 the whole
-    ///   window closes.
-    ///
-    /// Run on a copy, it answers which tabs a close would take before asking.
-    private static func detach(
-        _ paneId: String,
-        from terminalWindow: WorkspaceWindowState
-    ) -> (removedPaneIds: Set<String>, closesWindow: Bool) {
-        _ = terminalWindow.activateDepth(containingPane: paneId)
-        if terminalWindow.activeDepth > 0,
-           terminalWindow.layout?.leafIds == [paneId]
-        {
-            return (terminalWindow.removeActiveDepthAndDescendants(), false)
-        }
-
-        var removed = terminalWindow.removeDepthBranches(ownedBy: paneId)
-        removed.insert(paneId)
-        _ = terminalWindow.removePaneFromOwningLayout(paneId)
-        guard terminalWindow.layout == nil else { return (removed, false) }
-        if terminalWindow.activeDepth > 0 {
-            return (removed.union(terminalWindow.removeActiveDepthAndDescendants()), false)
-        }
-        return (removed.union(terminalWindow.paneIds), true)
     }
 
     // MARK: - Close Confirmation
@@ -771,7 +725,7 @@ final class AgentManager: @unchecked Sendable {
         guard panes[paneId] != nil,
               let terminalWindow = window(containingPane: paneId)
         else { return }
-        let paneIsVisible = terminalWindow.visibleLayout?.leafIds.contains(paneId) == true
+        let paneIsVisible = terminalWindow.layout?.containsLeaf(paneId) == true
         if activeWindowId == terminalWindow.id, paneIsVisible, activePaneId == paneId {
             guard clearAttentionWithoutNotification(paneId: paneId) else { return }
             notifyChange()
@@ -780,21 +734,15 @@ final class AgentManager: @unchecked Sendable {
         exitMaximize()
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let previousDepth = terminalWindow.activeDepth
-        let visibilityChanged = terminalWindow.revealPane(paneId)
-        let depthChanged = terminalWindow.activeDepth != previousDepth
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
-        notifyChange(
-            layoutChanged: windowChanged || depthChanged || visibilityChanged
-        )
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
     }
 
+    /// The window's panes, tab by tab, each tab in on-screen order.
     func orderedPanes(in windowId: String) -> [PaneState] {
-        guard let terminalWindow = windows[windowId] else { return [] }
-        return terminalWindow.depthLayers.flatMap { layer in
-            layer.layout?.orderedLeafIds.compactMap { panes[$0] } ?? []
-        }
+        windows[windowId]?.orderedPaneIds.compactMap { panes[$0] } ?? []
     }
 
     var paneShortcutAssignments: [(key: String, paneId: String)] {
@@ -834,10 +782,7 @@ final class AgentManager: @unchecked Sendable {
 
     func setSplitPercentage(at path: [SplitBranchSide], to percentage: Double) {
         guard let terminalWindow = windows[activeWindowId],
-              terminalWindow.setSplitPercentage(
-                atVisiblePath: path,
-                to: percentage
-              )
+              terminalWindow.setSplitPercentage(at: path, to: percentage)
         else { return }
         notifyChange()
     }
@@ -866,10 +811,8 @@ final class AgentManager: @unchecked Sendable {
             }
             guard valid else { continue }
 
-            guard windows[activeWindowId]?.adjustSplit(
-                atVisiblePath: ancestorPath,
-                delta: delta
-            ) == true else { return }
+            guard windows[activeWindowId]?.adjustSplit(at: ancestorPath, delta: delta) == true
+            else { return }
             notifyChange()
             return
         }
@@ -1098,7 +1041,7 @@ final class AgentManager: @unchecked Sendable {
         else { return }
 
         let isAlreadyFocused = activeWindowId == terminalWindow.id
-            && terminalWindow.depth(containingPane: paneId) == terminalWindow.activeDepth
+            && terminalWindow.layout?.containsLeaf(paneId) == true
             && terminalWindow.activePaneId == paneId
             && pane.activeTabIndex == index
         if isAlreadyFocused {
@@ -1107,15 +1050,11 @@ final class AgentManager: @unchecked Sendable {
             exitMaximize()
             let windowChanged = activeWindowId != terminalWindow.id
             _ = setActiveWindow(terminalWindow.id)
-            let previousDepth = terminalWindow.activeDepth
-            let visibilityChanged = terminalWindow.revealPane(paneId)
-            let depthChanged = terminalWindow.activeDepth != previousDepth
+            let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
             terminalWindow.activePaneId = paneId
             pane.activeTabIndex = index
             _ = clearAttentionWithoutNotification(paneId: paneId)
-            notifyChange(
-                layoutChanged: windowChanged || depthChanged || visibilityChanged
-            )
+            notifyChange(layoutChanged: windowChanged || layoutTabChanged)
         }
     }
 
@@ -1191,109 +1130,92 @@ final class AgentManager: @unchecked Sendable {
         return true
     }
 
-    // MARK: - Window Depth
+    // MARK: - Layout Tabs
 
-    /// Moves one level inward through the active pane. The pane's private
-    /// layout replaces only its region, so outer siblings remain visible.
-    @discardableResult
-    func goIn(_ paneId: String) -> String? {
-        guard let pane = panes[paneId],
-              let terminalWindow = window(containingPane: paneId),
-              pane.activeTab != nil
-        else { return nil }
-
-        _ = setActiveWindow(terminalWindow.id)
-        _ = terminalWindow.activateDepth(containingPane: paneId)
-        if terminalWindow.goIn(from: paneId) {
-            let targetPaneId = terminalWindow.activePaneId
-            retargetMaximize(from: paneId, to: targetPaneId)
-            _ = clearAttentionWithoutNotification(paneId: targetPaneId)
-            notifyChange(layoutChanged: true)
-            return panes[targetPaneId]?.activeTab?.id
-        }
-
-        guard terminalWindow.paneIds.count < Self.maxPanesPerWindow,
-              let activeTab = pane.activeTab
-        else { return nil }
-        let newPaneId = nextPaneId()
-        let newTabId = nextTabId()
-        let child = createPaneTab(
-            id: newTabId,
-            type: .terminal,
-            cwd: activeTab.cwd
-        )
-        panes[newPaneId] = PaneState(id: newPaneId, tabs: [child])
-        terminalWindow.appendDepth(
-            parentPaneId: paneId,
-            layout: .leaf(newPaneId),
-            activePaneId: newPaneId
-        )
-        retargetMaximize(from: paneId, to: newPaneId)
-        notifyChange(layoutChanged: true)
-        return newTabId
+    func window(containingLayoutTab layoutTabId: String) -> WorkspaceWindowState? {
+        windows.values.first { $0.tabIndex(of: layoutTabId) != nil }
     }
 
-    /// Collapses the active branch and reveals its owning outer pane.
+    /// Opens a tab at the end of the active window's row holding one fresh
+    /// terminal, started in the active terminal's directory, and shows it.
     @discardableResult
-    func goOut(_ paneId: String) -> Bool {
-        guard panes[paneId] != nil,
-              let terminalWindow = window(containingPane: paneId)
-        else { return false }
-
-        _ = setActiveWindow(terminalWindow.id)
-        _ = terminalWindow.activateDepth(containingPane: paneId)
-        guard terminalWindow.goOut() else { return false }
-        retargetMaximize(
-            from: paneId,
-            to: terminalWindow.activePaneId
+    func createLayoutTab(cwd: String? = nil) -> String? {
+        guard let terminalWindow = windows[activeWindowId] else { return nil }
+        let pane = makeTerminalPane(cwd: cwd ?? activeWorkingDirectory)
+        let layoutTabId = nextLayoutTabId()
+        terminalWindow.appendTab(
+            LayoutTab(id: layoutTabId, layout: .leaf(pane.id), activePaneId: pane.id)
         )
+        maximizedPaneId = nil
+        notifyChange(layoutChanged: true)
+        return layoutTabId
+    }
+
+    /// Shows `layoutTabId`, switching to its window when another is active.
+    func activateLayoutTab(_ layoutTabId: String) {
+        guard let terminalWindow = window(containingLayoutTab: layoutTabId),
+              let index = terminalWindow.tabIndex(of: layoutTabId)
+        else { return }
+        let windowChanged = setActiveWindow(terminalWindow.id)
+        let layoutTabChanged = terminalWindow.activateTab(at: index)
+        guard windowChanged || layoutTabChanged else { return }
+        showActiveLayoutTab(of: terminalWindow)
+    }
+
+    func activateNextLayoutTab() {
+        activateLayoutTab(offset: 1)
+    }
+
+    func activatePreviousLayoutTab() {
+        activateLayoutTab(offset: -1)
+    }
+
+    /// Moves through the active window's tabs, wrapping at either end.
+    private func activateLayoutTab(offset: Int) {
+        guard let terminalWindow = windows[activeWindowId],
+              terminalWindow.activateTab(offset: offset)
+        else { return }
+        showActiveLayoutTab(of: terminalWindow)
+    }
+
+    /// A maximized pane belongs to the tab that was on screen, and the
+    /// revealed tab's focused pane counts as seen.
+    private func showActiveLayoutTab(of terminalWindow: WorkspaceWindowState) {
+        maximizedPaneId = nil
         _ = clearAttentionWithoutNotification(paneId: terminalWindow.activePaneId)
         notifyChange(layoutChanged: true)
-        return true
     }
 
-    /// Keep a maximized region full-size while replacing its pane with the
-    /// corresponding pane from an adjacent depth layer.
-    private func retargetMaximize(from sourcePaneId: String, to targetPaneId: String) {
-        guard let maximizedPaneId else { return }
-        self.maximizedPaneId = maximizedPaneId == sourcePaneId
-            ? targetPaneId
-            : nil
-    }
-
-    /// Closes the complete active inner layout and all layouts farther inward.
-    /// Returns `false` at Z0 so callers retain their normal pane behavior.
-    @discardableResult
-    func closeActiveDepthLayer(_ paneId: String) -> Bool {
-        guard panes[paneId] != nil,
-              let terminalWindow = window(containingPane: paneId)
-        else { return false }
-        _ = setActiveWindow(terminalWindow.id)
-        _ = terminalWindow.activateDepth(containingPane: paneId)
-        guard terminalWindow.activeDepth > 0 else { return false }
-        // A cancelled close still counts as handled, so callers do not fall
-        // back to closing the pane instead.
-        guard confirmClosing(paneIds: terminalWindow.copy().removeActiveDepthAndDescendants()) else {
-            return true
+    /// Closes `layoutTabId` with every pane in it. A window's last tab takes
+    /// the window with it.
+    func closeLayoutTab(_ layoutTabId: String) {
+        guard let terminalWindow = window(containingLayoutTab: layoutTabId),
+              let index = terminalWindow.tabIndex(of: layoutTabId)
+        else { return }
+        guard terminalWindow.tabs.count > 1 else {
+            closeWindow(terminalWindow.id)
+            return
         }
+        let paneIds = terminalWindow.tabs[index].layout?.leafIds ?? []
+        guard confirmClosing(paneIds: paneIds) else { return }
 
-        exitMaximize()
-        removeActiveDepthAndDescendants(from: terminalWindow)
+        if let maximizedPaneId, paneIds.contains(maximizedPaneId) {
+            self.maximizedPaneId = nil
+        }
+        terminalWindow.removeTab(at: index)
+        for paneId in paneIds {
+            cancelAgentReadinessGenerations(in: paneId)
+            panes.removeValue(forKey: paneId)
+        }
         notifyChange(layoutChanged: true)
-        return true
     }
 
-    private func removeActiveDepthAndDescendants(
-        from terminalWindow: WorkspaceWindowState
-    ) {
-        let removedPaneIds = terminalWindow.removeActiveDepthAndDescendants()
-        for removedPaneId in removedPaneIds {
-            cancelAgentReadinessGenerations(in: removedPaneId)
-            panes.removeValue(forKey: removedPaneId)
-        }
+    func closeActiveLayoutTab() {
+        guard let terminalWindow = windows[activeWindowId] else { return }
+        closeLayoutTab(terminalWindow.activeTab.id)
     }
 
-    // MARK: - Tabs
+    // MARK: - Pane Tabs
 
     @discardableResult
     func addTabToPane(_ paneId: String, type: PaneType, profileId: String? = nil) -> String? {
@@ -1314,9 +1236,9 @@ final class AgentManager: @unchecked Sendable {
         pane.activeTabIndex = pane.tabs.count - 1
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
         terminalWindow.activePaneId = paneId
-        notifyChange(layoutChanged: windowChanged || depthChanged)
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
         return tabId
     }
 
@@ -1350,10 +1272,10 @@ final class AgentManager: @unchecked Sendable {
         pane.activeTabIndex = clamped
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
-        notifyChange(layoutChanged: windowChanged || depthChanged)
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
     }
 
     func nextTab(_ paneId: String) {
@@ -1364,10 +1286,10 @@ final class AgentManager: @unchecked Sendable {
         pane.activeTabIndex = (pane.clampedActiveIndex() + 1) % pane.tabs.count
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
-        notifyChange(layoutChanged: windowChanged || depthChanged)
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
     }
 
     func prevTab(_ paneId: String) {
@@ -1379,10 +1301,10 @@ final class AgentManager: @unchecked Sendable {
         pane.activeTabIndex = (current - 1 + pane.tabs.count) % pane.tabs.count
         let windowChanged = activeWindowId != terminalWindow.id
         _ = setActiveWindow(terminalWindow.id)
-        let depthChanged = terminalWindow.activateDepth(containingPane: paneId)
+        let layoutTabChanged = terminalWindow.activateTab(containingPane: paneId)
         terminalWindow.activePaneId = paneId
         _ = clearAttentionWithoutNotification(paneId: paneId)
-        notifyChange(layoutChanged: windowChanged || depthChanged)
+        notifyChange(layoutChanged: windowChanged || layoutTabChanged)
     }
 
     func renameTab(_ paneId: String, tabId: String, to title: String) {
@@ -1483,7 +1405,6 @@ final class AgentManager: @unchecked Sendable {
                             title: tab.title,
                             contentKind: tab.contentKind,
                             previewOwnerPaneId: tab.previewOwnerPaneId,
-                            depthParentId: nil,
                             conversation: tab.agent?.conversation
                         )
                     }
@@ -1496,18 +1417,12 @@ final class AgentManager: @unchecked Sendable {
                 title: terminalWindow.title,
                 isTitleCustom: terminalWindow.isTitleCustom,
                 isSidebarCollapsed: terminalWindow.isSidebarCollapsed,
-                layout: terminalWindow.rootLayout,
+                layout: terminalWindow.layout,
                 activePaneId: terminalWindow.activePaneId,
-                depthLayers: terminalWindow.depthLayers.map { layer in
-                    WorkspaceSession.SavedDepthLayer(
-                        parentPaneId: layer.parentPaneId,
-                        layout: layer.layout,
-                        activePaneId: layer.activePaneId,
-                        isExpanded: layer.isExpanded
-                    )
+                tabs: terminalWindow.tabs.map {
+                    WorkspaceSession.SavedLayoutTab(layout: $0.layout, activePaneId: $0.activePaneId)
                 },
-                activeDepthLayerIndex: terminalWindow.activeDepthLayerIndex,
-                activeDepth: terminalWindow.activeDepth
+                activeTabIndex: terminalWindow.activeTabIndex
             )
         }
 
@@ -1541,8 +1456,6 @@ final class AgentManager: @unchecked Sendable {
                 if let num = parseIdNumber(savedTab.id) {
                     maxId = max(maxId, num)
                 }
-                // Old pane-local depth surfaces remain available as ordinary
-                // tabs after migrating to pane-owned depth workspaces.
                 let conversation = savedTab.conversation.flatMap {
                     AgentConversation.validID($0.id)
                         && AgentConversation.supports(profileId: savedTab.profileId ?? "") ? $0 : nil
@@ -1585,38 +1498,30 @@ final class AgentManager: @unchecked Sendable {
                 if let num = parseIdNumber(savedWindow.id) {
                     maxId = max(maxId, num)
                 }
-                let savedDepthLayers = savedWindow.depthLayers ?? [
-                    WorkspaceSession.SavedDepthLayer(
-                        parentPaneId: nil,
-                        layout: savedWindow.layout,
-                        activePaneId: savedWindow.activePaneId
-                    )
-                ]
-                var previousLayerActivePaneId: String?
-                let restoredDepthLayers = savedDepthLayers.enumerated().compactMap {
-                    index,
-                    savedLayer
-                    -> WorkspaceDepthLayer? in
-                    guard let restoredLayout = savedLayer.layout,
-                          let firstPaneId = restoredLayout.leafIds.first(
+                let savedActiveTabIndex = savedWindow.restorableActiveTabIndex
+                var restoredTabs: [LayoutTab] = []
+                var activeTabIndex = 0
+                for (index, savedTab) in savedWindow.restorableTabs.enumerated() {
+                    guard let restoredLayout = savedTab.layout,
+                          let firstPaneId = restoredLayout.orderedLeafIds.first(
                             where: { newPanes[$0] != nil }
                           )
-                    else { return nil }
-                    let activePaneId = restoredLayout.leafIds.contains(savedLayer.activePaneId)
-                        ? savedLayer.activePaneId
-                        : firstPaneId
-                    let parentPaneId = savedLayer.parentPaneId
-                        ?? (index > 0 ? previousLayerActivePaneId : nil)
-                    previousLayerActivePaneId = activePaneId
-                    return WorkspaceDepthLayer(
-                        parentPaneId: parentPaneId,
+                    else { continue }
+                    // When the saved active tab cannot be restored, the
+                    // nearest one before it takes the front.
+                    if index <= savedActiveTabIndex {
+                        activeTabIndex = restoredTabs.count
+                    }
+                    maxId += 1
+                    restoredTabs.append(LayoutTab(
+                        id: "layout-\(maxId)",
                         layout: restoredLayout,
-                        activePaneId: activePaneId,
-                        isExpanded: savedLayer.isExpanded
-                            ?? (index == 0)
-                    )
+                        activePaneId: restoredLayout.containsLeaf(savedTab.activePaneId)
+                            ? savedTab.activePaneId
+                            : firstPaneId
+                    ))
                 }
-                guard let firstPaneId = restoredDepthLayers.first?.layout?.firstLeaf else {
+                guard let firstPaneId = restoredTabs.first?.layout?.firstLeaf else {
                     continue
                 }
                 let sessionId = savedWindow.sessionId.flatMap {
@@ -1641,10 +1546,8 @@ final class AgentManager: @unchecked Sendable {
                     title: restoredTitle,
                     isTitleCustom: isTitleCustom,
                     isSidebarCollapsed: savedWindow.isSidebarCollapsed ?? false,
-                    depthLayers: restoredDepthLayers,
-                    activeDepthLayerIndex: savedWindow.activeDepthLayerIndex
-                        ?? savedWindow.activeDepth
-                        ?? 0
+                    tabs: restoredTabs,
+                    activeTabIndex: activeTabIndex
                 )
             }
         } else {
@@ -1656,11 +1559,15 @@ final class AgentManager: @unchecked Sendable {
                 ? session.activePaneId
                 : firstPaneId
             let title = Self.suggestedWindowTitle(for: newPanes[firstPaneId]?.tabs.first)
+            maxId += 1
             newWindows[windowId] = WorkspaceWindowState(
                 id: windowId,
                 title: title,
-                layout: effectiveLayout,
-                activePaneId: restoredActivePaneId
+                tabs: [LayoutTab(
+                    id: "layout-\(maxId)",
+                    layout: effectiveLayout,
+                    activePaneId: restoredActivePaneId
+                )]
             )
         }
 
@@ -1715,8 +1622,8 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Private Helpers
 
     private func insertPane(_ pane: PaneState) -> Bool {
-        guard let terminalWindow = windows[activeWindowId],
-              terminalWindow.paneIds.count < Self.maxPanesPerWindow
+        guard canAddPane(to: activeWindowId),
+              let terminalWindow = windows[activeWindowId]
         else { return false }
         exitMaximize()
 
@@ -1745,9 +1652,21 @@ final class AgentManager: @unchecked Sendable {
         return true
     }
 
+    /// Whether the window's visible tab has room for another pane.
     func canAddPane(to windowId: String) -> Bool {
         guard let terminalWindow = windows[windowId] else { return false }
-        return terminalWindow.paneIds.count < Self.maxPanesPerWindow
+        return (terminalWindow.layout?.leafCount ?? 0) < Self.maxPanesPerTab
+    }
+
+    /// Registers a new pane holding one terminal that starts in
+    /// `workingDirectory`.
+    private func makeTerminalPane(cwd workingDirectory: String?) -> PaneState {
+        let pane = PaneState(
+            id: nextPaneId(),
+            tabs: [createPaneTab(id: nextTabId(), type: .terminal, cwd: workingDirectory)]
+        )
+        panes[pane.id] = pane
+        return pane
     }
 
     private func cancelAgentReadinessGeneration(for target: TerminalTarget) {

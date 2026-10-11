@@ -69,27 +69,28 @@ struct AgentDashboardSnapshotTests {
         #expect(entry(id: "codex", status: .idle).projectName == "Window")
     }
 
-    @Test func focusingADashboardTargetRevealsItsHiddenDepthBranchAndExactTab() throws {
+    @Test func focusingADashboardTargetShowsItsBackgroundTabAndExactPaneTab() throws {
         let manager = AgentManager()
         let rootPaneId = manager.activePaneId
-        _ = try #require(manager.goIn(rootPaneId))
-        let innerPaneId = manager.activePaneId
+        _ = try #require(manager.createLayoutTab())
+        let agentPaneId = manager.activePaneId
         let agentTabId = try #require(
             manager.addTabToPane(
-                innerPaneId,
+                agentPaneId,
                 type: .agent,
                 profileId: "codex"
             )
         )
-        #expect(manager.goOut(innerPaneId))
+        manager.switchTab(agentPaneId, index: 0)
+        manager.activatePreviousLayoutTab()
         #expect(manager.layout?.leafIds == [rootPaneId])
 
-        manager.focusTab(paneId: innerPaneId, tabId: agentTabId)
+        manager.focusTab(paneId: agentPaneId, tabId: agentTabId)
 
-        #expect(manager.activePaneId == innerPaneId)
-        #expect(manager.activeDepth == 1)
-        #expect(manager.layout?.leafIds == [innerPaneId])
-        #expect(manager.panes[innerPaneId]?.activeTab?.id == agentTabId)
+        #expect(manager.activePaneId == agentPaneId)
+        #expect(manager.windows[manager.activeWindowId]?.activeTabIndex == 1)
+        #expect(manager.layout?.leafIds == [agentPaneId])
+        #expect(manager.panes[agentPaneId]?.activeTab?.id == agentTabId)
     }
 
     private func entry(

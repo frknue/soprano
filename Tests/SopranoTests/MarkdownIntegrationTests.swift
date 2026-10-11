@@ -134,18 +134,19 @@ struct MarkdownIntegrationTests {
         #expect(manager.panes[newPaneId]?.activeTab?.isMarkdown == true)
         #expect(manager.panes[newPaneId]?.activeTab?.previewOwnerPaneId == nil)
         #expect(manager.markdownPreviewTarget(ownerPaneId: ownerPaneId)?.tabId == previewTabId)
-        #expect(manager.windows[otherWindowId]?.visibleLayout == otherLayout)
+        #expect(manager.windows[otherWindowId]?.layout == otherLayout)
     }
 
-    @Test func markdownCommandsRevealTheCallingDepthPaneEvenWhenAnotherWindowIsActive() throws {
+    @Test func markdownCommandsShowTheCallersBackgroundTabEvenWhenAnotherWindowIsActive() throws {
         let manager = AgentManager()
         let ownerWindowId = manager.activeWindowId
         let rootPaneId = manager.activePaneId
         let siblingPaneId = try #require(manager.splitPane(direction: .horizontal, paneId: rootPaneId))
-        let terminalTabId = try #require(manager.goIn(rootPaneId))
+        _ = try #require(manager.createLayoutTab())
         let ownerPaneId = manager.activePaneId
+        let terminalTabId = try #require(manager.panes[ownerPaneId]?.activeTab?.id)
         let originalLayout = manager.layout
-        #expect(manager.goOut(ownerPaneId))
+        manager.activatePreviousLayoutTab()
         let otherWindowId = try #require(manager.createWindow())
         let otherLayout = manager.layout
 
@@ -162,10 +163,10 @@ struct MarkdownIntegrationTests {
         #expect(paneId == ownerPaneId)
         #expect(manager.activeWindowId == ownerWindowId)
         #expect(manager.activePaneId == ownerPaneId)
-        #expect(manager.activeDepth == 1)
+        #expect(manager.windows[ownerWindowId]?.activeTabIndex == 1)
         #expect(manager.layout == originalLayout)
         #expect(manager.panes[siblingPaneId]?.tabs.count == 1)
-        #expect(manager.windows[otherWindowId]?.visibleLayout == otherLayout)
+        #expect(manager.windows[otherWindowId]?.layout == otherLayout)
     }
 
     @Test func markdownPreviewKeepsTheCallingPaneMaximized() throws {
@@ -197,7 +198,7 @@ struct MarkdownIntegrationTests {
         let manager = AgentManager()
         let ownerPaneId = manager.activePaneId
         let fileURL = URL(fileURLWithPath: "/tmp/project/README.md")
-        for _ in 1..<AgentManager.maxPanesPerWindow {
+        for _ in 1..<AgentManager.maxPanesPerTab {
             _ = try #require(manager.spawnTerminal())
         }
         let originalLayout = manager.layout
