@@ -1100,6 +1100,11 @@ final class AgentManager: @unchecked Sendable {
             value.cwd = agent.conversation?.id == value.id
                 ? agent.conversation?.cwd : nil
         }
+        // Codex's notify payload and some hooks carry no transcript path; the
+        // file of the same conversation is still the one reported earlier.
+        if value.transcriptPath == nil, agent.conversation?.id == value.id {
+            value.transcriptPath = agent.conversation?.transcriptPath
+        }
         guard agent.conversation != value else { return }
         agent.conversation = value
         notifyChange()

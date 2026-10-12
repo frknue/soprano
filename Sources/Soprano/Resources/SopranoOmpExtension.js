@@ -7,7 +7,10 @@ export default function (omp) {
     // Headless subagents inherit the pane environment but do not own its terminal.
     if (ctx.mode !== "tui") return
     const sessionId = ctx.sessionManager.getSessionId()
-    const payload = JSON.stringify({ session_id: sessionId, cwd: ctx.cwd })
+    // The session file lets the Agent Dashboard show the conversation; omp
+    // allocates the path before the file exists, which the dashboard tolerates.
+    const transcriptPath = ctx.sessionManager.getSessionFile?.()
+    const payload = JSON.stringify({ session_id: sessionId, cwd: ctx.cwd, transcript_path: transcriptPath })
     try {
       const child = Bun.spawn(
         [binary, "agent-event", state, "--profile", "omp", "--pid", String(process.pid),

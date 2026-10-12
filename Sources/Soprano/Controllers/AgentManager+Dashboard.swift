@@ -48,7 +48,8 @@ extension AgentManager {
             cwd: cwd,
             sessionName: terminalSessions[terminalWindow.sessionId]?.name,
             isWindowTitleCustom: terminalWindow.isTitleCustom,
-            profileIcon: profile?.icon ?? AgentDashboardEntry.fallbackProfileIcon
+            profileIcon: profile?.icon ?? AgentDashboardEntry.fallbackProfileIcon,
+            conversation: agent.conversation
         )
     }
 }

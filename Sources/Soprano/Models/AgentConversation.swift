@@ -4,6 +4,9 @@ import Foundation
 struct AgentConversation: Codable, Equatable {
     let id: String
     var cwd: String? = nil
+    /// The JSON Lines file the agent writes this conversation to, as its hooks
+    /// report it. Optional so workspaces saved before it existed still open.
+    var transcriptPath: String? = nil
 
     static func supports(profileId: String) -> Bool {
         ["codex", "claude-code", "opencode", "omp"].contains(profileId)
@@ -27,7 +30,12 @@ struct AgentConversation: Codable, Equatable {
             .compactMap({ object[$0] as? String }).first(where: validID)
         else { return nil }
         let cwd = (object["cwd"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
-        return AgentConversation(id: id, cwd: cwd)
+        // Claude Code and Codex hooks name the file; Soprano's omp extension
+        // forwards the same key.
+        let transcriptPath = (object["transcript_path"] as? String).flatMap {
+            $0.hasPrefix("/") && $0.hasSuffix(".jsonl") ? $0 : nil
+        }
+        return AgentConversation(id: id, cwd: cwd, transcriptPath: transcriptPath)
     }
 
     /// Replace launch-time conversation selectors so --continue/--last cannot

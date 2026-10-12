@@ -369,13 +369,25 @@ in an error state across every logical window. Entries are ordered by urgency, u
 from the same lifecycle events as pane headers and notifications, and show elapsed
 runtime and working directory. Each entry leads with its custom window name or project
 folder, followed by the agent and session, then the directory on its own line.
-Selecting an entry opens a live terminal inspector with
-theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code, plus
-**Reply**, **Open**, **Stop**, and **Restart** controls. Replies are available while the
-agent is working, ready, waiting for input, or in an error state and are sent to that
-exact pane tab. Use `J` / `K` or the arrow keys to move through agents, `R` to focus the
-reply field, `Return` to open the selected agent, and `Esc` to close the dashboard
-without changing the active agent.
+Selecting a Claude Code, Codex, or omp entry shows its **timeline**, read from the
+transcript the agent writes while it runs in its pane: your prompts as cards, the agent's
+replies rendered as Markdown, one line per tool call with its result (✓, ✗, or ▶ while
+it runs) and the diff of every edit, plus a **NOW** strip saying what the agent is doing
+right now; the entry in the list repeats that line. Claude Code and omp report their
+transcript through Soprano's hooks; Codex is found once its first reply arrives, or right
+away with the [Codex hooks](#agents-that-report-in) installed. Plain terminals, OpenCode,
+and custom agents show their live terminal instead, with theme-aware highlighting for
+prompts, diagnostics, paths, diffs, and fenced code. **Reply**, **Open**, **Stop**, and
+**Restart** work in both views. Replies are available while the agent is working, ready,
+waiting for input, or in an error state and are typed into that exact pane tab.
+
+Use `J` / `K` or the arrow keys to move through agents, `R` to focus the reply field,
+`Return` to open the selected agent, and `Esc` to close the dashboard without changing
+the active agent. In the timeline, `⇧J` / `⇧K` (or `Page Down` / `Page Up`) scroll,
+`[` / `]` jump to the previous or next prompt, `O` toggles details (thinking, full
+commands, and output), `G` jumps back to the newest entry and keeps following it, and
+`T` switches between the timeline and the live terminal. Clicking into the text to copy
+from it leaves these keys working.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow

@@ -21,6 +21,9 @@ struct AgentDashboardEntry: Identifiable, Equatable {
     /// Resolved when the snapshot is taken, so an icon edited in settings.json
     /// makes the entry differ and the dashboard redraws it.
     var profileIcon: String = fallbackProfileIcon
+    /// The agent's own conversation, which locates the transcript the
+    /// dashboard renders as a timeline.
+    var conversation: AgentConversation? = nil
 
     var projectName: String {
         if isWindowTitleCustom { return windowTitle }
