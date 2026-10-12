@@ -10,6 +10,7 @@ struct AppSettings: Codable, Equatable {
     var themeId: String
     var hideWindowBar: Bool
     /// Hides the numbered window tabs; the tab row moves up into their place.
+    /// On by default: the sidebar, `⌃1`…`⌃9`, and `⌘F` already switch windows.
     var hideWindowTabs: Bool
     /// Scanlines and phosphor glow over terminal panes. Off by default: it is
     /// a look, and a shader on every pane is not free.
@@ -24,7 +25,7 @@ struct AppSettings: Codable, Equatable {
         restoreLastSession: true,
         themeId: "mission-control",
         hideWindowBar: false,
-        hideWindowTabs: false,
+        hideWindowTabs: true,
         crtEffect: false,
         projectDirectories: [],
         notificationSound: false

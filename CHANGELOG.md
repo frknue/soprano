@@ -24,7 +24,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   filter, inline new file/folder and rename, Trash-backed delete with undo, drag and
   drop (onto terminals, folders, or Finder), and a context menu. Toggle and focus it
   with `⇧⌘E` (`toggle-explorer`), the **Toggle Explorer** palette command, or the
-  icon at the end of the window tabs; drag its edge to resize it.
+  icon at the end of the top tab row; drag its edge to resize it.
 - Files open in Soprano: clicking one in the Explorer opens a syntax-colored editor in a
   split beside the focused pane, which later files join as tabs (a slanted preview tab
   the next file replaces; double-click or edit to keep it), with line numbers, find
@@ -51,9 +51,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   palette; `new-tab-direct`, `new-tab`, `close-tab`, `next-tab`, `previous-tab` in
   `settings.json`). Focusing a pane in another tab switches to it, the status bar and
   sidebar show `TAB n` in windows with several tabs, and tabs restore with the workspace.
-- **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs": true`) turns off the
-  numbered window tabs; the tab row moves up into their place.
-- Windows now appear as numbered tabs above the terminals, with the active tab
+- **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs"`) is on by default:
+  the tab row sits on top, and you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`.
+- Turning it off shows windows as numbered tabs above the terminals, with the active tab
   highlighted, clickable switching, a **+** button, and trackpad or scroll-wheel
   scrolling (no scrollbar) when the row fills up. The tabs remain visible with the
   sidebar or macOS window bar hidden.

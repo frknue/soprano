@@ -287,13 +287,14 @@ A session is a named group of windows. Each window has its own tabs, and each ta
 own split panes. Use sessions for separate projects, and windows for the tasks inside
 one project.
 
-The session's windows appear as numbered tabs across the top of the terminal area,
-such as `1:Editor`, `2:Server`, and `3:Logs`. The active tab is highlighted. Click a
-tab to switch windows or **+** to create one. The row scrolls when it fills up and
-keeps the active tab in view as you navigate with the keyboard. It stays visible
-when the sidebar or macOS window bar is hidden. **Hide window tabs** in **Settings ▸
-General** (`"hideWindowTabs": true`) turns the row off; the [tab row](#tabs) then moves up
-into its place, and you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`.
+The session's windows can appear as numbered tabs across the top of the terminal area,
+such as `1:Editor`, `2:Server`, and `3:Logs`. They are hidden by default: you switch
+windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`, and the [tab row](#tabs) sits on top.
+Turn off **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs": false`) to
+show them. The active tab is highlighted. Click a tab to switch windows or **+** to
+create one. The row scrolls when it fills up and keeps the active tab in view as you
+navigate with the keyboard. It stays visible when the sidebar or macOS window bar is
+hidden.
 
 A compact agent badge beside a window's title counts open agents, including those
 in every tab and in hidden pane tabs. It stays visible while agents are ready or
@@ -392,7 +393,7 @@ focused pane: the git working tree containing the pane's directory, or that dire
 itself outside a repository. Focusing another pane switches projects; browser, Markdown,
 and editor tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to open it and move
 the keyboard into the tree, and again to hide it. `⌘L` (`toggle-right-sidebar`), the
-**Toggle Right Sidebar** palette command, the sidebar icon at the end of the window tabs,
+**Toggle Right Sidebar** palette command, the sidebar icon at the end of the top tab row,
 and the header's close button show or hide the sidebar without moving the keyboard. Drag
 its leading edge to resize it (220 points minimum, default 280, double-click to reset);
 its width and open state persist across launches.
@@ -460,10 +461,10 @@ with no room for another pane gets the file as a tab of the focused pane.
 
 ## Tabs
 
-There are two tab rows above the panes. The numbered **window tabs** (`1:Editor
-2:Server`) switch between logical windows; directly below them, the **tab row** switches
-between the tabs of the active window. Each tab holds its own split layout, and every
-terminal in a background tab keeps running.
+The **tab row** above the panes switches between the tabs of the active window. Each tab
+holds its own split layout, and every terminal in a background tab keeps running. With
+**Hide window tabs** turned off, the numbered **window tabs** (`1:Editor 2:Server`) sit
+above it and switch between logical windows.
 
 A tab is named after its focused pane, the same title the pane header shows. The active
 tab is lit with a raised background and an accent underline. A tab holding open agents
@@ -711,7 +712,7 @@ default.
   // solarized-dark | nord | tokyo-night | atom-one-dark
   "theme": "mission-control",
   "hideWindowBar": false,               // opt in to full-window panes
-  "hideWindowTabs": false,              // true: the tab row takes the window tabs' place
+  "hideWindowTabs": true,               // false: numbered window tabs above the tab row
   "crtEffect": false,                   // scanlines + phosphor glow on terminals
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
