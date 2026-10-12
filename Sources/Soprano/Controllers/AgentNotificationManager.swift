@@ -165,6 +165,7 @@ enum AgentEventCommand {
         if let conversation = payloads.lazy.compactMap(AgentConversation.fromPayload).first {
             userInfo["conversationId"] = conversation.id
             userInfo["conversationCwd"] = conversation.cwd
+            userInfo["conversationTranscript"] = conversation.transcriptPath
         }
 
         return DistributedNotificationEnvelope(
@@ -422,7 +423,11 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             title: info["title"] as? String ?? "Agent",
             body: info["body"] as? String ?? "Ready for a prompt",
             conversation: (info["conversationId"] as? String).map {
-                AgentConversation(id: $0, cwd: info["conversationCwd"] as? String)
+                AgentConversation(
+                    id: $0,
+                    cwd: info["conversationCwd"] as? String,
+                    transcriptPath: info["conversationTranscript"] as? String
+                )
             },
             processId: (info["processId"] as? String).flatMap(Int32.init)
         ))

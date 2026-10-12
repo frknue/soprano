@@ -78,6 +78,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- The Agent Dashboard shows Claude Code, Codex, and omp agents as a live timeline read
+  from their own transcripts instead of a copy of the terminal screen: prompts, rendered
+  replies, one line per tool call with its diff, and a NOW strip saying what the agent is
+  doing right now, which its row in the list repeats. `⇧J` / `⇧K` scroll it, `[` / `]`
+  jump between prompts, `O` adds thinking, commands, and full output, `G` follows the
+  newest entry, and `T` (or **Terminal**) switches to the live terminal, which plain
+  terminals and other agents keep showing.
 - New retro "Mission Control" look for the whole app with every theme: square
   corners, the bundled Departure Mono pixel font in small caps, double-rule dividers,
   glowing status lamps, lit-block selection for tabs and menus, a racing stripe, and
