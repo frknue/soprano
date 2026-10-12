@@ -132,7 +132,8 @@ enum ConfigFile {
           "hideWindowBar": \(settings.hideWindowBar),
 
           // Hide the numbered window tabs; the tab row moves up into their
-          // place. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F. Off by default.
+          // place. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F. On by default;
+          // set false to show the window tabs above the tab row.
           "hideWindowTabs": \(settings.hideWindowTabs),
 
           // Scanlines and phosphor glow over terminal panes, like an old CRT
