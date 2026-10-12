@@ -79,6 +79,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "toggle-sidebar", label: "Toggle Sidebar", description: "Show or hide the sidebar", category: .general, defaultKeys: "⌘E", mode: .direct, key: "e", meta: true),
             KeyBinding(id: "toggle-right-sidebar", label: "Toggle Right Sidebar", description: "Show or hide the right sidebar (a focused browser pane keeps ⌘L for its address bar)", category: .general, defaultKeys: "⌘L", mode: .direct, key: "l", meta: true),
             KeyBinding(id: "toggle-explorer", label: "Toggle Explorer", description: "Show and focus the file explorer sidebar, or hide it while it has focus", category: .general, defaultKeys: "⇧⌘E", mode: .direct, key: "e", meta: true, shift: true),
+            KeyBinding(id: "toggle-source-control", label: "Toggle Source Control", description: "Show and focus the Source Control sidebar, or hide it while it has focus", category: .general, defaultKeys: "⇧⌘G", mode: .direct, key: "g", meta: true, shift: true),
             KeyBinding(id: "open-settings", label: "Settings", description: "Open the settings page", category: .general, defaultKeys: "⌘,", mode: .direct, key: ",", meta: true),
             KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘+ / ⌘=", mode: .direct, key: "=", meta: true),
             KeyBinding(id: "zoom-out", label: "Zoom Out", description: "Decrease font size", category: .general, defaultKeys: "⌘-", mode: .direct, key: "-", meta: true),

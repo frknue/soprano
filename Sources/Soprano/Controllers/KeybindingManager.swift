@@ -66,6 +66,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingToggleSidebar()
     func keybindingToggleRightSidebar()
     func keybindingToggleExplorer()
+    func keybindingToggleSourceControl()
     func keybindingSaveSession()
     func keybindingNewSession()
     func keybindingFindSession()
@@ -551,6 +552,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingToggleRightSidebar() }
         case "toggle-explorer":
             invokeDelegate { $0.keybindingToggleExplorer() }
+        case "toggle-source-control":
+            invokeDelegate { $0.keybindingToggleSourceControl() }
         case "open-settings":
             invokeDelegate { $0.keybindingOpenSettings() }
         case "agent-dashboard":

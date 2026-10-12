@@ -271,6 +271,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘E` | Toggle sidebar |
 | `⌘L` | Toggle the right sidebar (in a browser pane, `⌘L` focuses its address bar) |
 | `⇧⌘E` | Show and focus the file explorer; press again while it has focus to hide it |
+| `⇧⌘G` | Show and focus Source Control; press again while it has focus to hide it (the file editor keeps `⇧⌘G` for find) |
 | `⌘S` / `⌘F` | Save / find in the file editor |
 | `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
 | `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
@@ -388,15 +389,16 @@ terminal to insert their shell-safe paths.
 
 ## File explorer
 
-The right sidebar holds the **Explorer**, modeled on Orca's. It shows the project of the
-focused pane: the git working tree containing the pane's directory, or that directory
-itself outside a repository. Focusing another pane switches projects; browser, Markdown,
-and editor tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to open it and move
-the keyboard into the tree, and again to hide it. `⌘L` (`toggle-right-sidebar`), the
-**Toggle Right Sidebar** palette command, the sidebar icon at the end of the top tab row,
-and the header's close button show or hide the sidebar without moving the keyboard. Drag
-its leading edge to resize it (220 points minimum, default 280, double-click to reset);
-its width and open state persist across launches.
+The right sidebar's first tab is the **Explorer**, modeled on Orca's. It shows the project
+of the focused pane: the git working tree containing the pane's directory, or that
+directory itself outside a repository. Focusing another pane switches projects; browser,
+Markdown, editor, and diff tabs keep the current one. Press `⇧⌘E` (`toggle-explorer`) to
+open it and move the keyboard into the tree, and again to hide it. `⌘L`
+(`toggle-right-sidebar`), the **Toggle Right Sidebar** palette command, the sidebar icon
+at the end of the top tab row, and the header's close button show or hide the sidebar
+without moving the keyboard. Drag its leading edge to resize it (220 points minimum,
+default 280, double-click to reset); its width, open state, and selected tab persist
+across launches.
 
 - Folders load as you expand them, folders first in natural order. `.git` and
   `node_modules` are never listed.
@@ -424,8 +426,34 @@ its width and open state persist across launches.
   from Finder are copied.
 - The tree follows the disk: files that agents, git, or other programs create, rename,
   or delete appear without a refresh. Nothing is read or watched while the sidebar is
-  closed. Renaming or moving a file in the explorer takes its open editor and reader
-  tabs along.
+  closed. Renaming or moving a file in the explorer takes its open editor, diff, and
+  reader tabs along.
+
+## Source control
+
+The right sidebar's second tab, **Source Control**, lists the git changes of the same
+repository as the Explorer, like Orca's: **Conflicts**, **Changes**, **Staged Changes**,
+and **Untracked Files**, each collapsible, with every file's status letter and `+` / `−`
+line counts. A file with staged and unstaged edits is listed in both. The list refreshes
+itself when files or the index change, and nothing runs while it is hidden. Press `⇧⌘G`
+(`toggle-source-control`) or use the **Toggle Source Control** palette command to open it
+with the keyboard in the list, and again to hide it. Staging and committing stay in the
+terminal.
+
+- Click a file, or press `Space`, to open its diff beside the focused pane, where files
+  open, as a slanted preview tab, `name (diff)` or `name (staged diff)`, that the next
+  preview replaces; double-click or `Return` keeps the tab. Conflicted files open in the
+  [file editor](#file-editor) instead.
+- A diff shows the whole file with removed and added lines tinted, the changed part of
+  each line highlighted, syntax colors, and line numbers. Its toolbar switches between
+  inline and side-by-side (new diffs open the way you chose last), jumps to the previous
+  or next change (`⇧F7` / `F7`), and **Open File** opens the file in the editor.
+- Staged diffs compare HEAD with the index; the others compare the index with the
+  working tree, and an untracked file shows as all additions. Binary files and diffs over
+  8 MB get a note instead.
+- Diff tabs reload when the file or the index changes and restore with the workspace.
+- The context menu offers **Open Diff**, **Open File**, **Copy Path**, **Copy Relative
+  Path**, and **Reveal in Finder**; `Esc` returns to the focused pane.
 
 ## File editor
 

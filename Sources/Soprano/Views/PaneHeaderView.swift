@@ -141,7 +141,7 @@ final class PaneHeaderView: NSView {
 
         titleLabel.textColor = theme.colors.textPrimary
         titleLabel.setRetroText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
-        if tab?.isEditorPreview == true {
+        if tab?.isFilePreview == true {
             titleLabel.attributedStringValue = Self.slanted(titleLabel.attributedStringValue)
         }
         styleGlyphButton(closeButton, theme: theme)
@@ -225,7 +225,7 @@ final class PaneHeaderView: NSView {
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
             button.contentTintColor = color
-            button.attributedTitle = tab.isEditorPreview
+            button.attributedTitle = tab.isFilePreview
                 ? Self.slanted(RetroText.display(title, color: color))
                 : RetroText.display(title, color: color)
             button.translatesAutoresizingMaskIntoConstraints = false
