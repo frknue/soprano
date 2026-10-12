@@ -103,7 +103,7 @@ final class MainContentViewController: NSViewController {
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
 
-        // Right sidebar (Explorer)
+        // Right sidebar (Explorer, Source Control)
         rightSidebarView = RightSidebarView(
             agentManager: agentManager,
             themeManager: themeManager,
@@ -113,6 +113,9 @@ final class MainContentViewController: NSViewController {
             self?.setRightSidebarVisible(false)
         }
         rightSidebarView.explorerView.onReturnFocus = { [weak self] in
+            self?.returnKeyboardFocusToPanes()
+        }
+        rightSidebarView.sourceControlView.onReturnFocus = { [weak self] in
             self?.returnKeyboardFocusToPanes()
         }
         rightSidebarView.setContentWidth(rightSidebarWidth)
@@ -265,21 +268,29 @@ final class MainContentViewController: NSViewController {
     /// ⇧⌘E: opens the explorer and moves the keyboard into it; pressed again
     /// while the explorer has focus, hides it and returns to the panes.
     func toggleExplorer() {
+        toggleRightSidebarTab(.explorer)
+    }
+
+    /// ⇧⌘G: the same for the Source Control list.
+    func toggleSourceControl() {
+        toggleRightSidebarTab(.sourceControl)
+    }
+
+    private func toggleRightSidebarTab(_ tab: RightSidebarView.Tab) {
         loadViewIfNeeded()
-        let explorer = rightSidebarView.explorerView
-        if !rightSidebarVisible {
-            setRightSidebarVisible(true)
-            explorer.focusTree()
-        } else if !explorer.containsKeyboardFocus {
-            explorer.focusTree()
-        } else {
+        let isShowingTab = rightSidebarVisible && rightSidebarView.activeTab == tab
+        if isShowingTab, rightSidebarView.containsKeyboardFocus {
             setRightSidebarVisible(false)
+            return
         }
+        rightSidebarView.selectTab(tab)
+        setRightSidebarVisible(true)
+        rightSidebarView.focusActivePanel()
     }
 
     private func setRightSidebarVisible(_ visible: Bool) {
         guard visible != rightSidebarVisible else { return }
-        let explorerHadFocus = rightSidebarView.explorerView.containsKeyboardFocus
+        let sidebarHadFocus = rightSidebarView.containsKeyboardFocus
         rightSidebarVisible = visible
         defaults.set(visible, forKey: Self.rightSidebarVisibleKey)
         rightSidebarResizeHandle.isHidden = !visible
@@ -287,7 +298,7 @@ final class MainContentViewController: NSViewController {
         updateRightSidebarToggle()
         animateWidth(of: rightSidebarWidthConstraint, to: visible ? rightSidebarWidth : 0)
         // A collapsed sidebar must not keep the keyboard.
-        if !visible, explorerHadFocus {
+        if !visible, sidebarHadFocus {
             returnKeyboardFocusToPanes()
         }
     }
@@ -350,7 +361,7 @@ final class MainContentViewController: NSViewController {
         let handle = SidebarResizeHandleView(edge: .leading)
         handle.translatesAutoresizingMaskIntoConstraints = false
         handle.identifier = NSUserInterfaceItemIdentifier("right-sidebar-resize-handle")
-        handle.toolTip = "Drag to resize the explorer, double-click to reset"
+        handle.toolTip = "Drag to resize the right sidebar, double-click to reset"
         handle.onDragBegan = { [weak self] in
             self?.rightSidebarWidth ?? SidebarWidthStore.right.defaultWidth
         }

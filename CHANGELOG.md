@@ -31,6 +31,13 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   (`⌘F`), undo, and save (`⌘S`). Modified tabs show `●`; changes from agents land in
   unmodified editors, and closing or quitting asks before unsaved changes are lost.
   Images are shown; renaming in the Explorer moves open tabs along.
+- A **Source Control** tab in the right sidebar, after Orca's, lists the focused pane's
+  git changes under Conflicts, Changes, Staged Changes, and Untracked Files with status
+  letters and `+`/`−` line counts. Clicking a file opens its diff beside the focused pane
+  as a preview tab: the whole file with changed lines tinted and the changed words
+  highlighted, syntax colors, inline or side-by-side, and previous/next change (`⇧F7` /
+  `F7`). Diffs follow the disk and restore with the workspace. Toggle and focus it with
+  `⇧⌘G` (`toggle-source-control`) or the **Toggle Source Control** palette command.
 - `⌘L` (`toggle-right-sidebar`) shows or hides the right sidebar; a focused browser
   pane keeps `⌘L` for its address bar.
 - `omp web`, also available in the `⌘P` command palette, opens an editable,

@@ -35,7 +35,7 @@ struct EditorTabTests {
         let first = try #require(manager.openEditor(fileURL: a, preview: true))
         let paneId = first.paneId
         #expect(editorTabs(manager, paneId).map(\.title) == ["a.swift"])
-        #expect(editorTabs(manager, paneId).first?.isEditorPreview == true)
+        #expect(editorTabs(manager, paneId).first?.isFilePreview == true)
 
         let second = try #require(manager.openEditor(fileURL: b, preview: true))
         #expect(second.paneId == paneId)
@@ -44,7 +44,7 @@ struct EditorTabTests {
 
         let kept = try #require(manager.openEditor(fileURL: b, preview: false))
         #expect(kept.tabId == second.tabId)
-        #expect(editorTabs(manager, paneId).first?.isEditorPreview == false)
+        #expect(editorTabs(manager, paneId).first?.isFilePreview == false)
 
         _ = try #require(manager.openEditor(fileURL: c, preview: true))
         #expect(editorTabs(manager, paneId).map(\.title) == ["b.swift", "c.swift"])
@@ -234,7 +234,7 @@ struct EditorTabTests {
         editor.textView.setSelectedRange(NSRange(location: 8, length: 1))
         editor.textView.insertText("2", replacementRange: editor.textView.selectedRange())
         try await waitUntil { manager.panes[target.paneId]?.activeTab?.title == "main.swift ●" }
-        #expect(manager.panes[target.paneId]?.activeTab?.isEditorPreview == false)
+        #expect(manager.panes[target.paneId]?.activeTab?.isFilePreview == false)
 
         let commandS = try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,

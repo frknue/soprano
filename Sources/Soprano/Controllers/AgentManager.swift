@@ -466,7 +466,7 @@ final class AgentManager: @unchecked Sendable {
         return PaneTab(
             id: nextTabId(),
             type: .browser,
-            title: standardizedURL.lastPathComponent,
+            title: PaneContentKind.title(for: standardizedURL, contentKind: contentKind),
             cwd: standardizedURL.deletingLastPathComponent().path,
             url: standardizedURL.absoluteString,
             contentKind: contentKind,
@@ -481,7 +481,7 @@ final class AgentManager: @unchecked Sendable {
         return TerminalTarget(paneId: ownerPaneId, tabId: tab.id)
     }
 
-    // MARK: - Editor Tabs
+    // MARK: - Editor and Diff Tabs
 
     /// Opens `fileURL` in an editor tab and shows it, like Orca's editor tabs,
     /// without covering what the focused pane shows:
@@ -496,15 +496,39 @@ final class AgentManager: @unchecked Sendable {
     /// - A file pane without room for another tab gets the file in a new split.
     @discardableResult
     func openEditor(fileURL: URL, preview: Bool, in paneId: String? = nil) -> TerminalTarget? {
+        openFileTab(fileURL: fileURL, contentKind: PaneContentKind.editor, preview: preview, in: paneId)
+    }
+
+    /// Opens the git diff of `fileURL` the way `openEditor` opens files: its
+    /// staged and working-tree changes are separate tabs, and a preview diff
+    /// and a preview file replace each other, as in Orca.
+    @discardableResult
+    func openDiff(fileURL: URL, staged: Bool, preview: Bool, in paneId: String? = nil) -> TerminalTarget? {
+        openFileTab(
+            fileURL: fileURL,
+            contentKind: staged ? PaneContentKind.stagedDiff : PaneContentKind.diff,
+            preview: preview,
+            in: paneId
+        )
+    }
+
+    private func openFileTab(
+        fileURL: URL,
+        contentKind: String,
+        preview: Bool,
+        in paneId: String?
+    ) -> TerminalTarget? {
         let standardizedURL = fileURL.standardizedFileURL
         let url = standardizedURL.absoluteString
         guard let paneId = paneId ?? filePane(in: activeWindowId),
               let pane = panes[paneId],
               let terminalWindow = window(containingPane: paneId)
-        else { return spawnEditor(fileURL: standardizedURL, preview: preview) }
+        else { return spawnFileTab(fileURL: standardizedURL, contentKind: contentKind, preview: preview) }
 
         let tabId: String
-        if let index = pane.tabs.firstIndex(where: { $0.isEditor && $0.url == url }) {
+        if let index = pane.tabs.firstIndex(where: {
+            $0.type == .browser && $0.contentKind == contentKind && $0.url == url
+        }) {
             if !preview {
                 pane.tabs[index].previewOwnerPaneId = nil
             }
@@ -512,19 +536,19 @@ final class AgentManager: @unchecked Sendable {
         } else {
             let tab = createFileTab(
                 fileURL: standardizedURL,
-                contentKind: PaneContentKind.editor,
+                contentKind: contentKind,
                 previewOwnerPaneId: preview ? paneId : nil
             )
             if preview, let index = pane.tabs.firstIndex(where: {
-                $0.isEditorPreview && $0.previewOwnerPaneId == paneId
+                $0.isFilePreview && $0.previewOwnerPaneId == paneId
             }) {
-                // A new tab ID gives the new file its own editor view; the old
+                // A new tab ID gives the new file its own view; the old
                 // preview's view is discarded with its tab.
                 pane.tabs[index] = tab
             } else if pane.tabs.count < PaneState.maxTabsPerPane {
                 pane.tabs.insert(tab, at: min(pane.clampedActiveIndex() + 1, pane.tabs.count))
             } else {
-                return spawnEditor(fileURL: standardizedURL, preview: preview)
+                return spawnFileTab(fileURL: standardizedURL, contentKind: contentKind, preview: preview)
             }
             tabId = tab.id
         }
@@ -533,14 +557,14 @@ final class AgentManager: @unchecked Sendable {
     }
 
     /// Where files open in `windowId`: the focused pane when it holds only
-    /// files (editor and Markdown reader tabs), else the first such pane in
-    /// the active layout tab. Nil when there is none, so the next file gets
-    /// its own split.
+    /// files (editor, diff, and Markdown reader tabs), else the first such
+    /// pane in the active layout tab. Nil when there is none, so the next
+    /// file gets its own split.
     func filePane(in windowId: String) -> String? {
         guard let terminalWindow = windows[windowId] else { return nil }
         let isFilePane = { [panes] (paneId: String) -> Bool in
             guard let tabs = panes[paneId]?.tabs, !tabs.isEmpty else { return false }
-            return tabs.allSatisfy { $0.isEditor || $0.isMarkdown }
+            return tabs.allSatisfy { $0.isEditor || $0.isDiff || $0.isMarkdown }
         }
         let visible = terminalWindow.layout?.orderedLeafIds ?? []
         if visible.contains(terminalWindow.activePaneId), isFilePane(terminalWindow.activePaneId) {
@@ -549,16 +573,15 @@ final class AgentManager: @unchecked Sendable {
         return visible.first(where: isFilePane)
     }
 
-    /// Opens `fileURL` in a new split beside the focused pane. A window with
+    /// Opens a file tab in a new split beside the focused pane. A window with
     /// no room for another pane gets it as a tab of the focused pane instead.
-    @discardableResult
-    func spawnEditor(fileURL: URL, preview: Bool = false) -> TerminalTarget? {
+    private func spawnFileTab(fileURL: URL, contentKind: String, preview: Bool) -> TerminalTarget? {
         guard canAddPane(to: activeWindowId) else {
             guard let pane = panes[activePaneId],
                   let terminalWindow = window(containingPane: pane.id),
                   pane.tabs.count < PaneState.maxTabsPerPane
             else { return nil }
-            let tab = createFileTab(fileURL: fileURL, contentKind: PaneContentKind.editor, previewOwnerPaneId: nil)
+            let tab = createFileTab(fileURL: fileURL, contentKind: contentKind, previewOwnerPaneId: nil)
             pane.tabs.insert(tab, at: min(pane.clampedActiveIndex() + 1, pane.tabs.count))
             showTab(tab.id, in: pane, of: terminalWindow)
             return TerminalTarget(paneId: pane.id, tabId: tab.id)
@@ -566,7 +589,7 @@ final class AgentManager: @unchecked Sendable {
         let paneId = nextPaneId()
         let tab = createFileTab(
             fileURL: fileURL,
-            contentKind: PaneContentKind.editor,
+            contentKind: contentKind,
             previewOwnerPaneId: preview ? paneId : nil
         )
         return insertPane(PaneState(id: paneId, tabs: [tab]))
@@ -578,19 +601,20 @@ final class AgentManager: @unchecked Sendable {
     func keepEditorTab(paneId: String, tabId: String) {
         guard let pane = panes[paneId],
               let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
-              pane.tabs[index].isEditorPreview
+              pane.tabs[index].isFilePreview
         else { return }
         pane.tabs[index].previewOwnerPaneId = nil
         notifyChange(.tabTitle(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
-    /// Points every editor and Markdown reader tab showing `oldURL`, or a file
-    /// inside it when it is a folder, at its new location after a rename or move.
+    /// Points every editor, diff, and Markdown reader tab showing `oldURL`, or
+    /// a file inside it when it is a folder, at its new location after a
+    /// rename or move.
     func relocateFileTabs(from oldURL: URL, to newURL: URL) {
         let oldPath = oldURL.standardizedFileURL.path
         let newPath = newURL.standardizedFileURL.path
         for pane in panes.values {
-            for tab in pane.tabs where tab.isEditor || tab.isMarkdown {
+            for tab in pane.tabs where tab.isEditor || tab.isDiff || tab.isMarkdown {
                 guard let value = tab.url, let url = URL(string: value), url.isFileURL else { continue }
                 let path = url.standardizedFileURL.path
                 let relocated: String
@@ -1347,7 +1371,7 @@ final class AgentManager: @unchecked Sendable {
         notifyChange(.browserURL(TerminalTarget(paneId: paneId, tabId: tabId)))
     }
 
-    /// Points a Markdown reader or editor tab at `fileURL`.
+    /// Points a Markdown reader, editor, or diff tab at `fileURL`.
     func updateFileDocument(
         paneId: String,
         tabId: String,
@@ -1356,11 +1380,12 @@ final class AgentManager: @unchecked Sendable {
         let standardizedURL = fileURL.standardizedFileURL
         guard let pane = panes[paneId],
               let index = pane.tabs.firstIndex(where: { $0.id == tabId }),
-              pane.tabs[index].isMarkdown || pane.tabs[index].isEditor
+              pane.tabs[index].isMarkdown || pane.tabs[index].isEditor || pane.tabs[index].isDiff,
+              let contentKind = pane.tabs[index].contentKind
         else { return }
 
         let absoluteString = standardizedURL.absoluteString
-        let title = standardizedURL.lastPathComponent
+        let title = PaneContentKind.title(for: standardizedURL, contentKind: contentKind)
         let directory = standardizedURL.deletingLastPathComponent().path
         guard pane.tabs[index].url != absoluteString
                 || pane.tabs[index].title != title

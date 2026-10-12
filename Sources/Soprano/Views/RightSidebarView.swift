@@ -1,35 +1,41 @@
 import AppKit
 
 /// Orca's right sidebar: a resizable column on the window's trailing edge with
-/// a tab strip and the active tab's panel. Explorer is the only tab so far.
+/// a tab strip (Explorer, Source Control) and the active tab's panel.
 ///
 /// Like the left sidebar it collapses to zero width rather than leaving the
-/// hierarchy, so the explorer keeps its expanded folders and caches; it only
-/// reads and watches the disk while open and in a window.
+/// hierarchy, so the panels keep their state and caches; a panel only reads
+/// and watches the disk while the sidebar is open, in a window, and showing it.
 final class RightSidebarView: NSView {
-    enum Tab: CaseIterable {
+    enum Tab: String, CaseIterable {
         case explorer
+        case sourceControl
 
         var title: String {
             switch self {
             case .explorer: "Explorer"
+            case .sourceControl: "Source Control"
             }
         }
 
         var symbolName: String {
             switch self {
             case .explorer: "doc.on.doc"
+            case .sourceControl: "arrow.triangle.branch"
             }
         }
     }
 
     /// Matches the window tab bar so both bottom rules run as one line.
     static let headerHeight = WindowTabBarView.height
+    static let activeTabKey = "soprano-right-sidebar-tab"
 
     let explorerView: FileExplorerView
+    let sourceControlView: SourceControlView
     var onCloseRequested: (() -> Void)?
 
     private let themeManager: ThemeManager
+    private let defaults: UserDefaults
     private let contentContainer = NSView()
     private var contentWidthConstraint: NSLayoutConstraint!
     private let header = NSView()
@@ -40,22 +46,27 @@ final class RightSidebarView: NSView {
     private let leadingBorder = RetroRuleView(axis: .vertical, style: .double)
     private var isResizeHighlighted = false
     private(set) var isOpen = false
-    private(set) var activeTab: Tab = .explorer
+    private(set) var activeTab: Tab
 
     init(agentManager: AgentManager, themeManager: ThemeManager, defaults: UserDefaults = .standard) {
         self.themeManager = themeManager
+        self.defaults = defaults
         explorerView = FileExplorerView(
             agentManager: agentManager,
             themeManager: themeManager,
             defaults: defaults
         )
-        headingView = RetroHeadingView(title: Tab.explorer.title, theme: themeManager.currentTheme)
+        sourceControlView = SourceControlView(agentManager: agentManager, themeManager: themeManager)
+        let activeTab = defaults.string(forKey: Self.activeTabKey).flatMap(Tab.init(rawValue:)) ?? .explorer
+        self.activeTab = activeTab
+        headingView = RetroHeadingView(title: activeTab.title, theme: themeManager.currentTheme)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("right-sidebar")
         wantsLayer = true
         layer?.masksToBounds = true
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
+        updatePanelVisibility()
         refreshTheme()
     }
 
@@ -96,7 +107,16 @@ final class RightSidebarView: NSView {
         )
         header.addSubview(closeButton)
 
-        contentContainer.addSubview(explorerView)
+        for panel in [explorerView, sourceControlView] as [NSView] {
+            panel.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(panel)
+            NSLayoutConstraint.activate([
+                panel.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+                panel.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+                panel.topAnchor.constraint(equalTo: header.bottomAnchor),
+                panel.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
+            ])
+        }
         addSubview(leadingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
@@ -129,11 +149,6 @@ final class RightSidebarView: NSView {
             headerRule.bottomAnchor.constraint(equalTo: header.bottomAnchor),
             headerRule.heightAnchor.constraint(equalToConstant: Retro.doubleRule),
 
-            explorerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
-            explorerView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
-            explorerView.topAnchor.constraint(equalTo: header.bottomAnchor),
-            explorerView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
-
             leadingBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
             leadingBorder.topAnchor.constraint(equalTo: topAnchor),
             leadingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -165,7 +180,43 @@ final class RightSidebarView: NSView {
     }
 
     private func updateActivity() {
-        explorerView.setActive(isOpen && window != nil && activeTab == .explorer)
+        let isShowing = isOpen && window != nil
+        explorerView.setActive(isShowing && activeTab == .explorer)
+        sourceControlView.setActive(isShowing && activeTab == .sourceControl)
+    }
+
+    private func updatePanelVisibility() {
+        explorerView.isHidden = activeTab != .explorer
+        sourceControlView.isHidden = activeTab != .sourceControl
+    }
+
+    /// Whether the keyboard is in either panel.
+    var containsKeyboardFocus: Bool {
+        explorerView.containsKeyboardFocus || sourceControlView.containsKeyboardFocus
+    }
+
+    /// Shows `tab`'s panel and remembers it for the next launch. The keyboard
+    /// moves along when it was in the panel being hidden.
+    func selectTab(_ tab: Tab) {
+        guard tab != activeTab else { return }
+        let hadFocus = containsKeyboardFocus
+        activeTab = tab
+        defaults.set(tab.rawValue, forKey: Self.activeTabKey)
+        headingView.title = tab.title
+        updatePanelVisibility()
+        refreshTheme()
+        updateActivity()
+        if hadFocus {
+            focusActivePanel()
+        }
+    }
+
+    /// Moves the keyboard into the active panel's list.
+    func focusActivePanel() {
+        switch activeTab {
+        case .explorer: explorerView.focusTree()
+        case .sourceControl: sourceControlView.focusList()
+        }
     }
 
     func refreshTheme() {
@@ -180,13 +231,11 @@ final class RightSidebarView: NSView {
             button.apply(colors: colors, isActive: tab == activeTab)
         }
         explorerView.applyTheme()
+        sourceControlView.applyTheme()
     }
 
     @objc private func tabClicked(_ sender: RightSidebarTabButton) {
-        activeTab = sender.tab
-        headingView.title = sender.tab.title
-        refreshTheme()
-        updateActivity()
+        selectTab(sender.tab)
     }
 
     @objc private func closeClicked() {

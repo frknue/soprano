@@ -131,15 +131,23 @@ final class SplitTreeView: NSView {
             break
 
         case .document(let target):
-            // Editor views follow their document's own location; only a
-            // Markdown reader has to be told to load the new file.
+            // Editor views follow their document's own location; a Markdown
+            // reader is told to load the new file and a diff view is rebuilt.
             paneContainers[target.paneId]?.updateHeader()
-            guard let value = agentManager.panes[target.paneId]?.tabs.first(
+            guard let tab = agentManager.panes[target.paneId]?.tabs.first(
                 where: { $0.id == target.tabId }
-            )?.url,
+            ),
+                  let value = tab.url,
                   let fileURL = URL(string: value),
                   fileURL.isFileURL
             else { return }
+            if tab.isDiff {
+                tabContentViews[target] = nil
+                if let container = paneContainers[target.paneId] {
+                    syncContainerContent(container, for: target.paneId)
+                }
+                return
+            }
             MarkdownPaneRegistry.shared.view(for: target)?.openDocument(
                 fileURL,
                 recordHistory: true
@@ -283,6 +291,8 @@ final class SplitTreeView: NSView {
             markdownView.focusPreferredControl()
         } else if let editorView = findEditorView(in: container) {
             editorView.focusPreferredControl()
+        } else if let diffView = findDiffView(in: container) {
+            diffView.focusPreferredControl()
         } else {
             findBrowserView(in: container)?.focusPreferredControl()
         }
@@ -464,6 +474,26 @@ final class SplitTreeView: NSView {
         let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
         switch tab.type {
         case .browser:
+            if tab.isDiff,
+               let value = tab.url,
+               let fileURL = URL(string: value),
+               fileURL.isFileURL
+            {
+                let diffView = DiffPaneView(
+                    target: target,
+                    fileURL: fileURL,
+                    staged: tab.contentKind == PaneContentKind.stagedDiff,
+                    themeManager: themeManager
+                )
+                diffView.onFocusRequested = { [weak self] in
+                    self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
+                }
+                diffView.onOpenFileRequested = { [weak self] fileURL in
+                    self?.agentManager.openEditor(fileURL: fileURL, preview: false, in: paneId)
+                }
+                view = diffView
+                break
+            }
             if tab.isEditor,
                let value = tab.url,
                let fileURL = URL(string: value),
@@ -669,6 +699,18 @@ final class SplitTreeView: NSView {
         return nil
     }
 
+    private func findDiffView(in view: NSView) -> DiffPaneView? {
+        if let diffView = view as? DiffPaneView {
+            return diffView
+        }
+        for subview in view.subviews {
+            if let found = findDiffView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func cancelCopyModeOutsideActiveTerminal() {
         guard let copyModeTarget else { return }
         let activeTarget = agentManager.panes[agentManager.activePaneId]?.activeTab.map {
@@ -742,6 +784,7 @@ final class SplitTreeView: NSView {
             findBrowserView(in: view)?.applyTheme()
             findMarkdownView(in: view)?.applyTheme()
             findEditorView(in: view)?.applyTheme()
+            findDiffView(in: view)?.applyTheme()
         }
         rebuildLayout()
     }

@@ -590,6 +590,20 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "toggle-source-control",
+                icon: "arrow.triangle.branch",
+                label: "Toggle Source Control",
+                description: "Show the changed files and their diffs, or hide them",
+                shortcut: commandShortcut(for: "toggle-source-control"),
+                searchText: "git diff changes staged",
+                action: { [weak self] in
+                    // After the palette closes, so focus lands in the list.
+                    DispatchQueue.main.async {
+                        self?.keybindingToggleSourceControl()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "open-settings",
                 icon: "gearshape",
                 label: "Settings",
@@ -663,6 +677,10 @@ extension MainWindowController: KeybindingDelegate {
 
     func keybindingToggleExplorer() {
         mainContentVC?.toggleExplorer()
+    }
+
+    func keybindingToggleSourceControl() {
+        mainContentVC?.toggleSourceControl()
     }
 
     /// Which kind of pane holds the keyboard; a field editor counts as the

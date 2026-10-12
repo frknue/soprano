@@ -4,6 +4,21 @@ enum PaneContentKind {
     static let markdown = "markdown"
     /// A file open in Soprano's code editor.
     static let editor = "editor"
+    /// A file's working-tree changes: the index against the working tree.
+    static let diff = "diff"
+    /// A file's staged changes: HEAD against the index.
+    static let stagedDiff = "staged-diff"
+
+    /// The tab title for `fileURL` shown as `contentKind`, after Orca's
+    /// "name (diff)" and "name (staged diff)".
+    static func title(for fileURL: URL, contentKind: String) -> String {
+        let name = fileURL.lastPathComponent
+        return switch contentKind {
+        case diff: "\(name) (diff)"
+        case stagedDiff: "\(name) (staged diff)"
+        default: name
+        }
+    }
 }
 
 /// The type of content in a pane tab.
@@ -68,9 +83,15 @@ struct PaneTab: Identifiable {
         type == .browser && contentKind == PaneContentKind.editor
     }
 
-    /// An editor tab the next preview open reuses, like Orca's preview tabs.
-    var isEditorPreview: Bool {
-        isEditor && previewOwnerPaneId != nil
+    /// A git diff of a file, staged or not.
+    var isDiff: Bool {
+        type == .browser && (contentKind == PaneContentKind.diff || contentKind == PaneContentKind.stagedDiff)
+    }
+
+    /// An editor or diff tab the next preview open replaces, like Orca's
+    /// preview tabs.
+    var isFilePreview: Bool {
+        (isEditor || isDiff) && previewOwnerPaneId != nil
     }
 
     /// A real web page, as opposed to browser-backed file content.
