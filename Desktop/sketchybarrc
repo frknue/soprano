@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+SUPPORT="$HOME/Library/Application Support/Soprano Desktop"
+CONFIG="$HOME/.config/soprano-desktop"
+SB="$SUPPORT/bin/sketchybar"
+DESKTOP_BIN="/Applications/Soprano Desktop.app/Contents/MacOS/SopranoDesktop"
+source "$SUPPORT/assets/palette.sh"
+
+"$SB" --bar position=top display=all height=36 notch_width=240 \
+    color="$BASE" border_color="$BORDER" border_width=1 \
+    corner_radius=0 blur_radius=0 shadow=off topmost=window \
+    padding_left=12 padding_right=12 sticky=on font_smoothing=off
+"$SB" --default icon.font="Departure Mono:Regular:11.0" \
+    label.font="Departure Mono:Regular:11.0" icon.color="$ORANGE" \
+    label.color="$TEXT" label.padding_left=6 label.padding_right=8 \
+    icon.padding_left=8 icon.padding_right=4 padding_left=3 padding_right=3 \
+    background.corner_radius=0 background.height=24
+
+"$SB" --add item control left --set control icon=MC label="mission control" \
+    background.drawing=on background.color="$RAISED" background.border_width=1 \
+    background.border_color="$ORANGE" click_script="\"$DESKTOP_BIN\" dashboard"
+"$SB" --add item overview left --set overview icon="[]" label=overview \
+    click_script="\"$DESKTOP_BIN\" overview"
+"$SB" --add item front_app left --set front_app icon="/" label=desktop \
+    label.max_chars=26 script="$CONFIG/plugins/front-app.sh" \
+    --subscribe front_app front_app_switched
+
+"$SB" --add item clock right --set clock icon="" label="--:--" \
+    label.color="$MUSTARD" script="$CONFIG/plugins/stats.sh" update_freq=15 \
+    click_script="\"$DESKTOP_BIN\" dashboard" --subscribe clock system_woke power_source_change
+"$SB" --add item battery right --set battery icon="" label=power
+"$SB" --add item memory right --set memory icon="" label=ram
+"$SB" --add item apps right --set apps icon="" label=applications \
+    click_script="\"$DESKTOP_BIN\" overview"
+"$SB" --update
