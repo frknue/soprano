@@ -56,6 +56,10 @@ final class AgentManager: @unchecked Sendable {
     /// Pane rendered full-size instead of the split tree (nil = normal).
     /// Transient view state — never persisted in sessions.
     private(set) var maximizedPaneId: String?
+    /// Terminal tabs whose shell is running a command (a dev server, a build,
+    /// an editor) instead of waiting at its prompt. Runtime state sampled from
+    /// the surfaces by `SplitTreeView`; never persisted.
+    private(set) var runningCommandTargets: Set<TerminalTarget> = []
     private var nextId: Int = 2
 
     /// Multi-observer notification. Views register closures to receive updates.
@@ -1032,6 +1036,23 @@ final class AgentManager: @unchecked Sendable {
         panes[paneId]?.tabs.first(where: { $0.id == tabId })?.agent
     }
 
+    /// Replaces the terminals running a command; observers hear only of a change.
+    func setRunningCommandTargets(_ targets: Set<TerminalTarget>) {
+        guard targets != runningCommandTargets else { return }
+        runningCommandTargets = targets
+        notifyChange()
+    }
+
+    /// Whether `tab` shows as running a command. An attached agent is the
+    /// command its shell runs, and the agent's own status shows instead.
+    func isRunningCommand(_ tab: PaneTab, in paneId: String) -> Bool {
+        tab.agent == nil
+            && runningCommandTargets.contains(TerminalTarget(paneId: paneId, tabId: tab.id))
+    }
+
+    /// Status label of a terminal running a command, beside the agents' own.
+    static let runningCommandLabel = "RUNNING"
+
     /// Associate an agent started manually inside a regular terminal tab with
     /// Soprano's lifecycle model. A live supported conversation can be resumed
     /// as an agent tab on restore; unrecognized shells remain ordinary terminals.
@@ -1635,6 +1656,8 @@ final class AgentManager: @unchecked Sendable {
         nextId = maxId
 
         maximizedPaneId = nil
+        // Restored ids can repeat ones in use before; their commands are gone.
+        runningCommandTargets = []
         workspaceRestoreGeneration += 1
         notifyChange(layoutChanged: true)
     }

@@ -1,9 +1,10 @@
 import AppKit
 
-/// The open agents behind a window or layout tab: their count beside a lamp
-/// in the color of the most urgent one, red for errors, yellow for input or
-/// startup, green for working, and blue for ready. Hidden without agents.
-final class AgentCountBadgeView: NSView {
+/// A lamp beside a count, set into a window or layout tab: the open agents
+/// behind it in the color of the most urgent one (red for errors, yellow for
+/// input or startup, green for working, blue for ready), or its terminals
+/// running a command. Hidden at zero.
+final class LampCountBadgeView: NSView {
     /// Most urgent first; the lamp takes the first status any agent has.
     static let urgencyOrder: [AgentStatus] = [.error, .waiting, .running, .starting, .idle]
     private static let lampSize: CGFloat = 6
@@ -37,8 +38,16 @@ final class AgentCountBadgeView: NSView {
         case .running: theme.colors.success
         default: theme.colors.blue
         }
-        isHidden = agents.isEmpty
-        countLabel.setRetroText("\(agents.count)", color: color)
+        configure(count: agents.count, color: color)
+    }
+
+    func configure(runningCommands count: Int, theme: AppTheme) {
+        configure(count: count, color: theme.colors.runningCommand)
+    }
+
+    private func configure(count: Int, color: NSColor) {
+        isHidden = count == 0
+        countLabel.setRetroText("\(count)", color: color)
         RetroLamp.light(lamp, color: color)
         layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
         layer?.borderColor = color.cgColor
@@ -55,6 +64,12 @@ final class AgentCountBadgeView: NSView {
             return count > 0 ? "\(count) \(status.displayLabel.lowercased())" : nil
         }
         return "\(agents.count) \(noun): \(counts.joined(separator: ", "))"
+    }
+
+    /// "2 commands running" for tooltips; nil when none is.
+    static func summary(ofRunningCommands count: Int) -> String? {
+        guard count > 0 else { return nil }
+        return count == 1 ? "1 command running" : "\(count) commands running"
     }
 
     override func layout() {

@@ -137,15 +137,20 @@ final class WindowTabBarView: NSView {
         )
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
-            let agents = agentManager.orderedPanes(in: terminalWindow.id)
+            let panes = agentManager.orderedPanes(in: terminalWindow.id)
+            let agents = panes
                 .flatMap(\.tabs)
                 .compactMap(\.agent)
                 .filter { $0.status != .stopped }
+            let runningCommands = panes.reduce(0) { count, pane in
+                count + pane.tabs.filter { agentManager.isRunningCommand($0, in: pane.id) }.count
+            }
             buttons[index].configure(
                 number: index + 1,
                 title: terminalWindow.title,
                 isSelected: terminalWindow.id == activeWindowId,
                 agents: agents,
+                runningCommands: runningCommands,
                 theme: theme
             )
             if buttons[index].tabWidth != previousWidth {
@@ -208,7 +213,9 @@ private final class WindowTabButton: NSButton {
     private let onSelect: () -> Void
     private let separator = TabPlateView()
     private let badgeUnderlay = TabPlateView()
-    private let agentBadge = AgentCountBadgeView(identifier: "window-agent-badge")
+    private let agentBadge = LampCountBadgeView(identifier: "window-agent-badge")
+    private let commandBadgeUnderlay = TabPlateView()
+    private let commandBadge = LampCountBadgeView(identifier: "window-command-badge")
     private(set) var tabWidth: CGFloat = 80
 
     init(windowId: String, onSelect: @escaping () -> Void) {
@@ -227,6 +234,8 @@ private final class WindowTabButton: NSButton {
         addSubview(separator)
         addSubview(badgeUnderlay)
         addSubview(agentBadge)
+        addSubview(commandBadgeUnderlay)
+        addSubview(commandBadge)
     }
 
     @available(*, unavailable)
@@ -239,6 +248,7 @@ private final class WindowTabButton: NSButton {
         title: String,
         isSelected: Bool,
         agents: [AgentInstance],
+        runningCommands: Int,
         theme: AppTheme
     ) {
         let text = "\(number):\(title)"
@@ -250,16 +260,24 @@ private final class WindowTabButton: NSButton {
             lineBreakMode: .byTruncatingTail
         )
         agentBadge.configure(agents: agents, theme: theme)
+        commandBadge.configure(runningCommands: runningCommands, theme: theme)
         badgeUnderlay.isHidden = agentBadge.isHidden
-        badgeUnderlay.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        let indicatorWidth = agents.isEmpty ? 0 : agentBadge.badgeWidth + 8
+        commandBadgeUnderlay.isHidden = commandBadge.isHidden
+        for underlay in [badgeUnderlay, commandBadgeUnderlay] {
+            underlay.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        }
+        let badges = [agentBadge, commandBadge].filter { !$0.isHidden }
+        let indicatorWidth = badges.isEmpty ? 0 : badges.reduce(4) { $0 + $1.badgeWidth + 4 }
         (cell as? WindowTabButtonCell)?.trailingInset = indicatorWidth
         tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24)) + indicatorWidth
         layer?.backgroundColor = isSelected ? theme.colors.accent.cgColor : NSColor.clear.cgColor
         separator.isHidden = isSelected
         separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         var description = "Window \(number): \(title)"
-        if let summary = AgentCountBadgeView.summary(of: agents) {
+        for summary in [
+            LampCountBadgeView.summary(of: agents),
+            LampCountBadgeView.summary(ofRunningCommands: runningCommands),
+        ].compactMap({ $0 }) {
             description += " — \(summary)"
         }
         toolTip = description
@@ -271,13 +289,19 @@ private final class WindowTabButton: NSButton {
 
     override func layout() {
         super.layout()
-        agentBadge.frame = NSRect(
-            x: bounds.maxX - 12 - agentBadge.badgeWidth,
-            y: floor(bounds.midY - 8),
-            width: agentBadge.badgeWidth,
-            height: 16
-        )
-        badgeUnderlay.frame = agentBadge.frame
+        // Agents sit at the trailing edge, running commands before them.
+        var badgeEdge = bounds.maxX - 8
+        for (badge, underlay) in [(agentBadge, badgeUnderlay), (commandBadge, commandBadgeUnderlay)]
+            where !badge.isHidden {
+            badge.frame = NSRect(
+                x: badgeEdge - 4 - badge.badgeWidth,
+                y: floor(bounds.midY - 8),
+                width: badge.badgeWidth,
+                height: 16
+            )
+            underlay.frame = badge.frame
+            badgeEdge = badge.frame.minX
+        }
         separator.frame = NSRect(
             x: bounds.maxX - Retro.hairline,
             y: 7,

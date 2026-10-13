@@ -79,6 +79,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - Optional CRT effect for terminal panes — scanlines, phosphor glow, and a soft
   vignette — under **Settings ▸ General ▸ Appearance** or `"crtEffect": true` in
   `settings.json`. Off by default.
+- Terminals running a command — `npm run dev`, a build, an editor — show it: `RUNNING`
+  with a cyan lamp in the pane header, a cyan `●` on its pane tab, a `RUNNING` badge on
+  its sidebar row, and a cyan count badge on its tab and window tab. It clears when the
+  shell is back at its prompt, using ghostty's shell-integration prompt marks.
 
 ### Changed
 

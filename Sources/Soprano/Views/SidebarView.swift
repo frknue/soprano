@@ -498,6 +498,7 @@ final class SidebarView: NSView {
                         dotColor: paneStatusColor(for: pane, theme: theme),
                         dotLit: paneLampLit(for: pane),
                         agentStatus: pane.activeTab?.agent?.status,
+                        runsCommand: paneRunsCommand(pane),
                         tabCount: pane.tabs.count,
                         layoutTabNumber: numbersLayoutTabs ? layoutTabIndex + 1 : nil,
                         shortcutKey: paneShortcutKeysById[pane.id],
@@ -660,11 +661,16 @@ final class SidebarView: NSView {
             return theme.colors.blue
         }
         guard let tab = pane.activeTab else { return theme.colors.gray }
+        if tab.agent == nil, paneRunsCommand(pane) {
+            return theme.colors.runningCommand
+        }
         return tabStatusColor(for: tab, theme: theme)
     }
 
     /// Whether the pane's status lamp glows: something is happening or wants
-    /// attention. Idle, stopped, and plain panes stay dark.
+    /// attention. Idle, stopped, and plain panes stay dark. The active tab's
+    /// agent speaks for the pane; without one, a command running in any of its
+    /// tabs lights the lamp.
     private func paneLampLit(for pane: PaneState) -> Bool {
         if pane.tabs.contains(where: { $0.agent?.needsAttention == true }) {
             return true
@@ -672,9 +678,15 @@ final class SidebarView: NSView {
         switch pane.activeTab?.agent?.status {
         case .starting, .running, .waiting, .error:
             return true
-        case .idle, .stopped, nil:
+        case .idle, .stopped:
             return false
+        case nil:
+            return paneRunsCommand(pane)
         }
+    }
+
+    private func paneRunsCommand(_ pane: PaneState) -> Bool {
+        pane.tabs.contains { agentManager.isRunningCommand($0, in: pane.id) }
     }
 
     private func tabStatusColor(for tab: PaneTab, theme: AppTheme) -> NSColor {
@@ -1092,6 +1104,7 @@ private final class SidebarPaneRowView: NSView {
         dotColor: NSColor,
         dotLit: Bool,
         agentStatus: AgentStatus?,
+        runsCommand: Bool,
         tabCount: Int,
         layoutTabNumber: Int?,
         shortcutKey: String?,
@@ -1119,6 +1132,9 @@ private final class SidebarPaneRowView: NSView {
             if let agentStatus {
                 badgeParts.append(agentStatus.displayLabel)
             }
+            if runsCommand {
+                badgeParts.append(AgentManager.runningCommandLabel)
+            }
             if tabCount > 1 {
                 badgeParts.append("\(tabCount)T")
             }
@@ -1128,7 +1144,7 @@ private final class SidebarPaneRowView: NSView {
             badgeContainer.isHidden = badgeParts.isEmpty
             applyBadge(
                 badgeParts.joined(separator: " · "),
-                tint: agentStatus == nil ? theme.colors.textMuted : dotColor
+                tint: agentStatus == nil && !runsCommand ? theme.colors.textMuted : dotColor
             )
             badgeContainer.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
         }

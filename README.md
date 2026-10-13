@@ -169,6 +169,13 @@ activates Soprano and focuses that tab. The pane header and status bar expose
 relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPUT` until
 the next prompt is submitted.
 
+Plain terminals report too. While a shell runs a command — `npm run dev`, a build, an
+editor — its pane header shows `RUNNING` beside a cyan lamp, its tab in the pane's tab
+strip gets a cyan `●`, and its sidebar row lights up with a `RUNNING` badge. The mark
+clears when the shell is back at its prompt. Detection reads ghostty's shell-integration
+prompt marks (bash, zsh, fish, elvish, nushell), so a shell without them shows nothing.
+A tab running an agent keeps showing the agent's status instead.
+
 Soprano asks for notification permission at launch. Notifications are only sent for
 panes that are **not focused** — a pane you are looking at updates its status without
 interrupting you. Banners are silent by default; enable *Play a sound* under
@@ -301,7 +308,8 @@ A compact agent badge beside a window's title counts open agents, including thos
 in every tab and in hidden pane tabs. It stays visible while agents are ready or
 waiting for input, and clears when they stop or exit. Its color reflects the most
 urgent state: red for errors, yellow for input or startup, green for working, and
-blue for ready. Hover over the window tab for a breakdown by status.
+blue for ready. A cyan badge before it counts the window's terminals running a command.
+Hover over the window tab for a breakdown by status.
 
 Press `Ctrl+A`, release it, then press `Shift+C` to create a session. `Ctrl+A` then
 lowercase `c` creates a window inside the current session, starting in the active
@@ -510,9 +518,9 @@ A tab is named after its focused pane, the same title the pane header shows. The
 tab is lit with a raised background and an accent underline. A tab holding open agents
 shows the same badge as window tabs — a count and a lamp, red for errors, yellow for
 input or startup, green for working, blue for ready — with a breakdown by status on
-hover. Click `×` on a tab (or middle-click it) to close it, and `+` at the right end to
-open a new one. When the row fills up it scrolls with the trackpad or scroll wheel and
-keeps the active tab visible.
+hover; a cyan badge counts its terminals running a command. Click `×` on a tab (or
+middle-click it) to close it, and `+` at the right end to open a new one. When the row
+fills up it scrolls with the trackpad or scroll wheel and keeps the active tab visible.
 
 `⌃Tab` / `⌃⇧Tab` move to the next / previous tab and wrap around. `⌘T` (or `⌃A` then
 `T`) opens a new tab at the end with one fresh terminal in the active terminal's

@@ -50,6 +50,10 @@ extension ThemeColors {
     /// The 70s racing stripe Soprano's chrome uses as its signature ornament:
     /// warning red, accent, and the strong accent, read left to right.
     var stripe: [NSColor] { [danger, accent, accentStrong] }
+
+    /// Lamp of a terminal running a command, apart from the agent colors so a
+    /// dev server never reads as an agent at work.
+    var runningCommand: NSColor { cyan }
 }
 
 struct TerminalColors {

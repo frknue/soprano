@@ -174,16 +174,20 @@ final class LayoutTabBarView: NSView {
         theme: AppTheme
     ) {
         let previousWidth = button.tabWidth
-        let agents = (tab.layout?.orderedLeafIds ?? [])
-            .compactMap { agentManager.panes[$0] }
+        let panes = (tab.layout?.orderedLeafIds ?? []).compactMap { agentManager.panes[$0] }
+        let agents = panes
             .flatMap(\.tabs)
             .compactMap(\.agent)
             .filter { $0.status != .stopped }
+        let runningCommands = panes.reduce(0) { count, pane in
+            count + pane.tabs.filter { agentManager.isRunningCommand($0, in: pane.id) }.count
+        }
         button.configure(
             number: number,
             title: agentManager.panes[tab.activePaneId]?.activeTab?.title ?? "Tab",
             isSelected: tab.id == activeLayoutTabId,
             agents: agents,
+            runningCommands: runningCommands,
             theme: theme
         )
         if button.tabWidth != previousWidth {
@@ -249,7 +253,8 @@ private final class LayoutTabButton: NSButton {
     private let closeButton = NSButton(title: "×", target: nil, action: nil)
     private let separator = TabPlateView()
     private let activeMarker = TabPlateView()
-    private let agentBadge = AgentCountBadgeView(identifier: "layout-tab-agent-badge")
+    private let agentBadge = LampCountBadgeView(identifier: "layout-tab-agent-badge")
+    private let commandBadge = LampCountBadgeView(identifier: "layout-tab-command-badge")
     private(set) var tabWidth: CGFloat = 96
 
     init(layoutTabId: String, onSelect: @escaping () -> Void, onClose: @escaping () -> Void) {
@@ -278,6 +283,7 @@ private final class LayoutTabButton: NSButton {
         addSubview(separator)
         addSubview(activeMarker)
         addSubview(agentBadge)
+        addSubview(commandBadge)
         addSubview(closeButton)
     }
 
@@ -291,6 +297,7 @@ private final class LayoutTabButton: NSButton {
         title: String,
         isSelected: Bool,
         agents: [AgentInstance],
+        runningCommands: Int,
         theme: AppTheme
     ) {
         self.title = title
@@ -301,7 +308,10 @@ private final class LayoutTabButton: NSButton {
             lineBreakMode: .byTruncatingTail
         )
         agentBadge.configure(agents: agents, theme: theme)
-        let badgeArea = agents.isEmpty ? 0 : agentBadge.badgeWidth + 4
+        commandBadge.configure(runningCommands: runningCommands, theme: theme)
+        let badgeArea = [agentBadge, commandBadge]
+            .filter { !$0.isHidden }
+            .reduce(0) { $0 + $1.badgeWidth + 4 }
         let trailingInset = badgeArea + Self.closeArea
         (cell as? LayoutTabButtonCell)?.trailingInset = trailingInset
         let titleWidth = ceil(attributedTitle.size().width)
@@ -319,7 +329,10 @@ private final class LayoutTabButton: NSButton {
         )
 
         var description = "Tab \(number): \(title)"
-        if let summary = AgentCountBadgeView.summary(of: agents) {
+        for summary in [
+            LampCountBadgeView.summary(of: agents),
+            LampCountBadgeView.summary(ofRunningCommands: runningCommands),
+        ].compactMap({ $0 }) {
             description += " — \(summary)"
         }
         toolTip = description
@@ -337,12 +350,17 @@ private final class LayoutTabButton: NSButton {
             width: Self.closeSize,
             height: Self.closeSize
         )
-        agentBadge.frame = NSRect(
-            x: closeButton.frame.minX - 4 - agentBadge.badgeWidth,
-            y: floor(bounds.midY - 8),
-            width: agentBadge.badgeWidth,
-            height: 16
-        )
+        // Agents sit next to the close button, running commands before them.
+        var badgeEdge = closeButton.frame.minX
+        for badge in [agentBadge, commandBadge] where !badge.isHidden {
+            badge.frame = NSRect(
+                x: badgeEdge - 4 - badge.badgeWidth,
+                y: floor(bounds.midY - 8),
+                width: badge.badgeWidth,
+                height: 16
+            )
+            badgeEdge = badge.frame.minX
+        }
         // An underline like the pane header's tab strip, on the edge facing
         // the panes.
         activeMarker.frame = NSRect(
@@ -377,8 +395,8 @@ private final class LayoutTabButton: NSButton {
     }
 }
 
-/// Draws the title in a padded area that leaves room for the agent badge and
-/// the close button.
+/// Draws the title in a padded area that leaves room for the badges and the
+/// close button.
 private final class LayoutTabButtonCell: NSButtonCell {
     static let leadingInset: CGFloat = 12
     var trailingInset: CGFloat = 0

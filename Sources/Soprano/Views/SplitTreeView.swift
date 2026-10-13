@@ -25,6 +25,7 @@ final class SplitTreeView: NSView {
     private let terminalViewHasLiveSurface: (NSView) -> Bool
     private let terminalVisibleText: (NSView) -> String?
     private let terminalPromptSubmitter: (NSView, String) -> Bool
+    private let terminalIsRunningCommand: (NSView) -> Bool
     private let scheduleCodexReadiness: CodexReadinessScheduler
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
 
@@ -44,6 +45,10 @@ final class SplitTreeView: NSView {
     private var lastWorkspaceRestoreGeneration: Int
     private var copyModeTarget: TerminalTarget?
     private var isSynchronizingKeyboardFocus = false
+    nonisolated(unsafe) private var runningCommandTimer: Timer?
+
+    /// Seconds between samples of which terminals are running a command.
+    static let runningCommandSampleInterval: TimeInterval = 1
 
     /// Observer ID for AgentManager notifications.
     private let observerId = "SplitTreeView"
@@ -78,6 +83,9 @@ final class SplitTreeView: NSView {
         terminalPromptSubmitter: @escaping (NSView, String) -> Bool = { view, prompt in
             (view as? TerminalSurfaceView)?.submitText(prompt) ?? false
         },
+        terminalIsRunningCommand: @escaping (NSView) -> Bool = { view in
+            (view as? TerminalSurfaceView)?.isRunningCommand() ?? false
+        },
         scheduleCodexReadiness: @escaping CodexReadinessScheduler = { callback in
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 callback()
@@ -92,6 +100,7 @@ final class SplitTreeView: NSView {
         self.terminalViewHasLiveSurface = terminalViewHasLiveSurface
         self.terminalVisibleText = terminalVisibleText
         self.terminalPromptSubmitter = terminalPromptSubmitter
+        self.terminalIsRunningCommand = terminalIsRunningCommand
         self.scheduleCodexReadiness = scheduleCodexReadiness
         self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
@@ -105,6 +114,15 @@ final class SplitTreeView: NSView {
         }
 
         rebuildLayout()
+        runningCommandTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.runningCommandSampleInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.sampleRunningCommands()
+            }
+        }
+        runningCommandTimer?.tolerance = 0.2
     }
 
     @available(*, unavailable)
@@ -113,8 +131,29 @@ final class SplitTreeView: NSView {
     }
 
     deinit {
+        runningCommandTimer?.invalidate()
         agentManager.removeObserver(id: observerId)
         agentManager.removeTerminalLifecycleObserver(id: observerId)
+    }
+
+    // MARK: - Running Commands
+
+    /// Publishes which terminals, in every window, are running a command.
+    /// Ghostty reports no action when a command starts, so the timer polls.
+    func sampleRunningCommands() {
+        agentManager.setRunningCommandTargets(Set(
+            tabContentViews.compactMap { target, view in
+                terminalIsRunningCommand(view) ? target : nil
+            }
+        ))
+    }
+
+    /// Shell integration reported the command's end: clear it without waiting
+    /// for the next sample.
+    private func clearRunningCommand(at target: TerminalTarget) {
+        var targets = agentManager.runningCommandTargets
+        targets.remove(target)
+        agentManager.setRunningCommandTargets(targets)
     }
 
     // MARK: - State Change Handler
@@ -610,6 +649,7 @@ final class SplitTreeView: NSView {
                     )
                 }
                 terminalView.onShellCommandFinished = { [weak self] exitCode in
+                    self?.clearRunningCommand(at: target)
                     self?.agentManager.agentCommandDidFinish(target: target, exitCode: exitCode)
                 }
                 terminalView.onAgentProcessExited = { [weak self] exitCode in

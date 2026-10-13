@@ -157,6 +157,17 @@ final class PaneHeaderView: NSView {
                 glow: agent.status == .running
             )
             statusLabel.isHidden = false
+        } else if let tab, agentManager.isRunningCommand(tab, in: paneId) {
+            let color = theme.colors.runningCommand
+            RetroLamp.light(statusDot, color: color)
+            statusLabel.textColor = color
+            statusLabel.setRetroText(
+                AgentManager.runningCommandLabel,
+                color: color,
+                tracking: 0,
+                glow: true
+            )
+            statusLabel.isHidden = false
         } else {
             RetroLamp.light(statusDot, color: theme.colors.textMuted, lit: false)
             statusLabel.stringValue = ""
@@ -205,6 +216,7 @@ final class PaneHeaderView: NSView {
         let activeTabId = pane.activeTab?.id
         for (index, tab) in pane.tabs.enumerated() {
             let needsAttention = tab.agent?.needsAttention == true
+            let isRunningCommand = agentManager.isRunningCommand(tab, in: pane.id)
             let isActive = tab.id == activeTabId
             let attentionPrefix = needsAttention ? "● " : ""
             let title = "\(attentionPrefix)\(tab.title)"
@@ -225,9 +237,15 @@ final class PaneHeaderView: NSView {
             button.setContentHuggingPriority(.defaultLow, for: .horizontal)
             button.setButtonType(.momentaryChange)
             button.contentTintColor = color
-            button.attributedTitle = tab.isFilePreview
-                ? Self.slanted(RetroText.display(title, color: color))
-                : RetroText.display(title, color: color)
+            // A running command lights a lamp before the title, which keeps
+            // its usual color; an agent's attention marker tints all of it.
+            let label = NSMutableAttributedString()
+            if isRunningCommand {
+                label.append(RetroText.display("● ", color: theme.colors.runningCommand, glow: true))
+                button.toolTip = "Running a command"
+            }
+            label.append(RetroText.display(title, color: color))
+            button.attributedTitle = tab.isFilePreview ? Self.slanted(label) : label
             button.translatesAutoresizingMaskIntoConstraints = false
 
             let underline = NSView()

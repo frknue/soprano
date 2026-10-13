@@ -296,6 +296,22 @@ struct TerminalMouseButtonState {
     }
 }
 
+/// Tells from ghostty whether a terminal's shell is running a command.
+///
+/// Ghostty answers "not at a prompt" from shell integration's prompt marks
+/// (`ghostty_surface_needs_confirm_quit`). A shell without integration never
+/// reports a prompt, nor does an agent started as the pane's own command, and
+/// `confirm-close-surface = always` answers "not at a prompt" throughout. So a
+/// terminal counts as running only once it has been seen at a prompt.
+struct TerminalCommandActivity {
+    private(set) var hasShownPrompt = false
+
+    mutating func isRunningCommand(atPrompt: Bool) -> Bool {
+        if atPrompt { hasShownPrompt = true }
+        return !atPrompt && hasShownPrompt
+    }
+}
+
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
     let paneId: String
@@ -324,6 +340,7 @@ final class TerminalSurfaceView: NSView {
     private var copyModeLineSelectionMouseHeld = false
     private var mouseButtonState = TerminalMouseButtonState()
     private var suppressedCopyModeKeyUps: Set<UInt16> = []
+    private var commandActivity = TerminalCommandActivity()
 
     init(
         paneId: String,
@@ -401,6 +418,7 @@ final class TerminalSurfaceView: NSView {
 
     private func createSurface() {
         guard let app = GhosttyAppManager.shared.app else { return }
+        commandActivity = TerminalCommandActivity()
 
         var surfaceConfig = ghostty_surface_config_new()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS
@@ -510,6 +528,15 @@ final class TerminalSurfaceView: NSView {
 
     func terminalChildDidExit(exitCode: Int32?) {
         onAgentProcessExited?(exitCode)
+    }
+
+    /// Whether the shell is running a command rather than waiting at its
+    /// prompt. Polled: ghostty reports no action when a command starts.
+    func isRunningCommand() -> Bool {
+        guard let surface else { return false }
+        return commandActivity.isRunningCommand(
+            atPrompt: !ghostty_surface_needs_confirm_quit(surface)
+        )
     }
 
     func changeFontSize(delta: Int) {
