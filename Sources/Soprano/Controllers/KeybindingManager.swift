@@ -76,6 +76,7 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingOpenCommandPalette()
     func keybindingFindWindow()
     func keybindingOpenProjectSearch()
+    func keybindingOpenInSopranoGit()
     func keybindingZoom(delta: Int)
     func keybindingZoomReset()
     func keybindingStartCopyMode()
@@ -532,6 +533,8 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingFindWindow() }
         case "open-project":
             invokeDelegate { $0.keybindingOpenProjectSearch() }
+        case "open-in-soprano-git":
+            invokeDelegate { $0.keybindingOpenInSopranoGit() }
         case "new-window":
             _ = agentManager.createWindow()
         case "rename-window":

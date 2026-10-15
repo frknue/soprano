@@ -10,6 +10,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- **Open in Soprano Git** (`⌃A` → `G`, the command palette, or **Commands ▸ Open in
+  Soprano Git**) opens the active tab's Git repository in Soprano Git, or selects its tab
+  there when it is already open. The Explorer's **Open in** menu lists Soprano Git too.
 - **Settings ▸ Accounts** (also `⌘P` → *Accounts*) keeps several Claude and Codex
   logins, like Orca: **Add Account** signs in through the browser, with
   **Re-authenticate** and **Remove**. omp keeps every account and balances them — mark
