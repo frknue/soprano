@@ -1,7 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-SUPPORT="$HOME/Library/Application Support/Soprano Desktop"
-source "$SUPPORT/assets/palette.sh"
-exec "$SUPPORT/bin/borders" style=square width=3.0 hidpi=on \
-    active_color="glow($ORANGE)" inactive_color="$BORDER" \
-    blacklist="Soprano Desktop,Omanotch,OmniNotch"
