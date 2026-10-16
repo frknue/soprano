@@ -245,8 +245,24 @@ final class MainWindowController: NSWindowController {
             }
     }
 
+    /// Listed only while Soprano Git is installed; the binding still explains itself without it.
+    private func sopranoGitPaletteItems() -> [CommandItem] {
+        guard SopranoGitLauncher.installedApplication() != nil else { return [] }
+        return [
+            CommandItem(
+                id: "open-in-soprano-git",
+                icon: "arrow.triangle.branch",
+                label: "Open in Soprano Git",
+                description: "Open the active tab's Git repository in Soprano Git",
+                shortcut: commandShortcut(for: "open-in-soprano-git"),
+                searchText: "git gitkraken graph history commit branch source control",
+                action: { [weak self] in self?.keybindingOpenInSopranoGit() }
+            ),
+        ]
+    }
+
     private func buildCommandPaletteItems() -> [CommandItem] {
-        agentLaunchPaletteItems() + [
+        agentLaunchPaletteItems() + sopranoGitPaletteItems() + [
             CommandItem(
                 id: "new-session",
                 icon: "rectangle.stack.badge.plus",
@@ -778,6 +794,12 @@ extension MainWindowController: KeybindingDelegate {
         )
     }
 
+    func keybindingOpenInSopranoGit() {
+        SopranoGitLauncher.open(workingDirectory: agentManager.activeWorkingDirectory) { [weak self] message in
+            self?.showNotice(title: "Open in Soprano Git", message: message)
+        }
+    }
+
     func keybindingZoom(delta: Int) {
         mainContentVC?.changeActiveTerminalFontSize(delta: delta)
     }
@@ -955,6 +977,13 @@ private extension MainWindowController {
         )
         commandsMenu.addItem(projectItem)
 
+        let sopranoGitItem = makeCommandsMenuItem(
+            title: "Open in Soprano Git",
+            action: #selector(openInSopranoGitMenuItemSelected),
+            bindingId: "open-in-soprano-git"
+        )
+        commandsMenu.addItem(sopranoGitItem)
+
         let markdownItem = NSMenuItem(
             title: "Open Markdown…",
             action: #selector(openMarkdownMenuItemSelected),
@@ -1023,6 +1052,23 @@ private extension MainWindowController {
 
     @objc func openProjectMenuItemSelected() {
         keybindingOpenProjectSearch()
+    }
+
+    @objc func openInSopranoGitMenuItemSelected() {
+        keybindingOpenInSopranoGit()
+    }
+
+    /// A one-button notice attached to the window.
+    func showNotice(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        if let window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     @objc func openMarkdownMenuItemSelected() {

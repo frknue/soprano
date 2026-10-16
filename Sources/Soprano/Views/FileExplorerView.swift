@@ -1539,6 +1539,7 @@ final class FileExplorerView: NSView {
             "com.jetbrains.pycharm",
             "com.jetbrains.goland",
             "com.jetbrains.rustrover",
+            "com.soprano.git",
             "com.DanPristupov.Fork",
             "com.fournova.Tower3",
             "com.github.GitHubClient",

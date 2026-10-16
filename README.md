@@ -279,6 +279,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 | `⌘L` | Toggle the right sidebar (in a browser pane, `⌘L` focuses its address bar) |
 | `⇧⌘E` | Show and focus the file explorer; press again while it has focus to hide it |
 | `⇧⌘G` | Show and focus Source Control; press again while it has focus to hide it (the file editor keeps `⇧⌘G` for find) |
+| `⌃A` → `G` | Open the active tab's Git repository in Soprano Git |
 | `⌘S` / `⌘F` | Save / find in the file editor |
 | `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
 | `⌘=` (or `⌘+`) / `⌘-` / `⌘0` | Zoom in / out / reset |
@@ -458,7 +459,9 @@ line counts. A file with staged and unstaged edits is listed in both. The list r
 itself when files or the index change, and nothing runs while it is hidden. Press `⇧⌘G`
 (`toggle-source-control`) or use the **Toggle Source Control** palette command to open it
 with the keyboard in the list, and again to hide it. Staging and committing stay in the
-terminal.
+terminal, or in Soprano Git: `⌃A` → `G` (`open-in-soprano-git`, also in the command
+palette and the **Commands** menu) opens the active tab's repository there, and selects
+its tab when Soprano Git already shows it.
 
 - Click a file, or press `Space`, to open its diff beside the focused pane, where files
   open, as a slanted preview tab, `name (diff)` or `name (staged diff)`, that the next

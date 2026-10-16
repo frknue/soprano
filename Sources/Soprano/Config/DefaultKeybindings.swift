@@ -84,6 +84,9 @@ enum DefaultKeybindings {
             KeyBinding(id: "zoom-in", label: "Zoom In", description: "Increase font size", category: .general, defaultKeys: "⌘+ / ⌘=", mode: .direct, key: "=", meta: true),
             KeyBinding(id: "zoom-out", label: "Zoom Out", description: "Decrease font size", category: .general, defaultKeys: "⌘-", mode: .direct, key: "-", meta: true),
             KeyBinding(id: "zoom-reset", label: "Reset Zoom", description: "Reset font size to default", category: .general, defaultKeys: "⌘0", mode: .direct, key: "0", meta: true),
+
+            // General (prefix)
+            KeyBinding(id: "open-in-soprano-git", label: "Open in Soprano Git", description: "Open the active tab's Git repository in Soprano Git", category: .general, defaultKeys: "Prefix → G", mode: .prefix, key: "g"),
         ]
     )
 
