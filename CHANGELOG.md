@@ -10,10 +10,6 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
-- **Soprano Desktop**, a companion app that dresses macOS in Soprano's Mission Control
-  look — status bar, window borders, styled launchers, and wallpaper. Build and install
-  it with `scripts/install-desktop.sh`; `scripts/restore-desktop.sh` brings back the
-  original appearance.
 - **Settings ▸ Accounts** (also `⌘P` → *Accounts*) keeps several Claude and Codex
   logins, like Orca: **Add Account** signs in through the browser, with
   **Re-authenticate** and **Remove**. omp keeps every account and balances them — mark
