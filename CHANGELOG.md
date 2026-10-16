@@ -114,6 +114,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- Closing a Markdown preview with **×** no longer leaves the editor's eye icon
+  or Reload button stuck in its hover state.
 - Pressing `Ctrl+C` again while an agent shuts down no longer leaves its pane at a bare
   zsh prompt: the shell the pane falls back to finishes loading your startup files
   (Oh My Zsh, Powerlevel10k, aliases) before `Ctrl+C` takes effect again.

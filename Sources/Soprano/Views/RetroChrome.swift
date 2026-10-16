@@ -448,6 +448,19 @@ final class RetroButton: NSButton {
         ))
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window == nil else { return }
+        // Swapping cached tab contents can detach us without a mouse-exit event.
+        isHovered = false
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        // Hiding can also skip the mouse-exit event.
+        isHovered = false
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea {
@@ -530,6 +543,21 @@ final class RetroIconButton: NSButton {
 
     override var isEnabled: Bool {
         didSet { alphaValue = isEnabled ? 1 : 0.5 }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window == nil else { return }
+        // Swapping cached tab contents can detach us without a mouse-exit event.
+        isHovered = false
+        applyTint()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        // Hiding can also skip the mouse-exit event.
+        isHovered = false
+        applyTint()
     }
 
     override func updateTrackingAreas() {
