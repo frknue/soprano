@@ -117,6 +117,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- The CRT effect no longer redraws unchanged terminals on every display refresh,
+  reducing unnecessary CPU and GPU work with `"crtEffect": true`.
+- Switching to another app or window now unfocuses its terminal surfaces, stopping
+  focus-only rendering and cursor blinking until that window regains keyboard focus.
 - Closing a Markdown preview with **×** no longer leaves the editor's eye icon
   or Reload button stuck in its hover state.
 - Pressing `Ctrl+C` again while an agent shuts down no longer leaves its pane at a bare

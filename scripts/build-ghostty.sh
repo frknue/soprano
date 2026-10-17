@@ -95,13 +95,42 @@ if [[ -n "$recorded_commit" && "$building_commit" == "$recorded_commit" ]]; then
     fi
 fi
 
-build_cache_dir="$(mktemp -d "$repo_root/.build-ghostty-cache.XXXXXX")"
-stage_dir="$(mktemp -d "$repo_root/.build-ghostty-stage.XXXXXX")"
+renderer_patch="$script_dir/patches/ghostty-static-shader.patch"
+applied_renderer_patch=false
+build_cache_dir=""
+stage_dir=""
 
 cleanup() {
-    rm -rf "$build_cache_dir" "$stage_dir"
+    local status=$?
+    if [[ "$applied_renderer_patch" == true ]]; then
+        if git -C "$ghostty_dir" apply --reverse "$renderer_patch"; then
+            echo "Restored Ghostty source after applying Soprano's renderer patch."
+        else
+            echo "Could not remove Soprano's renderer patch; preserve local changes and inspect ghostty/." >&2
+            status=1
+        fi
+    fi
+    if [[ -n "$build_cache_dir" ]]; then rm -rf "$build_cache_dir"; fi
+    if [[ -n "$stage_dir" ]]; then rm -rf "$stage_dir"; fi
+    return "$status"
 }
 trap cleanup EXIT
+
+# Keep the upstream pin intact. Only undo patches this invocation applied;
+# a developer may already be working with the same patch in the submodule.
+if git -C "$ghostty_dir" apply --reverse --check "$renderer_patch" 2>/dev/null; then
+    echo "Soprano's static-shader renderer patch is already applied."
+elif git -C "$ghostty_dir" apply --check "$renderer_patch"; then
+    git -C "$ghostty_dir" apply "$renderer_patch"
+    applied_renderer_patch=true
+    echo "Applied Soprano's static-shader renderer patch."
+else
+    echo "The Ghostty source does not match Soprano's renderer patch; update the patch before building." >&2
+    exit 1
+fi
+
+build_cache_dir="$(mktemp -d "$repo_root/.build-ghostty-cache.XXXXXX")"
+stage_dir="$(mktemp -d "$repo_root/.build-ghostty-stage.XXXXXX")"
 
 echo "Building libghostty at $building_commit (this takes a while)..."
 build_status=0
@@ -122,7 +151,7 @@ xcframework_dir="$ghostty_dir/macos/GhosttyKit.xcframework"
 built_libraries=()
 native_architecture="$(uname -m)"
 
-if [[ -d "$xcframework_dir" ]]; then
+if [[ "$build_status" -eq 0 && -d "$xcframework_dir" ]]; then
     while IFS= read -r artifact; do
         if [[ "$(lipo -archs "$artifact")" == "$native_architecture" ]]; then
             built_libraries+=("$artifact")

@@ -1,0 +1,177 @@
+diff --git a/src/renderer/generic.zig b/src/renderer/generic.zig
+index ff632f64a..4b1d4541d 100644
+--- a/src/renderer/generic.zig
++++ b/src/renderer/generic.zig
+@@ -559,6 +559,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+             min_contrast: f32,
+             padding_color: configpkg.WindowPaddingColor,
+             custom_shaders: configpkg.RepeatablePath,
++            custom_shader_animation: configpkg.CustomShaderAnimation,
+             bg_image: ?configpkg.Path,
+             bg_image_opacity: f32,
+             bg_image_position: configpkg.BackgroundImagePosition,
+@@ -633,6 +634,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+                     .search_selected_foreground = config.@"search-selected-foreground",
+ 
+                     .custom_shaders = custom_shaders,
++                    .custom_shader_animation = config.@"custom-shader-animation",
+                     .bg_image = bg_image,
+                     .bg_image_opacity = config.@"background-image-opacity",
+                     .bg_image_position = config.@"background-image-position",
+@@ -1008,10 +1010,128 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+             };
+         }
+ 
+-        /// True if our renderer has animations so that a higher frequency
+-        /// timer is used.
++        /// True if our custom shaders should animate in the current focus state.
++        /// Both the draw timer and vsync redraw decisions use this policy.
+         pub fn hasAnimations(self: *const Self) bool {
+-            return self.has_custom_shaders;
++            return self.has_custom_shaders and switch (self.config.custom_shader_animation) {
++                .false => false,
++                .true => self.focused,
++                .always => true,
++            };
++        }
++
++        /// Whether drawing must rebuild the target rather than present it again.
++        fn needsRedraw(self: *const Self, size_changed: bool, sync: bool) bool {
++            return size_changed or
++                self.cells_rebuilt or
++                self.reinitialize_shaders or
++                (self.has_custom_shaders and self.custom_shader_focused_changed) or
++                self.hasAnimations() or
++                sync;
++        }
++
++        test "custom shader redraw static frames" {
++            const testing = std.testing;
++            var self: Self = undefined;
++            self.has_custom_shaders = true;
++            self.config.custom_shader_animation = .false;
++            self.cells_rebuilt = false;
++            self.custom_shader_focused_changed = false;
++            self.reinitialize_shaders = false;
++
++            inline for (.{ true, false }) |focused| {
++                self.focused = focused;
++                try testing.expect(!self.hasAnimations());
++                try testing.expect(!self.needsRedraw(false, false));
++                try testing.expect(self.needsRedraw(true, false));
++                try testing.expect(self.needsRedraw(false, true));
++                self.cells_rebuilt = true;
++                try testing.expect(self.needsRedraw(false, false));
++                self.cells_rebuilt = false;
++                try testing.expect(!self.needsRedraw(false, false));
++                self.reinitialize_shaders = true;
++                try testing.expect(self.needsRedraw(false, false));
++                self.reinitialize_shaders = false;
++                try testing.expect(!self.needsRedraw(false, false));
++            }
++        }
++
++        test "custom shader redraw animation policy" {
++            const testing = std.testing;
++            var self: Self = undefined;
++            self.cells_rebuilt = false;
++            self.custom_shader_focused_changed = false;
++            self.reinitialize_shaders = false;
++
++            const Case = struct {
++                shaders: bool,
++                focus: bool,
++                mode: configpkg.CustomShaderAnimation,
++                expected: bool,
++            };
++            const cases = [_]Case{
++                .{ .shaders = false, .focus = true, .mode = .false, .expected = false },
++                .{ .shaders = false, .focus = true, .mode = .true, .expected = false },
++                .{ .shaders = false, .focus = true, .mode = .always, .expected = false },
++                .{ .shaders = false, .focus = false, .mode = .false, .expected = false },
++                .{ .shaders = false, .focus = false, .mode = .true, .expected = false },
++                .{ .shaders = false, .focus = false, .mode = .always, .expected = false },
++                .{ .shaders = true, .focus = true, .mode = .false, .expected = false },
++                .{ .shaders = true, .focus = true, .mode = .true, .expected = true },
++                .{ .shaders = true, .focus = true, .mode = .always, .expected = true },
++                .{ .shaders = true, .focus = false, .mode = .false, .expected = false },
++                .{ .shaders = true, .focus = false, .mode = .true, .expected = false },
++                .{ .shaders = true, .focus = false, .mode = .always, .expected = true },
++                .{ .shaders = true, .focus = false, .mode = .false, .expected = false },
++            };
++            // Reuse the renderer so mode changes must take effect immediately,
++            // including returning from unfocused .always animation to static.
++            for (cases) |case| {
++                self.has_custom_shaders = case.shaders;
++                self.focused = case.focus;
++                self.config.custom_shader_animation = case.mode;
++                try testing.expectEqual(case.expected, self.hasAnimations());
++                try testing.expectEqual(case.expected, self.needsRedraw(false, false));
++            }
++        }
++
++        test "custom shader redraw focus transitions settle" {
++            const testing = std.testing;
++            var self: Self = undefined;
++            self.has_custom_shaders = true;
++            self.config.custom_shader_animation = .false;
++            self.cells_rebuilt = false;
++            self.focused = true;
++            self.custom_shader_focused_changed = false;
++            self.reinitialize_shaders = false;
++            self.display_link = null;
++            self.first_frame_time = null;
++            self.last_frame_time = null;
++            self.custom_shader_uniforms = std.mem.zeroes(shadertoy.Uniforms);
++            self.custom_shader_uniforms.time_focus = -1;
++            self.cells = .{};
++            self.size = .{
++                .screen = .{ .width = 80, .height = 40 },
++                .cell = .{ .width = 8, .height = 10 },
++                .padding = .{},
++            };
++
++            try self.setFocus(false);
++            try testing.expect(self.needsRedraw(false, false));
++            try self.updateCustomShaderUniformsForFrame();
++            try testing.expectEqual(@as(i32, 0), self.custom_shader_uniforms.focus);
++            try testing.expectEqual(@as(f32, -1), self.custom_shader_uniforms.time_focus);
++            try testing.expect(!self.needsRedraw(false, false));
++
++            try self.setFocus(true);
++            try testing.expect(self.needsRedraw(false, false));
++            try self.updateCustomShaderUniformsForFrame();
++            try testing.expectEqual(@as(i32, 1), self.custom_shader_uniforms.focus);
++            try testing.expectEqual(
++                self.custom_shader_uniforms.time,
++                self.custom_shader_uniforms.time_focus,
++            );
++            try testing.expect(!self.needsRedraw(false, false));
+         }
+ 
+         /// True if our renderer is using vsync. If true, the renderer or apprt
+@@ -1474,11 +1594,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+ 
+             // Conditions under which we need to draw the frame, otherwise we
+             // don't need to since the previous frame should be identical.
+-            const needs_redraw =
+-                size_changed or
+-                self.cells_rebuilt or
+-                self.hasAnimations() or
+-                sync;
++            const needs_redraw = self.needsRedraw(size_changed, sync);
+ 
+             if (!needs_redraw) {
+                 // We still need to present the last target again, because the
+@@ -2217,8 +2333,10 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
+             // since it comes async from a message.
+             if (self.custom_shader_focused_changed and self.focused) {
+                 uniforms.time_focus = uniforms.time;
+-                self.custom_shader_focused_changed = false;
+             }
++            // A focus transition invalidates static shaders for one frame only,
++            // including when losing focus. Keep time_focus as the last gain.
++            self.custom_shader_focused_changed = false;
+         }
+ 
+         /// Build the overlay as configured. Returns null if there is no

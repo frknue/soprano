@@ -104,13 +104,19 @@ PATH="/opt/homebrew/opt/zig@0.15/bin:$PATH" ./scripts/build-ghostty.sh
 ./scripts/install.sh
 ```
 
-`lib/` is not tracked, so the Ghostty build is mandatory on a fresh clone, but you only
-repeat it when the ghostty submodule moves. To move it, hand the script a ref
-(`./scripts/build-ghostty.sh v1.3.1`) and commit the submodule pin: it refreshes the
-library, the C header, and the recorded version together, and `swift test` fails if they
-ever disagree. Ghostty requires the exact Zig version declared by
-`ghostty/build.zig.zon`; update the versioned Homebrew formula and `PATH` above when that
-declaration changes. Packaging also needs Ghostty's *runtime* resources (themes, shell
+`lib/` is not tracked, so the Ghostty build is mandatory on a fresh clone. Repeat it
+when the ghostty submodule or a patch in `scripts/patches/` changes. The build applies
+Soprano's static-shader redraw fix and restores the upstream source afterward; an
+already-applied patch is left in place. This keeps CRT change-driven instead of
+redrawing unchanged terminals on every display refresh.
+
+To move Ghostty, hand the script a ref (`./scripts/build-ghostty.sh v1.3.1`) and commit
+the submodule pin: it refreshes the library, the C header, and the recorded version
+together, and `swift test` fails if they ever disagree. A patch conflict stops the
+build rather than silently omitting the fix. Ghostty requires the exact Zig version
+declared by `ghostty/build.zig.zon`; update the versioned Homebrew formula and `PATH`
+above when that declaration changes. Packaging also needs Ghostty's *runtime*
+resources (themes, shell
 integration, terminfo); the Ghostty build produces them, an installed
 `/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
 both. Packaging says which source it used and warns when that source is a different

@@ -329,6 +329,9 @@ final class TerminalSurfaceView: NSView {
     private var lastXScale: CGFloat = 0
     private var lastYScale: CGFloat = 0
     private var lastSurfaceVisibility: Bool?
+    private var lastSurfaceFocus: Bool?
+    // Replaces only the Ghostty focus boundary in non-launching view fixtures.
+    var surfaceFocusHandler: ((Bool) -> Void)?
     private let surfaceDestructionGate = SurfaceDestructionGate()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
@@ -368,6 +371,18 @@ final class TerminalSurfaceView: NSView {
             self,
             selector: #selector(windowDidChangeOcclusionState(_:)),
             name: NSWindow.didChangeOcclusionStateNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeKeyStatus(_:)),
+            name: NSWindow.didBecomeKeyNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidChangeKeyStatus(_:)),
+            name: NSWindow.didResignKeyNotification,
             object: nil
         )
     }
@@ -499,6 +514,7 @@ final class TerminalSurfaceView: NSView {
         lastYScale = yScale
         installKeyUpMonitor()
         syncSurfaceVisibility()
+        syncSurfaceFocus()
     }
 
     func terminalTitleDidChange(_ title: String) {
@@ -1085,22 +1101,21 @@ final class TerminalSurfaceView: NSView {
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result, let surface {
-            ghostty_surface_set_focus(surface, true)
-            NotificationCenter.default.post(
-                name: .ghosttyDidFocusSurface,
-                object: self,
-                userInfo: ["paneId": paneId, "tabId": tabId]
-            )
+        if result {
+            // AppKit may not have assigned window.firstResponder yet.
+            syncSurfaceFocus(isFirstResponder: true)
         }
         return result
     }
 
     override func resignFirstResponder() -> Bool {
         let result = super.resignFirstResponder()
-        if result, let surface {
-            releaseTrackedLeftMouseButton(surface: surface)
-            ghostty_surface_set_focus(surface, false)
+        if result {
+            if let surface {
+                releaseTrackedLeftMouseButton(surface: surface)
+            }
+            // AppKit may still report us as window.firstResponder here.
+            syncSurfaceFocus(isFirstResponder: false)
         }
         if result {
             mouseButtonState.releaseLeftButton()
@@ -1108,6 +1123,37 @@ final class TerminalSurfaceView: NSView {
             suppressedCopyModeKeyUps.removeAll()
         }
         return result
+    }
+
+    private func syncSurfaceFocus(isFirstResponder: Bool? = nil) {
+        guard surface != nil || surfaceFocusHandler != nil else {
+            lastSurfaceFocus = nil
+            return
+        }
+        let focused = window?.isKeyWindow == true
+            && (isFirstResponder ?? (window?.firstResponder === self))
+        guard lastSurfaceFocus != focused else { return }
+        lastSurfaceFocus = focused
+
+        if let surfaceFocusHandler {
+            surfaceFocusHandler(focused)
+        } else if let surface {
+            ghostty_surface_set_focus(surface, focused)
+        }
+        if focused {
+            NotificationCenter.default.post(
+                name: .ghosttyDidFocusSurface,
+                object: self,
+                userInfo: ["paneId": paneId, "tabId": tabId]
+            )
+        }
+    }
+
+    @objc private func windowDidChangeKeyStatus(_ notification: Notification) {
+        guard let changedWindow = notification.object as? NSWindow,
+              changedWindow === window
+        else { return }
+        syncSurfaceFocus()
     }
 
     override func viewDidMoveToWindow() {
@@ -1122,6 +1168,7 @@ final class TerminalSurfaceView: NSView {
             }
         }
         syncSurfaceVisibility()
+        syncSurfaceFocus()
     }
 
     override func viewDidHide() {
@@ -1823,6 +1870,7 @@ final class TerminalSurfaceView: NSView {
             removeKeyUpMonitor()
             keyEquivalentRouter.reset()
             suppressedCopyModeKeyUps.removeAll()
+            lastSurfaceFocus = nil
             guard let surface else { return }
             GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
                 for: ObjectIdentifier(self)
