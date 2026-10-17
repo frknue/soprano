@@ -28,6 +28,8 @@ final class SidebarView: NSView {
     private var isControlKeyHeld = false
     private var windowRows: [String: SidebarWindowRowView] = [:]
     private var paneRows: [String: SidebarPaneRowView] = [:]
+    private var displayedWindowId: String?
+    private var needsActiveWindowReveal = false
 
     init(
         agentManager: AgentManager,
@@ -64,6 +66,18 @@ final class SidebarView: NSView {
         agentManager.removeObserver(id: "SidebarView")
         sessionManager.removeObserver(id: "SidebarView-sessions")
         gitBranchMonitor.onChange = nil
+    }
+
+    override func layout() {
+        super.layout()
+        guard needsActiveWindowReveal,
+              scrollView.contentSize.height > 0,
+              let row = windowRows[agentManager.activeWindowId]
+        else { return }
+        // Reconciled rows need their final frames before AppKit can reveal one.
+        listContentView.layoutSubtreeIfNeeded()
+        needsActiveWindowReveal = false
+        row.scrollToVisible(row.bounds)
     }
 
     private func setupViews() {
@@ -524,6 +538,11 @@ final class SidebarView: NSView {
                 equalTo: rowsStack.widthAnchor,
                 constant: -20
             ).isActive = true
+        }
+        if displayedWindowId != agentManager.activeWindowId {
+            displayedWindowId = agentManager.activeWindowId
+            needsActiveWindowReveal = true
+            needsLayout = true
         }
     }
 

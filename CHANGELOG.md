@@ -85,6 +85,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- The left sidebar scrolls the selected window into view when switching through the
+  Agent Dashboard, Find Window, or window shortcuts, while background updates leave
+  manual scrolling alone.
 - The Agent Dashboard shows Claude Code, Codex, and omp agents as a live timeline read
   from their own transcripts instead of a copy of the terminal screen: prompts, rendered
   replies, one line per tool call with its diff, and a NOW strip saying what the agent is
