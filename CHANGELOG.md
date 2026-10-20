@@ -84,6 +84,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   shell is back at its prompt, using ghostty's shell-integration prompt marks.
 - In the Agent Dashboard, `Tab` jumps into the reply field and `⇧Tab` returns to the
   agent list, keeping the typed reply.
+- A **Collapse All Windows** button next to `+` in the left sidebar's WINDOWS header
+  folds every window group at once; it dims while all of them are already collapsed.
 
 ### Changed
 

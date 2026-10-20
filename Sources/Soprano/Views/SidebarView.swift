@@ -23,6 +23,7 @@ final class SidebarView: NSView {
     private var settingsButton: RetroIconButton!
     private var dashboardButton: RetroIconButton!
     private var plusButton: RetroIconButton!
+    private var collapseAllButton: RetroIconButton!
     private var sessionsButton: RetroIconButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
@@ -111,6 +112,15 @@ final class SidebarView: NSView {
         )
         contentContainer.addSubview(plusButton)
 
+        collapseAllButton = RetroIconButton(
+            symbolName: "rectangle.compress.vertical",
+            accessibilityLabel: "Collapse All Windows",
+            pointSize: 12,
+            target: self,
+            action: #selector(collapseAllClicked)
+        )
+        contentContainer.addSubview(collapseAllButton)
+
         scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -176,7 +186,7 @@ final class SidebarView: NSView {
             sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -10),
             headerView.topAnchor.constraint(equalTo: sessionSelector.bottomAnchor, constant: 14),
             headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
-            headerView.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -6),
+            headerView.trailingAnchor.constraint(equalTo: collapseAllButton.leadingAnchor, constant: -6),
 
             scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -209,6 +219,9 @@ final class SidebarView: NSView {
 
             plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
             plusButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
+
+            collapseAllButton.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -2),
+            collapseAllButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
             sessionsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: 8),
             sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
@@ -267,6 +280,10 @@ final class SidebarView: NSView {
 
     @objc private func dashboardClicked() {
         onDashboardRequested?()
+    }
+
+    @objc private func collapseAllClicked() {
+        agentManager.collapseAllSidebarWindows()
     }
 
     // MARK: - Menus
@@ -407,10 +424,11 @@ final class SidebarView: NSView {
         headerView.apply(theme: theme)
         footerSeparator.color = theme.colors.borderStrong
         applyTrailingBorderColor(theme: theme)
-        for button in [settingsButton, dashboardButton, plusButton, sessionsButton] {
+        for button in [settingsButton, dashboardButton, plusButton, collapseAllButton, sessionsButton] {
             button?.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
         }
         rebuildSessionSelector()
+        collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }
 
         // Reconcile watchers first so rows read freshly-invalidated caches.
         gitBranchMonitor.setWatchedPaths(watchedCwds())

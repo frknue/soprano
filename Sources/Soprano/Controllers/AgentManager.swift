@@ -285,6 +285,16 @@ final class AgentManager: @unchecked Sendable {
         notifyChange()
     }
 
+    /// Collapses every window group the sidebar lists for the active session.
+    func collapseAllSidebarWindows() {
+        let expanded = activeSessionWindows.filter { !$0.isSidebarCollapsed }
+        guard !expanded.isEmpty else { return }
+        for terminalWindow in expanded {
+            terminalWindow.isSidebarCollapsed = true
+        }
+        notifyChange()
+    }
+
     func closeWindow(_ windowId: String) {
         guard let terminalWindow = windows[windowId] else { return }
         guard confirmClosing(paneIds: terminalWindow.paneIds) else { return }
