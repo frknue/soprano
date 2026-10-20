@@ -7,14 +7,26 @@ shipped as a hand-packaged `.app` bundle via `scripts/package-app.sh`.
 
 ## Commands
 
-Homebrew Swift is required — the system CLT Swift has broken SPM. Prefix every
-direct Swift command with the Homebrew toolchain:
+Homebrew Swift is required — the system CLT Swift has broken SPM. Homebrew Swift
+6.2 also cannot read the macOS 27 SDK Xcode selects by default (`unknown argument:
+'-target-arch-variant'`), and Xcode's own Swift builds the app but cannot compile
+the tests against the CLT `Testing.framework` that `Package.swift` hardcodes. Run
+every Swift command, `scripts/install.sh`, and `scripts/dev.sh` with the Homebrew
+toolchain on the CLT macOS 26 SDK:
 
 ```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build            # debug build / type-check
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test --filter SplitNodeTests
+export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
+export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+export PATH="/opt/homebrew/opt/swift/bin:$PATH"
+```
+
+Then:
+
+```bash
+swift build                       # debug build / type-check
+swift build -c release
+swift test
+swift test --filter SplitNodeTests
 ./scripts/dev.sh [--build-only]   # package + launch isolated Soprano Dev.app (user-driven only)
 ./scripts/install.sh              # release build → /Applications/Soprano.app
 bash Tests/Signing/LocalCodeSigningTests.sh   # signing-identity helper tests (mutates user keychain list)
