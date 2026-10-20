@@ -82,6 +82,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   with a cyan lamp in the pane header, a cyan `●` on its pane tab, a `RUNNING` badge on
   its sidebar row, and a cyan count badge on its tab and window tab. It clears when the
   shell is back at its prompt, using ghostty's shell-integration prompt marks.
+- In the Agent Dashboard, `Tab` jumps into the reply field and `⇧Tab` returns to the
+  agent list, keeping the typed reply.
 
 ### Changed
 

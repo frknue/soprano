@@ -396,10 +396,11 @@ prompts, diagnostics, paths, diffs, and fenced code. **Reply**, **Open**, **Stop
 **Restart** work in both views. Replies are available while the agent is working, ready,
 waiting for input, or in an error state and are typed into that exact pane tab.
 
-Use `J` / `K` or the arrow keys to move through agents, `R` to focus the reply field,
-`Return` to open the selected agent, and `Esc` to close the dashboard without changing
-the active agent. In the timeline, `⇧J` / `⇧K` (or `Page Down` / `Page Up`) scroll,
-`[` / `]` jump to the previous or next prompt, `O` toggles details (thinking, full
+Use `J` / `K` or the arrow keys to move through agents, `Tab` (or `R`) to focus the reply
+field and `⇧Tab` to leave it again, `Return` to open the selected agent, and `Esc` to
+close the dashboard without changing the active agent. In the timeline, `⇧J` / `⇧K` (or
+`Page Down` / `Page Up`) scroll, `[` / `]` jump to the previous or next prompt, `O`
+toggles details (thinking, full
 commands, and output), `G` jumps back to the newest entry and keeps following it, and
 `T` switches between the timeline and the live terminal. Clicking into the text to copy
 from it leaves these keys working.

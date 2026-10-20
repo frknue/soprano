@@ -195,6 +195,10 @@ final class AgentDashboardViewController: NSViewController {
         detailView.keyHandler = { [weak root] event in
             root?.handleKey(event) ?? false
         }
+        detailView.onLeaveReply = { [weak root] in
+            guard let root else { return }
+            root.window?.makeFirstResponder(root)
+        }
         workspaceStack.addArrangedSubview(detailView)
         detailView.widthAnchor.constraint(greaterThanOrEqualToConstant: 400).isActive = true
 
@@ -608,7 +612,7 @@ final class AgentDashboardViewController: NSViewController {
         agentListHeading = RetroHeadingView(title: "AGENTS", theme: theme)
         container.addSubview(agentListHeading)
 
-        let keyboardHint = "J/K  ·  R REPLY  ·  ↩ OPEN"
+        let keyboardHint = "J/K  ·  TAB REPLY  ·  ↩ OPEN"
         keyboardHintLabel = NSTextField(labelWithString: keyboardHint)
         keyboardHintLabel.alignment = .right
         keyboardHintLabel.lineBreakMode = .byTruncatingHead
@@ -700,6 +704,8 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     /// Called after switching to the live terminal, whose text is only read
     /// while it is shown.
     var onTerminalShown: (() -> Void)?
+    /// Called on ⇧Tab in the reply field to hand focus back to the agent list.
+    var onLeaveReply: (() -> Void)?
     /// Takes plain keys typed while the timeline or terminal text has focus,
     /// so a click into the text to copy something never captures J/K.
     var keyHandler: ((NSEvent) -> Bool)? {
@@ -919,6 +925,18 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
     func controlTextDidChange(_ notification: Notification) {
         updateSendButton()
+    }
+
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard commandSelector == #selector(NSResponder.insertBacktab(_:)) else {
+            return false
+        }
+        onLeaveReply?()
+        return true
     }
 
     // MARK: - Keyboard
@@ -2082,6 +2100,9 @@ private final class AgentDashboardRootView: NSView {
             return .move(-1)
         case 36, 76:
             return .activate
+        case 48:
+            // ⇧Tab leaves the reply field through its delegate instead.
+            return flags.contains(.shift) ? nil : .focusReply
         case 121:
             return .scroll(.pages(1))
         case 116:
