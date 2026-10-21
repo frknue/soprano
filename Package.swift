@@ -30,8 +30,6 @@ let package = Package(
                 .copy("Resources/SopranoOpenCodePlugin.js"),
                 .copy("Resources/SopranoOmpExtension.js"),
                 .copy("Resources/SopranoOmpAmbient.js"),
-                .copy("Resources/DepartureMono-Regular.woff2"),
-                .copy("Resources/SopranoCRT.glsl"),
                 .copy("Resources/SopranoZsh"),
             ],
             linkerSettings: [

@@ -20,6 +20,21 @@ struct LayoutTabBarTests {
         #expect(tabs(in: bar).map(\.title) == ["editor", "server"])
     }
 
+    @Test func newTabStaysOnScreenWhenTheTabsOverflow() throws {
+        let manager = AgentManager()
+        for _ in 1...12 { _ = try #require(manager.createLayoutTab()) }
+        let bar = makeBar(manager: manager)
+        bar.setFrameSize(NSSize(width: 360, height: LayoutTabBarView.height))
+        tabs(in: bar)[0].performClick(nil)
+        bar.layoutSubtreeIfNeeded()
+        let scrollView = try #require(descendants(in: bar).compactMap { $0 as? NSScrollView }.first)
+        let addButton = try button(withIdentifier: "new-layout-tab", in: bar)
+        #expect(scrollView.documentVisibleRect.minX == 0)
+        #expect(bar.bounds.contains(addButton.frame))
+        #expect(addButton.frame.minX >= scrollView.frame.maxX)
+        #expect(bar.hitTest(NSPoint(x: addButton.frame.midX, y: addButton.frame.midY)) === addButton)
+    }
+
     @Test func clickingSelectsClosesAndAddsTabs() throws {
         let manager = AgentManager()
         let firstPaneId = manager.activePaneId

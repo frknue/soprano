@@ -60,7 +60,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   or a middle-click (**New Tab**, **Next Tab**, **Previous Tab**, **Close Tab** in the
   palette; `new-tab-direct`, `new-tab`, `close-tab`, `next-tab`, `previous-tab` in
   `settings.json`). Focusing a pane in another tab switches to it, the status bar and
-  sidebar show `TAB n` in windows with several tabs, and tabs restore with the workspace.
+  sidebar show `Tab n` in windows with several tabs, and tabs restore with the workspace.
 - **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs"`) is on by default:
   the tab row sits on top, and you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`.
 - Turning it off shows windows as numbered tabs above the terminals, with the active tab
@@ -73,14 +73,15 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   and switching sessions preserves their running terminals, tabs, and layouts.
 - The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
   flags, diffs, and common fenced-code syntax using the active theme.
-- New **Mission Control** theme, now the default: cream on deep-space black with
-  international orange and mustard, plus a matching terminal palette.
-- Optional CRT effect for terminal panes — scanlines, phosphor glow, and a soft
-  vignette — under **Settings ▸ General ▸ Appearance** or `"crtEffect": true` in
-  `settings.json`. Off by default.
+- A light appearance: **Settings ▸ General ▸ Appearance** has a System / Light / Dark
+  control that follows macOS or keeps Soprano light or dark (`"appearance": "system"`,
+  `"light"`, or `"dark"` in `settings.json`; `system` by default).
+- An opt-in uptime at the end of the status bar (`Up 2:14:07` since launch), switched on
+  under **Settings ▸ General ▸ Appearance** or with `"statusBar": { "uptime": true }` in
+  `settings.json`.
 - Terminals running a command — `npm run dev`, a build, an editor — show it: `RUNNING`
-  with a cyan lamp in the pane header, a cyan `●` on its pane tab, a `RUNNING` badge on
-  its sidebar row, and a cyan count badge on its tab and window tab. It clears when the
+  with a cyan dot in the pane header, a cyan `●` on its pane tab, `RUNNING` on its
+  sidebar row, and a cyan count badge on its tab and window tab. It clears when the
   shell is back at its prompt, using ghostty's shell-integration prompt marks.
 - In the Agent Dashboard, `Tab` jumps into the reply field and `⇧Tab` returns to the
   agent list, keeping the typed reply.
@@ -99,18 +100,39 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   jump between prompts, `O` adds thinking, commands, and full output, `G` follows the
   newest entry, and `T` (or **Terminal**) switches to the live terminal, which plain
   terminals and other agents keep showing.
-- New retro "Mission Control" look for the whole app with every theme: square
-  corners, the bundled Departure Mono pixel font in small caps, double-rule dividers,
-  glowing status lamps, lit-block selection for tabs and menus, a racing stripe, and
-  a mission clock (`T+HH:MM:SS` since launch) in the status bar.
+- New **Folio** design for the whole app, in **Folio Paper** (light) and **Folio Ink**
+  (dark): New York titles, SF Pro interface text, SF Mono for paths and code, rounded
+  panels and controls, and single hairline dividers.
+- **Folio** is the new default theme (`"theme": "folio"`): Folio Paper while the app is
+  light and Folio Ink while it is dark, switching live with macOS; `folio-paper` and
+  `folio-ink` pin one. The seven other themes stay dark.
+- Status shows as a calm flat mark with an uppercase label in the status color: a ring
+  for `STARTING`, `READY`, and `STOPPED`, a dot for `WORKING`, `RUNNING`, and
+  `NEEDS INPUT`, and a diamond for `ERROR`.
+- The active tab and the active Settings section sit on a raised tab, and the selected
+  row in the sidebar, the command palette, and lists carries a pencil tick in the accent
+  color.
+- The accent color now marks only keyboard focus, the caret, matches in the selected
+  row, and the `PREFIX` / `COPY` mode chip; primary buttons are ink.
+- The focused pane has a raised header with an accent rule under it while the other
+  panes sit under a light veil; a pane that needs you is framed in the attention color
+  and never veiled.
+- The status bar drops the `SOPRANO` brand and reads mode chip, `session › window ›
+  pane`, counts with `N needs you` in the attention color, account usage, then
+  `⌘P Commands` and `⌃A Prefix` hints.
+- The `⌘P` command palette dims the window behind it, and clicking that window closes
+  the palette; its shortcuts show as keycaps, one per chord.
+- The prefix key in **Settings ▸ General ▸ Keybinding Behavior** is recorded instead of
+  typed: click its keycap (or press `Space` on it), then press the new key; `Esc` keeps
+  the current one. It writes `keybindings.prefixKey`.
 - `soprano <file.md>` and `soprano markdown <file>` now open a reusable reader tab
   in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
 - Agent Dashboard entries lead with the project or custom window name, with the
   agent, status, and directory on separate lines for easier scanning.
 - Redesigned the Settings screen: a narrower reading column, section titles above flat
-  cards, aligned label/control rows, keyboard shortcuts drawn as per-key keycaps with
-  the prefix step highlighted in the accent color, and buttons that match the active
-  theme.
+  cards, aligned label/control rows, keyboard shortcuts drawn as keycaps — one per chord,
+  with the prefix step highlighted in the accent color — and buttons that match the
+  active theme.
 - `⌃A` → `T` / `W` now open and close tabs, so pane tabs moved to Shift: `⌃A` → `⇧T`
   opens a terminal tab inside the active pane and `⌃A` → `⇧W` closes the active pane
   tab (`new-pane-tab`, `close-pane-tab`); `⌃A` → `>` / `<` still cycle them. `⌃A` →
@@ -124,8 +146,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
-- The CRT effect no longer redraws unchanged terminals on every display refresh,
-  reducing unnecessary CPU and GPU work with `"crtEffect": true`.
+- A custom shader in your Ghostty config no longer redraws unchanged terminals on every
+  display refresh, reducing unnecessary CPU and GPU work.
 - Switching to another app or window now unfocuses its terminal surfaces, stopping
   focus-only rendering and cursor blinking until that window regains keyboard focus.
 - Closing a Markdown preview with **×** no longer leaves the editor's eye icon

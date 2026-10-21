@@ -330,8 +330,16 @@ final class TerminalSurfaceView: NSView {
     private var lastYScale: CGFloat = 0
     private var lastSurfaceVisibility: Bool?
     private var lastSurfaceFocus: Bool?
+    /// Whether the surface currently holds the unfocused config (hollow
+    /// cursor in fg @ 55 %) rather than the app's focused one.
+    private var surfaceHasUnfocusedConfig = false
     // Replaces only the Ghostty focus boundary in non-launching view fixtures.
     var surfaceFocusHandler: ((Bool) -> Void)?
+    /// The theme's caret and text-selection colors for the copy-mode
+    /// cursor. SplitTreeView sets them at creation and on theme changes.
+    var chromeColors: ThemeColors? {
+        didSet { updateCopyModeCursor() }
+    }
     private let surfaceDestructionGate = SurfaceDestructionGate()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
@@ -383,6 +391,12 @@ final class TerminalSurfaceView: NSView {
             self,
             selector: #selector(windowDidChangeKeyStatus(_:)),
             name: NSWindow.didResignKeyNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(ghosttyDidUpdateConfig(_:)),
+            name: .ghosttyDidUpdateConfig,
             object: nil
         )
     }
@@ -1073,12 +1087,15 @@ final class TerminalSurfaceView: NSView {
             width: metrics.cellWidth,
             height: metrics.cellHeight
         )
-        let color = NSColor.controlAccentColor
+        // Folio's one pencil mark: the caret edge over a text-selection fill.
+        // Theme-less fixtures fall back to the system's equivalents.
+        let edge = chromeColors?.caret ?? .textColor
+        let fill = chromeColors?.textSelection ?? .selectedTextBackgroundColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         cursorLayer.frame = frame
-        cursorLayer.backgroundColor = color.withAlphaComponent(0.24).cgColor
-        cursorLayer.borderColor = color.withAlphaComponent(0.95).cgColor
+        cursorLayer.backgroundColor = fill.cgColor
+        cursorLayer.borderColor = edge.cgColor
         CATransaction.commit()
     }
 
@@ -1139,6 +1156,7 @@ final class TerminalSurfaceView: NSView {
             surfaceFocusHandler(focused)
         } else if let surface {
             ghostty_surface_set_focus(surface, focused)
+            applyFocusConfig(to: surface, focused: focused)
         }
         if focused {
             NotificationCenter.default.post(
@@ -1147,6 +1165,24 @@ final class TerminalSurfaceView: NSView {
                 userInfo: ["paneId": paneId, "tabId": tabId]
             )
         }
+    }
+
+    /// Ghostty draws an unfocused cursor as a hollow block in `cursor-color`;
+    /// the unfocused config makes that fg @ 55 %, the focused one restores
+    /// the accent. Only a change of config is sent.
+    private func applyFocusConfig(to surface: ghostty_surface_t, focused: Bool) {
+        guard surfaceHasUnfocusedConfig == focused else { return }
+        if GhosttyAppManager.shared.applyFocusConfig(to: surface, focused: focused) {
+            surfaceHasUnfocusedConfig = !focused
+        }
+    }
+
+    /// A theme apply handed every surface the focused config; a surface
+    /// without focus takes the unfocused one back.
+    @objc private func ghosttyDidUpdateConfig(_ notification: Notification) {
+        surfaceHasUnfocusedConfig = false
+        guard let surface, lastSurfaceFocus == false else { return }
+        applyFocusConfig(to: surface, focused: false)
     }
 
     @objc private func windowDidChangeKeyStatus(_ notification: Notification) {
@@ -1871,6 +1907,7 @@ final class TerminalSurfaceView: NSView {
             keyEquivalentRouter.reset()
             suppressedCopyModeKeyUps.removeAll()
             lastSurfaceFocus = nil
+            surfaceHasUnfocusedConfig = false
             guard let surface else { return }
             GhosttyAppManager.shared.clipboardConfirmationCoordinator.cancelRequests(
                 for: ObjectIdentifier(self)

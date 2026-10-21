@@ -45,6 +45,44 @@ struct SopranoConfigTests {
         #expect(resolved.issues.first?.message.contains("solarized-light") == true)
     }
 
+    @Test func theRetiredMissionControlThemeFallsBackToFolioWithAWarning() {
+        let resolved = resolve("""
+        { "theme": "mission-control" }
+        """)
+
+        #expect(resolved.settings.themeId == AppTheme.folioId)
+        #expect(resolved.issues.count == 1)
+        #expect(resolved.issues.first?.message.contains("mission-control") == true)
+    }
+
+    @Test func folioAndItsPinnedVariantsAreAcceptedThemeIds() {
+        for id in ["folio", "folio-paper", "folio-ink"] {
+            let resolved = resolve("{ \"theme\": \"\(id)\" }")
+            #expect(resolved.settings.themeId == id)
+            #expect(resolved.issues.isEmpty)
+        }
+    }
+
+    @Test func theAppearanceKeyDefaultsToSystemAndAcceptsLightAndDark() {
+        #expect(resolve("{}").settings.appearance == .system)
+        #expect(resolve(#"{ "appearance": "light" }"#).settings.appearance == .light)
+        #expect(resolve(#"{ "appearance": "dark" }"#).settings.appearance == .dark)
+    }
+
+    @Test func anUnknownAppearanceIsReportedAndSystemStays() {
+        let resolved = resolve(#"{ "appearance": "sepia" }"#)
+
+        #expect(resolved.settings.appearance == .system)
+        #expect(resolved.issues.count == 1)
+        #expect(resolved.issues.first?.severity == .warning)
+        #expect(resolved.issues.first?.message.contains("sepia") == true)
+    }
+
+    @Test func theStatusBarUptimeIsOptIn() {
+        #expect(resolve("{}").settings.statusBarUptime == false)
+        #expect(resolve(#"{ "statusBar": { "uptime": true } }"#).settings.statusBarUptime == true)
+    }
+
     @Test func projectDirectoriesExpandTildesAndRejectPathsThatAreNotDirectories() {
         let missing = "/tmp/soprano-tests-does-not-exist-\(UUID().uuidString)"
         let resolved = resolve("""

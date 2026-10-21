@@ -30,14 +30,14 @@ brew install --cask frknue/tap/soprano
 ```
 ┌───────────────────────┬─ Codex ─────────── WORKING ─┬─ Claude Code ────── NEEDS INPUT ─┐
 │ WINDOWS               │ • editing SplitNode.swift   │ Drop the legacy column? [y/n]    │
-│ ▍soprano              │ • 3 files changed           │ >                                │
-│ ▍ Codex    ⎇ main     │                             │                                  │
-│ ▍ Claude   ⎇ fix/ui • ├─ Terminal 1 ────────────────┴──────────────────────────────────┤
-│ ▍ Browser             │ > swift test                                                   │
+│ soprano               │ • 3 files changed           │ >                                │
+│   Codex    ⎇ main     │                             │                                  │
+│ ▎ Claude   ⎇ fix/ui • ├─ Terminal 1 ────────────────┴──────────────────────────────────┤
+│   Browser             │ > swift test                                                   │
 │  webapp               │ Executed 142 tests, 0 failures                                 │
 │   Terminal ⎇ main     │ >                                                              │
 ├───────────────────────┴────────────────────────────────────────────────────────────────┤
-│ soprano ▸ Claude Code · TAB 1                                  ⌘P commands   ⌃A prefix │
+│ NORMAL  work › soprano › Claude Code · Tab 1     1 needs you   ⌘P Commands   ⌃A Prefix │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,8 +107,9 @@ PATH="/opt/homebrew/opt/zig@0.15/bin:$PATH" ./scripts/build-ghostty.sh
 `lib/` is not tracked, so the Ghostty build is mandatory on a fresh clone. Repeat it
 when the ghostty submodule or a patch in `scripts/patches/` changes. The build applies
 Soprano's static-shader redraw fix and restores the upstream source afterward; an
-already-applied patch is left in place. This keeps CRT change-driven instead of
-redrawing unchanged terminals on every display refresh.
+already-applied patch is left in place. This keeps custom shaders — including one set in
+your Ghostty config — change-driven instead of redrawing unchanged terminals on every
+display refresh.
 
 To move Ghostty, hand the script a ref (`./scripts/build-ghostty.sh v1.3.1`) and commit
 the submodule pin: it refreshes the library, the C header, and the recorded version
@@ -176,8 +177,8 @@ relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPU
 the next prompt is submitted.
 
 Plain terminals report too. While a shell runs a command — `npm run dev`, a build, an
-editor — its pane header shows `RUNNING` beside a cyan lamp, its tab in the pane's tab
-strip gets a cyan `●`, and its sidebar row lights up with a `RUNNING` badge. The mark
+editor — its pane header shows `RUNNING` beside a cyan dot, its tab in the pane's tab
+strip gets a cyan `●`, and its sidebar row shows `RUNNING` in cyan. The mark
 clears when the shell is back at its prompt. Detection reads ghostty's shell-integration
 prompt marks (bash, zsh, fish, elvish, nushell), so a shell without them shows nothing.
 A tab running an agent keeps showing the agent's status instead.
@@ -228,8 +229,11 @@ underlying agent process inherits the Soprano terminal environment.
 
 ## Keyboard shortcuts
 
-`⌃A` is the prefix. Every binding below — including the prefix key, its timeout, and the
-resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
+`⌃A` is the prefix. **Settings → Keyboard Shortcuts** (`⌘,`) lists every binding below
+with its id; rebind one under `keybindings.bindings` in [`settings.json`](#settings). The
+prefix key, its timeout, and the resize step sit under **Settings ▸ General ▸ Keybinding
+Behavior**: click the prefix keycap (or focus it and press `Space`), then press the new
+key; `Esc` keeps the current one.
 
 **Panes**
 
@@ -276,7 +280,7 @@ resize step — is editable in **Settings → Keyboard Shortcuts** (`⌘,`).
 
 | Shortcut | Action |
 |---|---|
-| `⌘P` | Command palette |
+| `⌘P` | Command palette; `Esc` or a click on the dimmed window behind it closes it |
 | `⇧⌘D` | Open the Agent Dashboard |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
@@ -303,13 +307,13 @@ own split panes. Use sessions for separate projects, and windows for the tasks i
 one project.
 
 The session's windows can appear as numbered tabs across the top of the terminal area,
-such as `1:Editor`, `2:Server`, and `3:Logs`. They are hidden by default: you switch
-windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`, and the [tab row](#tabs) sits on top.
-Turn off **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs": false`) to
-show them. The active tab is highlighted. Click a tab to switch windows or **+** to
-create one. The row scrolls when it fills up and keeps the active tab in view as you
-navigate with the keyboard. It stays visible when the sidebar or macOS window bar is
-hidden.
+such as `1  Editor`, `2  Server`, and `3  Logs`, the number muted. They are hidden by
+default: you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`, and the
+[tab row](#tabs) sits on top. Turn off **Hide window tabs** in **Settings ▸ General**
+(`"hideWindowTabs": false`) to show them. The active tab is raised. Click a tab to switch
+windows or **+** to create one. The row scrolls when it fills up and keeps the active tab
+in view as you navigate with the keyboard. It stays visible when the sidebar or macOS
+window bar is hidden.
 
 A compact agent badge beside a window's title counts open agents, including those
 in every tab and in hidden pane tabs. It stays visible while agents are ready or
@@ -365,13 +369,14 @@ was recorded and must use it in their own resume command.
 
 ## Knowing where you are
 
-The active logical window and pane are marked in three places: the sidebar draws an
-accent rail down the active window and its panes and tints the focused row, the status
-bar names the location as `session ▸ window ▸ pane · TAB n` (the `· TAB n` only when the
-window has more than one tab), and the focused pane carries an
-accent frame while the others keep a hairline border. Panes in inactive windows are
-dimmed. Sidebar rows also show each pane's current git branch, refreshed as `HEAD`
-changes on disk.
+The active logical window and pane are marked in three places: the sidebar puts a pencil
+tick (a short accent stroke) on the focused pane's row, the status bar names the location
+as `session › window › pane · Tab n` (the `· Tab n` only when the window has more than
+one tab) and counts the panes that need you (`1 needs you`), and the focused pane gets a
+raised header with an accent rule under it while the other panes sit under a light veil.
+A pane that needs you is framed in the attention color instead and is never veiled.
+Sidebar rows also show each pane's current git branch, refreshed as `HEAD` changes on
+disk.
 
 Press `⌘F` to search the current session's windows by window title, pane or tab title, working
 directory, browser URL, or agent name. Window-title matches rank ahead of matches found
@@ -521,13 +526,13 @@ with no room for another pane gets the file as a tab of the focused pane.
 
 The **tab row** above the panes switches between the tabs of the active window. Each tab
 holds its own split layout, and every terminal in a background tab keeps running. With
-**Hide window tabs** turned off, the numbered **window tabs** (`1:Editor 2:Server`) sit
-above it and switch between logical windows.
+**Hide window tabs** turned off, the numbered **window tabs** (`1  Editor`, `2  Server`)
+sit above it and switch between logical windows. Tabs in this row carry no number.
 
 A tab is named after its focused pane, the same title the pane header shows. The active
-tab is lit with a raised background and an accent underline. A tab holding open agents
-shows the same badge as window tabs — a count and a lamp, red for errors, yellow for
-input or startup, green for working, blue for ready — with a breakdown by status on
+tab is a raised tab, lifted off the row with a hairline edge. A tab holding open agents
+shows the same badge as window tabs — a status mark and a count, red for errors, yellow
+for input or startup, green for working, blue for ready — with a breakdown by status on
 hover; a cyan badge counts its terminals running a command. Click `×` on a tab (or
 middle-click it) to close it, and `+` at the right end to open a new one. When the row
 fills up it scrolls with the trackpad or scroll wheel and keeps the active tab visible.
@@ -547,7 +552,7 @@ exiting, does not switch tabs. Each tab holds up to 20 panes.
 Focusing a pane that lives in another tab — from its sidebar row, a `⌃⇧`+letter pane
 hint, a notification, **Open** in the Agent Dashboard, or a Markdown or editor open —
 switches to that tab (and window). Switching tabs clears a maximized pane (`⌃A` → `M`).
-In windows with more than one tab, sidebar pane rows carry a `TAB n` badge.
+In windows with more than one tab, sidebar pane rows show `Tab n` on their second line.
 
 Tabs and the active tab restore with the workspace, on relaunch and from Saved
 Workspaces. Workspaces saved by older builds with window depth reopen with each depth
@@ -747,9 +752,10 @@ and clicking it lists every account's 5-hour and weekly windows.
 
 ## Settings
 
-`⌘,` opens a five-tab settings screen: **General** (theme, window bar, CRT effect,
-restore-last-session, project directories, notifications), **Keyboard Shortcuts**,
-**Agent Profiles**, **Accounts**, and **About**.
+`⌘,` opens a five-tab settings screen: **General** (theme, appearance, window bar,
+status-bar uptime, restore-last-session, notifications, project directories, prefix key
+and resize step), **Keyboard Shortcuts**, **Agent Profiles**, **Accounts**, and
+**About**.
 
 Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
 the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking
@@ -766,12 +772,15 @@ default.
 {
   // Comments and trailing commas are allowed. The UI preserves both when it
   // writes to this file.
-  // mission-control (default) | gruvbox-dark | catppuccin-mocha | dracula
-  // solarized-dark | nord | tokyo-night | atom-one-dark
-  "theme": "mission-control",
+  // folio (default) | folio-paper | folio-ink | gruvbox-dark | catppuccin-mocha
+  // dracula | solarized-dark | nord | tokyo-night | atom-one-dark
+  "theme": "folio",
+  "appearance": "system",               // system | light | dark
   "hideWindowBar": false,               // opt in to full-window panes
   "hideWindowTabs": true,               // false: numbered window tabs above the tab row
-  "crtEffect": false,                   // scanlines + phosphor glow on terminals
+  "statusBar": {
+    "uptime": false                     // true: "Up 2:14:07" in the status bar
+  },
   "restoreLastSession": true,
   "projectDirectories": ["~/git", "~/work"],
 
@@ -824,6 +833,21 @@ an agent with its own hook mechanism can report in the same way the built-ins do
 A malformed file never takes the app down: Soprano keeps the last values that worked,
 and the parse error — with its line number — plus any warning about an unknown theme,
 unparseable chord, or conflicting shortcut appears at the top of **Settings ▸ General**.
+
+### Themes
+
+Soprano's look is **Folio**: titles in New York, interface text in SF Pro, paths and
+code in SF Mono — all macOS system fonts — with flat status marks and one accent used
+only where the keyboard is. The default theme, `folio`, follows the app's appearance:
+**Folio Paper**, ink on warm paper, when it is light, and **Folio Ink** when it is dark.
+
+`appearance` sets the app's appearance: `system` (the default) follows macOS and
+switches with it live, while `light` and `dark` pin it. `folio-paper` and `folio-ink`
+pin one palette and the matching appearance. The seven bundled themes — Gruvbox Dark,
+Catppuccin Mocha, Dracula, Solarized Dark, Nord, Tokyo Night, and Atom One Dark — are
+dark and keep the app dark whatever `appearance` says. Every theme colors the chrome and
+the terminal palette together; an unknown theme id falls back to `folio` with a warning
+in **Settings ▸ General**.
 
 ## Development
 
@@ -905,7 +929,3 @@ packaged app in `Soprano.app/Contents/Resources/LICENSE-ghostty`.
 Markdown parsing uses [Swift Markdown](https://github.com/swiftlang/swift-markdown) and
 its cmark-gfm backend. The cmark notices travel with the packaged app in
 `Soprano.app/Contents/Resources/LICENSE-swift-cmark`.
-
-The interface font is [Departure Mono](https://departuremono.com) by Helena Zhang,
-bundled under the SIL Open Font License 1.1. Its license travels with the packaged app in
-`Soprano.app/Contents/Resources/LICENSE-departure-mono`.

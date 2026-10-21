@@ -19,7 +19,7 @@ struct SidebarLayoutTabTests {
 
         _ = try #require(manager.createLayoutTab())
         _ = try #require(manager.splitPane(direction: .horizontal, paneId: manager.activePaneId))
-        #expect(tabBadgeTexts(in: sidebar) == ["TAB 1", "TAB 2", "TAB 2"])
+        #expect(tabBadgeTexts(in: sidebar) == ["Tab 1", "Tab 2", "Tab 2"])
 
         let firstRow = try #require(
             descendants(of: sidebar, as: NSView.self).first {
@@ -45,10 +45,12 @@ struct SidebarLayoutTabTests {
         ))
     }
 
+    /// The `Tab N` part of each pane row's meta line, in row order.
     private func tabBadgeTexts(in view: NSView) -> [String] {
         descendants(of: view, as: NSTextField.self)
-            .filter { $0.identifier?.rawValue == "pane-layout-tab-badge" }
-            .map(\.stringValue)
+            .filter { $0.identifier?.rawValue == "pane-row-meta" && !$0.isHidden }
+            .flatMap { $0.stringValue.components(separatedBy: " · ") }
+            .filter { $0.hasPrefix("Tab ") }
     }
 
     private func descendants<T: NSView>(of view: NSView, as type: T.Type) -> [T] {

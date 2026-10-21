@@ -1,31 +1,35 @@
 import AppKit
 
-/// Bottom status bar showing keybinding mode, pane list, account usage,
-/// notification count, and the mission clock.
+/// Bottom status bar. Left: the keybinding mode chip and the
+/// `session › window › pane · Tab 1` breadcrumb. Right: muted counts with the
+/// panes that need you in the attention color, account usage, the ⌘P and
+/// Prefix hints, and the opt-in `Up h:mm:ss` readout.
 final class StatusBarView: NSView, NSPopoverDelegate {
-    /// A 28 pt content strip under the double rule along the top edge.
-    static let height: CGFloat = 28 + Retro.doubleRule
+    /// 26 pt including the hairline along the top edge.
+    static let height: CGFloat = 26
 
-    /// When the mission clock reads T+00:00:00.
-    private static let missionStart = NSRunningApplication.current.launchDate ?? Date()
+    /// When the uptime readout reads `Up 0:00:00`.
+    private static let launchDate = NSRunningApplication.current.launchDate ?? Date()
     private static let accountsObserverId = "StatusBarView"
-    /// Gap between the usage segment and the pane counts while it is shown.
-    private static let usageGap: CGFloat = 16
+    private static let gap: CGFloat = 12
 
     let agentManager: AgentManager
     let themeManager: ThemeManager
 
-    private let topRule = RetroRuleView(axis: .horizontal, style: .double)
-    private let stripeView = RetroStripeView(layout: .slanted)
-    private var brandLabel: NSTextField!
-    private let modeChip = NSView()
-    private var modeLabel: NSTextField!
-    private var locationLabel: NSTextField!
-    private var paneCountLabel: NSTextField!
-    private var usageLabel: NSTextField!
-    private var usageGapConstraint: NSLayoutConstraint!
-    /// Collapses the usage segment to nothing when no provider has usage.
-    private var usageCollapsedConstraint: NSLayoutConstraint!
+    private let topRule = ChromeRuleView(axis: .horizontal)
+    private let modeChip: ChromeModeChip
+    private let locationLabel = NSTextField(labelWithString: "")
+    private let countsLabel = NSTextField(labelWithString: "")
+    private let usageLabel = NSTextField(labelWithString: "")
+    private let paletteHint: StatusHintView
+    private let prefixHint: StatusHintView
+    private let uptimeLabel = NSTextField(labelWithString: "")
+    /// Counts, usage, hints and uptime. Segments that do not apply are left
+    /// out of the stack rather than hidden: a detaching stack rearranges its
+    /// subviews during layout.
+    private let trailingStack = NSStackView()
+    private var showsUsage = false
+    private var showsPaletteHint = true
     /// Countdowns in the usage segment are in minutes; the clock tick
     /// re-renders it when this minute number changes.
     private var usageRenderedMinute = 0
@@ -36,14 +40,24 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     private var usagePopoverClosedAt: Date?
     /// Opens Settings on the Accounts tab.
     var onManageAccounts: (() -> Void)?
-    private var clockSeparatorLabel: NSTextField!
-    private var clockLabel: NSTextField!
     private var mode: KeybindingState = .normal
     private var clockTimer: Timer?
+
+    /// Shows `Up h:mm:ss` at the trailing end (`statusBar.uptime`).
+    var showsUptime = false {
+        didSet {
+            updateTrailingViews()
+            updateUptime()
+        }
+    }
 
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        let theme = themeManager.currentTheme
+        modeChip = ChromeModeChip(theme: theme)
+        paletteHint = StatusHintView(title: "Commands", theme: theme)
+        prefixHint = StatusHintView(title: "Prefix", theme: theme)
         super.init(frame: .zero)
         wantsLayer = true
         setupViews()
@@ -51,6 +65,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         agentManager.addObserver(id: "StatusBarView") { [weak self] change in
             self?.handleAgentChange(change)
         }
+        refreshKeyHints()
         refreshTheme()
     }
 
@@ -59,10 +74,10 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         fatalError("init(coder:) is not supported")
     }
 
-    /// `T+HH:MM:SS` for an elapsed interval; hours keep growing past 99.
-    static func missionElapsedText(_ elapsed: TimeInterval) -> String {
+    /// `Up h:mm:ss` for an elapsed interval; hours keep growing past 99.
+    static func uptimeText(_ elapsed: TimeInterval) -> String {
         let total = max(0, Int(elapsed))
-        return String(format: "T+%02ld:%02ld:%02ld", total / 3600, total / 60 % 60, total % 60)
+        return String(format: "Up %ld:%02ld:%02ld", total / 3600, total / 60 % 60, total % 60)
     }
 
     override func viewDidMoveToWindow() {
@@ -79,7 +94,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
         AccountsController.shared.refresh()
         refreshUsage()
-        updateClock()
+        updateUptime()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
@@ -94,163 +109,134 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     }
 
     private func setupViews() {
+        topRule.translatesAutoresizingMaskIntoConstraints = false
         addSubview(topRule)
-        addSubview(stripeView)
-
-        brandLabel = NSTextField(labelWithString: "SOPRANO")
-        brandLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(brandLabel)
-
-        modeChip.wantsLayer = true
-        modeChip.layer?.cornerRadius = Retro.cornerRadius
-        modeChip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(modeChip)
 
-        modeLabel = NSTextField(labelWithString: "NORMAL")
-        modeLabel.translatesAutoresizingMaskIntoConstraints = false
-        modeChip.addSubview(modeLabel)
-
-        // Active session ▸ window ▸ pane breadcrumb
-        locationLabel = NSTextField(labelWithString: "")
         locationLabel.identifier = NSUserInterfaceItemIdentifier("status-location")
         locationLabel.lineBreakMode = .byTruncatingTail
         locationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         locationLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(locationLabel)
 
-        paneCountLabel = NSTextField(labelWithString: "1 pane")
-        paneCountLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(paneCountLabel)
+        countsLabel.identifier = NSUserInterfaceItemIdentifier("status-counts")
+        // Like the hints, the counts keep their width (it also sets the
+        // window's minimum); only the breadcrumb truncates.
+        countsLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         // Account usage: the tightest limit per provider; click for details
-        usageLabel = NSTextField(labelWithString: "")
         usageLabel.identifier = NSUserInterfaceItemIdentifier("status-usage")
         usageLabel.toolTip = "Account usage — click for details"
-        usageLabel.isHidden = true
-        usageLabel.setContentHuggingPriority(.required, for: .horizontal)
         usageLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        usageLabel.translatesAutoresizingMaskIntoConstraints = false
         usageLabel.addGestureRecognizer(
             NSClickGestureRecognizer(target: self, action: #selector(usageClicked))
         )
-        addSubview(usageLabel)
 
-        clockSeparatorLabel = NSTextField(labelWithString: "▪")
-        clockSeparatorLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(clockSeparatorLabel)
+        uptimeLabel.identifier = NSUserInterfaceItemIdentifier("status-uptime")
+        uptimeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        clockLabel = NSTextField(labelWithString: Self.missionElapsedText(0))
-        clockLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(clockLabel)
+        for hint in [paletteHint, prefixHint] {
+            hint.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        }
+
+        trailingStack.orientation = .horizontal
+        trailingStack.alignment = .centerY
+        trailingStack.spacing = Self.gap
+        trailingStack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(trailingStack)
 
         let content = NSLayoutGuide()
         addLayoutGuide(content)
-        usageGapConstraint = usageLabel.trailingAnchor.constraint(equalTo: paneCountLabel.leadingAnchor)
-        usageCollapsedConstraint = usageLabel.widthAnchor.constraint(equalToConstant: 0)
-
         NSLayoutConstraint.activate([
             topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             topRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             topRule.topAnchor.constraint(equalTo: topAnchor),
+            topRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.topAnchor.constraint(equalTo: topRule.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            stripeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            stripeView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            stripeView.widthAnchor.constraint(equalToConstant: 22),
-            stripeView.heightAnchor.constraint(equalToConstant: 12),
-
-            brandLabel.leadingAnchor.constraint(equalTo: stripeView.trailingAnchor, constant: 8),
-            brandLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-
-            modeChip.leadingAnchor.constraint(equalTo: brandLabel.trailingAnchor, constant: 14),
+            modeChip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.bar),
             modeChip.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            modeChip.heightAnchor.constraint(equalToConstant: 18),
-            modeLabel.leadingAnchor.constraint(equalTo: modeChip.leadingAnchor, constant: 6),
-            modeLabel.trailingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: -6),
-            modeLabel.centerYAnchor.constraint(equalTo: modeChip.centerYAnchor),
 
-            locationLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: 14),
+            locationLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Self.gap + 2),
             locationLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             locationLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: usageLabel.leadingAnchor,
-                constant: -16
+                lessThanOrEqualTo: trailingStack.leadingAnchor,
+                constant: -Self.gap
             ),
 
-            usageLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            usageGapConstraint,
-            usageCollapsedConstraint,
-
-            paneCountLabel.trailingAnchor.constraint(equalTo: clockSeparatorLabel.leadingAnchor, constant: -8),
-            paneCountLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-
-            clockSeparatorLabel.trailingAnchor.constraint(equalTo: clockLabel.leadingAnchor, constant: -8),
-            clockSeparatorLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-
-            clockLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            clockLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.bar),
+            trailingStack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
     }
 
     func setKeybindingMode(_ mode: KeybindingState) {
         self.mode = mode
-        applyMode(theme: themeManager.currentTheme)
+        applyMode()
+    }
+
+    /// Reads the palette chord and the prefix key from `settings.json`, so the
+    /// hints follow a rebound key. A disabled palette binding drops its hint.
+    func refreshKeyHints(_ keybindings: KeyBindingConfig = ConfigStore.shared.keybindings) {
+        let paletteCaps = keybindings.bindings.first { $0.id == "command-palette" }
+            .map { MainWindowController.keycaps(for: $0, prefixKey: keybindings.prefixKey) } ?? []
+        paletteHint.caps = paletteCaps
+        showsPaletteHint = !paletteCaps.isEmpty
+        prefixHint.caps = ["⌃" + keybindings.prefixKey.uppercased()]
+        updateTrailingViews()
+    }
+
+    private func updateTrailingViews() {
+        var views: [NSView] = [countsLabel]
+        if showsUsage { views.append(usageLabel) }
+        if showsPaletteHint { views.append(paletteHint) }
+        views.append(prefixHint)
+        if showsUptime { views.append(uptimeLabel) }
+        guard trailingStack.arrangedSubviews != views else { return }
+        trailingStack.setViews(views, in: .leading)
     }
 
     func refreshTheme() {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        topRule.color = theme.colors.borderStrong
-        stripeView.colors = theme.colors.stripe
-        brandLabel.setRetroText("SOPRANO", color: theme.colors.accent, glow: true)
-        clockSeparatorLabel.setRetroText("▪", color: theme.colors.textMuted)
-        applyMode(theme: theme)
-        updateClock()
+        topRule.color = theme.colors.borderSubtle
+        usagePopover?.appearance = theme.appearance.nsAppearance
+        // An open popover re-renders in the new palette rather than waiting
+        // for the next account change.
+        (usagePopover?.contentViewController as? AccountUsagePopoverViewController)?
+            .render(AccountsController.shared.snapshot)
+        modeChip.apply(theme: theme)
+        paletteHint.apply(theme: theme)
+        prefixHint.apply(theme: theme)
+        applyMode()
+        updateUptime()
         refresh()
         refreshUsage()
     }
 
-    private func applyMode(theme: AppTheme) {
-        let text: String
-        let litColor: NSColor?
+    private func applyMode() {
         switch mode {
-        case .normal:
-            text = "NORMAL"
-            litColor = nil
-        case .prefix:
-            text = "PREFIX"
-            litColor = theme.colors.accent
-        case .copy:
-            text = "COPY"
-            litColor = theme.colors.accent
-        case .copySelection:
-            text = "SELECT"
-            litColor = theme.colors.blue
-        }
-        if let litColor {
-            modeLabel.setRetroText(text, color: theme.colors.bgPanel)
-            modeChip.layer?.backgroundColor = litColor.cgColor
-            modeChip.layer?.borderWidth = 0
-        } else {
-            modeLabel.setRetroText(text, color: theme.colors.textMuted)
-            modeChip.layer?.backgroundColor = NSColor.clear.cgColor
-            modeChip.layer?.borderWidth = Retro.hairline
-            modeChip.layer?.borderColor = theme.colors.borderStrong.cgColor
+        case .normal: modeChip.set(mode: .normal, text: "Normal")
+        case .prefix: modeChip.set(mode: .prefix, text: "Prefix")
+        case .copy: modeChip.set(mode: .copy, text: "Copy")
+        case .copySelection: modeChip.set(mode: .select, text: "Select")
         }
     }
 
-    private func updateClock() {
-        clockLabel.setRetroText(
-            Self.missionElapsedText(Date().timeIntervalSince(Self.missionStart)),
+    private func updateUptime() {
+        guard showsUptime else { return }
+        uptimeLabel.setChromeText(
+            Self.uptimeText(Date().timeIntervalSince(Self.launchDate)),
+            font: ChromeFont.count,
             color: themeManager.currentTheme.colors.textMuted
         )
     }
 
     private func tick() {
-        updateClock()
+        updateUptime()
         if Self.minuteNumber(Date()) != usageRenderedMinute {
             refreshUsage()
         }
@@ -260,24 +246,27 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         Int(date.timeIntervalSinceReferenceDate / 60)
     }
 
-    /// `Claude 9% · 4h 12m  Codex 15% · 5d 8h`: each provider's tightest
-    /// window. Nil when no provider has usage yet.
+    /// `Claude 9% · 4h 12m | Codex 75% · 5d 8h`: each provider's tightest
+    /// window, the percentage in ink, yellow from 70 % and danger from 90 %.
+    /// Nil when no provider has usage yet.
     private func usageText(theme: AppTheme, now: Date) -> NSAttributedString? {
         let colors = theme.colors
+        let font = ChromeFont.count
         let snapshot = AccountsController.shared.snapshot
         let text = NSMutableAttributedString()
         for provider in AccountProvider.allCases {
             guard let window = snapshot.headline(for: provider)?.usage.tightest else { continue }
             if text.length > 0 {
-                text.append(RetroText.display("  ", color: colors.textMuted))
+                text.append(ChromeText.attributed("  |  ", font: font, color: colors.borderStrong))
             }
-            text.append(RetroText.display("\(provider.displayName) ", color: colors.textMuted))
-            text.append(RetroText.display(
+            text.append(ChromeText.attributed("\(provider.displayName) ", font: font, color: colors.textMuted))
+            text.append(ChromeText.attributed(
                 UsageFormat.percent(window.usedFraction),
+                font: font,
                 color: UsageSeverity.color(for: window.usedFraction, colors: colors)
             ))
             if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
-                text.append(RetroText.display(" · \(reset)", color: colors.textMuted))
+                text.append(ChromeText.attributed(" · \(reset)", font: font, color: colors.textMuted))
             }
         }
         return text.length > 0 ? text : nil
@@ -288,9 +277,10 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         usageRenderedMinute = Self.minuteNumber(now)
         let text = usageText(theme: themeManager.currentTheme, now: now)
         usageLabel.attributedStringValue = text ?? NSAttributedString(string: "")
-        usageLabel.isHidden = text == nil
-        usageCollapsedConstraint.isActive = text == nil
-        usageGapConstraint.constant = text == nil ? 0 : -Self.usageGap
+        if showsUsage != (text != nil) {
+            showsUsage = text != nil
+            updateTrailingViews()
+        }
     }
 
     @objc private func usageClicked() {
@@ -305,7 +295,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
-        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.appearance = themeManager.currentTheme.appearance.nsAppearance
         popover.contentViewController = controller
         popover.delegate = self
         controller.onManageAccounts = { [weak self, weak popover] in
@@ -344,59 +334,108 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
     }
 
-    /// `session ▸ window ▸ pane` for the focused location, with the active tab
-    /// appended when the window has more than one. Nil when nothing is open.
+    /// `session › window › pane` for the focused location, the pane in ink,
+    /// with the active tab appended when the window has more than one. Nil
+    /// when nothing is open.
     private func locationText(theme: AppTheme) -> NSAttributedString? {
         guard let terminalWindow = agentManager.windows[agentManager.activeWindowId] else {
             return nil
         }
-
+        let colors = theme.colors
         let text = NSMutableAttributedString()
-        func append(_ string: String, _ color: NSColor) {
-            text.append(RetroText.display(string, color: color))
+        func append(_ string: String, _ color: NSColor, font: NSFont = ChromeFont.label) {
+            text.append(ChromeText.attributed(string, font: font, color: color))
+        }
+        func separator() {
+            append(" › ", colors.borderStrong)
         }
 
-        append(agentManager.activeSession?.name ?? "Session", theme.colors.accent)
-        append(" ▸ ", theme.colors.textMuted)
-        append(terminalWindow.title, theme.colors.textPrimary)
-
-        let paneId = agentManager.activePaneId
-        if let title = agentManager.panes[paneId]?.activeTab?.title {
-            append(" ▸ ", theme.colors.textMuted)
-            append(title, theme.colors.textPrimary)
+        append(agentManager.activeSession?.name ?? "Session", colors.textMuted)
+        separator()
+        let paneTitle = agentManager.panes[agentManager.activePaneId]?.activeTab?.title
+        append(
+            terminalWindow.title,
+            paneTitle == nil ? colors.textPrimary : colors.textMuted,
+            font: paneTitle == nil ? ChromeFont.labelStrong : ChromeFont.label
+        )
+        if let paneTitle {
+            separator()
+            append(paneTitle, colors.textPrimary, font: ChromeFont.labelStrong)
         }
-
         if terminalWindow.tabs.count > 1 {
-            append(" · TAB \(terminalWindow.activeTabIndex + 1)", theme.colors.accent)
+            append(" · Tab \(terminalWindow.activeTabIndex + 1)", colors.textMuted)
         }
-
         return text
     }
 
     private func refresh() {
         let theme = themeManager.currentTheme
+        let colors = theme.colors
         locationLabel.attributedStringValue = locationText(theme: theme)
             ?? NSAttributedString(string: "")
-        let sessionCount = agentManager.terminalSessions.count
-        let paneCount = agentManager.paneCount
-        let windowCount = agentManager.windowCount
-        let sessions = "\(sessionCount) session\(sessionCount == 1 ? "" : "s")"
-        let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
-        let windows = "\(windowCount) window\(windowCount == 1 ? "" : "s")"
-        var components = [sessions, windows, panes]
-        if agentManager.readyAgentCount > 0 {
-            components.append("\(agentManager.readyAgentCount) READY")
+
+        func plural(_ count: Int, _ noun: String) -> String {
+            "\(count) \(noun)\(count == 1 ? "" : "s")"
         }
-        if agentManager.attentionCount > 0 {
-            components.append("\(agentManager.attentionCount) NEEDS ATTENTION")
-        }
-        let base = components.joined(separator: " · ")
+        var parts = [
+            plural(agentManager.terminalSessions.count, "session"),
+            plural(agentManager.windowCount, "window"),
+            plural(agentManager.paneCount, "pane"),
+        ]
         if agentManager.maximizedPaneId != nil {
-            paneCountLabel.setRetroText("\(base) · MAXIMIZED", color: theme.colors.accent)
-        } else if agentManager.attentionCount > 0 {
-            paneCountLabel.setRetroText(base, color: theme.colors.blue)
-        } else {
-            paneCountLabel.setRetroText(base, color: theme.colors.textMuted)
+            parts.append("maximized")
         }
+        let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
+            parts.joined(separator: " · "),
+            font: ChromeFont.count,
+            color: colors.textMuted
+        ))
+        if agentManager.attentionCount > 0 {
+            text.append(ChromeText.attributed(" · ", font: ChromeFont.count, color: colors.textMuted))
+            text.append(ChromeText.attributed(
+                "\(agentManager.attentionCount) needs you",
+                font: ChromeFont.count,
+                color: colors.attention
+            ))
+        }
+        countsLabel.attributedStringValue = text
+    }
+}
+
+/// `⌘P Commands` or `⌃A` `P` `Commands`: muted 16 pt keycaps, one per chord
+/// step, and a muted label.
+private final class StatusHintView: NSStackView {
+    let keycaps: ChromeKeycapGroupView
+    private let label = NSTextField(labelWithString: "")
+    private let title: String
+
+    var caps: [String] {
+        get { keycaps.caps }
+        set {
+            keycaps.caps = newValue
+            setAccessibilityLabel("\(newValue.joined(separator: " ")) \(title)")
+        }
+    }
+
+    init(title: String, theme: AppTheme) {
+        self.title = title
+        keycaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .muted)
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 5
+        addArrangedSubview(keycaps)
+        addArrangedSubview(label)
+        apply(theme: theme)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(theme: AppTheme) {
+        keycaps.apply(theme: theme)
+        label.setChromeText(title, font: ChromeFont.meta, color: theme.colors.textMuted)
     }
 }

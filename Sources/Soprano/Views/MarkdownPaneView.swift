@@ -39,6 +39,8 @@ final class MarkdownPaneRegistry {
 /// Read-only, automatically reloading local Markdown content.
 @MainActor
 final class MarkdownPaneView: NSView, WKNavigationDelegate {
+    static let toolbarHeight: CGFloat = 32
+
     let target: TerminalTarget
     var onFocusRequested: (() -> Void)?
     var onTitleChanged: ((String) -> Void)?
@@ -49,13 +51,13 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     private let schemeHandler: MarkdownSchemeHandler
     private let webView: MarkdownWebView
     private let toolbar = NSView()
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let pathLabel = NSTextField(labelWithString: "")
-    private let backButton = NSButton()
-    private let forwardButton = NSButton()
-    private let reloadButton = NSButton()
-    private let revealButton = NSButton()
-    private let editButton = NSButton()
+    private var backButton: ChromeIconButton!
+    private var forwardButton: ChromeIconButton!
+    private var reloadButton: ChromeIconButton!
+    private var revealButton: ChromeIconButton!
+    private var editButton: ChromeIconButton!
 
     private(set) var fileURL: URL
     private var watcher: ConfigFileWatcher?
@@ -112,10 +114,10 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgBase.cgColor
         toolbar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        toolbarRule.color = theme.colors.borderStrong
-        pathLabel.textColor = theme.colors.textMuted
+        toolbarRule.color = theme.colors.borderSubtle
+        pathLabel.textColor = theme.colors.textPrimary
         for button in [backButton, forwardButton, reloadButton, revealButton, editButton] {
-            button.contentTintColor = theme.colors.textMuted
+            button?.apply(theme: theme)
         }
         webView.underPageBackgroundColor = theme.colors.bgBase
         if historyIndex >= 0 || hasLoadedPage {
@@ -159,38 +161,33 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)
 
-        configureButton(
-            backButton,
+        backButton = makeToolbarButton(
             symbol: "chevron.left",
             toolTip: "Previous Markdown file",
             action: #selector(goBack)
         )
-        configureButton(
-            forwardButton,
+        forwardButton = makeToolbarButton(
             symbol: "chevron.right",
             toolTip: "Next Markdown file",
             action: #selector(goForward)
         )
-        configureButton(
-            reloadButton,
+        reloadButton = makeToolbarButton(
             symbol: "arrow.clockwise",
             toolTip: "Reload Markdown",
             action: #selector(reload)
         )
-        configureButton(
-            revealButton,
+        revealButton = makeToolbarButton(
             symbol: "folder",
             toolTip: "Reveal in Finder",
             action: #selector(revealInFinder)
         )
-        configureButton(
-            editButton,
+        editButton = makeToolbarButton(
             symbol: "square.and.pencil",
             toolTip: "Open in Editor",
             action: #selector(openInEditor)
         )
 
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monoSmall
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -211,16 +208,16 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 34),
+            toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
 
             backButton.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
             backButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 2),
             forwardButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            reloadButton.leadingAnchor.constraint(equalTo: forwardButton.trailingAnchor, constant: 4),
+            reloadButton.leadingAnchor.constraint(equalTo: forwardButton.trailingAnchor, constant: 2),
             reloadButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
-            pathLabel.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 8),
+            pathLabel.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
             pathLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             pathLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: revealButton.leadingAnchor,
@@ -229,12 +226,13 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
 
             editButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
             editButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            revealButton.trailingAnchor.constraint(equalTo: editButton.leadingAnchor, constant: -4),
+            revealButton.trailingAnchor.constraint(equalTo: editButton.leadingAnchor, constant: -2),
             revealButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
 
             toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
             toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -246,24 +244,16 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         updateToolbar()
     }
 
-    private func configureButton(
-        _ button: NSButton,
-        symbol: String,
-        toolTip: String,
-        action: Selector
-    ) {
-        button.title = ""
-        button.target = self
-        button.action = action
-        button.isBordered = false
-        button.image = NSImage(
-            systemSymbolName: symbol,
-            accessibilityDescription: toolTip
+    private func makeToolbarButton(symbol: String, toolTip: String, action: Selector) -> ChromeIconButton {
+        let button = ChromeIconButton(
+            symbolName: symbol,
+            accessibilityLabel: toolTip,
+            pointSize: 12,
+            target: self,
+            action: action
         )
-        button.imagePosition = .imageOnly
-        button.toolTip = toolTip
-        button.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(button)
+        return button
     }
 
     private func updateToolbar() {
@@ -321,7 +311,8 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     }
 
     private func htmlDocument(body: String) -> String {
-        let colors = themeManager.currentTheme.colors
+        let theme = themeManager.currentTheme
+        let colors = theme.colors
         return """
         <!doctype html>
         <html>
@@ -333,96 +324,95 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
                          style-src 'unsafe-inline'; font-src data:; script-src 'none';
                          object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
           <style>
-            \(RetroFont.cssFontFace)
             :root {
-              color-scheme: dark;
+              color-scheme: \(theme.appearance == .light ? "light" : "dark");
               --bg: \(colors.bgBase.markdownCSS);
               --panel: \(colors.bgPanel.markdownCSS);
-              --raised: \(colors.bgRaised.markdownCSS);
-              --overlay: \(colors.bgOverlay.markdownCSS);
               --text: \(colors.textPrimary.markdownCSS);
               --muted: \(colors.textMuted.markdownCSS);
               --accent: \(colors.accent.markdownCSS);
+              --selection: \(colors.textSelection.markdownCSS);
               --border: \(colors.borderSubtle.markdownCSS);
               --border-strong: \(colors.borderStrong.markdownCSS);
+              --serif: ui-serif, "New York", Georgia, serif;
+              --mono: ui-monospace, "SF Mono", Menlo, monospace;
             }
             * { box-sizing: border-box; }
             html { background: var(--bg); scroll-behavior: smooth; }
+            ::selection { background: var(--selection); }
+            /* The reader: New York 16/26 in a 920 px column, 32/42 padding. */
             body {
               background: var(--bg);
               color: var(--text);
-              font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-              font-size: 15px;
-              line-height: 1.65;
+              font: 400 16px/26px var(--serif);
               margin: 0 auto;
-              max-width: 920px;
-              padding: 32px 42px 80px;
+              max-width: calc(920px + 84px);
+              padding: 32px 42px 48px;
               overflow-wrap: break-word;
             }
             h1, h2, h3, h4, h5, h6 {
               color: var(--text);
-              line-height: 1.25;
-              margin: 1.5em 0 0.6em;
+              font-family: var(--serif);
               scroll-margin-top: 20px;
             }
-            h1, h2 {
-              font-family: "Departure Mono", ui-monospace, monospace;
-              font-variant-caps: small-caps;
-              font-weight: 400;
-              letter-spacing: 1px;
-              padding-bottom: .3em;
+            h1 { font: 400 28px/34px var(--serif); margin: 0 0 12px; }
+            h2 {
+              font: 400 21px/28px var(--serif);
+              margin: 28px 0 10px;
+              padding-bottom: 6px;
+              border-bottom: 1px solid var(--border);
             }
-            h1 { font-size: 33px; border-bottom: 3px double var(--border-strong); }
-            h2 { font-size: 22px; border-bottom: 1px solid var(--border-strong); }
-            h3 { font-size: 1.25em; font-weight: 700; }
-            h4 { font-size: 1em; font-weight: 700; }
-            p, blockquote, ul, ol, pre, .table-scroll { margin: 0 0 1em; }
+            h3 { font-size: 17px; line-height: 22px; font-weight: 500; margin: 24px 0 8px; }
+            h4, h5, h6 { font-size: 16px; line-height: 26px; font-weight: 600; margin: 20px 0 6px; }
+            p, blockquote, ul, ol, pre, .table-scroll { margin: 0 0 16px; }
             a {
-              color: var(--accent);
-              text-decoration: underline dotted;
+              color: inherit;
+              text-decoration: underline;
+              text-decoration-color: var(--accent);
               text-underline-offset: 3px;
             }
-            a:hover { text-decoration-style: solid; }
             code {
-              background: var(--raised);
-              border: 1px solid var(--border);
-              border-radius: 0;
-              font-family: "SFMono-Regular", Menlo, Monaco, monospace;
-              font-size: .88em;
-              padding: .15em .35em;
+              background: var(--panel);
+              border-radius: 4px;
+              font: 13px/1 var(--mono);
+              padding: 1px 4px;
             }
             pre {
               background: var(--panel);
-              border: 1px solid var(--border-strong);
-              border-radius: 0;
-              line-height: 1.5;
+              border-radius: \(Int(Chrome.Radius.card))px;
+              font: 13px/20px var(--mono);
               overflow: auto;
-              padding: 16px;
+              padding: 12px 14px;
               tab-size: 4;
             }
-            pre code { background: transparent; border: 0; padding: 0; }
+            pre code { background: transparent; border-radius: 0; font: inherit; padding: 0; }
             .raw-html { color: var(--muted); }
             blockquote {
-              border-left: 4px solid var(--accent);
+              border-left: 2px solid var(--border-strong);
               color: var(--muted);
-              padding: .25em 1em;
+              margin-left: 0;
+              padding-left: 14px;
             }
             blockquote > :last-child, li > :last-child { margin-bottom: 0; }
-            ul, ol { padding-left: 2em; }
-            li + li { margin-top: .25em; }
-            input[type="checkbox"] { accent-color: var(--accent); margin-right: .35em; }
-            hr { border: 0; border-top: 3px double var(--border-strong); margin: 24px 0; }
-            img { border-radius: 0; height: auto; max-width: 100%; }
+            ul, ol { padding-left: 1.6em; }
+            li + li { margin-top: 4px; }
+            input[type="checkbox"] { accent-color: var(--text); margin-right: .35em; }
+            hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+            img { border-radius: 8px; height: auto; max-width: 100%; }
             .table-scroll { overflow-x: auto; }
-            table { border-collapse: collapse; width: max-content; min-width: 100%; }
-            th, td { border: 1px solid var(--border); padding: 7px 12px; }
+            table {
+              border-collapse: collapse;
+              font: 13px/18px -apple-system, system-ui, sans-serif;
+              width: max-content;
+              min-width: 100%;
+            }
+            th, td { border: 1px solid var(--border); padding: 6px 12px; }
             th { background: var(--panel); font-weight: 600; }
-            tr:nth-child(even) td { background: color-mix(in srgb, var(--raised) 55%, transparent); }
             .align-left { text-align: left; }
             .align-center { text-align: center; }
             .align-right { text-align: right; }
             @media (max-width: 600px) {
-              body { padding: 24px 22px 64px; }
+              body { padding: 24px 22px 48px; }
             }
           </style>
         </head>

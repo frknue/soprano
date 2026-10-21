@@ -33,7 +33,6 @@ app_icon="$repo_root/Sources/Soprano/Resources/AppIcon.icns"
 soprano_license="$repo_root/LICENSE"
 ghostty_license="$repo_root/Support/Licenses/LICENSE-ghostty"
 swift_cmark_license="$repo_root/Support/Licenses/LICENSE-swift-cmark"
-departure_mono_license="$repo_root/Support/Licenses/LICENSE-departure-mono"
 web_source="$repo_root/web"
 web_launcher="$repo_root/Support/bin/omp"
 
@@ -137,7 +136,7 @@ elif [[ -z "$resources_ghostty_version" ]]; then
 fi
 
 for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" \
-    "$soprano_license" "$ghostty_license" "$swift_cmark_license" "$departure_mono_license" \
+    "$soprano_license" "$ghostty_license" "$swift_cmark_license" \
     "$web_launcher" "$web_source/package-lock.json"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing build artifact: $required_path" >&2
@@ -186,7 +185,6 @@ cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
 cp "$soprano_license" "$staged_app/Contents/Resources/LICENSE"
 cp "$ghostty_license" "$staged_app/Contents/Resources/LICENSE-ghostty"
 cp "$swift_cmark_license" "$staged_app/Contents/Resources/LICENSE-swift-cmark"
-cp "$departure_mono_license" "$staged_app/Contents/Resources/LICENSE-departure-mono"
 cp -R "$resource_bundle" "$staged_app/Contents/Resources/Soprano_Soprano.bundle"
 cp -R "$ghostty_resources_dir" "$staged_app/Contents/Resources/ghostty"
 cp -R "$ghostty_terminfo_dir" "$staged_app/Contents/Resources/terminfo"

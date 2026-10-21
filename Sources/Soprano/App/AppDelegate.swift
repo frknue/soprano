@@ -22,11 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AccountsController.shared.start()
 
         let settings = configStore.settings
-        let themeManager = ThemeManager(themeId: settings.themeId)
-        GhosttyAppManager.shared.initialize(
-            theme: themeManager.currentTheme,
-            crtEffect: settings.crtEffect
-        )
+        let themeManager = ThemeManager(themeId: settings.themeId, appearance: settings.appearance)
+        // NSApp.appearance follows the theme from here on, so alerts, menus
+        // and panels match it, and `folio` re-resolves when macOS flips.
+        themeManager.startDrivingApplicationAppearance()
+        GhosttyAppManager.shared.initialize(theme: themeManager.currentTheme)
         let agentManager = AgentManager()
         // Unsaved editor changes are asked about before any tab showing them closes.
         agentManager.closeConfirmation = { targets in

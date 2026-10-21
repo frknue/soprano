@@ -1,5 +1,12 @@
 import Foundation
 
+/// The `appearance` key: follow macOS, or pin light or dark.
+enum AppearancePreference: String, Codable, CaseIterable, Sendable {
+    case system
+    case light
+    case dark
+}
+
 /// Application-wide preferences.
 ///
 /// `settings.json` is the source of truth (see `ConfigStore`); the UserDefaults
@@ -8,13 +15,16 @@ import Foundation
 struct AppSettings: Codable, Equatable {
     var restoreLastSession: Bool
     var themeId: String
+    /// `system` follows macOS; `light` and `dark` pin the app appearance.
+    /// The `folio` theme resolves to Paper or Ink from the result.
+    var appearance: AppearancePreference
     var hideWindowBar: Bool
     /// Hides the numbered window tabs; the tab row moves up into their place.
     /// On by default: the sidebar, `⌃1`…`⌃9`, and `⌘F` already switch windows.
     var hideWindowTabs: Bool
-    /// Scanlines and phosphor glow over terminal panes. Off by default: it is
-    /// a look, and a shader on every pane is not free.
-    var crtEffect: Bool
+    /// Shows how long Soprano has been running (`Up 2:14:07`) in the status
+    /// bar. Off by default: an always-ticking clock is noise.
+    var statusBarUptime: Bool
     var projectDirectories: [String]
     /// Off by default. A pane that wants you is already announced by the banner,
     /// the unread ring, and the pane header; adding a chime to every finished
@@ -23,10 +33,11 @@ struct AppSettings: Codable, Equatable {
 
     static let defaultSettings = AppSettings(
         restoreLastSession: true,
-        themeId: "mission-control",
+        themeId: AppTheme.folioId,
+        appearance: .system,
         hideWindowBar: false,
         hideWindowTabs: true,
-        crtEffect: false,
+        statusBarUptime: false,
         projectDirectories: [],
         notificationSound: false
     )
@@ -42,12 +53,14 @@ struct AppSettings: Codable, Equatable {
             ?? defaults.restoreLastSession
         themeId = try container.decodeIfPresent(String.self, forKey: .themeId)
             ?? defaults.themeId
+        appearance = try container.decodeIfPresent(AppearancePreference.self, forKey: .appearance)
+            ?? defaults.appearance
         hideWindowBar = try container.decodeIfPresent(Bool.self, forKey: .hideWindowBar)
             ?? defaults.hideWindowBar
         hideWindowTabs = try container.decodeIfPresent(Bool.self, forKey: .hideWindowTabs)
             ?? defaults.hideWindowTabs
-        crtEffect = try container.decodeIfPresent(Bool.self, forKey: .crtEffect)
-            ?? defaults.crtEffect
+        statusBarUptime = try container.decodeIfPresent(Bool.self, forKey: .statusBarUptime)
+            ?? defaults.statusBarUptime
         projectDirectories = try container.decodeIfPresent([String].self, forKey: .projectDirectories)
             ?? defaults.projectDirectories
         notificationSound = try container.decodeIfPresent(Bool.self, forKey: .notificationSound)
@@ -57,17 +70,19 @@ struct AppSettings: Codable, Equatable {
     init(
         restoreLastSession: Bool,
         themeId: String,
+        appearance: AppearancePreference,
         hideWindowBar: Bool,
         hideWindowTabs: Bool,
-        crtEffect: Bool,
+        statusBarUptime: Bool,
         projectDirectories: [String],
         notificationSound: Bool
     ) {
         self.restoreLastSession = restoreLastSession
         self.themeId = themeId
+        self.appearance = appearance
         self.hideWindowBar = hideWindowBar
         self.hideWindowTabs = hideWindowTabs
-        self.crtEffect = crtEffect
+        self.statusBarUptime = statusBarUptime
         self.projectDirectories = projectDirectories
         self.notificationSound = notificationSound
     }

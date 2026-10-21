@@ -1,7 +1,9 @@
 import AppKit
 
 /// What an agent is doing right now, in one line, for its dashboard row and
-/// the detail view's NOW strip.
+/// the detail view's NOW strip: an optional call-state glyph, a lead (tool
+/// name or short phrase), the tool's subject in mono, a plain detail and the
+/// time it has been going.
 struct AgentTimelineActivity: Equatable {
     enum Tone: Equatable {
         case working
@@ -10,8 +12,24 @@ struct AgentTimelineActivity: Equatable {
         case failed
     }
 
-    let text: String
+    /// ▶ ✓ ✗ ⊘ for a tool call.
+    var glyph: String? = nil
+    /// A tool name or a short phrase: "Thinking", "Asks", "Replied".
+    let title: String
+    /// The tool's subject: a command, path or pattern.
+    var code: String? = nil
+    /// The first line of a reply.
+    var detail: String? = nil
+    /// How long it has been going: `38s`.
+    var elapsed: String? = nil
     let tone: Tone
+
+    /// The whole line as plain text: `▶ Bash · swift test · 38s`.
+    var text: String {
+        var parts = [glyph.map { "\($0) \(title)" } ?? title]
+        parts += [code, detail, elapsed].compactMap { $0 }
+        return parts.joined(separator: " · ")
+    }
 
     static func current(
         in timeline: AgentTimeline?,
@@ -28,50 +46,90 @@ struct AgentTimelineActivity: Equatable {
         case .running, .starting:
             if let running, let call = running.toolCall {
                 return AgentTimelineActivity(
-                    text: "▶ \(Self.label(for: call))\(Self.since(running.timestamp, now: now))",
+                    glyph: AgentTimelineRenderer.glyph(for: .running),
+                    title: call.name,
+                    code: Self.subject(of: call),
+                    elapsed: Self.since(running.timestamp, now: now),
                     tone: .working
                 )
             }
             switch last.kind {
             case .prompt, .thinking:
-                return AgentTimelineActivity(text: "Thinking\(Self.since(last.timestamp, now: now))", tone: .working)
+                return AgentTimelineActivity(title: "Thinking", elapsed: Self.since(last.timestamp, now: now), tone: .working)
             case .reply:
-                return AgentTimelineActivity(text: "Writing\(Self.since(last.timestamp, now: now))", tone: .working)
+                return AgentTimelineActivity(title: "Writing", elapsed: Self.since(last.timestamp, now: now), tone: .working)
             case .tool(let call):
                 return AgentTimelineActivity(
-                    text: "\(AgentTimelineRenderer.glyph(for: call.state)) \(Self.label(for: call))",
+                    glyph: AgentTimelineRenderer.glyph(for: call.state),
+                    title: call.name,
+                    code: Self.subject(of: call),
                     tone: .working
                 )
             case .notice(let text, let isError):
-                return AgentTimelineActivity(text: text, tone: isError ? .failed : .working)
+                return AgentTimelineActivity(title: AgentTimeline.firstLine(text), tone: isError ? .failed : .working)
             }
         case .waiting:
             if let running, let call = running.toolCall {
-                return AgentTimelineActivity(text: "Approve? \(Self.label(for: call))", tone: .waiting)
+                return AgentTimelineActivity(title: "Approve \(call.name)?", code: Self.subject(of: call), tone: .waiting)
             }
             if let reply = Self.lastReply(in: timeline) {
-                return AgentTimelineActivity(text: "Asks · \(AgentTimeline.firstLine(reply))", tone: .waiting)
+                return AgentTimelineActivity(title: "Asks", detail: AgentTimeline.firstLine(reply), tone: .waiting)
             }
-            return AgentTimelineActivity(text: "Waiting for input", tone: .waiting)
+            return AgentTimelineActivity(title: "Waiting for input", tone: .waiting)
         case .error:
             let notice = timeline.items.last { item in
                 if case .notice(_, true) = item.kind { return true }
                 return false
             }
             if case .notice(let text, _)? = notice?.kind {
-                return AgentTimelineActivity(text: AgentTimeline.firstLine(text), tone: .failed)
+                return AgentTimelineActivity(title: AgentTimeline.firstLine(text), tone: .failed)
             }
-            return AgentTimelineActivity(text: "Stopped with an error", tone: .failed)
+            return AgentTimelineActivity(title: "Stopped with an error", tone: .failed)
         case .idle, .stopped:
             if let reply = Self.lastReply(in: timeline) {
-                return AgentTimelineActivity(text: "Replied · \(AgentTimeline.firstLine(reply))", tone: .idle)
+                return AgentTimelineActivity(title: "Replied", detail: AgentTimeline.firstLine(reply), tone: .idle)
             }
             return nil
         }
     }
 
-    private static func label(for call: AgentToolCall) -> String {
-        call.summary.isEmpty ? call.name : "\(call.name) \(call.summary)"
+    /// The line in chrome type: the lead in `titleFont`, the subject in
+    /// `codeFont` and `codeColor`, the elapsed time with tabular digits,
+    /// joined by ` · `. `compact` (agent rows, which show their own status and
+    /// time) leaves out the glyph and the elapsed time.
+    func attributed(
+        font: NSFont,
+        titleFont: NSFont,
+        codeFont: NSFont,
+        color: NSColor,
+        codeColor: NSColor,
+        compact: Bool = false
+    ) -> NSAttributedString {
+        let line = NSMutableAttributedString()
+        func append(_ string: String, _ font: NSFont, _ color: NSColor) {
+            line.append(NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: color]))
+        }
+        if let glyph, !compact {
+            append(glyph + " ", font, color)
+        }
+        append(title, titleFont, color)
+        if let code {
+            append(" · ", font, color)
+            append(code, codeFont, codeColor)
+        }
+        if let detail {
+            append(" · ", font, color)
+            append(detail, font, color)
+        }
+        if let elapsed, !compact {
+            append(" · ", font, color)
+            append(elapsed, ChromeFont.sans(size: font.pointSize, tabular: true), color)
+        }
+        return line
+    }
+
+    private static func subject(of call: AgentToolCall) -> String? {
+        call.summary.isEmpty ? nil : call.summary
     }
 
     private static func lastReply(in timeline: AgentTimeline) -> String? {
@@ -82,16 +140,17 @@ struct AgentTimelineActivity: Equatable {
         return nil
     }
 
-    private static func since(_ start: Date?, now: Date) -> String {
-        guard let start else { return "" }
-        return " · " + AgentTimelineRenderer.duration(max(0, now.timeIntervalSince(start)))
+    private static func since(_ start: Date?, now: Date) -> String? {
+        guard let start else { return nil }
+        return AgentTimelineRenderer.duration(max(0, now.timeIntervalSince(start)))
     }
 }
 
 /// Lays out an agent's timeline as attributed text for the dashboard: prompts
-/// as tinted cards, replies as rendered Markdown, one line per tool call with
-/// its diff, and notices centered between them. The text view showing it must
-/// use TextKit 1, which draws the `NSTextBlock` backgrounds.
+/// as `You` cards, replies as rendered Markdown, one line per tool call (state
+/// glyph, name, mono subject, muted meta, diffstat) with its diff in a
+/// hairline box, and notices centered between them. The text view showing it
+/// must use TextKit 1, which draws the `NSTextBlock` boxes.
 @MainActor
 final class AgentTimelineRenderer {
     struct Output {
@@ -109,13 +168,25 @@ final class AgentTimelineRenderer {
     /// Tool calls quicker than this show no duration; every read would say 0.0s.
     static let shownDuration: TimeInterval = 1
 
+    /// Glyphs sit centered in a 20 pt column; text starts 6 pt after it.
+    private static let glyphColumn: CGFloat = 20
+    private static let textInset: CGFloat = 26
+    /// Tool names take at least this width before their subject.
+    private static let nameMinimumWidth: CGFloat = 56
+    private static let gap: CGFloat = 10
+    /// Space between timeline items.
+    private static let itemSpacing: CGFloat = 12
+    private static let lineHeight: CGFloat = 18
+    /// Diff rows: 48 pt gutter, 18 pt marker column, then the code.
+    private static let diffRowHeight: CGFloat = 18
+    private static let diffGutter: CGFloat = 48
+    private static let diffCode: CGFloat = 66
+
     private(set) var colors: ThemeColors
-    let fontSize: CGFloat
     private var replyCache: [String: (markdown: String, text: NSAttributedString)] = [:]
 
-    init(colors: ThemeColors, fontSize: CGFloat = 11) {
+    init(colors: ThemeColors) {
         self.colors = colors
-        self.fontSize = fontSize
     }
 
     func apply(colors: ThemeColors) {
@@ -131,7 +202,7 @@ final class AgentTimelineRenderer {
         var shownReplies = Set<String>()
 
         if timeline.items.isEmpty {
-            append("No messages yet.", color: colors.textMuted, to: output)
+            appendNotice("No messages yet.", isError: false, to: output)
         }
         for item in timeline.items {
             switch item.kind {
@@ -158,20 +229,34 @@ final class AgentTimelineRenderer {
 
     // MARK: - Items
 
+    /// `You` card: panel fill, radius 8, ink label and muted time over the
+    /// prompt in 13/19. No accent.
     private func appendPrompt(_ text: String, timestamp: Date?, to output: NSMutableAttributedString) {
-        let block = textBlock(background: colors.bgSelected, border: colors.accent, topMargin: 14)
+        let block = RoundedTextBlock(radius: Chrome.Radius.card)
+        block.backgroundColor = colors.bgPanel
+        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minY)
+        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxY)
+        block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .minX)
+        block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .maxX)
+        block.setWidth(Self.itemSpacing + 4, type: .absoluteValueType, for: .margin, edge: .maxY)
+
         let header = NSMutableAttributedString(
             string: "You",
-            attributes: [.font: RetroFont.display(11), .foregroundColor: colors.accent]
+            attributes: [.font: ChromeFont.labelStrong, .foregroundColor: colors.textPrimary]
         )
         if let timestamp {
+            header.append(gap(8, after: ChromeFont.labelStrong))
             header.append(NSAttributedString(
-                string: "  " + Self.timeFormatter.string(from: timestamp),
-                attributes: [.font: font(), .foregroundColor: colors.textMuted]
+                string: Self.timeFormatter.string(from: timestamp),
+                attributes: [.font: ChromeFont.count, .foregroundColor: colors.textMuted]
             ))
         }
-        header.append(NSAttributedString(string: "\n"))
-        header.addAttribute(.paragraphStyle, value: paragraph(blocks: [block], spacing: 3), range: NSRange(location: 0, length: header.length))
+        header.append(NSAttributedString(string: "\n", attributes: [.font: ChromeFont.labelStrong]))
+        header.addAttribute(
+            .paragraphStyle,
+            value: paragraph(blocks: [block], spacing: 4),
+            range: NSRange(location: 0, length: header.length)
+        )
         output.append(header)
 
         var shown = text
@@ -181,12 +266,11 @@ final class AgentTimelineRenderer {
         output.append(NSAttributedString(
             string: shown + "\n",
             attributes: [
-                .font: font(),
+                .font: ChromeFont.row,
                 .foregroundColor: colors.textPrimary,
-                .paragraphStyle: paragraph(blocks: [block], spacing: 2),
+                .paragraphStyle: paragraph(blocks: [block], lineHeight: 19),
             ]
         ))
-        output.append(spacer(height: 4))
     }
 
     private func appendReply(_ markdown: String, id: String, to output: NSMutableAttributedString) {
@@ -194,33 +278,44 @@ final class AgentTimelineRenderer {
         if let cached = replyCache[id], cached.markdown == markdown {
             rendered = cached.text
         } else {
-            rendered = AgentMarkdownRenderer.render(markdown, colors: colors, fontSize: fontSize)
+            rendered = AgentMarkdownRenderer.render(markdown, colors: colors, fontSize: ChromeFont.row.pointSize)
             replyCache[id] = (markdown, rendered)
         }
         output.append(rendered)
         output.append(NSAttributedString(
             string: "\n",
-            attributes: [.font: font(), .paragraphStyle: paragraph(spacing: 8)]
+            attributes: [.font: ChromeFont.row, .paragraphStyle: paragraph(spacing: Self.itemSpacing)]
         ))
     }
 
+    /// `▸ Thinking` in muted italic; detailed timelines show the whole text.
     private func appendThinking(_ text: String, detailed: Bool, to output: NSMutableAttributedString) {
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font(),
+            .font: ChromeFont.row,
             .foregroundColor: colors.textMuted,
             .obliqueness: 0.15,
-            .paragraphStyle: paragraph(spacing: 6),
         ]
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if detailed, !trimmed.isEmpty {
-            output.append(NSAttributedString(string: "▾ Thinking\n", attributes: attributes))
+        let expanded = detailed && !trimmed.isEmpty
+        let summary = expanded
+            ? "Thinking"
+            : (trimmed.isEmpty ? "Thinking" : AgentTimeline.firstLine(trimmed, limit: 140))
+        let line = NSMutableAttributedString()
+        line.append(glyph(expanded ? "▾" : "▸", color: colors.textMuted))
+        line.append(NSAttributedString(string: summary + "\n", attributes: attributes))
+        line.addAttribute(
+            .paragraphStyle,
+            value: itemParagraph(glyph: expanded ? "▾" : "▸", spacing: expanded ? 4 : Self.itemSpacing),
+            range: NSRange(location: 0, length: line.length)
+        )
+        output.append(line)
+        if expanded {
             output.append(NSAttributedString(
                 string: trimmed + "\n",
-                attributes: attributes.merging([.paragraphStyle: paragraph(spacing: 6, indent: characterWidth * 2)]) { $1 }
+                attributes: attributes.merging([
+                    .paragraphStyle: paragraph(spacing: Self.itemSpacing, indent: Self.textInset),
+                ]) { $1 }
             ))
-        } else {
-            let summary = trimmed.isEmpty ? "Thinking" : AgentTimeline.firstLine(trimmed, limit: 140)
-            output.append(NSAttributedString(string: "▸ \(summary)\n", attributes: attributes))
         }
     }
 
@@ -230,139 +325,233 @@ final class AgentTimelineRenderer {
         detailed: Bool,
         to output: NSMutableAttributedString
     ) {
-        let nameWidth = max(8, call.name.count + 1)
-        let indent = characterWidth * CGFloat(2 + nameWidth)
+        let nameFont = ChromeFont.sans(size: 13, weight: .medium)
         let line = NSMutableAttributedString()
+        let glyphText = Self.glyph(for: call.state)
+        line.append(glyph(glyphText, color: color(for: call.state)))
         line.append(NSAttributedString(
-            string: Self.glyph(for: call.state) + " ",
-            attributes: [.font: font(weight: .bold), .foregroundColor: color(for: call.state)]
+            string: call.name,
+            attributes: [.font: nameFont, .foregroundColor: colors.textPrimary]
         ))
-        line.append(NSAttributedString(
-            string: call.name.padding(toLength: nameWidth, withPad: " ", startingAt: 0),
-            attributes: [.font: font(weight: .semibold), .foregroundColor: colors.textMuted]
-        ))
-        line.append(NSAttributedString(
-            string: call.summary,
-            attributes: [.font: font(), .foregroundColor: colors.textPrimary]
-        ))
-        if call.state == .running {
+        let nameWidth = ceil((call.name as NSString).size(withAttributes: [.font: nameFont]).width)
+        line.append(gap(max(0, Self.nameMinimumWidth - nameWidth) + Self.gap, after: nameFont))
+        if !call.summary.isEmpty {
             line.append(NSAttributedString(
-                string: "  running…",
-                attributes: [.font: font(), .foregroundColor: colors.accent]
+                string: call.summary,
+                attributes: [.font: ChromeFont.mono, .foregroundColor: colors.textPrimary]
             ))
+        }
+        let meta: String?
+        if call.state == .running {
+            meta = "running…"
         } else if let startedAt, let finishedAt = call.finishedAt,
                   finishedAt.timeIntervalSince(startedAt) >= Self.shownDuration {
+            meta = Self.duration(finishedAt.timeIntervalSince(startedAt))
+        } else {
+            meta = nil
+        }
+        if let meta {
+            line.append(gap(Self.gap, after: ChromeFont.row))
             line.append(NSAttributedString(
-                string: " · " + Self.duration(finishedAt.timeIntervalSince(startedAt)),
-                attributes: [.font: font(), .foregroundColor: colors.textMuted]
+                string: meta,
+                attributes: [.font: ChromeFont.count, .foregroundColor: colors.textMuted]
             ))
         }
         if let diff = call.diff {
             let (added, removed) = Self.diffStatistics(diff)
-            line.append(NSAttributedString(string: "  +\(added)", attributes: [.font: font(), .foregroundColor: colors.success]))
-            line.append(NSAttributedString(string: " −\(removed)", attributes: [.font: font(), .foregroundColor: colors.danger]))
+            line.append(gap(Self.gap, after: ChromeFont.row))
+            line.append(NSAttributedString(string: "+\(added)", attributes: [
+                .font: ChromeFont.monoSmall,
+                .foregroundColor: added == 0 ? colors.textMuted : colors.success,
+            ]))
+            line.append(NSAttributedString(string: " ", attributes: [.font: ChromeFont.monoSmall]))
+            line.append(NSAttributedString(string: "−\(removed)", attributes: [
+                .font: ChromeFont.monoSmall,
+                .foregroundColor: removed == 0 ? colors.textMuted : colors.danger,
+            ]))
         }
-        line.append(NSAttributedString(string: "\n"))
+        line.append(NSAttributedString(string: "\n", attributes: [.font: ChromeFont.row]))
+
+        let failureLines: String? = {
+            guard !detailed, call.state == .failed, let text = call.output else { return nil }
+            let lines = text.split(separator: "\n").filter {
+                !$0.trimmingCharacters(in: .whitespaces).isEmpty
+            }
+            return lines.isEmpty ? nil : lines.suffix(Self.compactFailureLines).joined(separator: "\n")
+        }()
+        let detail = detailed ? call.detail.flatMap { $0.isEmpty ? nil : $0 } : nil
+        let hasBoxes = detail != nil || call.diff != nil || (detailed && call.output != nil) || failureLines != nil
         line.addAttribute(
             .paragraphStyle,
-            value: paragraph(spacing: 4, indent: indent, firstLineIndent: 0),
+            value: itemParagraph(glyph: glyphText, spacing: hasBoxes ? 0 : Self.itemSpacing),
             range: NSRange(location: 0, length: line.length)
         )
         output.append(line)
 
-        if detailed, let detail = call.detail, !detail.isEmpty {
-            appendBlock(detail, indent: indent, color: colors.textPrimary, to: output)
+        if let detail {
+            appendBlock(detail, color: colors.textPrimary, to: output)
         }
         if let diff = call.diff {
-            appendDiff(diff, indent: indent, detailed: detailed, to: output)
+            appendDiff(diff, detailed: detailed, to: output)
         }
-        if let text = call.output {
-            if detailed {
-                appendBlock(text, indent: indent, color: colors.textMuted, to: output)
-            } else if call.state == .failed {
-                let lines = text.split(separator: "\n").filter {
-                    !$0.trimmingCharacters(in: .whitespaces).isEmpty
-                }
-                appendBlock(
-                    lines.suffix(Self.compactFailureLines).joined(separator: "\n"),
-                    indent: indent,
-                    color: colors.danger,
-                    to: output
-                )
-            }
+        if detailed, let text = call.output {
+            appendBlock(text, color: colors.textMuted, to: output)
+        } else if let failureLines {
+            appendBlock(failureLines, color: colors.danger, to: output)
         }
     }
 
     private func appendNotice(_ text: String, isError: Bool, to output: NSMutableAttributedString) {
         let style = NSMutableParagraphStyle()
         style.alignment = .center
-        style.paragraphSpacing = 8
-        style.paragraphSpacingBefore = 6
+        style.paragraphSpacing = Self.itemSpacing
         output.append(NSAttributedString(
             string: "— \(AgentTimeline.firstLine(text, limit: 200)) —\n",
             attributes: [
-                .font: font(),
+                .font: ChromeFont.meta,
                 .foregroundColor: isError ? colors.danger : colors.textMuted,
                 .paragraphStyle: style,
             ]
         ))
     }
 
-    private func appendDiff(_ diff: String, indent: CGFloat, detailed: Bool, to output: NSMutableAttributedString) {
+    /// A diff in one hairline box: a muted mono gutter with line numbers from
+    /// the hunk headers, a marker column, and add/delete rows washed full width.
+    private func appendDiff(_ diff: String, detailed: Bool, to output: NSMutableAttributedString) {
         var lines = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var elided = 0
         if !detailed, lines.count > Self.compactDiffLines {
             elided = lines.count - Self.compactDiffLines
             lines = Array(lines.prefix(Self.compactDiffLines))
         }
-        let block = textBlock(background: colors.bgRaised, leftMargin: indent)
-        let style = paragraph(blocks: [block])
+        let block = boxBlock()
+        // The gutter starts inside the box's hairline padding.
+        block.gutterWidth = Chrome.hairline + Self.diffGutter
+        block.gutterFill = colors.bgPanel
         let text = NSMutableAttributedString()
-        for line in lines {
-            text.append(NSAttributedString(
-                string: line + "\n",
-                attributes: [.font: font(), .foregroundColor: diffColor(for: line), .paragraphStyle: style]
-            ))
+        var oldLine: Int?
+        var newLine: Int?
+        for (index, line) in lines.enumerated() {
+            if line.hasPrefix("@@") {
+                let numbers = Self.hunkStarts(line)
+                oldLine = numbers?.old
+                newLine = numbers?.new
+                // The first hunk's position is in the gutter already.
+                if index > 0 {
+                    text.append(diffRow(gutter: nil, marker: "", code: line, codeFont: ChromeFont.monoSmall,
+                                        codeColor: colors.cyan, wash: colors.diffFiller, block: block))
+                }
+                continue
+            }
+            if line.hasPrefix("diff ") {
+                oldLine = nil
+                newLine = nil
+                text.append(diffRow(gutter: nil, marker: "", code: String(line.dropFirst(5)),
+                                    codeFont: ChromeFont.sans(size: 12, weight: .medium),
+                                    codeColor: colors.textPrimary, wash: colors.diffFiller, block: block))
+                continue
+            }
+            let marker = line.first.map(String.init) ?? ""
+            let code = line.isEmpty ? "" : String(line.dropFirst())
+            switch marker {
+            case "+":
+                text.append(diffRow(gutter: newLine, marker: "+", code: code, markerColor: colors.success,
+                                    wash: colors.diffAdd, block: block))
+                newLine = newLine.map { $0 + 1 }
+            case "-":
+                text.append(diffRow(gutter: oldLine, marker: "−", code: code, markerColor: colors.danger,
+                                    wash: colors.diffDelete, block: block))
+                oldLine = oldLine.map { $0 + 1 }
+            default:
+                text.append(diffRow(gutter: newLine, marker: "", code: marker == " " ? code : line, block: block))
+                oldLine = oldLine.map { $0 + 1 }
+                newLine = newLine.map { $0 + 1 }
+            }
         }
         if elided > 0 {
-            text.append(NSAttributedString(
-                string: "⋯ \(elided) more lines · O shows all\n",
-                attributes: [.font: font(), .foregroundColor: colors.textMuted, .paragraphStyle: style]
-            ))
+            text.append(diffRow(gutter: nil, marker: "", code: "⋯ \(elided) more lines · O shows all",
+                                codeFont: ChromeFont.meta, codeColor: colors.textMuted, block: block))
         }
         output.append(text)
-        output.append(spacer(height: 4))
     }
 
-    private func appendBlock(_ text: String, indent: CGFloat, color: NSColor, to output: NSMutableAttributedString) {
-        let block = textBlock(background: colors.bgRaised, leftMargin: indent)
-        output.append(NSAttributedString(
-            string: text + "\n",
-            attributes: [.font: font(), .foregroundColor: color, .paragraphStyle: paragraph(blocks: [block])]
+    private func diffRow(
+        gutter: Int?,
+        marker: String,
+        code: String,
+        codeFont: NSFont = ChromeFont.mono,
+        codeColor: NSColor? = nil,
+        markerColor: NSColor? = nil,
+        wash: NSColor? = nil,
+        block: NSTextBlock
+    ) -> NSAttributedString {
+        let row = NSMutableAttributedString()
+        row.append(NSAttributedString(
+            string: "\t" + (gutter.map(String.init) ?? "") + "\t",
+            attributes: [.font: ChromeFont.monoSmall, .foregroundColor: colors.textMuted]
         ))
-        output.append(spacer(height: 4))
+        row.append(NSAttributedString(
+            string: marker + "\t",
+            attributes: [
+                .font: ChromeFont.monospaced(size: 12, weight: .semibold),
+                .foregroundColor: markerColor ?? colors.textMuted,
+            ]
+        ))
+        row.append(NSAttributedString(
+            string: code + "\n",
+            attributes: [.font: codeFont, .foregroundColor: codeColor ?? colors.textPrimary]
+        ))
+        let style = NSMutableParagraphStyle()
+        style.textBlocks = [block]
+        style.minimumLineHeight = Self.diffRowHeight
+        style.maximumLineHeight = Self.diffRowHeight
+        style.headIndent = Self.diffCode
+        style.lineBreakMode = .byWordWrapping
+        style.tabStops = [
+            NSTextTab(textAlignment: .right, location: Self.diffGutter - 8),
+            NSTextTab(textAlignment: .center, location: Self.diffGutter + 9),
+            NSTextTab(textAlignment: .left, location: Self.diffCode),
+        ]
+        let range = NSRange(location: 0, length: row.length)
+        row.addAttribute(.paragraphStyle, value: style, range: range)
+        row.addAttribute(.baselineOffset, value: 2, range: range)
+        if let wash {
+            row.addAttribute(.timelineRowWash, value: wash, range: range)
+        }
+        return row
     }
 
-    private func append(_ text: String, color: NSColor, to output: NSMutableAttributedString) {
+    /// Tool details and output: mono text in a hairline box.
+    private func appendBlock(_ text: String, color: NSColor, to output: NSMutableAttributedString) {
+        let block = boxBlock()
+        block.setWidth(8, type: .absoluteValueType, for: .padding)
+        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
         output.append(NSAttributedString(
             string: text + "\n",
-            attributes: [.font: font(), .foregroundColor: color, .paragraphStyle: paragraph(spacing: 6)]
+            attributes: [
+                .font: ChromeFont.mono,
+                .foregroundColor: color,
+                .paragraphStyle: paragraph(blocks: [block]),
+            ]
         ))
+    }
+
+    /// A box under a tool line, aligned with its name: borderSubtle edge,
+    /// radius 6, 6 pt above and the item gap below.
+    private func boxBlock() -> RoundedTextBlock {
+        let block = RoundedTextBlock(radius: Chrome.Radius.control, edge: colors.borderSubtle)
+        block.setWidth(Chrome.hairline, type: .absoluteValueType, for: .padding)
+        block.setWidth(Self.textInset, type: .absoluteValueType, for: .margin, edge: .minX)
+        block.setWidth(6, type: .absoluteValueType, for: .margin, edge: .minY)
+        block.setWidth(Self.itemSpacing, type: .absoluteValueType, for: .margin, edge: .maxY)
+        return block
     }
 
     // MARK: - Styling
 
-    private func diffColor(for line: String) -> NSColor {
-        if line.hasPrefix("@@") { return colors.cyan }
-        if line.hasPrefix("diff ") || line.hasPrefix("+++") || line.hasPrefix("---") { return colors.accent }
-        if line.hasPrefix("+") { return colors.success }
-        if line.hasPrefix("-") { return colors.danger }
-        return colors.textMuted
-    }
-
     private func color(for state: AgentToolCall.State) -> NSColor {
         switch state {
-        case .running: colors.accent
+        case .running: colors.textPrimary
         case .succeeded: colors.success
         case .failed: colors.danger
         case .interrupted: colors.textMuted
@@ -378,58 +567,63 @@ final class AgentTimelineRenderer {
         }
     }
 
-    private func font(weight: NSFont.Weight = .regular) -> NSFont {
-        RetroFont.body(fontSize, weight: weight)
+    private static var glyphFont: NSFont { ChromeFont.sans(size: 13, weight: .medium) }
+
+    /// A state glyph followed by the tab to the text column.
+    private func glyph(_ glyph: String, color: NSColor) -> NSAttributedString {
+        NSAttributedString(
+            string: glyph + "\t",
+            attributes: [.font: Self.glyphFont, .foregroundColor: color]
+        )
     }
 
-    private var characterWidth: CGFloat {
-        ("0" as NSString).size(withAttributes: [.font: font()]).width
+    /// One timeline line: the glyph centered in its column, wrapped text
+    /// hanging at the text column.
+    private func itemParagraph(glyph: String, spacing: CGFloat) -> NSParagraphStyle {
+        let width = (glyph as NSString).size(withAttributes: [.font: Self.glyphFont]).width
+        let style = NSMutableParagraphStyle()
+        style.firstLineHeadIndent = max(0, floor((Self.glyphColumn - width) / 2))
+        style.headIndent = Self.textInset
+        style.tabStops = [NSTextTab(textAlignment: .left, location: Self.textInset)]
+        style.minimumLineHeight = Self.lineHeight
+        style.paragraphSpacing = spacing
+        style.lineBreakMode = .byWordWrapping
+        return style
+    }
+
+    /// A space `width` wide, measured in `font`.
+    private func gap(_ width: CGFloat, after font: NSFont) -> NSAttributedString {
+        let space = (" " as NSString).size(withAttributes: [.font: font]).width
+        return NSAttributedString(string: " ", attributes: [.font: font, .kern: width - space])
     }
 
     private func paragraph(
         blocks: [NSTextBlock] = [],
         spacing: CGFloat = 0,
         indent: CGFloat = 0,
-        firstLineIndent: CGFloat? = nil
+        lineHeight: CGFloat? = nil
     ) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.textBlocks = blocks
         style.paragraphSpacing = spacing
         style.headIndent = indent
-        style.firstLineHeadIndent = firstLineIndent ?? indent
+        style.firstLineHeadIndent = indent
         style.lineBreakMode = .byWordWrapping
+        if let lineHeight {
+            style.minimumLineHeight = lineHeight
+            style.maximumLineHeight = lineHeight
+        }
         return style
     }
 
-    /// A full-width tinted box. Paragraphs that share one block draw as one box.
-    private func textBlock(
-        background: NSColor,
-        border: NSColor? = nil,
-        leftMargin: CGFloat = 0,
-        topMargin: CGFloat = 2
-    ) -> NSTextBlock {
-        let block = NSTextBlock()
-        block.backgroundColor = background
-        block.setValue(100, type: .percentageValueType, for: .width)
-        block.setWidth(6, type: .absoluteValueType, for: .padding)
-        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
-        block.setWidth(leftMargin, type: .absoluteValueType, for: .margin, edge: .minX)
-        block.setWidth(topMargin, type: .absoluteValueType, for: .margin, edge: .minY)
-        if let border {
-            block.setWidth(2, type: .absoluteValueType, for: .border, edge: .minX)
-            block.setBorderColor(border, for: .minX)
-        }
-        return block
-    }
-
-    private func spacer(height: CGFloat) -> NSAttributedString {
-        let style = NSMutableParagraphStyle()
-        style.minimumLineHeight = height
-        style.maximumLineHeight = height
-        return NSAttributedString(
-            string: "\n",
-            attributes: [.font: NSFont.systemFont(ofSize: 1), .paragraphStyle: style]
-        )
+    /// The old and new start lines of a `@@ -a,b +c,d @@` header.
+    private static func hunkStarts(_ header: String) -> (old: Int, new: Int)? {
+        let fields = header.split(separator: " ")
+        guard fields.count >= 3,
+              let old = fields[1].dropFirst().split(separator: ",").first.flatMap({ Int($0) }),
+              let new = fields[2].dropFirst().split(separator: ",").first.flatMap({ Int($0) })
+        else { return nil }
+        return (old, new)
     }
 
     static func diffStatistics(_ diff: String) -> (added: Int, removed: Int) {
@@ -460,13 +654,131 @@ final class AgentTimelineRenderer {
 }
 
 extension AgentTimelineActivity.Tone {
-    /// The dashboard's status colors: working green, waiting yellow, idle blue.
+    /// The status color of what the agent is doing: working green, waiting
+    /// yellow, idle blue, failed red.
     func color(in colors: ThemeColors) -> NSColor {
         switch self {
         case .working: colors.success
         case .waiting: colors.yellow
         case .idle: colors.blue
         case .failed: colors.danger
+        }
+    }
+}
+
+extension NSAttributedString.Key {
+    /// An `NSColor` a `RoundedTextBlock` paints across the full width of the
+    /// lines carrying it (diff rows).
+    static let timelineRowWash = NSAttributedString.Key("SopranoTimelineRowWash")
+}
+
+/// A full-width text box that TextKit 1 draws as one rounded rectangle: its
+/// `backgroundColor` fill, the `.timelineRowWash` of its lines, then an
+/// optional hairline `edge`. Paragraphs sharing one block share one box.
+final class RoundedTextBlock: NSTextBlock {
+    var radius: CGFloat = 0
+    var edge: NSColor?
+    /// A leading column (a diff's line numbers) filled with `gutterFill` over
+    /// the row washes and closed by an `edge` hairline.
+    var gutterWidth: CGFloat = 0
+    var gutterFill: NSColor?
+
+    override init() {
+        super.init()
+        // Without an explicit width TextKit sizes the block to its narrowest
+        // content, which stacks a long code line one character per line.
+        setValue(100, type: .percentageValueType, for: .width)
+    }
+
+    convenience init(radius: CGFloat, edge: NSColor? = nil) {
+        self.init()
+        self.radius = radius
+        self.edge = edge
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func copy(with zone: NSZone? = nil) -> Any {
+        let copy = super.copy(with: zone)
+        if let copy = copy as? RoundedTextBlock {
+            copy.radius = radius
+            copy.edge = edge
+            copy.gutterWidth = gutterWidth
+            copy.gutterFill = gutterFill
+        }
+        return copy
+    }
+
+    override func drawBackground(
+        withFrame frameRect: NSRect,
+        in controlView: NSView,
+        characterRange charRange: NSRange,
+        layoutManager: NSLayoutManager
+    ) {
+        let left = width(for: .margin, edge: .minX)
+        let right = width(for: .margin, edge: .maxX)
+        let top = width(for: .margin, edge: .minY)
+        let bottom = width(for: .margin, edge: .maxY)
+        let box = NSRect(
+            x: frameRect.minX + left,
+            y: frameRect.minY + top,
+            width: frameRect.width - left - right,
+            height: frameRect.height - top - bottom
+        )
+        guard box.width > 0, box.height > 0 else { return }
+        let shape = NSBezierPath(
+            roundedRect: box.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: radius,
+            yRadius: radius
+        )
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        if let backgroundColor {
+            backgroundColor.setFill()
+            box.fill()
+        }
+        drawRowWashes(in: box, controlView: controlView, characterRange: charRange, layoutManager: layoutManager)
+        if gutterWidth > 0 {
+            let gutter = NSRect(x: box.minX, y: box.minY, width: gutterWidth, height: box.height)
+            if let gutterFill {
+                gutterFill.setFill()
+                gutter.fill()
+            }
+            if let edge {
+                edge.setFill()
+                NSRect(x: gutter.maxX - Chrome.hairline, y: box.minY, width: Chrome.hairline, height: box.height).fill()
+            }
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        if let edge {
+            edge.setStroke()
+            shape.lineWidth = Chrome.hairline
+            shape.stroke()
+        }
+    }
+
+    private func drawRowWashes(
+        in box: NSRect,
+        controlView: NSView,
+        characterRange: NSRange,
+        layoutManager: NSLayoutManager
+    ) {
+        guard let storage = layoutManager.textStorage,
+              NSMaxRange(characterRange) <= storage.length
+        else { return }
+        // TextKit 1 draws on the main thread.
+        let origin = MainActor.assumeIsolated {
+            (controlView as? NSTextView)?.textContainerOrigin ?? .zero
+        }
+        storage.enumerateAttribute(.timelineRowWash, in: characterRange) { value, range, _ in
+            guard let wash = value as? NSColor else { return }
+            let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            wash.setFill()
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { line, _, _, _, _ in
+                NSRect(x: box.minX, y: line.minY + origin.y, width: box.width, height: line.height).fill()
+            }
         }
     }
 }

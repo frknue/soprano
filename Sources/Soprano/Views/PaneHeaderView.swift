@@ -1,18 +1,28 @@
 import AppKit
 
-/// Header bar at the top of each pane showing title, status, and controls.
+/// Header bar at the top of each pane: status mark, title (or the pane tabs),
+/// the UPPERCASE status word and the close button.
+///
+/// Folio (direction §6): the focused pane's header is `raised` with an ink
+/// Medium title and a 2 pt `focusMark` rule on its bottom edge; every other
+/// header sits on `bgPanel` with a muted title. NEEDS INPUT and ERROR wash
+/// the header in their status color, an attention pane in `attentionWash`.
+/// The attention frame itself belongs to `PaneContainerView`.
 final class PaneHeaderView: NSView {
+    static let height: CGFloat = 28
+
     let paneId: String
     let agentManager: AgentManager
     let themeManager: ThemeManager
     var onFocusRequested: (() -> Void)?
 
-    private var titleLabel: NSTextField!
-    private var statusDot: NSView!
-    private var statusLabel: NSTextField!
-    private var closeButton: NSButton!
-    private var tabStackView: NSStackView!
-    private var focusBar: NSView!
+    private let statusMark = ChromeStatusMark(shape: .idle)
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let tabStackView = NSStackView()
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
+    private let focusRule = ChromeRuleView(axis: .horizontal, thickness: Chrome.focusMarkWidth)
+    private var closeButton: ChromeIconButton!
 
     init(paneId: String, agentManager: AgentManager, themeManager: ThemeManager) {
         self.paneId = paneId
@@ -20,6 +30,17 @@ final class PaneHeaderView: NSView {
         self.themeManager = themeManager
         super.init(frame: .zero)
         setupViews()
+        // The focus rule leaves while another of the app's windows (the
+        // command palette, an alert) is key, the same moment the terminal
+        // cursor turns hollow.
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(keyWindowDidChange(_:)),
+                name: name,
+                object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -27,52 +48,45 @@ final class PaneHeaderView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    /// Whether the 2 pt focus rule shows (for tests and the harness).
+    var showsFocusMark: Bool { !focusRule.isHidden }
+
     private func setupViews() {
         wantsLayer = true
 
-        let pane = agentManager.panes[paneId]
-        let tab = pane?.activeTab
+        addSubview(statusMark)
 
-        focusBar = NSView()
-        focusBar.wantsLayer = true
-        focusBar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(focusBar)
-
-        // Status lamp
-        statusDot = NSView()
-        statusDot.wantsLayer = true
-        statusDot.layer?.cornerRadius = 4
-        statusDot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusDot)
-
-        // Title
-        titleLabel = NSTextField(labelWithString: tab?.title ?? "Pane")
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        tabStackView = NSStackView()
         tabStackView.orientation = .horizontal
-        tabStackView.alignment = .centerY
+        tabStackView.alignment = .top
         tabStackView.spacing = 2
         tabStackView.translatesAutoresizingMaskIntoConstraints = false
         tabStackView.isHidden = true
         addSubview(tabStackView)
 
-        statusLabel = NSTextField(labelWithString: "")
         statusLabel.alignment = .right
+        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
-        // Close button
-        closeButton = makeGlyphButton(
-            title: "×",
-            action: #selector(closePaneAction),
-            toolTip: "Close active tab"
+        closeButton = ChromeIconButton(
+            symbolName: "xmark",
+            accessibilityLabel: "Close active tab",
+            pointSize: 11,
+            size: 20,
+            target: self,
+            action: #selector(closePaneAction)
         )
         closeButton.identifier = NSUserInterfaceItemIdentifier("pane-close-button")
         addSubview(closeButton)
+
+        addSubview(bottomRule)
+        addSubview(focusRule)
 
         // Pane containers are briefly zero-width while AppKit reparents a
         // cached split tree. Let the flexible labels collapse during that
@@ -84,40 +98,39 @@ final class PaneHeaderView: NSView {
         titleTrailingConstraint.priority = .defaultHigh
         let tabsTrailingConstraint = tabStackView.trailingAnchor.constraint(
             lessThanOrEqualTo: statusLabel.leadingAnchor,
-            constant: -6
+            constant: -8
         )
         tabsTrailingConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
-            // The pane frame covers the outer 2 pt when focused; the bar
-            // shows as a lit segment just inside it.
-            focusBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            focusBar.topAnchor.constraint(equalTo: topAnchor),
-            focusBar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            focusBar.widthAnchor.constraint(equalToConstant: 4),
+            statusMark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            statusMark.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -Chrome.hairline / 2),
 
-            statusDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            statusDot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusDot.widthAnchor.constraint(equalToConstant: 8),
-            statusDot.heightAnchor.constraint(equalToConstant: 8),
-
-            titleLabel.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 8),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: statusMark.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: statusMark.centerYAnchor),
             titleTrailingConstraint,
 
-            tabStackView.leadingAnchor.constraint(equalTo: statusDot.trailingAnchor, constant: 6),
-            tabStackView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            // Pane tabs fill the header above its bottom rule, so the active
+            // tab's ink underline sits on that rule.
+            tabStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            tabStackView.topAnchor.constraint(equalTo: topAnchor),
+            tabStackView.bottomAnchor.constraint(equalTo: bottomRule.topAnchor),
             tabsTrailingConstraint,
-            tabStackView.heightAnchor.constraint(equalToConstant: 24),
 
-            statusLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -2),
-            statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            statusLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -8),
+            statusLabel.centerYAnchor.constraint(equalTo: statusMark.centerYAnchor),
 
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 24),
-            closeButton.heightAnchor.constraint(equalToConstant: 24),
+            closeButton.centerYAnchor.constraint(equalTo: statusMark.centerYAnchor),
+
+            bottomRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomRule.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // The focus rule covers the hairline and one point above it.
+            focusRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            focusRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            focusRule.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
         update()
@@ -136,59 +149,103 @@ final class PaneHeaderView: NSView {
     func update() {
         let pane = agentManager.panes[paneId]
         let tab = pane?.activeTab
-        let theme = themeManager.currentTheme
+        let colors = themeManager.currentTheme.colors
         let isFocused = agentManager.activePaneId == paneId
+        let needsAttention = pane?.tabs.contains { $0.agent?.needsAttention == true } ?? false
 
-        titleLabel.textColor = theme.colors.textPrimary
-        titleLabel.setRetroText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
+        let status = headerStatus(for: tab)
+        statusMark.set(status: status, colors: colors)
+        if status.label.isEmpty {
+            statusLabel.stringValue = ""
+            statusLabel.isHidden = true
+        } else {
+            statusLabel.setStatusText(status.label, color: status.color(in: colors))
+            statusLabel.isHidden = false
+        }
+
+        titleLabel.setChromeText(
+            tab?.title ?? "Pane",
+            font: isFocused ? ChromeFont.labelStrong : ChromeFont.label,
+            color: isFocused ? colors.textPrimary : colors.textMuted
+        )
         if tab?.isFilePreview == true {
             titleLabel.attributedStringValue = Self.slanted(titleLabel.attributedStringValue)
         }
-        styleGlyphButton(closeButton, theme: theme)
+        closeButton.apply(theme: themeManager.currentTheme)
 
-        if let agent = tab?.agent {
-            let statusColor = colorForStatus(agent.status, theme: theme)
-            RetroLamp.light(statusDot, color: statusColor, lit: isLit(agent.status))
-            statusLabel.textColor = statusColor
-            statusLabel.setRetroText(
-                agent.status.displayLabel,
-                color: statusColor,
-                tracking: 0,
-                glow: agent.status == .running
-            )
-            statusLabel.isHidden = false
-        } else if let tab, agentManager.isRunningCommand(tab, in: paneId) {
-            let color = theme.colors.runningCommand
-            RetroLamp.light(statusDot, color: color)
-            statusLabel.textColor = color
-            statusLabel.setRetroText(
-                AgentManager.runningCommandLabel,
-                color: color,
-                tracking: 0,
-                glow: true
-            )
-            statusLabel.isHidden = false
-        } else {
-            RetroLamp.light(statusDot, color: theme.colors.textMuted, lit: false)
-            statusLabel.stringValue = ""
-            statusLabel.isHidden = true
-        }
-
+        // Pane tabs replace the mark and title; the running or attention
+        // prefix on each tab carries what the mark would say.
         let tabCount = pane?.tabs.count ?? 0
         let shouldShowTabs = tabCount > 1
         titleLabel.isHidden = shouldShowTabs
+        statusMark.isHidden = shouldShowTabs
         tabStackView.isHidden = !shouldShowTabs
         if shouldShowTabs, let pane {
-            rebuildTabButtons(for: pane, theme: theme)
+            rebuildTabButtons(for: pane, colors: colors)
         } else {
             clearTabButtons()
         }
 
-        layer?.backgroundColor = isFocused
-            ? theme.colors.bgRaised.cgColor
-            : theme.colors.bgPanel.cgColor
-        focusBar.isHidden = !isFocused
-        focusBar.layer?.backgroundColor = theme.colors.accent.cgColor
+        layer?.backgroundColor = Self.background(
+            status: status,
+            isFocused: isFocused,
+            needsAttention: needsAttention,
+            colors: colors
+        ).cgColor
+        bottomRule.color = colors.borderSubtle
+        focusRule.color = colors.focusMark
+        refreshFocusMark()
+    }
+
+    /// Header fill, in components.css precedence: a NEEDS INPUT or ERROR
+    /// wash, then the attention wash, then `raised` for focus, else bgPanel.
+    /// Washes are composited onto bgPanel so the header stays opaque.
+    static func background(
+        status: ChromeStatus,
+        isFocused: Bool,
+        needsAttention: Bool,
+        colors: ThemeColors
+    ) -> NSColor {
+        let wash = status.headerWash(in: colors) ?? (needsAttention ? colors.attentionWash : nil)
+        if let wash {
+            return colors.bgPanel.mixed(
+                with: wash.withAlphaComponent(1),
+                fraction: wash.alphaComponent
+            )
+        }
+        return isFocused ? colors.raised : colors.bgPanel
+    }
+
+    private func refreshFocusMark() {
+        focusRule.isHidden = agentManager.activePaneId != paneId || isBehindOverlay
+    }
+
+    /// Another of the app's windows is key: the palette, an alert or a
+    /// sheet sits in front of this pane's window.
+    private var isBehindOverlay: Bool {
+        guard let window, let keyWindow = NSApplication.shared.keyWindow else { return false }
+        return keyWindow !== window
+    }
+
+    @objc private func keyWindowDidChange(_ notification: Notification) {
+        refreshFocusMark()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        refreshFocusMark()
+    }
+
+    /// The header's status: an agent's own status, a cyan RUNNING for a
+    /// shell running a command, otherwise the idle shell mark.
+    private func headerStatus(for tab: PaneTab?) -> ChromeStatus {
+        if let agent = tab?.agent {
+            return agent.status.chromeStatus
+        }
+        if let tab, agentManager.isRunningCommand(tab, in: paneId) {
+            return .running
+        }
+        return .idle
     }
 
     /// Closes only this pane's active tab. The last tab closes the pane, and
@@ -210,114 +267,53 @@ final class PaneHeaderView: NSView {
         }
     }
 
-    private func rebuildTabButtons(for pane: PaneState, theme: AppTheme) {
+    private func rebuildTabButtons(for pane: PaneState, colors: ThemeColors) {
         clearTabButtons()
 
         let activeTabId = pane.activeTab?.id
         for (index, tab) in pane.tabs.enumerated() {
-            let needsAttention = tab.agent?.needsAttention == true
-            let isRunningCommand = agentManager.isRunningCommand(tab, in: pane.id)
             let isActive = tab.id == activeTabId
-            let attentionPrefix = needsAttention ? "● " : ""
-            let title = "\(attentionPrefix)\(tab.title)"
-            let color = if needsAttention {
-                theme.colors.blue
-            } else if isActive {
-                theme.colors.accent
+            // Attention wins over a running command; either is a dot before
+            // the title, which keeps its active or muted ink.
+            let prefixColor: NSColor? = if tab.agent?.needsAttention == true {
+                colors.attention
+            } else if agentManager.isRunningCommand(tab, in: pane.id) {
+                colors.runningCommand
             } else {
-                theme.colors.textMuted
+                nil
             }
-            let button = NSButton(
-                title: title,
+            let label = NSMutableAttributedString()
+            if let prefixColor {
+                label.append(ChromeText.attributed("● ", font: ChromeFont.meta, color: prefixColor))
+            }
+            label.append(ChromeText.attributed(
+                tab.title,
+                font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
+                color: isActive ? colors.textPrimary : colors.textMuted
+            ))
+
+            let button = PaneTabButton(
+                title: tab.isFilePreview ? Self.slanted(label) : label,
+                underline: isActive ? colors.textPrimary : nil,
                 target: self,
                 action: #selector(tabClicked(_:))
             )
             button.tag = index
-            button.isBordered = false
-            button.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            button.setButtonType(.momentaryChange)
-            button.contentTintColor = color
-            // A running command lights a lamp before the title, which keeps
-            // its usual color; an agent's attention marker tints all of it.
-            let label = NSMutableAttributedString()
-            if isRunningCommand {
-                label.append(RetroText.display("● ", color: theme.colors.runningCommand, glow: true))
+            if tab.agent?.needsAttention == true {
+                button.toolTip = "Needs attention"
+            } else if prefixColor != nil {
                 button.toolTip = "Running a command"
             }
-            label.append(RetroText.display(title, color: color))
-            button.attributedTitle = tab.isFilePreview ? Self.slanted(label) : label
-            button.translatesAutoresizingMaskIntoConstraints = false
-
-            let underline = NSView()
-            underline.wantsLayer = true
-            underline.layer?.backgroundColor = (isActive ? color : NSColor.clear).cgColor
-            underline.translatesAutoresizingMaskIntoConstraints = false
-            button.addSubview(underline)
-
-            NSLayoutConstraint.activate([
-                underline.heightAnchor.constraint(equalToConstant: 2),
-                underline.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 3),
-                underline.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -3),
-                underline.bottomAnchor.constraint(equalTo: button.bottomAnchor),
-            ])
-
             tabStackView.addArrangedSubview(button)
+            button.heightAnchor.constraint(equalTo: tabStackView.heightAnchor).isActive = true
         }
     }
 
-    /// Preview tabs are set in italics, like Orca's; the pixel face has no
-    /// italic, so the glyphs are slanted.
+    /// Preview tabs are set in italics, like Orca's.
     private static func slanted(_ string: NSAttributedString) -> NSAttributedString {
         let slanted = NSMutableAttributedString(attributedString: string)
         slanted.addAttribute(.obliqueness, value: 0.22, range: NSRange(location: 0, length: slanted.length))
         return slanted
-    }
-
-    private func makeGlyphButton(
-        title: String,
-        action: Selector,
-        toolTip: String
-    ) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.isBordered = false
-        button.toolTip = toolTip
-        button.translatesAutoresizingMaskIntoConstraints = false
-        styleGlyphButton(button, theme: themeManager.currentTheme)
-        return button
-    }
-
-    /// Bakes the muted display-face glyph into the title; a disabled key
-    /// dims because attributed titles ignore the control's enabled state.
-    private func styleGlyphButton(_ button: NSButton, theme: AppTheme) {
-        let color = button.isEnabled
-            ? theme.colors.textMuted
-            : theme.colors.textMuted.withAlphaComponent(0.35)
-        button.contentTintColor = color
-        button.attributedTitle = RetroText.display(
-            button.title,
-            color: color,
-            size: 22,
-            tracking: 0,
-            alignment: .center
-        )
-    }
-
-    private func isLit(_ status: AgentStatus) -> Bool {
-        switch status {
-        case .running, .waiting, .starting, .error: true
-        case .idle, .stopped: false
-        }
-    }
-
-    private func colorForStatus(_ status: AgentStatus, theme: AppTheme) -> NSColor {
-        switch status {
-        case .idle: return theme.colors.blue
-        case .starting: return theme.colors.yellow
-        case .running: return theme.colors.success
-        case .waiting: return theme.colors.yellow
-        case .error: return theme.colors.danger
-        case .stopped: return theme.colors.gray
-        }
     }
 
     private func isInteractiveSubview(_ view: NSView?) -> Bool {
@@ -329,5 +325,51 @@ final class PaneHeaderView: NSView {
             current = candidate.superview
         }
         return false
+    }
+}
+
+/// One pane tab: 8 pt side padding, and for the active tab a 2 pt ink
+/// underline inset by that padding on the tab's bottom edge.
+private final class PaneTabButton: NSButton {
+    static let padding: CGFloat = 8
+
+    private let underlineColor: NSColor?
+
+    init(title: NSAttributedString, underline: NSColor?, target: AnyObject, action: Selector) {
+        underlineColor = underline
+        super.init(frame: .zero)
+        self.target = target
+        self.action = action
+        isBordered = false
+        setButtonType(.momentaryChange)
+        attributedTitle = title
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(
+            width: ceil(attributedTitle.size().width) + Self.padding * 2,
+            height: NSView.noIntrinsicMetric
+        )
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let underlineColor else { return }
+        underlineColor.setFill()
+        let rect = NSRect(
+            x: bounds.minX + Self.padding,
+            y: isFlipped ? bounds.maxY - Chrome.focusMarkWidth : bounds.minY,
+            width: max(0, bounds.width - Self.padding * 2),
+            height: Chrome.focusMarkWidth
+        )
+        NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
     }
 }

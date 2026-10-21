@@ -3,10 +3,10 @@ import Testing
 @testable import Soprano
 
 @MainActor
-struct RetroChromeHoverTests {
+struct ChromeHoverTests {
     @Test func aButtonDetachedWhileHoveredComesBackWithItsRestingFill() throws {
         let theme = ThemeManager(themeId: "gruvbox-dark").currentTheme
-        let button = RetroButton(title: "Reload", theme: theme)
+        let button = ChromeButton(title: "Reload", theme: theme)
         button.frame = NSRect(x: 0, y: 0, width: 120, height: 26)
         let window = makeWindow()
         let host = try #require(window.contentView)
@@ -22,7 +22,7 @@ struct RetroChromeHoverTests {
         button.removeFromSuperview()
         host.addSubview(button)
 
-        let fresh = RetroButton(title: "Reload", theme: theme)
+        let fresh = ChromeButton(title: "Reload", theme: theme)
         fresh.frame = button.frame
         let resting = try #require(fillColor(of: fresh))
         #expect(hovered != resting)
@@ -42,18 +42,18 @@ struct RetroChromeHoverTests {
         defer { window.contentView = nil }
         let entered = try enterEvent(in: window)
 
-        let icon = RetroIconButton(
+        let icon = ChromeIconButton(
             symbolName: "eye", accessibilityLabel: "Probe", target: nil, action: nil
         )
-        icon.setTints(normal: colors.textMuted, hover: colors.accent)
+        icon.apply(theme: themeManager.currentTheme)
         host.addSubview(icon)
         icon.mouseEntered(with: entered)
-        #expect(icon.contentTintColor == colors.accent)
+        #expect(icon.contentTintColor == colors.textPrimary)
         icon.isHidden = true
         icon.isHidden = false
         #expect(icon.contentTintColor == colors.textMuted)
 
-        let button = RetroButton(title: "Reload", theme: themeManager.currentTheme)
+        let button = ChromeButton(title: "Reload", theme: themeManager.currentTheme)
         button.frame = NSRect(x: 0, y: 0, width: 120, height: 26)
         host.addSubview(button)
         button.mouseEntered(with: entered)
@@ -61,6 +61,33 @@ struct RetroChromeHoverTests {
         button.isHidden = true
         button.isHidden = false
         #expect(fillColor(of: button) != hovered)
+    }
+
+    @Test func buttonsTrackHoverWhileTheAppIsActiveSoLeavingTheKeyWindowCannotStrandIt() {
+        // With `.activeInKeyWindow`, ⌘Tab away while hovered left the fill on.
+        let button = ChromeButton(title: "Reload", theme: .folioPaper)
+        let icon = ChromeIconButton(
+            symbolName: "eye", accessibilityLabel: "Probe", target: nil, action: nil
+        )
+        for view in [button, icon] as [NSView] {
+            view.updateTrackingAreas()
+            let options = view.trackingAreas.map(\.options)
+            #expect(options.contains { $0.contains(.activeInActiveApp) })
+            #expect(!options.contains { $0.contains(.activeInKeyWindow) })
+        }
+    }
+
+    @Test func aToggledOnIconStaysInkWithoutTheAccent() {
+        let theme = AppTheme.folioPaper
+        let icon = ChromeIconButton(
+            symbolName: "sidebar.left", accessibilityLabel: "Sidebar", target: nil, action: nil
+        )
+        icon.apply(theme: theme)
+        #expect(icon.contentTintColor == theme.colors.textMuted)
+
+        icon.isToggledOn = true
+        #expect(icon.contentTintColor == theme.colors.textPrimary)
+        #expect(icon.contentTintColor != theme.colors.accent)
     }
 
     private func makeWindow() -> NSWindow {
@@ -88,9 +115,9 @@ struct RetroChromeHoverTests {
         ))
     }
 
-    /// Renders the button offscreen and samples its fill near the corner,
-    /// inside the frame stroke.
-    private func fillColor(of button: RetroButton) -> NSColor? {
+    /// Renders the button offscreen and samples its fill inside the rounded
+    /// frame, clear of the corner radius and the centered label.
+    private func fillColor(of button: ChromeButton) -> NSColor? {
         let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: 120, pixelsHigh: 26, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
@@ -100,6 +127,6 @@ struct RetroChromeHoverTests {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         button.draw(button.bounds)
         NSGraphicsContext.restoreGraphicsState()
-        return rep.colorAt(x: 3, y: 3)?.usingColorSpace(.deviceRGB)
+        return rep.colorAt(x: 8, y: 13)?.usingColorSpace(.deviceRGB)
     }
 }

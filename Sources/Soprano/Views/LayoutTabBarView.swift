@@ -3,25 +3,24 @@ import AppKit
 /// The active window's tabs, in a row between the window tabs and the panes.
 /// Each tab holds a split layout of its own and is named after its focused
 /// pane; the active one is on screen. With the window tabs hidden it is the
-/// top row and takes over their height, double rule, and right sidebar toggle.
+/// top row and takes over the right sidebar toggle.
 final class LayoutTabBarView: NSView {
-    /// The row's height under the window tabs.
-    static let height: CGFloat = 30
-
-    /// As the top row it matches the window tabs, so its bottom rule runs on
-    /// into the right sidebar's header.
-    static func height(isTopRow: Bool) -> CGFloat {
-        isTopRow ? WindowTabBarView.height : height
-    }
+    static let height: CGFloat = TabPillButton.rowHeight
 
     private let agentManager: AgentManager
     private let themeManager: ThemeManager
     private let observerId = "LayoutTabBarView-\(UUID().uuidString)"
     private let scrollView = NSScrollView()
     private let tabContainer = NSView()
-    private let addButton = NSButton(title: "+", target: nil, action: nil)
-    private var bottomRule = RetroRuleView(axis: .horizontal, style: .single)
-    private let rightSidebarToggle = RetroIconButton(
+    private let addButton = ChromeIconButton(
+        symbolName: "plus",
+        accessibilityLabel: "New Tab",
+        pointSize: 12,
+        target: nil,
+        action: nil
+    )
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
+    private let rightSidebarToggle = ChromeIconButton(
         symbolName: "sidebar.right",
         accessibilityLabel: "Toggle Right Sidebar",
         target: nil,
@@ -31,19 +30,6 @@ final class LayoutTabBarView: NSView {
     private var activeLayoutTabId: String?
     private var revealActiveTab = true
     private var previousViewportWidth: CGFloat = 0
-
-    /// Set while the window tabs are hidden.
-    var isTopRow = false {
-        didSet {
-            guard isTopRow != oldValue else { return }
-            // A rule's style is fixed when it is made, so swap in a new one.
-            bottomRule.removeFromSuperview()
-            bottomRule = RetroRuleView(axis: .horizontal, style: isTopRow ? .double : .single)
-            bottomRule.translatesAutoresizingMaskIntoConstraints = true
-            addSubview(bottomRule)
-            refresh()
-        }
-    }
 
     /// The top row carries the right sidebar's toggle while it is closed.
     var showsRightSidebarToggle = false {
@@ -72,12 +58,11 @@ final class LayoutTabBarView: NSView {
         addSubview(scrollView)
 
         addButton.identifier = NSUserInterfaceItemIdentifier("new-layout-tab")
-        addButton.isBordered = false
         addButton.refusesFirstResponder = true
         addButton.target = self
         addButton.action = #selector(addTab)
-        addButton.toolTip = "New Tab"
-        addButton.setAccessibilityLabel("New Tab")
+        addButton.translatesAutoresizingMaskIntoConstraints = true
+        // A row subview above the strip, so it can stay put when tabs overflow.
         addSubview(addButton)
 
         rightSidebarToggle.identifier = NSUserInterfaceItemIdentifier("right-sidebar-toggle")
@@ -140,14 +125,9 @@ final class LayoutTabBarView: NSView {
 
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        bottomRule.color = theme.colors.borderStrong
-        rightSidebarToggle.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
-        addButton.attributedTitle = RetroText.display(
-            "+",
-            color: theme.colors.textMuted,
-            size: 22,
-            alignment: .center
-        )
+        bottomRule.color = theme.colors.borderSubtle
+        rightSidebarToggle.apply(theme: theme)
+        addButton.apply(theme: theme)
         for (index, tab) in tabs.enumerated() {
             configure(buttons[index], for: tab, number: index + 1, theme: theme)
         }
@@ -197,38 +177,35 @@ final class LayoutTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        let rule = bottomRule.style.thickness
+        let rule = bottomRule.thickness
         let stripHeight = max(0, bounds.height - rule)
-        let toggleWidth: CGFloat = showsRightSidebarToggle ? 30 : 0
-        let viewportWidth = max(0, bounds.width - 38 - toggleWidth)
-        scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
-        addButton.frame = NSRect(
-            x: max(0, bounds.width - 34 - toggleWidth),
-            y: rule + floor((stripHeight - 28) / 2),
-            width: 28,
-            height: 28
-        )
+        let iconSize = ChromeIconButton.defaultSize
+        let toggleWidth: CGFloat = showsRightSidebarToggle ? iconSize + 8 : 0
+        let availableWidth = max(0, bounds.width - toggleWidth)
         rightSidebarToggle.frame = NSRect(
-            x: max(0, bounds.width - 31),
-            y: rule + floor((stripHeight - RetroIconButton.defaultSize) / 2),
-            width: RetroIconButton.defaultSize,
-            height: RetroIconButton.defaultSize
+            x: max(0, bounds.width - 8 - iconSize),
+            y: rule + floor((stripHeight - iconSize) / 2),
+            width: iconSize,
+            height: iconSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
-
-        var x: CGFloat = 0
-        for button in buttons {
-            button.frame = NSRect(x: x, y: 0, width: button.tabWidth, height: stripHeight)
-            x += button.tabWidth
-        }
-        tabContainer.setFrameSize(NSSize(width: max(viewportWidth, x), height: stripHeight))
+        let viewportWidth = TabRowLayout.layout(
+            tabs: buttons.map { ($0, $0.tabWidth) },
+            addButton: addButton,
+            scrollView: scrollView,
+            container: tabContainer,
+            availableWidth: availableWidth,
+            rule: rule,
+            stripHeight: stripHeight
+        )
         if viewportWidth != previousViewportWidth {
             previousViewportWidth = viewportWidth
             revealActiveTab = true
         }
         if revealActiveTab, viewportWidth > 0,
            let selected = buttons.first(where: { $0.layoutTabId == activeLayoutTabId }) {
-            selected.scrollToVisible(selected.bounds)
+            // Include the row's 4 pt padding so the first tab reveals flush.
+            selected.scrollToVisible(selected.bounds.insetBy(dx: -4, dy: 0))
             revealActiveTab = false
         }
     }
@@ -242,19 +219,26 @@ final class LayoutTabBarView: NSView {
     }
 }
 
-private final class LayoutTabButton: NSButton {
-    private static let closeSize: CGFloat = 20
-    /// The close button and the margin after it.
-    private static let closeArea: CGFloat = closeSize + 6
+/// `Claude Code ● 3 ×`: the focused pane's title with no index, unboxed
+/// badges, and a close button shown on the selected or hovered tab.
+private final class LayoutTabButton: TabPillButton {
+    private static let closeSize: CGFloat = 16
+    private static let maxWidth: CGFloat = 240
+    private static let minWidth: CGFloat = 96
 
     let layoutTabId: String
     private let onSelect: () -> Void
     private let onClose: () -> Void
-    private let closeButton = NSButton(title: "×", target: nil, action: nil)
-    private let separator = TabPlateView()
-    private let activeMarker = TabPlateView()
-    private let agentBadge = LampCountBadgeView(identifier: "layout-tab-agent-badge")
-    private let commandBadge = LampCountBadgeView(identifier: "layout-tab-command-badge")
+    private let closeButton = ChromeIconButton(
+        symbolName: "xmark",
+        accessibilityLabel: "Close Tab",
+        pointSize: 9,
+        size: LayoutTabButton.closeSize,
+        target: nil,
+        action: nil
+    )
+    private let agentBadge = StatusCountBadgeView(identifier: "layout-tab-agent-badge")
+    private let commandBadge = StatusCountBadgeView(identifier: "layout-tab-command-badge")
     private(set) var tabWidth: CGFloat = 96
 
     init(layoutTabId: String, onSelect: @escaping () -> Void, onClose: @escaping () -> Void) {
@@ -262,26 +246,16 @@ private final class LayoutTabButton: NSButton {
         self.onSelect = onSelect
         self.onClose = onClose
         super.init(frame: .zero)
-        cell = LayoutTabButtonCell()
         identifier = NSUserInterfaceItemIdentifier("layout-tab-\(layoutTabId)")
-        isBordered = false
-        refusesFirstResponder = true
-        wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
         target = self
         action = #selector(selectTab)
-        setAccessibilityRole(.radioButton)
 
         closeButton.identifier = NSUserInterfaceItemIdentifier("close-layout-tab-\(layoutTabId)")
-        closeButton.isBordered = false
         closeButton.refusesFirstResponder = true
         closeButton.target = self
         closeButton.action = #selector(closeTab)
-        closeButton.toolTip = "Close Tab"
-        closeButton.setAccessibilityLabel("Close Tab")
+        closeButton.translatesAutoresizingMaskIntoConstraints = true
 
-        addSubview(separator)
-        addSubview(activeMarker)
         addSubview(agentBadge)
         addSubview(commandBadge)
         addSubview(closeButton)
@@ -300,38 +274,25 @@ private final class LayoutTabButton: NSButton {
         runningCommands: Int,
         theme: AppTheme
     ) {
-        self.title = title
-        attributedTitle = RetroText.display(
+        let colors = theme.colors
+        attributedTitle = ChromeText.attributed(
             title,
-            color: isSelected ? theme.colors.textPrimary : theme.colors.textMuted,
-            alignment: .left,
-            lineBreakMode: .byTruncatingTail
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
+            color: isSelected ? colors.textPrimary : colors.textMuted
         )
         agentBadge.configure(agents: agents, theme: theme)
         commandBadge.configure(runningCommands: runningCommands, theme: theme)
-        let badgeArea = [agentBadge, commandBadge]
-            .filter { !$0.isHidden }
-            .reduce(0) { $0 + $1.badgeWidth + 4 }
-        let trailingInset = badgeArea + Self.closeArea
-        (cell as? LayoutTabButtonCell)?.trailingInset = trailingInset
+        closeButton.apply(theme: theme)
         let titleWidth = ceil(attributedTitle.size().width)
-        tabWidth = min(240, max(96, LayoutTabButtonCell.leadingInset + titleWidth + 6 + trailingInset))
-
-        layer?.backgroundColor = isSelected ? theme.colors.bgRaised.cgColor : NSColor.clear.cgColor
-        activeMarker.isHidden = !isSelected
-        activeMarker.layer?.backgroundColor = theme.colors.accent.cgColor
-        separator.isHidden = isSelected
-        separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
-        closeButton.attributedTitle = RetroText.display(
-            "×",
-            color: theme.colors.textMuted,
-            alignment: .center
-        )
+        let trailing = badgeAreaWidth + Self.contentGap + Self.closeSize
+        tabWidth = min(Self.maxWidth, max(Self.minWidth, Self.chromeWidth + titleWidth + trailing))
+        isSelectedTab = isSelected
+        applyPill(colors: colors)
 
         var description = "Tab \(number): \(title)"
         for summary in [
-            LampCountBadgeView.summary(of: agents),
-            LampCountBadgeView.summary(ofRunningCommands: runningCommands),
+            StatusCountBadgeView.summary(of: agents),
+            StatusCountBadgeView.summary(ofRunningCommands: runningCommands),
         ].compactMap({ $0 }) {
             description += " — \(summary)"
         }
@@ -342,39 +303,50 @@ private final class LayoutTabButton: NSButton {
         needsDisplay = true
     }
 
+    private var visibleBadges: [StatusCountBadgeView] {
+        // Agents sit next to the close button, running commands before them.
+        [agentBadge, commandBadge].filter { !$0.isHidden }
+    }
+
+    private var badgeAreaWidth: CGFloat {
+        visibleBadges.reduce(0) { $0 + Self.contentGap + $1.badgeWidth }
+    }
+
+    /// The close button keeps its place on every tab so widths never jump,
+    /// but shows only on the selected tab and under the pointer.
+    override func hoverStateDidChange() {
+        closeButton.alphaValue = isSelectedTab || isHovered ? 1 : 0
+    }
+
     override func layout() {
         super.layout()
+        let pill = pillRect
+        // The glyph's right edge lines up with the pill's 8 pt padding.
         closeButton.frame = NSRect(
-            x: bounds.maxX - Self.closeArea,
+            x: pill.maxX - Self.trailingPadding + 4 - Self.closeSize,
             y: floor(bounds.midY - Self.closeSize / 2),
             width: Self.closeSize,
             height: Self.closeSize
         )
-        // Agents sit next to the close button, running commands before them.
-        var badgeEdge = closeButton.frame.minX
-        for badge in [agentBadge, commandBadge] where !badge.isHidden {
+        var edge = closeButton.frame.minX - Self.contentGap + 4
+        for badge in visibleBadges {
             badge.frame = NSRect(
-                x: badgeEdge - 4 - badge.badgeWidth,
-                y: floor(bounds.midY - 8),
+                x: edge - badge.badgeWidth,
+                y: floor(bounds.midY - StatusCountBadgeView.height / 2),
                 width: badge.badgeWidth,
-                height: 16
+                height: StatusCountBadgeView.height
             )
-            badgeEdge = badge.frame.minX
+            edge = badge.frame.minX - Self.contentGap
         }
-        // An underline like the pane header's tab strip, on the edge facing
-        // the panes.
-        activeMarker.frame = NSRect(
-            x: 0,
-            y: isFlipped ? bounds.maxY - 2 : 0,
-            width: bounds.width,
-            height: 2
+        let titleMinX = pill.minX + Self.leadingPadding
+        let titleMaxX = visibleBadges.isEmpty ? closeButton.frame.minX - Self.contentGap + 4 : edge
+        (cell as? TabPillButtonCell)?.titleFrame = NSRect(
+            x: titleMinX,
+            y: 0,
+            width: max(0, titleMaxX - titleMinX),
+            height: bounds.height
         )
-        separator.frame = NSRect(
-            x: bounds.maxX - Retro.hairline,
-            y: 7,
-            width: Retro.hairline,
-            height: max(0, bounds.height - 14)
-        )
+        hoverStateDidChange()
     }
 
     /// A middle click closes the tab, as in a browser.
@@ -392,26 +364,5 @@ private final class LayoutTabButton: NSButton {
 
     @objc private func closeTab() {
         onClose()
-    }
-}
-
-/// Draws the title in a padded area that leaves room for the badges and the
-/// close button.
-private final class LayoutTabButtonCell: NSButtonCell {
-    static let leadingInset: CGFloat = 12
-    var trailingInset: CGFloat = 0
-
-    override func titleRect(forBounds rect: NSRect) -> NSRect {
-        let height = ceil(attributedTitle.size().height)
-        return NSRect(
-            x: rect.minX + Self.leadingInset,
-            y: floor(rect.midY - height / 2),
-            width: max(0, rect.width - Self.leadingInset - 6 - trailingInset),
-            height: height
-        )
-    }
-
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        attributedTitle.draw(in: titleRect(forBounds: cellFrame))
     }
 }

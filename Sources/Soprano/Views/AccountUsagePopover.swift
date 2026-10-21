@@ -1,7 +1,8 @@
 import AppKit
 
 /// How close a usage figure is to its limit. The status bar and the usage
-/// popover share it so a limit turns yellow and red at the same point in both.
+/// popover share it so a limit turns yellow and red at the same point in both:
+/// yellow from 70 %, danger from 90 %.
 enum UsageSeverity {
     static func color(for fraction: Double, colors: ThemeColors) -> NSColor {
         if fraction >= 0.9 { return colors.danger }
@@ -16,8 +17,14 @@ enum UsageSeverity {
 final class AccountUsagePopoverViewController: NSViewController {
     static let maxWidth: CGFloat = 460
     private static let minWidth: CGFloat = 280
-    private static let inset: CGFloat = 12
+    private static let inset: CGFloat = 14
     private static let observerId = "AccountUsagePopover"
+    /// Mark column: the 8 pt mark plus its gap, so names and usage lines
+    /// share one left edge.
+    private static let markColumn: CGFloat = Chrome.statusMark + 8
+    private static let windowLabelWidth: CGFloat = 52
+    private static let barWidth: CGFloat = 64
+    private static let percentWidth: CGFloat = 36
 
     private let themeManager: ThemeManager
     /// Called after "Manage Accounts…" was clicked; the owner closes the
@@ -25,9 +32,9 @@ final class AccountUsagePopoverViewController: NSViewController {
     var onManageAccounts: (() -> Void)?
 
     private let contentStack = NSStackView()
-    private let footerRule = RetroRuleView(axis: .horizontal, style: .single)
-    private var refreshButton: RetroButton!
-    private var manageButton: RetroButton!
+    private let footerRule = ChromeRuleView(axis: .horizontal)
+    private var refreshButton: ChromeButton!
+    private var manageButton: ChromeButton!
     private var contentWidthConstraint: NSLayoutConstraint!
 
     init(themeManager: ThemeManager) {
@@ -48,18 +55,19 @@ final class AccountUsagePopoverViewController: NSViewController {
         let theme = themeManager.currentTheme
         contentStack.orientation = .vertical
         contentStack.alignment = .leading
-        contentStack.spacing = 4
+        contentStack.spacing = 6
         contentStack.translatesAutoresizingMaskIntoConstraints = false
 
-        refreshButton = RetroButton(
+        refreshButton = ChromeButton(
             title: "Refresh",
             theme: theme,
             target: self,
             action: #selector(refreshClicked)
         )
-        manageButton = RetroButton(
+        manageButton = ChromeButton(
             title: "Manage Accounts…",
             theme: theme,
+            kind: .ink,
             target: self,
             action: #selector(manageAccountsClicked)
         )
@@ -71,7 +79,7 @@ final class AccountUsagePopoverViewController: NSViewController {
         let outer = NSStackView(views: [contentStack, footerRule, footer])
         outer.orientation = .vertical
         outer.alignment = .leading
-        outer.spacing = 10
+        outer.spacing = 12
         outer.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(outer)
 
@@ -80,7 +88,7 @@ final class AccountUsagePopoverViewController: NSViewController {
             outer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.inset),
             outer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.inset),
             outer.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.inset),
-            outer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.inset),
+            outer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
             contentWidthConstraint,
             footerRule.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
         ])
@@ -111,12 +119,14 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     // MARK: - Rendering
 
-    private func render(_ snapshot: AccountsSnapshot) {
+    /// Rebuilds the popover for `snapshot`; `AccountsController` calls it on
+    /// every change while the popover is open.
+    func render(_ snapshot: AccountsSnapshot) {
         let theme = themeManager.currentTheme
         let colors = theme.colors
-        view.layer?.backgroundColor = colors.bgPanel.cgColor
-        view.layer?.borderWidth = Retro.hairline
-        view.layer?.borderColor = colors.borderStrong.cgColor
+        // The popover is a raised surface; NSPopover supplies the 10 pt
+        // radius and the edge.
+        view.layer?.backgroundColor = colors.raised.cgColor
         footerRule.color = colors.borderSubtle
         refreshButton.apply(theme: theme)
         manageButton.apply(theme: theme)
@@ -131,7 +141,6 @@ final class AccountUsagePopoverViewController: NSViewController {
         // Rows measure their natural width before they are pinned to the
         // column, so the popover is as wide as its longest line, capped.
         var fullWidthViews: [NSView] = []
-        var usageLabels: [(label: NSTextField, indent: CGFloat)] = []
         var naturalWidth: CGFloat = 0
         func add(_ view: NSView, spacingAfter: CGFloat? = nil) {
             contentStack.addArrangedSubview(view)
@@ -149,21 +158,24 @@ final class AccountUsagePopoverViewController: NSViewController {
 
             if listID.provider != currentProvider {
                 if let last = contentStack.arrangedSubviews.last {
+                    let rule = ChromeRuleView(axis: .horizontal, color: colors.borderSubtle)
                     contentStack.setCustomSpacing(12, after: last)
+                    add(rule, spacingAfter: 12)
                 }
-                add(RetroHeadingView(title: listID.provider.displayName, theme: theme), spacingAfter: 8)
+                add(ChromeEyebrowView(title: listID.provider.displayName, theme: theme), spacingAfter: 8)
                 currentProvider = listID.provider
             } else if let last = contentStack.arrangedSubviews.last {
-                contentStack.setCustomSpacing(10, after: last)
+                contentStack.setCustomSpacing(12, after: last)
             }
 
             let isAutomatic = listID.tool == .omp && list.selectedAccountId == nil
             let caption = makeLabel()
-            caption.setRetroText(
+            caption.setChromeText(
                 isAutomatic ? "\(listID.tool.displayName) · automatic" : listID.tool.displayName,
+                font: ChromeFont.meta,
                 color: colors.textMuted
             )
-            add(caption, spacingAfter: 4)
+            add(caption, spacingAfter: 6)
 
             if let systemDefault = list.systemDefault {
                 let row = makeRow(
@@ -173,8 +185,7 @@ final class AccountUsagePopoverViewController: NSViewController {
                     colors: colors
                 )
                 naturalWidth = max(naturalWidth, row.naturalWidth)
-                usageLabels.append((row.usageLabel, row.indent))
-                add(row.view)
+                add(row.view, spacingAfter: 8)
             }
             for account in list.accounts {
                 let row = makeRow(
@@ -184,14 +195,13 @@ final class AccountUsagePopoverViewController: NSViewController {
                     colors: colors
                 )
                 naturalWidth = max(naturalWidth, row.naturalWidth)
-                usageLabels.append((row.usageLabel, row.indent))
-                add(row.view)
+                add(row.view, spacingAfter: 8)
             }
         }
 
         if fullWidthViews.isEmpty {
             let empty = makeLabel()
-            empty.attributedStringValue = bodyText("No accounts yet.", color: colors.textMuted)
+            empty.setChromeText("No accounts yet.", font: ChromeFont.label, color: colors.textMuted)
             add(empty)
         }
 
@@ -205,37 +215,39 @@ final class AccountUsagePopoverViewController: NSViewController {
             max(Self.minWidth, ceil(naturalWidth), footerWidth)
         )
         contentWidthConstraint.constant = columnWidth
-        // Wrapping labels need their width up front to report the right height.
-        for (label, indent) in usageLabels {
-            label.preferredMaxLayoutWidth = columnWidth - indent
-        }
         view.layoutSubtreeIfNeeded()
         preferredContentSize = view.fittingSize
     }
 
-    /// Two lines, so a long email never squeezes the figures (or the reverse):
+    /// The login on one line, then one line per usage window:
     ///
     ///     ● ada@example.com
-    ///       5h 9% · 3h 54m   7d 10% · 5d 17h
+    ///       5h      ▬▬▭▭▭   9%  3h 54m
+    ///       7d      ▬▭▭▭▭  10%  5d 17h
+    ///
+    /// The chosen login has a filled ink mark, the others a ring; a login
+    /// with a problem shows the error diamond.
     private func makeRow(
         _ row: AccountRow,
         isSelected: Bool,
         isSystemDefault: Bool,
         colors: ThemeColors
-    ) -> (view: NSView, usageLabel: NSTextField, indent: CGFloat, naturalWidth: CGFloat) {
-        let marker = makeLabel()
-        marker.attributedStringValue = bodyText(
-            isSelected ? "●" : "○",
-            color: isSelected ? colors.accent : colors.textMuted
+    ) -> (view: NSView, naturalWidth: CGFloat) {
+        let hasProblem = !(row.problem ?? "").isEmpty
+        let mark = ChromeStatusMark(
+            shape: hasProblem ? .diamond : (isSelected ? .dot : .ring),
+            color: hasProblem ? colors.danger : (isSelected ? colors.textPrimary : colors.textMuted)
         )
-        marker.setContentHuggingPriority(.required, for: .horizontal)
-        marker.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let name = NSMutableAttributedString()
         if isSystemDefault {
-            name.append(bodyText("System default — ", color: colors.textMuted))
+            name.append(ChromeText.attributed("System default — ", font: ChromeFont.label, color: colors.textMuted))
         }
-        name.append(bodyText(row.identity.email.isEmpty ? (row.problem ?? "") : row.identity.email, color: colors.textPrimary))
+        name.append(ChromeText.attributed(
+            row.identity.email.isEmpty ? (row.problem ?? "") : row.identity.email,
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
+            color: colors.textPrimary
+        ))
         // The paragraph style, not the field's lineBreakMode, decides how an
         // attributed label breaks: one line, shortened in the middle.
         let truncating = NSMutableParagraphStyle()
@@ -249,72 +261,93 @@ final class AccountUsagePopoverViewController: NSViewController {
         nameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let header = NSStackView(views: [marker, nameLabel])
-        header.orientation = .horizontal
-        header.alignment = .firstBaseline
-        header.spacing = 6
-        header.translatesAutoresizingMaskIntoConstraints = false
-
-        let usage = usageText(row.usage, colors: colors)
-        let usageLabel = NSTextField(wrappingLabelWithString: "")
-        usageLabel.attributedStringValue = usage
-        usageLabel.maximumNumberOfLines = 0
-        usageLabel.translatesAutoresizingMaskIntoConstraints = false
-
         let view = NSView()
         view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(header)
-        view.addSubview(usageLabel)
-        let indent = marker.intrinsicContentSize.width + header.spacing
+        view.addSubview(mark)
+        view.addSubview(nameLabel)
+
+        let usageStack = NSStackView()
+        usageStack.orientation = .vertical
+        usageStack.alignment = .leading
+        usageStack.spacing = 3
+        usageStack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(usageStack)
+
+        var usageWidth: CGFloat = 0
+        if let usage = row.usage, !usage.windows.isEmpty {
+            let now = Date()
+            for window in usage.windows {
+                let line = makeUsageLine(window, now: now, colors: colors)
+                usageStack.addArrangedSubview(line.view)
+                usageWidth = max(usageWidth, line.width)
+            }
+        } else {
+            let none = makeLabel()
+            none.setChromeText("no usage data", font: ChromeFont.meta, color: colors.textMuted)
+            usageStack.addArrangedSubview(none)
+            usageWidth = ceil(none.intrinsicContentSize.width)
+        }
+
         NSLayoutConstraint.activate([
-            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
-            header.topAnchor.constraint(equalTo: view.topAnchor),
-            usageLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: indent),
-            usageLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
-            usageLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 2),
-            usageLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            mark.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            mark.centerYAnchor.constraint(equalTo: nameLabel.centerYAnchor),
+            nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.markColumn),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
+            nameLabel.topAnchor.constraint(equalTo: view.topAnchor),
+            usageStack.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
+            usageStack.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor),
+            usageStack.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 4),
+            usageStack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        let naturalWidth = max(
-            marker.intrinsicContentSize.width + header.spacing + ceil(name.size().width),
-            indent + ceil(usage.size().width)
-        ) + 4
-        return (view, usageLabel, indent, naturalWidth)
+        let naturalWidth = Self.markColumn + max(ceil(name.size().width), usageWidth) + 4
+        return (view, naturalWidth)
     }
 
-    /// Each window as `UsageFormat.window` renders it, with the percentage
-    /// colored by how close it is to the limit.
-    private func usageText(_ usage: AccountUsage?, colors: ThemeColors) -> NSAttributedString {
-        guard let usage, !usage.windows.isEmpty else {
-            return bodyText("no usage data", color: colors.textMuted)
-        }
-        let now = Date()
-        let text = NSMutableAttributedString()
-        for (index, window) in usage.windows.enumerated() {
-            if index > 0 {
-                text.append(bodyText("   ", color: colors.textMuted))
-            }
-            let segment = NSMutableAttributedString(
-                attributedString: bodyText(UsageFormat.window(window, now: now), color: colors.textMuted)
-            )
-            let percentRange = (segment.string as NSString).range(of: UsageFormat.percent(window.usedFraction))
-            if percentRange.location != NSNotFound {
-                segment.addAttribute(
-                    .foregroundColor,
-                    value: UsageSeverity.color(for: window.usedFraction, colors: colors),
-                    range: percentRange
-                )
-            }
-            text.append(segment)
-        }
-        return text
-    }
+    /// One usage window: its label, a bar filled to the share used, the
+    /// percentage in the severity color, and the time until it resets.
+    private func makeUsageLine(
+        _ window: UsageWindow,
+        now: Date,
+        colors: ThemeColors
+    ) -> (view: NSView, width: CGFloat) {
+        let severity = UsageSeverity.color(for: window.usedFraction, colors: colors)
 
-    private func bodyText(_ string: String, color: NSColor) -> NSAttributedString {
-        NSAttributedString(string: string, attributes: [
-            .font: RetroFont.body(11),
-            .foregroundColor: color,
+        let label = makeLabel()
+        label.setChromeText(window.label, font: ChromeFont.meta, color: colors.textMuted)
+
+        let bar = UsageBarView(
+            fraction: window.usedFraction,
+            fill: severity == colors.textPrimary ? colors.textMuted : severity,
+            track: colors.bgOverlay
+        )
+
+        let percent = makeLabel()
+        percent.alignment = .right
+        percent.setChromeText(UsageFormat.percent(window.usedFraction), font: ChromeFont.badge, color: severity)
+
+        var views: [NSView] = [label, bar, percent]
+        // Labels take at least the column width; a longer omp label
+        // (`<window> <tier>`) widens its line instead of truncating.
+        let labelWidth = max(Self.windowLabelWidth, ceil(label.intrinsicContentSize.width))
+        var width = labelWidth + 8 + Self.barWidth + 8 + Self.percentWidth
+        if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
+            let resetLabel = makeLabel()
+            resetLabel.setChromeText(reset, font: ChromeFont.count, color: colors.textMuted)
+            views.append(resetLabel)
+            width += 10 + ceil(resetLabel.intrinsicContentSize.width)
+        }
+
+        let line = NSStackView(views: views)
+        line.orientation = .horizontal
+        line.alignment = .centerY
+        line.spacing = 8
+        line.setCustomSpacing(10, after: percent)
+        NSLayoutConstraint.activate([
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.windowLabelWidth),
+            bar.widthAnchor.constraint(equalToConstant: Self.barWidth),
+            percent.widthAnchor.constraint(equalToConstant: Self.percentWidth),
         ])
+        return (line, width)
     }
 
     private func makeLabel() -> NSTextField {
@@ -322,5 +355,42 @@ final class AccountUsagePopoverViewController: NSViewController {
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
+    }
+}
+
+/// A 4 pt usage bar: an overlay track filled to `fraction` (capped at full).
+private final class UsageBarView: NSView {
+    private let fraction: Double
+    private let fill: NSColor
+    private let track: NSColor
+
+    init(fraction: Double, fill: NSColor, track: NSColor) {
+        self.fraction = fraction
+        self.fill = fill
+        self.track = track
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: 4)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = NSRect(x: 0, y: floor((bounds.height - 4) / 2), width: bounds.width, height: 4)
+        track.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+        let share = CGFloat(min(max(fraction, 0), 1))
+        guard share > 0 else { return }
+        var filled = rect
+        filled.size.width = max(4, round(rect.width * share))
+        fill.setFill()
+        NSBezierPath(roundedRect: filled, xRadius: 2, yRadius: 2).fill()
     }
 }

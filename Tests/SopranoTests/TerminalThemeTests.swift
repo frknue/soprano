@@ -4,9 +4,10 @@ import Testing
 
 @MainActor
 struct TerminalThemeTests {
-    @Test func builtInThemeCatalogLeadsWithMissionControlAndKeepsEveryExistingId() {
+    @Test func builtInThemeCatalogLeadsWithFolioPaperAndInkAndKeepsTheThirdPartyIds() {
         #expect(AppTheme.allThemes.map(\.id) == [
-            "mission-control",
+            "folio-paper",
+            "folio-ink",
             "gruvbox-dark",
             "catppuccin-mocha",
             "dracula",
@@ -15,22 +16,76 @@ struct TerminalThemeTests {
             "tokyo-night",
             "atom-one-dark",
         ])
+        #expect(AppTheme.options.first?.id == "folio")
+        #expect(AppTheme.options.dropFirst().map(\.id) == AppTheme.allThemes.map(\.id))
+    }
+
+    @Test func folioResolvesToPaperWhenLightAndInkWhenDark() {
+        #expect(AppTheme.theme(for: "folio", appearance: .light).id == "folio-paper")
+        #expect(AppTheme.theme(for: "folio", appearance: .dark).id == "folio-ink")
+        #expect(AppTheme.theme(for: "folio-ink", appearance: .light).id == "folio-ink")
+        #expect(AppTheme.theme(for: "mission-control", appearance: .light).id == "folio-paper")
+    }
+
+    @Test func onlyFolioPaperIsLight() {
+        let light = AppTheme.allThemes.filter { $0.appearance == .light }.map(\.id)
+        #expect(light == ["folio-paper"])
+    }
+
+    @Test func aFolioThemeManagerReResolvesWhenTheAppearanceChanges() {
+        let manager = ThemeManager(themeId: "folio", appearance: .light)
+        var changes: [String] = []
+        manager.onThemeChanged = { changes.append($0.id) }
+        #expect(manager.currentTheme.id == "folio-paper")
+
+        manager.setAppearance(.dark)
+        #expect(manager.currentTheme.id == "folio-ink")
+
+        manager.setTheme(id: "nord")
+        manager.setAppearance(.light)
+        #expect(manager.currentTheme.id == "nord")
+        #expect(changes == ["folio-ink", "nord"])
     }
 
     @Test func everyAppThemeProducesACompleteGhosttyTerminalPalette() {
         for theme in AppTheme.allThemes {
             let lines = theme.terminalColors.ghosttyConfiguration.split(separator: "\n")
 
-            #expect(lines.count == 21)
+            #expect(lines.count == 22)
             #expect(lines.contains { $0.hasPrefix("background = ") })
             #expect(lines.contains { $0.hasPrefix("foreground = ") })
             #expect(lines.contains { $0.hasPrefix("cursor-color = ") })
             #expect(lines.contains { $0.hasPrefix("cursor-text = ") })
             #expect(lines.contains { $0.hasPrefix("selection-background = ") })
+            #expect(lines.contains("faint-opacity = 0.66"))
             for index in 0..<16 {
                 #expect(lines.contains { $0.hasPrefix("palette = \(index)=") })
             }
         }
+    }
+
+    @Test func unfocusedSurfacesDrawTheirHollowCursorInTheForegroundAt55PercentNeverTheAccent() {
+        for theme in AppTheme.allThemes {
+            let terminal = theme.terminalColors
+            let config = terminal.ghosttyUnfocusedConfiguration
+            #expect(config.split(separator: "\n").count == 1)
+            #expect(config.hasPrefix("cursor-color = "))
+            #expect(!theme.terminalColors.ghosttyConfiguration.contains(config))
+            #expect(terminal.unfocusedCursor.labDistance(to: theme.colors.accent) > 10)
+            #expect(terminal.unfocusedCursor == terminal.background.mixed(with: terminal.foreground, fraction: 0.55))
+        }
+    }
+
+    @Test func folioTerminalPalettesMatchTheTokens() {
+        let paper = AppTheme.folioPaper.terminalColors.ghosttyConfiguration
+        #expect(paper.contains("background = f6f2ea"))
+        #expect(paper.contains("cursor-color = a34a17"))
+        #expect(paper.contains("selection-background = e4cdbc"))
+        #expect(paper.contains("palette = 7=6f665a"))
+        let ink = AppTheme.folioInk.terminalColors.ghosttyConfiguration
+        #expect(ink.contains("background = 1d1b18"))
+        #expect(ink.contains("cursor-color = e08a52"))
+        #expect(ink.contains("palette = 15=f4efe5"))
     }
 
     @Test func builtInTerminalThemesUseTheirDeclaredBackgroundColors() {

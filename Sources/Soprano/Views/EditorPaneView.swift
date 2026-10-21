@@ -7,7 +7,7 @@ import AppKit
 /// Every tab showing the same file shares one `EditorDocument`, so edits,
 /// undo, and the saved state are the same in each.
 final class EditorPaneView: NSView {
-    static let toolbarHeight: CGFloat = 34
+    static let toolbarHeight: CGFloat = 32
 
     let target: TerminalTarget
     let document: EditorDocument
@@ -21,22 +21,22 @@ final class EditorPaneView: NSView {
     var onMarkdownPreviewRequested: ((URL) -> Void)?
 
     private let toolbar = NSView()
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let pathLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
-    private var reloadButton: RetroButton!
-    private var saveButton: RetroIconButton!
-    private var previewButton: RetroIconButton!
-    private var revealButton: RetroIconButton!
-    private var openExternallyButton: RetroIconButton!
+    private var reloadButton: ChromeButton!
+    private var saveButton: ChromeIconButton!
+    private var previewButton: ChromeIconButton!
+    private var revealButton: ChromeIconButton!
+    private var openExternallyButton: ChromeIconButton!
 
     private let scrollView = NSScrollView()
-    private let layoutManager = NSLayoutManager()
+    private let layoutManager = EditorLayoutManager()
     let textView: EditorTextView
     private var ruler: EditorLineNumberRuler!
     private let imageView = NSImageView()
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private var messageButton: RetroButton!
+    private var messageButton: ChromeButton!
     private var pendingRestore: (selection: [NSValue], origin: NSPoint)?
     private var lastLineCountDigits = 0
 
@@ -107,7 +107,7 @@ final class EditorPaneView: NSView {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)
 
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monoSmall
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -118,7 +118,7 @@ final class EditorPaneView: NSView {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(statusLabel)
 
-        reloadButton = RetroButton(
+        reloadButton = ChromeButton(
             title: "Reload",
             theme: themeManager.currentTheme,
             target: self,
@@ -182,12 +182,6 @@ final class EditorPaneView: NSView {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(visibleTextChanged),
-            name: NSTextView.didChangeSelectionNotification,
-            object: textView
-        )
         addSubview(scrollView)
 
         imageView.imageScaling = .scaleProportionallyDown
@@ -196,10 +190,10 @@ final class EditorPaneView: NSView {
         addSubview(imageView)
 
         messageLabel.alignment = .center
-        messageLabel.font = RetroFont.body(12)
+        messageLabel.font = ChromeFont.empty
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
-        messageButton = RetroButton(
+        messageButton = ChromeButton(
             title: "Open with Default App",
             theme: themeManager.currentTheme,
             target: self,
@@ -213,9 +207,9 @@ final class EditorPaneView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
 
-            pathLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 10),
+            pathLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 12),
             pathLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -10),
+            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -8),
 
             statusLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             statusLabel.trailingAnchor.constraint(equalTo: reloadButton.leadingAnchor, constant: -8),
@@ -223,7 +217,7 @@ final class EditorPaneView: NSView {
             reloadButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             reloadButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -6),
 
-            openExternallyButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -6),
+            openExternallyButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
             openExternallyButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             revealButton.trailingAnchor.constraint(equalTo: openExternallyButton.leadingAnchor, constant: -2),
             revealButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -235,7 +229,7 @@ final class EditorPaneView: NSView {
             toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
             toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -255,8 +249,8 @@ final class EditorPaneView: NSView {
         ])
     }
 
-    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> RetroIconButton {
-        let button = RetroIconButton(
+    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> ChromeIconButton {
+        let button = ChromeIconButton(
             symbolName: symbol,
             accessibilityLabel: label,
             pointSize: 12,
@@ -274,64 +268,58 @@ final class EditorPaneView: NSView {
         let colors = themeManager.currentTheme.colors
         layer?.backgroundColor = colors.bgBase.cgColor
         toolbar.layer?.backgroundColor = colors.bgPanel.cgColor
-        toolbarRule.color = colors.borderStrong
-        pathLabel.textColor = colors.textMuted
+        toolbarRule.color = colors.borderSubtle
+        pathLabel.textColor = colors.textPrimary
         for button in [saveButton, previewButton, revealButton, openExternallyButton] {
-            button?.setTints(normal: colors.textMuted, hover: colors.accent)
+            button?.apply(theme: themeManager.currentTheme)
         }
         reloadButton.apply(theme: themeManager.currentTheme)
         messageButton.apply(theme: themeManager.currentTheme)
         messageLabel.textColor = colors.textMuted
 
-        let font = RetroFont.body(12)
+        let font = ChromeFont.mono
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = []
         paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: colors.textPrimary,
+            .foregroundColor: colors.syntaxPlain,
             .paragraphStyle: paragraph,
         ]
         document.applyBaseAttributes(attributes)
         textView.typingAttributes = attributes
         textView.backgroundColor = colors.bgBase
-        textView.insertionPointColor = colors.accent
-        textView.selectedTextAttributes = [.backgroundColor: colors.accent.withAlphaComponent(0.3)]
+        textView.insertionPointColor = colors.caret
+        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
         scrollView.backgroundColor = colors.bgBase
         ruler.colors = colors
         applyHighlights()
         updateChrome()
     }
 
-    static func color(for kind: SyntaxTokenKind, in colors: ThemeColors) -> NSColor {
-        switch kind {
-        case .keyword, .tag: colors.accentStrong
-        case .string, .inserted: colors.success
-        case .comment: colors.textMuted
-        case .number, .attribute, .heading: colors.accent
-        case .type: colors.cyan
-        case .function, .key: colors.blue
-        case .deleted: colors.danger
+    /// Syntax colors are drawn by this view's layout manager rather than
+    /// stored in the shared text, so they never touch undo or the dirty state.
+    /// Temporary attributes cannot change the font, so keywords carry a
+    /// marker the layout manager draws Semibold, and comments a slant.
+    private func applyHighlights() {
+        let length = document.textStorage.length
+        let all = NSRange(location: 0, length: length)
+        for key in [NSAttributedString.Key.foregroundColor, .editorSyntaxEmphasis, .obliqueness] {
+            layoutManager.removeTemporaryAttribute(key, forCharacterRange: all)
+        }
+        let colors = themeManager.currentTheme.colors
+        for token in document.tokens where NSMaxRange(token.range) <= length {
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: token.kind.color(in: colors)]
+            if token.kind.isEmphasized {
+                attributes[.editorSyntaxEmphasis] = true
+            } else if token.kind.isItalic {
+                attributes[.obliqueness] = Self.commentObliqueness
+            }
+            layoutManager.addTemporaryAttributes(attributes, forCharacterRange: token.range)
         }
     }
 
-    /// Syntax colors are drawn by this view's layout manager rather than
-    /// stored in the shared text, so they never touch undo or the dirty state.
-    private func applyHighlights() {
-        let length = document.textStorage.length
-        layoutManager.removeTemporaryAttribute(
-            .foregroundColor,
-            forCharacterRange: NSRange(location: 0, length: length)
-        )
-        let colors = themeManager.currentTheme.colors
-        for token in document.tokens where NSMaxRange(token.range) <= length {
-            layoutManager.addTemporaryAttribute(
-                .foregroundColor,
-                value: Self.color(for: token.kind, in: colors),
-                forCharacterRange: token.range
-            )
-        }
-    }
+    private static let commentObliqueness: CGFloat = 0.18
 
     // MARK: - Document Changes
 
@@ -422,7 +410,7 @@ final class EditorPaneView: NSView {
             }
         }
         statusLabel.isHidden = status == nil
-        statusLabel.setRetroText(status?.text ?? "", color: status?.color ?? colors.textMuted, tracking: 0)
+        statusLabel.setChromeText(status?.text ?? "", font: ChromeFont.meta, color: status?.color ?? colors.textMuted)
         reloadButton.isHidden = document.diskState != .changed
         saveButton.isEnabled = document.content == .text && !document.isReadOnly
         previewButton.isHidden = !["md", "markdown"].contains(document.url.pathExtension.lowercased())
@@ -506,6 +494,83 @@ extension EditorPaneView: NSTextViewDelegate {
     }
 }
 
+// MARK: - Layout Manager
+
+extension NSAttributedString.Key {
+    /// Temporary attribute: draw this run in the Semibold weight of its font.
+    static let editorSyntaxEmphasis = NSAttributedString.Key("SopranoEditorSyntaxEmphasis")
+}
+
+/// Draws runs marked `editorSyntaxEmphasis` in Semibold: glyphs are drawn
+/// run by run, and a marked run's glyphs are shown with the Semibold weight
+/// of their font. SF Mono's weights share glyphs and advances, so nothing
+/// moves and the shared text keeps its one font.
+final class EditorLayoutManager: NSLayoutManager {
+    private var drawsEmphasis = false
+    private var semiboldFonts: [CGFloat: NSFont] = [:]
+
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        guard characters.length > 0 else {
+            super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
+            return
+        }
+        let end = NSMaxRange(characters)
+        var location = characters.location
+        while location < end {
+            var run = NSRange()
+            drawsEmphasis = temporaryAttribute(
+                .editorSyntaxEmphasis,
+                atCharacterIndex: location,
+                longestEffectiveRange: &run,
+                in: NSRange(location: location, length: end - location)
+            ) as? Bool == true
+            let glyphs = glyphRange(forCharacterRange: run, actualCharacterRange: nil)
+            super.drawGlyphs(forGlyphRange: NSIntersectionRange(glyphs, glyphsToShow), at: origin)
+            location = max(NSMaxRange(run), location + 1)
+        }
+        drawsEmphasis = false
+    }
+
+    override func showCGGlyphs(
+        _ glyphs: UnsafePointer<CGGlyph>,
+        positions: UnsafePointer<CGPoint>,
+        count glyphCount: Int,
+        font: NSFont,
+        textMatrix: CGAffineTransform,
+        attributes: [NSAttributedString.Key: Any] = [:],
+        in context: CGContext
+    ) {
+        guard drawsEmphasis, let semibold = semiboldFont(matching: font) else {
+            super.showCGGlyphs(
+                glyphs, positions: positions, count: glyphCount, font: font,
+                textMatrix: textMatrix, attributes: attributes, in: context
+            )
+            return
+        }
+        // AppKit shows the glyphs with the context's font, so the Semibold
+        // instance goes there for this run.
+        context.saveGState()
+        context.setFont(CTFontCopyGraphicsFont(semibold, nil))
+        super.showCGGlyphs(
+            glyphs, positions: positions, count: glyphCount, font: semibold,
+            textMatrix: textMatrix, attributes: attributes, in: context
+        )
+        context.restoreGState()
+    }
+
+    /// SF Mono Semibold at `font`'s size; nil for any other family, since only
+    /// SF Mono's own weights share its glyph ids.
+    private func semiboldFont(matching font: NSFont) -> NSFont? {
+        let semibold = semiboldFonts[font.pointSize] ?? {
+            let made = NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .semibold)
+            semiboldFonts[font.pointSize] = made
+            return made
+        }()
+        return font.familyName == semibold.familyName ? semibold : nil
+    }
+}
+
 // MARK: - Text View
 
 /// The editor's text view, keeping the current indentation on Return.
@@ -545,8 +610,8 @@ final class EditorTextView: NSTextView {
 
 // MARK: - Line Numbers
 
-/// The gutter: a line number beside the first line fragment of each line,
-/// the caret's line brighter.
+/// The gutter: a muted line number beside the first line fragment of each
+/// line, on the panel color with one hairline.
 final class EditorLineNumberRuler: NSRulerView {
     private weak var editorTextView: NSTextView?
     private let document: EditorDocument
@@ -554,7 +619,7 @@ final class EditorLineNumberRuler: NSRulerView {
         didSet { needsDisplay = true }
     }
 
-    private let font = RetroFont.body(10)
+    private let font = ChromeFont.monoSmall
 
     init(textView: NSTextView, document: EditorDocument) {
         self.editorTextView = textView
@@ -603,14 +668,13 @@ final class EditorLineNumberRuler: NSRulerView {
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: container)
         let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         let insetY = textView.textContainerOrigin.y
-        let caretLine = document.lineNumber(at: textView.selectedRange().location)
 
         func drawNumber(_ number: Int, fragmentY: CGFloat, height: CGFloat) {
             let y = convert(NSPoint(x: 0, y: fragmentY + insetY), from: textView).y
             let label = String(number) as NSString
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
-                .foregroundColor: number == caretLine ? colors.textPrimary : colors.textMuted,
+                .foregroundColor: colors.textMuted,
             ]
             let size = label.size(withAttributes: attributes)
             label.draw(

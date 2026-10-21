@@ -18,9 +18,12 @@ struct SettingsConfigWritingTests {
         return (store, directory)
     }
 
-    private func makeController(_ store: ConfigStore) -> SettingsViewController {
+    private func makeController(
+        _ store: ConfigStore,
+        themeManager: ThemeManager? = nil
+    ) -> SettingsViewController {
         let controller = SettingsViewController(
-            themeManager: ThemeManager(themeId: store.settings.themeId),
+            themeManager: themeManager ?? ThemeManager(themeId: store.settings.themeId),
             settings: store.settings,
             keybindingConfig: store.keybindings,
             configStore: store
@@ -50,7 +53,7 @@ struct SettingsConfigWritingTests {
         let popup = controls(NSPopUpButton.self, in: controller.view).first
         #expect(popup != nil)
 
-        let mochaIndex = AppTheme.allThemes.firstIndex { $0.id == "catppuccin-mocha" }!
+        let mochaIndex = AppTheme.options.firstIndex { $0.id == "catppuccin-mocha" }!
         popup?.selectItem(at: mochaIndex)
         send(popup!)
 
@@ -63,14 +66,14 @@ struct SettingsConfigWritingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = makeController(store)
-        // Checkboxes sit at the trailing edge of a labeled row, so the
-        // accessibility label is what names them now.
-        let checkbox = controls(NSButton.self, in: controller.view)
+        // Switches sit at the trailing edge of a labeled row, so the
+        // accessibility label is what names them.
+        let toggle = controls(ChromeSwitch.self, in: controller.view)
             .first { $0.accessibilityLabel() == "Restore last session" }
-        #expect(checkbox != nil)
+        #expect(toggle != nil)
 
-        checkbox?.state = .off
-        send(checkbox!)
+        toggle?.state = .off
+        send(toggle!)
 
         #expect(store.settings.restoreLastSession == false)
         #expect(fileText(store).contains("\"restoreLastSession\": false"))
@@ -81,15 +84,97 @@ struct SettingsConfigWritingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = makeController(store)
-        let checkbox = controls(NSButton.self, in: controller.view)
+        let toggle = controls(ChromeSwitch.self, in: controller.view)
             .first { $0.accessibilityLabel() == "Hide window bar" }
-        #expect(checkbox != nil)
+        #expect(toggle != nil)
 
-        checkbox?.state = .on
-        send(checkbox!)
+        toggle?.state = .on
+        send(toggle!)
 
         #expect(store.settings.hideWindowBar == true)
         #expect(fileText(store).contains("\"hideWindowBar\": true"))
+    }
+
+    @Test func choosingDarkAppearanceWritesTheAppearanceKeyAndPinsTheThemeManager() {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let themeManager = ThemeManager(themeId: store.settings.themeId)
+        let controller = makeController(store, themeManager: themeManager)
+        #expect(themeManager.appearance == .system)
+
+        let dark = controls(NSButton.self, in: controller.view).first { $0.title == "Dark" }
+        #expect(dark != nil)
+        send(dark!)
+
+        #expect(store.settings.appearance == .dark)
+        #expect(fileText(store).contains("\"appearance\": \"dark\""))
+        #expect(themeManager.appearance == .dark)
+        #expect(themeManager.currentTheme.appearance == .dark)
+    }
+
+    @Test func theAppearanceControlReflectsTheConfiguredAppearance() {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        store.write("light", at: ["appearance"])
+        let controller = makeController(store)
+
+        let light = controls(NSButton.self, in: controller.view).first { $0.title == "Light" }
+        #expect(light?.accessibilityValue() as? Bool == true)
+        let system = controls(NSButton.self, in: controller.view).first { $0.title == "System" }
+        #expect(system?.accessibilityValue() as? Bool == false)
+    }
+
+    @Test func togglingTheUptimeSwitchWritesTheNestedStatusBarKey() {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = makeController(store)
+        let toggle = controls(ChromeSwitch.self, in: controller.view)
+            .first { $0.accessibilityLabel() == "Show uptime in status bar" }
+        #expect(toggle?.state == .off)
+
+        toggle?.state = .on
+        send(toggle!)
+        #expect(store.settings.statusBarUptime == true)
+        #expect(fileText(store).contains("\"uptime\": true"))
+
+        toggle?.state = .off
+        send(toggle!)
+        #expect(store.settings.statusBarUptime == false)
+        #expect(fileText(store).contains("\"uptime\": false"))
+    }
+
+    @Test func recordingAPrefixKeyWritesItAndShowsItAsAControlChord() throws {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = makeController(store)
+        let prefix = try #require(
+            controls(NSControl.self, in: controller.view)
+                .first { $0.accessibilityLabel() == "Prefix key" }
+        )
+        #expect(prefix.accessibilityValue() as? String == "⌃A")
+
+        #expect(prefix.accessibilityPerformPress())
+        let event = try #require(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "b",
+            charactersIgnoringModifiers: "b",
+            isARepeat: false,
+            keyCode: 11
+        ))
+        prefix.keyDown(with: event)
+
+        #expect(prefix.accessibilityValue() as? String == "⌃B")
+        #expect(store.keybindings.prefixKey == "b")
+        #expect(fileText(store).contains("\"prefixKey\": \"b\""))
     }
 
     @Test func addingAProjectDirectoryWritesItHomeRelativeAndResolvesItBack() {
@@ -98,7 +183,7 @@ struct SettingsConfigWritingTests {
 
         let controller = makeController(store)
         let input = controls(NSTextField.self, in: controller.view)
-            .first { $0.placeholderString == "Folder path" }
+            .first { $0.placeholderAttributedString?.string == "Folder path" }
         #expect(input != nil)
 
         let home = FileManager.default.homeDirectoryForCurrentUser

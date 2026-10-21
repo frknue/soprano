@@ -16,9 +16,10 @@ final class MainContentViewController: NSViewController {
     private var windowTabBarView: WindowTabBarView!
     private var layoutTabBarView: LayoutTabBarView!
     private var windowTabBarHeightConstraint: NSLayoutConstraint!
-    private var layoutTabBarHeightConstraint: NSLayoutConstraint!
     private var windowTabsHidden = false
     private var statusBarView: StatusBarView!
+    /// The titlebar's bottom hairline; above the safe area it is off screen.
+    private let titlebarRule = ChromeRuleView(axis: .horizontal)
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var sidebarResizeHandle: SidebarResizeHandleView!
     private var sidebarWidth: CGFloat
@@ -28,11 +29,7 @@ final class MainContentViewController: NSViewController {
     private var rightSidebarResizeHandle: SidebarResizeHandleView!
     private var rightSidebarWidth: CGFloat
     private var settingsContainerView: NSView!
-    private var settingsHeaderView: NSView!
-    private var settingsTitleLabel: NSTextField!
-    private var settingsStripeView: RetroStripeView!
-    private var settingsCloseButton: RetroButton!
-    private var settingsHeaderRule: RetroRuleView!
+    private var settingsHeaderView: SettingsHeaderView!
     private var settingsViewController: SettingsViewController?
     private var settingsViewConstraints: [NSLayoutConstraint] = []
     private var dashboardViewController: AgentDashboardViewController?
@@ -140,6 +137,9 @@ final class MainContentViewController: NSViewController {
             self?.setKeybindingMode(state)
         }
 
+        titlebarRule.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(titlebarRule)
+
         sidebarView.setContentWidth(sidebarWidth)
 
         // Resize handles, above the sidebars and the tiling layout
@@ -159,9 +159,6 @@ final class MainContentViewController: NSViewController {
         )
         windowTabBarHeightConstraint = windowTabBarView.heightAnchor.constraint(
             equalToConstant: WindowTabBarView.height
-        )
-        layoutTabBarHeightConstraint = layoutTabBarView.heightAnchor.constraint(
-            equalToConstant: LayoutTabBarView.height
         )
 
         NSLayoutConstraint.activate([
@@ -200,7 +197,7 @@ final class MainContentViewController: NSViewController {
             layoutTabBarView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             layoutTabBarView.trailingAnchor.constraint(equalTo: rightSidebarView.leadingAnchor),
             layoutTabBarView.topAnchor.constraint(equalTo: windowTabBarView.bottomAnchor),
-            layoutTabBarHeightConstraint,
+            layoutTabBarView.heightAnchor.constraint(equalToConstant: LayoutTabBarView.height),
 
             // Split tree: between the sidebars, below both tab rows, above status bar
             splitTreeView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
@@ -213,6 +210,11 @@ final class MainContentViewController: NSViewController {
             statusBarView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             statusBarView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             statusBarView.heightAnchor.constraint(equalToConstant: StatusBarView.height),
+
+            titlebarRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            titlebarRule.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            titlebarRule.bottomAnchor.constraint(equalTo: safeArea.topAnchor),
+            titlebarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
         ])
 
         buildSettingsScreen(in: root, below: safeArea.topAnchor)
@@ -326,8 +328,6 @@ final class MainContentViewController: NSViewController {
         windowTabsHidden = hidden
         windowTabBarView.isHidden = hidden
         windowTabBarHeightConstraint.constant = hidden ? 0 : WindowTabBarView.height
-        layoutTabBarView.isTopRow = hidden
-        layoutTabBarHeightConstraint.constant = LayoutTabBarView.height(isTopRow: hidden)
         updateRightSidebarToggle()
     }
 
@@ -422,6 +422,15 @@ final class MainContentViewController: NSViewController {
         statusBarView.setKeybindingMode(mode)
     }
 
+    /// The opt-in `Up h:mm:ss` readout (`statusBar.uptime`). Called whenever
+    /// settings.json is applied, so the status bar's key hints follow a
+    /// rebound palette chord or prefix key too.
+    func setStatusBarUptimeVisible(_ visible: Bool) {
+        loadViewIfNeeded()
+        statusBarView.showsUptime = visible
+        statusBarView.refreshKeyHints()
+    }
+
     func setControlKeyHeld(_ isHeld: Bool) {
         sidebarView.setControlKeyHeld(isHeld)
     }
@@ -489,7 +498,7 @@ final class MainContentViewController: NSViewController {
             splitTreeView.isHidden = true
             settingsContainerView.isHidden = false
         }
-        view.window?.makeFirstResponder(settingsCloseButton)
+        view.window?.makeFirstResponder(settingsHeaderView.closeButton)
     }
 
     /// Opens Settings on the Accounts tab, as the status bar's usage popover
@@ -609,13 +618,11 @@ final class MainContentViewController: NSViewController {
 
     private func applyTheme() {
         let theme = themeManager.currentTheme
-        view.layer?.backgroundColor = theme.backgroundColor.cgColor
+        // Shows only in the titlebar strip; everything below covers it.
+        view.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        titlebarRule.color = theme.colors.borderSubtle
         settingsContainerView?.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        settingsHeaderView?.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        settingsTitleLabel?.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
-        settingsStripeView?.colors = theme.colors.stripe
-        settingsCloseButton?.apply(theme: theme)
-        settingsHeaderRule?.color = theme.colors.borderStrong
+        settingsHeaderView?.apply(theme: theme)
         settingsViewController?.apply(theme: theme)
         dashboardViewController?.apply(theme: theme)
     }
@@ -635,34 +642,11 @@ final class MainContentViewController: NSViewController {
         settingsContainerView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(settingsContainerView, positioned: .above, relativeTo: nil)
 
-        settingsHeaderView = NSView()
-        settingsHeaderView.wantsLayer = true
-        settingsHeaderView.translatesAutoresizingMaskIntoConstraints = false
+        settingsHeaderView = SettingsHeaderView(theme: themeManager.currentTheme)
+        settingsHeaderView.onClose = { [weak self] in
+            self?.closeSettings()
+        }
         settingsContainerView.addSubview(settingsHeaderView)
-
-        let theme = themeManager.currentTheme
-        settingsTitleLabel = NSTextField(labelWithString: "Settings")
-        settingsTitleLabel.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
-        settingsTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        settingsHeaderView.addSubview(settingsTitleLabel)
-
-        settingsStripeView = RetroStripeView(layout: .slanted, colors: theme.colors.stripe)
-        settingsHeaderView.addSubview(settingsStripeView)
-
-        settingsCloseButton = RetroButton(
-            title: "Done",
-            theme: theme,
-            kind: .standard,
-            target: self,
-            action: #selector(settingsCloseClicked)
-        )
-        settingsCloseButton.keyEquivalent = "\u{1b}"
-        settingsCloseButton.keyEquivalentModifierMask = []
-        settingsCloseButton.toolTip = "Return to the workspace (Esc)"
-        settingsHeaderView.addSubview(settingsCloseButton)
-
-        settingsHeaderRule = RetroRuleView(axis: .horizontal, style: .double, color: theme.colors.borderStrong)
-        settingsHeaderView.addSubview(settingsHeaderRule)
 
         NSLayoutConstraint.activate([
             settingsContainerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -673,27 +657,7 @@ final class MainContentViewController: NSViewController {
             settingsHeaderView.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
             settingsHeaderView.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
             settingsHeaderView.topAnchor.constraint(equalTo: settingsContainerView.topAnchor),
-            settingsHeaderView.heightAnchor.constraint(equalToConstant: 52),
-
-            settingsTitleLabel.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor, constant: 20),
-            settingsTitleLabel.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-
-            settingsStripeView.leadingAnchor.constraint(equalTo: settingsTitleLabel.trailingAnchor, constant: 12),
-            settingsStripeView.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-            settingsStripeView.widthAnchor.constraint(equalToConstant: 22),
-            settingsStripeView.heightAnchor.constraint(equalToConstant: 12),
-
-            settingsCloseButton.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor, constant: -20),
-            settingsCloseButton.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-
-            settingsHeaderRule.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor),
-            settingsHeaderRule.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor),
-            settingsHeaderRule.bottomAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
         ])
-    }
-
-    @objc private func settingsCloseClicked() {
-        closeSettings()
     }
 }
 

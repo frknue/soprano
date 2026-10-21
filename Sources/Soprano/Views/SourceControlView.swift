@@ -30,13 +30,13 @@ final class SourceControlView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let branchLabel = NSTextField(labelWithString: "")
-    private var refreshButton: RetroIconButton!
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private var refreshButton: ChromeIconButton!
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let scrollView = NSScrollView()
     private let outlineView = SourceControlOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let statusSpinner = NSProgressIndicator()
-    private let toastLabel = NSTextField(wrappingLabelWithString: "")
+    private let toast: SidebarToastView
     private var toastTask: Task<Void, Never>?
 
     // MARK: State
@@ -67,6 +67,7 @@ final class SourceControlView: NSView {
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        toast = SidebarToastView(colors: themeManager.currentTheme.colors)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
@@ -364,10 +365,14 @@ final class SourceControlView: NSView {
     }
 
     private func updateToolbar() {
-        titleLabel.setRetroText(rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control", color: colors.textPrimary)
+        titleLabel.setChromeText(
+            rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control",
+            font: ChromeFont.labelStrong,
+            color: colors.textPrimary
+        )
         titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         branchLabel.stringValue = rootURL == nil ? "" : changeList.branch ?? ""
-        branchLabel.font = RetroFont.body(11)
+        branchLabel.font = ChromeFont.monoSmall
         branchLabel.textColor = colors.textMuted
         refreshButton.isEnabled = rootURL != nil
     }
@@ -391,9 +396,7 @@ final class SourceControlView: NSView {
             showsSpinner = true
         }
         statusLabel.isHidden = message == nil
-        statusLabel.stringValue = message ?? ""
-        statusLabel.font = RetroFont.body(11)
-        statusLabel.textColor = colors.textMuted
+        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "", colors: colors)
         scrollView.isHidden = message != nil || showsSpinner
         if showsSpinner {
             statusSpinner.startAnimation(nil)
@@ -403,13 +406,13 @@ final class SourceControlView: NSView {
     }
 
     private func showToast(_ message: String) {
-        toastLabel.stringValue = message
-        toastLabel.isHidden = false
+        toast.message = message
+        toast.isHidden = false
         toastTask?.cancel()
         toastTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
-            self?.toastLabel.isHidden = true
+            self?.toast.isHidden = true
         }
     }
 
@@ -555,7 +558,7 @@ final class SourceControlView: NSView {
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(branchLabel)
 
-        refreshButton = RetroIconButton(
+        refreshButton = ChromeIconButton(
             symbolName: "arrow.clockwise",
             accessibilityLabel: "Refresh Source Control",
             pointSize: 12,
@@ -614,14 +617,8 @@ final class SourceControlView: NSView {
         statusSpinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusSpinner)
 
-        toastLabel.font = RetroFont.body(11)
-        toastLabel.isHidden = true
-        toastLabel.wantsLayer = true
-        toastLabel.drawsBackground = true
-        toastLabel.isBordered = false
-        toastLabel.layer?.borderWidth = Retro.hairline
-        toastLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(toastLabel)
+        toast.isHidden = true
+        addSubview(toast)
 
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
@@ -630,13 +627,13 @@ final class SourceControlView: NSView {
             branchLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
             branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -6),
 
-            refreshButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            refreshButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
-            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
+            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight - Chrome.hairline),
             toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -649,20 +646,18 @@ final class SourceControlView: NSView {
             statusSpinner.centerXAnchor.constraint(equalTo: centerXAnchor),
             statusSpinner.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 24),
 
-            toastLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            toastLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            toastLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            toast.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            toast.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            toast.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
     }
 
     func applyTheme() {
         let colors = colors
         layer?.backgroundColor = colors.bgPanel.cgColor
-        refreshButton.setTints(normal: colors.textMuted, hover: colors.accent)
-        toolbarRule.color = colors.borderStrong
-        toastLabel.backgroundColor = colors.bgRaised
-        toastLabel.textColor = colors.textPrimary
-        toastLabel.layer?.borderColor = colors.danger.cgColor
+        refreshButton.apply(theme: themeManager.currentTheme)
+        toolbarRule.color = colors.borderSubtle
+        toast.apply(colors: colors)
         updateToolbar()
         updateStatus()
         reconfigureVisibleRows()
@@ -873,7 +868,7 @@ private final class SourceControlOutlineView: NSOutlineView {
 
 // MARK: - Cells
 
-/// Chevron, area title, and change count.
+/// Chevron, area eyebrow, and change count (`.section-heading`).
 private final class SourceControlHeaderCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("source-control-header")
 
@@ -887,22 +882,22 @@ private final class SourceControlHeaderCell: NSTableCellView {
         chevronView.imageScaling = .scaleProportionallyDown
         titleField.lineBreakMode = .byTruncatingTail
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        countField.font = RetroFont.body(10)
+        countField.font = ChromeFont.count
         countField.setContentCompressionResistancePriority(.required, for: .horizontal)
         for view in [chevronView, titleField, countField] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            chevronView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            chevronView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: FileExplorerCellView.contentInset),
             chevronView.centerYAnchor.constraint(equalTo: centerYAnchor),
             chevronView.widthAnchor.constraint(equalToConstant: 12),
             chevronView.heightAnchor.constraint(equalToConstant: 12),
             titleField.leadingAnchor.constraint(equalTo: chevronView.trailingAnchor, constant: 4),
             titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            countField.leadingAnchor.constraint(equalTo: titleField.trailingAnchor, constant: 6),
+            countField.leadingAnchor.constraint(equalTo: titleField.trailingAnchor, constant: 8),
             countField.firstBaselineAnchor.constraint(equalTo: titleField.firstBaselineAnchor),
-            countField.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
+            countField.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -FileExplorerCellView.trailingInset),
         ])
     }
 
@@ -915,16 +910,16 @@ private final class SourceControlHeaderCell: NSTableCellView {
         chevronView.image = FileExplorerCellView.symbol(
             isExpanded ? "chevron.down" : "chevron.right",
             size: 9,
-            weight: .bold
+            weight: .semibold
         )
         chevronView.contentTintColor = colors.textMuted
-        titleField.attributedStringValue = RetroText.display(section.area.title, color: colors.textMuted)
+        titleField.attributedStringValue = ChromeText.eyebrow(section.area.title, color: colors.textMuted)
         countField.stringValue = "\(section.items.count)"
         countField.textColor = colors.textMuted
     }
 }
 
-/// Type icon, name, dimmed folder, line counts, and the status letter.
+/// Type icon, name, dimmed folder, diffstat, and the bare change letter.
 private final class SourceControlChangeCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("source-control-change")
 
@@ -941,17 +936,21 @@ private final class SourceControlChangeCell: NSTableCellView {
         iconView.imageScaling = .scaleProportionallyDown
         nameField.lineBreakMode = .byTruncatingMiddle
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        directoryField.font = RetroFont.body(10)
+        directoryField.font = ChromeFont.monoSmall
         directoryField.lineBreakMode = .byTruncatingHead
         // The folder gives way before the name does.
         directoryField.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         directoryField.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
-        for field in [addedField, deletedField, letterField] {
-            field.font = RetroFont.body(10)
+        for field in [addedField, deletedField] {
+            field.font = ChromeFont.monoSmall
             field.alignment = .right
             field.setContentCompressionResistancePriority(.required, for: .horizontal)
             field.setContentHuggingPriority(.required, for: .horizontal)
         }
+        letterField.alignment = .center
+        letterField.setContentCompressionResistancePriority(.required, for: .horizontal)
+        letterField.setContentHuggingPriority(.required, for: .horizontal)
+        letterField.widthAnchor.constraint(equalToConstant: 16).isActive = true
         let trailing = NSStackView(views: [addedField, deletedField, letterField])
         trailing.orientation = .horizontal
         trailing.spacing = 6
@@ -963,7 +962,11 @@ private final class SourceControlChangeCell: NSTableCellView {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            // Children sit one 16 pt level in, under the section title.
+            iconView.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: FileExplorerCellView.contentInset + FileExplorerOutlineView.indentation
+            ),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             iconView.widthAnchor.constraint(equalToConstant: 14),
             iconView.heightAnchor.constraint(equalToConstant: 14),
@@ -973,7 +976,7 @@ private final class SourceControlChangeCell: NSTableCellView {
             directoryField.firstBaselineAnchor.constraint(equalTo: nameField.firstBaselineAnchor),
             directoryField.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -6),
             nameField.trailingAnchor.constraint(lessThanOrEqualTo: trailing.leadingAnchor, constant: -6),
-            trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            trailing.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -FileExplorerCellView.trailingInset),
             trailing.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -989,14 +992,15 @@ private final class SourceControlChangeCell: NSTableCellView {
             : FileExplorerCellView.color(for: change.status, colors: colors)
         iconView.image = FileExplorerCellView.symbol(
             FileTypeIcon.symbolName(forFileNamed: change.name),
-            size: 11,
+            size: 12,
             weight: .regular
         )
-        iconView.contentTintColor = statusColor
+        // Color lives on the letter; the icon stays muted.
+        iconView.contentTintColor = colors.textMuted
 
         let isDeleted = change.status == .deleted
         var nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: RetroFont.body(11),
+            .font: ChromeFont.label,
             .foregroundColor: isDeleted ? colors.textMuted : colors.textPrimary,
         ]
         if isDeleted {
@@ -1015,12 +1019,7 @@ private final class SourceControlChangeCell: NSTableCellView {
         deletedField.textColor = colors.danger
         deletedField.isHidden = (change.linesDeleted ?? 0) == 0
 
-        letterField.attributedStringValue = RetroText.display(
-            change.letter,
-            color: statusColor,
-            tracking: 0,
-            alignment: .right
-        )
+        letterField.attributedStringValue = FileExplorerCellView.kindLetter(change.letter, color: statusColor)
 
         toolTip = change.originalPath.map { "\(change.path)\nRenamed from \($0)" } ?? change.path
     }

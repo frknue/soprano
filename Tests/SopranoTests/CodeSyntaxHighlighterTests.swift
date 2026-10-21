@@ -121,6 +121,40 @@ struct CodeSyntaxHighlighterTests {
         #expect(CodeLanguage.forFile(named: "README") == nil)
     }
 
+    @Test func tokenKindsTakeTheFolioSyntaxColorsAndNeverTheAccent() {
+        let kinds: [SyntaxTokenKind] = [
+            .keyword, .string, .comment, .number, .type, .function,
+            .attribute, .key, .tag, .heading, .inserted, .deleted,
+        ]
+        for theme in [AppTheme.folioPaper, AppTheme.folioInk] {
+            let colors = theme.colors
+            for kind in kinds {
+                #expect(!kind.color(in: colors).isEqual(colors.accent))
+                #expect(!kind.color(in: colors).isEqual(colors.accentStrong))
+            }
+            #expect(SyntaxTokenKind.keyword.color(in: colors).isEqual(colors.syntaxKeyword))
+            #expect(SyntaxTokenKind.string.color(in: colors).isEqual(colors.syntaxString))
+            #expect(SyntaxTokenKind.comment.color(in: colors).isEqual(colors.syntaxComment))
+            #expect(SyntaxTokenKind.number.color(in: colors).isEqual(colors.syntaxNumber))
+            #expect(SyntaxTokenKind.attribute.color(in: colors).isEqual(colors.syntaxAttribute))
+            #expect(SyntaxTokenKind.type.color(in: colors).isEqual(colors.syntaxType))
+            #expect(SyntaxTokenKind.function.color(in: colors).isEqual(colors.syntaxFunction))
+        }
+        #expect(kinds.filter(\.isEmphasized) == [.keyword, .tag, .heading])
+        #expect(kinds.filter(\.isItalic) == [.comment])
+    }
+
+    @Test func emphasizedAndCommentFontsKeepTheMonospacedAdvance() {
+        let base = ChromeFont.mono
+        let advance = ("m" as NSString).size(withAttributes: [.font: base]).width
+        for kind in [SyntaxTokenKind.keyword, .comment] {
+            let font = kind.font(from: base)
+            #expect(font != base)
+            #expect(("m" as NSString).size(withAttributes: [.font: font]).width == advance)
+        }
+        #expect(SyntaxTokenKind.string.font(from: base) == base)
+    }
+
     private func highlighted(_ text: String, _ language: CodeLanguage) -> [(text: String, kind: SyntaxTokenKind)] {
         let string = text as NSString
         return CodeSyntaxHighlighter.tokens(in: text, language: language).map {

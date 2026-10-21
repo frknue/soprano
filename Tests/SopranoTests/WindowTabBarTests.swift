@@ -11,14 +11,14 @@ struct WindowTabBarTests {
         let secondWindowId = try #require(manager.createWindow())
         manager.renameWindow(secondWindowId, to: "Logs")
         let bar = makeBar(manager: manager)
-        #expect(tabs(in: bar).map(\.title) == ["1:Editor", "2:Logs"])
-        #expect(selectedTabs(in: bar).map(\.title) == ["2:Logs"])
+        #expect(tabs(in: bar).map(\.title) == ["1  Editor", "2  Logs"])
+        #expect(selectedTabs(in: bar).map(\.title) == ["2  Logs"])
 
         tabs(in: bar)[0].performClick(nil)
         #expect(manager.activeWindowId == firstWindowId)
-        #expect(selectedTabs(in: bar).map(\.title) == ["1:Editor"])
+        #expect(selectedTabs(in: bar).map(\.title) == ["1  Editor"])
         manager.renameWindow(firstWindowId, to: "Code")
-        #expect(tabs(in: bar)[0].title == "1:Code")
+        #expect(tabs(in: bar)[0].title == "1  Code")
 
         let addButton = try #require(descendants(in: bar).compactMap { $0 as? NSButton }.first {
             $0.identifier?.rawValue == "new-window-tab"
@@ -28,7 +28,7 @@ struct WindowTabBarTests {
         #expect(selectedTabs(in: bar).first?.identifier?.rawValue == "window-tab-\(manager.activeWindowId)")
         manager.closeWindow(secondWindowId)
         #expect(tabs(in: bar).count == 2)
-        #expect(tabs(in: bar)[1].title.hasPrefix("2:"))
+        #expect(tabs(in: bar)[1].title.hasPrefix("2  "))
     }
 
     @Test func theRowShowsOnlyTheCurrentSessionsWindows() throws {
@@ -38,9 +38,9 @@ struct WindowTabBarTests {
         let bar = makeBar(manager: manager)
         _ = try #require(manager.createSession(name: "Personal"))
         manager.renameWindow(manager.activeWindowId, to: "Notes")
-        #expect(tabs(in: bar).map(\.title) == ["1:Notes"])
+        #expect(tabs(in: bar).map(\.title) == ["1  Notes"])
         manager.activateSession(firstSessionId)
-        #expect(tabs(in: bar).map(\.title) == ["1:Work"])
+        #expect(tabs(in: bar).map(\.title) == ["1  Work"])
     }
 
     @Test func activityIndicatorsFollowAgentLifecycleWithoutChangingTheWindowTitle() throws {
@@ -61,7 +61,7 @@ struct WindowTabBarTests {
                 : "Window 1: Editor"
             #expect(button.toolTip == description)
             #expect(button.accessibilityLabel() == description)
-            #expect(button.title == "1:Editor")
+            #expect(button.title == "1  Editor")
             #expect(selectedTabs(in: bar) == [button])
         }
 
@@ -122,7 +122,7 @@ struct WindowTabBarTests {
         #expect(agentBadge(in: tabs(in: bar)[0]) == nil)
     }
 
-    @Test func agentBadgesStayInsideLongTabsAndPrioritizeInputAndErrorsOverWorkingAgents() throws {
+    @Test func agentBadgesStayUnboxedInsideLongTabsAndShowTheMostUrgentStatus() throws {
         let manager = AgentManager()
         manager.renameWindow(manager.activeWindowId, to: String(repeating: "Long project name ", count: 4))
         for _ in 0..<12 {
@@ -132,15 +132,23 @@ struct WindowTabBarTests {
         let paneId = manager.activePaneId
         let bar = makeBar(manager: manager, width: 260)
         let button = try #require(tabs(in: bar).first)
-        let badge = try #require(agentBadge(in: button))
+        let badge = try #require(agentBadge(in: button) as? StatusCountBadgeView)
         let theme = ThemeManager(themeId: "gruvbox-dark").currentTheme
-        #expect(badge.layer?.backgroundColor == theme.colors.success.withAlphaComponent(0.14).cgColor)
+        // A bare mark and count in the status color: no plate, no border.
+        #expect(badge.layer?.backgroundColor == nil)
+        #expect(badge.status == .working)
+        #expect(badge.mark.shape == .dot)
+        #expect(badge.mark.color == theme.colors.success)
+        #expect(badge.mark.frame.width == StatusCountBadgeView.markSize)
         #expect(descendants(in: badge).compactMap { ($0 as? NSTextField)?.stringValue } == ["12"])
         #expect(button.bounds.contains(badge.frame))
-        #expect(button.bounds.maxX - badge.frame.maxX == 12)
-        #expect(badge.frame.midY == button.bounds.midY)
+        // The pill's 8 pt trailing padding, inside the 1 pt half of the gap.
+        #expect(button.bounds.maxX - badge.frame.maxX == 9)
+        // The badge sits on whole points; a one-hairline rule leaves the tab an
+        // odd height, so it may sit half a point below the exact middle.
+        #expect(abs(badge.frame.midY - button.bounds.midY) <= 0.5)
         let titleRect = try #require(button.cell?.titleRect(forBounds: button.bounds))
-        #expect(titleRect.maxX + 8 == badge.frame.minX)
+        #expect(titleRect.maxX + 6 == badge.frame.minX)
         #expect(titleRect.width > 0)
         #expect(button.hitTest(NSPoint(
             x: button.frame.minX + badge.frame.midX,
@@ -149,11 +157,14 @@ struct WindowTabBarTests {
 
         manager.updateAgentStatus(paneId: paneId, status: .waiting)
         bar.layoutSubtreeIfNeeded()
-        #expect(badge.layer?.backgroundColor == theme.colors.yellow.withAlphaComponent(0.14).cgColor)
+        #expect(badge.status == .needsInput)
+        #expect(badge.mark.color == theme.colors.yellow)
         #expect(button.toolTip?.contains("1 needs input, 11 working") == true)
         #expect(button.cell?.titleRect(forBounds: button.bounds) == titleRect)
         manager.updateAgentStatus(paneId: paneId, status: .error)
-        #expect(badge.layer?.backgroundColor == theme.colors.danger.withAlphaComponent(0.14).cgColor)
+        #expect(badge.status == .error)
+        #expect(badge.mark.shape == .diamond)
+        #expect(badge.mark.color == theme.colors.danger)
     }
 
     @Test func overflowingTabsScrollToKeepTheKeyboardSelectedWindowVisible() throws {
@@ -176,6 +187,31 @@ struct WindowTabBarTests {
         bar.setFrameSize(NSSize(width: 260, height: WindowTabBarView.height))
         bar.layoutSubtreeIfNeeded()
         #expect(scrollView.documentVisibleRect.contains(try #require(selectedTabs(in: bar).first).frame))
+    }
+
+    @Test func newWindowFollowsTheLastTabUntilTheTabsOverflowThenStaysPinnedAndClickable() throws {
+        let manager = AgentManager()
+        let bar = makeBar(manager: manager, width: 360)
+        let scrollView = try #require(descendants(in: bar).compactMap { $0 as? NSScrollView }.first)
+        let addButton = try #require(descendants(in: bar).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "new-window-tab"
+        })
+        // One tab: `+` sits right after it and the strip keeps the full width.
+        #expect(addButton.frame.minX == tabs(in: bar)[0].frame.maxX + 4)
+        #expect(scrollView.frame.width == bar.bounds.width)
+
+        for _ in 1...10 { _ = try #require(manager.createWindow()) }
+        // Back at the first window the strip scrolls to the start, far from
+        // the last tab, yet `+` stays on screen beside the strip.
+        manager.activateWindow(number: 1)
+        bar.layoutSubtreeIfNeeded()
+        #expect(scrollView.documentVisibleRect.minX == 0)
+        #expect(bar.bounds.contains(addButton.frame))
+        #expect(addButton.frame.minX >= scrollView.frame.maxX)
+        let center = NSPoint(x: addButton.frame.midX, y: addButton.frame.midY)
+        #expect(bar.hitTest(center) === addButton)
+        addButton.performClick(nil)
+        #expect(tabs(in: bar).count == 12)
     }
 
     @Test func tabsStayVisibleAboveTheTerminalWhenTheWindowBarAndBothSidebarsAreHidden() throws {

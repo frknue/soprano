@@ -150,8 +150,13 @@ Scale for this app:
   routing, drag-and-drop, env export, copy mode); `GhosttyAppManager` owns the
   single global `ghostty_app_t`.
 - `Views/` — `SplitTreeView` renders a `SplitNode`; browser panes are WebKit.
-  `RetroChrome.swift` is the chrome design system ("Mission Control"): fonts,
-  rules, racing stripe, lamps, buttons, headings. New chrome builds on it.
+  `Chrome.swift` is the Folio design system: metrics, `ChromeFont`, `ChromeText`,
+  status marks, buttons, keycaps, mode chip, selection pills, switches, fields,
+  floating surfaces. New chrome builds on it. It depends only on AppKit,
+  `Config/Theme.swift`, and `Utilities/NSColor+Hex.swift`, because the sibling
+  apps vendor those three files. `Theme.swift` holds the palettes and derived
+  tokens; the `folio` id resolves to Folio Paper or Folio Ink from the effective
+  appearance, and the seven third-party themes are dark.
 - `Config/` — built-in defaults (agent profiles, keybindings, themes) **and** the
   user configuration layer. `ConfigStore` is the runtime authority for every
   user-facing setting: it loads `~/.config/soprano/settings.json`, resolves it
@@ -187,10 +192,27 @@ they are app state, not configuration.
 
 ## Conventions
 
-- Chrome is square (`Retro.cornerRadius`), colored only from `ThemeColors`, and
-  set in the bundled Departure Mono via `RetroFont.display` at 11/22/33 pt only
-  (other sizes blur its pixel grid); running text uses `RetroFont.body`. Never
-  rewrite strings to uppercase — the display face renders small caps.
+- Chrome is Folio. Build it from `Chrome.swift` components and color it only
+  from `ThemeColors` tokens, including the derived ones (`selection`,
+  `focusMark`, `inkButtonFill`, `attention`, …).
+- Fonts by role through `ChromeFont`: New York (`title`, `screen`, `headline`,
+  `empty`, `figure`, `serif(...)`) only at 15 pt and up; SF Pro for all other
+  chrome; SF Mono (`mono`, `monoSmall`) for paths, SHAs, code, and diffs. Text
+  is 11 pt or larger.
+- Eyebrows and status labels are the only uppercase text, and they get it from
+  `ChromeText.eyebrow` / `.status` (or `setEyebrowText` / `setStatusText`);
+  every other string keeps its own case.
+- The accent (sienna in Folio) is reserved for the keyboard-focus mark (pencil
+  tick, 2-pt rule under a focused header), the caret and terminal cursor,
+  matched characters on the selected row, a non-NORMAL `ChromeModeChip`, and
+  the `.accent` keycap tone for the Prefix cap and ⌃-jump digits. Primary
+  buttons are ink (`ChromeButton` `.ink`); destructive ones are `.danger`.
+- Keycaps follow K1: one cap per chord (`⌘1`, `⇧⌘P`, `⌃A`), a prefix sequence
+  as separate caps (`⌃A` then `P`, via `ChromeKeycapGroupView`), letter legends
+  uppercase (`J`, `⇧J`), `esc` lowercase.
+- Radii come from `Chrome.Radius`: floating panels 12, popovers 10, cards 8,
+  controls and selection 6, keycaps and chips 4; tiled panes stay square.
+- Motion is opacity-only fades of 150 ms or less, and none under Reduce Motion.
 - Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`), not XCTest,
   with long sentence-style test names. One `struct …Tests` per file in
   `Tests/SopranoTests/`.

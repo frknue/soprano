@@ -236,8 +236,8 @@ final class DiffColumn {
         self.colors = colors
         textView.colors = colors
         textView.backgroundColor = colors.bgBase
-        textView.insertionPointColor = colors.accent
-        textView.selectedTextAttributes = [.backgroundColor: colors.accent.withAlphaComponent(0.3)]
+        textView.insertionPointColor = colors.caret
+        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
         scrollView.backgroundColor = colors.bgBase
         ruler.colors = colors
         textStorage.beginEditing()
@@ -247,7 +247,7 @@ final class DiffColumn {
 
     private func applyAttributes() {
         guard let colors else { return }
-        let font = RetroFont.body(12)
+        let font = ChromeFont.mono
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = []
         paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
@@ -258,22 +258,27 @@ final class DiffColumn {
         paragraph.maximumLineHeight = lineHeight
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: colors.textPrimary,
+            .foregroundColor: colors.syntaxPlain,
             .paragraphStyle: paragraph,
         ]
         textView.typingAttributes = attributes
         let length = textStorage.length
         textStorage.setAttributes(attributes, range: NSRange(location: 0, length: length))
         guard let side else { return }
+        // Semibold and italic SF Mono keep the regular advance, so rows and
+        // columns never shift.
+        let emphasizedFont = SyntaxTokenKind.keyword.font(from: font)
+        let italicFont = SyntaxTokenKind.comment.font(from: font)
         for token in side.tokens where NSMaxRange(token.range) <= length {
-            textStorage.addAttribute(
-                .foregroundColor,
-                value: EditorPaneView.color(for: token.kind, in: colors),
-                range: token.range
-            )
+            textStorage.addAttribute(.foregroundColor, value: token.kind.color(in: colors), range: token.range)
+            if token.kind.isEmphasized {
+                textStorage.addAttribute(.font, value: emphasizedFont, range: token.range)
+            } else if token.kind.isItalic {
+                textStorage.addAttribute(.font, value: italicFont, range: token.range)
+            }
         }
-        let addedEmphasis = colors.success.withAlphaComponent(0.32)
-        let removedEmphasis = colors.danger.withAlphaComponent(0.32)
+        let addedEmphasis = colors.diffAddWord
+        let removedEmphasis = colors.diffDeleteWord
         for emphasis in side.emphasis where NSMaxRange(emphasis.range) <= length {
             textStorage.addAttribute(
                 .backgroundColor,
@@ -425,52 +430,30 @@ final class DiffTextView: NSTextView {
         layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { fragment, _, _, glyphs, _ in
             let character = layoutManager.characterIndexForGlyph(at: glyphs.location)
             guard let row = self.row(containing: character) else { return }
-            let kind = self.rowKinds[row]
-            guard let tint = Self.tint(for: kind, colors: colors) else { return }
+            guard let tint = Self.tint(for: self.rowKinds[row], colors: colors) else { return }
             let rowRect = NSRect(x: rect.minX, y: fragment.minY + origin.y, width: rect.width, height: fragment.height)
             tint.setFill()
             rowRect.fill(using: .sourceOver)
-            if kind == .filler {
-                Self.drawHatch(in: rowRect, color: colors.borderSubtle)
-            }
         }
     }
 
+    /// Row washes: green or pink for changes, a flat 3 % ink for fillers.
     static func tint(for kind: GitDiffRow.Kind, colors: ThemeColors) -> NSColor? {
         switch kind {
         case .context: nil
-        case .added: colors.success.withAlphaComponent(0.14)
-        case .removed: colors.danger.withAlphaComponent(0.14)
-        case .filler: colors.textMuted.withAlphaComponent(0.06)
+        case .added: colors.diffAdd
+        case .removed: colors.diffDelete
+        case .filler: colors.diffFiller
         }
-    }
-
-    /// Thin diagonal stripes, placed by absolute position so stacked filler
-    /// rows join into one hatched block.
-    private static func drawHatch(in rect: NSRect, color: NSColor) {
-        let spacing: CGFloat = 8
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: rect).addClip()
-        let path = NSBezierPath()
-        path.lineWidth = 1
-        var step = floor((rect.minX - rect.maxY) / spacing)
-        let lastStep = ceil((rect.maxX - rect.minY) / spacing)
-        while step <= lastStep {
-            let offset = step * spacing
-            path.move(to: NSPoint(x: offset + rect.minY, y: rect.minY))
-            path.line(to: NSPoint(x: offset + rect.maxY, y: rect.maxY))
-            step += 1
-        }
-        color.setStroke()
-        path.stroke()
-        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
 // MARK: - Gutter
 
-/// Line numbers beside each row, with the row's tint: old and new numbers
-/// and a +/− marker inline, the side's own number side by side.
+/// Muted line numbers beside each row, with the row's wash and a Semibold
+/// +/− marker in its status color: old and new numbers inline, the side's own
+/// number side by side. The current change's first row carries the 2×14
+/// pencil tick at the gutter's leading edge.
 final class DiffGutterRuler: NSRulerView {
     private weak var diffTextView: DiffTextView?
     private var side: DiffRenderedSide?
@@ -478,9 +461,19 @@ final class DiffGutterRuler: NSRulerView {
     var colors: ThemeColors? {
         didSet { needsDisplay = true }
     }
+    /// The first row of the change being read; nil hides the tick.
+    var currentChangeRow: Int? {
+        didSet {
+            guard currentChangeRow != oldValue else { return }
+            needsDisplay = true
+        }
+    }
 
-    private let font = RetroFont.body(10)
+    private let font = ChromeFont.monoSmall
+    private let markerFont = ChromeFont.monospaced(size: 11, weight: .semibold)
     private let padding: CGFloat = 6
+    /// Numbers start clear of the pencil tick.
+    private let leading = Chrome.tickInset + Chrome.tickWidth + 4
 
     init(textView: DiffTextView) {
         self.diffTextView = textView
@@ -500,22 +493,19 @@ final class DiffGutterRuler: NSRulerView {
         ("8" as NSString).size(withAttributes: [.font: font]).width
     }
 
-    private var isInline: Bool { side?.gutter == .inline }
-
-    /// Right edges of the old and new number columns in the inline gutter.
-    private var inlineColumns: (old: CGFloat, new: CGFloat, marker: CGFloat) {
+    /// Right edges of the number columns and the marker column. Inline shows
+    /// old and new numbers; a side shows only its own.
+    private var columns: (old: CGFloat, new: CGFloat, marker: CGFloat) {
         let width = CGFloat(digits) * digitWidth
-        let old = padding + width
-        let new = old + padding + width
-        return (old, new, new + padding)
+        let old = leading + width
+        let new = side?.gutter == .inline ? old + padding + width : old
+        return (old, new, new + padding + digitWidth)
     }
 
     func show(_ side: DiffRenderedSide?) {
         self.side = side
         digits = max(3, String(side?.largestNumber ?? 0).count)
-        let thickness = isInline
-            ? ceil(inlineColumns.marker + digitWidth + padding + 1)
-            : ceil(CGFloat(digits) * digitWidth + 18)
+        let thickness = ceil(columns.marker + padding + Chrome.hairline)
         if thickness != ruleThickness {
             ruleThickness = thickness
         }
@@ -549,7 +539,7 @@ final class DiffGutterRuler: NSRulerView {
         let characters = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         guard var row = textView.row(containing: characters.location) else { return }
         let end = NSMaxRange(characters)
-        let columns = inlineColumns
+        let columns = columns
         let numberAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.textMuted]
 
         func drawLabel(_ label: String, rightEdge: CGFloat, in rowRect: NSRect, attributes: [NSAttributedString.Key: Any]) {
@@ -580,27 +570,37 @@ final class DiffGutterRuler: NSRulerView {
                 if let new = numbers.new {
                     drawLabel(String(new), rightEdge: columns.new, in: rowRect, attributes: numberAttributes)
                 }
-                let marker: (String, NSColor)? = switch kind {
-                case .added: ("+", colors.success)
-                case .removed: ("−", colors.danger)
-                case .context, .filler: nil
-                }
-                if let marker {
-                    drawLabel(
-                        marker.0,
-                        rightEdge: columns.marker + digitWidth,
-                        in: rowRect,
-                        attributes: [.font: font, .foregroundColor: marker.1]
-                    )
-                }
             case .old:
                 if let old = numbers.old {
-                    drawLabel(String(old), rightEdge: ruleThickness - 9, in: rowRect, attributes: numberAttributes)
+                    drawLabel(String(old), rightEdge: columns.old, in: rowRect, attributes: numberAttributes)
                 }
             case .new:
                 if let new = numbers.new {
-                    drawLabel(String(new), rightEdge: ruleThickness - 9, in: rowRect, attributes: numberAttributes)
+                    drawLabel(String(new), rightEdge: columns.new, in: rowRect, attributes: numberAttributes)
                 }
+            }
+            let marker: (String, NSColor)? = switch kind {
+            case .added: ("+", colors.success)
+            case .removed: ("−", colors.danger)
+            case .context, .filler: nil
+            }
+            if let marker {
+                drawLabel(
+                    marker.0,
+                    rightEdge: columns.marker,
+                    in: rowRect,
+                    attributes: [.font: markerFont, .foregroundColor: marker.1]
+                )
+            }
+            if row == currentChangeRow {
+                let tick = NSRect(
+                    x: Chrome.tickInset,
+                    y: floor(rowRect.midY - Chrome.tickHeight / 2),
+                    width: Chrome.tickWidth,
+                    height: Chrome.tickHeight
+                )
+                colors.pencilTick.setFill()
+                NSBezierPath(roundedRect: tick, xRadius: 1, yRadius: 1).fill()
             }
             row += 1
         }
