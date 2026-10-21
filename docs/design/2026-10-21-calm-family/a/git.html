@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Soprano Git — Quiet</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+
+/* ---- artboard: the Soprano Git window content, 1512×982 ---- */
+html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+body { display: flex; flex-direction: column; background: var(--bg-base); color: var(--text-primary); font: var(--type-row); }
+
+/* tab bar: traffic lights inset, repo tabs from x=78 (current-tab idiom) */
+.tabbar .traffic { align-self: center; margin: 0 14px 0 12px; }
+.tab { min-width: 108px; }
+.tab .tab-index { color: var(--text-muted); margin-right: 6px; }
+.tabbar > .tab-add { margin-left: 6px; }
+
+/* toolbar sits on the surface the selected tab controls, so the tab flows into it */
+.toolbar { background: var(--bg-base); }
+.toolbar .repo { font: var(--type-row-strong); color: var(--text-primary); }
+.toolbar .btn-plain { gap: 8px; }
+.toolbar .spacer { flex: 1; }
+.toolbar .btn-plain .icon { --icon-size: 13px; color: var(--text-muted); }
+
+/* three regions */
+.workspace { flex: 1; min-height: 0; display: flex; }
+.center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+.commit-panel { flex: none; width: var(--git-w-commit-panel); }
+.commit-panel .panel-header .hint { margin-left: auto; font: var(--type-label); }
+
+/* commit detail */
+.detail { padding: 12px 12px 0; }
+.detail .summary { font: var(--type-title); color: var(--text-primary); margin: 0; }
+.detail .refs-line { display: flex; gap: 4px; margin: 10px 0 12px; }
+.meta { display: grid; grid-template-columns: 60px 1fr; row-gap: 6px; margin: 0; font: var(--type-row); }
+.meta dt { font: var(--type-label); color: var(--text-muted); }
+.meta dd { margin: 0; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .sha-link { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.commit-panel .section-heading { padding-top: 20px; }
+.commit-panel .list { padding-top: 0; }
+.commit-panel .list .row { gap: 6px; padding: 0 6px; }
+.file-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-path .dir { color: var(--text-muted); }
+.file-path .name { font-weight: 500; }
+
+/* status bar */
+.statusbar .status { gap: 6px; }
+.statusbar .hints { gap: 14px; }
+.statusbar .branch { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .branch .icon { --icon-size: 11px; }
+
+
+/* ---- refs sidebar ---- */
+.refs { flex: none; width: 260px; }
+.refs .search-field { margin: 8px 10px 2px; }
+.refs .search-field .field-input { font: var(--type-row); }
+.refs .section-heading { padding: 14px 12px 4px 12px; gap: 6px; }
+.refs .section-heading .disclosure { margin-left: -2px; }
+.refs .list { padding: 0; }
+.refs .row { gap: 6px; }
+.refs .row.lvl-1 { padding-left: 20px; }
+.refs .row.lvl-2 { padding-left: 32px; }
+.refs .row .disclosure:empty { width: 12px; }
+.refs .row.is-current > .icon { color: var(--text-primary); }
+.refs .row.is-current .row-title { font: var(--type-row-strong); }
+
+/* ---- commit graph ---- */
+.graph-cols { --gcols: 210px 52px minmax(0, 1fr) 64px 40px 64px; }
+.graph-head { display: grid; grid-template-columns: var(--gcols); padding: 0 4px; gap: 0; }
+.graph-head > span { padding: 0 8px; white-space: nowrap; }
+.graph-head > span:nth-child(3) { padding-left: 4px; }
+.graph-rows { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.graph-rows .table-row { grid-template-columns: var(--gcols); height: 26px; padding: 0; column-gap: 0; }
+.graph-rows .table-row > * { padding: 0 8px; }
+.graph-rows .table-row > .graph-slot { padding: 0; }
+.graph-rows .table-row > .msg { padding: 0 4px; }
+.graph-rows .table-row > .cell-muted { font: var(--type-meta); font-variant-numeric: tabular-nums; }
+.ref-cell { align-self: stretch; display: flex; align-items: center; padding-right: 0 !important; }
+.ref-cell .ref-pill { flex: 0 1 auto; min-width: 0; }
+.ref-cell .ref-pill > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ref-cell .ref-line { align-self: flex-start; margin-top: 12px; flex: 1 0 6px; height: 1px; background: var(--lane); opacity: .7; }
+.graph-svg { position: absolute; left: 214px; top: 0; z-index: 2; pointer-events: none; overflow: visible; }
+.graph-svg .ref-link { stroke: var(--lane); stroke-width: 1; opacity: .7; }
+
+</style>
+</head>
+<body>
+<div class="tabbar">
+  <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+  <div class="tab is-selected"><span class="tab-title"><span class="tab-index">1</span>soprano</span></div>
+  <button class="btn-icon tab-add" title="New tab"><i data-icon="plus"></i></button>
+</div>
+<div class="toolbar">
+  <span class="repo">soprano</span>
+  <span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑0</span><span class="behind">↓0</span></span>
+  <div class="toolbar-group"><button class="btn-plain">Pull <span class="hint-key">⌃A P</span></button><button class="btn-plain">Push <span class="hint-key">⌃A ⇧P</span></button></div>
+  <div class="toolbar-group"><button class="btn-plain">Branch <span class="hint-key">⌘B</span></button></div>
+  <div class="toolbar-group"><button class="btn-plain is-disabled">Stash <span class="hint-key">⌃A S</span></button><button class="btn-plain is-disabled">Pop <span class="hint-key">⌃A ⇧S</span></button></div>
+  <span class="spacer"></span>
+  <button class="btn-plain"><i data-icon="search"></i>Commands <span class="hint-key">⌘P</span></button>
+</div>
+<div class="workspace">
+  <aside class="sidebar refs region">
+    <div class="panel-header">Refs</div>
+    <div class="search-field"><i data-icon="search"></i><span class="field-input placeholder">Filter</span><kbd class="kbd">/</kbd></div>
+    <div class="section-heading"><span class="disclosure"><i data-icon="chevron-down"></i></span>Local<span class="row-count">7</span></div>
+    <div class="list">
+      <div class="row lvl-0"><span class="disclosure"><i data-icon="chevron-down"></i></span><i data-icon="folder"></i><span class="row-title">docs</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">readme-refresh</span></div>
+      <div class="row lvl-0"><span class="disclosure"><i data-icon="chevron-down"></i></span><i data-icon="folder"></i><span class="row-title">feat</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">changelog-versioning</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">dashboard-chat-view</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">window-agent-indicator</span></div>
+      <div class="row lvl-0"><span class="disclosure"><i data-icon="chevron-down"></i></span><i data-icon="folder"></i><span class="row-title">wt</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">20261009-000421</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">20261009-005256</span></div>
+      <div class="row lvl-0 is-current"><span class="disclosure"></span><i data-icon="check"></i><span class="row-title">main</span></div>
+    </div>
+    <div class="section-heading"><span class="disclosure"><i data-icon="chevron-down"></i></span>Remote<span class="row-count">2</span></div>
+    <div class="list">
+      <div class="row lvl-0"><span class="disclosure"><i data-icon="chevron-down"></i></span><i data-icon="cloud"></i><span class="row-title">origin</span></div>
+      <div class="row lvl-1"><span class="disclosure"><i data-icon="chevron-down"></i></span><i data-icon="folder"></i><span class="row-title">feat</span></div>
+      <div class="row lvl-2"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">window-agent-indicator</span></div>
+      <div class="row lvl-1"><span class="disclosure"></span><i data-icon="git-branch"></i><span class="row-title">main</span></div>
+    </div>
+    <div class="section-heading"><span class="disclosure"><i data-icon="chevron-down"></i></span>Tags<span class="row-count">5</span></div>
+    <div class="list">
+      <div class="row lvl-0"><span class="disclosure"></span><i data-icon="tag"></i><span class="row-title">v0.3.0</span></div>
+      <div class="row lvl-0"><span class="disclosure"></span><i data-icon="tag"></i><span class="row-title">v0.3.1</span></div>
+      <div class="row lvl-0"><span class="disclosure"></span><i data-icon="tag"></i><span class="row-title">v0.4.0</span></div>
+      <div class="row lvl-0"><span class="disclosure"></span><i data-icon="tag"></i><span class="row-title">v0.5.0</span></div>
+      <div class="row lvl-0"><span class="disclosure"></span><i data-icon="tag"></i><span class="row-title">v0.6.0</span></div>
+    </div>
+    <div class="section-heading"><span class="disclosure"></span>Stashes<span class="row-count">0</span></div>
+  </aside>
+
+  <main class="center graph-cols region is-focused">
+    <div class="panel-header is-focused graph-head"><span>Branch / tag</span><span>Graph</span><span>Commit message</span><span>Author</span><span>Date</span><span>SHA</span></div>
+    <div class="table is-focused graph-rows">
+      <svg class="graph-svg" width="64" height="884" viewBox="0 0 64 884" aria-hidden="true">
+        <g class="lane-0"><line class="ref-link" x1="0" y1="12.5" x2="6" y2="12.5"/></g>
+        <g class="lane-0"><line class="ref-link" x1="0" y1="246.5" x2="9" y2="246.5"/></g>
+        <g class="lane-1"><line class="ref-link" x1="0" y1="454.5" x2="23" y2="454.5"/></g>
+        <g class="lane-2"><line class="ref-link" x1="0" y1="506.5" x2="37" y2="506.5"/></g>
+        <g class="lane-0"><path class="edge" d="M14 13 V884"/></g>
+        <g class="lane-1"><path class="edge" d="M28 455 V507 C28 517 14 523 14 533"/></g>
+        <g class="lane-2"><path class="edge" d="M42 507 C42 517 14 523 14 533"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="13" r="5"/><circle class="node-head-ring" cx="14" cy="13" r="7"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="39" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="65" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="91" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="117" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="143" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="169" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="195" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="221" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="247" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="273" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="299" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="325" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="351" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="377" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="403" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="429" r="5"/></g>
+        <g class="lane-1"><circle class="node" cx="28" cy="455" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="481" r="5"/></g>
+        <g class="lane-2"><circle class="node" cx="42" cy="507" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="533" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="559" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="585" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="611" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="637" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="663" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="689" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="715" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="741" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="767" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="793" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="819" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="845" r="5"/></g>
+        <g class="lane-0"><circle class="node" cx="14" cy="871" r="5"/></g>
+      </svg>
+      <div class="table-row is-selected"><div class="ref-cell lane-0"><span class="ref-pill lane-0 is-head" title="main"><i data-icon="check"></i><i data-icon="laptop"></i><i data-icon="cloud"></i><span>main</span></span><span class="ref-line"></span></div><div class="graph-slot"></div><div class="msg">feat: add Collapse All Windows button to the left sidebar</div><div class="cell-muted">frknue</div><div class="cell-muted">20h</div><div class="cell-muted">d78be48</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">docs: document the Swift toolchain and SDK that build on macOS 27</div><div class="cell-muted">frknue</div><div class="cell-muted">1d</div><div class="cell-muted">f55ec9e</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: Tab and Shift-Tab move focus in and out of the dashboard reply field</div><div class="cell-muted">frknue</div><div class="cell-muted">1d</div><div class="cell-muted">653edce</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: Reveal selected windows in the sidebar</div><div class="cell-muted">frknue</div><div class="cell-muted">4d</div><div class="cell-muted">eb9df62</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: reduce idle terminal rendering and sync window focus</div><div class="cell-muted">frknue</div><div class="cell-muted">4d</div><div class="cell-muted">a3df281</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: open the active tab&#x27;s repository in Soprano Git (#17)</div><div class="cell-muted">frknue</div><div class="cell-muted">5d</div><div class="cell-muted">1ff140c</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: clear button hover when a cached tab detaches or hides it (#18)</div><div class="cell-muted">frknue</div><div class="cell-muted">5d</div><div class="cell-muted">8da9b7e</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">chore: remove Soprano Desktop (#19)</div><div class="cell-muted">frknue</div><div class="cell-muted">5d</div><div class="cell-muted">bb06fac</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: show running commands in tabs and sidebar</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">49af635</div></div>
+      <div class="table-row"><div class="ref-cell lane-0"><span class="ref-pill lane-0" title="feat/dashboard-chat-view"><i data-icon="laptop"></i><span>feat/dashboard-chat-view</span></span><span class="ref-line"></span></div><div class="graph-slot"></div><div class="msg">feat: add Soprano Desktop, a Mission Control theme for macOS (#16)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">9a84512</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: show agents as a live timeline in the Agent Dashboard (#15)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">5f31ecf</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: add a Source Control tab with Orca-style git diffs (#14)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">f6904b5</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: hide window tabs by default (#13)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">c542dc6</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: keep zsh startup files intact when Ctrl+C hits the fallback shell</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">9fbe92d</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: replace window depth with tabs (#12)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">6ff649b</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: manage several Claude and Codex accounts with usage (#11)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">ca677a5</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: close only the pane&#x27;s tab from the header × inside depth layers (#10)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">af679c3</div></div>
+      <div class="table-row"><div class="ref-cell lane-1"><span class="ref-pill lane-1" title="wt/20261009-005256"><i data-icon="laptop"></i><span>wt/20261009-005256</span></span><span class="ref-line"></span></div><div class="graph-slot"></div><div class="msg">fix: close only the pane&#x27;s tab from the header ×</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">210d40d</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: stop busy agents from hanging the dashboard and pegging the CPU (#9)</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">b04a5a8</div></div>
+      <div class="table-row"><div class="ref-cell lane-2"><span class="ref-pill lane-2" title="wt/20261009-000421"><i data-icon="laptop"></i><span>wt/20261009-000421</span></span><span class="ref-line"></span></div><div class="graph-slot"></div><div class="msg">fix: stop busy agents from hanging the dashboard</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">4cb9594</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: open files in an in-app editor split and toggle the right sidebar with ⌘L</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">0a135bb</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: add a right sidebar with Orca&#x27;s file explorer</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">e0898e0</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: hide the window tab bar scrollbar</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">3925a8a</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: add omp web workspace</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">ead7fbc</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: navigate panes by geometry instead of tree order</div><div class="cell-muted">frknue</div><div class="cell-muted">1w</div><div class="cell-muted">c2b0088</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: fall back to the login shell when an agent exits</div><div class="cell-muted">frknue</div><div class="cell-muted">2w</div><div class="cell-muted">0315922</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: allow AppleScript from programs in panes</div><div class="cell-muted">frknue</div><div class="cell-muted">2w</div><div class="cell-muted">6f850ec</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: notify when omp asks a question</div><div class="cell-muted">frknue</div><div class="cell-muted">2w</div><div class="cell-muted">850faa4</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: detach quit shell agents and launch restored agents via login shell</div><div class="cell-muted">frknue</div><div class="cell-muted">3w</div><div class="cell-muted">3aeb33e</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: Mission Control retro redesign with optional CRT effect</div><div class="cell-muted">frknue</div><div class="cell-muted">3w</div><div class="cell-muted">52024a5</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: keep manually launched omp visible</div><div class="cell-muted">frknue</div><div class="cell-muted">4w</div><div class="cell-muted">76d26a9</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: add omp (Oh My Pi) agent launcher and ambient extension (#8)</div><div class="cell-muted">frknue</div><div class="cell-muted">4w</div><div class="cell-muted">06e773c</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">feat: resume agent conversations when reopening Soprano</div><div class="cell-muted">frknue</div><div class="cell-muted">6w</div><div class="cell-muted">9561914</div></div>
+      <div class="table-row"><div></div><div class="graph-slot"></div><div class="msg">fix: open Markdown in the calling terminal pane</div><div class="cell-muted">frknue</div><div class="cell-muted">6w</div><div class="cell-muted">2a50b18</div></div>
+    </div>
+  </main>
+  <aside class="sidebar is-right commit-panel region">
+    <div class="panel-header">Commit d78be48<span class="hint"><kbd class="kbd">Y</kbd>copy</span></div>
+    <div class="detail">
+      <p class="summary">feat: add Collapse All Windows button to the left sidebar</p>
+      <div class="refs-line"><span class="ref-pill lane-0 is-head"><i data-icon="check"></i><i data-icon="laptop"></i>main</span><span class="ref-pill lane-0"><i data-icon="cloud"></i>origin/main</span></div>
+      <dl class="meta">
+        <dt>Author</dt><dd>frknue <span class="fg-muted">&lt;furkan.uelker@hotmail.com&gt;</span></dd>
+        <dt>Date</dt><dd>2026-10-20 21:48 <span class="fg-muted">· 20h ago</span></dd>
+        <dt>Parent</dt><dd><span class="sha-link">f55ec9e</span></dd>
+      </dl>
+    </div>
+    <div class="section-heading">Files<span class="row-count">4</span></div>
+    <div class="list">
+      <div class="row"><span class="kind kind-M">M</span><span class="file-path"><span class="name">CHANGELOG.md</span></span><span class="diffstat"><span class="add">+2</span> <span class="del">−0</span></span></div>
+      <div class="row"><span class="kind kind-M">M</span><span class="file-path"><span class="dir">…/Controllers/</span><span class="name">AgentManager.swift</span></span><span class="diffstat"><span class="add">+10</span> <span class="del">−0</span></span></div>
+      <div class="row"><span class="kind kind-M">M</span><span class="file-path"><span class="dir">Sources/Soprano/Views/</span><span class="name">SidebarView.swift</span></span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+      <div class="row"><span class="kind kind-A">A</span><span class="file-path"><span class="dir">…/</span><span class="name">SidebarCollapseAllTests.swift</span></span><span class="diffstat"><span class="add">+57</span> <span class="del">−0</span></span></div>
+    </div>
+  </aside>
+
+</div>
+<div class="statusbar is-git">
+  <span class="mode-chip is-normal">Normal</span>
+  <span class="status"><i class="status-dot sm is-working"></i><span class="fg-primary">Ready</span></span>
+  <span class="statusbar-spacer"></span>
+  <span class="hints"><span class="hint"><span class="hint-key">⌘P</span>commands</span><span class="hint"><span class="hint-key">⌃A</span>prefix</span><span class="hint"><span class="hint-key">?</span>shortcuts</span></span>
+  <span class="divider-v"></span>
+  <span class="branch"><i data-icon="git-branch"></i>main · 204 commits</span>
+</div>
+</body>
+</html>

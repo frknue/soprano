@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Soprano">
+  <title>Soprano</title>
+  <defs>
+    <linearGradient id="sq" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f5f7"/>
+      <stop offset="1" stop-color="#e4e7eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sq)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#000000" stroke-opacity="0.10" stroke-width="1"/>
+  <rect x="232" y="232" width="250" height="560" rx="64" fill="#2a2e34" fill-opacity="0.9"/>
+  <rect x="522" y="232" width="270" height="260" rx="64" fill="#c0550c"/>
+  <rect x="522" y="532" width="270" height="260" rx="64" fill="#2a2e34" fill-opacity="0.9"/>
+</svg>

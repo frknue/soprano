@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio · Soprano · Agent Dashboard</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  .app { display: flex; flex-direction: column; height: 100%; }
+
+  /* the overlay fills everything below the titlebar */
+  .dash {
+    flex: 1; min-height: 0;
+    display: grid;
+    grid-template-columns: 440px 1fr;
+    grid-template-rows: var(--h-dash-header) auto 1fr auto;
+    background: var(--bg-base);
+  }
+
+  /* ---------- header ---------- */
+  .dash-head {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 var(--gutter-page);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .dash-head .t-screen { color: var(--text-primary); }
+  .dash-head .subtitle { font: var(--type-meta); color: var(--text-muted); padding-top: 5px; }
+  .dash-head .btn { margin-left: auto; }
+
+  /* ---------- summary figures ---------- */
+  .summary {
+    grid-column: 1 / -1;
+    display: grid; grid-template-columns: 416px repeat(3, 1fr); /* 2nd hairline sits on the list column's rule (x = 440) */
+    padding: 20px var(--gutter-page) 18px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .summary .stat { min-width: 0; gap: 2px; }
+  .summary .stat + .stat { padding-left: 24px; border-left: 1px solid var(--border-subtle); }
+  .summary .stat-label { gap: 7px; }
+  .summary .stat-label .status-dot { --status-mark: 7px; }
+  .summary .stat-label .status-dot.is-error { width: 8px; height: 8px; }
+
+  /* ---------- agent list ---------- */
+  .agents {
+    display: flex; flex-direction: column; min-height: 0;
+    border-right: 1px solid var(--border-subtle);
+    padding-top: 12px;
+  }
+  .agents .section-heading { padding: 0 16px; }
+  .agents .list { gap: 2px; padding: 2px 0; }
+  /* ---------- detail ---------- */
+  .detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .detail-head {
+    display: flex; align-items: flex-start; gap: 16px;
+    padding: 20px var(--gutter-page) 18px;
+  }
+  .detail-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .detail-title { display: flex; align-items: center; gap: 10px; }
+  .detail-title .t-headline { color: var(--text-primary); }
+  .detail-title .t-num { font: var(--type-meta); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .detail-loc { font: var(--type-meta); color: var(--text-muted); padding-left: 18px; }
+  .detail-loc code { font: var(--type-mono-sm); }
+  .detail-actions { margin-left: auto; display: inline-flex; gap: 8px; padding-top: 1px; }
+
+  .timeline-head {
+    display: flex; align-items: center; gap: 12px;
+    margin: 0 var(--gutter-page); height: 28px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .timeline-head .t-eyebrow { color: var(--text-muted); }
+  .timeline-head .hints { margin-left: auto; gap: 14px; }
+  .timeline-head .live { font: var(--type-status); letter-spacing: var(--track-status); text-transform: uppercase; color: var(--success); }
+
+  /* "now" strip: directly under the TIMELINE heading (AgentDashboardViewController.swift:1184), 26 px,
+     tinted in the activity tone (Working → success): tone edge + tone text; no fill, so it stays one hairline box */
+  .now {
+    display: flex; align-items: center; gap: 6px;
+    height: 26px; margin: 10px var(--gutter-page) 0; padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--success) 45%, transparent); border-radius: var(--radius-control);
+    font: var(--type-label); color: var(--success); white-space: nowrap; min-width: 0;
+  }
+  .now .name { font-weight: 500; }
+  .now code { font: var(--type-mono); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .now .t-num { font-variant-numeric: tabular-nums; }
+
+  .timeline {
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 16px var(--gutter-page) 0;
+  }
+  .tl { display: grid; grid-template-columns: 20px 1fr; column-gap: 6px; align-items: baseline; }
+  .tl-glyph { font: 500 13px/18px var(--font-sans); text-align: center; color: var(--text-muted); }
+  .tl-glyph.is-ok { color: var(--success); }
+  .tl-glyph.is-run { color: var(--text-primary); }
+  .tl-line { display: flex; align-items: baseline; gap: 10px; min-width: 0; font: var(--type-row); white-space: nowrap; }
+  .tl-name { font-weight: 500; color: var(--text-primary); min-width: 56px; }
+  .tl-arg { font: var(--type-mono); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+  .tl-meta { font: var(--type-meta); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .tl-thinking { font: italic 400 13px/18px var(--font-sans); color: var(--text-muted); }
+
+  .tl-you {
+    background: var(--bg-panel);
+    border-radius: var(--radius-card);
+    padding: 10px 14px 12px;
+    margin-bottom: 4px;
+  }
+  .tl-you-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+  .tl-you-head .t-meta { font-variant-numeric: tabular-nums; }
+  .tl-you-body { font: 400 13px/19px var(--font-sans); color: var(--text-primary); }
+
+  .tl-diff {
+    grid-column: 2; margin-top: 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    overflow: hidden;
+  }
+  .tl-diff .diff-row { grid-template-columns: 48px 18px 1fr; }
+  .tl-diff .diff-row .code { white-space: pre; }
+
+  /* ---------- bottom band: key hints | reply ---------- */
+  .keys {
+    display: flex; align-items: center;
+    padding: 0 16px 0 20px;
+    border-top: 1px solid var(--border-subtle);
+    border-right: 1px solid var(--border-subtle);
+  }
+  .keys .hints { gap: 16px; }
+  .reply {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 16px var(--gutter-page) 16px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .reply-row { display: flex; align-items: center; gap: 8px; }
+  .reply-row .field { flex: 1; height: 30px; padding: 0 10px; font: var(--type-row); }
+  .reply-row .btn-primary { height: 30px; padding: 0 16px; }
+  .reply .t-meta { padding-left: 2px; }
+</style>
+</head>
+<body class="artboard">
+<div class="app">
+  <div class="titlebar">
+    <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+  </div>
+
+  <main class="dash">
+    <!-- header -->
+    <header class="dash-head">
+      <h1 class="t-screen">Agent Dashboard</h1>
+      <span class="subtitle">Monitoring 4 agents across 3 windows</span>
+      <button class="btn">Done <span class="kbd">esc</span></button>
+    </header>
+
+    <!-- summary figures: unboxed, mark carries the state -->
+    <section class="summary">
+      <div class="stat"><span class="stat-value">4</span><span class="stat-label">Total</span></div>
+      <div class="stat"><span class="stat-value">1</span><span class="stat-label"><i class="status-dot is-working"></i>Working</span></div>
+      <div class="stat"><span class="stat-value">1</span><span class="stat-label"><i class="status-dot is-needs-input"></i>Needs input</span></div>
+      <div class="stat"><span class="stat-value">1</span><span class="stat-label"><i class="status-dot is-error"></i>Errors</span></div>
+    </section>
+
+    <!-- agent list (keyboard focus) -->
+    <section class="agents">
+      <div class="section-heading">Agents <span class="section-count">4</span></div>
+      <div class="list is-focused">
+        <div class="row agent is-selected">
+          <div class="a-line">
+            <i class="status-dot is-working"></i>
+            <span class="a-title">soprano<span class="sep">▸</span><span class="who">Claude Code</span></span>
+            <span class="a-time">4m 12s</span>
+            <span class="a-trail status-label is-working">Working</span>
+          </div>
+          <div class="a-sub">
+            <span class="a-act">Bash · <code>swift test --filter SidebarCollapseAllTests</code></span>
+          </div>
+        </div>
+        <div class="row agent is-attention">
+          <div class="a-line">
+            <i class="status-dot is-needs-input"></i>
+            <span class="a-title">soprano<span class="sep">▸</span><span class="who">Codex</span></span>
+            <span class="a-time">1m 03s</span>
+            <span class="a-trail status-label is-needs-input">Needs input</span>
+          </div>
+          <div class="a-sub">
+            <span class="a-act">Allow command? <code>rg -l "bgRaised" …</code></span>
+          </div>
+        </div>
+        <div class="row agent">
+          <div class="a-line">
+            <i class="status-dot is-ready"></i>
+            <span class="a-title">soprano-git<span class="sep">▸</span><span class="who">Claude Code</span></span>
+            <span class="a-time">12m</span>
+            <span class="a-trail status-label is-ready">Ready</span>
+          </div>
+          <div class="a-sub">
+            <span class="a-act">Turn finished · 3 files changed</span>
+          </div>
+        </div>
+        <div class="row agent">
+          <div class="a-line">
+            <i class="status-dot is-error"></i>
+            <span class="a-title">valkental<span class="sep">▸</span><span class="who">omp</span></span>
+            <span class="a-time">2m 40s</span>
+            <span class="a-trail status-label is-error">Error</span>
+          </div>
+          <div class="a-sub">
+            <span class="a-act is-error">Turn failed: 429 rate limited</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- detail for the selected agent -->
+    <section class="detail">
+      <div class="detail-head">
+        <div class="detail-id">
+          <div class="detail-title">
+            <i class="status-dot is-working"></i>
+            <h2 class="t-headline">soprano</h2>
+            <span class="status-label is-working">Working</span>
+            <span class="t-num">4m 12s</span>
+          </div>
+          <div class="detail-loc">soprano ▸ Claude Code · <code>~/git/private/soprano</code></div>
+        </div>
+        <div class="detail-actions">
+          <button class="btn"><i data-icon="app-window"></i>Open <span class="kbd">↵</span></button>
+          <button class="btn"><i data-icon="stop"></i>Stop</button>
+          <button class="btn"><i data-icon="restart"></i>Restart</button>
+          <button class="btn"><i data-icon="terminal"></i>Terminal <span class="kbd">T</span></button>
+        </div>
+      </div>
+
+      <div class="timeline-head">
+        <span class="t-eyebrow">Timeline</span>
+        <span class="hints">
+          <span class="hint"><span class="kbd-group"><span class="kbd kbd-sm">⇧J</span><span class="kbd kbd-sm">⇧K</span></span>Scroll</span>
+          <span class="hint"><span class="kbd-group"><span class="kbd kbd-sm">[</span><span class="kbd kbd-sm">]</span></span>Turn</span>
+          <span class="hint"><span class="kbd kbd-sm">O</span>Details</span>
+          <span class="hint"><span class="kbd kbd-sm">G</span>Live</span>
+        </span>
+        <span class="live">Live</span>
+      </div>
+
+      <div class="now">
+        <span>▶</span><span class="name">Bash</span><span>·</span><code>swift test --filter SidebarCollapseAllTests</code><span>·</span><span class="t-num">38s</span>
+      </div>
+
+      <div class="timeline">
+        <div class="tl-you">
+          <div class="tl-you-head"><span class="t-label-strong">You</span><span class="t-meta">21:41</span></div>
+          <div class="tl-you-body">Disable the sidebar's Collapse All button when every window is already collapsed.</div>
+        </div>
+
+        <div class="tl"><span class="tl-glyph">▸</span><span class="tl-thinking">Thinking</span></div>
+
+        <div class="tl"><span class="tl-glyph is-ok">✓</span>
+          <span class="tl-line"><span class="tl-name">Search</span><span class="tl-arg">collapseAllButton</span><span class="tl-meta">0.4s</span></span>
+        </div>
+
+        <div class="tl"><span class="tl-glyph is-ok">✓</span>
+          <span class="tl-line"><span class="tl-name">Read</span><span class="tl-arg">SidebarView.swift</span><span class="tl-meta">0.1s</span></span>
+        </div>
+
+        <div class="tl"><span class="tl-glyph is-ok">✓</span>
+          <span class="tl-line"><span class="tl-name">Update</span><span class="tl-arg">SidebarView.swift</span><span class="tl-meta">0.2s</span><span class="diffstat"><span class="add">+1</span> <span class="del is-zero">−0</span></span></span>
+          <div class="tl-diff diff">
+            <div class="diff-row is-ctx"><span class="gutter">430</span><span class="marker"></span><span class="code">        rebuildSessionSelector()</span></div>
+            <div class="diff-row is-add"><span class="gutter">431</span><span class="marker">+</span><span class="code">        collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }</span></div>
+            <div class="diff-row is-ctx"><span class="gutter">432</span><span class="marker"></span><span class="code"></span></div>
+          </div>
+        </div>
+
+        <div class="tl"><span class="tl-glyph is-run">▶</span>
+          <span class="tl-line"><span class="tl-name">Bash</span><span class="tl-arg">swift test --filter SidebarCollapseAllTests</span><span class="tl-meta">running…</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- bottom band -->
+    <div class="keys">
+      <span class="hints">
+        <span class="hint"><span class="kbd-group"><span class="kbd">J</span><span class="kbd">K</span></span>Select</span>
+        <span class="hint"><span class="kbd">Tab</span>Reply</span>
+        <span class="hint"><span class="kbd">↵</span>Open</span>
+        <span class="hint"><span class="kbd">T</span>Terminal</span>
+      </span>
+    </div>
+    <div class="reply">
+      <div class="reply-row">
+        <div class="field"><span class="placeholder">Reply to Claude Code…</span></div>
+        <button class="btn btn-primary"><i data-icon="send"></i>Send</button>
+      </div>
+      <span class="t-meta">Press Return to send this single-line reply.</span>
+    </div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio · Soprano Settings</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* Soprano window: 28 px titlebar band, then the Settings overlay (same chrome as soprano-dashboard) */
+  .settings { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+
+  /* header: serif title + Done, one rule under it */
+  .s-header {
+    flex: none; height: var(--h-dash-header);
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 var(--gutter-page);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .s-header .t-screen { color: var(--text-primary); }
+  .s-header .btn { margin-left: auto; }
+
+  .s-body { flex: 1; display: flex; min-height: 0; }
+  .s-body .settings-nav { padding-top: 16px; }
+
+  /* the page: margin column (eyebrow + note) beside a card column; every control on the card's right edge */
+  .s-content { flex: 1; min-width: 0; overflow: hidden; }
+  .page {
+    --margin-col: 232px; --page-gap: 40px; --card-col: 680px;
+    width: calc(var(--margin-col) + var(--page-gap) + var(--card-col));
+    margin-left: 48px; padding: 28px 0 0;
+  }
+  .page-head { margin-bottom: 28px; }
+  .page-head .t-screen { color: var(--text-primary); }
+  .page-sub { font: var(--type-row); color: var(--text-muted); margin-top: 4px; }
+
+  .sec { display: grid; grid-template-columns: var(--margin-col) var(--card-col); column-gap: var(--page-gap); align-items: start; }
+  .sec + .sec { margin-top: 28px; }
+  .sec-side { padding-top: 11px; }
+  .sec-side .t-eyebrow { display: block; }
+  .sec-side .form-note { margin-top: 6px; line-height: 16px; }
+  .sec-side .t-mono-sm { color: var(--text-primary); }
+
+  .card .form-row { gap: 16px; }
+  .form-row.is-tall { min-height: 44px; }
+  .lead { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .lead > .icon { --icon-size: 14px; --icon-stroke: 1.75; color: var(--text-muted); }
+  .lead .ok { color: var(--success); }
+
+  .form-control .btn { min-width: 0; }
+  .select.theme { width: 190px; }
+  .segment .icon { --icon-size: 12px; }
+
+  /* text fields at fixed widths; units sit inside the field, muted */
+  .field.f-path { flex: 1; height: var(--h-control); }
+  .field.f-num { height: var(--h-control); justify-content: flex-end; font-variant-numeric: tabular-nums; }
+  .field.f-num .unit { color: var(--text-muted); }
+  .field.w84 { width: 84px; }
+  .field.w56 { width: 56px; }
+  .add-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+  .add-row .field .icon { --icon-size: 13px; }
+</style>
+</head>
+<body class="artboard">
+<div class="settings">
+
+  <div class="titlebar">
+    <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+  </div>
+
+  <header class="s-header">
+    <h1 class="t-screen">Settings</h1>
+    <button class="btn">Done <span class="kbd">esc</span></button>
+  </header>
+
+  <div class="s-body">
+    <nav class="settings-nav">
+      <div class="nav-item is-active"><i data-icon="gear"></i>General</div>
+      <div class="nav-item"><i data-icon="keyboard"></i>Keyboard Shortcuts</div>
+      <div class="nav-item"><i data-icon="cpu"></i>Agent Profiles</div>
+      <div class="nav-item"><i data-icon="users"></i>Accounts</div>
+      <div class="nav-item"><i data-icon="info"></i>About</div>
+    </nav>
+
+    <main class="s-content">
+      <div class="page">
+        <div class="page-head">
+          <h2 class="t-screen">General</h2>
+          <div class="page-sub">Theme, persistence, project roots, and keybinding behavior. Every setting here is stored in settings.json.</div>
+        </div>
+
+        <!-- Configuration file -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Configuration file</span>
+            <div class="form-note">This screen edits <span class="t-mono-sm">~/.config/soprano/settings.json</span>. Hand edits apply as soon as you save — comments and key order are preserved.</div>
+          </div>
+          <div class="card">
+            <div class="form-row is-tall">
+              <div class="lead"><i data-icon="file-code"></i><span class="t-mono">~/.config/soprano/settings.json</span></div>
+              <div class="form-control">
+                <button class="btn">Open settings.json</button>
+                <button class="btn">Reveal in Finder</button>
+                <button class="btn">Reload</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Appearance -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Appearance</span>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="form-label">Theme</div>
+              <div class="form-control"><span class="select theme">Folio</span></div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Appearance</div>
+              <div class="form-control">
+                <span class="segmented">
+                  <span class="segment is-active"><i data-icon="monitor"></i>System</span>
+                  <span class="segment"><i data-icon="sun"></i>Light</span>
+                  <span class="segment"><i data-icon="moon"></i>Dark</span>
+                </span>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Hide window bar</div>
+              <div class="form-control"><span class="switch" role="switch" aria-checked="false"></span></div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Hide window tabs</div>
+              <div class="form-control"><span class="switch is-on" role="switch" aria-checked="true"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Session -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Session</span>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="form-label">Restore workspace from the previous launch</div>
+              <div class="form-control"><span class="switch is-on" role="switch" aria-checked="true"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Notifications -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Notifications</span>
+            <div class="form-note">Banners for panes that are not focused, named window ▸ pane.</div>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="form-label">Play a sound</div>
+              <div class="form-control"><span class="switch" role="switch" aria-checked="false"></span></div>
+            </div>
+            <div class="form-row">
+              <div class="lead">
+                <i data-icon="check-circle" class="ok"></i>
+                <div>
+                  <div class="form-label">Notifications allowed</div>
+                  <div class="form-note">macOS is allowed to show Soprano notifications.</div>
+                </div>
+              </div>
+              <div class="form-control"><button class="btn">Open System Settings</button></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Project directories -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Project directories</span>
+            <div class="form-note">Directories available to project-aware features.</div>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="lead"><i data-icon="folder"></i><span class="t-mono">~/git/private</span></div>
+              <div class="form-control"><button class="btn">Remove</button></div>
+            </div>
+            <div class="form-row">
+              <div class="lead"><i data-icon="folder"></i><span class="t-mono">~/git/work</span></div>
+              <div class="form-control"><button class="btn">Remove</button></div>
+            </div>
+            <div class="form-row is-tall">
+              <div class="add-row">
+                <div class="field f-path is-focused"><i class="caret"></i><span class="placeholder">Folder path</span></div>
+                <button class="btn">Browse…</button>
+                <button class="btn btn-primary">Add</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Keybinding behavior -->
+        <section class="sec">
+          <div class="sec-side">
+            <span class="t-eyebrow">Keybinding behavior</span>
+            <div class="form-note">Adjust prefix trigger and pane resize granularity.</div>
+          </div>
+          <div class="card">
+            <div class="form-row">
+              <div class="form-label">Prefix key</div>
+              <div class="form-control"><span class="kbd kbd-field kbd-accent">⌃A</span></div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Prefix timeout</div>
+              <div class="form-control"><span class="field f-num w84">1000 <span class="unit">ms</span></span></div>
+            </div>
+            <div class="form-row">
+              <div class="form-label">Resize step</div>
+              <div class="form-control"><span class="field f-num w56">5 <span class="unit">%</span></span></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>

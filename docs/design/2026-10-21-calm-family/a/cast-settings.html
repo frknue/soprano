@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Soprano Cast Settings — Extensions · Quiet</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<script>
+  /* puzzlepiece.extension stand-in (Lucide "puzzle"); not in shared/icons.js */
+  Object.assign(window.SOPRANO_ICONS, {
+    puzzle: '<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>'
+  });
+</script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  html[data-mode="light"] .only-dark, html[data-mode="dark"] .only-light { display: none; }
+
+  /* window: content 1120×700 + 28 titlebar, centered in the visible frame: 24 + (958 − 728) / 2 */
+  .cs-window { left: 196px; top: 139px; width: 1120px; height: 728px; }
+  .cs-body { flex: 1; min-height: 0; display: flex; }
+
+  .cs-nav { width: var(--cast-w-settings-sidebar); flex: none; }
+
+  .cs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .cs-topbar { flex: none; display: flex; align-items: center; height: 52px; padding: 0 12px; }
+  .cs-topbar .search-field { width: 260px; }
+  .cs-topbar .count { margin-left: auto; }
+
+  .cs-table { --cols: minmax(120px, 1fr) 120px 76px 108px 56px; flex: 1; min-height: 0; overflow: hidden; }
+  .cs-table .table-row { height: 30px; } /* 14 rows + 7 groups fit 700 without a scrollbar */
+  .cs-table .table-head > :last-child, .cs-table .table-row > :last-child { justify-self: center; }
+  .cs-table .table-group .disclosure { margin-left: -2px; }
+  .cs-table .table-rows { padding: 2px 0; }
+  .cs-table .table-group.is-follow { box-shadow: inset 0 1px 0 var(--border-subtle), inset 0 -1px 0 var(--border-subtle); }
+  .cs-table .cell-keys { display: inline-flex; align-items: center; }
+
+  /* app icons: stand-ins drawn on the macOS 64 grid (52 px squircle), shared with tab.html;
+     the svg box is 64/52 of the visible squircle, so a 22 px box shows an 18 px icon */
+  .aic { display: block; flex: none; width: 22px; height: 22px; margin: -2px; }
+  .aic.is-lg { width: 40px; height: 40px; margin: -4px; }
+  .app-img { width: 22px; height: 22px; margin: -2px; flex: none; }  /* 1024 canvas has a 100 px margin */
+
+  /* detail pane */
+  .cs-detail { flex: none; width: var(--cast-w-detail); padding: 20px 16px; box-shadow: inset 1px 0 0 var(--border-subtle); }
+  .cs-head { display: flex; align-items: center; gap: 12px; }
+  .cs-head .t-label { color: var(--text-muted); margin-top: 2px; }
+  .cs-meta { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; }
+  .cs-detail .card-title { padding-top: 24px; }
+  .cs-detail .form-row { gap: 12px; padding: 6px 12px; } /* 36 high with fields and checkboxes alike */
+  .cs-detail .field, .cs-detail .kbd-field { width: 140px; }
+  .cs-detail .field { height: var(--h-control); }
+</style>
+</head>
+<body class="artboard">
+  <!-- app icon stand-ins (mode-independent content imagery, macOS icon grid: 52/64 squircle; shared with tab.html) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <clipPath id="sqc"><rect x="6" y="6" width="52" height="52" rx="11.6"/></clipPath>
+    </defs>
+    <symbol id="ai-chrome" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f7f7f7"/>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <path d="M32 32 L15.55 22.5 A19 19 0 0 1 48.45 22.5 Z" fill="#e5483d"/>
+      <path d="M32 32 L48.45 22.5 A19 19 0 0 1 32 51 Z" fill="#f4bf3a"/>
+      <path d="M32 32 L32 51 A19 19 0 0 1 15.55 22.5 Z" fill="#3a9d5a"/>
+      <circle cx="32" cy="32" r="9" fill="#ffffff"/>
+      <circle cx="32" cy="32" r="7" fill="#3a7fe0"/>
+    </symbol>
+    <symbol id="ai-xcode" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#2a74d8"/>
+      <rect x="14" y="14" width="36" height="36" rx="7" fill="none" stroke="#ffffff" stroke-opacity=".28" stroke-width="1.4"/>
+      <path d="M14 26 H50 M14 38 H50 M26 14 V50 M38 14 V50" stroke="#ffffff" stroke-opacity=".14" stroke-width="1.2"/>
+      <g transform="rotate(-40 32 34)">
+        <rect x="29.5" y="25" width="5" height="25" rx="2.2" fill="#f2f2f2"/>
+        <path d="M21 18.5 H43 L44.5 25 H19.5 Z" fill="#c9ced6"/>
+      </g>
+    </symbol>
+    <symbol id="ai-aside" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#5a4bd1"/>
+      <rect x="15" y="18" width="34" height="28" rx="4" fill="#ffffff"/>
+      <rect x="15" y="18" width="11" height="28" rx="4" fill="#d8d3fb"/>
+      <path d="M22 18 H26 V46 H22 Z" fill="#d8d3fb"/>
+    </symbol>
+    <symbol id="ai-whatsapp" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#2fbf5f"/>
+      <path d="M32 17 A14.5 14.5 0 1 1 24.2 44.2 L18 46 L19.8 40 A14.5 14.5 0 0 1 32 17 Z" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M27.2 25.5 C26.4 28.8 30.6 35.4 35.6 37.4 C37 37.9 38.3 37.4 38.8 36.1 L37.2 34.6 L35.4 35.4 C33.4 34.4 31.5 32.5 30.5 30.5 L31.4 28.8 L29.8 26.9 Z" fill="#ffffff"/>
+    </symbol>
+    <symbol id="ai-safari" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f7f7f7"/>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <circle cx="32" cy="32" r="19" fill="#3a8ee6"/>
+      <circle cx="32" cy="32" r="16" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="1 3.2"/>
+      <path d="M41.5 22.5 L34.2 34.2 L29.8 29.8 Z" fill="#e5483d"/>
+      <path d="M22.5 41.5 L29.8 29.8 L34.2 34.2 Z" fill="#ffffff"/>
+    </symbol>
+    <symbol id="ai-finder" viewBox="0 0 64 64">
+      <g clip-path="url(#sqc)">
+        <rect x="6" y="6" width="52" height="52" fill="#9fd0f7"/>
+        <path d="M6 6 H35 C30 20 28.5 34 31 58 H6 Z" fill="#3a8ee6"/>
+      </g>
+      <path d="M22 22 V28 M42 22 V28" stroke="#1d3a5c" stroke-width="3" stroke-linecap="round"/>
+      <path d="M19 41 C26 46.5 38 46.5 45 41" fill="none" stroke="#1d3a5c" stroke-width="3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ai-mail" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#3d8fe8"/>
+      <rect x="15" y="20" width="34" height="24" rx="3" fill="#ffffff"/>
+      <path d="M16 22 L32 34 L48 22" fill="none" stroke="#3d8fe8" stroke-width="2.4" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ai-settings" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#8e8e93"/>
+      <circle cx="32" cy="32" r="17.5" fill="none" stroke="#5c5c61" stroke-width="5" stroke-dasharray="4.3 2.57"/>
+      <circle cx="32" cy="32" r="14" fill="#5c5c61"/>
+      <circle cx="32" cy="32" r="8" fill="#c7c7cc"/>
+      <circle cx="32" cy="32" r="3.5" fill="#5c5c61"/>
+    </symbol>
+    <symbol id="ai-slack" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#4a154b"/>
+      <path d="M27 18 L24 46 M40 18 L37 46 M18 27 H47 M17 38 H46" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ai-notes" viewBox="0 0 64 64">
+      <g clip-path="url(#sqc)">
+        <rect x="6" y="6" width="52" height="52" fill="#ffffff"/>
+        <rect x="6" y="6" width="52" height="15" fill="#f5c443"/>
+      </g>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <path d="M14 30 H50 M14 38 H50 M14 46 H50" stroke="#dcdcdc" stroke-width="1.6"/>
+      <path d="M8 21.5 H56" stroke="#000" stroke-opacity=".08"/>
+    </symbol>
+    <symbol id="ai-music" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f2455c"/>
+      <path d="M27 41 V20 L44 16.5 V37" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+      <ellipse cx="23" cy="41.5" rx="5" ry="4" fill="#ffffff"/>
+      <ellipse cx="40" cy="37.5" rx="5" ry="4" fill="#ffffff"/>
+    </symbol>
+  </svg>
+
+  <div class="desktop"></div>
+
+  <div class="menubar">
+    <span class="menubar-apple"></span>
+    <span class="menubar-app">Soprano Cast</span>
+    <div class="menubar-right">
+      <span class="tpl tpl-cast" title="Soprano Cast"></span>
+      <span class="tpl tpl-tab" title="Soprano Tab"></span>
+      <i data-icon="wifi"></i>
+      <i data-icon="battery"></i>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <div class="window cs-window">
+    <div class="titlebar">
+      <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+      <span class="titlebar-title">Soprano Cast Settings</span>
+    </div>
+
+    <div class="cs-body">
+      <nav class="settings-nav cs-nav">
+        <div class="nav-item"><i data-icon="gear"></i>General</div>
+        <div class="nav-item is-active"><i data-icon="puzzle"></i>Extensions</div>
+        <div class="nav-item"><i data-icon="sliders"></i>Advanced</div>
+      </nav>
+
+      <section class="cs-main">
+        <div class="cs-topbar">
+          <div class="search-field"><i data-icon="search"></i><span class="field-input placeholder">search commands…</span></div>
+          <span class="count t-meta">79 commands</span>
+        </div>
+
+        <div class="table is-focused cs-table">
+          <div class="table-head"><span>Name</span><span>Type</span><span>Alias</span><span>Hotkey</span><span>Enabled</span></div>
+
+          <div class="table-group"><span class="disclosure"><i data-icon="chevron-down"></i></span>Applications <span class="row-count">14</span></div>
+          <div class="table-rows">
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-aside"/></svg>Aside</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-finder"/></svg>Finder</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row is-selected"><span class="cell-name"><svg class="aic"><use href="#ai-chrome"/></svg>Google Chrome</span><span class="cell-muted">Application</span><span class="cell-muted">add alias</span><span class="cell-keys"><kbd class="kbd">⌘1</kbd></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-mail"/></svg>Mail</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-music"/></svg>Music</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-notes"/></svg>Notes</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-safari"/></svg>Safari</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-slack"/></svg>Slack</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><img class="app-img only-dark" src="icons/soprano.svg" alt=""><img class="app-img only-light" src="icons/soprano-light.svg" alt="">Soprano</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><img class="app-img only-dark" src="icons/git.svg" alt=""><img class="app-img only-light" src="icons/git-light.svg" alt="">Soprano Git</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><img class="app-img only-dark" src="icons/tab.svg" alt=""><img class="app-img only-light" src="icons/tab-light.svg" alt="">Soprano Tab</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-settings"/></svg>System Settings</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-whatsapp"/></svg>WhatsApp</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+            <div class="table-row"><span class="cell-name"><svg class="aic"><use href="#ai-xcode"/></svg>Xcode</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+          </div>
+
+          <div class="table-group is-follow"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>Quicklinks <span class="row-count">0</span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>Script Commands <span class="row-count">3</span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>Soprano Cast <span class="row-count">5</span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>System <span class="row-count">12</span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>System Settings <span class="row-count">5</span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>Window Management <span class="row-count">40</span></div>
+        </div>
+      </section>
+
+      <aside class="cs-detail">
+        <div class="cs-head">
+          <svg class="aic is-lg"><use href="#ai-chrome"/></svg>
+          <div>
+            <div class="t-title">Google Chrome</div>
+            <div class="t-label">Application</div>
+          </div>
+        </div>
+        <div class="cs-meta">
+          <span class="t-meta">/Applications</span>
+          <span class="t-meta">app:com.google.Chrome</span>
+        </div>
+
+        <div class="card-title">Command</div>
+        <div class="card">
+          <div class="form-row"><span class="form-label">Alias</span><span class="form-control"><span class="field"><span class="field-input placeholder">add alias</span></span></span></div>
+          <div class="form-row"><span class="form-label">Hotkey</span><span class="form-control"><span class="kbd-field"><kbd class="kbd">⌘1</kbd></span></span></div>
+          <div class="form-row"><span class="form-label">Show in Root Search</span><span class="form-control"><span class="checkbox is-checked"></span></span></div>
+          <div class="form-row"><span class="form-label">Favorite</span><span class="form-control"><span class="checkbox"></span></span></div>
+          <div class="form-row"><span class="form-label">Fallback command</span><span class="form-control"><span class="checkbox"></span></span></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

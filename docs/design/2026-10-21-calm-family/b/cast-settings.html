@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio — Soprano Cast Settings · Extensions</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<script>
+  /* puzzlepiece.extension stand-in (Lucide "puzzle"); not in shared/icons.js yet */
+  Object.assign(window.SOPRANO_ICONS, {
+    puzzle: '<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>'
+  });
+</script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* ---- mode-matched family icons ---- */
+  [data-mode="dark"] .m-light, [data-mode="light"] .m-dark { display: none; }
+
+  /* ---- app icons: real-app stand-ins (content imagery, mode-independent) ---- */
+  .ai {
+    --s: 18px;
+    position: relative; flex: none; overflow: hidden;
+    width: var(--s); height: var(--s);
+    border-radius: calc(var(--s) * 0.24);
+    display: grid; place-items: center;
+    box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 0.5px 1px rgba(0, 0, 0, 0.16);
+  }
+  .ai > svg { width: 66%; height: 66%; }
+  .ai > .icon { width: 64%; height: 64%; color: #ffffff; stroke-width: 2.4; }
+  img.ai { box-shadow: none; border-radius: 0; transform: scale(1.22); }
+  .ai-chrome {
+    border-radius: 50%;
+    background:
+      radial-gradient(circle, #4285f4 0 18%, #ffffff 20.5% 26.5%, transparent 28.5%),
+      conic-gradient(#db4437 0deg 60deg, #f4b400 60deg 180deg, #0f9d58 180deg 300deg, #db4437 300deg 360deg);
+  }
+  .ai-aside    { background: linear-gradient(#45434f, #1f1e25); }
+  .ai-finder   { background: linear-gradient(90deg, #1b8cf2 0 52%, #e8f2fd 52%); }
+  .ai-mail     { background: linear-gradient(#63bdff, #1c72ef); }
+  .ai-safari   { background: #ffffff; }
+  .ai-safari > svg { width: 100%; height: 100%; }
+  .ai-slack    { background: #ffffff; }
+  .ai-slack > svg { width: 88%; height: 88%; }
+  .ai-music    { background: linear-gradient(#ff6b80, #f5304f); }
+  .ai-notes    { background: linear-gradient(#f6c744 0 30%, #fffdf5 30%); }
+  .ai-settings { background: linear-gradient(#a3a3a9, #5f5f66); }
+  .ai-settings > .icon { color: #26262a; stroke-width: 2; }
+  .ai-whatsapp { background: linear-gradient(#5ff27e, #1fb646); }
+  .ai-xcode    { background: linear-gradient(#4fb0ff, #1563e1); }
+
+  /* ---- settings window: content 1120×700 + 28 title bar, centered below the menu bar ---- */
+  .settings-window { left: 196px; top: 139px; width: 1120px; height: 728px; }
+  .settings-body { flex: 1; min-height: 0; display: flex; }
+  .settings-body .settings-nav { width: var(--w-cast-nav); }
+
+  .ext-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* one 52 px bar: Folio screen title + count left, search right */
+  .ext-header {
+    flex: none; height: 52px;
+    display: flex; align-items: center; gap: 12px; padding: 0 16px;
+  }
+  .ext-title { display: flex; align-items: baseline; gap: 10px; }
+  .ext-header .search-field { width: 260px; margin-left: auto; }
+
+  .ext-table { flex: 1; min-height: 0; overflow: hidden; }
+  .ext-table .table { --cols: minmax(120px, 1fr) 120px 76px 108px 56px; }
+  .ext-table .table-head > :last-child,
+  .ext-table .table-row > :last-child { justify-self: center; }
+  .ext-table .table-group { background: var(--bg-base); }
+  .ext-table .table-group .icon { --icon-size: 12px; }
+  .ext-table .table-rows { padding: 0; }
+  /* 30 px command rows (parity with A) so all 14 apps + 7 groups fit in 648 px */
+  .ext-table .table-row { height: 30px; }
+  .table-row .cell-alias { font: var(--type-label); color: var(--text-muted); }
+  .ext-table .table-row .kbd { justify-self: start; }
+
+  /* ---- detail pane (320, after a borderStrong splitter) ---- */
+  .ext-detail {
+    flex: none; width: var(--w-cast-detail);
+    border-left: 1px solid var(--border-strong);
+    padding: 16px 20px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .detail-head { display: flex; align-items: center; gap: 12px; }
+  .detail-head .t-meta { margin-top: 1px; }
+  .detail-facts { display: flex; flex-direction: column; gap: 4px; font: var(--type-mono-sm); color: var(--text-muted); }
+  .ext-detail .card .form-row { padding: 6px 12px; min-height: 40px; }
+  .ext-detail .form-control .field { width: 140px; }
+</style>
+</head>
+<body class="artboard">
+  <div class="desktop"></div>
+
+  <!-- macOS menu bar: Soprano Cast is an accessory app, so with its Settings window key the bar shows only its name -->
+  <div class="menubar">
+    <i class="menubar-apple"></i>
+    <b class="menubar-app">Soprano Cast</b>
+    <div class="menubar-right">
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Cast"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg>
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Tab"><path d="M5.5 9.5H3A1.5 1.5 0 0 1 1.5 8V4A1.5 1.5 0 0 1 3 2.5h6A1.5 1.5 0 0 1 10.5 4v2.5"/><rect x="5.5" y="6.5" width="9" height="7" rx="1.5"/><path d="M8.3 10h3.4M10.6 8.8 11.8 10l-1.2 1.2"/></svg>
+      <i data-icon="wifi"></i>
+      <i data-icon="battery"></i>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <div class="window settings-window">
+    <div class="titlebar">
+      <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+      <span class="window-title">Soprano Cast Settings</span>
+    </div>
+
+    <div class="settings-body">
+      <nav class="settings-nav">
+        <div class="nav-item"><i data-icon="gear"></i>General</div>
+        <div class="nav-item is-active"><i data-icon="puzzle"></i>Extensions</div>
+        <div class="nav-item"><i data-icon="sliders"></i>Advanced</div>
+      </nav>
+
+      <section class="ext-main">
+        <div class="ext-header">
+          <div class="ext-title"><h1 class="t-screen">Extensions</h1><span class="t-meta t-num">79 commands</span></div>
+          <div class="search-field"><i data-icon="search"></i><span class="placeholder">search commands…</span></div>
+        </div>
+
+        <div class="ext-table">
+          <div class="table">
+            <div class="table-head"><span>Name</span><span>Type</span><span>Alias</span><span>Hotkey</span><span>Enabled</span></div>
+
+            <div class="table-group is-open"><span><i data-icon="chevron-down"></i>Applications <span class="row-count">14</span></span></div>
+            <div class="table-rows">
+              <div class="table-row"><span class="cell-name"><span class="ai ai-aside"><svg viewBox="0 0 12 12" fill="none" stroke="#ffffff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 6 2.5 9 10"/><path d="M4.3 7.4h3.4"/></svg></span>Aside</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-finder"><svg viewBox="0 0 12 12" fill="none" stroke="#0d3a63" stroke-width="1.1" stroke-linecap="round"><path d="M4 3.6v1.2M8.2 3.6v1.2"/><path d="M3 7.4c1.7 1.3 4.3 1.3 6 0"/><path d="M6.6 2c-.5 1.6-.7 3-.5 4.4H5.4"/></svg></span>Finder</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row is-selected"><span class="cell-name"><span class="ai ai-chrome"></span>Google Chrome</span><span class="cell-muted">Application</span><span class="cell-alias">add alias</span><span class="kbd kbd-sm">⌘1</span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-mail"><i data-icon="mail"></i></span>Mail</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-music"><i data-icon="music"></i></span>Music</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-notes"><svg viewBox="0 0 12 12" fill="none" stroke="#b8b2a2" stroke-width="0.9" stroke-linecap="round"><path d="M2.5 7h7M2.5 9h7M2.5 11h5"/></svg></span>Notes</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-safari"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.4" fill="#1d8af5"/><circle cx="6" cy="6" r="4.4" fill="none" stroke="#ffffff" stroke-width=".5" stroke-dasharray=".4 .9"/><path d="M8.6 3.4 6.6 6.6 5.4 5.4z" fill="#ff3b30"/><path d="M3.4 8.6 5.4 5.4 6.6 6.6z" fill="#ffffff"/></svg></span>Safari</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-slack"><svg viewBox="0 0 12 12" stroke-width="1.7" stroke-linecap="round"><path d="M4.6 1.8v4" stroke="#36c5f0"/><path d="M1.8 7.4h4" stroke="#2eb67d"/><path d="M7.4 10.2v-4" stroke="#ecb22e"/><path d="M10.2 4.6h-4" stroke="#e01e5a"/></svg></span>Slack</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><img class="ai m-light" src="icons/soprano.svg" alt=""><img class="ai m-dark" src="icons/soprano-dark.svg" alt="">Soprano</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><img class="ai m-light" src="icons/git.svg" alt=""><img class="ai m-dark" src="icons/git-dark.svg" alt="">Soprano Git</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><img class="ai m-light" src="icons/tab.svg" alt=""><img class="ai m-dark" src="icons/tab-dark.svg" alt="">Soprano Tab</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-settings"><i data-icon="gear"></i></span>System Settings</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-whatsapp"><i data-icon="message"></i></span>WhatsApp</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+              <div class="table-row"><span class="cell-name"><span class="ai ai-xcode"><i data-icon="code"></i></span>Xcode</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+            </div>
+
+            <div class="table-group"><span><i data-icon="chevron-right"></i>Quicklinks <span class="row-count">0</span></span></div>
+            <div class="table-group"><span><i data-icon="chevron-right"></i>Script Commands <span class="row-count">3</span></span></div>
+            <div class="table-group"><span><i data-icon="chevron-right"></i>Soprano Cast <span class="row-count">5</span></span></div>
+            <div class="table-group"><span><i data-icon="chevron-right"></i>System <span class="row-count">12</span></span></div>
+            <div class="table-group"><span><i data-icon="chevron-right"></i>System Settings <span class="row-count">5</span></span></div>
+            <div class="table-group"><span><i data-icon="chevron-right"></i>Window Management <span class="row-count">40</span></span></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="ext-detail">
+        <div class="detail-head">
+          <span class="ai ai-chrome" style="--s:32px"></span>
+          <div>
+            <h2 class="t-headline">Google Chrome</h2>
+            <div class="t-meta">Application</div>
+          </div>
+        </div>
+        <div class="detail-facts">
+          <span>/Applications</span>
+          <span>app:com.google.Chrome</span>
+        </div>
+
+        <div class="settings-section">
+          <div class="t-eyebrow">Command</div>
+          <div class="card">
+            <div class="form-row"><div class="form-label">Alias</div><div class="form-control"><span class="field"><span class="placeholder">add alias</span></span></div></div>
+            <div class="form-row"><div class="form-label">Hotkey</div><div class="form-control"><span class="kbd">⌘1</span></div></div>
+            <div class="form-row"><div class="form-label">Show in Root Search</div><div class="form-control"><span class="switch is-on"></span></div></div>
+            <div class="form-row"><div class="form-label">Favorite</div><div class="form-control"><span class="switch"></span></div></div>
+            <div class="form-row"><div class="form-label">Fallback command</div><div class="form-control"><span class="switch"></span></div></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</body>
+</html>

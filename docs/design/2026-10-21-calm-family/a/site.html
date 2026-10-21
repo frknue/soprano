@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Soprano — a tiling terminal multiplexer for AI coding agents</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { width: 1512px; overflow-x: hidden; }
+  body { background: var(--bg-base); }
+  .page { font: 400 17px/1.6 var(--font-sans); color: var(--text-primary); }
+
+  /* only-in-mode helpers for the dark/light app icons */
+  html[data-mode="dark"] .in-light, html[data-mode="light"] .in-dark { display: none; }
+
+  .wrap { width: 1120px; margin: 0 auto; }
+
+  /* ── masthead ── */
+  .mast { position: sticky; top: 0; z-index: 20; background: var(--bg-panel); box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .mast .wrap { height: 52px; display: flex; align-items: center; gap: 10px; }
+  .mast .mark { width: 24px; height: 24px; }
+  .mast .wordmark { font-size: 20px; }
+  .mast nav { margin-left: auto; display: flex; align-items: center; gap: 24px; font: var(--type-label); color: var(--text-muted); }
+  .mast nav a { color: inherit; text-decoration: none; }
+  .mast nav .kbd { margin-left: -4px; }
+
+  /* ── section rhythm ── */
+  .section { padding: 88px 0; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .section:last-of-type { box-shadow: none; }
+  .eyebrow { font: 400 12px/16px var(--font-mono); color: var(--text-muted); margin: 0 0 16px; }
+  h2 { font: 600 32px/1.15 var(--font-mono); letter-spacing: -0.4px; margin: 0; max-width: 34ch; }
+  .body { max-width: 62ch; color: var(--text-muted); margin: 20px 0 0; }
+  .body p { margin: 0 0 12px; }
+  .body strong { color: var(--text-primary); font-weight: 600; }
+  .body code, .note code, .cell code { font: 400 0.86em var(--font-mono); color: var(--text-primary); }
+  .caption code { font: inherit; color: var(--text-primary); }
+  .sec-head { display: grid; grid-template-columns: 520px 1fr; gap: 64px; align-items: start; }
+  .sec-head h2 { max-width: none; }
+  .sec-head .body { margin: 30px 0 0; max-width: 60ch; }
+  .caption { font: var(--type-meta); color: var(--text-muted); margin: 16px 0 0; }
+  .frame { border-radius: var(--r-overlay); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+
+  /* ── hero ── */
+  .hero { padding: 88px 0 96px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .hero .wordmark { display: block; font-size: var(--wordmark-lg); margin: 12px 0 36px -4px; }
+  .hero-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: start; }
+  .lede { font: 400 24px/1.4 var(--font-sans); margin: 0; max-width: 26ch; color: var(--text-primary); }
+  .sub { margin: 4px 0 0; color: var(--text-muted); max-width: 46ch; }
+  .cta { display: flex; gap: 12px; margin-top: 40px; }
+  .cta .btn-lg { height: 36px; padding: 0 18px; font-size: 12px; }
+
+  .score { margin-top: 56px; }
+  .score-head { display: flex; align-items: center; height: 40px; padding: 0 16px; box-shadow: inset 0 -1px 0 var(--border-subtle); font: var(--type-label); color: var(--text-primary); }
+  .score-head .where { margin-left: auto; font: var(--type-meta); color: var(--text-muted); }
+  .lane { display: grid; grid-template-columns: 200px 1fr 150px; align-items: center; gap: 24px; height: 48px; padding: 0 16px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .lane-name { display: flex; align-items: center; gap: 10px; font: var(--type-row); }
+  .track { height: 4px; border-radius: 2px; background: var(--border-subtle); overflow: hidden; }
+  .track > i { display: block; height: 100%; background: var(--text-muted); }
+  .track > i.is-working { background: var(--success); }
+  .track > i.is-needs-input { background: var(--yellow); }
+  .lane .status-label { justify-self: end; }
+  .score-foot { padding: 12px 16px; font: var(--type-prose); color: var(--text-muted); }
+
+  /* ── states ── */
+  .states { margin-top: 48px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border-subtle); border-radius: var(--r-overlay); overflow: hidden; box-shadow: 0 0 0 1px var(--border-subtle); }
+  .state { background: var(--bg-base); padding: 24px; min-height: 128px; }
+  .state .status { margin-bottom: 12px; }
+  .state p { margin: 0; font: 400 14px/1.55 var(--font-sans); color: var(--text-muted); }
+
+  /* ── attention ── */
+  .attn { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .notify { position: relative; min-height: 360px; padding: 40px 14px 16px; display: flex; flex-direction: column; align-items: flex-end; overflow: hidden; isolation: isolate; }
+  .notify .desktop { z-index: -2; }
+  .notify .bg-win { left: 20px; top: 76px; width: 380px; height: 300px; z-index: -1; }
+  .notify .bg-win .pane { flex: 0 0 auto; }
+  .notify .bg-win .pane:first-of-type { height: 150px; }
+  .notify .bg-win .pane:last-of-type { flex: 1; }
+  .notify .bg-win .term { margin: 0; padding: 8px 10px; font: 400 11px/16px var(--font-mono); color: var(--term-fg); white-space: pre; }
+  .notify .menubar { position: absolute; }
+  .note-banner { width: 392px; display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--bg-raised); box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-l1); }
+  .note-banner img { width: 38px; height: 38px; }
+  .note-banner .t { font: 600 13px/17px var(--font-sans); }
+  .note-banner .w { font: 400 13px/17px var(--font-sans); color: var(--text-primary); }
+  .note-banner .m { font: 400 13px/17px var(--font-sans); color: var(--text-muted); }
+  .note-banner .m b { color: var(--yellow); font-weight: 600; }
+  .note-banner .now { font: 400 12px/17px var(--font-sans); color: var(--text-muted); }
+  .note-group { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .note-stack { position: relative; }
+  .note-stack::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -6px; height: 12px; border-radius: 0 0 12px 12px; background: var(--bg-raised); box-shadow: 0 0 0 1px var(--border-strong); z-index: -1; opacity: .7; }
+  .note-stack { z-index: 0; }
+  .note-more { font: 400 12px/17px var(--font-sans); color: var(--text-primary); background: var(--bg-raised); box-shadow: 0 0 0 1px var(--border-strong); border-radius: 8px; padding: 3px 10px; margin-top: 6px; }
+
+  .dash { padding: 20px; background: var(--bg-base); }
+  .dash-head { display: flex; align-items: center; gap: 8px; font: var(--type-label); margin-bottom: 16px; }
+  .dash-head .live { margin-left: auto; }
+  .tallies { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .dash .agent-row { display: flex; height: 44px; padding: 0 12px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .dash .agent-row:last-child { box-shadow: none; }
+  .dash .agent-row .loc { font: var(--type-row); }
+  .dash .agent-row .loc .sep { color: var(--text-muted); }
+  .dash .agent-row .status-label { margin-left: auto; }
+
+  /* ── layout stage (real panes) ── */
+  .stage { margin-top: 48px; display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-overlay); box-shadow: 0 0 0 1px var(--border-strong); background: var(--bg-panel); }
+  .stage-split { height: 500px; display: flex; gap: 1px; background: var(--border-strong); box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .stage-split > .pane { flex: 0 0 calc(52% - 0.5px); }
+  .stage .col { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .stage .col > .pane { flex: 0 0 52%; }
+  .stage .row2 { flex: 1; display: flex; gap: 1px; min-height: 0; }
+  .stage .row2 > .pane { flex: 1; min-width: 0; }
+  .stage .term { padding: 10px 12px; font: 400 12px/18px var(--font-mono); margin: 0; white-space: pre; color: var(--term-fg); }
+  .stage .pane-header .t-meta { margin-left: auto; }
+
+  /* ── features ── */
+  .grid { margin-top: 48px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border-subtle); border-radius: var(--r-overlay); overflow: hidden; box-shadow: 0 0 0 1px var(--border-subtle); }
+  .cell { background: var(--bg-base); padding: 22px 22px 24px; }
+  .cell h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; font: 500 13px/20px var(--font-mono); color: var(--text-primary); }
+  .cell h3 .keys { margin-left: auto; display: inline-flex; gap: 3px; }
+  .cell p { margin: 0; font: 400 14px/1.55 var(--font-sans); color: var(--text-muted); }
+  .cell p .kbd { vertical-align: 1px; }
+
+  .keymap { margin-top: 24px; }
+  .keymap .km-row { display: grid; grid-template-columns: 300px 1fr; align-items: center; height: 44px; padding: 0 20px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .keymap .km-row:last-child { box-shadow: none; }
+  .keymap .keys { display: flex; align-items: center; gap: 4px; font: var(--type-meta); color: var(--text-muted); }
+  .keymap .keys .kbd + .kbd, .seq .kbd + .kbd { margin-left: 0; }
+  .seq { display: inline-flex; gap: 3px; }
+  .seq + .seq { margin-left: 8px; }
+  .keymap .what { font: 400 15px/1.4 var(--font-sans); color: var(--text-primary); }
+
+  /* ── family ── */
+  .family { margin-top: 48px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .app { display: flex; flex-direction: column; padding: 24px; border-radius: var(--r-overlay); background: transparent; box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .app img { width: 72px; height: 72px; display: block; margin: 0 0 20px -4px; }
+  .app h3 { margin: 0 0 6px; font: 500 14px/20px var(--font-mono); }
+  .app p { margin: 0 0 16px; font: 400 14px/1.5 var(--font-sans); color: var(--text-muted); }
+  .app .t-meta { margin-top: auto; display: flex; gap: 6px; align-items: center; }
+
+  /* ── themes ── */
+  .themes { margin-top: 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .tp { border-radius: var(--r-card); overflow: hidden; background: var(--bg-base); color: var(--text-primary); box-shadow: 0 0 0 1px var(--border-subtle); }
+  .tp.is-selected { box-shadow: 0 0 0 1px var(--text-muted); }
+  .tp-head { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 12px; font: var(--type-label); background: var(--bg-panel); box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .tp .pane { flex: none; }
+  .tp .term { margin: 0; padding: 6px 10px; font: 400 11px/16px var(--font-mono); color: var(--term-fg); white-space: pre; }
+  .tp .tp-add { color: var(--success); }
+  .tp-foot { display: flex; align-items: center; justify-content: space-between; height: 32px; padding: 0 10px; background: var(--bg-panel); box-shadow: inset 0 1px 0 var(--border-subtle); }
+  .tp-dots { display: inline-flex; gap: 6px; }
+
+  /* ── install ── */
+  .terminal { margin-top: 40px; overflow: hidden; background: var(--term-bg); box-shadow: 0 0 0 1px var(--border-strong); }
+  .terminal header { display: flex; align-items: center; gap: 16px; height: 36px; padding: 0 14px; background: var(--bg-panel); box-shadow: inset 0 -1px 0 var(--border-subtle); font: var(--type-label); color: var(--text-muted); }
+  .terminal pre { margin: 0; padding: 20px 24px 24px; font: 400 13px/22px var(--font-mono); color: var(--term-fg); }
+  .terminal .c { color: var(--text-muted); }
+  .terminal .p { color: var(--success); }
+  .terminal .cursor-block { display: inline-block; width: 8px; height: 16px; background: var(--term-cursor); vertical-align: -3px; }
+  .note { margin: 20px 0 0; font: 400 14px/1.55 var(--font-sans); color: var(--text-muted); }
+  .note strong { color: var(--text-primary); font-weight: 600; }
+
+  /* ── footer ── */
+  .foot { background: var(--bg-panel); box-shadow: inset 0 1px 0 var(--border-subtle); }
+  .foot .wrap { height: 88px; display: flex; align-items: center; gap: 12px; font: var(--type-meta); color: var(--text-muted); }
+  .foot .wordmark { font-size: 16px; color: var(--text-muted); }
+  .foot .links { margin-left: auto; display: flex; gap: 24px; }
+</style>
+</head>
+<body class="artboard is-scroll page">
+
+<header class="mast">
+  <div class="wrap">
+    <img class="mark in-dark" src="icons/soprano.svg" alt=""><img class="mark in-light" src="icons/soprano-light.svg" alt="">
+    <span class="wordmark">soprano</span>
+    <nav>
+      <a>Status</a><a>Layout</a><a>Features</a><a>Family</a><a>Themes</a><a>Install</a><a>GitHub</a>
+      <kbd class="kbd">⌘P</kbd>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- hero -->
+  <section class="hero" id="status">
+    <div class="wrap">
+      <p class="eyebrow">Native macOS · Swift 6 + libghostty · MIT</p>
+      <h1 class="wordmark">soprano</h1>
+      <div class="hero-cols">
+        <p class="lede">A tiling terminal multiplexer for the room full of coding agents you're already running.</p>
+        <p class="sub">Codex, Claude Code, and OpenCode side by side in real GPU-rendered terminals. Every pane says what its agent is doing, and macOS tells you which one is waiting on you.</p>
+      </div>
+
+      <div class="frame score">
+        <div class="score-head">Live pane status<span class="where">soprano › window 1</span></div>
+        <div class="lane"><span class="lane-name"><i class="status-dot is-working"></i>Codex</span><span class="track"><i class="is-working" style="width:62%"></i></span><span class="status-label">Working</span></div>
+        <div class="lane"><span class="lane-name"><i class="status-dot is-needs-input"></i>Claude Code</span><span class="track"><i class="is-needs-input" style="width:100%"></i></span><span class="status-label is-needs-input">Needs input</span></div>
+        <div class="lane"><span class="lane-name"><i class="status-dot is-working"></i>OpenCode</span><span class="track"><i class="is-working" style="width:34%"></i></span><span class="status-label">Working</span></div>
+        <div class="lane"><span class="lane-name"><i class="status-dot is-ready"></i>Terminal 1</span><span class="track"><i style="width:0"></i></span><span class="status-label">Ready</span></div>
+        <div class="score-foot">Driven by real agent lifecycle hooks — not output scraping.</div>
+      </div>
+
+      <div class="cta">
+        <button class="btn-primary btn-lg">Install Soprano</button>
+        <button class="btn btn-lg">Read the source</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- the problem -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">The problem</p>
+        <h2>One agent is easy. Four is a scheduling problem.</h2>
+        </div>
+        <div class="body">
+        <p>They run asynchronously, they all stop to ask you something eventually, and terminal tabs hide the one that is blocked. So you cycle through tabs looking for the agent that went quiet for the wrong reason.</p>
+        <p>Soprano is built around the question you actually have all day: <strong>which agent needs me right now?</strong> Panes answer it themselves — the launchers install lifecycle hooks per launch, so nothing scrapes output and nothing touches your global agent config.</p>
+      </div>
+      </div>
+      <div class="states">
+        <div class="state"><span class="status"><i class="status-dot is-starting"></i><span class="status-label">Starting</span></span><p>The launcher is up, the agent has not reported in yet.</p></div>
+        <div class="state"><span class="status"><i class="status-dot is-working"></i><span class="status-label">Working</span></span><p>A turn is in flight. Leave it alone.</p></div>
+        <div class="state"><span class="status"><i class="status-dot is-ready"></i><span class="status-label">Ready</span></span><p>Idle and waiting for a prompt.</p></div>
+        <div class="state"><span class="status"><i class="status-dot is-needs-input"></i><span class="status-label is-needs-input">Needs input</span></span><p>A question or a permission prompt. This is the one you came for.</p></div>
+        <div class="state"><span class="status"><i class="status-dot is-error"></i><span class="status-label is-error">Error</span></span><p>The turn failed. The pane keeps the state until you look.</p></div>
+        <div class="state"><span class="status"><i class="status-dot is-stopped"></i><span class="status-label">Stopped</span></span><p>The process exited. The layout stays where you left it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- attention -->
+  <section class="section" id="attention">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">Attention</p>
+        <h2>It tells you where to look, not just that something happened.</h2>
+        </div>
+        <div class="body">
+        <p>Notifications only fire for panes that are not focused, and they are subtitled <strong>window › pane</strong> so the banner names the location. Clicking one activates Soprano and focuses that exact tab. A pane's banners group together instead of stacking up.</p>
+      </div>
+      </div>
+      <div class="attn">
+        <div class="frame notify">
+          <div class="desktop"></div>
+          <div class="menubar">
+            <span class="menubar-apple"></span><span class="menubar-app">Soprano Git</span><span class="menubar-item">File</span><span class="menubar-item">Repository</span>
+            <div class="menubar-right"><i data-icon="wifi"></i><i data-icon="battery"></i><span class="menubar-clock">Tue 21 Oct 21:41</span></div>
+          </div>
+          <div class="window bg-win">
+            <div class="titlebar"><span class="traffic is-inactive"><i></i><i></i><i></i></span></div>
+            <section class="pane is-attention">
+              <header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header>
+              <div class="pane-body"><pre class="term">⏺ Migration 0042 removes users.legacy_role.
+  It is still read by AdminExport.swift:88.
+
+  <span class="b">Drop the legacy column?</span> [y/n]</pre></div>
+            </section>
+            <section class="pane is-dimmed">
+              <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span></header>
+              <div class="pane-body"><pre class="term"><span class="fg-muted">•</span> Ran swift build
+  └ Build complete! (14.2s)</pre></div>
+            </section>
+          </div>
+          <div class="note-group">
+          <div class="note-banner">
+            <img class="in-dark" src="icons/soprano.svg" alt=""><img class="in-light" src="icons/soprano-light.svg" alt="">
+            <div>
+              <div class="t">Soprano</div>
+              <div class="w">soprano › Claude Code</div>
+              <div class="m"><b>Needs input</b> — Drop the legacy column? [y/n]</div>
+            </div>
+            <span class="now">now</span>
+          </div>
+          <div class="note-banner note-stack">
+            <img class="in-dark" src="icons/soprano.svg" alt=""><img class="in-light" src="icons/soprano-light.svg" alt="">
+            <div>
+              <div class="t">Soprano</div>
+              <div class="w">soprano › Codex</div>
+              <div class="m">Turn finished — 3 files changed</div>
+            </div>
+            <span class="now">2m ago</span>
+          </div>
+          <div class="note-more">2 more from soprano › Codex</div>
+          </div>
+        </div>
+        <div class="frame dash">
+          <div class="dash-head"><span>Agent dashboard</span><kbd class="kbd">⇧⌘D</kbd><span class="status live"><i class="status-dot sm is-working"></i><span class="status-label">Live</span></span></div>
+          <div class="tallies">
+            <div class="tally"><span class="tally-value">2</span><span class="tally-label"><i class="status-dot sm is-working"></i>Working</span></div>
+            <div class="tally"><span class="tally-value">1</span><span class="tally-label is-needs-input"><i class="status-dot sm is-needs-input"></i>Needs input</span></div>
+            <div class="tally"><span class="tally-value is-zero">0</span><span class="tally-label">Error</span></div>
+          </div>
+          <div class="agent-row"><i class="status-dot sm is-working"></i><span class="loc">soprano <span class="sep">›</span> Codex</span><span class="status-label">Working</span></div>
+          <div class="agent-row"><i class="status-dot sm is-needs-input"></i><span class="loc">soprano <span class="sep">›</span> Claude Code</span><span class="status-label is-needs-input">Needs input</span></div>
+          <div class="agent-row"><i class="status-dot sm is-working"></i><span class="loc">webapp <span class="sep">›</span> OpenCode</span><span class="status-label">Working</span></div>
+          <div class="agent-row"><i class="status-dot sm is-ready"></i><span class="loc">webapp <span class="sep">›</span> Terminal</span><span class="status-label">Ready</span></div>
+        </div>
+      </div>
+      <p class="caption">Click a banner and Soprano focuses that exact tab. Live agent states across every logical window. Navigate with J/K, open with Return.</p>
+    </div>
+  </section>
+
+  <!-- layout -->
+  <section class="section" id="layout">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">The layout</p>
+        <h2>Every pane is a node. Every split is a decision.</h2>
+        </div>
+        <div class="body">
+        <p>Panes live in a recursive split tree, so a window is never a fixed grid you have to fight. Then there is <strong>depth</strong>: any pane can open a private workspace on the window's z-axis, so one pane becomes a whole layout while its siblings keep running behind it.</p>
+      </div>
+      </div>
+      <div class="stage">
+        <div class="stage-split">
+        <section class="pane is-focused">
+          <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="t-meta">main · 2t</span></header>
+          <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> Add SplitNode.insert(_:beside:axis:) and route ⌃A | through it.
+
+<span class="fg-muted">•</span> Explored
+  └ Read SplitNode.swift, PaneContainerView.swift, Keymap.swift
+
+<span class="fg-muted">•</span> Edited Sources/Soprano/Layout/SplitNode.swift (+31 -4)
+    <span class="c2">+ func insert(_ pane: PaneID, beside target: PaneID,</span>
+    <span class="c2">+             axis: SplitAxis) -&gt; SplitNode {</span>
+    <span class="c2">+     guard let leaf = find(target) else { return self }</span>
+    <span class="c2">+     return replacing(leaf, with: .split(axis, [leaf, .leaf(pane)]))</span>
+    <span class="c2">+ }</span>
+
+<span class="fg-muted">•</span> Edited Sources/Soprano/Input/Keymap.swift (+6 -2)
+    <span class="c1">- case "|": splitActive(.vertical)</span>
+    <span class="c2">+ case "|": tree.insert(new, beside: active, axis: .vertical)</span>
+
+<span class="fg-muted">•</span> Ran swift build
+  └ Compiling Soprano SplitNode.swift
+    Compiling Soprano PaneContainerView.swift
+    Build complete! (14.2s)
+
+<span class="fg-muted">  3 files changed, 48 insertions(+), 12 deletions(-)</span>
+
+<span class="fg-muted">›</span> wire the same path into ⌃A -<span class="cursor"> </span></pre></div>
+        </section>
+        <div class="col">
+          <section class="pane is-attention is-dimmed">
+            <header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">⏺</span> Read Migrations/0042_drop_legacy_role.sql
+<span class="fg-muted">⏺</span> Search(legacy_role) — 2 matches
+  AdminExport.swift:88
+  UserRecord.swift:14
+
+<span class="fg-muted">⏺</span> Migration 0042 removes users.legacy_role.
+  It is still read by AdminExport.swift:88,
+  so the export breaks after the migration.
+
+  <span class="b">Drop the legacy column?</span> [y/n]
+  <span class="fg-muted">y = drop and patch AdminExport · n = keep</span></pre></div>
+          </section>
+          <div class="row2">
+            <section class="pane is-dimmed">
+              <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">OpenCode</span></header>
+              <div class="pane-body"><pre class="term"><span class="fg-muted">◇</span> resolving imports
+<span class="fg-muted">◇</span> writing tests
+  Tests/PaneTreeTests.swift
+  <span class="c2">✓</span> testSplitKeepsFocus
+  <span class="c2">✓</span> testInsertBesideLeaf
+  <span class="c2">✓</span> testCollapseOnClose
+  <span class="fg-muted">·</span> testDepthRoundTrip
+<span class="fg-muted">◇</span> running swift test --filter
+  PaneTree</pre></div>
+            </section>
+            <section class="pane is-dimmed">
+              <header class="pane-header"><i class="status-dot is-ready"></i><span class="pane-title">Terminal 1</span></header>
+              <div class="pane-body"><pre class="term"><span class="c2">~/soprano</span> <span class="fg-muted">main</span>
+<span class="c2">$</span> swift test
+Executed 252 tests, with 0
+failures in 38.4 seconds
+<span class="c2">$</span> git status --short
+ M Layout/SplitNode.swift
+ M Input/Keymap.swift
+<span class="c2">$</span> </pre></div>
+            </section>
+          </div>
+        </div>
+        </div>
+        <footer class="statusbar">
+          <span class="mode-chip is-normal">Normal</span>
+          <span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep">›</span><span class="crumb">window 1</span><span class="crumb-sep">›</span><span class="crumb is-current">Codex</span><span class="crumb">· tab 1</span></span>
+          <span class="statusbar-spacer"></span>
+          <span class="counts">4 panes · <span class="is-attention">1 needs input</span></span>
+          <span class="hints"><span class="hint"><span class="hint-key">⌘P</span> commands</span><span class="hint"><span class="hint-key">⌃A</span> prefix</span></span>
+        </footer>
+      </div>
+      <p class="caption">One pane becomes a layout — and every layout comes back on the next launch.</p>
+    </div>
+  </section>
+
+  <!-- features -->
+  <section class="section" id="features">
+    <div class="wrap">
+      <p class="eyebrow">What it does</p>
+      <h2>A real terminal, arranged the way you think.</h2>
+      <div class="grid">
+        <div class="cell"><h3>libghostty surfaces</h3><p>Every pane is a real GPU-rendered terminal hosted in AppKit — full keyboard routing, sided modifiers, a clipboard confirmation policy for paste. No Electron, no web view, no reimplemented VT parser.</p></div>
+        <div class="cell"><h3>Agent launchers <span class="keys"><kbd class="kbd">⌘1</kbd><kbd class="kbd">⌘2</kbd><kbd class="kbd">⌘3</kbd></span></h3><p>Codex, Claude Code, and OpenCode start with lifecycle hooks scoped to that launch. Your global agent configuration is never modified.</p></div>
+        <div class="cell"><h3>Custom agents</h3><p>Define your own launcher under <code>agents</code> — command, args, env, cwd or a <code>launchScript</code>, colour, and its own launch key. It shows up in the sidebar and settings like a built-in.</p></div>
+        <div class="cell"><h3>Browser panes <span class="keys"><kbd class="kbd">⌘B</kbd></span></h3><p>A WebKit pane with an address bar and history controls. Agents drive it from any terminal: <code>"$SOPRANO_BIN" browser click @e1</code>, with snapshots that assign element refs.</p></div>
+        <div class="cell"><h3>Copy mode <span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">[</kbd></span></span></h3><p>Vim motions over the scrollback — viewport and buffer jumps, character and line selection, clipboard yank.</p></div>
+        <div class="cell"><h3>Command palette <span class="keys"><kbd class="kbd">⌘P</kbd></span></h3><p>Every action in one place, plus a project launcher and search over your configured project directories on <kbd class="kbd">⇧⌘P</kbd>.</p></div>
+        <div class="cell"><h3>Window switcher <span class="keys"><kbd class="kbd">⌘F</kbd></span></h3><p>Searches window titles and nested pane details at once, prioritising window-title matches.</p></div>
+        <div class="cell"><h3>Sessions <span class="keys"><kbd class="kbd">⇧⌘S</kbd></span></h3><p>The last workspace restores on launch. Save named sessions and toggle back to the previous one with <span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">⇧L</kbd></span>.</p></div>
+        <div class="cell"><h3>Drag and drop</h3><p>Files, folders, URLs, and macOS screenshot thumbnails dropped on a terminal become shell-safe paths at the cursor.</p></div>
+        <div class="cell"><h3>Sidebar</h3><p>Every pane with its git branch, a spawn menu, a sessions footer, and jump hints that appear while <kbd class="kbd">⌃</kbd> is held.</p></div>
+        <div class="cell"><h3>tmux handoff</h3><p>Pane navigation passes through to tmux at layout boundaries, scoped to the issuing process, pane, and tab — so nesting behaves.</p></div>
+        <div class="cell"><h3>settings.json</h3><p>One commented file at <code>~/.config/soprano/settings.json</code>. Rebind any action by id, or set it to <code>null</code> to turn it off. Saving applies immediately — no restart.</p></div>
+      </div>
+
+      <div class="frame keymap">
+        <div class="km-row"><span class="keys"><kbd class="kbd">⌘1</kbd><kbd class="kbd">⌘2</kbd><kbd class="kbd">⌘3</kbd></span><span class="what">Launch Codex, Claude Code, or OpenCode in the active pane</span></div>
+        <div class="km-row"><span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">|</kbd></span><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">-</kbd></span></span><span class="what">Split the active pane vertically or horizontally</span></div>
+        <div class="km-row"><span class="keys"><kbd class="kbd">⌃H</kbd><kbd class="kbd">⌃J</kbd><kbd class="kbd">⌃K</kbd><kbd class="kbd">⌃L</kbd></span><span class="what">Move between panes — no prefix, wraps at layout boundaries</span></div>
+        <div class="km-row"><span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">H</kbd><kbd class="kbd">J</kbd><kbd class="kbd">K</kbd><kbd class="kbd">L</kbd></span></span><span class="what">Resize the active pane by the configured step</span></div>
+        <div class="km-row"><span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">M</kbd></span></span><span class="what">Maximize the active pane, again to restore</span></div>
+        <div class="km-row"><span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">I</kbd></span><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">O</kbd></span></span><span class="what">Dive into a pane's private workspace, and come back out</span></div>
+        <div class="km-row"><span class="keys"><kbd class="kbd">⌃1</kbd>…<kbd class="kbd">⌃9</kbd></span><span class="what">Select a pane tab by number</span></div>
+        <div class="km-row"><span class="keys"><span class="seq"><kbd class="kbd">⌃A</kbd><kbd class="kbd">⇧P</kbd></span></span><span class="what">Jump to the most recently active window, again to toggle back</span></div>
+        <div class="km-row"><span class="keys"><kbd class="kbd">⌘=</kbd><kbd class="kbd">⌘-</kbd><kbd class="kbd">⌘0</kbd></span><span class="what">Terminal zoom in, out, and reset</span></div>
+        <div class="km-row"><span class="keys"><kbd class="kbd">⇧⌘D</kbd></span><span class="what">Agent dashboard across every window</span></div>
+      </div>
+      <p class="caption">Every binding is rebindable by action id in <code>settings.json</code>.</p>
+    </div>
+  </section>
+
+  <!-- family -->
+  <section class="section" id="family">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">The family</p>
+        <h2>Four apps, one quiet console.</h2>
+        </div>
+        <div class="body"><p>The same keys, the same status vocabulary and the same single orange part that says where you are.</p></div>
+      </div>
+      <div class="family">
+        <div class="app"><img class="in-dark" src="icons/soprano.svg" alt=""><img class="in-light" src="icons/soprano-light.svg" alt=""><h3>Soprano</h3><p>Terminal multiplexer for coding agents.</p><span class="t-meta">frknue/soprano</span></div>
+        <div class="app"><img class="in-dark" src="icons/git.svg" alt=""><img class="in-light" src="icons/git-light.svg" alt=""><h3>Soprano Git</h3><p>Keyboard-first Git client.</p><span class="t-meta">frknue/soprano_git</span></div>
+        <div class="app"><img class="in-dark" src="icons/cast.svg" alt=""><img class="in-light" src="icons/cast-light.svg" alt=""><h3>Soprano Cast</h3><p>Launcher and hotkeys.</p><span class="t-meta">frknue/soprano_cast</span></div>
+        <div class="app"><img class="in-dark" src="icons/tab.svg" alt=""><img class="in-light" src="icons/tab-light.svg" alt=""><h3>Soprano Tab</h3><p>Window switcher.</p><span class="t-meta">frknue/soprano_tab</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- themes -->
+  <section class="section" id="themes">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">Themes</p>
+        <h2>Quiet and seven more ship with it. Try them on this page.</h2>
+        </div>
+        <div class="body">
+        <p>These are the real palettes from <code>Theme.swift</code>, applied live to this page. Themes recolour open terminals — background, ANSI palette, pane headers — without a restart. <strong>Quiet</strong> is the default and follows the system appearance.</p>
+      </div>
+      </div>
+      <div class="themes">
+        <div class="tp is-selected">
+          <div class="tp-head"><span>Quiet</span><span class="t-meta">Default</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#282828;--bg-panel:#1d2021;--bg-raised:#1d2021;--bg-overlay:#3c3836;--text-primary:#ebdbb2;--text-muted:#a89984;--accent:#fe8019;--accent-strong:#fabd2f;--border-subtle:#3c3836;--border-strong:#504945;--success:#b8bb26;--danger:#fb4934;--blue:#83a598;--cyan:#8ec07c;--yellow:#fabd2f;--gray:#665c54;--term-bg:#282828;--term-fg:#ebdbb2;--term-cursor:#fe8019">
+          <div class="tp-head"><span>Gruvbox Dark</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#1e1e2e;--bg-panel:#181825;--bg-raised:#11111b;--bg-overlay:#313244;--text-primary:#cdd6f4;--text-muted:#a6adc8;--accent:#cba6f7;--accent-strong:#f5c2e7;--border-subtle:#313244;--border-strong:#45475a;--success:#a6e3a1;--danger:#f38ba8;--blue:#89b4fa;--cyan:#94e2d5;--yellow:#f9e2af;--gray:#45475a;--term-bg:#1e1e2e;--term-fg:#cdd6f4;--term-cursor:#cba6f7">
+          <div class="tp-head"><span>Catppuccin Mocha</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#282a36;--bg-panel:#21222c;--bg-raised:#343746;--bg-overlay:#44475a;--text-primary:#f8f8f2;--text-muted:#6272a4;--accent:#bd93f9;--accent-strong:#ff79c6;--border-subtle:#44475a;--border-strong:#6272a4;--success:#50fa7b;--danger:#ff5555;--blue:#bd93f9;--cyan:#8be9fd;--yellow:#f1fa8c;--gray:#6272a4;--term-bg:#282a36;--term-fg:#f8f8f2;--term-cursor:#bd93f9;--attention:#ff79c6">
+          <div class="tp-head"><span>Dracula</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#2e3440;--bg-panel:#3b4252;--bg-raised:#434c5e;--bg-overlay:#4c566a;--text-primary:#eceff4;--text-muted:#81a1c1;--accent:#88c0d0;--accent-strong:#8fbcbb;--border-subtle:#434c5e;--border-strong:#4c566a;--success:#a3be8c;--danger:#bf616a;--blue:#81a1c1;--cyan:#88c0d0;--yellow:#ebcb8b;--gray:#4c566a;--term-bg:#2e3440;--term-fg:#eceff4;--term-cursor:#88c0d0;--attention:#b48ead">
+          <div class="tp-head"><span>Nord</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#1a1b26;--bg-panel:#15161e;--bg-raised:#24283b;--bg-overlay:#292e42;--text-primary:#c0caf5;--text-muted:#565f89;--accent:#7aa2f7;--accent-strong:#bb9af7;--border-subtle:#292e42;--border-strong:#414868;--success:#9ece6a;--danger:#f7768e;--blue:#7aa2f7;--cyan:#7dcfff;--yellow:#e0af68;--gray:#414868;--term-bg:#1a1b26;--term-fg:#c0caf5;--term-cursor:#7aa2f7;--attention:#bb9af7">
+          <div class="tp-head"><span>Tokyo Night</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#002b36;--bg-panel:#073642;--bg-raised:#073642;--bg-overlay:#586e75;--text-primary:#93a1a1;--text-muted:#657b83;--accent:#268bd2;--accent-strong:#6c71c4;--border-subtle:#073642;--border-strong:#586e75;--success:#859900;--danger:#dc322f;--blue:#268bd2;--cyan:#2aa198;--yellow:#b58900;--gray:#586e75;--term-bg:#002b36;--term-fg:#93a1a1;--term-cursor:#268bd2;--attention:#d33682;--a-selection:12%">
+          <div class="tp-head"><span>Solarized Dark</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+        <div class="tp" data-mode="dark" style="--bg-base:#21252b;--bg-panel:#1b1f23;--bg-raised:#282c34;--bg-overlay:#323844;--text-primary:#abb2bf;--text-muted:#5c6370;--accent:#61afef;--accent-strong:#c678dd;--border-subtle:#323844;--border-strong:#4b5263;--success:#98c379;--danger:#e06c75;--blue:#61afef;--cyan:#56b6c2;--yellow:#e5c07b;--gray:#5c6370;--term-bg:#21252b;--term-fg:#abb2bf;--term-cursor:#61afef;--attention:#c678dd">
+          <div class="tp-head"><span>Atom One Dark</span></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="status-label" style="margin-left:auto">Working</span></header>
+            <div class="pane-body"><pre class="term"><span class="fg-muted">›</span> swift build
+<span class="tp-add">+ func insert(_ pane: PaneID)</span>
+<span class="cursor"> </span></pre></div></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="status-label is-needs-input" style="margin-left:auto">Needs input</span></header></section>
+          <div class="tp-foot"><span class="mode-chip is-normal">Normal</span><span class="tp-dots"><i class="status-dot sm is-working"></i><i class="status-dot sm is-ready"></i><i class="status-dot sm is-needs-input"></i><i class="status-dot sm is-error"></i></span></div>
+        </div>
+      </div>
+      <p class="caption">Your choice is remembered while you browse. It does not change how Soprano is configured.</p>
+    </div>
+  </section>
+
+  <!-- install -->
+  <section class="section" id="install">
+    <div class="wrap">
+      <div class="sec-head">
+        <div>
+        <p class="eyebrow">Install</p>
+        <h2>Build it from source.</h2>
+        </div>
+        <div class="body"><p>Soprano links libghostty statically, so the first build compiles it once. After that you only repeat it when the ghostty submodule moves.</p></div>
+      </div>
+      <div class="frame terminal">
+        <header><span class="traffic is-inactive"><i></i><i></i><i></i></span>Fresh clone to installed app</header>
+<pre><span class="c"># 1 · Toolchain. Homebrew Swift is required — the system CLT Swift has broken SPM.</span>
+<span class="p">$</span> brew install swift zig
+<span class="p">$</span> xcodebuild -downloadComponent MetalToolchain
+
+<span class="c"># 2 · Clone with the ghostty submodule</span>
+<span class="p">$</span> git clone --recurse-submodules https://github.com/frknue/soprano.git
+<span class="p">$</span> cd soprano
+
+<span class="c"># 3 · Build libghostty once (a few minutes)</span>
+<span class="p">$</span> ./scripts/build-ghostty.sh
+
+<span class="c"># 4 · Build the release app into /Applications</span>
+<span class="p">$</span> ./install.sh
+<span class="p">$</span> <span class="cursor-block"></span></pre>
+      </div>
+      <p class="note"><strong>Requirements:</strong> macOS 14 Sonoma or newer · full Xcode with the Metal Toolchain (Command Line Tools alone cannot build libghostty) · Homebrew Swift 6.2+ · Zig 0.15.2+.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="wordmark">soprano</span>
+    <span>Soprano is free software under the MIT license.</span>
+    <span class="links"><span>Source</span><span>Changelog</span><span>Issues</span><span>Built on ghostty</span></span>
+  </div>
+</footer>
+</body>
+</html>

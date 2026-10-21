@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soprano family · calm redesign</title>
+<script src="a/meta.js"></script>
+<script src="b/meta.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1d1d1f;
+    --ui: rgba(44, 44, 46, 0.92);
+    --ui-line: rgba(255, 255, 255, 0.10);
+    --ui-hover: rgba(255, 255, 255, 0.07);
+    --seg-on: #636366;
+    --text: #e5e5e7;
+    --text-2: #a1a1a6;
+    --text-3: #6e6e73;
+    --board-empty: #141415;
+    --gap: 24px;
+    --reserve: 96px;
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+  button, select { font: inherit; color: inherit; }
+
+  /* ---------- stage ---------- */
+  #stage {
+    position: fixed; inset: 0;
+    overflow: auto;
+    padding: 20px var(--gap) var(--reserve);
+    display: flex; flex-direction: column; align-items: safe center; justify-content: safe center;
+  }
+  #stage.zoom-100 { justify-content: flex-start; }
+  #cols { flex: none; display: flex; gap: var(--gap); align-items: flex-start; }
+  .col { margin: 0; flex: none; }
+  .cap {
+    display: flex; align-items: baseline; gap: 10px;
+    height: 24px; margin-bottom: 8px; overflow: hidden; white-space: nowrap;
+  }
+  .cap-name { font-weight: 600; color: var(--text); }
+  .cap-note { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .cap-screen { margin-left: auto; color: var(--text-3); padding-left: 12px; }
+  .box {
+    position: relative; overflow: hidden;
+    border-radius: 6px;
+    box-shadow: 0 0 0 1px var(--ui-line), 0 12px 40px rgba(0, 0, 0, 0.35);
+    background: var(--board-empty);
+  }
+  .board { position: absolute; left: 0; top: 0; width: 1512px; height: 982px; transform-origin: 0 0; }
+  .board iframe { display: block; width: 1512px; height: 982px; border: 0; background: transparent; }
+  .board .shot { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .board .shot.scale-down { object-fit: scale-down; }
+  .board .scroller { width: 100%; height: 100%; overflow-y: auto; }
+  .board .scroller img { display: block; width: 100%; height: auto; }
+  .placeholder {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    padding: 0 180px; text-align: center;
+    background: var(--board-empty); color: var(--text-2);
+    font-size: 30px; line-height: 1.45;
+  }
+  .placeholder small { font-size: 20px; color: var(--text-3); }
+  .placeholder[hidden] { display: none; }
+
+  /* ---------- floating bar ---------- */
+  #bar {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px; max-width: calc(100vw - 24px);
+    background: var(--ui); border: 1px solid var(--ui-line); border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(20px) saturate(1.2); -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    white-space: nowrap; z-index: 10;
+    transition: transform 160ms ease, opacity 160ms ease;
+  }
+  #bar.is-hidden { transform: translate(-50%, calc(100% + 30px)); opacity: 0; }
+  #barHot { position: fixed; left: 0; right: 0; bottom: 0; height: 16px; z-index: 9; display: none; }
+  body.bar-auto #barHot { display: block; }
+  @media (prefers-reduced-motion: reduce) { #bar { transition: none; } }
+  .sep { width: 1px; align-self: stretch; margin: 4px 4px; background: var(--ui-line); }
+  .seg { display: flex; padding: 2px; border-radius: 8px; background: rgba(0, 0, 0, 0.25); }
+  .seg button, .btn {
+    border: 0; background: transparent; cursor: default;
+    height: 28px; padding: 0 11px; border-radius: 6px; color: var(--text-2);
+  }
+  .seg button:hover, .btn:hover { background: var(--ui-hover); color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--seg-on); color: #fff; }
+  .seg button[aria-pressed="true"]:hover { background: var(--seg-on); }
+  .btn.icon { width: 28px; padding: 0; }
+  .btn[aria-pressed="true"] { background: var(--seg-on); color: #fff; }
+  .btn[hidden] { display: none; }
+  #designSeg button { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  #designSeg .letter { font-weight: 600; margin-right: 3px; }
+  select {
+    height: 28px; padding: 0 8px; min-width: 190px;
+    border: 0; border-radius: 6px; background: rgba(0, 0, 0, 0.25); color: var(--text);
+  }
+  button:focus-visible, select:focus-visible { outline: 2px solid #8e8e93; outline-offset: 1px; }
+
+  /* ---------- overlays ---------- */
+  #help {
+    position: fixed; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  #help[hidden], #info[hidden] { display: none; }
+  .card {
+    min-width: 360px; padding: 20px 24px;
+    background: #2c2c2e; border: 1px solid var(--ui-line); border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  .card h2, #info h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.06em; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; align-items: baseline; }
+  kbd {
+    display: inline-block; min-width: 22px; padding: 1px 6px; text-align: center;
+    border-radius: 5px; border: 1px solid var(--ui-line); background: rgba(255, 255, 255, 0.06);
+    font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--text);
+  }
+  /* Design notes: bottom sheet above the bar; the stage shrinks so every column stays visible. */
+  #info {
+    position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 15;
+    width: min(1280px, calc(100vw - 24px)); max-height: 40vh; overflow-y: auto;
+    padding: 16px 22px 18px;
+    background: var(--ui); border: 1px solid var(--ui-line); border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  }
+  #infoBody { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 28px; }
+  #info section { min-width: 0; }
+  #info h3 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 4px; font-size: 15px; }
+  #info h3 kbd { margin-left: auto; font-weight: 400; }
+  #info .tagline { margin: 0 0 8px; color: var(--text-2); }
+  #info .modes { margin: 0 0 8px; color: var(--text-3); font-size: 12px; }
+  #info ol { margin: 0; padding-left: 20px; color: var(--text); }
+  #info li { margin: 4px 0; }
+  #info .close { position: absolute; top: 10px; right: 10px; }
+</style>
+</head>
+<body>
+<main id="stage">
+  <div id="cols"></div>
+</main>
+
+<div id="barHot" aria-hidden="true"></div>
+<nav id="bar" aria-label="Design comparison">
+  <div class="seg" id="designSeg" role="group" aria-label="Design"></div>
+  <div class="sep"></div>
+  <button class="btn icon" id="prev" title="Previous screen (←)" aria-label="Previous screen">‹</button>
+  <select id="screen" aria-label="Screen" title="Screen (← →)"></select>
+  <button class="btn icon" id="next" title="Next screen (→)" aria-label="Next screen">›</button>
+  <div class="sep"></div>
+  <div class="seg" id="modeSeg" role="group" aria-label="Mode" title="Mode (M cycles Primary → Dark → Light)">
+    <button data-mode="" title="Each design in its own primary mode">Primary</button>
+    <button data-mode="dark">Dark</button>
+    <button data-mode="light">Light</button>
+  </div>
+  <div class="seg" id="viewSeg" role="group" aria-label="View" title="Compare (C)">
+    <button data-view="single">Single</button>
+    <button data-view="compare">Compare</button>
+  </div>
+  <div class="seg" id="zoomSeg" role="group" aria-label="Zoom" title="Zoom (Z)">
+    <button data-zoom="fit">Fit</button>
+    <button data-zoom="100">100%</button>
+  </div>
+  <button class="btn" id="syncBtn" title="Synced scrolling (S)" hidden>Sync scroll</button>
+  <div class="sep"></div>
+  <button class="btn icon" id="infoBtn" title="Design notes (I)" aria-label="Design notes">i</button>
+  <button class="btn icon" id="helpBtn" title="Shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+</nav>
+
+<aside id="info" hidden aria-label="Design notes">
+  <button class="btn icon close" data-close aria-label="Close">×</button>
+  <h2>Design notes</h2>
+  <div id="infoBody"></div>
+</aside>
+
+<div id="help" hidden role="dialog" aria-label="Keyboard shortcuts">
+  <div class="card">
+    <h2>Shortcuts</h2>
+    <div class="keys">
+      <span><kbd>0</kbd> <kbd>1</kbd> <kbd>2</kbd></span><span>Today · Design A · Design B</span>
+      <span><kbd>←</kbd> <kbd>→</kbd></span><span>Previous / next screen</span>
+      <span><kbd>M</kbd></span><span>Mode: Primary → Dark → Light</span>
+      <span><kbd>C</kbd></span><span>Single / compare</span>
+      <span><kbd>S</kbd></span><span>Synced scrolling (System, Landing page in compare)</span>
+      <span><kbd>Z</kbd></span><span>Fit / 100%</span>
+      <span><kbd>I</kbd></span><span>Design notes</span>
+      <span><kbd>?</kbd></span><span>This sheet</span>
+      <span><kbd>Esc</kbd></span><span>Close</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var W = 1512, H = 982;
+
+  var SCREENS = [
+    { id: 'system',            app: 'Family',       label: 'System',          scroll: true },
+    { id: 'soprano',           app: 'Soprano',      label: 'Main window' },
+    { id: 'soprano-palette',   app: 'Soprano',      label: 'Command palette' },
+    { id: 'soprano-dashboard', app: 'Soprano',      label: 'Agent dashboard' },
+    { id: 'soprano-settings',  app: 'Soprano',      label: 'Settings' },
+    { id: 'git',               app: 'Soprano Git',  label: 'Graph' },
+    { id: 'git-diff',          app: 'Soprano Git',  label: 'Diff' },
+    { id: 'cast',              app: 'Soprano Cast', label: 'Launcher' },
+    { id: 'cast-settings',     app: 'Soprano Cast', label: 'Settings' },
+    { id: 'tab',               app: 'Soprano Tab',  label: 'Switcher' },
+    { id: 'site',              app: 'Site',         label: 'Landing page',    scroll: true }
+  ];
+
+  var NO_RENDER = "Today\u2019s Soprano window has no offscreen renderer \u2014 terminal panes would start shells.";
+  var TODAY = {
+    'system':            { src: 'current/system.png', fit: 'scale-down', note: "Today\u2019s app icons" },
+    'soprano':           { none: NO_RENDER },
+    'soprano-palette':   { src: 'current/soprano-palette.png', note: "Rendered in Soprano Git, which vendors Soprano\u2019s command palette" },
+    'soprano-dashboard': { none: NO_RENDER },
+    'soprano-settings':  { none: NO_RENDER },
+    'git':               { src: 'current/git.png' },
+    'git-diff':          { src: 'current/git-diff.png' },
+    'cast':              { src: 'current/cast.png' },
+    'cast-settings':     { src: 'current/cast-settings.png' },
+    'tab':               { src: 'current/tab.png' },
+    'site':              { src: 'current/site.png', scroll: true, note: 'soprano-site landing page, Gruvbox Dark (default theme), 1512 px wide' }
+  };
+
+  var metas = window.SOPRANO_DESIGNS || {};
+  var DESIGNS = {
+    today: { id: 'today', name: 'Mission Control', tagline: 'As shipped \u2014 renders captured 2026-10-21.' },
+    a: Object.assign({ id: 'a' }, metas.a || {}),
+    b: Object.assign({ id: 'b' }, metas.b || {})
+  };
+  var ORDER = ['today', 'a', 'b'];
+  var KEY = { today: '0', a: '1', b: '2' };
+
+  // Labels: bar "A Quiet", caption "A · Quiet", drawer "Quiet — Design A".
+  function letter(id) { return id.toUpperCase(); }
+  function captionName(id) {
+    if (id === 'today') return 'Today';
+    return DESIGNS[id].name ? letter(id) + ' \u00b7 ' + DESIGNS[id].name : 'Design ' + letter(id);
+  }
+  function drawerName(id) {
+    if (id === 'today') return 'Today \u2014 ' + DESIGNS.today.name;
+    return DESIGNS[id].name ? DESIGNS[id].name + ' \u2014 Design ' + letter(id) : 'Design ' + letter(id);
+  }
+
+  // ---------- state ----------
+  var q = new URLSearchParams(location.search);
+  function pick(value, allowed, fallback) { return allowed.indexOf(value) !== -1 ? value : fallback; }
+  var state = {
+    design: pick(q.get('design'), ORDER, 'a'),
+    screen: pick(q.get('screen'), SCREENS.map(function (s) { return s.id; }), 'soprano'),
+    mode: pick(q.get('mode'), ['dark', 'light'], null),
+    view: pick(q.get('view'), ['single', 'compare'], 'single'),
+    zoom: pick(q.get('zoom'), ['fit', '100'], 'fit'),
+    sync: q.get('sync') !== '0'
+  };
+
+  function syncUrl() {
+    var p = new URLSearchParams();
+    p.set('design', state.design);
+    p.set('screen', state.screen);
+    if (state.mode) p.set('mode', state.mode);
+    p.set('view', state.view);
+    p.set('zoom', state.zoom);
+    if (!state.sync) p.set('sync', '0');
+    try { history.replaceState(null, '', location.pathname + '?' + p.toString()); } catch (e) { /* ignore */ }
+  }
+
+  function screenInfo(id) { return SCREENS.filter(function (s) { return s.id === id; })[0]; }
+  function frameUrl(designId) {
+    return designId + '/' + state.screen + '.html' + (state.mode ? '?mode=' + state.mode : '');
+  }
+
+  // ---------- DOM ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var stage = $('stage'), cols = $('cols'), bar = $('bar'), info = $('info');
+  var frames = [];      // { iframe, design, ready, placeholder }
+  var todayScroller = null;
+  var todayNote = null;
+
+  function columns() { return state.view === 'single' ? [state.design] : ORDER.slice(); }
+
+  // Bottom reserve: the bar (always shown at Fit, auto-hidden at 100%) plus the notes sheet when open.
+  function updateReserve() {
+    var reserve = state.zoom === '100' && info.hidden ? 32 : 96;
+    if (!info.hidden) reserve = info.offsetHeight + 76 + 16;
+    stage.style.setProperty('--reserve', reserve + 'px');
+  }
+
+  function scaleFor(n) {
+    if (state.zoom === '100') return 1;
+    var cs = getComputedStyle(stage);
+    var availW = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (n - 1) * 24;
+    var availH = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 32;
+    return Math.max(0.1, Math.min(1, availW / (n * W), availH / H));
+  }
+
+  function todayCaption() {
+    var t = TODAY[state.screen];
+    var text = t.src ? (t.note || DESIGNS.today.name) : 'No render';
+    return text + (state.mode ? ' \u00b7 dark only' : '');
+  }
+
+  function buildToday(board) {
+    var t = TODAY[state.screen];
+    if (!t.src) {
+      var ph = document.createElement('div');
+      ph.className = 'placeholder';
+      ph.textContent = t.none;
+      board.appendChild(ph);
+      return;
+    }
+    var img = document.createElement('img');
+    img.src = t.src;
+    img.alt = 'Today: ' + screenInfo(state.screen).app + ' \u2014 ' + screenInfo(state.screen).label;
+    if (t.scroll) {
+      var sc = document.createElement('div');
+      sc.className = 'scroller';
+      sc.appendChild(img);
+      board.appendChild(sc);
+      watchTodayScroll(sc);
+    } else {
+      img.className = 'shot' + (t.fit === 'scale-down' ? ' scale-down' : '');
+      board.appendChild(img);
+    }
+  }
+
+  function buildFrame(board, designId) {
+    var iframe = document.createElement('iframe');
+    var scr = screenInfo(state.screen);
+    iframe.title = captionName(designId) + ' \u2014 ' + scr.app + ' ' + scr.label;
+    if (!scr.scroll) iframe.setAttribute('scrolling', 'no');
+    var ph = document.createElement('div');
+    ph.className = 'placeholder';
+    ph.hidden = true;
+    ph.innerHTML = 'Not built yet<small></small>';
+    ph.querySelector('small').textContent = designId + '/' + state.screen + '.html is missing or does not load shared/frame.js';
+    var rec = { iframe: iframe, design: designId, ready: false, placeholder: ph };
+    iframe.addEventListener('load', function () {
+      setTimeout(function () { if (!rec.ready) ph.hidden = false; }, 700);
+    });
+    iframe.src = frameUrl(designId);
+    board.appendChild(iframe);
+    board.appendChild(ph);
+    frames.push(rec);
+  }
+
+  function render() {
+    frames = [];
+    todayScroller = null;
+    todayNote = null;
+    cols.textContent = '';
+    var scr = screenInfo(state.screen);
+    var list = columns();
+    updateReserve();
+    var s = scaleFor(list.length);
+    list.forEach(function (designId) {
+      var col = document.createElement('figure');
+      col.className = 'col';
+      col.style.width = Math.round(W * s) + 'px';
+      var cap = document.createElement('figcaption');
+      cap.className = 'cap';
+      var name = document.createElement('span');
+      name.className = 'cap-name';
+      name.textContent = captionName(designId);
+      var sub = document.createElement('span');
+      sub.className = 'cap-note';
+      if (designId === 'today') { sub.textContent = todayCaption(); todayNote = sub; }
+      else sub.textContent = DESIGNS[designId].tagline || '';
+      sub.title = sub.textContent;
+      var where = document.createElement('span');
+      where.className = 'cap-screen';
+      where.textContent = scr.app + ' \u00b7 ' + scr.label;
+      cap.append(name, sub, where);
+      var box = document.createElement('div');
+      box.className = 'box';
+      box.style.width = Math.round(W * s) + 'px';
+      box.style.height = Math.round(H * s) + 'px';
+      var board = document.createElement('div');
+      board.className = 'board';
+      board.style.transform = s === 1 ? 'none' : 'scale(' + s + ')';
+      if (designId === 'today') buildToday(board); else buildFrame(board, designId);
+      box.appendChild(board);
+      col.append(cap, box);
+      cols.appendChild(col);
+    });
+    stage.classList.toggle('zoom-100', state.zoom === '100');
+    updateBarMode();
+    syncControls();
+    syncUrl();
+    document.title = scr.app + ' \u00b7 ' + scr.label + ' \u2014 ' +
+      (state.view === 'compare' ? 'compare' : captionName(state.design)) + ' \u00b7 calm family';
+  }
+
+  function rescale() {
+    updateReserve();
+    var s = scaleFor(columns().length);
+    Array.prototype.forEach.call(cols.children, function (col) {
+      col.style.width = Math.round(W * s) + 'px';
+      var box = col.querySelector('.box');
+      box.style.width = Math.round(W * s) + 'px';
+      box.style.height = Math.round(H * s) + 'px';
+      col.querySelector('.board').style.transform = s === 1 ? 'none' : 'scale(' + s + ')';
+    });
+  }
+
+  // ---------- synced scrolling (system, site in compare) ----------
+  function syncActive() {
+    return state.sync && state.view === 'compare' && !!screenInfo(state.screen).scroll;
+  }
+  // Design frames match the sender's section landmark (id + offset) when they have it, else
+  // the fraction; Today's PNG has no landmarks and always follows the fraction.
+  function relayScroll(fraction, anchor, fromWindow) {
+    frames.forEach(function (f) {
+      var w = f.iframe.contentWindow;
+      if (w && w !== fromWindow && f.ready) w.postMessage({ type: 'soprano-design:scroll-to', fraction: fraction, anchor: anchor }, '*');
+    });
+    if (todayScroller && fromWindow !== 'today') {
+      var max = todayScroller.scrollHeight - todayScroller.clientHeight;
+      var top = Math.round(fraction * Math.max(0, max));
+      todayScroller._applied = top;
+      todayScroller.scrollTop = top;
+    }
+  }
+  function watchTodayScroll(sc) {
+    todayScroller = sc;
+    var pending = false;
+    sc.addEventListener('scroll', function () {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        // Ignore the scroll event caused by our own relay (no feedback loop).
+        if (sc._applied != null && Math.abs(sc.scrollTop - sc._applied) < 2) return;
+        sc._applied = null;
+        if (!syncActive()) return;
+        var max = sc.scrollHeight - sc.clientHeight;
+        relayScroll(max > 0 ? sc.scrollTop / max : 0, null, 'today');
+      });
+    }, { passive: true });
+  }
+
+  // ---------- floating bar: always visible at Fit, auto-hides at 100% ----------
+  var hideTimer = null;
+  function barAuto() { return state.zoom === '100' && info.hidden && $('help').hidden; }
+  function showBar() { clearTimeout(hideTimer); bar.classList.remove('is-hidden'); }
+  function hideBarSoon(delay) {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      if (barAuto() && !bar.matches(':hover') && !bar.contains(document.activeElement)) bar.classList.add('is-hidden');
+    }, delay == null ? 500 : delay);
+  }
+  function updateBarMode() {
+    document.body.classList.toggle('bar-auto', barAuto());
+    if (barAuto()) hideBarSoon(1200); else showBar();
+  }
+  function peekBar() { if (barAuto()) { showBar(); hideBarSoon(1400); } }
+  $('barHot').addEventListener('mouseenter', showBar);
+  $('barHot').addEventListener('mouseleave', function () { if (barAuto()) hideBarSoon(); });
+  bar.addEventListener('mouseenter', showBar);
+  bar.addEventListener('mouseleave', function () { if (barAuto()) hideBarSoon(); });
+  bar.addEventListener('focusin', showBar);
+  bar.addEventListener('focusout', function () { if (barAuto()) hideBarSoon(); });
+  document.addEventListener('mousemove', function (e) {
+    if (!barAuto()) return;
+    if (e.clientY > window.innerHeight - 90) showBar();
+  });
+
+  // ---------- controls ----------
+  var designSeg = $('designSeg');
+  ORDER.forEach(function (id) {
+    var b = document.createElement('button');
+    b.dataset.design = id;
+    if (id === 'today') b.textContent = 'Today';
+    else {
+      var l = document.createElement('span');
+      l.className = 'letter';
+      l.textContent = letter(id);
+      b.append(l, DESIGNS[id].name || ('Design ' + letter(id)));
+    }
+    b.title = drawerName(id) + ' (' + KEY[id] + ')';
+    designSeg.appendChild(b);
+  });
+
+  var select = $('screen');
+  var groups = {};
+  SCREENS.forEach(function (s) {
+    if (!groups[s.app]) {
+      groups[s.app] = document.createElement('optgroup');
+      groups[s.app].label = s.app;
+      select.appendChild(groups[s.app]);
+    }
+    var o = document.createElement('option');
+    o.value = s.id;
+    o.textContent = s.label;
+    groups[s.app].appendChild(o);
+  });
+
+  function press(container, attr, value) {
+    Array.prototype.forEach.call(container.querySelectorAll('button'), function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset[attr] === value));
+    });
+  }
+  function syncControls() {
+    press(designSeg, 'design', state.view === 'compare' ? '' : state.design);
+    press($('modeSeg'), 'mode', state.mode || '');
+    press($('viewSeg'), 'view', state.view);
+    press($('zoomSeg'), 'zoom', state.zoom);
+    select.value = state.screen;
+    var sync = $('syncBtn');
+    sync.hidden = !(state.view === 'compare' && screenInfo(state.screen).scroll);
+    sync.setAttribute('aria-pressed', String(state.sync));
+    $('infoBtn').setAttribute('aria-pressed', String(!info.hidden));
+    $('helpBtn').setAttribute('aria-pressed', String(!$('help').hidden));
+  }
+
+  function setDesign(id) { state.design = id; state.view = 'single'; render(); }
+  function stepScreen(delta) {
+    var i = SCREENS.map(function (s) { return s.id; }).indexOf(state.screen);
+    state.screen = SCREENS[(i + delta + SCREENS.length) % SCREENS.length].id;
+    render();
+  }
+  function primaryOf(designId) {
+    var m = DESIGNS[designId] && DESIGNS[designId].primaryMode;
+    return m === 'light' || m === 'dark' ? m : null;
+  }
+  function setMode(mode) {
+    state.mode = mode;
+    frames.forEach(function (f) {
+      var target = mode || primaryOf(f.design);
+      if (target) {
+        if (f.iframe.contentWindow) f.iframe.contentWindow.postMessage({ type: 'soprano-design:mode', mode: target }, '*');
+      } else {
+        f.ready = false;
+        f.iframe.src = frameUrl(f.design);
+      }
+    });
+    if (todayNote) { todayNote.textContent = todayCaption(); todayNote.title = todayNote.textContent; }
+    syncControls();
+    syncUrl();
+  }
+  function cycleMode() { setMode(state.mode === null ? 'dark' : state.mode === 'dark' ? 'light' : null); }
+  function toggleSync() { state.sync = !state.sync; syncControls(); syncUrl(); }
+  function toggleOverlay(id) {
+    var el = $(id);
+    el.hidden = !el.hidden;
+    if (id === 'info') rescale();
+    updateBarMode();
+    syncControls();
+  }
+
+  designSeg.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (b) setDesign(b.dataset.design);
+  });
+  $('modeSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (b) setMode(b.dataset.mode || null);
+  });
+  $('viewSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (b) { state.view = b.dataset.view; render(); }
+  });
+  $('zoomSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (b) { state.zoom = b.dataset.zoom; render(); }
+  });
+  $('syncBtn').addEventListener('click', toggleSync);
+  $('prev').addEventListener('click', function () { stepScreen(-1); });
+  $('next').addEventListener('click', function () { stepScreen(1); });
+  select.addEventListener('change', function () { state.screen = select.value; select.blur(); render(); });
+  $('infoBtn').addEventListener('click', function () { toggleOverlay('info'); });
+  $('helpBtn').addEventListener('click', function () { toggleOverlay('help'); });
+  $('help').addEventListener('click', function () { toggleOverlay('help'); });
+  info.querySelector('[data-close]').addEventListener('click', function () { toggleOverlay('info'); });
+
+  // ---------- design notes ----------
+  (function buildInfo() {
+    var body = $('infoBody');
+    ORDER.forEach(function (id) {
+      var d = DESIGNS[id];
+      var sec = document.createElement('section');
+      var h = document.createElement('h3');
+      var title = document.createElement('span');
+      title.textContent = drawerName(id);
+      var key = document.createElement('kbd');
+      key.textContent = KEY[id];
+      key.title = 'Press ' + KEY[id];
+      h.append(title, key);
+      sec.appendChild(h);
+      var p = document.createElement('p');
+      p.className = 'tagline';
+      p.textContent = d.tagline || 'meta.js not loaded yet.';
+      sec.appendChild(p);
+      var m = document.createElement('p');
+      m.className = 'modes';
+      m.textContent = id === 'today' ? 'Dark only' :
+        d.primaryMode ? 'Primary mode: ' + d.primaryMode + (d.modes ? ' \u00b7 modes: ' + d.modes.join(', ') : '') : '';
+      if (m.textContent) sec.appendChild(m);
+      if (d.principles && d.principles.length) {
+        var ol = document.createElement('ol');
+        d.principles.forEach(function (pr) {
+          var li = document.createElement('li');
+          li.textContent = pr;
+          ol.appendChild(li);
+        });
+        sec.appendChild(ol);
+      }
+      body.appendChild(sec);
+    });
+  })();
+
+  // ---------- keyboard ----------
+  function handleKey(key) {
+    switch (key) {
+      case '0': setDesign('today'); break;
+      case '1': setDesign('a'); break;
+      case '2': setDesign('b'); break;
+      case 'ArrowLeft': stepScreen(-1); break;
+      case 'ArrowRight': stepScreen(1); break;
+      case 'm': case 'M': cycleMode(); break;
+      case 'c': case 'C': state.view = state.view === 'compare' ? 'single' : 'compare'; render(); break;
+      case 's': case 'S': toggleSync(); break;
+      case 'z': case 'Z': state.zoom = state.zoom === 'fit' ? '100' : 'fit'; render(); break;
+      case 'i': case 'I': toggleOverlay('info'); break;
+      case '?': toggleOverlay('help'); break;
+      case 'Escape':
+        if (!$('help').hidden) toggleOverlay('help');
+        else if (!info.hidden) toggleOverlay('info');
+        break;
+      default: return false;
+    }
+    peekBar();
+    return true;
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+    if (e.target === select && /^Arrow/.test(e.key)) return;
+    if (handleKey(e.key)) e.preventDefault();
+  });
+
+  // Messages from screens (shared/frame.js): ready handshake, forwarded keys, scroll fractions.
+  window.addEventListener('message', function (e) {
+    var data = e.data;
+    if (!data || typeof data.type !== 'string') return;
+    var rec = frames.filter(function (f) { return f.iframe.contentWindow === e.source; })[0];
+    if (!rec) return;
+    if (data.type === 'soprano-design:ready') {
+      rec.ready = true;
+      rec.placeholder.hidden = true;
+      var want = state.mode || primaryOf(rec.design);
+      if (want && data.mode !== want) e.source.postMessage({ type: 'soprano-design:mode', mode: want }, '*');
+    } else if (data.type === 'soprano-design:key') {
+      handleKey(data.key);
+    } else if (data.type === 'soprano-design:scroll') {
+      if (syncActive() && typeof data.fraction === 'number') relayScroll(data.fraction, data.anchor || null, e.source);
+    }
+  });
+
+  // Fallback for frames without frame.js: hand focus back to the shell after a click inside.
+  window.addEventListener('blur', function () {
+    setTimeout(function () {
+      var el = document.activeElement;
+      if (!el || el.tagName !== 'IFRAME') return;
+      var rec = frames.filter(function (f) { return f.iframe === el; })[0];
+      if (!rec || !rec.ready) { el.blur(); window.focus(); }
+    }, 0);
+  });
+
+  var resizeTimer;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(rescale, 60);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

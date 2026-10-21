@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio — Soprano Tab</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<script>
+  /* screen-local glyphs for third-party app-icon stand-ins (Lucide paths) */
+  Object.assign(window.SOPRANO_ICONS, {
+    compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/>',
+    'sticky-note': '<path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><path d="M15 3v4a2 2 0 0 0 2 2h4"/>',
+    finder: '<path d="M12.5 3c-1.2 3.6-1.8 6.6-1.5 9.5h2.4"/><path d="M8 8.5v2M16 8.5v2"/><path d="M7.5 16c2.8 2 6.2 2 9 0"/>',
+    'notebook-pen': '<path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4M2 10h4M2 14h4M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>'
+  });
+</script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* ---------- desktop ---------- */
+  .desktop { --desk-shadow: var(--shadow-window); }
+  .menubar-right .battery { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+
+  .bgw { position: absolute; box-shadow: var(--desk-shadow); }
+  .bgw-git    { left: 36px;   top: 52px;  width: 820px;  height: 560px; }
+  .bgw-sticky { left: 1318px; top: 62px;  width: 150px;  height: 140px; }
+  .bgw-sticky.st { background: #f7f1cf; color: #5a5030; }
+  .bgw-sticky.st .bar { background: #eee5b0; }
+  [data-mode="dark"] .bgw-sticky { filter: brightness(0.72) saturate(0.7); }
+  .bgw-claude { left: 170px;  top: 96px;  width: 1060px; height: 840px; }
+
+  /* Soprano window (Ink terminal look) */
+  .sop-body { flex: 1; min-height: 0; display: flex; }
+  .sop-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .sop-main .pane { flex: 1; }
+  .term-bottom { position: absolute; left: 0; right: 0; bottom: 0; }
+  .sidebar .select { height: 24px; min-width: 150px; }
+
+  /* Git window toolbar text buttons */
+  .git-btn { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: var(--radius-control); font: var(--type-label); color: var(--text-primary); white-space: nowrap; }
+  .git-btn .icon { --icon-size: 13px; --icon-stroke: 2; color: var(--text-muted); }
+  .git-btn .kbd { height: 16px; min-width: 16px; padding: 0 4px; color: var(--text-muted); }
+
+  /* ---------- switcher ---------- */
+  .switcher { left: 91px; top: 210px; width: 1330px; z-index: 10; }
+  .tiles { display: flex; flex-direction: column; gap: var(--tile-gap); align-items: center; }
+  .trow { display: flex; gap: var(--tile-gap); }
+  .tiles .tile { height: 168px; }
+  .tile-thumb { --s: 0.4; }
+  .thumb-icon { position: absolute; inset: 0; display: grid; place-items: center; }
+
+  /* miniature window: drawn at 2.5× then scaled into the 140 px well */
+  .mini {
+    position: absolute; left: 0; top: 0;
+    width: calc(var(--iw) / var(--s)); height: calc(140px / var(--s));
+    transform: scale(var(--s)); transform-origin: 0 0;
+    display: flex; flex-direction: column; overflow: hidden;
+    font: 400 13px/18px var(--font-sans);
+  }
+  .mini .sidebar { width: 150px; }
+
+  /* ---------- app icons: Folio family (mode-matched) + third-party stand-ins ---------- */
+  .ai { --ai: 16px; position: relative; display: inline-block; flex: none; width: var(--ai); height: var(--ai); }
+  .ai::before { content: ""; position: absolute; inset: 9.8%; border-radius: 22.6%; background: var(--ai-bg); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.22), inset 0 0 0 0.5px rgba(0, 0, 0, 0.08); }
+  .ai > .icon { position: absolute; left: 26%; top: 26%; width: 48%; height: 48%; color: var(--ai-fg, #fff); --icon-stroke: 2.4; }
+  .ai.ai-lg { --ai: 72px; }
+  .ai.ai-lg > .icon { --icon-stroke: 1.9; }
+  .ai-soprano, .ai-git { background: center / contain no-repeat; }
+  .ai-soprano::before, .ai-git::before { display: none; }
+  .ai-soprano { background-image: url("icons/soprano.svg"); }
+  .ai-git { background-image: url("icons/git.svg"); }
+  [data-mode="dark"] .ai-soprano { background-image: url("icons/soprano-dark.svg"); }
+  [data-mode="dark"] .ai-git { background-image: url("icons/git-dark.svg"); }
+  /* third-party app icons are content imagery: fixed colors in both modes */
+  .ai-safari   { --ai-bg: linear-gradient(#5ba8f0, #2d6fd2); }
+  .ai-finder   { --ai-bg: linear-gradient(90deg, #4f9fe8 0 50%, #a9d4f5 50% 100%); --ai-fg: #1f3d63; }
+  .ai-stickies { --ai-bg: linear-gradient(#f6e27a, #e8c93f); --ai-fg: #6d5810; }
+  .ai-mail     { --ai-bg: linear-gradient(#5aa9f2, #2a74d8); }
+  .ai-settings { --ai-bg: linear-gradient(#a7a6a3, #6f6e6b); }
+  .ai-slack    { --ai-bg: linear-gradient(#5b2a5c, #3f1240); }
+  .ai-notes    { --ai-bg: linear-gradient(#f7d45e, #e9b52c); }
+  .ai-music    { --ai-bg: linear-gradient(#f2667a, #d93a52); }
+
+  /* ---------- thumbnails: one legible headline each, body copy as calm ink lines ---------- */
+  .ln { display: block; flex: none; height: 9px; border-radius: 5px; background: currentColor; opacity: 0.16; }
+  .ln.b { opacity: 0.34; }
+  .lns { display: flex; flex-direction: column; gap: 14px; }
+  .mini .hl { font-weight: 600; letter-spacing: -0.3px; white-space: nowrap; }
+
+  /* Soprano / Soprano Git minis: page mode, real components, labels as lines */
+  .mini .term.big { font: 400 26px/36px var(--font-mono); padding: 14px 18px; }
+  .mini .tab .ln, .mini .pane-header .ln, .mini .statusbar .ln { opacity: 0.3; }
+  .mside { display: flex; flex-direction: column; gap: 16px; padding: 18px 14px; color: var(--text-primary); }
+  .mside .sel { padding: 9px 8px; margin: -9px -8px; border-radius: var(--radius-control); background: var(--selection-muted); }
+  .grow { display: flex; align-items: center; gap: 18px; height: 44px; padding: 0 16px 0 56px; color: var(--text-primary); }
+  .grow.is-head { background: var(--selection-muted); }
+  .grow .hl { font-size: 28px; line-height: 34px; font-weight: 500; letter-spacing: -0.2px; }
+  .grow .ln:last-child { margin-left: auto; }
+
+  /* light app content (mode-independent imagery) */
+  .lt { background: #ffffff; color: #2b2b2b; }
+  .lt .bar { flex: none; display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 18px; background: #f4f3f1; border-bottom: 1px solid #e2dfda; }
+  .lt .lights { display: inline-flex; gap: 8px; flex: none; }
+  .lt .lights i { width: 12px; height: 12px; border-radius: 50%; background: #d8d5d0; display: block; }
+  .lt .url { flex: 1; display: flex; justify-content: center; }
+  .lt .url > span { width: 56%; height: 30px; border-radius: 8px; background: #e8e6e2; display: flex; align-items: center; justify-content: center; }
+  .lt .url .ln { width: 60%; }
+  .lt .page { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 18px; padding: 26px 32px; }
+  .lt .h1 { font: 600 44px/50px var(--font-sans); letter-spacing: -0.6px; color: #1d1d1f; }
+  .lt .side { flex: none; background: #f0efec; border-right: 1px solid #e2dfda; display: flex; flex-direction: column; gap: 16px; padding: 20px 16px; }
+  .lt .side .sel { padding: 8px; margin: -8px; border-radius: 6px; background: #dedcd8; }
+
+  /* AltTab */
+  .at-nav { flex: none; display: flex; align-items: center; gap: 20px; height: 54px; padding: 0 32px; border-bottom: 1px solid #ecebe8; }
+  .at-nav .logo { width: 26px; height: 26px; border-radius: 7px; background: #2f3542; flex: none; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .lt .card { background: none; box-shadow: none; border: 1px solid #e6e4e0; border-radius: 10px; padding: 16px 14px; display: flex; flex-direction: column; gap: 11px; }
+
+  /* GitHub */
+  .gh-head { flex: none; display: flex; align-items: center; gap: 14px; height: 54px; padding: 0 28px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; }
+  .gh-head .octo { width: 28px; height: 28px; border-radius: 50%; background: #1f2328; flex: none; }
+  .lt .gh-title { font: 600 34px/40px var(--font-sans); letter-spacing: -0.4px; color: #1f2328; }
+  .lt .gh-title span { color: #8a929b; font-weight: 400; }
+  .gh-meta { display: flex; align-items: center; gap: 14px; }
+  .gh-open { width: 78px; height: 30px; border-radius: 15px; background: #1f883d; flex: none; }
+  .gh-box { border: 1px solid #d1d9e0; border-radius: 8px; overflow: hidden; }
+  .gh-box .h { height: 40px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; display: flex; align-items: center; padding: 0 14px; }
+  .gh-box .lns { padding: 16px 14px; }
+
+  /* Finder */
+  .fd { flex: 1; min-height: 0; display: flex; }
+  .fd-row { display: flex; align-items: center; gap: 12px; height: 34px; padding: 0 18px; }
+  .fd-row:nth-child(even) { background: #f6f5f3; }
+  .fd-row i.f { width: 16px; height: 20px; border-radius: 3px; flex: none; display: block; }
+  .fd-row .ln:last-child { margin-left: auto; }
+  .lt .bar .ttl { font: 600 28px/1 var(--font-sans); color: #2b2b2b; }
+
+  /* Stickies */
+  .st { background: #fbf1a9; color: #3d3415; }
+  .st .bar { flex: none; height: 24px; background: #f2e17a; display: flex; align-items: center; padding: 0 10px; }
+  .st .bar i { width: 11px; height: 11px; border: 1px solid #b9a540; display: block; }
+  .st .note { padding: 20px 22px; display: flex; flex-direction: column; gap: 18px; }
+  .st .h1 { font: 600 34px/40px var(--font-sans); }
+  .st .ln { opacity: 0.26; }
+
+  /* Mail */
+  .ml { flex: 1; min-height: 0; display: flex; }
+  .ml-list { width: 220px; flex: none; border-right: 1px solid #e3e1dd; }
+  .ml-msg { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 14px 30px; border-bottom: 1px solid #ecebe8; }
+  .ml-msg.unread::before { content: ""; position: absolute; left: 11px; top: 16px; width: 9px; height: 9px; border-radius: 50%; background: #2f7ae5; }
+  .ml-msg.on { background: #e6eaf0; }
+
+  /* System Settings */
+  .ss { flex: 1; min-height: 0; display: flex; position: relative; }
+  .ss .side { width: 118px; padding-top: 52px; }
+  .ss .side div { display: flex; align-items: center; gap: 8px; }
+  .ss i.sq { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+  .ss-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 16px; }
+  .ss-main .h1 { font: 600 24px/30px var(--font-sans); letter-spacing: -0.2px; color: #1d1d1f; white-space: nowrap; }
+  .ss-group { border-radius: 10px; background: #f4f3f1; border: 1px solid #e6e4e0; }
+  .ss-row { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-bottom: 1px solid #e6e4e0; }
+  .ss-row:last-child { border-bottom: 0; }
+
+  /* Slack (full screen) */
+  .sk { flex: 1; min-height: 0; display: flex; background: #fff; color: #1d1c1d; }
+  .sk-rail { width: 60px; flex: none; background: #2f0b30; display: flex; flex-direction: column; align-items: center; padding-top: 16px; gap: 12px; }
+  .sk-rail i { width: 34px; height: 34px; border-radius: 9px; background: #e9c46a; display: block; }
+  .sk-rail i + i { background: rgba(255, 255, 255, 0.16); }
+  .sk-side { width: 170px; flex: none; background: #3f1240; color: #ffffff; display: flex; flex-direction: column; gap: 16px; padding: 22px 16px; }
+  .sk-side .ln { opacity: 0.32; } .sk-side .ln.b { opacity: 0.7; }
+  .sk-side .sel { padding: 8px 16px; margin: -8px -16px; background: #1264a3; }
+  .sk-side .sel .ln { opacity: 0.85; }
+  .sk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .sk-top { flex: none; height: 64px; display: flex; align-items: center; padding: 0 22px; border-bottom: 1px solid #e8e8e8; font: 700 32px/1 var(--font-sans); letter-spacing: -0.3px; }
+  .sk-msg { display: flex; gap: 14px; padding: 18px 22px 4px; }
+  .sk-msg .av { width: 38px; height: 38px; border-radius: 8px; flex: none; }
+  .sk-msg .lns { flex: 1; gap: 11px; }
+</style>
+</head>
+<body class="artboard">
+<div class="desktop">
+
+  <!-- macOS menu bar -->
+  <div class="menubar">
+    <i class="menubar-apple"></i>
+    <b class="menubar-app">Soprano</b>
+    <span class="menubar-item">Edit</span>
+    <span class="menubar-item">Commands</span>
+    <div class="menubar-right">
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Cast"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg>
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Tab"><path d="M5.5 9.5H3A1.5 1.5 0 0 1 1.5 8V4A1.5 1.5 0 0 1 3 2.5h6A1.5 1.5 0 0 1 10.5 4v2.5"/><rect x="5.5" y="6.5" width="9" height="7" rx="1.5"/><path d="M8.3 10h3.4M10.6 8.8 11.8 10l-1.2 1.2"/></svg>
+      <i data-icon="wifi"></i>
+      <span class="battery"><i data-icon="battery"></i></span>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <!-- ===== desktop windows (behind the switcher) ===== -->
+
+  <!-- Soprano Git — soprano-tab — main (inactive) -->
+  <div class="window is-inactive bgw bgw-git">
+    <div class="tabbar is-titlebar" style="position:relative">
+      <div class="traffic is-inactive" style="position:absolute;left:14px"><i></i><i></i><i></i></div>
+      <div class="tab is-selected"><span class="tab-index">1</span>soprano-tab</div>
+      <i class="tab-add" data-icon="plus"></i>
+    </div>
+    <div class="toolbar">
+      <span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑0</span> <span class="behind">↓0</span></span>
+      <span class="git-btn"><i data-icon="arrow-down"></i>Pull <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">P</span></span></span>
+      <span class="git-btn"><i data-icon="arrow-up"></i>Push <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">⇧P</span></span></span>
+      <span class="git-btn"><i data-icon="git-branch"></i>Branch <span class="kbd">⌘B</span></span>
+    </div>
+    <div class="sop-body">
+      <aside class="sidebar" style="width:200px">
+        <div class="panel-header">Local <span class="panel-header-trail">3</span></div>
+        <div class="list">
+          <div class="row"><i data-icon="git-branch" class="row-icon"></i><span class="row-title">feat/keycap-hints</span></div>
+          <div class="row is-selected"><i data-icon="check" class="row-icon"></i><span class="row-title">main</span></div>
+        </div>
+      </aside>
+      <div class="sop-main"></div>
+    </div>
+  </div>
+
+  <!-- Stickies — Groceries -->
+  <div class="bgw bgw-sticky st" style="display:flex;flex-direction:column;border-radius:3px;overflow:hidden">
+    <div class="bar" style="height:16px"><i style="width:8px;height:8px"></i></div>
+    <div class="note" style="display:block;font-size:13px;line-height:20px;padding:10px 14px"><b style="display:block;font-size:15px;line-height:22px;margin-bottom:4px">Groceries</b>oat milk<br>eggs (10)<br>sourdough</div>
+  </div>
+
+  <!-- Soprano — soprano-tab — claude (key window) -->
+  <div class="window bgw bgw-claude">
+    <div class="titlebar">
+      <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+    </div>
+    <div class="sop-body">
+      <aside class="sidebar">
+        <div class="sidebar-header"><span class="select">soprano-tab</span></div>
+        <div class="section-heading">Windows <span class="section-actions"><i data-icon="collapse" class="i12"></i><i data-icon="plus" class="i12"></i></span></div>
+        <div class="list">
+          <div class="row"><i data-icon="chevron-down" class="disclosure"></i><span class="row-title" style="font-weight:500">soprano-tab</span><span class="row-trail"><span class="row-count">2</span></span></div>
+          <div class="row is-selected" style="--indent:16px"><i class="status-dot is-working"></i><span class="row-title">Claude Code</span><span class="row-trail"><span class="status-label is-working">Working</span></span></div>
+          <div class="row" style="--indent:16px"><i class="status-dot is-idle"></i><span class="row-title">zsh</span></div>
+          <div class="row"><i data-icon="chevron-right" class="disclosure"></i><span class="row-title" style="font-weight:500">valkental</span><span class="row-trail"><span class="row-count">1</span></span></div>
+        </div>
+        <div class="sidebar-body"></div>
+        <div class="sidebar-footer">
+          <button class="btn-icon" title="Saved Workspaces"><i data-icon="history"></i></button>
+          <button class="btn-icon" title="Agent Dashboard"><i data-icon="chart-line"></i></button>
+          <button class="btn-icon" title="Settings" style="margin-left:auto"><i data-icon="gear"></i></button>
+        </div>
+      </aside>
+      <div class="sop-main">
+        <div class="tabbar">
+          <div class="tab is-selected"><span class="tab-index">1</span>Claude Code</div>
+          <div class="tab"><span class="tab-index">2</span>zsh</div>
+          <i class="tab-add" data-icon="plus"></i>
+        </div>
+        <section class="pane is-focused">
+          <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><span class="pane-actions t-meta">feat/keycap-hints</span></header>
+          <div class="pane-body"><pre class="term term-bottom"><span class="d">│                                                  │</span>
+<span class="d">│   /help for help, /status for your current setup │</span>
+<span class="d">│                                                  │</span>
+<span class="d">│   cwd: ~/git/private/soprano-tab                 │</span>
+<span class="d">╰──────────────────────────────────────────────────╯</span>
+
+<span class="d">&gt;</span> Draw the header hints as keycaps and drop them from the end when the panel is narrow.
+
+⏺ I'll start with SwitcherHeaderView, where the hints are laid out.
+
+<span class="c2">⏺</span> <span class="b">Read</span>(Sources/SopranoTab/Views/SwitcherHeaderView.swift)
+<span class="d">  ⎿  Read 186 lines</span>
+
+<span class="c2">⏺</span> <span class="b">Search</span>(pattern: "hintText", path: "Sources/SopranoTab")
+<span class="d">  ⎿  Found 2 files</span>
+
+<span class="c2">⏺</span> <span class="b">Update</span>(Sources/SopranoTab/Views/SwitcherHeaderView.swift)
+<span class="d">  ⎿  Updated Sources/SopranoTab/Views/SwitcherHeaderView.swift with 14 additions and 9 removals</span>
+<span class="d">       88</span> <span class="c1">-        hintLabel.stringValue = hints.joined(separator: "  ")</span>
+<span class="add-line"><span class="d">       88</span> <span class="c2">+        hintStack.setViews(hints.map(KeycapHintView.init), in: .trailing)</span></span>
+<span class="add-line"><span class="d">       89</span> <span class="c2">+        hintStack.setClippingResistancePriority(.defaultLow, for: .horizontal)</span></span>
+
+<span class="c2">⏺</span> <span class="b">Update</span>(Tests/SopranoTabTests/SwitcherHeaderTests.swift)
+<span class="d">  ⎿  Updated Tests/SopranoTabTests/SwitcherHeaderTests.swift with 22 additions</span>
+<span class="add-line"><span class="d">       41</span> <span class="c2">+    func testHintsTruncateFromTheEnd() {</span></span>
+<span class="add-line"><span class="d">       42</span> <span class="c2">+        let header = SwitcherHeaderView(width: 360)</span></span>
+<span class="add-line"><span class="d">       43</span> <span class="c2">+        XCTAssertEqual(header.visibleHints, ["⇥ next", "⇧ back"])</span></span>
+
+<span class="c2">⏺</span> <span class="b">Bash</span>(swift test --filter SwitcherHeaderTests)
+<span class="d">  ⎿  Test Suite 'SwitcherHeaderTests' passed at 2026-10-21 21:40:52.</span>
+<span class="d">     Executed 6 tests, with 0 failures (0 unexpected) in 0.018 seconds</span>
+
+<span class="c2">⏺</span> <span class="b">Bash</span>(swift build)
+<span class="d">  ⎿  Build complete! (21.4s)</span>
+
+⏺ The hints now render as keycaps in SwitcherHeaderView. They sit in a stack that gives
+  way from the trailing end, so at the 360 pt minimum only "⇥ next" and "⇧ back" remain.
+  SwitcherHeaderTests covers both widths.
+
+<span class="d">╭──────────────────────────────────────────────────╮</span>
+<span class="d">│</span> &gt;                                                <span class="d">│</span>
+<span class="d">╰──────────────────────────────────────────────────╯</span>
+<span class="d">  ? for shortcuts</span></pre></div>
+        </section>
+        <footer class="statusbar">
+          <span class="mode-chip is-normal">Normal</span>
+          <span class="breadcrumb"><span class="crumb">soprano-tab</span><span class="crumb-sep"></span><span class="crumb">soprano-tab</span><span class="crumb-sep"></span><span class="crumb is-current">Claude Code</span><span>· Tab 1</span></span>
+          <span class="statusbar-spacer"></span>
+          <span class="counts">1 session · 2 windows · 3 panes</span>
+          <span class="usage">Claude <span class="pct">42%</span> · 2h 10m</span>
+        </footer>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Soprano Tab switcher ===== -->
+  <div class="switcher" role="dialog" aria-label="Soprano Tab">
+    <div class="switcher-header">All windows <span class="switcher-count">· 13</span>
+      <span class="hints">
+        <span class="hint"><span class="kbd">⇥</span>next</span>
+        <span class="hint"><span class="kbd">⇧</span>back</span>
+        <span class="hint"><span class="kbd">↩</span>open</span>
+        <span class="hint"><span class="kbd">W</span>close</span>
+        <span class="hint"><span class="kbd">M</span>min</span>
+        <span class="hint"><span class="kbd">Q</span>quit</span>
+        <span class="hint"><span class="kbd">S</span>search</span>
+      </span>
+    </div>
+
+    <div class="tiles">
+      <!-- row 1 -->
+      <div class="trow">
+
+        <!-- 1 · hovered: window lamps overlay the thumbnail's top-left -->
+        <div class="tile is-hover" style="width:207px" aria-label="soprano-tab — claude, Soprano">
+          <div class="tile-title"><i class="ai ai-soprano"></i><span>soprano-tab — claude</span></div>
+          <div class="tile-thumb">
+            <span class="lamps thumb-lamps" title="Close · Minimize · Full screen"><i class="lamp lamp-close"></i><i class="lamp lamp-min"></i><i class="lamp lamp-zoom"></i></span>
+            <div class="mini window" style="--iw:195px;border-radius:0;box-shadow:none">
+              <div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div></div>
+              <div class="sop-body">
+                <aside class="sidebar" style="width:120px">
+                  <div class="mside">
+                    <i class="ln b" style="width:78px"></i>
+                    <i class="ln" style="width:52px"></i>
+                    <i class="ln b" style="width:70px"></i>
+                    <div class="sel"><i class="ln b" style="width:62px"></i></div>
+                    <i class="ln" style="width:40px"></i>
+                    <i class="ln b" style="width:66px"></i>
+                  </div>
+                </aside>
+                <div class="sop-main">
+                  <div class="tabbar"><div class="tab is-selected"><i class="ln" style="width:74px"></i></div><div class="tab"><i class="ln" style="width:30px"></i></div></div>
+                  <section class="pane">
+                    <header class="pane-header"><i class="status-dot is-working"></i><i class="ln" style="width:84px"></i></header>
+                    <div class="pane-body"><pre class="term big"><span class="c2">⏺</span> Bash(swift build)
+<span class="d">  ⎿ Build complete!</span>
+
+⏺ Hints render as
+  keycaps now.
+
+<span class="d">›</span> <span class="cursor-hollow"> </span></pre></div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2 · Safari — Features – AltTab -->
+        <div class="tile" style="width:206px" aria-label="Features – AltTab, Safari">
+          <div class="tile-title"><i class="ai ai-safari"><i data-icon="compass"></i></i><span>Features – AltTab</span></div>
+          <div class="tile-thumb">
+            <div class="mini lt" style="--iw:194px">
+              <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="url"><span><i class="ln"></i></span></span></div>
+              <div class="at-nav"><i class="logo"></i><i class="ln b" style="width:72px"></i><span style="flex:1"></span><i class="ln" style="width:58px"></i><i class="ln" style="width:58px"></i><i class="ln" style="width:58px"></i></div>
+              <div class="page">
+                <div class="h1">Features</div>
+                <div class="lns"><i class="ln" style="width:94%"></i><i class="ln" style="width:68%"></i></div>
+                <div class="cards">
+                  <div class="card"><i class="ln b" style="width:70%"></i><i class="ln" style="width:92%"></i><i class="ln" style="width:64%"></i></div>
+                  <div class="card"><i class="ln b" style="width:56%"></i><i class="ln" style="width:88%"></i><i class="ln" style="width:72%"></i></div>
+                  <div class="card"><i class="ln b" style="width:62%"></i><i class="ln" style="width:90%"></i><i class="ln" style="width:58%"></i></div>
+                  <div class="card"><i class="ln b" style="width:48%"></i><i class="ln" style="width:86%"></i><i class="ln" style="width:66%"></i></div>
+                  <div class="card"><i class="ln b" style="width:60%"></i><i class="ln" style="width:92%"></i><i class="ln" style="width:50%"></i></div>
+                  <div class="card"><i class="ln b" style="width:66%"></i><i class="ln" style="width:84%"></i><i class="ln" style="width:70%"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 · Soprano Git — soprano-tab — main -->
+        <div class="tile" style="width:217px" aria-label="soprano-tab — main, Soprano Git">
+          <div class="tile-title"><i class="ai ai-git"></i><span>soprano-tab — main</span></div>
+          <div class="tile-thumb">
+            <div class="mini window" style="--iw:205px;border-radius:0;box-shadow:none">
+              <div class="tabbar is-titlebar" style="position:relative">
+                <div class="traffic is-inactive" style="position:absolute;left:14px"><i></i><i></i><i></i></div>
+                <div class="tab is-selected"><i class="ln" style="width:90px"></i></div>
+              </div>
+              <div class="toolbar">
+                <span class="branch-chip"><i data-icon="git-branch"></i><i class="ln b" style="width:60px"></i></span>
+                <i class="ln" style="width:56px"></i><i class="ln" style="width:56px"></i><i class="ln" style="width:64px"></i>
+              </div>
+              <div class="sop-body">
+                <div class="sop-main" style="position:relative">
+                  <svg width="52" height="280" viewBox="0 0 52 280" fill="none" stroke-width="2.5" style="position:absolute;left:0;top:0;z-index:1">
+                    <path d="M22 22 V280" stroke="var(--lane-0)"/>
+                    <path d="M22 66 C22 84 40 84 40 100 V140 C40 156 22 156 22 174" stroke="var(--lane-1)"/>
+                    <circle cx="22" cy="22" r="7" fill="var(--bg-base)" stroke="var(--text-primary)"/>
+                    <circle cx="22" cy="66" r="5" fill="var(--lane-0)"/>
+                    <circle cx="40" cy="110" r="5" fill="var(--lane-1)"/>
+                    <circle cx="40" cy="154" r="5" fill="var(--lane-1)"/>
+                    <circle cx="22" cy="198" r="5" fill="var(--bg-base)" stroke="var(--lane-0)"/>
+                    <circle cx="22" cy="242" r="5" fill="var(--lane-0)"/>
+                  </svg>
+                  <div class="grow is-head"><span class="hl">feat: header hints as keycaps</span></div>
+                  <div class="grow"><i class="ln b" style="width:62%"></i><i class="ln" style="width:44px"></i></div>
+                  <div class="grow"><i class="ln b" style="width:48%"></i><i class="ln" style="width:44px"></i></div>
+                  <div class="grow"><i class="ln b" style="width:56%"></i><i class="ln" style="width:44px"></i></div>
+                  <div class="grow"><i class="ln" style="width:40%"></i><i class="ln" style="width:44px"></i></div>
+                  <div class="grow"><i class="ln b" style="width:52%"></i><i class="ln" style="width:44px"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4 · SELECTED: Soprano — valkental — zsh -->
+        <div class="tile is-selected" style="width:200px" aria-label="valkental — zsh, Soprano" aria-selected="true">
+          <div class="tile-title"><i class="ai ai-soprano"></i><span>valkental — zsh</span></div>
+          <div class="tile-thumb">
+            <div class="mini window" style="--iw:188px;border-radius:0;box-shadow:none">
+              <div class="titlebar"><div class="traffic is-inactive"><i></i><i></i><i></i></div></div>
+              <div class="tabbar"><div class="tab is-selected"><i class="ln" style="width:34px"></i></div><div class="tab"><i class="ln" style="width:38px"></i></div></div>
+              <section class="pane">
+                <header class="pane-header"><i class="status-dot is-running"></i><i class="ln" style="width:44px"></i></header>
+                <div class="pane-body"><pre class="term big"><span class="c4">~/git/work/valkental</span> <span class="c5">main</span>
+<span class="c2">❯</span> shopify theme dev
+  Preview your theme (t)
+  <span class="c4 u">http://127.0.0.1:9292</span>
+<span class="c2">Synced</span> » countdown-bar.css</pre></div>
+              </section>
+              <footer class="statusbar"><i class="ln" style="width:58px"></i><i class="ln" style="width:120px"></i></footer>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5 · Safari — GitHub PR -->
+        <div class="tile" style="width:199px" aria-label="Valkental/shop-theme · Pull Request #81, Safari">
+          <div class="tile-title"><i class="ai ai-safari"><i data-icon="compass"></i></i><span>Valkental/shop-theme · Pull Request #81</span></div>
+          <div class="tile-thumb">
+            <div class="mini lt" style="--iw:187px">
+              <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="url"><span><i class="ln"></i></span></span></div>
+              <div class="gh-head"><i class="octo"></i><i class="ln" style="width:70px"></i><i class="ln b" style="width:90px"></i></div>
+              <div class="page" style="padding-top:22px">
+                <div class="gh-title">Countdown bar above add to cart <span>#81</span></div>
+                <div class="gh-meta"><i class="gh-open"></i><i class="ln" style="width:58%"></i></div>
+                <div class="gh-box"><div class="h"><i class="ln b" style="width:42%"></i></div><div class="lns"><i class="ln" style="width:92%"></i><i class="ln" style="width:76%"></i><i class="ln" style="width:58%"></i></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6 · Finder — Downloads -->
+        <div class="tile" style="width:224px" aria-label="Downloads, Finder">
+          <div class="tile-title"><i class="ai ai-finder"><i data-icon="finder"></i></i><span>Downloads</span></div>
+          <div class="tile-thumb">
+            <div class="mini lt" style="--iw:212px">
+              <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="ttl" style="margin-left:116px">Downloads</span></div>
+              <div class="fd">
+                <div class="side" style="width:128px"><i class="ln b" style="width:50px"></i><i class="ln" style="width:72px"></i><i class="ln" style="width:58px"></i><i class="ln" style="width:80px"></i><div class="sel"><i class="ln b" style="width:76px"></i></div><i class="ln" style="width:66px"></i><i class="ln" style="width:54px"></i></div>
+                <div style="flex:1;min-width:0;padding-top:8px">
+                  <div class="fd-row"><i class="f" style="background:#d6d3ce"></i><i class="ln b" style="width:42%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#e8b7b0"></i><i class="ln b" style="width:56%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#b8d3b0"></i><i class="ln b" style="width:64%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#c9c3b5"></i><i class="ln b" style="width:38%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#d6d3ce"></i><i class="ln b" style="width:30%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#e8b7b0"></i><i class="ln b" style="width:48%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#c9c3b5"></i><i class="ln b" style="width:44%"></i><i class="ln" style="width:56px"></i></div>
+                  <div class="fd-row"><i class="f" style="background:#b8d3b0"></i><i class="ln b" style="width:52%"></i><i class="ln" style="width:56px"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- row 2 -->
+      <div class="trow">
+
+        <!-- 7 · Stickies — Groceries -->
+        <div class="tile" style="width:165px" aria-label="Groceries, Stickies">
+          <div class="tile-title"><i class="ai ai-stickies"><i data-icon="sticky-note"></i></i><span>Groceries</span></div>
+          <div class="tile-thumb">
+            <div class="mini st" style="--iw:153px">
+              <div class="bar"><i></i></div>
+              <div class="note"><div class="h1">Groceries</div><i class="ln" style="width:52%"></i><i class="ln" style="width:44%"></i><i class="ln" style="width:60%"></i><i class="ln" style="width:70%"></i><i class="ln" style="width:48%"></i><i class="ln" style="width:58%"></i></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 8 · Mail — Inbox (hidden app) -->
+        <div class="tile" style="width:206px" aria-label="Inbox – 3 unread messages, Mail, hidden">
+          <div class="tile-title"><i class="ai ai-mail"><i data-icon="mail"></i></i><span>Inbox – 3 unread messages</span></div>
+          <div class="tile-thumb">
+            <div class="mini lt" style="--iw:194px">
+              <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="ttl" style="margin-left:92px">Inbox</span></div>
+              <div class="ml">
+                <div class="side" style="width:112px"><i class="ln b" style="width:48px"></i><div class="sel"><i class="ln b" style="width:64px"></i></div><i class="ln" style="width:44px"></i><i class="ln" style="width:56px"></i><i class="ln" style="width:40px"></i><i class="ln" style="width:52px"></i></div>
+                <div class="ml-list">
+                  <div class="ml-msg unread on"><i class="ln b" style="width:52%"></i><i class="ln" style="width:86%"></i></div>
+                  <div class="ml-msg unread"><i class="ln b" style="width:44%"></i><i class="ln" style="width:78%"></i></div>
+                  <div class="ml-msg unread"><i class="ln b" style="width:36%"></i><i class="ln" style="width:82%"></i></div>
+                  <div class="ml-msg"><i class="ln b" style="width:40%"></i><i class="ln" style="width:70%"></i></div>
+                  <div class="ml-msg"><i class="ln b" style="width:48%"></i><i class="ln" style="width:74%"></i></div>
+                </div>
+                <div class="lns" style="flex:1;min-width:0;padding:22px 18px"><i class="ln b" style="width:84%;height:12px"></i><i class="ln" style="width:50%"></i><i class="ln" style="width:94%;margin-top:10px"></i><i class="ln" style="width:88%"></i><i class="ln" style="width:70%"></i></div>
+              </div>
+            </div>
+            <div class="tile-chips"><span class="tile-chip">Hidden</span></div>
+          </div>
+        </div>
+
+        <!-- 9 · Safari — Swift Forums (minimized: no capture, app icon) -->
+        <div class="tile" style="width:202px" aria-label="Swift Forums – Strict Concurrency Checking, Safari, minimized">
+          <div class="tile-title"><i class="ai ai-safari"><i data-icon="compass"></i></i><span>Swift Forums – Strict Concurrency Checking</span></div>
+          <div class="tile-thumb">
+            <div class="thumb-icon"><i class="ai ai-safari ai-lg"><i data-icon="compass"></i></i></div>
+            <div class="tile-chips"><span class="tile-chip">Minimized</span></div>
+          </div>
+        </div>
+
+        <!-- 10 · System Settings — Privacy & Security -->
+        <div class="tile" style="width:162px" aria-label="Privacy &amp; Security, System Settings">
+          <div class="tile-title"><i class="ai ai-settings"><i data-icon="gear"></i></i><span>Privacy &amp; Security</span></div>
+          <div class="tile-thumb">
+            <div class="mini lt" style="--iw:150px">
+              <div class="ss">
+                <span class="lights" style="position:absolute;left:16px;top:18px"><i></i><i></i><i></i></span>
+                <div class="side">
+                  <div><i class="sq" style="background:#3b82f6"></i><i class="ln" style="width:52px"></i></div>
+                  <div><i class="sq" style="background:#3b82f6"></i><i class="ln" style="width:62px"></i></div>
+                  <div><i class="sq" style="background:#8e8e93"></i><i class="ln" style="width:48px"></i></div>
+                  <div><i class="sq" style="background:#1d1d1f"></i><i class="ln" style="width:66px"></i></div>
+                  <div><i class="sq" style="background:#3b82f6"></i><i class="ln" style="width:58px"></i></div>
+                  <div class="sel"><i class="sq" style="background:#3b82f6"></i><i class="ln b" style="width:64px"></i></div>
+                  <div><i class="sq" style="background:#06b6d4"></i><i class="ln" style="width:50px"></i></div>
+                </div>
+                <div class="ss-main">
+                  <div class="h1">Privacy &amp; Security</div>
+                  <div class="ss-group">
+                    <div class="ss-row"><i class="sq" style="background:#3b82f6"></i><i class="ln" style="width:56%"></i></div>
+                    <div class="ss-row"><i class="sq" style="background:#a1a1aa"></i><i class="ln" style="width:40%"></i></div>
+                    <div class="ss-row"><i class="sq" style="background:#ef4444"></i><i class="ln" style="width:46%"></i></div>
+                  </div>
+                  <div class="ss-group">
+                    <div class="ss-row"><i class="sq" style="background:#3b82f6"></i><i class="ln" style="width:50%"></i></div>
+                    <div class="ss-row"><i class="sq" style="background:#8e8e93"></i><i class="ln" style="width:64%"></i></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 11 · Slack — full screen (no title bar) -->
+        <div class="tile" style="width:217px" aria-label="soprano (Channel) - Valkental - Slack, Slack, full screen">
+          <div class="tile-title"><i class="ai ai-slack"><i data-icon="hash"></i></i><span>soprano (Channel) - Valkental - Slack</span></div>
+          <div class="tile-thumb">
+            <div class="mini" style="--iw:205px">
+              <div class="sk">
+                <div class="sk-rail"><i></i><i></i></div>
+                <div class="sk-side">
+                  <i class="ln b" style="width:96px;height:12px"></i>
+                  <i class="ln" style="width:70px;margin-top:6px"></i>
+                  <i class="ln" style="width:84px"></i>
+                  <i class="ln b" style="width:62px"></i>
+                  <div class="sel"><i class="ln" style="width:88px"></i></div>
+                  <i class="ln" style="width:74px"></i>
+                  <i class="ln" style="width:92px;margin-top:6px"></i>
+                  <i class="ln b" style="width:46px"></i>
+                </div>
+                <div class="sk-main">
+                  <div class="sk-top"># soprano</div>
+                  <div class="sk-msg"><i class="av" style="background:#c9b79a"></i><div class="lns"><i class="ln b" style="width:30%"></i><i class="ln" style="width:94%"></i><i class="ln" style="width:72%"></i></div></div>
+                  <div class="sk-msg"><i class="av" style="background:#86a6cb"></i><div class="lns"><i class="ln b" style="width:22%"></i><i class="ln" style="width:58%"></i></div></div>
+                  <div class="sk-msg"><i class="av" style="background:#c9b79a"></i><div class="lns"><i class="ln b" style="width:30%"></i><i class="ln" style="width:88%"></i><i class="ln" style="width:46%"></i></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="tile-chips"><span class="tile-chip">Full screen</span></div>
+          </div>
+        </div>
+
+        <!-- 12 · Notes (windowless) -->
+        <div class="tile is-windowless" style="width:226px" aria-label="Notes, no windows">
+          <div class="tile-title"><i class="ai ai-notes"><i data-icon="notebook-pen"></i></i><span>Notes</span></div>
+          <div class="tile-thumb"><div class="thumb-icon"><i class="ai ai-notes ai-lg"><i data-icon="notebook-pen"></i></i></div></div>
+        </div>
+      </div>
+
+      <!-- row 3 -->
+      <div class="trow">
+        <!-- 13 · Music (windowless) -->
+        <div class="tile is-windowless" style="width:226px" aria-label="Music, no windows">
+          <div class="tile-title"><i class="ai ai-music"><i data-icon="music"></i></i><span>Music</span></div>
+          <div class="tile-thumb"><div class="thumb-icon"><i class="ai ai-music ai-lg"><i data-icon="music"></i></i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

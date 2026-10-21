@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio — design system</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<script src="meta.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; }
+  body { overflow-x: hidden; background: var(--bg-base); }
+  .sheet { padding: 48px 56px 96px; display: flex; flex-direction: column; gap: 64px; }
+  .sec { display: flex; flex-direction: column; gap: 20px; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle); }
+  .sec-head .t-eyebrow { min-width: 28px; }
+  .sec-head .t-meta { margin-left: auto; }
+  .lede { font: 400 15px/24px var(--font-sans); color: var(--text-muted); max-width: 860px; margin: 0; }
+  .cols-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .cols-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .modebox { border-radius: var(--radius-card); background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--border-subtle); padding: 20px; }
+  .modebox-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+  .doc-table { width: 100%; border-collapse: collapse; font: var(--type-label); }
+  .doc-table th { text-align: left; font: var(--type-eyebrow); letter-spacing: var(--track-eyebrow); text-transform: uppercase; color: var(--text-muted); padding: 0 12px 8px 0; border-bottom: 1px solid var(--border-subtle); }
+  .doc-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  .doc-table td.code, .code { font: var(--type-mono); }
+  .verdict { font: var(--type-label-strong); color: var(--text-primary); }
+  .principles { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px 28px; counter-reset: p; }
+  .principles li { counter-increment: p; display: flex; gap: 10px; font: 400 13px/19px var(--font-sans); }
+  .principles li::before { content: counter(p); font: var(--type-headline); color: var(--text-muted); min-width: 14px; }
+
+  /* swatches */
+  .swatches { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+  .sw { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px; min-height: 34px; }
+  .sw-chip { width: 34px; height: 26px; border-radius: 5px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent); }
+  .sw-name { font: var(--type-mono-sm); color: var(--text-primary); }
+  .sw-role { font: var(--type-meta); color: var(--text-muted); }
+  .sw-hex { font: var(--type-mono-sm); color: var(--text-muted); }
+  .derived-chip { background: var(--bg-panel); position: relative; overflow: hidden; }
+  .derived-chip > i { position: absolute; inset: 0; }
+  .contrast { display: grid; grid-template-columns: 120px repeat(3, 1fr); gap: 0; font: var(--type-meta); margin-top: 16px; border-top: 1px solid var(--border-subtle); }
+  .contrast > div { padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+  .contrast .h { color: var(--text-muted); font-weight: 600; }
+  .contrast .v { font-variant-numeric: tabular-nums; }
+
+  /* terminal */
+  .ansi { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-bottom: 12px; }
+  .ansi > div { height: 44px; border-radius: 5px; display: flex; align-items: flex-end; padding: 4px 6px; font: var(--type-mono-sm); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 12%, transparent); }
+  .term-meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; }
+  .term-meta > div { display: flex; align-items: center; gap: 8px; font: var(--type-mono-sm); color: var(--text-muted); }
+  .term-meta i { width: 22px; height: 16px; border-radius: 3px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent); }
+  .term-frame { border: 1px solid var(--border-subtle); border-radius: var(--radius-card); overflow: hidden; }
+
+  /* type */
+  .type-row { display: grid; grid-template-columns: 220px 300px 1fr; gap: 20px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--border-subtle); }
+  .type-row .t-meta.code { font: var(--type-mono-sm); }
+
+  /* space */
+  .space-row { display: flex; align-items: center; gap: 14px; height: 24px; font: var(--type-mono-sm); color: var(--text-muted); }
+  .space-row i { display: block; height: 12px; background: var(--text-primary); border-radius: 2px; }
+  .radius-row { display: flex; gap: 18px; align-items: flex-end; }
+  .radius-row div { display: flex; flex-direction: column; align-items: center; gap: 8px; font: var(--type-mono-sm); color: var(--text-muted); }
+  .radius-row i { display: block; width: 72px; height: 56px; background: var(--raised); border: 1px solid var(--border-strong); }
+  .elev { display: flex; gap: 28px; }
+  .elev > div { width: 180px; height: 96px; border-radius: var(--radius-card); background: var(--bg-raised); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; justify-content: flex-end; padding: 12px; font: var(--type-meta); color: var(--text-muted); }
+  .heights { columns: 4; column-gap: 28px; font: var(--type-mono-sm); color: var(--text-muted); }
+  .heights div { break-inside: avoid; display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid var(--border-subtle); }
+  .heights b { font-weight: 400; color: var(--text-primary); }
+
+  /* status matrix */
+  .matrix { display: grid; grid-template-columns: 120px 300px 260px 220px 1fr; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); overflow: hidden; background: var(--bg-panel); }
+  .matrix > div { display: flex; align-items: center; min-height: 48px; padding: 0 12px; border-bottom: 1px solid var(--border-subtle); border-right: 1px solid var(--border-subtle); min-width: 0; }
+  .matrix > .mh { min-height: 30px; font: var(--type-eyebrow); letter-spacing: var(--track-eyebrow); text-transform: uppercase; color: var(--text-muted); background: var(--bg-base); }
+  .matrix .pane-header { width: 100%; border-bottom: 0; }
+  .matrix .cell-pane { padding: 0; }
+  .matrix .cell-pane .pane { width: 100%; height: 100%; justify-content: center; background: transparent; }
+  .matrix .cell-pane .pane > .pane-header { height: 100%; min-height: 48px; }
+  .matrix .list { width: 100%; padding: 0; }
+  .matrix .tabbar { border-bottom: 0; background: transparent; padding: 0; }
+  .dash-row { display: grid; grid-template-columns: 8px 1fr auto; gap: 4px 10px; align-items: center; width: 100%; }
+  .dash-row .dash-title { font: var(--type-label-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dash-row .dash-act { grid-column: 2 / 4; font: var(--type-meta); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* focus demo */
+  .demo-grid { display: grid; grid-template-columns: 1.15fr 1px 1fr; grid-template-rows: 210px 1px 210px; border: 1px solid var(--border-strong); background: var(--border-strong); overflow: hidden; border-radius: 0; }
+  .demo-grid .pane .term { font-size: 12px; line-height: 16px; padding: 6px 10px; }
+  .demo-notes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 28px; font: 400 13px/19px var(--font-sans); color: var(--text-muted); }
+  .demo-notes b { color: var(--text-primary); font-weight: 600; }
+  .mini-sidebar { width: 100%; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); overflow: hidden; }
+  .mini-sidebar .sidebar { width: 100%; border-right: 0; }
+
+  /* gallery */
+  .gallery { border-radius: 12px; padding: 28px; background: var(--bg-base); color: var(--text-primary); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 20px; }
+  .gallery-head { display: flex; align-items: baseline; gap: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: start; }
+  .gcard { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .gcard.span-2 { grid-column: span 2; }
+  .gcard.span-3 { grid-column: span 3; }
+  .gcard > .cap { font: var(--type-mono-sm); color: var(--text-muted); }
+  .stage { position: relative; border: 1px solid var(--border-subtle); border-radius: var(--radius-card); background: var(--bg-base); padding: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-width: 0; overflow: hidden; }
+  .stage.col { flex-direction: column; align-items: stretch; }
+  .stage.flush { padding: 0; }
+  .stage.panel { background: var(--bg-panel); }
+  .stage.desk { background: var(--desktop-wallpaper); height: 220px; padding: 0; }
+
+  /* switcher specimen mini windows (content imagery: mode-independent) */
+  .mt { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  .mt-bar { height: 9px; flex: none; }
+  .mt-body { flex: 1; display: flex; gap: 6px; padding: 6px; }
+  .mt-side { width: 26%; border-radius: 2px; }
+  .mt-lines { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+  .mt-lines i { display: block; height: 4px; border-radius: 2px; }
+  .mt-ink { background: #1d1b18; } .mt-ink .mt-bar { background: #181613; } .mt-ink .mt-side { background: #26231f; } .mt-ink .mt-lines i { background: #4a453d; } .mt-ink .mt-lines i.mt-acc { background: #97ae76; }
+  .mt-paper { background: #f6f2ea; } .mt-paper .mt-bar { background: #ede7db; } .mt-paper .mt-side { background: #ede7db; } .mt-paper .mt-lines i { background: #cfc5b3; } .mt-paper .mt-lines i.mt-acc { background: #456b30; }
+  .mt-web { background: #ffffff; } .mt-web .mt-bar { background: #ececec; } .mt-web .mt-lines i { background: #d9d9d9; } .mt-web .mt-lines i.mt-blue { background: #4a8fe0; height: 7px; }
+  /* icons */
+  .icon-wall { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .icon-set { border-radius: var(--radius-card); padding: 24px; display: flex; flex-direction: column; gap: 18px; border: 1px solid var(--border-subtle); background: var(--bg-base); color: var(--text-primary); }
+  .icon-line { display: flex; align-items: flex-end; gap: 28px; }
+  .icon-line figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; font: var(--type-meta); color: var(--text-muted); }
+
+  /* themes */
+  .themes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  .theme-card { display: flex; flex-direction: column; gap: 8px; }
+  .theme-sample { border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--border-strong); background: var(--bg-base); color: var(--text-primary); }
+  .theme-sample .tabbar { padding-left: 6px; }
+  .theme-sample .body { display: grid; grid-template-columns: 112px 1fr; height: 128px; }
+  .theme-sample .row { margin: 0 3px; padding: 0 6px; gap: 6px; }
+  .theme-sample .pane-header { padding-left: 8px; gap: 6px; }
+  .theme-sample .sidebar { width: auto; padding-top: 6px; }
+  .theme-sample .pane { height: 100%; }
+  .theme-sample .foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-panel); border-top: 1px solid var(--border-subtle); }
+  .theme-note { font: var(--type-meta); color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ================================================================ 0 -->
+  <header class="sec" style="gap:24px">
+    <div style="display:flex;align-items:flex-end;gap:20px">
+      <img src="icons/soprano.svg" width="72" height="72" alt="">
+      <div>
+        <div class="t-eyebrow">Design B · Soprano family</div>
+        <h1 class="t-title" style="font-size:44px;line-height:50px">Folio</h1>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <span class="t-meta">Primary appearance</span><span class="chip">Paper (light)</span><span class="chip chip-outline">Ink (dark)</span>
+      </div>
+    </div>
+    <p class="lede">Each app reads like a well-set page: paper and ink, a serif voice for titles and one sienna pencil mark wherever your keyboard is. Mood: iA Writer (ink on paper), Things 3 (calm macOS density), Stripe Press (warm paper, serif heads, hairlines).</p>
+    <ol class="principles" id="principles"></ol>
+  </header>
+
+  <section class="sec" id="intro">
+    <div class="sec-head"><span class="t-eyebrow">01</span><h2 class="t-screen">Mission Control → Folio</h2><span class="t-meta">spec §3</span></div>
+    <table class="doc-table">
+      <thead><tr><th style="width:230px">Mission Control</th><th style="width:110px">Verdict</th><th>Folio</th></tr></thead>
+      <tbody>
+        <tr><td>Departure Mono, small caps</td><td><span class="verdict remove">Remove</span></td><td>SF Pro Text for chrome; New York for titles ≥ 15 px. No bundled fonts.</td></tr>
+        <tr><td>Single rules</td><td><span class="verdict keep">Keep</span></td><td>1 px <span class="code">border-subtle</span> between regions; <span class="code">border-strong</span> only on control edges and splitters.</td></tr>
+        <tr><td>Double rules</td><td><span class="verdict remove">Remove</span></td><td>One 1 px rule, or 8 px of space.</td></tr>
+        <tr><td>Racing stripe</td><td><span class="verdict remove">Remove</span></td><td>Gone everywhere (status bar, palette, Settings, Dashboard, About, Cast footer, Tab header, dialogs).</td></tr>
+        <tr><td>Lamps · glow</td><td><span class="verdict change">Change</span></td><td>Flat 8 px marks; the shape carries the state (ring · dot · diamond). No glow anywhere.</td></tr>
+        <tr><td>CRT shader</td><td><span class="verdict remove">Remove</span></td><td>Shader, setting and Settings row deleted.</td></tr>
+        <tr><td>Lit blocks (solid orange)</td><td><span class="verdict remove">Remove</span></td><td>Raised paper tab · sienna wash + pencil tick · outlined chip · ink button.</td></tr>
+        <tr><td>Mission clock</td><td><span class="verdict remove">Remove</span></td><td>Opt-in <span class="code">statusBar.uptime</span> → <span class="code">Up 2:14:07</span>, muted tabular.</td></tr>
+        <tr><td>Square corners</td><td><span class="verdict change">Change</span></td><td>12 floating panels · 10 popovers · 8 cards · 6 controls · 4 keycaps; tiled panes stay square.</td></tr>
+        <tr><td>Orange everywhere</td><td><span class="verdict change">Change</span></td><td>Sienna only for focus, caret, matches, non-NORMAL mode chip. Primary buttons are ink.</td></tr>
+        <tr><td>Density</td><td><span class="verdict keep">Keep</span></td><td>Data rows keep today's heights; chrome loses boxes and gains 4–8 px of air.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================================================================ colors -->
+  <section class="sec" id="color">
+    <div class="sec-head"><span class="t-eyebrow">02</span><h2 class="t-screen">Color tokens</h2><span class="t-meta">16 ThemeColors slots + derived · values read live from tokens.css</span></div>
+    <div class="cols-2" id="color-cols">
+      <div class="modebox" data-mode="light"><div class="modebox-head"><span class="t-headline">Paper</span><span class="t-meta">light · primary</span></div><div class="swatches" data-swatches></div><div class="t-eyebrow" style="margin:18px 0 8px">Derived (on bg-panel)</div><div class="swatches" data-derived></div><div class="contrast" data-contrast></div></div>
+      <div class="modebox" data-mode="dark"><div class="modebox-head"><span class="t-headline">Ink</span><span class="t-meta">dark</span></div><div class="swatches" data-swatches></div><div class="t-eyebrow" style="margin:18px 0 8px">Derived (on bg-panel)</div><div class="swatches" data-derived></div><div class="contrast" data-contrast></div></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ terminal -->
+  <section class="sec" id="terminal">
+    <div class="sec-head"><span class="t-eyebrow">03</span><h2 class="t-screen">Terminal palette</h2><span class="t-meta">ANSI 0–15 · Paper follows the GitHub-Light convention (7/15 are mid-greys)</span></div>
+    <div class="cols-2">
+      <div class="modebox" data-mode="light" data-term><div class="modebox-head"><span class="t-headline">Paper</span><span class="t-meta">SF Mono 13 / 17</span></div></div>
+      <div class="modebox" data-mode="dark" data-term><div class="modebox-head"><span class="t-headline">Ink</span><span class="t-meta">SF Mono 13 / 17</span></div></div>
+    </div>
+    <template id="tpl-term">
+      <div class="term-meta"></div>
+      <div class="ansi"></div>
+      <div class="term-frame"><pre class="term"><span class="c4">~/git/private/soprano</span> on <span class="c5">feat/calm-chrome</span>
+<span class="c2">❯</span> swift build
+Building for debugging...
+[412/538] Compiling Soprano StatusBarView.swift
+<span class="d">[413/538] Compiling Soprano RetroChrome.swift</span>
+
+<span class="c2">⏺</span> <span class="b">Search</span>(pattern: <span class="c3">"collapseAllButton"</span>)
+  <span class="d">⎿  Found 3 files</span>
+       431 <span class="add-line"><span class="c2">+</span>        collapseAllButton.isEnabled = …</span>
+<span class="c3">▌</span> <span class="b c3">Allow command?</span>   <span class="c6">$ rg -l "bgRaised"</span>
+<span class="c1">error:</span> <span class="sel">no such module 'Ghostty'</span>  <span class="c8">// bright black</span>
+<span class="c2">❯</span> <span class="cursor"> </span></pre></div>
+    </template>
+  </section>
+
+  <!-- ================================================================ type -->
+  <section class="sec" id="type">
+    <div class="sec-head"><span class="t-eyebrow">04</span><h2 class="t-screen">Type</h2><span class="t-meta">serif only ≥ 15 px · uppercase only for eyebrows and status · nothing below 11 px</span></div>
+    <div>
+      <div class="type-row"><span class="t-label-strong">Hero · .t-title</span><span class="t-meta code">New York 30/36 Regular −0.4</span><span class="t-title">Soprano Git</span></div>
+      <div class="type-row"><span class="t-label-strong">Screen title · .t-screen</span><span class="t-meta code">New York 22/28 Regular −0.2</span><span class="t-screen">Agent Dashboard</span></div>
+      <div class="type-row"><span class="t-label-strong">Headline · .t-headline</span><span class="t-meta code">New York 17/22 Medium</span><span class="t-headline">feat: add Collapse All Windows button to the left sidebar</span></div>
+      <div class="type-row"><span class="t-label-strong">Empty state · .t-empty</span><span class="t-meta code">New York Italic 17/22, muted</span><span class="t-empty">No panes open</span></div>
+      <div class="type-row"><span class="t-label-strong">Figure · .t-figure</span><span class="t-meta code">New York 26/30 tabular</span><span class="t-figure">4 · 1 · 1 · 1</span></div>
+      <div class="type-row"><span class="t-label-strong">Launcher query · .t-query</span><span class="t-meta code">SF Pro Display 20/26</span><span class="t-query">chr<i class="caret" style="height:22px;margin-left:2px"></i></span></div>
+      <div class="type-row"><span class="t-label-strong">Row title · .t-row</span><span class="t-meta code">SF Pro Text 13/18</span><span class="t-row">Open in Soprano Git</span></div>
+      <div class="type-row"><span class="t-label-strong">Chrome label · .t-label</span><span class="t-meta code">SF Pro Text 12/16 (500 selected)</span><span class="t-label">Claude Code &nbsp; <span class="t-label-strong">Claude Code</span></span></div>
+      <div class="type-row"><span class="t-label-strong">Meta · .t-meta</span><span class="t-meta code">SF Pro Text 11/14, muted</span><span class="t-meta">Monitoring 4 agents across 3 windows</span></div>
+      <div class="type-row"><span class="t-label-strong">Eyebrow · .t-eyebrow</span><span class="t-meta code">SF Pro Text 11/14 Semibold +0.6 CAPS</span><span class="t-eyebrow">Project directories</span></div>
+      <div class="type-row"><span class="t-label-strong">Status · .t-status</span><span class="t-meta code">SF Pro Text 11/14 Semibold +0.4 CAPS</span><span><span class="status-label is-working">Working</span> &nbsp; <span class="status-label is-needs-input">Needs input</span></span></div>
+      <div class="type-row"><span class="t-label-strong">Keycaps · .kbd</span><span class="t-meta code">SF Pro Text 11 Medium · cap 18</span><span class="hints"><span class="kbd">⇧⌘D</span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">P</span></span><span class="kbd">esc</span><span class="kbd kbd-field kbd-accent">Ctrl+A</span></span></div>
+      <div class="type-row"><span class="t-label-strong">Mono · .t-mono / .t-mono-sm</span><span class="t-meta code">SF Mono 12/18 · 11/14</span><span><span class="t-mono">Sources/Soprano/Views/SidebarView.swift</span> &nbsp; <span class="t-mono-sm t-muted">d78be48 · 20h</span></span></div>
+      <div class="type-row"><span class="t-label-strong">Prose · .t-prose</span><span class="t-meta code">New York 16/26 · Markdown reader</span><div class="t-prose">Soprano is built around the question you actually have all day: <em>which agent needs me right now?</em></div></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ space -->
+  <section class="sec" id="space">
+    <div class="sec-head"><span class="t-eyebrow">05</span><h2 class="t-screen">Space, shape, elevation</h2><span class="t-meta">4-pt rhythm · 1 px borders only · opaque surfaces</span></div>
+    <div class="cols-3">
+      <div>
+        <div class="t-eyebrow" style="margin-bottom:10px">Spacing</div>
+        <div class="space-row"><span style="width:70px">--space-2</span><i style="width:2px"></i>2</div>
+        <div class="space-row"><span style="width:70px">--space-4</span><i style="width:4px"></i>4</div>
+        <div class="space-row"><span style="width:70px">--space-8</span><i style="width:8px"></i>8</div>
+        <div class="space-row"><span style="width:70px">--space-12</span><i style="width:12px"></i>12</div>
+        <div class="space-row"><span style="width:70px">--space-16</span><i style="width:16px"></i>16</div>
+        <div class="space-row"><span style="width:70px">--space-24</span><i style="width:24px"></i>24</div>
+        <div class="space-row"><span style="width:70px">--space-32</span><i style="width:32px"></i>32</div>
+        <div class="space-row"><span style="width:70px">--space-48</span><i style="width:48px"></i>48</div>
+      </div>
+      <div>
+        <div class="t-eyebrow" style="margin-bottom:10px">Radii</div>
+        <div class="radius-row">
+          <div><i style="border-radius:12px"></i>panel 12</div>
+          <div><i style="border-radius:10px"></i>popover 10</div>
+          <div><i style="border-radius:8px"></i>card 8</div>
+        </div>
+        <div class="radius-row" style="margin-top:14px">
+          <div><i style="border-radius:6px"></i>control 6</div>
+          <div><i style="border-radius:4px"></i>cap 4</div>
+          <div><i style="border-radius:0"></i>pane 0</div>
+        </div>
+      </div>
+      <div>
+        <div class="t-eyebrow" style="margin-bottom:10px">Elevation</div>
+        <div class="elev" style="flex-direction:column;gap:18px">
+          <div style="box-shadow:none;background:var(--bg-panel)">e0 · flat (bars, panes)</div>
+          <div style="box-shadow:var(--shadow-e2)">e2 · popovers, toasts, HUD</div>
+          <div style="box-shadow:var(--shadow-e3)">e3 · palette, launcher, switcher</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="t-eyebrow" style="margin:6px 0 10px">Heights (px, tokens --h-*)</div>
+      <div class="heights">
+        <div>titlebar<b>28</b></div><div>tab rows<b>32</b></div><div>sidebar header<b>32</b></div><div>window row<b>28</b></div><div>pane row (2 lines)<b>40</b></div><div>pane header<b>28</b></div><div>pane tab<b>22</b></div><div>status bar<b>26</b></div><div>right-sidebar header<b>32</b></div><div>explorer / SC rows<b>24</b></div><div>diff/editor toolbar<b>32</b></div><div>dashboard header<b>56</b></div><div>agent rows<b>52</b></div><div>settings nav<b>30</b></div><div>settings rows<b>≥ 36</b></div><div>palette 620×460<b>44/44/28</b></div>
+        <div>git tab bar<b>36</b></div><div>git toolbar<b>38</b></div><div>panel headers<b>28</b></div><div>refs<b>24</b></div><div>graph<b>28</b></div><div>files<b>26</b></div><div>sections<b>28</b></div><div>hunk header<b>26</b></div><div>diff lines<b>18</b></div>
+        <div>launcher 750×474<b>—</b></div><div>launcher search<b>56</b></div><div>launcher section<b>26</b></div><div>launcher rows<b>40</b></div><div>launcher footer<b>40</b></div><div>action rows<b>30</b></div><div>table group / row<b>28 / 32</b></div>
+        <div>switcher header<b>28</b></div><div>tile title<b>22</b></div><div>title rows<b>28/34/40</b></div><div>search strip<b>30</b></div><div>keycap<b>18 (16)</b></div><div>control / field<b>24 / 26</b></div><div>menu bar<b>24</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ status -->
+  <section class="sec" id="status">
+    <div class="sec-head"><span class="t-eyebrow">06</span><h2 class="t-screen">Status system</h2><span class="t-meta">ring = nothing happening · dot = activity or your turn · diamond = failure · no glow, no pulse</span></div>
+    <div class="matrix" id="matrix">
+      <div class="mh">State</div><div class="mh">Pane header</div><div class="mh">Sidebar row</div><div class="mh">Tab badge</div><div class="mh">Dashboard row</div>
+    </div>
+    <p class="lede" style="font-size:13px;line-height:19px">Aggregate badges take the most urgent state: error &gt; waiting (needs input) &gt; running &gt; starting &gt; idle. A badge is an unboxed mark plus a tabular count.</p>
+  </section>
+
+  <!-- ================================================================ focus -->
+  <section class="sec" id="focus">
+    <div class="sec-head"><span class="t-eyebrow">07</span><h2 class="t-screen">Focus, attention, selection</h2><span class="t-meta">one pencil mark per window</span></div>
+    <div class="cols-2" style="grid-template-columns:1.35fr 1fr">
+      <div class="demo-grid">
+        <section class="pane is-focused" style="grid-row:1/4">
+          <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><span class="pane-actions"><span class="status-label is-working">Working</span><button class="btn-icon"><i data-icon="x"></i></button></span></header>
+          <div class="pane-body"><pre class="term"><span class="c2">⏺</span> <span class="b">Update</span>(SidebarView.swift)
+  <span class="d">⎿  Updated with 1 addition</span>
+       431 <span class="add-line"><span class="c2">+</span> collapseAllButton.isEnabled = …</span>
+
+<span class="c2">⏺</span> <span class="b">Bash</span>(swift test --filter Sidebar…)
+  <span class="d">⎿  Running…</span>
+
+<span class="c3">✻</span> <span class="c3">Brewing…</span> <span class="d">(38s · esc to interrupt)</span>
+
+<span class="d">╭──────────────────────────────╮</span>
+<span class="d">│</span> &gt; <span class="cursor"> </span>                          <span class="d">│</span>
+<span class="d">╰──────────────────────────────╯</span></pre></div>
+        </section>
+        <i style="grid-row:1/4;grid-column:2;background:var(--border-strong)"></i>
+        <section class="pane is-attention is-needs-input" style="grid-column:3">
+          <header class="pane-header"><i class="attention-dot"></i><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><span class="pane-actions"><span class="status-label is-needs-input">Needs input</span><button class="btn-icon"><i data-icon="x"></i></button></span></header>
+          <div class="pane-body"><pre class="term"><span class="c2">•</span> I need to run a command outside
+  the workspace:
+
+  <span class="c6">$ rg -l "bgRaised" ../soprano-git</span>
+
+<span class="c3">▌</span> <span class="b c3">Allow command?</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes, run it</span>
+<span class="c3">▌</span>   2. No, tell Codex what to do</pre></div>
+        </section>
+        <i style="grid-column:3;grid-row:2;background:var(--border-strong)"></i>
+        <section class="pane is-dimmed" style="grid-column:3;grid-row:3">
+          <header class="pane-header" style="padding-left:6px"><div class="pane-tabs"><span class="pane-tab is-active is-running">swift build</span><span class="pane-tab">zsh</span></div><span class="pane-actions"><span class="status-label is-running">Running</span><button class="btn-icon"><i data-icon="x"></i></button></span></header>
+          <div class="pane-body"><pre class="term"><span class="c4">~/git/private/soprano</span> on <span class="c5">feat/calm-chrome</span>
+<span class="c2">❯</span> swift build
+[411/538] Compiling Soprano SidebarView.swift
+[412/538] Compiling Soprano StatusBarView.swift
+[413/538] Compiling Soprano RetroChrome.swift</pre></div>
+        </section>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:18px">
+        <div class="demo-notes" style="grid-template-columns:1fr">
+          <div><b>Focus</b> — the focused pane has a raised header, an ink title and a 2 px sienna rule along the header's bottom edge. Every other pane sinks under a veil: Paper multiplies bg-panel (ink stays ≈ 11 : 1), Ink lays 18 % black, so the focused pane reads as the top sheet. Attention panes are never veiled.</div>
+          <div><b>Attention</b> — a full 2 px frame in <span class="code">--attention</span> (blue; yellow when the theme's accent ≈ blue), an attention-wash header and a dot before the title. Never veiled.</div>
+          <div><b>Status wash</b> — NEEDS INPUT and ERROR tint their own header at 10 %. Everything else stays paper.</div>
+        </div>
+        <div class="cols-2" style="gap:16px">
+          <div>
+            <div class="t-meta" style="margin-bottom:6px">Focused list — sienna wash + pencil tick</div>
+            <div class="mini-sidebar"><div class="sidebar"><div class="section-heading">Windows</div><div class="list is-focused">
+              <div class="row"><i data-icon="chevron-down" class="disclosure"></i><span class="row-title t-label-strong">soprano</span><span class="row-trail row-count">3 · <span class="is-attention">1!</span></span></div>
+              <div class="row is-selected" style="--indent:18px"><i class="status-dot is-working"></i><span class="row-title">Claude Code</span><span class="row-trail status-label is-working">Working</span></div>
+              <div class="row" style="--indent:18px"><i class="status-dot is-needs-input"></i><span class="row-title">Codex</span><span class="row-trail status-label is-needs-input">Needs input</span></div>
+            </div></div></div>
+          </div>
+          <div>
+            <div class="t-meta" style="margin-bottom:6px">Unfocused list — neutral wash, no tick</div>
+            <div class="mini-sidebar"><div class="sidebar"><div class="section-heading">Local <span class="section-count">7</span></div><div class="list">
+              <div class="row"><i data-icon="folder"></i><span class="row-title">feat</span></div>
+              <div class="row is-selected"><i data-icon="git-branch"></i><span class="row-title t-label-strong">main</span><span class="row-trail row-count">↑0 ↓0</span></div>
+              <div class="row"><i data-icon="folder"></i><span class="row-title">wt</span></div>
+            </div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================================================================ gallery -->
+  <section class="sec" id="components">
+    <div class="sec-head"><span class="t-eyebrow">08</span><h2 class="t-screen">Components</h2><span class="t-meta">every class from the components.css index · rendered in Paper and in Ink</span></div>
+    <div class="gallery" data-mode="light" data-gallery><div class="gallery-head"><span class="t-headline">Paper</span><span class="t-meta">light · primary</span></div></div>
+    <div class="gallery" data-mode="dark" data-gallery><div class="gallery-head"><span class="t-headline">Ink</span><span class="t-meta">dark</span></div></div>
+  </section>
+
+  <!-- ================================================================ icons -->
+  <section class="sec" id="app-icons">
+    <div class="sec-head"><span class="t-eyebrow">09</span><h2 class="t-screen">App icons</h2><span class="t-meta">paper squircle · ink glyph · exactly one sienna element · icons/&lt;app&gt;.svg and &lt;app&gt;-dark.svg</span></div>
+    <div class="icon-wall" id="icon-wall">
+      <div class="icon-set" data-mode="light" data-variant=""><div class="t-headline">Paper icons</div></div>
+      <div class="icon-set" data-mode="dark" data-variant="-dark"><div class="t-headline">Ink icons</div></div>
+    </div>
+  </section>
+
+  <!-- ================================================================ mapping -->
+  <section class="sec" id="theme-mapping">
+    <div class="sec-head"><span class="t-eyebrow">10</span><h2 class="t-screen">ThemeColors mapping</h2><span class="t-meta">Swift slot → CSS token → Paper / Ink → use</span></div>
+    <table class="doc-table" id="mapping"><thead><tr><th style="width:150px">ThemeColors</th><th style="width:150px">Token</th><th style="width:150px">Paper</th><th style="width:150px">Ink</th><th>Use</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- ================================================================ themes -->
+  <section class="sec" id="third-party">
+    <div class="sec-head"><span class="t-eyebrow">11</span><h2 class="t-screen">Third-party themes under Folio rules</h2><span class="t-meta">real 16 values from Theme.swift · derived tokens recomputed per theme</span></div>
+    <div class="themes" id="themes"></div>
+  </section>
+
+</div>
+
+<!-- ======================================================================
+     Gallery template — cloned into Paper and Ink sections
+     ====================================================================== -->
+<template id="tpl-gallery">
+<div class="cards">
+
+  <div class="gcard"><span class="cap">.btn · .btn-primary · .btn-danger · .btn-plain · .btn-icon</span>
+    <div class="stage">
+      <button class="btn">Reveal in Finder</button><button class="btn is-hover">Hover</button><button class="btn is-pressed">Pressed</button><button class="btn" disabled>Disabled</button>
+      <button class="btn btn-primary">Commit 3 files <span class="kbd">⌘↵</span></button><button class="btn btn-primary" disabled>Commit</button>
+      <button class="btn btn-danger">Restart <span class="kbd">↵</span></button><button class="btn btn-plain"><i data-icon="download"></i>Pull <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">P</span></span></button>
+      <button class="btn-icon"><i data-icon="gear"></i></button><button class="btn-icon is-hover"><i data-icon="plus"></i></button><button class="btn-icon is-on"><i data-icon="eye"></i></button><button class="btn-icon" disabled><i data-icon="collapse"></i></button>
+      <button class="btn btn-lg">Stage all &amp; commit <span class="kbd">⇧⌘↵</span></button>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.kbd · .kbd-sm · .kbd-lg · .kbd-accent · .hint · .hints</span>
+    <div class="stage col">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="kbd">⌘1</span><span class="kbd">⇧⌘P</span><span class="kbd">⌃A</span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">⇧P</span></span><span class="kbd">esc</span><span class="kbd">↵</span><span class="kbd">J</span><span class="kbd kbd-sm">⇥</span><span class="kbd kbd-accent">1</span><span class="kbd">⇧K</span></div>
+      <div style="display:flex;gap:8px;align-items:center"><span class="kbd kbd-lg">⌘1</span><span class="t-empty" style="margin-left:8px">Recording…</span></div>
+      <span class="t-meta">One cap per chord step; a prefix sequence is separate caps (⌃A then ⇧P).</span>
+      <span class="hints"><span class="hint"><span class="kbd">↑↓</span>Navigate</span><span class="hint"><span class="kbd">↵</span>Run</span><span class="hint"><span class="kbd">esc</span>Close</span></span>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.status-dot · .status-label · .badge · .attention-dot · .mode-chip · .chip</span>
+    <div class="stage col">
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <span class="status"><i class="status-dot is-starting"></i><span class="status-label is-starting">Starting</span></span>
+        <span class="status"><i class="status-dot is-working"></i><span class="status-label is-working">Working</span></span>
+        <span class="status"><i class="status-dot is-running"></i><span class="status-label is-running">Running</span></span>
+        <span class="status"><i class="status-dot is-ready"></i><span class="status-label is-ready">Ready</span></span>
+        <span class="status"><i class="status-dot is-needs-input"></i><span class="status-label is-needs-input">Needs input</span></span>
+        <span class="status"><i class="status-dot is-error"></i><span class="status-label is-error">Error</span></span>
+        <span class="status"><i class="status-dot is-stopped"></i><span class="status-label is-stopped">Stopped</span></span>
+        <span class="status"><i class="status-dot is-idle"></i><span class="t-meta">idle shell</span></span>
+      </div>
+      <div style="display:flex;gap:10px 12px;align-items:center;flex-wrap:wrap">
+        <span class="badge is-needs-input"><i class="status-dot is-needs-input"></i>3</span><span class="badge is-error"><i class="status-dot is-error"></i>1</span><span class="badge is-running"><i class="status-dot is-running"></i>2</span><span class="badge"><i class="status-dot is-idle"></i>1</span><i class="attention-dot"></i>
+        <span class="mode-chip is-normal">Normal</span><span class="mode-chip is-prefix">Prefix</span><span class="mode-chip is-copy">Copy</span><span class="mode-chip is-select">Select</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center"><span class="chip">settings.json</span><span class="chip chip-outline">Staged</span><span class="chip">Custom</span><span class="chip">OFF</span></div>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.tabbar · .tab (.is-selected .is-attention .is-hover) · .tab-index · .tab-close · .tab-add · .pane-tabs .pane-tab</span>
+    <div class="stage col flush">
+      <div class="tabbar">
+        <div class="tab is-selected"><span class="tab-text">Claude Code</span><span class="badge is-needs-input"><i class="status-dot is-needs-input"></i>3</span><i data-icon="x" class="tab-close"></i></div>
+        <div class="tab"><span class="tab-text">omp web</span></div>
+        <div class="tab is-hover is-attention"><span class="tab-text">Codex</span></div>
+        <i data-icon="plus" class="tab-add"></i>
+        <button class="btn-icon" style="margin-left:auto"><i data-icon="sidebar-right"></i></button>
+      </div>
+      <div class="tabbar is-titlebar" style="position:relative">
+        <div class="traffic" style="position:absolute;left:12px"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+        <div class="tab is-selected"><span class="tab-index">1</span><span class="tab-text">soprano</span></div><div class="tab"><span class="tab-index">2</span><span class="tab-text">Settings</span></div><i data-icon="plus" class="tab-add"></i>
+      </div>
+      <div class="pane-header" style="background:var(--bg-panel)"><div class="pane-tabs"><span class="pane-tab is-active is-running">swift build</span><span class="pane-tab">zsh</span><span class="pane-tab is-attention">claude</span></div></div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.window · .titlebar · .traffic (.is-inactive) · .window-title</span>
+    <div class="stage" style="height:136px;background:var(--desktop-wallpaper);padding:0">
+      <div class="window" style="left:16px;top:16px;width:190px;height:100px"><div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div><span class="window-title">Settings</span></div></div>
+      <div class="window is-inactive" style="left:222px;top:16px;width:190px;height:100px"><div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div><span class="window-title">Inactive</span></div></div>
+    </div>
+  </div>
+
+  <div class="gcard span-3"><span class="cap">.split · .split-divider · .pane (.is-focused .is-dimmed .is-attention .is-needs-input .is-error) · .pane-header · .pane-title · .pane-actions · .pane-body</span>
+    <div class="stage flush" style="height:120px">
+      <div class="split split-row" style="width:100%;height:100%">
+        <section class="pane is-focused" style="flex:1"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><span class="pane-actions"><span class="status-label is-working">Working</span><button class="btn-icon"><i data-icon="x"></i></button></span></header><div class="pane-body"><pre class="term">focused · raised header + sienna rule</pre></div></section>
+        <i class="split-divider is-vertical"></i>
+        <section class="pane is-dimmed is-attention is-needs-input" style="flex:1"><header class="pane-header"><i class="attention-dot"></i><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><span class="pane-actions"><span class="status-label is-needs-input">Needs input</span></span></header><div class="pane-body"><pre class="term">attention frame · never veiled</pre></div></section>
+        <i class="split-divider is-vertical"></i>
+        <section class="pane is-dimmed is-error" style="flex:1"><header class="pane-header"><i class="status-dot is-error"></i><span class="pane-title">omp</span><span class="pane-actions"><span class="status-label is-error">Error</span></span></header><div class="pane-body"><pre class="term"><span class="c1">Turn failed: 429 rate limited</span></pre></div></section>
+        <i class="split-divider is-vertical"></i>
+        <section class="pane is-dimmed" style="flex:1"><header class="pane-header"><i class="status-dot is-idle"></i><span class="pane-title">zsh</span></header><div class="pane-body"><pre class="term">dimmed · veil (multiply / 18 % black)</pre></div></section>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.sidebar · .sidebar-header · .section-heading · .list.is-focused · .row (.is-selected .is-hover .row-2line) · .row-count · .sidebar-footer</span>
+    <div class="stage flush" style="height:300px">
+      <div class="sidebar" style="width:100%">
+        <div class="sidebar-header"><span class="select" style="min-width:0;flex:1">soprano</span></div>
+        <div class="section-heading">Windows<span class="section-actions"><button class="btn-icon"><i data-icon="collapse"></i></button><button class="btn-icon"><i data-icon="plus"></i></button></span></div>
+        <div class="sidebar-body"><div class="list is-focused">
+          <div class="row" style="--row-h:28px"><i data-icon="chevron-down" class="disclosure"></i><span class="row-title t-label-strong">soprano</span><span class="row-trail row-count">3 · <span class="is-attention">1!</span></span></div>
+          <div class="row row-2line is-selected" style="--row-h:40px;--indent:18px"><span class="row-line"><i class="status-dot is-working"></i><span class="row-title">Claude Code</span><span class="row-trail status-label is-working">Working</span></span><span class="row-sub" style="padding-left:16px">⎇ feat/calm-chrome</span></div>
+          <div class="row row-2line" style="--row-h:40px;--indent:18px"><span class="row-line"><i class="attention-dot"></i><span class="row-title">Codex</span><span class="row-trail status-label is-needs-input">Needs input</span></span><span class="row-sub" style="padding-left:15px">⎇ feat/calm-chrome</span></div>
+          <div class="row row-2line is-hover" style="--row-h:40px;--indent:18px"><span class="row-line"><i class="status-dot is-running"></i><span class="row-title">zsh</span><span class="row-trail"><span class="status-label is-running">Running</span><span class="row-count">2T</span></span></span><span class="row-sub" style="padding-left:16px">⎇ feat/calm-chrome</span></div>
+          <div class="row" style="--row-h:28px"><i data-icon="chevron-right" class="disclosure"></i><span class="row-title">soprano-git</span><span class="row-trail row-count">2</span></div>
+        </div></div>
+        <div class="sidebar-footer"><button class="btn-icon"><i data-icon="history"></i></button><button class="btn-icon"><i data-icon="chart-line"></i></button><button class="btn-icon" style="margin-left:auto"><i data-icon="gear"></i></button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.statusbar · .mode-chip · .breadcrumb .crumb .crumb-sep · .counts · .usage .pct (.is-warn .is-crit) · .hints</span>
+    <div class="stage col flush">
+      <footer class="statusbar"><span class="mode-chip is-normal">Normal</span><span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb is-current">Claude Code</span><span class="crumb">· Tab 1</span></span><span class="statusbar-spacer"></span><span class="counts">1 session · 3 windows · 6 panes · <span class="is-attention">1 needs you</span></span><span class="usage">Claude <span class="pct">42%</span> · 2h 10m &nbsp; Codex <span class="pct is-warn">71%</span> · 3d 4h</span></footer>
+      <footer class="statusbar"><span class="mode-chip is-prefix">Prefix</span><span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb is-current">zsh</span></span><span class="statusbar-spacer"></span><span class="usage">Claude <span class="pct is-crit">93%</span> · 12m</span><span class="hints"><span class="hint"><span class="kbd kbd-sm">⌘P</span>Commands</span><span class="hint"><span class="kbd kbd-sm">⌃A</span>Prefix</span></span></footer>
+      <div class="toolbar"><span class="t-label-strong">soprano</span><span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑0</span><span class="behind is-behind">↓1</span></span><span class="toolbar-group"><button class="btn btn-plain"><i data-icon="download"></i>Pull <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">P</span></span></button><button class="btn btn-plain"><i data-icon="upload"></i>Push <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">⇧P</span></span></button></span><button class="btn btn-plain" style="margin-left:auto"><i data-icon="command"></i><span class="kbd">⌘P</span></button></div>
+      <div class="banner is-danger"><i class="status-dot is-error"></i><span class="banner-text">Merge in progress · 2 conflicts</span><span class="banner-actions"><button class="btn btn-primary">Continue <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">C</span></span></button><button class="btn">Abort <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">X</span></span></button></span></div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.field (.is-focused .is-invalid) · .caret · .search-field · .textarea</span>
+    <div class="stage col">
+      <div class="field"><span class="placeholder">Folder path</span></div>
+      <div class="field is-focused">feat/calm-chrome<i class="caret"></i></div>
+      <div class="field is-invalid">feat/calm chrome</div><span class="t-meta t-danger" style="margin-top:-6px">Branch names cannot contain spaces.</span>
+      <div class="search-field"><i data-icon="search"></i><span class="placeholder">Filter</span><span class="kbd">/</span></div>
+      <div class="textarea"><span class="placeholder">Description</span></div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.checkbox (.is-checked) · .switch (.is-on) · .select · .segmented .segment</span>
+    <div class="stage col">
+      <div style="display:flex;gap:12px;align-items:center"><span class="checkbox"></span><span class="checkbox is-checked"></span><span class="t-label">Amend</span><span class="switch"></span><span class="switch is-on"></span></div>
+      <span class="select" style="width:190px">Folio (follows system)</span>
+      <span class="segmented"><span class="segment">System</span><span class="segment is-active"><i data-icon="sun"></i>Light</span><span class="segment"><i data-icon="moon"></i>Dark</span></span>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.settings-nav · .nav-item (.is-active .is-hover) · .settings-section · .card · .form-row · .form-label · .form-note · .form-control</span>
+    <div class="stage flush" style="height:250px;align-items:stretch">
+      <nav class="settings-nav" style="width:180px"><div class="nav-item is-active"><i data-icon="gear"></i>General</div><div class="nav-item is-hover"><i data-icon="keyboard"></i>Keyboard Shortcuts</div><div class="nav-item"><i data-icon="cpu"></i>Agent Profiles</div><div class="nav-item"><i data-icon="users"></i>Accounts</div><div class="nav-item"><i data-icon="info"></i>About</div></nav>
+      <div style="flex:1;padding:16px 20px;display:flex;flex-direction:column;gap:10px;min-width:0">
+        <div class="settings-section"><div class="t-eyebrow">Appearance</div>
+          <div class="card">
+            <div class="form-row"><div><div class="form-label">Theme</div><div class="form-note">Folio follows the system appearance.</div></div><div class="form-control"><span class="select">Folio</span></div></div>
+            <div class="form-row"><div class="form-label">Hide window tabs</div><div class="form-control"><span class="switch is-on"></span></div></div>
+            <div class="form-row"><div class="form-label">Prefix key</div><div class="form-control"><span class="chip">Custom</span><span class="kbd kbd-field kbd-accent">Ctrl+A</span></div></div>
+            <div class="form-row"><div class="form-label">Play a sound</div><div class="form-control"><span class="switch"></span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.menu · .menu-heading · .menu-row (.is-selected .is-danger) · .menu-sep</span>
+    <div class="stage panel">
+      <div class="menu" style="width:100%">
+        <div class="menu-heading">Google Chrome</div>
+        <div class="menu-row is-selected">Open Application<span class="kbd">↵</span></div>
+        <div class="menu-row">Show in Finder<span class="kbd">⌘↵</span></div>
+        <div class="menu-row">Copy Path<span class="kbd">⇧⌘C</span></div>
+        <div class="menu-sep"></div>
+        <div class="menu-row is-danger">Quit Application</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.scrim · .palette · .palette-search · .palette-list · .palette-row (.is-selected) · .palette-footer</span>
+    <div class="stage flush" style="height:300px;background:var(--bg-panel)">
+      <div class="scrim"></div>
+      <div class="palette" style="left:50%;top:14px;transform:translateX(-50%);width:600px;height:272px">
+        <div class="palette-search"><i data-icon="search"></i>open<i class="caret"></i><span class="kbd">⌘P</span></div>
+        <div class="palette-list">
+          <div class="palette-row is-selected"><i data-icon="git-branch"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> in Soprano Git</span><span class="palette-desc">Open the active tab's Git repository in Soprano Git</span></span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">G</span></span></div>
+          <div class="palette-row"><i data-icon="folder"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Project…</span><span class="palette-desc">Search configured projects or choose a directory</span></span><span class="kbd">⇧⌘P</span></div>
+          <div class="palette-row"><i data-icon="terminal"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Terminal</span><span class="palette-desc">Open a new terminal pane</span></span><span class="kbd">⌘D</span></div>
+        </div>
+        <div class="palette-footer"><span class="t-num">3 results</span><span class="hints"><span class="hint"><span class="kbd">↑↓</span>Navigate</span><span class="hint"><span class="kbd">↵</span>Run</span><span class="hint"><span class="kbd">esc</span>Close</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.toast (.is-error) · .tooltip · .hud</span>
+    <div class="stage col panel">
+      <div class="toast is-error" style="width:100%"><i class="status-dot is-error"></i><div><div class="toast-title">Push failed</div><div class="toast-body">! [rejected] main -> main (fetch first)</div></div><span class="kbd">esc</span></div>
+      <div style="display:flex;gap:12px;align-items:center"><span class="tooltip">Collapse All Windows</span><span class="hud">Reloaded script directories</span></div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.dialog · .dialog-title · .dialog-body · .dialog-actions</span>
+    <div class="stage panel">
+      <div class="dialog" style="width:100%">
+        <h3 class="dialog-title">Delete branch feat/dashboard-chat-view?</h3>
+        <div class="dialog-body">The branch is fully merged into main. This cannot be undone.</div>
+        <div class="dialog-actions"><span class="hints"><span class="hint"><span class="kbd">↵</span>Delete</span></span><button class="btn">Cancel</button><button class="btn btn-danger">Delete</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.stat .stat-value (.is-zero) .stat-label · .empty</span>
+    <div class="stage col">
+      <div style="display:flex;gap:20px">
+        <div class="stat"><span class="stat-value">4</span><span class="stat-label">Total</span></div>
+        <div class="stat"><span class="stat-value">1</span><span class="stat-label"><i class="status-dot is-working"></i>Working</span></div>
+        <div class="stat"><span class="stat-value">0</span><span class="stat-label"><i class="status-dot is-error"></i>Errors</span></div>
+      </div>
+      <div class="empty" style="height:80px">No panes open<span class="t-meta">Press ⌘1 to launch Claude Code</span></div>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.table · .table-head · .table-group · .table-row (.is-selected .is-muted) · .cell-name .cell-muted .cell-mono</span>
+    <div class="stage flush col" style="padding-bottom:4px">
+      <div class="table" style="--cols:minmax(120px,1fr) 120px 76px 108px 56px">
+        <div class="table-head"><span>Name</span><span>Type</span><span>Alias</span><span>Hotkey</span><span>Enabled</span></div>
+        <div class="table-group"><span><i data-icon="chevron-down"></i>Applications <span class="row-count">14</span></span></div>
+        <div class="table-row is-selected"><span class="cell-name"><img src="icons/cast.svg" width="18" height="18" alt="">Google Chrome</span><span class="cell-muted">Application</span><span class="cell-mono">chr</span><span><span class="kbd">⌘1</span></span><span class="checkbox is-checked"></span></div>
+        <div class="table-row"><span class="cell-name"><img src="icons/tab.svg" width="18" height="18" alt="">Safari</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox is-checked"></span></div>
+        <div class="table-row is-muted"><span class="cell-name"><img src="icons/git.svg" width="18" height="18" alt="" style="opacity:.6">Xcode</span><span class="cell-muted">Application</span><span></span><span></span><span class="checkbox"></span></div>
+        <div class="table-group"><span><i data-icon="chevron-right"></i>Window Management <span class="row-count">40</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.term · .c0–.c15 · .bg* · .b .d .i .u .inv · .cursor · .sel</span>
+    <div class="stage flush">
+      <pre class="term" style="width:100%"><span class="c2">❯</span> git status
+On branch <span class="c5 b">feat/calm-chrome</span>
+<span class="c2">  modified:   Views/SidebarView.swift</span>
+<span class="c1">  deleted:    Views/RetroStripe.swift</span>
+<span class="d">dim</span> <span class="i">italic</span> <span class="u">underline</span> <span class="inv">inverse</span> <span class="sel">selection</span>
+<span class="bg3 c0"> warn </span> <span class="bg1 c15"> fail </span> <span class="c12">bright blue</span>
+<span class="c2">❯</span> <span class="cursor"> </span></pre>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.diff · .diff-row (.is-hunk .is-ctx .is-add .is-del .is-filler .is-current) · .gutter .marker .code · .w-add .w-del · .syn-*</span>
+    <div class="stage flush col">
+      <div class="diff" style="width:100%">
+        <div class="diff-row is-hunk"><span><span class="hunk-range">@@ -176,7 +186,7 @@</span> <span class="hunk-context">final class SidebarView: NSView {</span></span></div>
+        <div class="diff-row is-ctx"><span class="gutter">186</span><span class="marker"></span><span class="code">            headerView.<span class="syn-fn">leadingAnchor</span>.<span class="syn-fn">constraint</span>(equalTo: contentContainer.leadingAnchor, constant: <span class="syn-num">14</span>),</span></div>
+        <div class="diff-row is-del is-current"><span class="gutter">179</span><span class="marker">−</span><span class="code">            headerView.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: <span class="w-del">plusButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div>
+        <div class="diff-row is-add is-current"><span class="gutter">189</span><span class="marker">+</span><span class="code">            headerView.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: <span class="w-add">collapseAllButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div>
+        <div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div>
+        <div class="diff-row is-add"><span class="gutter">286</span><span class="marker">+</span><span class="code">    <span class="syn-attr">@objc</span> <span class="syn-kw">private func</span> <span class="syn-fn">collapseAllClicked</span>() {  <span class="syn-com">// Collapse every window</span></span></div>
+        <div class="diff-row is-add"><span class="gutter">287</span><span class="marker">+</span><span class="code">        <span class="syn-kw">let</span> label: <span class="syn-type">String</span> = <span class="syn-str">"Collapse All Windows"</span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.ref-pill (.is-head) .lane-* · .kind-* · .diffstat · svg .edge .node .node-head .node-merge .node-stash .node-wip</span>
+    <div class="stage col">
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="ref-pill is-head lane-0"><i data-icon="check"></i><i data-icon="laptop"></i>main</span><span class="ref-pill lane-0"><i data-icon="cloud"></i>origin/main</span><span class="ref-pill lane-1"><i data-icon="laptop"></i>wt/20261009-005256</span><span class="ref-pill lane-2"><i data-icon="tag"></i>v0.6.0</span><span class="ref-more">+2</span></div>
+      <div style="display:flex;gap:10px;align-items:center"><span class="kind kind-M">M</span><span class="kind kind-A">A</span><span class="kind kind-D">D</span><span class="kind kind-R">R</span><span class="kind kind-C">C</span><span class="kind kind-U">U</span><span class="kind kind-T">T</span><span class="kind kind-Q">?</span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+      <svg width="260" height="120" viewBox="0 0 260 120" style="overflow:visible">
+        <path class="edge-wip" d="M14 14 V 42"/>
+        <path class="edge lane-0" d="M14 42 V 120"/>
+        <path class="edge lane-1" d="M14 70 C 14 84, 28 84, 28 98 V 112"/>
+        <path class="edge lane-2" d="M42 56 C 42 70, 14 70, 14 84"/>
+        <circle class="node-wip" cx="14" cy="14" r="5"/>
+        <circle class="node lane-0" cx="14" cy="42" r="4"/><circle class="node-head" cx="14" cy="42" r="7"/>
+        <circle class="node lane-2" cx="42" cy="56" r="4"/>
+        <circle class="node-merge lane-0" cx="14" cy="84" r="4"/>
+        <rect class="node-stash lane-1" x="24.5" y="104.5" width="7" height="7"/>
+        <text x="60" y="18" class="t-meta" fill="currentColor" style="font:11px var(--font-sans);fill:var(--text-muted)">WIP · dashed ring</text>
+        <text x="60" y="46" style="font:11px var(--font-sans);fill:var(--text-muted)">HEAD · ink ring</text>
+        <text x="60" y="88" style="font:11px var(--font-sans);fill:var(--text-muted)">merge · hollow</text>
+        <text x="60" y="112" style="font:11px var(--font-sans);fill:var(--text-muted)">stash · square</text>
+      </svg>
+      <div style="display:flex;gap:4px"><i class="lane-fill lane-0" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-1" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-2" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-3" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-4" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-5" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-6" style="width:22px;height:8px;border-radius:2px"></i><i class="lane-fill lane-7" style="width:22px;height:8px;border-radius:2px"></i></div>
+    </div>
+  </div>
+
+  <div class="gcard span-2"><span class="cap">.switcher · .switcher-header · .tile (.is-selected .is-hover .is-windowless) · .tile-title · .tile-thumb · .tile-chips .tile-chip · .lamps .lamp-*</span>
+    <div class="stage" style="height:236px;background:var(--desktop-wallpaper);padding:0">
+      <div class="switcher" style="left:16px;top:14px;right:16px">
+        <div class="switcher-header">All windows <span class="switcher-count">· 13</span><span class="hints"><span class="hint"><span class="kbd">⇥</span>next</span><span class="hint"><span class="kbd">⇧</span>back</span><span class="hint"><span class="kbd">↩</span>open</span><span class="hint"><span class="kbd">W</span>close</span><span class="hint"><span class="kbd">M</span>min</span><span class="hint"><span class="kbd">Q</span>quit</span><span class="hint"><span class="kbd">S</span>search</span></span></div>
+        <div style="display:flex;gap:var(--tile-gap)">
+          <div class="tile is-hover" style="width:180px;height:130px"><div class="tile-title"><img src="icons/soprano.svg" alt=""><span>soprano-tab — claude</span></div><div class="tile-thumb"><span class="lamps thumb-lamps"><i class="lamp lamp-close"></i><i class="lamp lamp-min"></i><i class="lamp lamp-zoom"></i></span><div class="mt mt-ink"><i class="mt-bar"></i><div class="mt-body"><i class="mt-side"></i><div class="mt-lines"><i style="width:70%"></i><i style="width:52%"></i><i class="mt-acc" style="width:38%"></i><i style="width:64%"></i><i style="width:44%"></i></div></div></div></div></div>
+          <div class="tile is-selected" style="width:180px;height:130px"><div class="tile-title"><img src="icons/soprano.svg" alt=""><span>valkental — zsh</span></div><div class="tile-thumb"><div class="mt mt-paper"><i class="mt-bar"></i><div class="mt-body"><i class="mt-side"></i><div class="mt-lines"><i style="width:60%"></i><i style="width:76%"></i><i style="width:48%"></i><i class="mt-acc" style="width:30%"></i><i style="width:66%"></i></div></div></div></div></div>
+          <div class="tile" style="width:180px;height:130px"><div class="tile-title"><img src="icons/tab.svg" alt=""><span>Inbox — 3 unread messages</span></div><div class="tile-thumb"><div class="mt mt-web"><i class="mt-bar"></i><div class="mt-body"><div class="mt-lines"><i class="mt-blue" style="width:46%"></i><i style="width:82%"></i><i style="width:74%"></i><i style="width:58%"></i><i style="width:80%"></i></div></div></div><div class="tile-chips"><span class="tile-chip">Hidden</span><span class="tile-chip">2</span></div></div></div>
+          <div class="tile is-windowless" style="width:150px;height:130px"><div class="tile-title"><img src="icons/cast.svg" alt=""><span>Notes</span></div><div class="tile-thumb" style="display:flex;align-items:center;justify-content:center"><img src="icons/cast.svg" width="48" height="48" alt=""></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.desktop · .menubar (.menubar-apple .menubar-app .menubar-item .menubar-right .menubar-clock) · .wordmark · .brand-mark</span>
+    <div class="stage desk">
+      <div class="menubar" style="position:absolute"><i class="menubar-apple"></i><b class="menubar-app">Soprano</b><span class="menubar-item">Edit</span><span class="menubar-item">Commands</span><div class="menubar-right"><svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Cast"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg><svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Tab"><path d="M5.5 9.5H3A1.5 1.5 0 0 1 1.5 8V4A1.5 1.5 0 0 1 3 2.5h6A1.5 1.5 0 0 1 10.5 4v2.5"/><rect x="5.5" y="6.5" width="9" height="7" rx="1.5"/><path d="M8.3 10h3.4M10.6 8.8 11.8 10l-1.2 1.2"/></svg><i data-icon="wifi"></i><span class="menubar-clock">Tue 21 Oct 21:41</span></div></div>
+      <div style="position:absolute;left:18px;bottom:16px;display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-raised);border-radius:8px;box-shadow:var(--shadow-e2)"><img class="brand-mark" src="icons/cast.svg" alt=""><span class="wordmark">Soprano Cast</span></div>
+    </div>
+  </div>
+
+
+  <div class="gcard span-2"><span class="cap">.launcher · .launcher-search · .launcher-list (.list.is-focused .row .section-heading .q) · .launcher-footer · .glyph-tile · .match</span>
+    <div class="stage" style="height:520px;background:var(--desktop-wallpaper);padding:0">
+      <div class="launcher" style="left:50%;top:22px;transform:translateX(-50%)">
+        <div class="launcher-search">chr<i class="caret"></i></div>
+        <div class="launcher-list list is-focused">
+          <div class="section-heading">Results</div>
+          <div class="row is-selected">
+            <span style="width:24px;height:24px;flex:none;border-radius:50%;background:radial-gradient(circle at 50% 50%, #4285f4 0 4.3px, #ffffff 4.9px 6.3px, transparent 6.8px), conic-gradient(from 0deg, #db4437 0deg 60deg, #f4b400 60deg 180deg, #0f9d58 180deg 300deg, #db4437 300deg 360deg)" role="img" aria-label="Google Chrome"></span>
+            <span class="row-title">Google <span class="match">Chr</span>ome</span>
+            <span class="row-sub mono">/Applications</span>
+            <span class="row-trail"><span class="kbd">⌘1</span><span class="row-meta">Application</span></span>
+          </div>
+          <div class="row">
+            <span class="glyph-tile"><svg class="tpl" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><rect x="6.25" y="3.25" width="3.5" height="9.5" fill="currentColor" stroke="none" opacity=".55"/></svg></span>
+            <span class="row-title"><span class="match">C</span>enter T<span class="match">h</span>i<span class="match">r</span>d</span>
+            <span class="row-sub">Window Management</span>
+            <span class="row-trail"><span class="row-meta">Command</span></span>
+          </div>
+          <div class="section-heading">Use <span class="q">“chr”</span> with…</div>
+          <div class="row">
+            <span class="glyph-tile"><i data-icon="search"></i></span>
+            <span class="row-title">Search Google</span>
+            <span class="row-sub">“chr”</span>
+            <span class="row-trail"><span class="row-meta">Command</span></span>
+          </div>
+        </div>
+        <div class="launcher-footer">
+          <svg class="brand-glyph" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg>
+          <span>Soprano Cast</span>
+          <span class="actions"><span class="primary">Open Application</span><span class="kbd">↵</span><span class="sep"></span><span>Actions</span><span class="kbd">⌘K</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="gcard"><span class="cap">.panel-header.is-focused · .agent (on .row) · .is-selected · .is-attention</span>
+    <div class="stage flush col panel">
+      <div class="panel-header is-focused">Agents <span class="panel-header-trail"><span class="kbd kbd-sm">J</span><span class="kbd kbd-sm">K</span></span></div>
+      <div class="list is-focused" style="gap:2px;padding:6px 0">
+        <div class="row agent is-selected"><div class="a-line"><i class="status-dot is-working"></i><span class="a-title">soprano<span class="sep">▸</span><span class="who">Claude Code</span></span><span class="a-time">4m 12s</span><span class="a-trail status-label is-working">Working</span></div><div class="a-sub"><span class="a-act">Bash · <code>swift test --filter Sidebar…</code></span></div></div>
+        <div class="row agent is-attention"><div class="a-line"><i class="status-dot is-needs-input"></i><span class="a-title">soprano<span class="sep">▸</span><span class="who">Codex</span></span><span class="a-time">1m 03s</span><span class="a-trail status-label is-needs-input">Needs input</span></div><div class="a-sub"><span class="a-act">Allow command? <code>rg -l "bgRaised" …</code></span></div></div>
+        <div class="row agent"><div class="a-line"><i class="status-dot is-error"></i><span class="a-title">valkental<span class="sep">▸</span><span class="who">omp</span></span><span class="a-time">2m 40s</span><span class="a-trail status-label is-error">Error</span></div><div class="a-sub"><span class="a-act is-error">Turn failed: 429 rate limited</span></div></div>
+      </div>
+      <div class="panel-header" style="border-top:1px solid var(--border-subtle)">Timeline <span class="panel-header-trail">unfocused header</span></div>
+    </div>
+  </div>
+
+  <div class="gcard span-3"><span class="cap">.pane-toolbar (.is-focused) · .reader · .t-prose (h1 h2 p code pre blockquote a) — Markdown reader pane</span>
+    <div class="stage flush col" style="height:330px">
+      <section class="pane" style="height:100%;width:100%">
+        <div class="pane-toolbar is-focused"><button class="btn-icon"><i data-icon="chevron-left"></i></button><button class="btn-icon"><i data-icon="chevron-right"></i></button><button class="btn-icon"><i data-icon="refresh"></i></button><span class="path">docs/ARCHITECTURE.md</span><span class="pane-actions"><button class="btn-icon"><i data-icon="external-link"></i></button><button class="btn-icon"><i data-icon="pencil"></i></button></span></div>
+        <div class="reader"><div class="t-prose">
+          <h1>Architecture</h1>
+          <p>Every pane is a libghostty surface. Agents report their state through lifecycle hooks, so nothing scrapes output — see <a href="#">Agent status</a>.</p>
+          <h2>Split tree</h2>
+          <blockquote>Splits clamp to 10–90 % and come back on the next launch.</blockquote>
+          <p>The tree lives in <code>SplitTreeView.swift</code>; focus moves by geometry, not tree order.</p>
+        </div></div>
+      </section>
+    </div>
+  </div>
+
+</div>
+</template>
+
+<script>
+(function () {
+  'use strict';
+  var meta = (window.SOPRANO_DESIGNS || {}).b || {};
+  var pl = document.getElementById('principles');
+  (meta.principles || []).forEach(function (p) { var li = document.createElement('li'); li.textContent = p; pl.appendChild(li); });
+
+  function hexOf(el, v) { return getComputedStyle(el).getPropertyValue(v).trim(); }
+  function rgb(h) { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join(''); return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); }); }
+  function lum(h) { return rgb(h).map(function (c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }).reduce(function (a, c, i) { return a + c * [0.2126, 0.7152, 0.0722][i]; }, 0); }
+  function cr(a, b) { var x = lum(a), y = lum(b); return ((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)).toFixed(1); }
+  function hue(h) { var c = rgb(h).map(function (v) { return v / 255; }); var mx = Math.max.apply(0, c), mn = Math.min.apply(0, c), d = mx - mn; if (!d) return 0; var r = c[0], g = c[1], b = c[2]; var hh = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; hh *= 60; return hh < 0 ? hh + 360 : hh; }
+
+  var SLOTS = [
+    ['bgBase', '--bg-base', 'window, terminal, reading surfaces'],
+    ['bgPanel', '--bg-panel', 'sidebars, bars, status bar'],
+    ['bgRaised', '--bg-raised', 'focused header, selected tab, cards, fields, overlays'],
+    ['bgOverlay', '--bg-overlay', 'hover'],
+    ['textPrimary', '--text-primary', 'ink: titles, body, ink buttons'],
+    ['textMuted', '--text-muted', 'secondary text, icons, eyebrows'],
+    ['accent', '--accent', 'sienna pencil: focus, caret, cursor, matches'],
+    ['accentStrong', '--accent-strong', 'matches on a selected row'],
+    ['borderSubtle', '--border-subtle', 'rules, card edges, row separators'],
+    ['borderStrong', '--border-strong', 'control edges, keycaps, splitters'],
+    ['success', '--success', 'WORKING, +lines, A'],
+    ['danger', '--danger', 'ERROR, −lines, D, destructive'],
+    ['blue', '--blue', 'READY, attention, SELECT'],
+    ['cyan', '--cyan', 'RUNNING, R/C, types'],
+    ['yellow', '--yellow', 'STARTING, NEEDS INPUT, M, ≥ 70 %'],
+    ['gray', '--gray', 'STOPPED, ignored, idle']
+  ];
+  var DERIVED = [
+    ['--selection', 'accent @ 12/16 % · focused list'],
+    ['--selection-muted', 'ink @ 6/7 % · unfocused list'],
+    ['--hover', 'bg-overlay'],
+    ['--attention', 'blue (yellow if accent ≈ blue)'],
+    ['--attention-wash', 'attention @ 10 %'],
+    ['--status-wash-needs-input', 'yellow @ 10 % header'],
+    ['--status-wash-error', 'danger @ 10 % header'],
+    ['--text-selection', 'accent @ 22 %'],
+    ['--unfocused-veil', 'Paper: bg-panel multiply · Ink: 18 % black'],
+    ['--diff-add-bg', 'Paper #5f8f3a 16 % (word 30) · Ink success 12 % (24)'],
+    ['--diff-del-bg', 'danger @ 10 % (word 22)'],
+    ['--ink-button-bg', 'text-primary fill, bg-raised label'],
+    ['--scrim', 'overlay scrim'],
+    ['--focus-mark', 'accent · 2 px rule / tick']
+  ];
+
+  function sw(chipStyle, name, val, role, derived) {
+    return '<div class="sw"><span class="sw-chip' + (derived ? ' derived-chip' : '') + '" style="' + (derived ? '' : chipStyle) + '">' + (derived ? '<i style="' + chipStyle + '"></i>' : '') + '</span><span style="min-width:0"><div class="sw-name">' + name + '</div><div class="sw-role">' + role + '</div></span><span class="sw-hex">' + val + '</span></div>';
+  }
+  document.querySelectorAll('#color-cols .modebox').forEach(function (box) {
+    var html = '';
+    SLOTS.forEach(function (s) { html += sw('background:var(' + s[1] + ')', s[1], hexOf(box, s[1]), s[2], false); });
+    box.querySelector('[data-swatches]').innerHTML = html;
+    var d = '';
+    DERIVED.forEach(function (s) { d += sw('background:var(' + s[0] + ')', s[0], '', s[1], true); });
+    box.querySelector('[data-derived]').innerHTML = d;
+    var c = '<div class="h">Contrast</div><div class="h">on bg-base</div><div class="h">on bg-panel</div><div class="h">on bg-raised</div>';
+    ['--text-primary', '--text-muted', '--accent', '--accent-strong', '--yellow', '--success', '--gray'].forEach(function (t) {
+      c += '<div class="code" style="font:var(--type-mono-sm)">' + t.slice(2) + '</div>';
+      ['--bg-base', '--bg-panel', '--bg-raised'].forEach(function (b) { c += '<div class="v">' + cr(hexOf(box, t), hexOf(box, b)) + ' : 1</div>'; });
+    });
+    box.querySelector('[data-contrast]').innerHTML = c;
+  });
+
+  // terminal
+  var tpl = document.getElementById('tpl-term');
+  document.querySelectorAll('[data-term]').forEach(function (box) {
+    box.appendChild(tpl.content.cloneNode(true));
+    var meta = box.querySelector('.term-meta'), m = '';
+    [['bg', '--term-bg'], ['fg', '--term-fg'], ['cursor', '--term-cursor'], ['selection', '--term-selection']].forEach(function (t) { m += '<div><i style="background:var(' + t[1] + ')"></i>' + t[0] + ' ' + hexOf(box, t[1]) + '</div>'; });
+    meta.innerHTML = m;
+    var a = '';
+    for (var i = 0; i < 16; i++) { var v = hexOf(box, '--ansi-' + i); var fg = lum(v) > 0.3 ? '#2b2620' : '#f6f2ea'; a += '<div style="background:var(--ansi-' + i + ');color:' + fg + '">' + i + '<span style="margin-left:auto;opacity:.8">' + v.slice(1) + '</span></div>'; }
+    box.querySelector('.ansi').innerHTML = a;
+  });
+
+  // status matrix
+  var STATES = [
+    ['starting', 'Starting', 'Codex', 'Launching…', '0s'],
+    ['working', 'Working', 'Claude Code', 'Bash · swift test --filter SidebarCollapseAllTests', '4m 12s'],
+    ['running', 'Running', 'zsh', 'swift build', '1m 20s'],
+    ['ready', 'Ready', 'Claude Code', 'Turn finished · 3 files changed', '12m'],
+    ['needs-input', 'Needs input', 'Codex', 'Allow command? rg -l "bgRaised" …', '1m 03s'],
+    ['error', 'Error', 'omp', 'Turn failed: 429 rate limited', '2m 40s'],
+    ['stopped', 'Stopped', 'Open Code', 'Process exited (0)', '—'],
+    ['idle', '', 'zsh', 'idle shell · no label', '—']
+  ];
+  var mx = document.getElementById('matrix'), mh = '';
+  STATES.forEach(function (s) {
+    var k = s[0], label = s[1];
+    var lab = label ? '<span class="status-label is-' + k + '">' + label + '</span>' : '';
+    var paneCls = 'pane' + (k === 'needs-input' ? ' is-needs-input' : k === 'error' ? ' is-error' : '');
+    mh += '<div><span class="t-label-strong">' + (label || 'idle shell') + '</span></div>';
+    mh += '<div class="cell-pane"><section class="' + paneCls + '"><header class="pane-header"><i class="status-dot is-' + k + '"></i><span class="pane-title">' + s[2] + '</span><span class="pane-actions">' + lab + '</span></header></section></div>';
+    mh += '<div><div class="list"><div class="row row-2line" style="--row-h:40px;margin:0"><span class="row-line"><i class="status-dot is-' + k + '"></i><span class="row-title">' + s[2] + '</span><span class="row-trail">' + lab + '</span></span><span class="row-sub" style="padding-left:16px">⎇ feat/calm-chrome</span></div></div></div>';
+    mh += '<div><div class="tabbar"><div class="tab is-selected"><span class="tab-index">1</span><span class="tab-text">' + s[2] + '</span><span class="badge is-' + k + '"><i class="status-dot is-' + k + '"></i>' + (k === 'idle' ? '1' : '2') + '</span></div></div></div>';
+    mh += '<div><div class="dash-row"><i class="status-dot is-' + k + '"></i><span class="dash-title">soprano ▸ ' + s[2] + '</span><span style="display:inline-flex;gap:10px;align-items:center"><span class="t-meta t-num">' + s[4] + '</span>' + lab + '</span><span class="dash-act">' + s[3] + '</span></div></div>';
+  });
+  mx.insertAdjacentHTML('beforeend', mh);
+
+  // gallery
+  var g = document.getElementById('tpl-gallery');
+  document.querySelectorAll('[data-gallery]').forEach(function (box) { box.appendChild(g.content.cloneNode(true)); });
+
+  // icons
+  document.querySelectorAll('#icon-wall .icon-set').forEach(function (set) {
+    var v = set.getAttribute('data-variant'), html = '';
+    [128, 64, 32].forEach(function (size) {
+      html += '<div class="icon-line">';
+      [['soprano', 'Soprano'], ['git', 'Soprano Git'], ['cast', 'Soprano Cast'], ['tab', 'Soprano Tab']].forEach(function (a) {
+        html += '<figure><img src="icons/' + a[0] + v + '.svg" width="' + size + '" height="' + size + '" alt="' + a[1] + '">' + (size === 128 ? a[1] : size + ' px') + '</figure>';
+      });
+      html += '</div>';
+    });
+    set.insertAdjacentHTML('beforeend', html);
+  });
+
+  // mapping table
+  var tb = document.querySelector('#mapping tbody'), light = document.querySelector('#color-cols [data-mode="light"]'), dark = document.querySelector('#color-cols [data-mode="dark"]'), rows = '';
+  SLOTS.forEach(function (s) {
+    var lv = hexOf(light, s[1]), dv = hexOf(dark, s[1]);
+    rows += '<tr><td class="code">' + s[0] + '</td><td class="code">' + s[1] + '</td><td class="code"><span class="sw-chip" style="display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:8px;background:' + lv + '"></span>' + lv + '</td><td class="code"><span class="sw-chip" style="display:inline-block;width:14px;height:14px;vertical-align:-2px;margin-right:8px;background:' + dv + '"></span>' + dv + '</td><td>' + s[2] + '</td></tr>';
+  });
+  tb.innerHTML = rows;
+
+  // third-party themes (values from Sources/Soprano/Config/Theme.swift)
+  var THEMES = [
+    ['Gruvbox Dark', ['#282828', '#1d2021', '#1d2021', '#3c3836', '#ebdbb2', '#a89984', '#fe8019', '#fabd2f', '#3c3836', '#504945', '#b8bb26', '#fb4934', '#83a598', '#8ec07c', '#fabd2f', '#665c54']],
+    ['Catppuccin Mocha', ['#1e1e2e', '#181825', '#11111b', '#313244', '#cdd6f4', '#a6adc8', '#cba6f7', '#f5c2e7', '#313244', '#45475a', '#a6e3a1', '#f38ba8', '#89b4fa', '#94e2d5', '#f9e2af', '#45475a']],
+    ['Dracula', ['#282a36', '#21222c', '#343746', '#44475a', '#f8f8f2', '#6272a4', '#bd93f9', '#ff79c6', '#44475a', '#6272a4', '#50fa7b', '#ff5555', '#bd93f9', '#8be9fd', '#f1fa8c', '#6272a4']],
+    ['Solarized Dark', ['#002b36', '#073642', '#073642', '#586e75', '#93a1a1', '#657b83', '#268bd2', '#6c71c4', '#073642', '#586e75', '#859900', '#dc322f', '#268bd2', '#2aa198', '#b58900', '#586e75']],
+    ['Nord', ['#2e3440', '#3b4252', '#434c5e', '#4c566a', '#eceff4', '#81a1c1', '#88c0d0', '#8fbcbb', '#434c5e', '#4c566a', '#a3be8c', '#bf616a', '#81a1c1', '#88c0d0', '#ebcb8b', '#4c566a']],
+    ['Tokyo Night', ['#1a1b26', '#15161e', '#24283b', '#292e42', '#c0caf5', '#565f89', '#7aa2f7', '#bb9af7', '#292e42', '#414868', '#9ece6a', '#f7768e', '#7aa2f7', '#7dcfff', '#e0af68', '#414868']],
+    ['Atom One Dark', ['#21252b', '#1b1f23', '#282c34', '#323844', '#abb2bf', '#5c6370', '#61afef', '#c678dd', '#323844', '#4b5263', '#98c379', '#e06c75', '#61afef', '#56b6c2', '#e5c07b', '#5c6370']]
+  ];
+  var tw = document.getElementById('themes'), th = '';
+  THEMES.forEach(function (t) {
+    var v = t[1], style = '';
+    SLOTS.forEach(function (s, i) { style += s[1] + ':' + v[i] + ';'; });
+    var notes = [];
+    var dh = Math.abs(hue(v[6]) - hue(v[12])); dh = Math.min(dh, 360 - dh);
+    if (dh < 40) { style += '--attention:var(--yellow);'; notes.push('accent ≈ blue (Δ' + Math.round(dh) + '°) → attention uses yellow'); }
+    if (+cr(v[2], v[1]) < 1.05) { style += '--raised:color-mix(in srgb, ' + v[1] + ' 95%, ' + v[4] + ');'; notes.push('bgRaised = bgPanel → raised mixes 5 % ink'); }
+    if (!notes.length) notes.push('no adjustment needed');
+    th += '<div class="theme-card"><div class="t-label-strong">' + t[0] + '</div><div class="theme-sample" data-mode="dark" data-theme style="' + style + '">' +
+      '<div class="tabbar"><div class="tab is-selected"><span class="tab-index">1</span><span class="tab-text">Claude Code</span><span class="badge is-needs-input"><i class="status-dot is-needs-input"></i>3</span></div><div class="tab is-attention"><span class="tab-index">2</span><span class="tab-text">omp web</span></div></div>' +
+      '<div class="body"><div class="sidebar"><div class="list is-focused"><div class="row is-selected"><i class="status-dot is-working"></i><span class="row-title">Claude Code</span></div><div class="row"><i class="attention-dot"></i><span class="row-title">Codex</span></div><div class="row"><i class="status-dot is-running"></i><span class="row-title">zsh</span><span class="row-trail row-count">2T</span></div></div></div>' +
+      '<section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude</span><span class="pane-actions"><span class="status-label is-working">Working</span></span></header><div class="pane-body"><pre class="term" style="background:var(--bg-base);color:var(--text-primary);font-size:11px;line-height:15px"><span style="color:var(--success)">⏺</span> Update(Sidebar…)\n  <span style="color:var(--text-muted)">⎿  1 addition</span>\n<span style="color:var(--accent)">❯</span> <span style="background:var(--accent)"> </span></pre></div></section></div>' +
+      '<div class="foot"><i class="status-dot is-starting"></i><i class="status-dot is-working"></i><i class="status-dot is-running"></i><i class="status-dot is-ready"></i><i class="status-dot is-needs-input"></i><i class="status-dot is-error"></i><i class="status-dot is-stopped"></i><span class="mode-chip is-prefix" style="margin-left:6px">Prefix</span><button class="btn btn-primary" style="margin-left:auto">Commit</button></div>' +
+      '</div><div class="theme-note">' + notes.join(' · ') + '</div></div>';
+  });
+  tw.innerHTML = th;
+})();
+</script>
+</body>
+</html>

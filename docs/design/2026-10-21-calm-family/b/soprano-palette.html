@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Soprano · Command palette — Folio</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  .behind { position: absolute; inset: 0; width: 1512px; height: 982px; border: 0; display: block; pointer-events: none; background: var(--bg-base); }
+
+  /* NSPanel 620 wide, centered on the window; Folio's 28 px titlebar + 32 px tab row push the pane headers to
+     60–88, so the panel sits at 100 to clear them instead of cutting through; height fits the 6 results */
+  .palette { left: 446px; top: 100px; height: auto; }
+  .palette-search .caret { margin-left: -9px; }
+  .palette-list { flex: none; }
+  .palette-row .kbd-group { flex: none; }
+</style>
+</head>
+<body class="artboard">
+<iframe class="behind" id="behind" title="Soprano main window" tabindex="-1"></iframe>
+<script>
+  (function () {
+    var root = document.documentElement;
+    var frame = document.getElementById('behind');
+    frame.src = 'soprano.html?behind=1&mode=' + encodeURIComponent(root.dataset.mode);
+    function forward() {
+      if (frame.contentWindow) frame.contentWindow.postMessage({ type: 'soprano-design:mode', mode: root.dataset.mode }, '*');
+    }
+    new MutationObserver(forward).observe(root, { attributes: true, attributeFilter: ['data-mode'] });
+    frame.addEventListener('load', forward);
+  })();
+</script>
+
+<div class="scrim"></div>
+
+<div class="palette" role="dialog" aria-label="Command palette">
+  <div class="palette-search"><i data-icon="search"></i>open<i class="caret"></i><span class="kbd">⌘P</span></div>
+  <div class="palette-list">
+    <div class="palette-row is-selected"><i data-icon="git-branch"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> in Soprano Git</span><span class="palette-desc">Open the active tab's Git repository in Soprano Git</span></span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">G</span></span></div>
+    <div class="palette-row"><i data-icon="folder"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Project…</span><span class="palette-desc">Search configured projects or choose a directory</span></span><span class="kbd-group"><span class="kbd">⇧⌘P</span></span></div>
+    <div class="palette-row"><i data-icon="terminal"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Terminal</span><span class="palette-desc">Open a new terminal pane</span></span><span class="kbd-group"><span class="kbd">⌘D</span></span></div>
+    <div class="palette-row"><i data-icon="globe"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Browser</span><span class="palette-desc">Split a browser pane to the right</span></span><span class="kbd-group"><span class="kbd">⌘B</span></span></div>
+    <div class="palette-row"><i data-icon="file-text"></i><span class="palette-text"><span class="palette-title"><span class="match">Open</span> Markdown…</span><span class="palette-desc">Open a local Markdown file in a live reader</span></span></div>
+    <div class="palette-row"><i data-icon="globe"></i><span class="palette-text"><span class="palette-title">omp web</span><span class="palette-desc">Start the omp web workspace in your default browser</span></span></div>
+  </div>
+  <div class="palette-footer"><span class="t-num">6 results</span><span class="hints"><span class="hint"><span class="kbd">↑↓</span>Navigate</span><span class="hint"><span class="kbd">↵</span>Run</span><span class="hint"><span class="kbd">esc</span>Close</span></span></div>
+</div>
+</body>
+</html>

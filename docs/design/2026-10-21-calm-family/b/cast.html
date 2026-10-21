@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Folio — Soprano Cast launcher</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* launcher placement: centered, top = menu bar + (982 − 24) / 5 */
+  .launcher { left: 381px; top: 216px; }
+
+  /* real app icon (content imagery, mode-independent) */
+  .appicon-chrome {
+    width: 24px; height: 24px; flex: none; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, #4285f4 0 4.3px, #ffffff 4.9px 6.3px, transparent 6.8px),
+      conic-gradient(from 0deg, #db4437 0deg 60deg, #f4b400 60deg 180deg, #0f9d58 180deg 300deg, #db4437 300deg 360deg);
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 1px 1.5px rgba(0, 0, 0, 0.18);
+  }
+</style>
+</head>
+<body class="artboard">
+  <div class="desktop"></div>
+
+  <!-- macOS menu bar: frontmost app stays Soprano (the launcher is a non-activating panel) -->
+  <div class="menubar">
+    <i class="menubar-apple"></i>
+    <b class="menubar-app">Soprano</b>
+    <span class="menubar-item">Edit</span>
+    <span class="menubar-item">Commands</span>
+    <div class="menubar-right">
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Cast"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg>
+      <svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Tab"><path d="M5.5 9.5H3A1.5 1.5 0 0 1 1.5 8V4A1.5 1.5 0 0 1 3 2.5h6A1.5 1.5 0 0 1 10.5 4v2.5"/><rect x="5.5" y="6.5" width="9" height="7" rx="1.5"/><path d="M8.3 10h3.4M10.6 8.8 11.8 10l-1.2 1.2"/></svg>
+      <i data-icon="wifi"></i>
+      <i data-icon="battery"></i>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <!-- Soprano Cast launcher, query "chr" -->
+  <div class="launcher" role="dialog" aria-label="Soprano Cast">
+    <div class="launcher-search">chr<i class="caret"></i></div>
+
+    <div class="launcher-list list is-focused">
+      <div class="section-heading">Results</div>
+
+      <div class="row is-selected">
+        <span class="appicon-chrome" role="img" aria-label="Google Chrome"></span>
+        <span class="row-title">Google <span class="match">Chr</span>ome</span>
+        <span class="row-sub mono">/Applications</span>
+        <span class="row-trail">
+          <span class="kbd">⌘1</span>
+          <span class="row-meta">Application</span>
+        </span>
+      </div>
+
+      <div class="row">
+        <span class="glyph-tile"><svg class="tpl" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5"/><rect x="6.25" y="3.25" width="3.5" height="9.5" fill="currentColor" stroke="none" opacity=".55"/></svg></span>
+        <span class="row-title"><span class="match">C</span>enter T<span class="match">h</span>i<span class="match">r</span>d</span>
+        <span class="row-sub">Window Management</span>
+        <span class="row-trail"><span class="row-meta">Command</span></span>
+      </div>
+
+      <div class="section-heading">Use <span class="q">“chr”</span> with…</div>
+
+      <div class="row">
+        <span class="glyph-tile"><i data-icon="search"></i></span>
+        <span class="row-title">Search Google</span>
+        <span class="row-sub">“chr”</span>
+        <span class="row-trail"><span class="row-meta">Command</span></span>
+      </div>
+    </div>
+
+    <div class="launcher-footer">
+      <svg class="brand-glyph" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg>
+      <span>Soprano Cast</span>
+      <span class="actions">
+        <span class="primary">Open Application</span><span class="kbd">↵</span>
+        <span class="sep"></span>
+        <span>Actions</span><span class="kbd">⌘K</span>
+      </span>
+    </div>
+  </div>
+</body>
+</html>

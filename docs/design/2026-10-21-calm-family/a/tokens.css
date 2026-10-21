@@ -1,0 +1,427 @@
+@import url("../shared/system-fonts.css"); /* base64 SF Mono 400–700 (+italics), New York, Departure Mono — Chrome cannot reach them by name or via file:// urls */
+/*
+ * Design A — "Quiet" · tokens.css
+ * The same console with the lights dimmed. Dark is primary; light is first-class.
+ *
+ * Structure
+ *   1. @import ../shared/system-fonts.css (SF Mono, Departure Mono — wordmark only)
+ *   2. Mode-independent tokens on :root (fonts, type, space, radii, heights, widths)
+ *   3. [data-mode="dark"]  — 16 ThemeColors slots, terminal, lanes, mode alphas, shadows, wallpaper
+ *   4. [data-mode="light"] — same set
+ *   5. [data-mode]         — derived tokens (formulas over the slots; re-resolve on any element that
+ *                            sets data-mode, so a container can switch mode or carry a third-party
+ *                            theme via inline slot overrides, e.g. style="--accent:#fe8019; …")
+ */
+
+:root {
+  /* ---------- fonts ---------- */
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+  --font-sans: system-ui, BlinkMacSystemFont, -apple-system, "SF Pro Text", sans-serif;
+  --font-display: system-ui, BlinkMacSystemFont, -apple-system, "SF Pro Display", sans-serif;
+  --font-wordmark: "Departure Mono", var(--font-mono);
+
+  /* ---------- type roles (font shorthand: weight size/line family) ---------- */
+  --type-label: 500 11px/16px var(--font-mono);        /* chrome label: tabs, buttons, headers, columns, window rows */
+  --type-row: 400 12px/16px var(--font-mono);          /* pane titles, files, commit messages, paths */
+  --type-row-strong: 500 12px/16px var(--font-mono);
+  --type-meta: 400 11px/14px var(--font-mono);         /* branch, SHA, dates, counts, line numbers (textMuted) */
+  --type-status: 600 11px/14px var(--font-mono);       /* STATE LABEL + MODE CHIP — the only uppercase */
+  --tracking-status: 0.5px;
+  --type-eyebrow: 600 11px/16px var(--font-mono);      /* section header, sentence case, textMuted */
+  --type-screen: 600 17px/22px var(--font-mono);       /* Settings, Agent Dashboard, Welcome */
+  --tracking-screen: -0.2px;
+  --type-title: 600 13px/18px var(--font-mono);        /* dialog / detail / toast title */
+  --type-headline: 600 28px/34px var(--font-mono);     /* site H2-size and About-size headings */
+  --type-prose: 400 12px/17px var(--font-sans);        /* subtitles, descriptions, dialog messages, empty states */
+  --type-form-label: 400 13px/18px var(--font-sans);   /* settings row label */
+  --type-input: 400 13px/18px var(--font-mono);        /* palette, filters, composer */
+  --type-query: 400 18px/24px var(--font-mono);        /* Cast launcher query */
+  --type-palette: 400 13px/18px var(--font-mono);      /* palette / launcher row title */
+  --type-palette-selected: 500 13px/18px var(--font-mono);
+  --type-kbd: 500 11px/14px var(--font-sans);          /* keycaps (SF Pro covers ⌘⌥⌃⇧✦␣) */
+  --type-kbd-lg: 500 17px/22px var(--font-sans);       /* Cast recorder keycaps */
+  --type-numeral: 500 22px/26px var(--font-mono);      /* dashboard tallies */
+  --type-term: 400 12px/17px var(--font-mono);         /* terminal surfaces in mockups */
+  --type-code: 400 12px/18px var(--font-mono);         /* diff + editor lines */
+  --type-menubar: 400 13px/24px var(--font-sans);
+  --type-menubar-app: 700 13px/24px var(--font-sans);
+  --type-md-body: 400 15px/24px var(--font-sans);
+  --type-md-h1: 600 26px/32px var(--font-display);
+  --type-md-h2: 600 20px/26px var(--font-display);
+  --type-site-body: 400 17px/27px var(--font-sans);
+  --type-site-h2: 600 32px/37px var(--font-mono);
+  --type-site-eyebrow: 400 12px/16px var(--font-mono);
+  --wordmark-sm: 22px;   /* Welcome, About */
+  --wordmark-lg: 96px;   /* site hero */
+
+  /* ---------- spacing scale ---------- */
+  --s-2: 2px;
+  --s-4: 4px;
+  --s-8: 8px;
+  --s-12: 12px;  /* row/bar horizontal padding */
+  --s-16: 16px;  /* cluster gap */
+  --s-24: 24px;
+  --s-32: 32px;
+  --gap-icon: 8px;
+
+  /* ---------- radii ---------- */
+  --r-0: 0px;          /* panes, splits, terminals, bars */
+  --r-row: 4px;        /* rows, chips, keycaps, badges, pane tabs */
+  --r-control: 6px;    /* buttons, fields, settings nav, Cast rows */
+  --r-card: 8px;       /* cards, tiles, popovers, toast, Action Panel */
+  --r-overlay: 10px;   /* palette, launcher, switcher, dialogs, recorder */
+  --r-window: 10px;    /* macOS window frame (system) */
+  --r-app-icon: 185px; /* on the 1024 icon canvas */
+
+  /* ---------- lines ---------- */
+  --hairline: 1px;
+  --tick-w: 2px;               /* focus tick width */
+  --focus-frame: 1px;          /* focused pane frame */
+  --attention-line: 2px;       /* top edge of an attention pane header */
+  --ring-stroke: 2px;          /* status ring stroke */
+
+  /* ---------- icons ---------- */
+  --icon-size: 13px;           /* toolbar */
+  --icon-size-row: 12px;
+  --icon-size-inline: 11px;
+  --icon-stroke: 2.25;         /* 24-box units → ≈1.2 px at 13 px, matches SF Symbols .regular */
+
+  /* ---------- status dots ---------- */
+  --dot-sm: 6px;               /* rows, badges */
+  --dot-md: 8px;               /* pane header, dashboard */
+  --dot-lg: 10px;              /* window lamps (Tab), permissions */
+
+  /* ---------- controls ---------- */
+  --h-control: 24px;
+  --h-kbd: 18px;
+  --h-chip: 18px;
+  --h-field: 26px;
+  --h-badge-chip: 16px;
+
+  /* ---------- heights: Soprano ---------- */
+  --h-titlebar: 28px;
+  --h-tabbar: 32px;            /* layout-tab row as top row */
+  --h-window-tabbar: 30px;
+  --h-sidebar-header: 28px;
+  --h-window-row: 28px;
+  --h-pane-row: 40px;          /* two lines: title + branch */
+  --h-sidebar-footer: 32px;
+  --h-pane-header: 26px;
+  --h-pane-tab: 20px;
+  --h-statusbar: 26px;
+  --h-rsidebar-header: 32px;
+  --h-file-row: 24px;
+  --h-dash-header: 52px;
+  --h-tally: 72px;
+  --h-agent-row: 52px;
+  --h-settings-header: 48px;
+  --h-nav-row: 30px;
+  --h-form-row: 36px;
+  --h-palette-search: 44px;
+  --h-palette-row: 40px;
+  --h-palette-footer: 28px;
+  --h-menubar: 24px;
+
+  /* ---------- heights: Soprano Git ---------- */
+  --git-h-tabbar: 32px;
+  --git-h-toolbar: 36px;
+  --git-h-panel-header: 28px;
+  --git-h-graph-header: 24px;
+  --git-h-graph-row: 26px;
+  --git-h-sidebar-row: 24px;
+  --git-h-file-row: 24px;
+  --git-h-section-row: 28px;
+  --git-h-hunk: 26px;
+  --git-h-diff-line: 18px;
+  --git-h-statusbar: 24px;
+  --git-h-banner: 32px;
+  --git-h-ref-pill: 18px;
+  --git-lane-gap: 14px;
+  --git-node: 10px;
+  --git-node-head-ring: 16px;
+
+  /* ---------- heights: Soprano Cast ---------- */
+  --cast-h-search: 56px;
+  --cast-h-section: 28px;
+  --cast-h-row: 40px;
+  --cast-h-footer: 36px;
+  --cast-h-action-row: 32px;
+  --cast-h-group-row: 28px;
+  --cast-h-table-row: 32px;
+  --cast-h-hud: 36px;
+
+  /* ---------- heights: Soprano Tab ---------- */
+  --tab-h-header: 24px;
+  --tab-h-search: 30px;
+  --tab-h-title-row-s: 28px;
+  --tab-h-title-row-m: 34px;
+  --tab-h-title-row-l: 40px;
+  --tab-h-tile-title: 18px;
+
+  /* ---------- widths ---------- */
+  --w-sidebar: 220px;
+  --w-rsidebar: 280px;
+  --w-settings-nav: 200px;
+  --w-settings-column: 660px;
+  --w-palette: 620px;
+  --h-palette: 440px;
+  --w-dialog: 480px;
+  --w-toast: 440px;
+  --w-launcher: 750px;
+  --h-launcher: 474px;
+  --git-w-sidebar: 240px;
+  --git-w-commit-panel: 380px;
+  --cast-w-action-panel: 360px;
+  --cast-w-settings-sidebar: 180px;
+  --cast-w-detail: 320px;
+  --w-menu-min: 180px;
+
+  /* ---------- macOS system constants (mode-independent) ---------- */
+  --traffic-close: #ff5f57;
+  --traffic-min: #febc2e;
+  --traffic-zoom: #28c840;
+  --traffic-size: 12px;
+  --traffic-gap: 8px;
+}
+
+/* =====================================================================
+ * Quiet Dark (primary)
+ * ===================================================================== */
+[data-mode="dark"] {
+  color-scheme: dark;
+
+  /* ThemeColors — 16 slots */
+  --bg-base: #16181c;
+  --bg-panel: #121417;
+  --bg-raised: #1e2126;
+  --bg-overlay: #262a30;
+  --text-primary: #d8d3c6;
+  --text-muted: #8b877e;
+  --accent: #e8873a;
+  --accent-strong: #f2a35e;
+  --border-subtle: #24272c;
+  --border-strong: #33373e;
+  --success: #8fb573;
+  --danger: #de6b5e;
+  --blue: #76a3cc;
+  --cyan: #6cb0a8;
+  --yellow: #d7ab55;
+  --gray: #62656c;
+
+  /* TerminalColors */
+  --term-bg: #16181c;
+  --term-fg: #d4cfc2;
+  --term-cursor: #e8873a;
+  --term-selection: #34373d;
+  --ansi-0: #1f2227;
+  --ansi-1: #de6b5e;
+  --ansi-2: #8fb573;
+  --ansi-3: #d7ab55;
+  --ansi-4: #76a3cc;
+  --ansi-5: #c48bb8;
+  --ansi-6: #6cb0a8;
+  --ansi-7: #c9c4b7;
+  --ansi-8: #767a82;   /* raised from #5c6068 (2.8:1) to 4.1:1 — dim transcript text must stay readable */
+  --ansi-9: #eb857a;
+  --ansi-10: #a8cb8e;
+  --ansi-11: #e8c174;
+  --ansi-12: #93b9dd;
+  --ansi-13: #d6a6cb;
+  --ansi-14: #8ac6be;
+  --ansi-15: #ece7da;
+
+  /* Graph lanes: [blue, success, ANSI 5, yellow, cyan, accent, danger, ANSI 12] — main is blue */
+  --lane-0: #76a3cc;
+  --lane-1: #8fb573;
+  --lane-2: #c48bb8;
+  --lane-3: #d7ab55;
+  --lane-4: #6cb0a8;
+  --lane-5: #e8873a;
+  --lane-6: #de6b5e;
+  --lane-7: #93b9dd;
+
+  /* mode alphas used by the derived formulas */
+  --a-selection: 8%;
+  --a-selection-inactive: 5%;
+  --a-hover: 5%;
+  --a-chip: 14%;
+  --a-dim: 20%;
+  --a-diff: 12%;
+  --a-diff-word: 26%;
+  --a-filler: 5%;
+  --a-attention-band: 18%;
+  --kbd-edge-on-fill: var(--border-strong);   /* keycaps on a selection fill / inside .kbd-field must not read recessed */
+
+  /* ink on filled accent / danger buttons (= bgPanel #121417, so third-party themes follow) */
+  --on-accent: var(--bg-panel);
+  --on-danger: var(--bg-panel);
+
+  /* surfaces that differ by mode */
+  --card-bg: var(--bg-panel);
+  --card-border: transparent;
+  --scrim: rgba(0, 0, 0, 0.45);
+  --traffic-inactive: #3b3e44;
+  --menubar-bg: rgba(18, 20, 23, 0.82);
+  --menubar-fg: #d8d3c6;
+  --window-edge: rgba(255, 255, 255, 0.07);
+
+  /* elevation */
+  --shadow-l1: 0 4px 16px rgba(0, 0, 0, 0.30);
+  --shadow-l2: 0 10px 28px rgba(0, 0, 0, 0.40);
+  --shadow-window: 0 24px 64px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.30);
+
+  /* desktop wallpaper for Cast/Tab screens */
+  --desktop-wallpaper:
+    radial-gradient(1100px 680px at 74% 16%, #272b32 0%, rgba(39, 43, 50, 0) 70%),
+    radial-gradient(900px 620px at 12% 88%, #1f2328 0%, rgba(31, 35, 40, 0) 70%),
+    linear-gradient(180deg, #181a1e 0%, #111215 100%);
+
+  /* app-icon palette */
+  --icon-squircle-top: #26292e;
+  --icon-squircle-bottom: #1b1d21;
+  --icon-glyph: #cfc8b6;
+  --icon-orange: #e8873a;
+}
+
+/* =====================================================================
+ * Quiet Light — cool neutral graphite console (not paper): grey ground, ink-black text,
+ * the same orange accent tuned for the cool ground. Contrast on bgBase / bgPanel noted per slot.
+ * ===================================================================== */
+[data-mode="light"] {
+  color-scheme: light;
+
+  --bg-base: #f3f4f5;
+  --bg-panel: #e9ebee;
+  --bg-raised: #ffffff;
+  --bg-overlay: #e1e4e8;
+  --text-primary: #1f2328;    /* 14.4 / 13.2 */
+  --text-muted: #59606b;      /* 5.8 / 5.3 · 5.0 on selection */
+  --accent: #a64608;          /* 5.5 / 5.0 · white on accent 6.0 */
+  --accent-strong: #8f3c06;   /* pressed primary */
+  --border-subtle: #dde0e4;
+  --border-strong: #c9cdd3;
+  --success: #246c35;         /* 5.6 / 5.4 · ≥ 4.9 on its diff wash (+ lines, strings) */
+  --danger: #b33029;          /* 5.7 / 5.2 · ≥ 4.6 on its wash and chip */
+  --blue: #1f62b0;            /* 5.6 / 5.1 */
+  --cyan: #0f6a64;            /* 5.9 / 5.4 · 4.8 on its chip */
+  --yellow: #7d5900;          /* 5.9 / 5.3 · 4.8 on its chip (M kind letter) */
+  --gray: #8b929c;            /* never text */
+
+  --term-bg: #f3f4f5;
+  --term-fg: #1f2328;         /* 14.4 */
+  --term-cursor: #a64608;
+  --term-selection: #d3d8de;  /* fg 11.0 */
+  --ansi-0: #24292f;
+  --ansi-1: #b33029;          /* 5.7 */
+  --ansi-2: #246c35;          /* 5.6 */
+  --ansi-3: #7d5900;          /* 5.9 */
+  --ansi-4: #1f62b0;          /* 5.6 */
+  --ansi-5: #8a3f9c;          /* 5.8 */
+  --ansi-6: #0f6a64;          /* 5.9 */
+  --ansi-7: #6b727c;          /* mid grey (GitHub Light convention: "white" must show) */
+  --ansi-8: #555c66;
+  --ansi-9: #c24c3f;
+  --ansi-10: #327f41;
+  --ansi-11: #946a00;
+  --ansi-12: #2f72c2;
+  --ansi-13: #9b52ad;
+  --ansi-14: #1a7d76;
+  --ansi-15: #8b929c;         /* mid grey */
+
+  --lane-0: #1f62b0;
+  --lane-1: #246c35;
+  --lane-2: #8a3f9c;
+  --lane-3: #7d5900;
+  --lane-4: #0f6a64;
+  --lane-5: #a64608;
+  --lane-6: #b33029;
+  --lane-7: #2f72c2;
+
+  --a-selection: 7%;
+  --a-selection-inactive: 4.5%;
+  --a-hover: 4%;
+  --a-chip: 8%;               /* accent ink on its chip 4.5 */
+  --a-dim: 25%;
+  --a-diff: 10%;
+  --a-diff-word: 24%;
+  --a-filler: 6%;
+  --a-attention-band: 14%;
+  --kbd-edge-on-fill: var(--border-subtle);
+
+  --on-accent: #ffffff;
+  --on-danger: #ffffff;
+
+  --card-bg: var(--bg-raised);
+  --card-border: var(--border-subtle);
+  --scrim: rgba(243, 244, 245, 0.60);
+  --traffic-inactive: #cfd3d8;
+  --menubar-bg: rgba(243, 244, 245, 0.82);
+  --menubar-fg: #1f2328;
+  --window-edge: rgba(31, 35, 40, 0.12);
+
+  --shadow-l1: 0 4px 16px rgba(31, 35, 40, 0.12);
+  --shadow-l2: 0 10px 28px rgba(31, 35, 40, 0.16);
+  --shadow-window: 0 24px 64px rgba(31, 35, 40, 0.18), 0 2px 8px rgba(31, 35, 40, 0.10);
+
+  --desktop-wallpaper:
+    radial-gradient(1100px 680px at 74% 16%, #f8f9fa 0%, rgba(248, 249, 250, 0) 70%),
+    radial-gradient(900px 620px at 12% 88%, #dfe3e8 0%, rgba(223, 227, 232, 0) 70%),
+    linear-gradient(180deg, #e6e9ed 0%, #d6dbe1 100%);
+
+  --icon-squircle-top: #f4f5f7;
+  --icon-squircle-bottom: #e4e7eb;
+  --icon-glyph: #2a2e34;
+  --icon-orange: #c0550c;
+}
+
+/* =====================================================================
+ * Derived tokens — formulas over the slots (valid for every theme)
+ * Translucent mixes so they sit correctly on bgBase, bgPanel or bgRaised.
+ * ===================================================================== */
+[data-mode] {
+  /* selection idioms */
+  --selection: color-mix(in srgb, var(--text-primary) var(--a-selection), transparent);
+  --selection-inactive: color-mix(in srgb, var(--text-primary) var(--a-selection-inactive), transparent);
+  --hover: color-mix(in srgb, var(--text-primary) var(--a-hover), transparent);
+  --focus-ring: var(--accent);
+  --field-focus: var(--text-muted);
+
+  /* attention: blue, or ANSI 5 when accent and blue are < 30° apart (set per theme inline) */
+  --attention: var(--blue);
+  --attention-band: color-mix(in srgb, var(--attention) var(--a-attention-band), transparent);
+
+  /* chipFill(c) */
+  --chip-accent: color-mix(in srgb, var(--accent) var(--a-chip), transparent);
+  --chip-blue: color-mix(in srgb, var(--blue) var(--a-chip), transparent);
+  --chip-yellow: color-mix(in srgb, var(--yellow) var(--a-chip), transparent);
+  --chip-danger: color-mix(in srgb, var(--danger) var(--a-chip), transparent);
+  --chip-success: color-mix(in srgb, var(--success) var(--a-chip), transparent);
+  --chip-cyan: color-mix(in srgb, var(--cyan) var(--a-chip), transparent);
+  --chip-attention: color-mix(in srgb, var(--attention) var(--a-chip), transparent);
+
+  /* unfocused pane dim (over terminal content only) */
+  --dim: color-mix(in srgb, var(--bg-base) var(--a-dim), transparent);
+
+  /* diff */
+  --diff-add: color-mix(in srgb, var(--success) var(--a-diff), transparent);
+  --diff-add-word: color-mix(in srgb, var(--success) var(--a-diff-word), transparent);
+  --diff-del: color-mix(in srgb, var(--danger) var(--a-diff), transparent);
+  --diff-del-word: color-mix(in srgb, var(--danger) var(--a-diff-word), transparent);
+  --diff-filler: color-mix(in srgb, var(--text-muted) var(--a-filler), transparent);
+  --diff-gutter: var(--bg-panel);
+  --search-match: color-mix(in srgb, var(--yellow) 20%, transparent);
+
+  /* tile badge chips (Tab) */
+  --tile-chip-bg: color-mix(in srgb, var(--bg-base) 85%, transparent);
+  --scroll-thumb: color-mix(in srgb, var(--text-muted) 40%, transparent);
+
+  /* syntax */
+  --syn-keyword: var(--text-primary);   /* + Semibold in .syn-kw — no orange in code; orange = where your keys go */
+  --syn-type: var(--cyan);
+  --syn-string: var(--success);
+  --syn-comment: var(--text-muted);
+  --syn-number: var(--yellow);
+  --syn-function: var(--blue);
+  --syn-attribute: var(--ansi-5);
+  --syn-plain: var(--text-primary);
+}

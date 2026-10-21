@@ -1,0 +1,365 @@
+@import url("../shared/system-fonts.css");
+/*
+ * Folio — design B tokens (Paper = light, primary · Ink = dark).
+ *
+ * Structure
+ *   :root                         mode-independent: fonts, type roles, spacing, radii, heights, icon sizing
+ *   [data-mode="light"]           Paper: 16 ThemeColors slots, terminal, mode-specific alphas/shadows/wallpaper
+ *   [data-mode="dark"]            Ink:   same slots
+ *   [data-mode], [data-theme]     derived tokens (formulas over the 16 slots). They are re-declared on any
+ *                                 element carrying data-mode or data-theme, so a container that overrides the
+ *                                 16 slots (e.g. a third-party theme sample) gets correct derived tokens.
+ *
+ * Fonts: system families. Chrome cannot reach SF Mono / New York by name, so ../shared/system-fonts.css
+ * embeds them as @font-face "SF Mono" and "New York"; the named family comes first in each stack.
+ */
+
+:root {
+  /* ---------- families ---------- */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --font-serif: "New York", ui-serif, "Iowan Old Style", Georgia, serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* ---------- type roles: font shorthand + tracking ---------- */
+  --type-hero: 400 30px/36px var(--font-serif);          --track-hero: -0.4px;     /* About, Welcome */
+  --type-screen: 400 22px/28px var(--font-serif);        --track-screen: -0.2px;   /* Settings page, Dashboard, Cast group */
+  --type-headline: 500 17px/22px var(--font-serif);      --track-headline: 0;      /* dialog title, commit subject, detail title */
+  --type-empty: italic 400 17px/22px var(--font-serif);  --track-empty: 0;         /* empty states */
+  --type-figure: 400 26px/30px var(--font-serif);        --track-figure: 0;        /* dashboard figures */
+  --type-query: 400 20px/26px var(--font-display);       --track-query: 0;         /* launcher query */
+  --type-palette-query: 400 15px/20px var(--font-sans);  --track-palette-query: 0; /* ⌘P search */
+  --type-row: 400 13px/18px var(--font-sans);            --track-row: 0;           /* launcher, palette, tables */
+  --type-label: 400 12px/16px var(--font-sans);          --track-label: 0;         /* chrome labels */
+  --type-label-strong: 500 12px/16px var(--font-sans);                              /* selected tab, window row */
+  --type-meta: 400 11px/14px var(--font-sans);           --track-meta: 0;          /* secondary, hints */
+  --type-eyebrow: 600 11px/14px var(--font-sans);        --track-eyebrow: 0.6px;   /* UPPERCASE section heads */
+  --type-status: 600 11px/14px var(--font-sans);         --track-status: 0.4px;    /* UPPERCASE status labels */
+  --type-keycap: 500 11px/14px var(--font-sans);
+  --type-mono: 400 12px/18px var(--font-mono);                                      /* paths, code, diff */
+  --type-mono-sm: 400 11px/14px var(--font-mono);                                   /* SHAs, dates, line numbers */
+  --type-term: 400 13px/17px var(--font-mono);                                      /* terminal default */
+  --type-prose: 400 16px/26px var(--font-serif);                                    /* Markdown reader body */
+  --type-prose-h1: 400 28px/34px var(--font-serif);
+  --type-prose-h2: 400 21px/28px var(--font-serif);
+
+  /* ---------- spacing (4-pt rhythm) ---------- */
+  --space-2: 2px; --space-4: 4px; --space-8: 8px; --space-12: 12px;
+  --space-16: 16px; --space-24: 24px; --space-32: 32px; --space-48: 48px;
+  --inset-bar: 12px; --inset-panel: 16px; --gutter-page: 24px;
+
+  /* ---------- radii ---------- */
+  --radius-panel: 12px;     /* floating panels: palette, launcher, switcher */
+  --radius-popover: 10px;   /* popovers, Action Panel, toasts, HUD, dialogs, windows */
+  --radius-card: 8px;       /* settings cards, Tab tiles */
+  --radius-control: 6px;    /* buttons, fields, popups, selection pills, tabs */
+  --radius-cap: 4px;        /* keycaps, chips, ref pills, thumbnail wells */
+  --radius-pane: 0;         /* tiled panes, splitters */
+  --radius-window: 10px;
+  --radius-icon: 185px;     /* app-icon squircle on the 1024 grid */
+
+  /* ---------- lines, marks ---------- */
+  --hairline: 1px;
+  --focus-mark-width: 2px;
+  --pencil-tick-w: 2px;
+  --pencil-tick-h: 14px;
+  --tick-inset: 4px;         /* pencil tick sits 4 px inside the selection pill */
+  --attention-frame: 2px;
+  --status-mark: 8px;
+  --status-mark-sm: 6px;
+  --ring-stroke: 2px;
+
+  /* ---------- heights: Soprano ---------- */
+  --h-titlebar: 28px;
+  --h-tabrow: 32px;            /* layout-tab and window-tab rows */
+  --h-tab: 24px;               /* tab pill inside a 32 row */
+  --h-sidebar-header: 32px;
+  --h-window-row: 28px;
+  --h-pane-row: 40px;          /* two lines: 12 title + 11 branch */
+  --h-pane-header: 28px;
+  --h-pane-tab: 22px;
+  --h-statusbar: 26px;
+  --h-right-header: 32px;
+  --h-tree-row: 24px;          /* explorer + source-control rows */
+  --h-pane-toolbar: 32px;      /* diff/editor toolbar */
+  --h-dash-header: 56px;
+  --h-agent-row: 52px;
+  --h-nav-row: 30px;
+  --h-form-row: 36px;
+  --w-palette: 620px; --h-palette: 460px;
+  --h-palette-search: 44px; --h-palette-row: 44px; --h-palette-footer: 28px;
+  --w-sidebar: 220px; --w-right-sidebar: 280px; --w-settings-nav: 200px;
+
+  /* ---------- heights: Git ---------- */
+  --h-git-tabbar: 36px; --w-traffic-inset: 78px;
+  --h-git-toolbar: 38px;
+  --h-panel-header: 28px;
+  --h-ref-row: 24px;
+  --h-graph-row: 28px;
+  --h-file-row: 26px;
+  --h-section-row: 28px;
+  --h-hunk-header: 26px;
+  --h-diff-line: 18px;
+  --h-banner: 36px;
+  --w-git-sidebar: 240px; --w-commit-panel: 380px;
+
+  /* ---------- heights: Cast ---------- */
+  --w-launcher: 750px; --h-launcher: 474px;
+  --h-launcher-search: 56px;
+  --h-launcher-section: 26px;
+  --h-launcher-row: 40px;
+  --h-launcher-footer: 40px;
+  --h-action-row: 30px;  --w-action-panel: 360px;
+  --h-table-head: 26px;
+  --h-table-group: 28px;
+  --h-table-row: 32px;
+  --w-cast-nav: 180px; --w-cast-detail: 320px;
+
+  /* ---------- heights: Tab ---------- */
+  --h-switcher-header: 28px;
+  --h-tile-title: 22px;
+  --h-title-row-s: 28px; --h-title-row-m: 34px; --h-title-row-l: 40px;
+  --h-search-strip: 30px;
+  --tile-gap: 8px;
+  --h-window-lamp: 12px;
+
+  /* ---------- shared controls ---------- */
+  --h-control: 24px;
+  --h-control-lg: 28px;
+  --h-field: 26px;
+  --h-keycap: 18px;
+  --h-keycap-sm: 16px;
+  --h-mode-chip: 18px;
+  --h-chip: 18px;
+  --h-menubar: 24px;
+  --h-traffic: 12px;
+
+  /* ---------- icons (frame.js .icon) ---------- */
+  --icon-size: 16px;
+  --icon-stroke: 1.75;
+  --icon-toolbar: 13px;
+  --icon-row: 12px;
+
+  /* ---------- motion (0 under Reduce Motion) ---------- */
+  --dur-overlay: 120ms;
+  --dur-sidebar: 150ms;
+  --dur-hud: 200ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-overlay: 0ms; --dur-sidebar: 0ms; --dur-hud: 0ms; }
+}
+
+/* =====================================================================
+   Paper (light) — primary
+   ===================================================================== */
+[data-mode="light"] {
+  color-scheme: light;
+
+  /* 16 ThemeColors slots */
+  --bg-base: #f6f2ea;
+  --bg-panel: #ede7db;
+  --bg-raised: #fcfaf5;
+  --bg-overlay: #e5dece;
+  --text-primary: #2b2620;
+  --text-muted: #62594d;
+  --accent: #a34a17;
+  --accent-strong: #863a0f;
+  --border-subtle: #e0d8c9;
+  --border-strong: #cbc0ad;
+  --success: #456b30;
+  --danger: #ae2f3c;
+  --blue: #2f5f8a;
+  --cyan: #266b66;
+  --yellow: #835f0b;
+  --gray: #857c6e;
+
+  /* mode-specific alphas used by the derived formulas */
+  --selection-tint: var(--accent);   /* Paper: sienna pencil wash */
+  --a-selection: 12%;
+  --a-selection-muted: 6%;
+  /* unfocused veil: multiply bg-panel, so the page sinks while ink keeps ≈ 11:1 */
+  --veil: var(--bg-panel);
+  --veil-blend: multiply;
+  /* chromatic add wash: success @ 12 % reads gray on paper */
+  --diff-add-tint: #5f8f3a;
+  --a-diff-add: 16%;
+  --a-diff-add-word: 30%;
+  --glyph-tile-bg: var(--bg-overlay);
+  --switch-knob-off: var(--bg-raised);
+
+  /* scrim + elevation */
+  --scrim: rgba(43, 38, 32, 0.20);
+  --shadow-e2: 0 6px 18px rgba(43, 38, 32, 0.12), 0 0 0 1px rgba(43, 38, 32, 0.04);
+  --shadow-e3: 0 12px 36px rgba(43, 38, 32, 0.16), 0 0 0 1px rgba(43, 38, 32, 0.05);
+  --shadow-window: 0 18px 48px rgba(43, 38, 32, 0.20), 0 0 0 1px rgba(43, 38, 32, 0.10);
+
+  /* terminal */
+  --term-bg: #f6f2ea;
+  --term-fg: #2b2620;
+  --term-cursor: #a34a17;
+  --term-selection: #e4cdbc;
+  --ansi-0: #2b2620;  --ansi-1: #ae2f3c;  --ansi-2: #456b30;  --ansi-3: #835f0b;
+  --ansi-4: #2f5f8a;  --ansi-5: #8a3f78;  --ansi-6: #266b66;  --ansi-7: #6f665a;
+  --ansi-8: #5a5248;  --ansi-9: #c0414a;  --ansi-10: #557f3b; --ansi-11: #9a7212;
+  --ansi-12: #3d72a3; --ansi-13: #a04f8d; --ansi-14: #2f817b; --ansi-15: #8f8678;
+
+  /* macOS furniture (system colors, not theme) */
+  --menubar-bg: rgba(246, 242, 234, 0.82);
+  --menubar-fg: #1f1b16;
+  --traffic-close: #ff5f57; --traffic-min: #febc2e; --traffic-zoom: #28c840;
+  --traffic-inactive: #d6cfc2; --traffic-edge: rgba(0, 0, 0, 0.12);
+
+  /* desktop wallpaper: warm paper dunes */
+  --desktop-wallpaper:
+    radial-gradient(120% 80% at 18% 8%, #f4ede0 0%, rgba(244, 237, 224, 0) 55%),
+    radial-gradient(90% 70% at 85% 95%, #c9b79a 0%, rgba(201, 183, 154, 0) 60%),
+    linear-gradient(172deg, #e8dfcf 0%, #dccfb9 52%, #cdbda3 100%);
+
+  /* app-icon colors */
+  --icon-ground-top: #f3eee4; --icon-ground-bottom: #e9e2d4;
+  --icon-ink: #2b2620; --icon-mark: #a34a17;
+}
+
+/* =====================================================================
+   Ink (dark)
+   ===================================================================== */
+[data-mode="dark"] {
+  color-scheme: dark;
+
+  --bg-base: #1d1b18;
+  --bg-panel: #181613;
+  --bg-raised: #26231f;
+  --bg-overlay: #2f2b26;
+  --text-primary: #e2dacb;
+  --text-muted: #a0968a;
+  --accent: #e08a52;
+  --accent-strong: #f0a774;
+  --border-subtle: #322e29;
+  --border-strong: #443e37;
+  --success: #97ae76;
+  --danger: #e0707a;
+  --blue: #86a6cb;
+  --cyan: #74b3a9;
+  --yellow: #d6aa4f;
+  --gray: #776f64;
+
+  --selection-tint: var(--text-primary);   /* Ink: neutral ink fill (no Mission Control brown); the sienna tick marks focus */
+  --a-selection: 11%;
+  --a-selection-muted: 7%;
+  --veil: rgba(0, 0, 0, 0.18);
+  --veil-blend: normal;
+  --diff-add-tint: var(--success);
+  --a-diff-add: 16%;
+  --a-diff-add-word: 28%;
+  --glyph-tile-bg: color-mix(in srgb, var(--text-primary) 9%, var(--bg-raised));
+  --switch-knob-off: var(--text-muted);          /* bg-raised knob vanishes on Ink cards */
+
+  --scrim: rgba(0, 0, 0, 0.45);
+  --shadow-e2: 0 8px 24px rgba(0, 0, 0, 0.40), 0 0 0 1px rgba(0, 0, 0, 0.30);
+  --shadow-e3: 0 14px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.35);
+  --shadow-window: 0 20px 56px rgba(0, 0, 0, 0.60), 0 0 0 1px rgba(0, 0, 0, 0.50);
+
+  --term-bg: #1d1b18;
+  --term-fg: #e2dacb;
+  --term-cursor: #e08a52;
+  --term-selection: #483325;
+  --ansi-0: #2a2622;  --ansi-1: #e0707a;  --ansi-2: #97ae76;  --ansi-3: #d6aa4f;
+  --ansi-4: #86a6cb;  --ansi-5: #c191b8;  --ansi-6: #74b3a9;  --ansi-7: #cfc6b5;
+  --ansi-8: #7d7469;  --ansi-9: #ec8f97;  --ansi-10: #b0c592; --ansi-11: #e8c272;
+  --ansi-12: #a3bfdf; --ansi-13: #d5aacd; --ansi-14: #93c9bf; --ansi-15: #f4efe5;
+
+  --menubar-bg: rgba(29, 27, 24, 0.78);
+  --menubar-fg: #ece5d8;
+  --traffic-close: #ff5f57; --traffic-min: #febc2e; --traffic-zoom: #28c840;
+  --traffic-inactive: #4a453e; --traffic-edge: rgba(0, 0, 0, 0.30);
+
+  /* desktop wallpaper: ink dusk */
+  --desktop-wallpaper:
+    radial-gradient(110% 80% at 20% 0%, #3a332b 0%, rgba(58, 51, 43, 0) 58%),
+    radial-gradient(80% 70% at 88% 100%, #4a3524 0%, rgba(74, 53, 36, 0) 60%),
+    linear-gradient(172deg, #24211d 0%, #1b1916 55%, #141210 100%);
+
+  --icon-ground-top: #26231f; --icon-ground-bottom: #1a1815;
+  --icon-ink: #e2dacb; --icon-mark: #e08a52;
+}
+
+/* =====================================================================
+   Derived tokens — formulas over the 16 slots (spec §4)
+   ===================================================================== */
+[data-mode], [data-theme] {
+  /* selection idioms */
+  --selection: color-mix(in srgb, var(--selection-tint, var(--accent)) var(--a-selection, 12%), transparent);       /* focused list */
+  --selection-muted: color-mix(in srgb, var(--text-primary) var(--a-selection-muted, 7%), transparent); /* unfocused list */
+  --hover: var(--bg-overlay);
+  --raised: var(--bg-raised);                       /* override when bgRaised ≈ bgPanel (Gruvbox) */
+  --focus-mark: var(--accent);
+  --pencil-tick: var(--accent);
+  --caret: var(--accent);
+  --match: var(--accent);
+  --match-on-selection: var(--accent-strong);
+  --text-selection: color-mix(in srgb, var(--accent) 22%, transparent);
+
+  /* attention: blue; yellow when accent ≈ blue (set per theme) */
+  --attention: var(--blue);
+  --attention-wash: color-mix(in srgb, var(--attention) 10%, transparent);
+
+  /* status → token */
+  --st-starting: var(--yellow);
+  --st-working: var(--success);
+  --st-running: var(--cyan);
+  --st-ready: var(--blue);
+  --st-needs-input: var(--yellow);
+  --st-error: var(--danger);
+  --st-stopped: var(--gray);
+  --st-idle: color-mix(in srgb, var(--gray) 60%, transparent);
+  --status-wash-needs-input: color-mix(in srgb, var(--yellow) 10%, transparent);
+  --status-wash-error: color-mix(in srgb, var(--danger) 10%, transparent);
+
+  /* unfocused pane veil (never on .is-attention panes) */
+  --unfocused-veil: var(--veil, rgba(0, 0, 0, 0.18));
+
+  /* buttons */
+  --ink-button-bg: var(--text-primary);
+  --ink-button-fg: var(--bg-raised);
+  --ink-button-pressed: color-mix(in srgb, var(--text-primary) 85%, var(--bg-raised));
+  --danger-button-bg: var(--danger);
+  --danger-button-fg: var(--bg-raised);
+  --field-focus-edge: color-mix(in srgb, var(--text-primary) 38%, var(--bg-raised));
+
+  /* diff */
+  --diff-add-bg: color-mix(in srgb, var(--diff-add-tint, var(--success)) var(--a-diff-add, 12%), transparent);
+  --diff-add-word: color-mix(in srgb, var(--diff-add-tint, var(--success)) var(--a-diff-add-word, 24%), transparent);
+  --diff-del-bg: color-mix(in srgb, var(--danger) 10%, transparent);
+  --diff-del-word: color-mix(in srgb, var(--danger) 22%, transparent);
+  --diff-filler: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  --diff-gutter-bg: var(--bg-panel);
+  --diff-hunk-bg: var(--bg-panel);
+
+  /* syntax (no accent; keywords are bold ink) */
+  --syn-keyword: var(--text-primary);
+  --syn-type: var(--cyan);
+  --syn-string: var(--success);
+  --syn-comment: var(--text-muted);
+  --syn-number: var(--yellow);
+  --syn-function: var(--blue);
+  --syn-attribute: var(--yellow);
+  --syn-plain: var(--text-primary);
+
+  /* graph lanes: graphite trunk, accent excluded */
+  --lane-0: var(--text-muted);
+  --lane-1: var(--blue);
+  --lane-2: var(--success);
+  --lane-3: var(--ansi-5, #8a3f78);
+  --lane-4: var(--cyan);
+  --lane-5: var(--yellow);
+  --lane-6: var(--ansi-13, #a04f8d);
+  --lane-7: var(--ansi-12, #3d72a3);
+
+  /* misc */
+  --scrollbar-thumb: color-mix(in srgb, var(--text-primary) 22%, transparent);
+  --chip-on-image: color-mix(in srgb, var(--bg-base) 90%, transparent);
+  --keycap-bg: var(--raised);
+  --keycap-edge: var(--border-strong);
+}

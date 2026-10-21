@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Quiet — Soprano Tab switcher</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* ---------- app icons (content imagery; Soprano family icons follow the mode) ---------- */
+  .aic { display: block; background: center / contain no-repeat; }
+  [data-mode="dark"] .aic-soprano { background-image: url("icons/soprano.svg"); }
+  [data-mode="light"] .aic-soprano { background-image: url("icons/soprano-light.svg"); }
+  [data-mode="dark"] .aic-git { background-image: url("icons/git.svg"); }
+  [data-mode="light"] .aic-git { background-image: url("icons/git-light.svg"); }
+
+  /* ---------- switcher geometry (TileLayoutEngine, medium: 3 rows × 168, spacing 8) ---------- */
+  .switcher { left: 98px; top: 211px; width: 1315px; }
+  .switcher-header .hint-key { margin-right: -1px; }
+  .tile { height: 168px; }
+
+  /* ---------- window thumbnails: miniatures of the real windows ---------- */
+  .mini { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .mini .tb { position: relative; flex: none; height: 10px; display: flex; align-items: center; gap: 2px; padding: 0 5px; }
+  .mini .tb > i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+  .mini .tb > b { position: absolute; left: 50%; top: 4px; width: 46px; height: 2px; margin-left: -23px; border-radius: 1px; background: currentColor; }
+  .mini .bd { position: relative; flex: 1; min-height: 0; display: flex; }
+  .mini .side { flex: none; display: flex; flex-direction: column; gap: 4px; padding: 6px 5px; }
+  .mini .main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; }
+  .mini .mr { display: flex; align-items: center; gap: 3px; flex: none; }
+  .mini .gap { flex: 1; }
+  .l { display: block; flex: none; height: 2px; border-radius: 1px; background: currentColor; }
+  .l.t { height: 3px; }
+  .l.h { height: 4px; border-radius: 1px; }
+  .dt { display: block; flex: none; width: 3px; height: 3px; border-radius: 50%; }
+  .sq { display: block; flex: none; width: 5px; height: 5px; border-radius: 1px; }
+
+  /* Soprano terminal windows: Quiet follows the system appearance, so these use the mode's terminal tokens */
+  .mini.mterm { background: var(--term-bg); color: color-mix(in srgb, var(--text-muted) 38%, var(--term-bg)); }
+  .mini.mterm .tb { background: var(--bg-panel); color: var(--border-strong); box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .mini.mterm .side { background: var(--bg-panel); box-shadow: inset -1px 0 0 var(--border-subtle); }
+  .mini.mterm .ph { flex: none; height: 7px; margin: -6px -7px 1px; background: var(--bg-raised); box-shadow: inset 0 -1px 0 var(--border-subtle); display: flex; align-items: center; gap: 3px; padding: 0 5px; }
+  .mterm .fg { background: color-mix(in srgb, var(--term-fg) 75%, var(--term-bg)); }
+  .mterm .mu { background: color-mix(in srgb, var(--text-muted) 62%, var(--term-bg)); }
+  .mterm .msg { background: color-mix(in srgb, var(--text-muted) 80%, var(--term-bg)); }
+  .mterm .ring { box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .mterm .msel { background: var(--selection); border-radius: 2px; padding: 2px 3px; margin: 0 -3px; }
+  .mterm .add { background: var(--diff-add); padding: 2px 3px; margin: 0 -3px; }
+  .mterm .del { background: var(--diff-del); padding: 2px 3px; margin: 0 -3px; }
+  .mterm .cur { display: block; flex: none; width: 3px; height: 5px; background: var(--term-fg); }
+  .mterm .k-success { background: var(--success); } .mterm .k-danger { background: var(--danger); }
+  .mterm .k-blue { background: var(--blue); } .mterm .k-cyan { background: var(--cyan); } .mterm .k-yellow { background: var(--yellow); }
+  .mterm .k-muted { background: var(--text-muted); }
+
+  /* light web/app windows */
+  .mini.web { background: #ffffff; color: #d9d9d9; }
+  .mini.web .tb { height: 14px; background: #f2f2f3; color: #cfcfd1; box-shadow: inset 0 -1px 0 #e1e1e3; }
+  .mini.web .tb > b { width: 70px; height: 7px; margin-left: -35px; top: 3.5px; border-radius: 2px; background: #e3e3e5; }
+  .web .ink { background: #3a3a3c; }
+  .web .gr { background: #b8b8bb; }
+
+  /* ---------- desktop windows behind the panel ---------- */
+  .win { position: absolute; display: flex; flex-direction: column; }
+  .win .titlebar-title { font: var(--type-label); }
+
+  /* desktop windows sit so only calm edges show around the panel (no clipped headlines or rows) */
+  .win-soprano { left: 80px; top: 46px; width: 960px; height: 640px; background: var(--term-bg); color: var(--term-fg); }
+  .win-soprano .titlebar { box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .win-soprano .wbody { flex: 1; display: flex; min-height: 0; }
+  .win-soprano .wside { width: 220px; flex: none; background: var(--bg-panel); box-shadow: inset -1px 0 0 var(--border-subtle); padding: 6px 0; font: var(--type-label); color: var(--text-muted); }
+  .win-soprano .wside .h { display: flex; align-items: center; height: 28px; padding: 0 12px; font: var(--type-eyebrow); }
+  .win-soprano .wside .r { position: relative; display: flex; align-items: center; gap: 8px; height: 28px; margin: 0 4px; padding: 0 8px; border-radius: 4px; }
+  .win-soprano .wside .r.on { background: var(--selection-inactive); color: var(--text-primary); }
+  .win-soprano .wside .r .n { margin-left: auto; font: var(--type-meta); color: var(--text-muted); }
+  .win-soprano .wpane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .win-soprano .wph { flex: none; height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg-raised); box-shadow: inset 0 -1px 0 var(--border-subtle); font: var(--type-label); color: var(--text-primary); }
+  .win-soprano .wph .m { margin-left: auto; font: var(--type-meta); color: var(--text-muted); }
+  .win-soprano pre { margin: 0; padding: 8px 14px; font: var(--type-term); color: var(--term-fg); white-space: pre; }
+  .win-soprano .g { color: var(--ansi-2); } .win-soprano .mu { color: var(--text-muted); } .win-soprano .bl { color: var(--ansi-4); }
+  .win-soprano .dot.ok { background: var(--success); } .win-soprano .dot.idle { box-shadow: inset 0 0 0 1.5px var(--border-strong); }
+  .win-soprano .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
+
+  .win-safari { left: 940px; top: 150px; width: 500px; height: 600px; background: #ffffff; color: #1f2328; box-shadow: 0 0 0 1px rgba(0,0,0,.12), var(--shadow-window); }
+  .win-safari .stb { flex: none; height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: #f2f2f3; box-shadow: inset 0 -1px 0 #e1e1e3; }
+  .win-safari .stb .traffic > i { background: #d5d5d7; }
+  .win-safari .url { flex: 1; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 7px; background: #e5e5e7; font: 400 12px/16px var(--font-sans); color: #4a4a4c; }
+  .win-safari .page { flex: 1; padding: 22px 26px; font: 400 13px/20px var(--font-sans); color: #59636e; }
+  .win-safari .crumb { font: 400 13px/18px var(--font-sans); color: #59636e; }
+  .win-safari .crumb b { color: #0969da; font-weight: 600; }
+  .win-safari h1 { margin: 14px 0 8px; font: 400 22px/28px var(--font-sans); color: #1f2328; }
+  .win-safari h1 span { color: #818b98; }
+  .win-safari .state { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; margin-right: 8px; border-radius: 13px; background: #1f883d; color: #fff; font: 500 12px/1 var(--font-sans); }
+  .win-safari .box { margin-top: 18px; border: 1px solid #d1d9e0; border-radius: 6px; }
+  .win-safari .box .bh { padding: 8px 12px; background: #f6f8fa; border-bottom: 1px solid #d1d9e0; border-radius: 6px 6px 0 0; font: 400 12px/16px var(--font-sans); }
+  .win-safari .box .bb { padding: 10px 12px; color: #1f2328; }
+
+  .win-finder { left: 150px; top: 470px; width: 600px; height: 360px; background: #ffffff; color: #1d1d1f; box-shadow: 0 0 0 1px rgba(0,0,0,.12), var(--shadow-window); }
+  .win-finder .fbody { flex: 1; display: flex; min-height: 0; }
+  .win-finder .fside { width: 150px; flex: none; background: #eeeeef; box-shadow: inset -1px 0 0 #dfdfe1; padding: 12px 10px; font: 400 12px/24px var(--font-sans); color: #3a3a3c; }
+  .win-finder .fside .fh { font-weight: 600; font-size: 11px; color: #8c8c8f; }
+  .win-finder .fside .on { margin: 0 -4px; padding: 0 4px; border-radius: 5px; background: #dbdbdd; }
+  .win-finder .flist { flex: 1; display: flex; flex-direction: column; padding-top: 52px; }
+  .win-finder .fstatus { margin-top: auto; height: 28px; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 1px 0 #e5e5e7; background: #f7f7f8; font: 400 11px/14px var(--font-sans); color: #8c8c8f; }
+  .win-finder .fr { display: grid; grid-template-columns: 1fr 150px 70px; align-items: center; height: 24px; padding: 0 14px; font: 400 12px/24px var(--font-sans); }
+  .win-finder .fr:nth-child(even) { background: #f5f5f6; }
+  .win-finder .fr span:not(:first-child) { color: #8c8c8f; }
+  .win-finder .fr i { display: inline-block; width: 12px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 2px; background: #c8c8cb; }
+  .win-finder .fr i.fo { background: #6aaee8; height: 11px; vertical-align: -1px; }
+</style>
+</head>
+<body class="artboard">
+
+  <!-- app icon stand-ins (mode-independent content imagery, macOS icon grid: 52/64 squircle) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <clipPath id="sqc"><rect x="6" y="6" width="52" height="52" rx="11.6"/></clipPath>
+    </defs>
+    <symbol id="ai-safari" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f7f7f7"/>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <circle cx="32" cy="32" r="19" fill="#3a8ee6"/>
+      <circle cx="32" cy="32" r="16" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="1 3.2"/>
+      <path d="M41.5 22.5 L34.2 34.2 L29.8 29.8 Z" fill="#e5483d"/>
+      <path d="M22.5 41.5 L29.8 29.8 L34.2 34.2 Z" fill="#ffffff"/>
+    </symbol>
+    <symbol id="ai-finder" viewBox="0 0 64 64">
+      <g clip-path="url(#sqc)">
+        <rect x="6" y="6" width="52" height="52" fill="#9fd0f7"/>
+        <path d="M6 6 H35 C30 20 28.5 34 31 58 H6 Z" fill="#3a8ee6"/>
+      </g>
+      <path d="M22 22 V28 M42 22 V28" stroke="#1d3a5c" stroke-width="3" stroke-linecap="round"/>
+      <path d="M19 41 C26 46.5 38 46.5 45 41" fill="none" stroke="#1d3a5c" stroke-width="3" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ai-stickies" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f2d24c"/>
+      <path d="M16 18 H48 V40 L38 50 H16 Z" fill="#fdf0a2"/>
+      <path d="M38 50 V40 H48" fill="#e9c93c"/>
+      <path d="M21 26 H43 M21 32 H43 M21 38 H35" stroke="#c9a92c" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ai-mail" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#3d8fe8"/>
+      <rect x="15" y="20" width="34" height="24" rx="3" fill="#ffffff"/>
+      <path d="M16 22 L32 34 L48 22" fill="none" stroke="#3d8fe8" stroke-width="2.4" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="ai-settings" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#8e8e93"/>
+      <circle cx="32" cy="32" r="17.5" fill="none" stroke="#5c5c61" stroke-width="5" stroke-dasharray="4.3 2.57"/>
+      <circle cx="32" cy="32" r="14" fill="#5c5c61"/>
+      <circle cx="32" cy="32" r="8" fill="#c7c7cc"/>
+      <circle cx="32" cy="32" r="3.5" fill="#5c5c61"/>
+    </symbol>
+    <symbol id="ai-slack" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#4a154b"/>
+      <path d="M27 18 L24 46 M40 18 L37 46 M18 27 H47 M17 38 H46" stroke="#ffffff" stroke-width="4" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="ai-notes" viewBox="0 0 64 64">
+      <g clip-path="url(#sqc)">
+        <rect x="6" y="6" width="52" height="52" fill="#ffffff"/>
+        <rect x="6" y="6" width="52" height="15" fill="#f5c443"/>
+      </g>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <path d="M14 30 H50 M14 38 H50 M14 46 H50" stroke="#dcdcdc" stroke-width="1.6"/>
+      <path d="M8 21.5 H56" stroke="#000" stroke-opacity=".08"/>
+    </symbol>
+    <symbol id="ai-music" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f2455c"/>
+      <path d="M27 41 V20 L44 16.5 V37" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+      <ellipse cx="23" cy="41.5" rx="5" ry="4" fill="#ffffff"/>
+      <ellipse cx="40" cy="37.5" rx="5" ry="4" fill="#ffffff"/>
+    </symbol>
+  </svg>
+
+  <div class="desktop"></div>
+
+  <!-- macOS menu bar: frontmost app stays Soprano (the switcher panel is non-activating) -->
+  <div class="menubar">
+    <span class="menubar-apple"></span>
+    <b class="menubar-app">Soprano</b>
+    <span class="menubar-item">Edit</span>
+    <span class="menubar-item">Commands</span>
+    <div class="menubar-right">
+      <span class="tpl tpl-cast" title="Soprano Cast"></span>
+      <span class="tpl tpl-tab" title="Soprano Tab"></span>
+      <i data-icon="wifi"></i>
+      <i data-icon="battery"></i>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <!-- ===== windows behind the switcher ===== -->
+
+  <!-- Safari: Valkental/shop-theme · Pull Request #81 (inactive) -->
+  <div class="window win win-safari">
+    <div class="stb">
+      <div class="traffic"><i></i><i></i><i></i></div>
+      <i data-icon="sidebar-left" style="color:#8c8c8f"></i>
+      <div class="url">github.com/Valkental/shop-theme/pull/81</div>
+      <i data-icon="plus" style="color:#8c8c8f"></i>
+    </div>
+    <div class="page">
+      <div class="crumb">Valkental / <b>shop-theme</b></div>
+      <h1>Sticky add-to-cart bar on mobile PDP <span>#81</span></h1>
+      <div><span class="state">Open</span>frknue wants to merge 4 commits into <b style="color:#0969da;font-weight:500">main</b> from <b style="color:#0969da;font-weight:500">feat/sticky-atc</b></div>
+      <div class="box"><div class="bh"><b style="color:#1f2328">frknue</b> commented 2 hours ago</div><div class="bb">Adds the sticky add-to-cart bar below 750 px. It appears once the main button scrolls out of view and keeps the selected variant in sync.</div></div>
+      <div class="box"><div class="bh"><b style="color:#1f2328">eric-valkental</b> commented 40 minutes ago</div><div class="bb">Looks good on the preview link. Can we keep the price visible in the bar on small phones?</div></div>
+      <div class="box"><div class="bh"><b style="color:#1f2328">frknue</b> commented 12 minutes ago</div><div class="bb">Done in 3f1c2a9: the price stays, the variant name truncates first.</div></div>
+      <div class="box"><div class="bh">Checks</div><div class="bb"><span style="color:#1f883d">●</span> theme-check — passed &nbsp; <span style="color:#1f883d">●</span> lighthouse — passed</div></div>
+      <div class="box"><div class="bh">Files changed 6</div><div class="bb">sections/main-product.liquid · snippets/sticky-atc.liquid · assets/sticky-atc.js · assets/section-main-product.css</div></div>
+    </div>
+  </div>
+
+  <!-- Finder: Downloads (inactive) -->
+  <div class="window win win-finder">
+    <div class="fbody">
+      <div class="fside">
+        <div style="height:30px"><div class="traffic is-inactive"><i></i><i></i><i></i></div></div>
+        <div class="fh">Favourites</div>
+        <div>Recents</div><div>Applications</div><div>Desktop</div><div class="on">Downloads</div><div>Documents</div><div>git</div>
+      </div>
+      <div class="flist">
+        <div class="fr"><span><i class="fo"></i>soprano-tab-0.6.0</span><span>Today at 21:12</span><span>--</span></div>
+        <div class="fr"><span><i></i>soprano-tab-0.6.0.dmg</span><span>Today at 21:11</span><span>4,8 MB</span></div>
+        <div class="fr"><span><i></i>Screenshot 2026-10-21 at 20.58.14.png</span><span>Today at 20:58</span><span>612 KB</span></div>
+        <div class="fr"><span><i></i>shop-theme-pr81-preview.mov</span><span>Today at 19:40</span><span>18,2 MB</span></div>
+        <div class="fr"><span><i></i>Rechnung-2026-10.pdf</span><span>Yesterday at 16:05</span><span>88 KB</span></div>
+        <div class="fr"><span><i class="fo"></i>departure-mono-1.500</span><span>Yesterday at 11:20</span><span>--</span></div>
+        <div class="fr"><span><i></i>ghostty-1.2.3.dmg</span><span>19 Oct 2026 at 22:47</span><span>31,4 MB</span></div>
+        <div class="fr"><span><i></i>valkental-briefing-h31.pdf</span><span>18 Oct 2026 at 09:12</span><span>1,1 MB</span></div>
+        <div class="fr"><span><i></i>sf-symbols-7.dmg</span><span>14 Oct 2026 at 18:30</span><span>210 MB</span></div>
+        <div class="fstatus">9 items, 182,4 GB available</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Soprano: soprano-tab — claude (frontmost window, active) -->
+  <div class="window win win-soprano">
+    <div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div></div>
+    <div class="wbody">
+      <div class="wside">
+        <div class="h">Windows</div>
+        <div class="r on"><span class="dot ok"></span>soprano-tab<span class="n">2</span></div>
+        <div class="r"><span class="dot idle"></span>valkental<span class="n">1</span></div>
+        <div class="r"><span class="dot idle"></span>soprano<span class="n">3</span></div>
+        <div class="r"><span class="dot idle"></span>shop-theme<span class="n">1</span></div>
+        <div class="r"><span class="dot idle"></span>soprano-site<span class="n">1</span></div>
+        <div class="r"><span class="dot idle"></span>soprano-cast<span class="n">2</span></div>
+        <div class="r"><span class="dot idle"></span>soprano-git<span class="n">1</span></div>
+        <div class="r"><span class="dot idle"></span>ab-tool<span class="n">1</span></div>
+        <div class="r"><span class="dot idle"></span>shop-monitor<span class="n">1</span></div>
+      </div>
+      <div class="wpane">
+        <div class="wph"><span class="dot ok" style="width:8px;height:8px"></span>claude<span class="m">~/git/private/soprano-tab · main</span></div>
+<pre><span class="g">●</span> Read <span class="bl">Sources/SopranoTab/TileView.swift</span> <span class="mu">(212 lines)</span>
+<span class="g">●</span> Update(Sources/SopranoTab/TileView.swift)
+  <span class="mu">⎿  Updated TileView.swift with 6 additions and 9 removals</span>
+<span class="g">●</span> The selection wash is gone; the tile now draws a 2 pt ring outset by 2 pt,
+  so it still reads on white Safari and Finder thumbnails.
+<span class="g">●</span> Bash(swift build -c debug)
+  <span class="mu">⎿  Build complete! (14.82s)</span>
+<span class="g">●</span> Bash(swift test --filter TileLayoutEngineTests)
+  <span class="mu">⎿  Executed 23 tests, with 0 failures (0 unexpected) in 0.412 seconds</span>
+<span class="g">●</span> Next: header copy "All windows 13" and lowercase badge chips.
+</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Soprano Tab switcher: thumbnails, medium, standard scenario, ⌥⇥⇥ ===== -->
+  <div class="switcher" role="dialog" aria-label="Soprano Tab">
+    <div class="switcher-header">
+      <span class="t-row-strong">All windows</span><span class="t-meta">13</span>
+      <span class="hints">
+        <span class="hint"><span class="hint-key">⇥</span>next</span>
+        <span class="hint"><span class="hint-key">⇧</span>back</span>
+        <span class="hint"><span class="hint-key">↩</span>open</span>
+        <span class="hint"><span class="hint-key">W</span>close</span>
+        <span class="hint"><span class="hint-key">M</span>min</span>
+        <span class="hint"><span class="hint-key">Q</span>quit</span>
+        <span class="hint"><span class="hint-key">S</span>search</span>
+      </span>
+    </div>
+
+    <div class="switcher-grid">
+
+      <!-- 1 · soprano-tab — claude (Soprano) — hovered: flat window lamps over the thumbnail's top-left -->
+      <div class="tile is-hover" style="width:205px" aria-label="soprano-tab — claude, Soprano">
+        <div class="tile-title"><span class="aic aic-soprano"></span><span>soprano-tab — claude</span></div>
+        <div class="tile-thumb">
+          <span class="lamps" title="Close · Minimize · Fullscreen"><i class="lamp is-close"></i><i class="lamp is-min"></i><i class="lamp is-zoom"></i></span>
+          <div class="mini mterm">
+            <div class="tb"><b></b></div>
+            <div class="bd">
+              <div class="side" style="width:36px">
+                <span class="l mu" style="width:14px;margin-bottom:2px"></span>
+                <span class="mr msel"><span class="dt k-success"></span><span class="l fg" style="width:16px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:14px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:18px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:12px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:16px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:13px"></span></span>
+              </div>
+              <div class="main">
+                <div class="ph"><span class="dt k-success"></span><span class="l k-muted" style="width:22px"></span></div>
+                <span class="mr"><span class="dt k-success"></span><span class="l fg" style="width:62%"></span></span>
+                <span class="mr"><span class="dt k-success"></span><span class="l fg" style="width:48%"></span></span>
+                <span class="l mu" style="width:56%;margin-left:6px"></span>
+                <span class="l add" style="width:auto;margin-left:3px"><span class="l k-success" style="width:70%;opacity:.7"></span></span>
+                <span class="l del" style="width:auto;margin-left:3px"><span class="l k-danger" style="width:52%;opacity:.7"></span></span>
+                <span class="l add" style="width:auto;margin-left:3px"><span class="l k-success" style="width:64%;opacity:.7"></span></span>
+                <span class="mr"><span class="dt k-success"></span><span class="l fg" style="width:74%"></span></span>
+                <span class="l mu" style="width:44%;margin-left:6px"></span>
+                <span class="gap"></span>
+                <span class="mr" style="height:10px;padding:0 4px;border-radius:2px;box-shadow:inset 0 0 0 1px var(--border-strong)"><span class="l mu" style="width:4px"></span><span class="l mu" style="width:46%"></span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2 · Features – AltTab (Safari) -->
+      <div class="tile" style="width:204px" aria-label="Features – AltTab, Safari">
+        <div class="tile-title"><svg class="aic"><use href="#ai-safari"/></svg><span>Features – AltTab</span></div>
+        <div class="tile-thumb">
+          <div class="mini web">
+            <div class="tb"><i></i><i></i><i></i><b></b></div>
+            <div class="bd" style="flex-direction:column">
+              <div class="mr" style="height:12px;padding:0 8px;gap:6px;box-shadow:inset 0 -1px 0 #ececed"><span class="sq" style="background:#5b6b7f"></span><span class="l ink" style="width:22px"></span><span class="gap"></span><span class="l gr" style="width:14px"></span><span class="l gr" style="width:14px"></span><span class="l gr" style="width:14px"></span></div>
+              <div class="main" style="align-items:center;gap:4px;padding:9px 10px 0">
+                <span class="l h ink" style="width:58%"></span>
+                <span class="l gr" style="width:72%"></span>
+                <span class="l gr" style="width:50%"></span>
+                <span style="display:block;flex:none;width:86%;height:44px;margin-top:4px;border-radius:3px;background:#1d2733;box-shadow:0 2px 6px rgba(0,0,0,.15);position:relative">
+                  <span style="position:absolute;left:8px;right:8px;top:12px;height:20px;display:flex;gap:4px"><span style="flex:1;border-radius:2px;background:#4b5a6c"></span><span style="flex:1;border-radius:2px;background:#6f8bb0;box-shadow:0 0 0 1px #a9c3e6"></span><span style="flex:1;border-radius:2px;background:#4b5a6c"></span><span style="flex:1;border-radius:2px;background:#4b5a6c"></span></span>
+                </span>
+                <span class="mr" style="width:100%;gap:6px;margin-top:6px"><span style="flex:1;height:22px;border-radius:2px;background:#f1f3f6"></span><span style="flex:1;height:22px;border-radius:2px;background:#f1f3f6"></span><span style="flex:1;height:22px;border-radius:2px;background:#f1f3f6"></span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3 · soprano-tab — main (Soprano Git) -->
+      <div class="tile" style="width:218px" aria-label="soprano-tab — main, Soprano Git">
+        <div class="tile-title"><span class="aic aic-git"></span><span>soprano-tab — main</span></div>
+        <div class="tile-thumb">
+          <div class="mini mterm">
+            <div class="tb"><i></i><i></i><i></i><b></b></div>
+            <div class="mr" style="height:9px;padding:0 5px;gap:4px;background:var(--bg-panel);box-shadow:inset 0 -1px 0 var(--border-subtle)"><span style="display:block;height:9px;width:30px;background:var(--term-bg)"></span><span class="l" style="width:16px"></span></div>
+            <div class="mr" style="height:10px;padding:0 6px;gap:6px;box-shadow:inset 0 -1px 0 var(--border-subtle)"><span class="l mu" style="width:20px"></span><span class="l" style="width:12px"></span><span class="l" style="width:12px"></span><span class="l" style="width:12px"></span><span class="gap"></span><span class="l" style="width:10px"></span></div>
+            <div class="bd">
+              <div class="side" style="width:40px;gap:4px">
+                <span class="l mu" style="width:14px"></span>
+                <span class="l" style="width:24px;margin-left:4px"></span>
+                <span class="l" style="width:20px;margin-left:4px"></span>
+                <span class="l fg" style="width:16px;margin-left:4px"></span>
+                <span class="l mu" style="width:14px;margin-top:3px"></span>
+                <span class="l" style="width:18px;margin-left:4px"></span>
+                <span class="l mu" style="width:12px;margin-top:3px"></span>
+                <span class="l" style="width:22px;margin-left:4px"></span>
+              </div>
+              <div class="main" style="padding:4px 0 0 4px;gap:0;flex-direction:row">
+                <svg width="22" height="96" viewBox="0 0 22 96" style="flex:none">
+                  <path d="M6 4 V94" stroke="var(--blue)" stroke-width="1.2"/>
+                  <path d="M6 22 C6 28 13 28 13 34 V58 C13 64 6 64 6 70" fill="none" stroke="var(--success)" stroke-width="1.2"/>
+                  <circle cx="6" cy="4" r="3" fill="none" stroke="var(--text-primary)" stroke-width="1.2"/>
+                  <circle cx="6" cy="14" r="2" fill="var(--blue)"/><circle cx="13" cy="34" r="2" fill="var(--success)"/><circle cx="13" cy="46" r="2" fill="var(--success)"/>
+                  <circle cx="6" cy="40" r="2" fill="var(--blue)"/><circle cx="6" cy="70" r="2" fill="var(--blue)"/><circle cx="6" cy="82" r="2" fill="var(--blue)"/><circle cx="6" cy="94" r="2" fill="var(--blue)"/>
+                </svg>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                  <span class="mr" style="height:8px;margin:0 2px 2px -2px;padding:0 2px;background:var(--selection);border-radius:2px"><span class="l" style="width:14px;background:var(--chip-blue);height:4px"></span><span class="l fg" style="width:52%"></span></span>
+                  <span class="mr" style="height:10px"><span class="l msg" style="width:66%"></span></span>
+                  <span class="mr" style="height:10px"><span class="l msg" style="width:48%"></span></span>
+                  <span class="mr" style="height:10px"><span class="l msg" style="width:58%"></span></span>
+                  <span class="mr" style="height:12px"><span class="l" style="width:12px;background:var(--chip-success);height:4px"></span><span class="l msg" style="width:40%"></span></span>
+                  <span class="mr" style="height:10px"><span class="l msg" style="width:62%"></span></span>
+                  <span class="mr" style="height:12px"><span class="l msg" style="width:54%"></span></span>
+                  <span class="mr" style="height:12px"><span class="l msg" style="width:36%"></span></span>
+                  <span class="mr" style="height:12px"><span class="l msg" style="width:60%"></span></span>
+                </div>
+              </div>
+              <div class="side" style="width:52px;background:var(--term-bg);box-shadow:inset 1px 0 0 var(--border-subtle);gap:4px">
+                <span class="l fg" style="width:40px"></span>
+                <span class="l mu" style="width:26px"></span>
+                <span class="l" style="width:36px;margin-top:4px"></span>
+                <span class="mr"><span class="sq" style="width:4px;height:4px;background:var(--success)"></span><span class="l" style="width:28px"></span></span>
+                <span class="mr"><span class="sq" style="width:4px;height:4px;background:var(--yellow)"></span><span class="l" style="width:22px"></span></span>
+                <span class="mr"><span class="sq" style="width:4px;height:4px;background:var(--yellow)"></span><span class="l" style="width:32px"></span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 · valkental — zsh (Soprano) — SELECTED -->
+      <div class="tile is-selected" style="width:200px" aria-label="valkental — zsh, Soprano" aria-selected="true">
+        <div class="tile-title"><span class="aic aic-soprano"></span><span>valkental — zsh</span></div>
+        <div class="tile-thumb">
+          <div class="mini mterm">
+            <div class="tb"><i></i><i></i><i></i><b></b></div>
+            <div class="bd">
+              <div class="side" style="width:32px">
+                <span class="l mu" style="width:12px;margin-bottom:2px"></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:14px"></span></span>
+                <span class="mr msel"><span class="dt k-cyan"></span><span class="l fg" style="width:12px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:16px"></span></span>
+                <span class="mr"><span class="dt ring"></span><span class="l" style="width:11px"></span></span>
+              </div>
+              <div class="main" style="gap:4px">
+                <div class="ph"><span class="dt k-cyan"></span><span class="l k-muted" style="width:16px"></span></div>
+                <span class="mr"><span class="l k-blue" style="width:24px"></span><span class="l k-success" style="width:10px"></span><span class="l fg" style="width:30px"></span></span>
+                <span class="l mu" style="width:70%"></span>
+                <span class="l mu" style="width:52%"></span>
+                <span class="l mu" style="width:60%"></span>
+                <span class="mr" style="margin-top:3px"><span class="l k-blue" style="width:24px"></span><span class="l k-success" style="width:10px"></span><span class="l fg" style="width:44px"></span></span>
+                <span class="mr"><span class="l k-success" style="width:8px"></span><span class="l mu" style="width:46%"></span></span>
+                <span class="mr"><span class="l k-success" style="width:8px"></span><span class="l mu" style="width:38%"></span></span>
+                <span class="mr"><span class="l k-yellow" style="width:8px"></span><span class="l mu" style="width:42%"></span></span>
+                <span class="mr" style="margin-top:3px"><span class="l k-blue" style="width:24px"></span><span class="l k-success" style="width:10px"></span><span class="cur"></span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5 · Valkental/shop-theme · Pull Request #81 (Safari) -->
+      <div class="tile" style="width:193px" aria-label="Valkental/shop-theme · Pull Request #81, Safari">
+        <div class="tile-title"><svg class="aic"><use href="#ai-safari"/></svg><span>Valkental/shop-theme · Pull Request #81</span></div>
+        <div class="tile-thumb">
+          <div class="mini web">
+            <div class="tb"><i></i><i></i><i></i><b></b></div>
+            <div class="mr" style="height:12px;padding:0 7px;gap:4px;background:#f6f8fa;box-shadow:inset 0 -1px 0 #d1d9e0"><span class="dt" style="width:6px;height:6px;background:#1f2328"></span><span class="l gr" style="width:20px"></span><span class="l" style="width:26px;background:#0969da;opacity:.7"></span></div>
+            <div class="main" style="gap:4px;padding:7px 8px">
+              <span class="mr"><span class="l h ink" style="width:66%"></span><span class="l h gr" style="width:10px"></span></span>
+              <span class="mr" style="margin-bottom:3px"><span style="display:block;width:16px;height:6px;border-radius:3px;background:#1f883d"></span><span class="l gr" style="width:52%"></span></span>
+              <span class="mr" style="gap:7px;padding-bottom:3px;box-shadow:inset 0 -1px 0 #e4e8ec"><span class="l" style="width:16px;background:#59636e"></span><span class="l gr" style="width:14px"></span><span class="l gr" style="width:12px"></span><span class="l gr" style="width:16px"></span></span>
+              <span style="display:block;flex:none;height:30px;margin-top:3px;border-radius:2px;box-shadow:inset 0 0 0 1px #d1d9e0;background:linear-gradient(#f6f8fa 0 7px,#fff 7px);padding:10px 5px 0"><span class="l gr" style="width:84%;margin-bottom:3px"></span><span class="l gr" style="width:62%;margin-bottom:3px"></span><span class="l gr" style="width:72%"></span></span>
+              <span style="display:block;flex:none;height:26px;margin-top:2px;border-radius:2px;box-shadow:inset 0 0 0 1px #d1d9e0;background:linear-gradient(#f6f8fa 0 7px,#fff 7px);padding:10px 5px 0"><span class="l gr" style="width:76%;margin-bottom:3px"></span><span class="l gr" style="width:48%"></span></span>
+              <span class="mr" style="margin-top:2px"><span class="dt" style="width:5px;height:5px;background:#1f883d"></span><span class="l gr" style="width:40%"></span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6 · Downloads (Finder) -->
+      <div class="tile" style="width:223px" aria-label="Downloads, Finder">
+        <div class="tile-title"><svg class="aic"><use href="#ai-finder"/></svg><span>Downloads</span></div>
+        <div class="tile-thumb">
+          <div class="mini web">
+            <div class="bd">
+              <div class="side" style="width:46px;background:#eeeeef;box-shadow:inset -1px 0 0 #dfdfe1;gap:5px;padding-top:4px">
+                <span class="mr" style="gap:2px;margin-bottom:4px"><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span></span>
+                <span class="l" style="width:16px;background:#c3c3c6"></span>
+                <span class="mr"><span class="dt" style="background:#6aaee8"></span><span class="l gr" style="width:20px"></span></span>
+                <span class="mr"><span class="dt" style="background:#6aaee8"></span><span class="l gr" style="width:26px"></span></span>
+                <span class="mr"><span class="dt" style="background:#6aaee8"></span><span class="l gr" style="width:18px"></span></span>
+                <span class="mr" style="background:#dbdbdd;margin:0 -3px;padding:2px 3px;border-radius:2px"><span class="dt" style="background:#6aaee8"></span><span class="l" style="width:24px;background:#6d6d70"></span></span>
+                <span class="mr"><span class="dt" style="background:#6aaee8"></span><span class="l gr" style="width:22px"></span></span>
+                <span class="mr"><span class="dt" style="background:#6aaee8"></span><span class="l gr" style="width:12px"></span></span>
+              </div>
+              <div class="main" style="padding:0;gap:0">
+                <div class="mr" style="height:14px;padding:0 6px;gap:4px;box-shadow:inset 0 -1px 0 #ececed"><span class="l ink" style="width:30px"></span><span class="gap"></span><span class="sq" style="background:#e3e3e5"></span><span class="sq" style="background:#e3e3e5"></span><span style="display:block;width:24px;height:6px;border-radius:2px;background:#ebebed"></span></div>
+                <div class="mr" style="height:9px;padding:0 6px;box-shadow:inset 0 -1px 0 #ececed"><span class="l" style="width:14px;background:#c3c3c6"></span><span class="gap"></span><span class="l" style="width:22px;background:#c3c3c6"></span><span class="l" style="width:10px;background:#c3c3c6;margin-left:10px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px"><span class="sq" style="background:#6aaee8"></span><span class="l gr" style="width:44px"></span><span class="gap"></span><span class="l gr" style="width:26px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px;background:#f5f5f6"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:56px"></span><span class="gap"></span><span class="l gr" style="width:26px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:84px"></span><span class="gap"></span><span class="l gr" style="width:26px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px;background:#f5f5f6"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:62px"></span><span class="gap"></span><span class="l gr" style="width:26px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:48px"></span><span class="gap"></span><span class="l gr" style="width:30px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px;background:#f5f5f6"><span class="sq" style="background:#6aaee8"></span><span class="l gr" style="width:52px"></span><span class="gap"></span><span class="l gr" style="width:30px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:40px"></span><span class="gap"></span><span class="l gr" style="width:30px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px;background:#f5f5f6"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:58px"></span><span class="gap"></span><span class="l gr" style="width:30px"></span></div>
+                <div class="mr" style="height:10px;padding:0 6px"><span class="sq" style="background:#c8c8cb"></span><span class="l gr" style="width:36px"></span><span class="gap"></span><span class="l gr" style="width:30px"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7 · Groceries (Stickies) -->
+      <div class="tile" style="width:164px" aria-label="Groceries, Stickies">
+        <div class="tile-title"><svg class="aic"><use href="#ai-stickies"/></svg><span>Groceries</span></div>
+        <div class="tile-thumb">
+          <div class="mini" style="background:#fdf2a6;color:#c9b55a">
+            <div class="tb" style="background:#f5e37a;color:#d8c45c"><i></i><i></i><i></i></div>
+            <div class="main" style="gap:7px;padding:10px 12px">
+              <span class="l t" style="width:52%;background:#7a6a26"></span>
+              <span class="mr" style="gap:5px;margin-top:2px"><span class="sq" style="box-shadow:inset 0 0 0 1px #b19f45"></span><span class="l" style="width:46%"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="box-shadow:inset 0 0 0 1px #b19f45"></span><span class="l" style="width:62%"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="background:#b19f45"></span><span class="l" style="width:38%;opacity:.6"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="box-shadow:inset 0 0 0 1px #b19f45"></span><span class="l" style="width:54%"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="box-shadow:inset 0 0 0 1px #b19f45"></span><span class="l" style="width:30%"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="background:#b19f45"></span><span class="l" style="width:48%;opacity:.6"></span></span>
+              <span class="mr" style="gap:5px"><span class="sq" style="box-shadow:inset 0 0 0 1px #b19f45"></span><span class="l" style="width:40%"></span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8 · Inbox – 3 unread messages (Mail) — hidden -->
+      <div class="tile" style="width:204px" aria-label="Inbox – 3 unread messages, Mail, hidden">
+        <div class="tile-title"><svg class="aic"><use href="#ai-mail"/></svg><span>Inbox – 3 unread messages</span></div>
+        <div class="tile-thumb">
+          <div class="mini web">
+            <div class="bd">
+              <div class="side" style="width:36px;background:#eeeeef;box-shadow:inset -1px 0 0 #dfdfe1;gap:5px;padding-top:4px">
+                <span class="mr" style="gap:2px;margin-bottom:4px"><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span></span>
+                <span class="mr" style="background:#dbdbdd;margin:0 -3px;padding:2px 3px;border-radius:2px"><span class="dt" style="background:#3d8fe8"></span><span class="l" style="width:14px;background:#6d6d70"></span></span>
+                <span class="mr"><span class="dt" style="background:#99999c"></span><span class="l gr" style="width:16px"></span></span>
+                <span class="mr"><span class="dt" style="background:#99999c"></span><span class="l gr" style="width:12px"></span></span>
+                <span class="mr"><span class="dt" style="background:#99999c"></span><span class="l gr" style="width:18px"></span></span>
+                <span class="mr"><span class="dt" style="background:#99999c"></span><span class="l gr" style="width:10px"></span></span>
+              </div>
+              <div class="side" style="width:62px;background:#fff;box-shadow:inset -1px 0 0 #ececed;padding:4px 0 0;gap:0">
+                <span class="mr" style="height:10px;padding:0 5px;box-shadow:inset 0 -1px 0 #ececed"><span class="l ink" style="width:18px"></span><span class="gap"></span><span class="l gr" style="width:8px"></span></span>
+                <span style="display:flex;flex-direction:column;gap:3px;padding:4px 5px 4px 9px;position:relative;background:#e7e7e9;box-shadow:inset 0 -1px 0 #ececed"><span class="dt" style="position:absolute;left:3px;top:5px;background:#3d8fe8"></span><span class="l ink" style="width:28px"></span><span class="l gr" style="width:40px"></span><span class="l gr" style="width:34px"></span></span>
+                <span style="display:flex;flex-direction:column;gap:3px;padding:4px 5px 4px 9px;position:relative;box-shadow:inset 0 -1px 0 #ececed"><span class="dt" style="position:absolute;left:3px;top:5px;background:#3d8fe8"></span><span class="l ink" style="width:22px"></span><span class="l gr" style="width:42px"></span><span class="l gr" style="width:30px"></span></span>
+                <span style="display:flex;flex-direction:column;gap:3px;padding:4px 5px 4px 9px;position:relative;box-shadow:inset 0 -1px 0 #ececed"><span class="dt" style="position:absolute;left:3px;top:5px;background:#3d8fe8"></span><span class="l ink" style="width:30px"></span><span class="l gr" style="width:38px"></span><span class="l gr" style="width:26px"></span></span>
+                <span style="display:flex;flex-direction:column;gap:3px;padding:4px 5px 4px 9px;box-shadow:inset 0 -1px 0 #ececed"><span class="l gr" style="width:24px;background:#8c8c8f"></span><span class="l gr" style="width:40px"></span><span class="l gr" style="width:32px"></span></span>
+              </div>
+              <div class="main" style="gap:4px;padding:8px 8px">
+                <span class="l t ink" style="width:70%"></span>
+                <span class="mr" style="margin-bottom:5px"><span class="dt" style="width:7px;height:7px;background:#b8c7d9"></span><span class="l gr" style="width:44%"></span></span>
+                <span class="l gr" style="width:92%"></span>
+                <span class="l gr" style="width:86%"></span>
+                <span class="l gr" style="width:60%"></span>
+                <span class="l gr" style="width:90%;margin-top:4px"></span>
+                <span class="l gr" style="width:74%"></span>
+                <span class="l gr" style="width:40%;margin-top:4px"></span>
+              </div>
+            </div>
+          </div>
+          <div class="tile-chips"><span class="tile-chip">hidden</span></div>
+        </div>
+      </div>
+
+      <!-- 9 · Swift Forums – Strict Concurrency Checking (Safari) — minimized: icon fallback -->
+      <div class="tile" style="width:201px" aria-label="Swift Forums – Strict Concurrency Checking, Safari, minimized">
+        <div class="tile-title"><svg class="aic"><use href="#ai-safari"/></svg><span>Swift Forums – Strict Concurrency Checking</span></div>
+        <div class="tile-thumb">
+          <svg class="tile-fallback"><use href="#ai-safari"/></svg>
+          <div class="tile-chips"><span class="tile-chip">min</span></div>
+        </div>
+      </div>
+
+      <!-- 10 · Privacy & Security (System Settings) -->
+      <div class="tile" style="width:159px" aria-label="Privacy &amp; Security, System Settings">
+        <div class="tile-title"><svg class="aic"><use href="#ai-settings"/></svg><span>Privacy &amp; Security</span></div>
+        <div class="tile-thumb">
+          <div class="mini web" style="background:#f4f4f5">
+            <div class="bd">
+              <div class="side" style="width:44px;background:#eaeaeb;box-shadow:inset -1px 0 0 #dcdcde;gap:5px;padding-top:4px">
+                <span class="mr" style="gap:2px;margin-bottom:2px"><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span><span class="dt" style="background:#cfcfd1"></span></span>
+                <span style="display:block;height:6px;border-radius:3px;background:#dbdbdd;margin-bottom:2px"></span>
+                <span class="mr"><span class="sq" style="background:#3d8fe8"></span><span class="l gr" style="width:20px"></span></span>
+                <span class="mr"><span class="sq" style="background:#ef8f3a"></span><span class="l gr" style="width:16px"></span></span>
+                <span class="mr"><span class="sq" style="background:#8e8e93"></span><span class="l gr" style="width:22px"></span></span>
+                <span class="mr"><span class="sq" style="background:#5ab55e"></span><span class="l gr" style="width:14px"></span></span>
+                <span class="mr" style="background:#d5d5d7;margin:0 -3px;padding:2px 3px;border-radius:2px"><span class="sq" style="background:#3d8fe8"></span><span class="l" style="width:22px;background:#6d6d70"></span></span>
+                <span class="mr"><span class="sq" style="background:#8e8e93"></span><span class="l gr" style="width:18px"></span></span>
+                <span class="mr"><span class="sq" style="background:#e5483d"></span><span class="l gr" style="width:12px"></span></span>
+              </div>
+              <div class="main" style="gap:5px;padding:7px 7px">
+                <span class="l t ink" style="width:56%;margin-bottom:2px"></span>
+                <span style="display:flex;flex-direction:column;gap:0;border-radius:3px;background:#fff;box-shadow:inset 0 0 0 1px #e3e3e5;flex:none">
+                  <span class="mr" style="height:10px;padding:0 4px;box-shadow:inset 0 -1px 0 #eeeeef"><span class="sq" style="width:4px;height:4px;background:#3d8fe8"></span><span class="l gr" style="width:40%"></span><span class="gap"></span><span class="l gr" style="width:6px"></span></span>
+                  <span class="mr" style="height:10px;padding:0 4px;box-shadow:inset 0 -1px 0 #eeeeef"><span class="sq" style="width:4px;height:4px;background:#5ab55e"></span><span class="l gr" style="width:34%"></span><span class="gap"></span><span class="l gr" style="width:6px"></span></span>
+                  <span class="mr" style="height:10px;padding:0 4px;box-shadow:inset 0 -1px 0 #eeeeef"><span class="sq" style="width:4px;height:4px;background:#ef8f3a"></span><span class="l gr" style="width:46%"></span><span class="gap"></span><span class="l gr" style="width:6px"></span></span>
+                  <span class="mr" style="height:10px;padding:0 4px"><span class="sq" style="width:4px;height:4px;background:#8e8e93"></span><span class="l gr" style="width:30%"></span><span class="gap"></span><span class="l gr" style="width:6px"></span></span>
+                </span>
+                <span class="l gr" style="width:40%;margin-top:3px"></span>
+                <span style="display:flex;flex-direction:column;border-radius:3px;background:#fff;box-shadow:inset 0 0 0 1px #e3e3e5;flex:none">
+                  <span class="mr" style="height:10px;padding:0 4px;box-shadow:inset 0 -1px 0 #eeeeef"><span class="l gr" style="width:44%"></span><span class="gap"></span><span style="display:block;width:9px;height:5px;border-radius:3px;background:#5ab55e"></span></span>
+                  <span class="mr" style="height:10px;padding:0 4px"><span class="l gr" style="width:36%"></span><span class="gap"></span><span style="display:block;width:9px;height:5px;border-radius:3px;background:#d5d5d7"></span></span>
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 11 · soprano (Channel) - Valkental - Slack — fullscreen -->
+      <div class="tile" style="width:215px" aria-label="soprano (Channel) - Valkental - Slack, Slack, fullscreen">
+        <div class="tile-title"><svg class="aic"><use href="#ai-slack"/></svg><span>soprano (Channel) - Valkental - Slack</span></div>
+        <div class="tile-thumb">
+          <div class="mini" style="background:#ffffff;color:#d6d6d6">
+            <div class="bd">
+              <div class="side" style="width:50px;background:#3f0e40;color:#a88aa9;gap:5px;padding:7px 5px">
+                <span class="l" style="width:30px;background:#e9dce9;height:3px;margin-bottom:3px"></span>
+                <span class="l" style="width:24px"></span>
+                <span class="l" style="width:30px"></span>
+                <span class="l" style="width:18px;margin-top:3px;opacity:.6"></span>
+                <span class="l" style="width:28px"></span>
+                <span class="mr" style="background:#1164a3;margin:0 -3px;padding:2px 3px;border-radius:2px"><span class="l" style="width:26px;background:#ffffff"></span></span>
+                <span class="l" style="width:22px"></span>
+                <span class="l" style="width:32px"></span>
+                <span class="l" style="width:18px;margin-top:3px;opacity:.6"></span>
+                <span class="l" style="width:26px"></span>
+                <span class="l" style="width:20px"></span>
+              </div>
+              <div class="main" style="gap:0;padding:0">
+                <div class="mr" style="height:13px;padding:0 7px;box-shadow:inset 0 -1px 0 #ebebeb"><span class="l" style="width:34px;background:#1d1c1d;height:3px"></span></div>
+                <div style="flex:1;display:flex;flex-direction:column;gap:7px;padding:7px 7px 0">
+                  <span class="mr" style="align-items:flex-start;gap:4px"><span class="sq" style="width:8px;height:8px;background:#c48b5a"></span><span style="display:flex;flex-direction:column;gap:3px;flex:1"><span class="l" style="width:22px;background:#1d1c1d"></span><span class="l" style="width:84%"></span><span class="l" style="width:58%"></span></span></span>
+                  <span class="mr" style="align-items:flex-start;gap:4px"><span class="sq" style="width:8px;height:8px;background:#5a7fc4"></span><span style="display:flex;flex-direction:column;gap:3px;flex:1"><span class="l" style="width:30px;background:#1d1c1d"></span><span class="l" style="width:72%"></span></span></span>
+                  <span class="mr" style="align-items:flex-start;gap:4px"><span class="sq" style="width:8px;height:8px;background:#c48b5a"></span><span style="display:flex;flex-direction:column;gap:3px;flex:1"><span class="l" style="width:22px;background:#1d1c1d"></span><span class="l" style="width:66%"></span><span style="display:block;width:60%;height:18px;border-radius:2px;background:#f2f2f2;box-shadow:inset 2px 0 0 #dddddd"></span></span></span>
+                  <span class="mr" style="align-items:flex-start;gap:4px"><span class="sq" style="width:8px;height:8px;background:#6aa36a"></span><span style="display:flex;flex-direction:column;gap:3px;flex:1"><span class="l" style="width:26px;background:#1d1c1d"></span><span class="l" style="width:48%"></span></span></span>
+                </div>
+                <div style="flex:none;height:16px;margin:0 7px 6px;border-radius:3px;box-shadow:inset 0 0 0 1px #d6d6d6"></div>
+              </div>
+            </div>
+          </div>
+          <div class="tile-chips"><span class="tile-chip">full</span></div>
+        </div>
+      </div>
+
+      <!-- 12 · Notes — windowless -->
+      <div class="tile is-windowless" style="width:230px" aria-label="Notes, no windows">
+        <div class="tile-title"><svg class="aic"><use href="#ai-notes"/></svg><span>Notes</span></div>
+        <div class="tile-thumb"><svg class="tile-fallback"><use href="#ai-notes"/></svg></div>
+      </div>
+
+      <!-- 13 · Music — windowless -->
+      <div class="tile is-windowless" style="width:230px" aria-label="Music, no windows">
+        <div class="tile-title"><svg class="aic"><use href="#ai-music"/></svg><span>Music</span></div>
+        <div class="tile-thumb"><svg class="tile-fallback"><use href="#ai-music"/></svg></div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

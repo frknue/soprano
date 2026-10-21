@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Soprano — Folio</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* window frame: fills the artboard */
+  .app { display: flex; flex-direction: column; }
+  .app > .titlebar { padding-left: 14px; }
+  .main { flex: 1; min-height: 0; display: flex; }
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .content > .tabbar { padding: 0 8px 0 6px; }
+  .content > .tabbar .badge { margin-left: 2px; }
+  .content > .split { flex: 1; min-height: 0; }
+
+  /* left sidebar */
+  .sidebar-header { padding: 0 8px; }
+  .sidebar-header .select { flex: 1; min-width: 0; font-weight: 500; }
+  .sidebar .section-heading { height: var(--h-sidebar-header); padding-right: 6px; }
+  .win-row { --row-h: var(--h-window-row); }
+  .win-row .row-title { font: var(--type-label-strong); }
+  .win-row.is-muted .row-title { color: var(--text-muted); }
+  .pane-row { --row-h: var(--h-pane-row); --indent: 18px; }
+  .pane-row .row-sub { padding-left: 16px; }
+  .pane-row .row-trail { gap: 6px; }
+  .pane-row .row-count { font-weight: 500; }
+  .sidebar .list { gap: 1px; }
+
+  /* split tree */
+  .split-col > .pane { flex: 1 1 0; }
+  .pane-left { flex: 0 0 56%; }
+  .pane-right { flex: 1; min-width: 0; }
+  .pane-body > .term { height: 100%; }
+  .pane-header > .pane-tabs { margin-left: -4px; }
+
+  /* terminal details */
+  .term .ln { display: inline-block; min-width: 100%; }
+  /* behind the ⌘P palette (?behind=1): the palette holds keyboard focus, so the window drops its pencil marks
+     (focus rule, sidebar tick, solid cursor); the focused header stays raised */
+  html.is-behind .pane.is-focused > .pane-header::after { display: none; }
+
+  /* status bar */
+  .statusbar .hints { gap: 12px; }
+  .statusbar .usage .sep { margin: 0 6px; color: var(--border-strong); }
+  .statusbar .mode-chip { margin-right: 2px; }
+</style>
+</head>
+<body class="artboard app">
+<script>
+  if (new URLSearchParams(location.search).has('behind')) {
+    document.documentElement.classList.add('is-behind');
+    document.addEventListener('DOMContentLoaded', function () {
+      document.querySelectorAll('.term .cursor').forEach(function (c) { c.className = 'cursor-hollow'; });
+      document.querySelectorAll('.list.is-focused').forEach(function (l) { l.classList.remove('is-focused'); });
+      document.querySelectorAll('.traffic').forEach(function (t) { t.classList.add('is-inactive'); });
+    });
+  }
+</script>
+
+<div class="titlebar">
+  <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+</div>
+
+<div class="main">
+  <!-- ============================================================ left sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header"><span class="select">soprano</span></div>
+    <div class="section-heading">Windows
+      <span class="section-actions">
+        <button class="btn-icon" title="Collapse All Windows"><i data-icon="collapse"></i></button>
+        <button class="btn-icon" title="New Window or Pane"><i data-icon="plus"></i></button>
+      </span>
+    </div>
+    <div class="sidebar-body">
+      <div class="list is-focused">
+        <div class="row win-row"><i data-icon="chevron-down" class="disclosure"></i><span class="row-title">soprano</span><span class="row-trail row-count">3 · <span class="is-attention">1!</span></span></div>
+
+        <div class="row row-2line pane-row is-selected">
+          <span class="row-line"><i class="status-dot is-working"></i><span class="row-title">Claude Code</span><span class="row-trail"><span class="status-label is-working">Working</span></span></span>
+          <span class="row-sub">⎇ feat/calm-chrome</span>
+        </div>
+        <div class="row row-2line pane-row">
+          <span class="row-line"><i class="status-dot is-needs-input"></i><span class="row-title">Codex</span><span class="row-trail"><span class="status-label is-needs-input">Needs input</span></span></span>
+          <span class="row-sub">⎇ feat/calm-chrome</span>
+        </div>
+        <div class="row row-2line pane-row">
+          <span class="row-line"><i class="status-dot is-running"></i><span class="row-title">zsh <span class="t-muted">· swift build</span></span><span class="row-trail"><span class="status-label is-running">Running</span></span></span>
+          <span class="row-sub">⎇ feat/calm-chrome · 2T</span>
+        </div>
+
+        <div class="row win-row is-muted"><i data-icon="chevron-right" class="disclosure"></i><span class="row-title">soprano-git</span><span class="row-trail row-count">2</span></div>
+        <div class="row win-row is-muted"><i data-icon="chevron-right" class="disclosure"></i><span class="row-title">valkental</span><span class="row-trail row-count">1</span></div>
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button class="btn-icon" title="Saved Workspaces"><i data-icon="history"></i></button>
+      <button class="btn-icon" title="Agent Dashboard"><i data-icon="chart-line"></i></button>
+      <button class="btn-icon" title="Settings" style="margin-left:auto"><i data-icon="gear"></i></button>
+    </div>
+  </aside>
+
+  <!-- ============================================================ content -->
+  <div class="content">
+    <div class="tabbar">
+      <div class="tab is-selected"><span class="tab-text">Claude Code</span><span class="badge is-needs-input"><i class="status-dot is-needs-input"></i>3</span><i data-icon="x" class="tab-close"></i></div>
+      <div class="tab"><span class="tab-text">omp web</span></div>
+      <i data-icon="plus" class="tab-add"></i>
+      <button class="btn-icon" style="margin-left:auto" title="Show Right Sidebar (⌘L)"><i data-icon="sidebar-right"></i></button>
+    </div>
+
+    <div class="split split-row">
+      <!-- Claude Code — focused -->
+      <section class="pane pane-left is-focused">
+        <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><span class="pane-actions"><span class="status-label is-working">Working</span><button class="btn-icon" title="Close active tab"><i data-icon="x"></i></button></span></header>
+        <div class="pane-body"><pre class="term"><span class="d">╭──────────────────────────────────────────────────╮</span>
+<span class="d">│</span> <span class="c3">✻</span> Welcome to <span class="b">Claude Code</span>!                        <span class="d">│</span>
+<span class="d">│   /help for help, /status for your current setup │</span>
+<span class="d">│   cwd: ~/git/private/soprano                     │</span>
+<span class="d">╰──────────────────────────────────────────────────╯</span>
+
+<span class="d">&gt;</span> Disable the sidebar's Collapse All button when every window is already collapsed.
+
+<span>⏺</span> I'll find where the sidebar builds its header buttons.
+
+<span class="c2">⏺</span> <span class="b">Search</span>(pattern: "collapseAllButton", path: "Sources/Soprano")
+  <span class="d">⎿  Found 3 files</span>
+
+<span class="c2">⏺</span> <span class="b">Read</span>(Sources/Soprano/Views/SidebarView.swift)
+  <span class="d">⎿  Read 512 lines</span>
+
+<span class="c2">⏺</span> <span class="b">Update</span>(Sources/Soprano/Views/SidebarView.swift)
+  <span class="d">⎿  Updated <span class="b">Sources/Soprano/Views/SidebarView.swift</span> with <span class="b">1</span> addition</span>
+       <span class="d">430</span>          rebuildSessionSelector()
+<span class="ln add-line">       <span class="d">431</span> <span class="c2">+</span>        collapseAllButton.isEnabled = agentManager.activeSessionWindows</span>
+<span class="ln add-line">                        .contains { !$0.isSidebarCollapsed }</span>
+       <span class="d">432</span>
+
+<span class="d">⏺</span> <span class="b">Bash</span>(swift test --filter SidebarCollapseAllTests)
+  <span class="d">⎿  Running…</span>
+
+<span class="c3">✻ Brewing…</span> <span class="d">(38s · ↑ 2.1k tokens · <span class="b">esc</span> to interrupt)</span>
+
+<span class="d">╭──────────────────────────────────────────────────╮</span>
+<span class="d">│</span> &gt; <span class="cursor"> </span>                                              <span class="d">│</span>
+<span class="d">╰──────────────────────────────────────────────────╯</span>
+  <span class="d">? for shortcuts</span></pre></div>
+      </section>
+
+      <i class="split-divider is-vertical"></i>
+
+      <div class="split split-col pane-right">
+        <!-- Codex — needs input + unread attention -->
+        <section class="pane is-attention is-needs-input">
+          <header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><span class="pane-actions"><span class="status-label is-needs-input">Needs input</span><button class="btn-icon" title="Close active tab"><i data-icon="x"></i></button></span></header>
+          <div class="pane-body"><pre class="term"><span class="b">&gt;_ OpenAI Codex</span> <span class="d">(v0.46.0)</span>
+<span class="d">   model: </span>gpt-5-codex<span class="d">   directory: </span>~/git/private/soprano
+
+<span class="d">›</span> Rename ThemeColors.bgRaised to bgElevated and update the vendored
+  copies.
+
+<span class="c2">•</span> <span class="b">Explored</span>
+  <span class="d">└</span> <span class="c6">Search</span> bgRaised in Sources
+    <span class="c6">Read</span> Theme.swift, RetroChrome.swift
+
+<span class="c2">•</span> I need to run a command outside the workspace:
+
+  <span class="c6">$ rg -l "bgRaised" ../soprano-git ../soprano-cast ../soprano-tab</span>
+
+<span class="c3">▌</span> <span class="b c3">Allow command?</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes, run it</span>
+<span class="c3">▌</span>   2. Yes, and don't ask again for <span class="c6">rg</span>
+<span class="c3">▌</span>   3. No, tell Codex what to do differently
+
+  <span class="d">Press <span class="b">enter</span> to confirm or <span class="b">esc</span> to cancel</span></pre></div>
+        </section>
+
+        <i class="split-divider is-horizontal"></i>
+
+        <!-- zsh — running swift build, 2 pane tabs -->
+        <section class="pane is-dimmed">
+          <header class="pane-header"><div class="pane-tabs"><span class="pane-tab is-active is-running">swift build</span><span class="pane-tab">zsh</span></div><span class="pane-actions"><span class="status-label is-running">Running</span><button class="btn-icon" title="Close active tab"><i data-icon="x"></i></button></span></header>
+          <div class="pane-body"><pre class="term"><span class="c4">~/git/private/soprano</span> on <span class="c5">feat/calm-chrome</span>
+<span class="c2">❯</span> swift build
+Building for debugging...
+[409/538] Compiling Soprano LayoutTabBarView.swift
+[410/538] Compiling Soprano PaneHeaderView.swift
+[411/538] Compiling Soprano SidebarView.swift
+[412/538] Compiling Soprano StatusBarView.swift
+[413/538] Compiling Soprano RetroChrome.swift
+[414/538] Compiling Soprano SplitTreeView.swift
+<span class="cursor-hollow"> </span></pre></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ status bar -->
+<footer class="statusbar">
+  <span class="mode-chip is-normal">Normal</span>
+  <span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb is-current">Claude Code</span><span class="crumb">· Tab 1</span></span>
+  <span class="statusbar-spacer"></span>
+  <span class="counts">1 session · 3 windows · 6 panes · <span class="is-attention">1 needs you</span></span>
+  <span class="usage">Claude <span class="pct">42%</span> · 2h 10m<span class="sep">|</span>Codex <span class="pct is-warn">71%</span> · 3d 4h</span>
+  <span class="hints"><span class="hint"><span class="kbd kbd-sm">⌘P</span>Commands</span><span class="hint"><span class="kbd kbd-sm">⌃A</span>Prefix</span></span>
+</footer>
+</body>
+</html>

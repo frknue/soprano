@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Soprano Git">
+  <title>Soprano Git</title>
+  <defs>
+    <linearGradient id="sq" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26292e"/>
+      <stop offset="1" stop-color="#1b1d21"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sq)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-width="1"/>
+  <g fill="none" stroke="#cfc8b6" stroke-opacity="0.85" stroke-width="56" stroke-linecap="round">
+    <path d="M372 300 V724"/>
+    <path d="M372 650 C372 520 652 560 652 380"/>
+  </g>
+  <rect x="316" y="244" width="112" height="112" rx="36" fill="#cfc8b6" fill-opacity="0.85"/>
+  <rect x="316" y="456" width="112" height="112" rx="36" fill="#cfc8b6" fill-opacity="0.85"/>
+  <rect x="316" y="668" width="112" height="112" rx="36" fill="#cfc8b6" fill-opacity="0.85"/>
+  <rect x="586" y="232" width="132" height="132" rx="40" fill="#e8873a"/>
+</svg>

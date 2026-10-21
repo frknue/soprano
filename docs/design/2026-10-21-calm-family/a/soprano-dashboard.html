@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Quiet · Soprano · Agent Dashboard</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+
+  /* titlebar band + dashboard header read as one bgPanel toolbar; the overlay fills everything below the band */
+  .dash-header {
+    flex: none; display: flex; align-items: center; gap: var(--s-12);
+    height: var(--h-dash-header); padding: 0 var(--s-24);
+    background: var(--bg-panel); box-shadow: inset 0 -1px 0 var(--border-subtle);
+  }
+  .dash-header .t-prose { margin-top: 2px; }
+  .dash-header .btn { margin-left: auto; }
+
+  .dash-body {
+    flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s-16);
+    padding: var(--s-24);
+  }
+  .tallies { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-8); }
+  .tally-label .status-dot { width: var(--dot-sm); height: var(--dot-sm); }
+
+  .dash-main { flex: 1; min-height: 0; display: grid; grid-template-columns: 440px 1fr; gap: var(--s-16); }
+  .dash-card { min-height: 0; display: flex; flex-direction: column; border-radius: var(--r-card); background: var(--card-bg); box-shadow: inset 0 0 0 1px var(--card-border); overflow: hidden; }
+
+  /* agent list */
+  .list-head { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 var(--s-12) 0 var(--s-16); }
+  .list-head .row-count { margin-left: 0; }
+  .list-head .hints { margin-left: auto; gap: var(--s-12); }
+  .dash-card .list { padding: 0 0 4px; }
+  .agent-row { padding: 0 12px 0 14px; gap: 12px; }
+  .agent-row + .agent-row { margin-top: 2px; }
+  .agent-row .row-main { gap: 5px; }
+  .agent-row .line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .agent-row .row-title { flex: 1; font: var(--type-row-strong); }
+  .agent-row .row-sub { display: block; white-space: nowrap; }
+  .agent-row .sep { color: var(--text-muted); font-weight: 400; padding: 0 2px; }
+  .agent-row .t-meta { display: inline-flex; align-items: center; gap: 6px; flex: none; min-width: 56px; justify-content: flex-end; }
+
+  /* detail */
+  .detail-head { flex: none; display: flex; align-items: center; gap: var(--s-16); padding: 18px var(--s-24) 16px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .detail-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .detail-title .line { display: flex; align-items: center; gap: 10px; }
+  .detail-title .t-meta .sep { padding: 0 2px; }
+  .detail-actions { margin-left: auto; display: flex; gap: var(--s-8); }
+
+  .tl-head { flex: none; display: flex; align-items: center; gap: var(--s-12); height: 40px; padding: 4px var(--s-24) 0; }
+  .tl-head .hints { margin-left: auto; gap: var(--s-12); }
+  /* "now" strip: 26 px under the Timeline heading (heading.bottom + 9 in the app). Neutral 1 px edge —
+     in Quiet a colored frame reads as focus — so only the ▶ glyph carries the activity tone */
+  .now {
+    flex: none; display: flex; align-items: center; gap: 8px; height: 26px; margin: 4px var(--s-24) 0; padding: 0 10px;
+    border-radius: var(--r-control); white-space: nowrap; font: 400 12px/18px var(--font-mono); color: var(--text-primary);
+    box-shadow: inset 0 0 0 1px var(--border-subtle);
+  }
+  .now .now-label { font: var(--type-label); color: var(--text-muted); margin-right: 4px; }
+  .now .g { font-weight: 700; color: var(--success); }
+  .now .meta { color: var(--text-muted); }
+
+  .timeline { flex: 1; min-height: 0; overflow: hidden; padding: 12px var(--s-24) 0; font: 400 12px/18px var(--font-mono); color: var(--text-primary); }
+  .tl-you { padding: 8px 12px 9px; border-radius: var(--r-control); background: var(--selection); margin-bottom: 16px; }
+  .tl-you .who { font: var(--type-label); color: var(--text-primary); }
+  .tl-you .who .t-meta { margin-left: 8px; }
+  .tl-you .msg { margin-top: 4px; }
+  .tl-thinking { font-style: italic; color: var(--text-muted); margin-bottom: 10px; }
+  .tl-tool { display: grid; grid-template-columns: 2ch 8ch 1fr; white-space: pre; margin-bottom: 8px; }
+  .tl-tool .g { font-weight: 700; color: var(--text-muted); }
+  .tl-tool .g.is-running { color: var(--success); }
+  .tl-tool .name { font-weight: 600; color: var(--text-muted); }
+  .tl-tool .meta { color: var(--text-muted); }
+  .tl-tool .add { color: var(--success); }
+  .tl-diff {
+    margin: 0 0 10px 10ch; border-radius: var(--r-row); overflow: hidden;
+    background: var(--bg-base); box-shadow: inset 0 0 0 1px var(--border-subtle);
+    --gutter-w: 48px;
+  }
+  .tl-diff .diff { background: transparent; }
+  .tl-diff .gutter { background: transparent; }
+
+  .reply { flex: none; padding: var(--s-12) var(--s-24) var(--s-16); box-shadow: inset 0 1px 0 var(--border-subtle); }
+  .reply-line { display: flex; align-items: center; gap: var(--s-8); }
+  .reply-line .field { flex: 1; }
+  .reply-line .btn-primary { min-width: 70px; }
+  .reply .t-prose { margin-top: 6px; }
+</style>
+</head>
+<body class="artboard">
+
+  <div class="titlebar">
+    <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+  </div>
+
+  <header class="dash-header">
+    <span class="t-screen">Agent Dashboard</span>
+    <span class="t-prose">Monitoring 4 agents across 3 windows</span>
+    <button class="btn">Done <span class="hint-key">esc</span></button>
+  </header>
+
+  <main class="dash-body">
+    <section class="tallies">
+      <div class="tally"><span class="tally-value">4</span><span class="tally-label">Total</span></div>
+      <div class="tally"><span class="tally-value">1</span><span class="tally-label"><i class="status-dot is-working"></i>Working</span></div>
+      <div class="tally"><span class="tally-value">1</span><span class="tally-label is-needs-input"><i class="status-dot is-needs-input"></i>Needs input</span></div>
+      <div class="tally"><span class="tally-value">1</span><span class="tally-label is-error"><i class="status-dot is-error"></i>Errors</span></div>
+    </section>
+
+    <section class="dash-main">
+      <!-- agent list: owns keyboard focus → selected row carries the accent tick -->
+      <div class="dash-card">
+        <div class="list-head">
+          <span class="t-eyebrow">Agents</span><span class="row-count">4</span>
+          <span class="hints">
+            <span class="hint"><kbd class="kbd">J</kbd><kbd class="kbd">K</kbd>select</span>
+            <span class="hint"><kbd class="kbd">⇥</kbd>reply</span>
+            <span class="hint"><kbd class="kbd">↵</kbd>open</span>
+          </span>
+        </div>
+        <div class="list is-focused">
+          <div class="row agent-row is-selected">
+            <i class="status-dot is-working"></i>
+            <div class="row-main">
+              <div class="line"><span class="row-title">soprano<span class="sep"> › </span>Claude Code</span><span class="status-label">Working</span><span class="t-meta">4m 12s</span></div>
+              <span class="row-sub">Bash · swift test --filter SidebarCollapseAllTests</span>
+            </div>
+          </div>
+          <div class="row agent-row">
+            <i class="status-dot is-needs-input"></i>
+            <div class="row-main">
+              <div class="line"><span class="row-title">soprano<span class="sep"> › </span>Codex</span><span class="status-label is-needs-input">Needs input</span><span class="t-meta"><i class="attention-dot"></i>1m 03s</span></div>
+              <span class="row-sub">Allow command? rg -l "bgRaised" …</span>
+            </div>
+          </div>
+          <div class="row agent-row">
+            <i class="status-dot is-ready"></i>
+            <div class="row-main">
+              <div class="line"><span class="row-title">soprano-git<span class="sep"> › </span>Claude Code</span><span class="status-label">Ready</span><span class="t-meta">12m</span></div>
+              <span class="row-sub">Turn finished · 3 files changed</span>
+            </div>
+          </div>
+          <div class="row agent-row">
+            <i class="status-dot is-error"></i>
+            <div class="row-main">
+              <div class="line"><span class="row-title">valkental<span class="sep"> › </span>omp</span><span class="status-label is-error">Error</span><span class="t-meta">2m 40s</span></div>
+              <span class="row-sub">Turn failed: 429 rate limited</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- detail for the selected agent -->
+      <div class="dash-card">
+        <div class="detail-head">
+          <div class="detail-title">
+            <div class="line">
+              <span class="t-title">soprano</span>
+              <span class="status"><i class="status-dot is-working"></i><span class="status-label">Working</span></span>
+              <span class="t-meta">4m 12s</span>
+            </div>
+            <span class="t-meta">soprano<span class="sep"> › </span>Claude Code · ~/git/private/soprano</span>
+          </div>
+          <div class="detail-actions">
+            <button class="btn">Open</button>
+            <button class="btn">Stop</button>
+            <button class="btn">Restart</button>
+            <button class="btn">Terminal <span class="hint-key">T</span></button>
+          </div>
+        </div>
+
+        <div class="tl-head">
+          <span class="t-eyebrow">Timeline</span>
+          <span class="status"><i class="status-dot is-working"></i><span class="status-label">Live</span></span>
+          <span class="hints">
+            <span class="hint"><kbd class="kbd">⇧J</kbd><kbd class="kbd">⇧K</kbd>scroll</span>
+            <span class="hint"><kbd class="kbd">[</kbd><kbd class="kbd">]</kbd>turn</span>
+            <span class="hint"><kbd class="kbd">O</kbd>details</span>
+            <span class="hint"><kbd class="kbd">G</kbd>live</span>
+          </span>
+        </div>
+
+        <div class="now"><span class="now-label">now</span><span class="g">▶</span><span>Bash · swift test --filter SidebarCollapseAllTests<span class="meta"> · 38s</span></span></div>
+
+        <div class="timeline">
+          <div class="tl-you">
+            <div class="who">You<span class="t-meta">21:41</span></div>
+            <div class="msg">Disable the sidebar's Collapse All button when every window is already collapsed.</div>
+          </div>
+          <div class="tl-thinking">▸ Thinking</div>
+          <div class="tl-tool"><span class="g">✓</span><span class="name">Search</span><span>collapseAllButton<span class="meta"> · 0.4s</span></span></div>
+          <div class="tl-tool"><span class="g">✓</span><span class="name">Read</span><span>SidebarView.swift<span class="meta"> · 0.1s</span></span></div>
+          <div class="tl-tool"><span class="g">✓</span><span class="name">Update</span><span>SidebarView.swift<span class="meta"> · 0.2s</span>  <span class="add">+1</span> <span class="meta">−0</span></span></div>
+          <div class="tl-diff">
+            <div class="diff">
+              <div class="diff-row is-ctx"><span class="gutter">430</span><span class="marker"></span><span class="code">        rebuildSessionSelector()</span></div>
+              <div class="diff-row is-add"><span class="gutter">431</span><span class="marker">+</span><span class="code">        collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }</span></div>
+              <div class="diff-row is-ctx"><span class="gutter">432</span><span class="marker"></span><span class="code"></span></div>
+            </div>
+          </div>
+          <div class="tl-tool"><span class="g is-running">▶</span><span class="name">Bash</span><span>swift test --filter SidebarCollapseAllTests<span class="meta">  running…</span></span></div>
+        </div>
+
+        <div class="reply">
+          <div class="reply-line">
+            <div class="field t-input"><span class="field-input placeholder">Reply to Claude Code…</span></div>
+            <button class="btn-primary is-disabled">Send</button>
+          </div>
+          <div class="t-prose">Press Return to send this single-line reply.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+</body>
+</html>

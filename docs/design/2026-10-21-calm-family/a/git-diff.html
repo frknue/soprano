@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Soprano Git — split diff — Quiet</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+
+/* ---- artboard: the Soprano Git window content, 1512×982 ---- */
+html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+body { display: flex; flex-direction: column; background: var(--bg-base); color: var(--text-primary); font: var(--type-row); }
+
+/* tab bar: traffic lights inset, repo tabs from x=78 (current-tab idiom) */
+.tabbar .traffic { align-self: center; margin: 0 14px 0 12px; }
+.tab { min-width: 108px; }
+.tab .tab-index { color: var(--text-muted); margin-right: 6px; }
+.tabbar > .tab-add { margin-left: 6px; }
+
+/* toolbar sits on the surface the selected tab controls, so the tab flows into it */
+.toolbar { background: var(--bg-base); }
+.toolbar .repo { font: var(--type-row-strong); color: var(--text-primary); }
+.toolbar .btn-plain { gap: 8px; }
+.toolbar .spacer { flex: 1; }
+.toolbar .btn-plain .icon { --icon-size: 13px; color: var(--text-muted); }
+
+/* three regions */
+.workspace { flex: 1; min-height: 0; display: flex; }
+.center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+.commit-panel { flex: none; width: var(--git-w-commit-panel); }
+.commit-panel .panel-header .hint { margin-left: auto; font: var(--type-label); }
+
+/* commit detail */
+.detail { padding: 12px 12px 0; }
+.detail .summary { font: var(--type-title); color: var(--text-primary); margin: 0; }
+.detail .refs-line { display: flex; gap: 4px; margin: 10px 0 12px; }
+.meta { display: grid; grid-template-columns: 60px 1fr; row-gap: 6px; margin: 0; font: var(--type-row); }
+.meta dt { font: var(--type-label); color: var(--text-muted); }
+.meta dd { margin: 0; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta .sha-link { text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.commit-panel .section-heading { padding-top: 20px; }
+.commit-panel .list { padding-top: 0; }
+.commit-panel .list .row { gap: 6px; padding: 0 6px; }
+.file-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-path .dir { color: var(--text-muted); }
+.file-path .name { font-weight: 500; }
+
+/* status bar */
+.statusbar .status { gap: 6px; }
+.statusbar .hints { gap: 14px; }
+.statusbar .branch { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar .branch .icon { --icon-size: 11px; }
+
+
+.commit-panel { width: 340px; }
+
+/* ---- diff header ---- */
+.diff-head { height: var(--git-h-panel-header); gap: 8px; padding-right: 6px; }
+.diff-head .path { font: var(--type-row); color: var(--text-primary); white-space: nowrap; }
+.diff-head .path .dir { color: var(--text-muted); }
+.diff-head .path .name { font-weight: 500; }
+.diff-head .spacer { flex: 1; }
+.diff-head .counter { font: var(--type-meta); color: var(--text-muted); font-variant-numeric: tabular-nums; margin-right: 2px; }
+.diff-head .btn-plain { color: var(--text-primary); gap: 6px; }
+.diff-head .btn-plain .icon { --icon-size: 12px; color: var(--text-muted); }
+.diff-head .segmented { height: 22px; padding: 1px; }
+.diff-head .segment { height: 18px; padding: 0 8px; }
+.diff-head .group { display: inline-flex; align-items: center; gap: 6px; }
+.diff-head .divider-v { margin: 0 4px; }
+.sha-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--r-row); box-shadow: inset 0 0 0 1px var(--border-subtle); font: var(--type-meta); color: var(--text-primary); }
+
+/* ---- split diff body ---- */
+.diff-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.diff .diff-row { grid-template-columns: 34px 14px minmax(0, 1fr); }
+.diff .gutter { padding-right: 6px; }
+.diff .diff-row.is-hunk .code { padding-left: 4px; }
+.pair { display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr); }
+.pair-sep { background: var(--border-subtle); }
+
+</style>
+</head>
+<body>
+<div class="tabbar">
+  <div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div>
+  <div class="tab is-selected"><span class="tab-title"><span class="tab-index">1</span>soprano</span></div>
+  <button class="btn-icon tab-add" title="New tab"><i data-icon="plus"></i></button>
+</div>
+<div class="toolbar">
+  <span class="repo">soprano</span>
+  <span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑0</span><span class="behind">↓0</span></span>
+  <div class="toolbar-group"><button class="btn-plain">Pull <span class="hint-key">⌃A P</span></button><button class="btn-plain">Push <span class="hint-key">⌃A ⇧P</span></button></div>
+  <div class="toolbar-group"><button class="btn-plain">Branch <span class="hint-key">⌘B</span></button></div>
+  <div class="toolbar-group"><button class="btn-plain is-disabled">Stash <span class="hint-key">⌃A S</span></button><button class="btn-plain is-disabled">Pop <span class="hint-key">⌃A ⇧S</span></button></div>
+  <span class="spacer"></span>
+  <button class="btn-plain"><i data-icon="search"></i>Commands <span class="hint-key">⌘P</span></button>
+</div>
+<div class="workspace">
+  <main class="center region is-focused">
+    <div class="panel-header is-focused diff-head">
+      <span class="kind kind-M">M</span><span class="path"><span class="dir">Sources/Soprano/Views/</span><span class="name">SidebarView.swift</span></span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span>
+      <span class="spacer"></span>
+      <span class="counter">Hunk 3/4</span>
+      <button class="btn-plain btn-sm"><i data-icon="arrow-up"></i>Prev <span class="hint-key">K</span></button>
+      <button class="btn-plain btn-sm"><i data-icon="arrow-down"></i>Next <span class="hint-key">J</span></button>
+      <span class="divider-v"></span>
+      <span class="sha-chip">d78be48</span>
+      <span class="group"><span class="segmented"><span class="segment is-active">Split</span><span class="segment">Inline</span></span><span class="hint-key">V</span></span>
+      <button class="btn-plain btn-sm">Close <span class="hint-key">esc</span></button>
+    </div>
+    <div class="diff-body diff is-wrap">
+      <div class="diff-row is-hunk"><span class="gutter"></span><span class="marker"></span><span class="code">@@ -23,6 +23,7 @@  <span class="hunk-section">final class SidebarView: NSView {</span></span></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">23</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> settingsButton: <span class="syn-type">RetroIconButton</span>!</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">23</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> settingsButton: <span class="syn-type">RetroIconButton</span>!</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">24</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> dashboardButton: <span class="syn-type">RetroIconButton</span>!</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">24</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> dashboardButton: <span class="syn-type">RetroIconButton</span>!</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">25</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> plusButton: <span class="syn-type">RetroIconButton</span>!</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">25</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> plusButton: <span class="syn-type">RetroIconButton</span>!</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">26</span><span class="marker">+</span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> collapseAllButton: <span class="syn-type">RetroIconButton</span>!</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">26</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> sessionsButton: <span class="syn-type">RetroIconButton</span>!</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">27</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> sessionsButton: <span class="syn-type">RetroIconButton</span>!</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">27</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> isResizeHighlighted = <span class="syn-kw">false</span></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">28</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> isResizeHighlighted = <span class="syn-kw">false</span></span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">28</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> isControlKeyHeld = <span class="syn-kw">false</span></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">29</span><span class="marker"></span><span class="code">    <span class="syn-kw">private</span> <span class="syn-kw">var</span> isControlKeyHeld = <span class="syn-kw">false</span></span></div></div>
+      <div class="diff-row is-hunk"><span class="gutter"></span><span class="marker"></span><span class="code">@@ -111,6 +112,15 @@  <span class="hunk-section">final class SidebarView: NSView {</span></span></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">111</span><span class="marker"></span><span class="code">        )</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">112</span><span class="marker"></span><span class="code">        )</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">112</span><span class="marker"></span><span class="code">        contentContainer.<span class="syn-fn">addSubview</span>(plusButton)</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">113</span><span class="marker"></span><span class="code">        contentContainer.<span class="syn-fn">addSubview</span>(plusButton)</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">113</span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">114</span><span class="marker"></span><span class="code"></span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">115</span><span class="marker">+</span><span class="code">        collapseAllButton = <span class="syn-type">RetroIconButton</span>(</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">116</span><span class="marker">+</span><span class="code">            symbolName: <span class="syn-str">&quot;rectangle.compress.vertical&quot;</span>,</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">117</span><span class="marker">+</span><span class="code">            accessibilityLabel: <span class="syn-str">&quot;Collapse All Windows&quot;</span>,</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">118</span><span class="marker">+</span><span class="code">            pointSize: <span class="syn-num">12</span>,</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">119</span><span class="marker">+</span><span class="code">            target: <span class="syn-kw">self</span>,</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">120</span><span class="marker">+</span><span class="code">            action: <span class="syn-kw">#selector</span>(collapseAllClicked)</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">121</span><span class="marker">+</span><span class="code">        )</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">122</span><span class="marker">+</span><span class="code">        contentContainer.<span class="syn-fn">addSubview</span>(collapseAllButton)</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">123</span><span class="marker">+</span><span class="code"></span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">114</span><span class="marker"></span><span class="code">        scrollView = <span class="syn-type">NSScrollView</span>()</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">124</span><span class="marker"></span><span class="code">        scrollView = <span class="syn-type">NSScrollView</span>()</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">115</span><span class="marker"></span><span class="code">        scrollView.drawsBackground = <span class="syn-kw">false</span></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">125</span><span class="marker"></span><span class="code">        scrollView.drawsBackground = <span class="syn-kw">false</span></span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">116</span><span class="marker"></span><span class="code">        scrollView.hasVerticalScroller = <span class="syn-kw">true</span></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">126</span><span class="marker"></span><span class="code">        scrollView.hasVerticalScroller = <span class="syn-kw">true</span></span></div></div>
+      <div class="diff-row is-hunk is-current"><span class="gutter"></span><span class="marker"></span><span class="code">@@ -176,7 +186,7 @@  <span class="hunk-section">final class SidebarView: NSView {</span></span></div>
+      <div class="pair"><div class="diff-row is-ctx is-current"><span class="gutter">176</span><span class="marker"></span><span class="code">            sessionSelector.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: contentContainer.trailingAnchor, constant: <span class="syn-num">-10</span>),</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">186</span><span class="marker"></span><span class="code">            sessionSelector.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: contentContainer.trailingAnchor, constant: <span class="syn-num">-10</span>),</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx is-current"><span class="gutter">177</span><span class="marker"></span><span class="code">            headerView.topAnchor.<span class="syn-fn">constraint</span>(equalTo: sessionSelector.bottomAnchor, constant: <span class="syn-num">14</span>),</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">187</span><span class="marker"></span><span class="code">            headerView.topAnchor.<span class="syn-fn">constraint</span>(equalTo: sessionSelector.bottomAnchor, constant: <span class="syn-num">14</span>),</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx is-current"><span class="gutter">178</span><span class="marker"></span><span class="code">            headerView.leadingAnchor.<span class="syn-fn">constraint</span>(equalTo: contentContainer.leadingAnchor, constant: <span class="syn-num">14</span>),</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">188</span><span class="marker"></span><span class="code">            headerView.leadingAnchor.<span class="syn-fn">constraint</span>(equalTo: contentContainer.leadingAnchor, constant: <span class="syn-num">14</span>),</span></div></div>
+      <div class="pair"><div class="diff-row is-del is-current"><span class="gutter">179</span><span class="marker">−</span><span class="code">            headerView.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: <span class="w-del">plusButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">189</span><span class="marker">+</span><span class="code">            headerView.trailingAnchor.<span class="syn-fn">constraint</span>(equalTo: <span class="w-add">collapseAllButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx is-current"><span class="gutter">180</span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">190</span><span class="marker"></span><span class="code"></span></div></div>
+      <div class="pair"><div class="diff-row is-ctx is-current"><span class="gutter">181</span><span class="marker"></span><span class="code">            scrollView.topAnchor.<span class="syn-fn">constraint</span>(equalTo: headerView.bottomAnchor, constant: <span class="syn-num">8</span>),</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">191</span><span class="marker"></span><span class="code">            scrollView.topAnchor.<span class="syn-fn">constraint</span>(equalTo: headerView.bottomAnchor, constant: <span class="syn-num">8</span>),</span></div></div>
+      <div class="diff-row is-hunk"><span class="gutter"></span><span class="marker"></span><span class="code">@@ -269,6 +282,10 @@  <span class="hunk-section">final class SidebarView: NSView {</span></span></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">269</span><span class="marker"></span><span class="code">        <span class="syn-fn">onDashboardRequested</span>?()</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">282</span><span class="marker"></span><span class="code">        <span class="syn-fn">onDashboardRequested</span>?()</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">270</span><span class="marker"></span><span class="code">    }</span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">283</span><span class="marker"></span><span class="code">    }</span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">271</span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">284</span><span class="marker"></span><span class="code"></span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">285</span><span class="marker">+</span><span class="code">    <span class="syn-attr">@objc</span> <span class="syn-kw">private</span> <span class="syn-kw">func</span> <span class="syn-fn">collapseAllClicked</span>() {</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">286</span><span class="marker">+</span><span class="code">        agentManager.<span class="syn-fn">collapseAllSidebarWindows</span>()</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">287</span><span class="marker">+</span><span class="code">    }</span></div></div>
+      <div class="pair"><div class="diff-row is-filler"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div><span class="pair-sep"></span><div class="diff-row is-add"><span class="gutter">288</span><span class="marker">+</span><span class="code"></span></div></div>
+      <div class="pair"><div class="diff-row is-ctx"><span class="gutter">272</span><span class="marker"></span><span class="code">    <span class="syn-com">// MARK: - Menus</span></span></div><span class="pair-sep"></span><div class="diff-row is-ctx"><span class="gutter">289</span><span class="marker"></span><span class="code">    <span class="syn-com">// MARK: - Menus</span></span></div></div>
+    </div>
+  </main>
+  <aside class="sidebar is-right commit-panel region">
+    <div class="panel-header">Commit d78be48<span class="hint"><kbd class="kbd">Y</kbd>copy</span></div>
+    <div class="detail">
+      <p class="summary">feat: add Collapse All Windows button to the left sidebar</p>
+      <div class="refs-line"><span class="ref-pill lane-0 is-head"><i data-icon="check"></i><i data-icon="laptop"></i>main</span><span class="ref-pill lane-0"><i data-icon="cloud"></i>origin/main</span></div>
+      <dl class="meta">
+        <dt>Author</dt><dd>frknue <span class="fg-muted">&lt;furkan.uelker@hotmail.com&gt;</span></dd>
+        <dt>Date</dt><dd>2026-10-20 21:48 <span class="fg-muted">· 20h ago</span></dd>
+        <dt>Parent</dt><dd><span class="sha-link">f55ec9e</span></dd>
+      </dl>
+    </div>
+    <div class="section-heading">Files<span class="row-count">4</span></div>
+    <div class="list">
+      <div class="row"><span class="kind kind-M">M</span><span class="file-path"><span class="name">CHANGELOG.md</span></span><span class="diffstat"><span class="add">+2</span> <span class="del">−0</span></span></div>
+      <div class="row"><span class="kind kind-M">M</span><span class="file-path"><span class="dir">…/Controllers/</span><span class="name">AgentManager.swift</span></span><span class="diffstat"><span class="add">+10</span> <span class="del">−0</span></span></div>
+      <div class="row is-selected"><span class="kind kind-M">M</span><span class="file-path"><span class="dir">…/Soprano/Views/</span><span class="name">SidebarView.swift</span></span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+      <div class="row"><span class="kind kind-A">A</span><span class="file-path"><span class="dir">…/</span><span class="name">SidebarCollapseAllTests.swift</span></span><span class="diffstat"><span class="add">+57</span> <span class="del">−0</span></span></div>
+    </div>
+  </aside>
+
+</div>
+<div class="statusbar is-git">
+  <span class="mode-chip is-normal">Normal</span>
+  <span class="status"><i class="status-dot sm is-working"></i><span class="fg-primary">Ready</span></span>
+  <span class="statusbar-spacer"></span>
+  <span class="hints"><span class="hint"><span class="hint-key">J K</span>change</span><span class="hint"><span class="hint-key">⇧J ⇧K</span>file</span><span class="hint"><span class="hint-key">V</span>split</span><span class="hint"><span class="hint-key">esc</span>close</span></span>
+  <span class="divider-v"></span>
+  <span class="branch"><i data-icon="git-branch"></i>main · 204 commits</span>
+</div>
+</body>
+</html>

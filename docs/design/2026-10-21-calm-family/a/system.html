@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Design A · Quiet — design system</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<script src="meta.js"></script>
+<style>
+  html, body { width: 1512px; margin: 0; }
+  html { overflow-x: hidden; }
+  body { background: var(--bg-base); color: var(--text-primary); }
+  .sheet { width: 1512px; padding: 48px 56px 96px; }
+  .sheet h2 { font: var(--type-screen); letter-spacing: var(--tracking-screen); margin: 0 0 4px; }
+  .sheet .lede { font: var(--type-prose); color: var(--text-muted); margin: 0 0 20px; max-width: 900px; font-size: 13px; line-height: 19px; }
+  .sheet section.block { padding: 40px 0 8px; border-top: 1px solid var(--border-subtle); margin-top: 40px; }
+  .cols-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+  .cols-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .panel { border-radius: var(--r-card); padding: 20px; box-shadow: inset 0 0 0 1px var(--border-subtle); background: var(--bg-base); color: var(--text-primary); }
+  .panel-label { font: var(--type-eyebrow); color: var(--text-muted); margin-bottom: 12px; display: flex; gap: 8px; align-items: center; }
+  table.spec { width: 100%; border-collapse: collapse; font: var(--type-row); }
+  table.spec th { text-align: left; font: var(--type-label); color: var(--text-muted); padding: 6px 8px; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  table.spec td { padding: 6px 8px; vertical-align: middle; box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  table.spec td.mono { white-space: nowrap; }
+  .sw { display: inline-block; width: 28px; height: 18px; border-radius: var(--r-row); box-shadow: inset 0 0 0 1px var(--border-strong); vertical-align: middle; }
+  .sw-check { background-image: linear-gradient(45deg, var(--bg-overlay) 25%, transparent 25%, transparent 75%, var(--bg-overlay) 75%), linear-gradient(45deg, var(--bg-overlay) 25%, transparent 25%, transparent 75%, var(--bg-overlay) 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; }
+  .sw-fill { display: block; width: 100%; height: 100%; border-radius: var(--r-row); }
+  .hero { display: flex; align-items: flex-end; gap: 32px; }
+  .hero .wordmark { font-size: 64px; }
+  .tagline { font: 400 15px/22px var(--font-sans); color: var(--text-muted); max-width: 720px; }
+  ol.principles { margin: 24px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; counter-reset: p; }
+  ol.principles li { counter-increment: p; padding: 14px 16px; border-radius: var(--r-card); background: var(--card-bg); box-shadow: inset 0 0 0 1px var(--card-border); font: var(--type-prose); color: var(--text-primary); font-size: 13px; line-height: 19px; }
+  ol.principles li::before { content: counter(p); display: block; font: var(--type-eyebrow); color: var(--text-muted); margin-bottom: 4px; }
+  .ansi-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin: 12px 0; }
+  .ansi-cell { border-radius: var(--r-row); height: 44px; box-shadow: inset 0 0 0 1px var(--border-subtle); display: flex; align-items: flex-end; padding: 4px 6px; font: var(--type-meta); }
+  .ansi-cap { font: var(--type-meta); color: var(--text-muted); margin-top: 2px; }
+  .type-row td:first-child { width: 220px; color: var(--text-muted); font: var(--type-label); }
+  .type-row td:last-child { width: 360px; color: var(--text-muted); font: var(--type-meta); }
+  .space-bar { display: inline-block; height: 12px; background: var(--text-muted); opacity: .5; border-radius: 2px; vertical-align: middle; }
+  .radius-box { width: 96px; height: 64px; background: var(--bg-raised); box-shadow: inset 0 0 0 1px var(--border-strong); display: flex; align-items: flex-end; padding: 6px 8px; font: var(--type-meta); color: var(--text-muted); }
+  .elev { height: 96px; border-radius: var(--r-card); display: flex; align-items: flex-end; padding: 10px 12px; font: var(--type-meta); color: var(--text-muted); }
+  .spec-card { border-radius: var(--r-card); box-shadow: inset 0 0 0 1px var(--border-subtle); padding: 14px 16px 16px; min-width: 0; }
+  .spec-card > .cls { font: var(--type-meta); color: var(--text-muted); margin-bottom: 10px; display: block; }
+  .spec-card .stack { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .spec-card .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .gallery { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  .gallery .span-2 { grid-column: span 2; }
+  .gallery .span-3 { grid-column: span 3; }
+  .mode-section { border-radius: 12px; padding: 24px; margin-top: 16px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .mode-section > .panel-label { font-size: 12px; }
+  .grid-demo { display: flex; height: 260px; box-shadow: inset 0 0 0 1px var(--border-strong); }
+  .mini-term { font: 400 11px/15px var(--font-mono); padding: 6px 8px; }
+  .state-table td { height: 40px; }
+  .state-table .mini-header { display: flex; align-items: center; gap: 8px; width: 250px; height: 26px; padding: 0 10px; background: var(--bg-raised); box-shadow: inset 0 0 0 1px var(--border-subtle); }
+  .state-table .mini-header .pane-title { color: var(--text-primary); }
+  .state-table .mini-header .status-label { margin-left: auto; }
+  .state-table .mini-row { width: 200px; background: var(--bg-panel); padding: 2px 0; }
+  .icons-row { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; }
+  .icons-row figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; font: var(--type-meta); color: var(--text-muted); }
+  .theme-card { border-radius: var(--r-card); overflow: hidden; box-shadow: 0 0 0 1px var(--border-strong); background: var(--bg-base); color: var(--text-primary); }
+  .theme-card .tc-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font: var(--type-label); background: var(--bg-panel); box-shadow: inset 0 -1px 0 var(--border-subtle); }
+  .theme-card .tc-body { display: grid; grid-template-columns: 180px 1fr; min-height: 150px; }
+  .theme-card .tc-note { font: var(--type-prose); color: var(--text-muted); padding: 8px 12px 12px; }
+  .mc-table td:nth-child(2) { white-space: nowrap; font: var(--type-label); }
+  .thumb-fake { position: absolute; inset: 0; }
+  .thumb-fake.dark { background: linear-gradient(#2a2d33 0 10px, #1c1e22 10px); }
+  .thumb-fake.dark::after { content: ""; position: absolute; left: 8px; right: 30%; top: 18px; height: 4px; background: #3a3e45; box-shadow: 0 10px 0 #3a3e45, 0 20px 0 #3a3e45, 0 30px 0 #5a4030; }
+  .thumb-fake.white { background: linear-gradient(#e6e6e6 0 10px, #ffffff 10px); }
+  .thumb-fake.white::after { content: ""; position: absolute; left: 8px; right: 20%; top: 18px; height: 5px; background: #9cc3f0; box-shadow: 0 12px 0 #d9d9d9, 0 24px 0 #d9d9d9; }
+  .app-glyph { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font: 600 18px/1 var(--font-sans); color: #fff; }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ============================================================ 0. identity -->
+  <header>
+    <div class="hero">
+      <span class="wordmark">soprano</span>
+      <div>
+        <div class="t-eyebrow">Design A · family design system</div>
+        <div class="t-screen" style="font-size:28px;line-height:34px">Quiet</div>
+      </div>
+    </div>
+    <p class="tagline" id="tagline">The same console with the lights dimmed. Mono chrome, orange still means “your keys go here”, and everything that glowed, striped, blinked or shouted is gone. Dark is primary; light is first-class. Mood: Zed (calm chrome, neutral selection) · Sublime Merge (dense git UI that reads quietly) · Ghostty (native chrome that disappears, dimmed unfocused splits).</p>
+    <ol class="principles" id="principles"></ol>
+  </header>
+
+  <section class="block" id="intro">
+    <h2>Mission Control → Quiet</h2>
+    <p class="lede">Item by item. Identity is kept (mono chrome, orange = active, status vocabulary, icon geometry); ornament is removed.</p>
+    <table class="spec mc-table">
+      <tr><th style="width:220px">Item</th><th style="width:120px">Verdict</th><th>Quiet rule</th></tr>
+      <tr><td>Departure Mono + small caps</td><td>change</td><td>All chrome in SF Mono, sentence case. Departure Mono only as the lowercase wordmark <span class="wordmark" style="font-size:15px">soprano</span> (About, Welcome, site H1).</td></tr>
+      <tr><td>Single rules</td><td>keep, fewer</td><td>1 px borderSubtle dividers; section headings lose their trailing rule.</td></tr>
+      <tr><td>Double rules</td><td>remove</td><td>Sidebars, top row, status bar, overlay headers, Markdown.</td></tr>
+      <tr><td>Racing stripe</td><td>remove</td><td>No replacement; wordmark + icon carry the brand.</td></tr>
+      <tr><td>Lamps</td><td>change</td><td>Flat status dots: solid = active or needs you, ring = at rest. No shadow.</td></tr>
+      <tr><td>Glow (phosphor, lamp, lane)</td><td>remove</td><td>Nothing glows.</td></tr>
+      <tr><td>CRT shader</td><td>remove</td><td>Setting, Settings row and shader deleted.</td></tr>
+      <tr><td>Lit blocks</td><td>remove</td><td>Neutral selection fill (+ accent tick when the list is focused); tinted chip for PREFIX/COPY.</td></tr>
+      <tr><td>T+HH:MM:SS clock</td><td>remove</td><td>Slot holds muted hints <span class="hint"><span class="hint-key">⌘P</span> commands</span> <span class="hint"><span class="hint-key">⌃A</span> prefix</span>.</td></tr>
+      <tr><td>Square corners</td><td>keep for tiling</td><td>Panes, splits, terminals, bars: 0. Rows/chips 4 · controls 6 · cards/tiles 8 · overlays 10.</td></tr>
+      <tr><td>Orange</td><td>keep, narrowed</td><td><span class="sw" style="background:var(--accent)"></span> only: focused pane frame, focused list tick, one primary button, caret; transient PREFIX/COPY, ⌃ jump hints, recorder countdown.</td></tr>
+      <tr><td>Density</td><td>keep</td><td>Bars lose 2–6 px each; type stays 11–13 px; air comes from consistent spacing.</td></tr>
+    </table>
+  </section>
+
+  <!-- ============================================================ 1. color -->
+  <section class="block" id="color">
+    <h2>Color tokens</h2>
+    <p class="lede">The 16 ThemeColors slots plus derived tokens (formulas over the slots, so every theme gets them). Translucent derived tokens are shown as rgba over a checker.</p>
+    <div class="cols-2">
+      <div class="panel mode-scope" data-mode="dark"><div class="panel-label">Quiet Dark · primary</div><table class="spec" data-swatches></table></div>
+      <div class="panel mode-scope" data-mode="light"><div class="panel-label">Quiet Light</div><table class="spec" data-swatches></table></div>
+    </div>
+    <div class="cols-2" style="margin-top:16px">
+      <div class="panel mode-scope" data-mode="dark"><div class="panel-label">Contrast (WCAG) · dark</div>
+        <div class="t-prose" style="color:var(--text-primary)">textPrimary 11.9 on bgBase · 12.4 on bgPanel<br>textMuted 5.0 · 5.2 · on selection 4.2<br>accent 6.7 · ink #121417 on accent 7.0<br>status colors ≥ 5.4; gray never carries text</div></div>
+      <div class="panel mode-scope" data-mode="light"><div class="panel-label">Contrast (WCAG) · light — cool graphite ground, not paper</div>
+        <div class="t-prose" style="color:var(--text-primary)">textPrimary 14.4 on bgBase · 13.2 on bgPanel<br>textMuted 5.8 · 5.3 · on selection 5.0 (4.7 on panel selection)<br>accent 5.5 · 5.0 · white on accent 6.0 · accent on its chip 4.5<br>status colors ≥ 4.6 on panel; ANSI 1–6 ≥ 4.8 on terminal bg; gray never carries text</div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 2. terminal -->
+  <section class="block" id="terminal">
+    <h2>Terminal palette</h2>
+    <p class="lede">TerminalColors for libghostty. Selection is neutral, not orange-brown. Light is a cool grey console ground; its 7/15 are mid greys (GitHub Light convention: “white” output must stay visible).</p>
+    <div class="cols-2">
+      <div class="panel mode-scope" data-mode="dark" data-term><div class="panel-label">Quiet Dark</div></div>
+      <div class="panel mode-scope" data-mode="light" data-term><div class="panel-label">Quiet Light</div></div>
+    </div>
+    <template id="term-snippet">
+<pre class="term" style="border-radius:var(--r-card);box-shadow:inset 0 0 0 1px var(--border-subtle);padding:10px 12px"><span class="c4">~/git/private/soprano</span> on <span class="c5">feat/calm-chrome</span>
+<span class="c2">❯</span> swift build
+Building for debugging...
+[412/538] Compiling Soprano StatusBarView.swift
+[413/538] Compiling Soprano <span class="sel">RetroChrome.swift</span>
+
+<span class="c2">⏺</span> <span class="b">Update</span>(Sources/Soprano/Views/SidebarView.swift)
+  <span class="d">⎿  Updated SidebarView.swift with 1 addition</span>
+       <span class="d">431</span> <span class="add-line"><span class="c2">+</span>        collapseAllButton.isEnabled = …</span>
+<span class="c3">▌ Allow command?</span>   <span class="c6">$ rg -l "bgRaised" ../soprano-git</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes, run it</span>
+<span class="c1">error:</span> <span class="c9">build failed</span>  <span class="c11">warning</span> <span class="c12">note</span> <span class="c13">hint</span> <span class="c14">info</span> <span class="i c7">italic</span> <span class="u">underline</span> <span class="inv">inverse</span>
+<span class="c3">✻</span> <span class="c3">Brewing…</span> <span class="d">(38s · ↑ 2.1k tokens · esc to interrupt)</span> <span class="cursor"> </span>  <span class="d">unfocused:</span> <span class="cursor-hollow"> </span></pre>
+    </template>
+  </section>
+
+  <!-- ============================================================ 3. type -->
+  <section class="block" id="type">
+    <h2>Type</h2>
+    <p class="lede">SF Mono for what the machine says or you type; SF Pro for sentences; Departure Mono only for the wordmark (bundled, SIL OFL 1.1, github.com/rektdeckard/departure-mono). Nothing below 11 px, nothing below Regular, frames on whole pixels (1x monitor). Uppercase exceptions besides state labels and the mode chip: acronyms only (<span class="t-label">SHA</span> column header in Git).</p>
+    <table class="spec">
+      <tr class="type-row"><td>Screen title · .t-screen</td><td><span class="t-screen">Agent Dashboard</span></td><td>SF Mono 17/22 Semibold −0.2</td></tr>
+      <tr class="type-row"><td>Title · .t-title</td><td><span class="t-title">Delete branch feat/calm-chrome?</span></td><td>SF Mono 13/18 Semibold</td></tr>
+      <tr class="type-row"><td>Headline · .t-headline</td><td><span class="t-headline">Which agent needs me right now?</span></td><td>SF Mono 28/34 Semibold (site H2 32/37)</td></tr>
+      <tr class="type-row"><td>Chrome label · .t-label</td><td><span class="t-label">Claude Code &nbsp; omp web &nbsp; Pull &nbsp; Branch / tag</span></td><td>SF Mono 11/16 Medium, sentence case</td></tr>
+      <tr class="type-row"><td>Row · .t-row</td><td><span class="t-row">feat: add Collapse All Windows button to the left sidebar</span></td><td>SF Mono 12/16 Regular</td></tr>
+      <tr class="type-row"><td>Meta · .t-meta</td><td><span class="t-meta">d78be48 · 20h · frknue · 204 commits</span></td><td>SF Mono 11/14 Regular, textMuted, tabular</td></tr>
+      <tr class="type-row"><td>State · .t-status</td><td><span class="status"><i class="status-dot is-working"></i><span class="status-label">Working</span></span> &nbsp; <span class="mode-chip is-normal">Normal</span> &nbsp; <span class="status-label is-needs-input">Needs input</span></td><td>SF Mono 11/14 Semibold UPPER +0.5 — the only caps</td></tr>
+      <tr class="type-row"><td>Section · .t-eyebrow</td><td><span class="t-eyebrow">Windows &nbsp; Changes 4 &nbsp; Staged changes 3</span></td><td>SF Mono 11/16 Semibold muted; 16 above · 4 below</td></tr>
+      <tr class="type-row"><td>Prose · .t-prose</td><td><span class="t-prose">Restore every window, layout and pane from the previous launch.</span></td><td>SF Pro Text 12/17 Regular</td></tr>
+      <tr class="type-row"><td>Settings label · .t-form-label</td><td><span class="t-form-label">Hide window tabs</span></td><td>SF Pro Text 13/18 Regular</td></tr>
+      <tr class="type-row"><td>Input · .t-input</td><td><span class="t-input">open<span class="caret"></span></span></td><td>SF Mono 13/18; caret = accent</td></tr>
+      <tr class="type-row"><td>Launcher query · .t-query</td><td><span class="t-query">chr<span class="caret" style="height:20px;vertical-align:-4px"></span></span></td><td>SF Mono 18/24</td></tr>
+      <tr class="type-row"><td>Keycap · .kbd</td><td><kbd class="kbd">⇧⌘P</kbd> &nbsp; <kbd class="kbd">⌘1</kbd> &nbsp; <kbd class="kbd">⌃A</kbd><kbd class="kbd">G</kbd> &nbsp; <kbd class="kbd">✦</kbd> &nbsp; <kbd class="kbd">␣</kbd> &nbsp; <kbd class="kbd">esc</kbd> &nbsp; <span class="hint-key">⌃A P</span></td><td>.kbd SF Pro 11/14 Medium muted, 18 high · rule K1: one cap per chord, one cap per sequence step, lowercase esc · .hint-key = same face, no box</td></tr>
+      <tr class="type-row"><td>Numeral · .t-numeral</td><td><span class="t-numeral">4 &nbsp; 1 &nbsp; 4m 12s</span></td><td>SF Mono 22/26 Medium</td></tr>
+      <tr class="type-row"><td>Terminal · .term</td><td><span style="font:var(--type-term)">❯ swift test --filter SidebarCollapseAllTests</span></td><td>SF Mono 12/17 (app: user's terminal font)</td></tr>
+      <tr class="type-row"><td>Wordmark · .wordmark</td><td><span class="wordmark">soprano</span></td><td>Departure Mono 22 (About/Welcome) · 96 (site), lowercase, no glow</td></tr>
+      <tr class="type-row"><td>Markdown · .md</td><td><span style="font:var(--type-md-h2)">Architecture</span> <span style="font:var(--type-md-body)">Body text in SF Pro 15/24.</span></td><td>SF Pro Display 26/20 Semibold h1/h2 · body 15/24 · code SF Mono 13</td></tr>
+    </table>
+  </section>
+
+  <!-- ============================================================ 4. space -->
+  <section class="block" id="space">
+    <h2>Space · shape · elevation</h2>
+    <div class="cols-3">
+      <div class="panel">
+        <div class="panel-label">Spacing scale</div>
+        <table class="spec">
+          <tr><td class="mono">--s-2</td><td><span class="space-bar" style="width:2px"></span></td><td class="t-meta">hairline gaps</td></tr>
+          <tr><td class="mono">--s-4</td><td><span class="space-bar" style="width:4px"></span></td><td class="t-meta">row inset, chip gap</td></tr>
+          <tr><td class="mono">--s-8</td><td><span class="space-bar" style="width:8px"></span></td><td class="t-meta">icon–text gap</td></tr>
+          <tr><td class="mono">--s-12</td><td><span class="space-bar" style="width:12px"></span></td><td class="t-meta">row/bar padding</td></tr>
+          <tr><td class="mono">--s-16</td><td><span class="space-bar" style="width:16px"></span></td><td class="t-meta">cluster gap</td></tr>
+          <tr><td class="mono">--s-24</td><td><span class="space-bar" style="width:24px"></span></td><td class="t-meta">section padding</td></tr>
+          <tr><td class="mono">--s-32</td><td><span class="space-bar" style="width:32px"></span></td><td class="t-meta">overlay content</td></tr>
+        </table>
+      </div>
+      <div class="panel">
+        <div class="panel-label">Radii</div>
+        <div class="line" style="display:flex;flex-wrap:wrap;gap:12px">
+          <div class="radius-box" style="border-radius:0">0 · panes</div>
+          <div class="radius-box" style="border-radius:var(--r-row)">4 · rows</div>
+          <div class="radius-box" style="border-radius:var(--r-control)">6 · controls</div>
+          <div class="radius-box" style="border-radius:var(--r-card)">8 · cards</div>
+          <div class="radius-box" style="border-radius:var(--r-overlay)">10 · overlays</div>
+        </div>
+        <div class="panel-label" style="margin-top:20px">Elevation</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          <div class="elev" style="background:var(--bg-panel);box-shadow:inset 0 0 0 1px var(--border-subtle)">L0 · in-window: none</div>
+          <div class="elev" style="background:var(--bg-raised);box-shadow:0 0 0 1px var(--border-strong),var(--shadow-l1)">L1 · menus, toast</div>
+          <div class="elev" style="background:var(--bg-base);border-radius:var(--r-overlay);box-shadow:0 0 0 1px var(--border-strong),var(--shadow-l2)">L2 · palette, dialog</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-label">Bar &amp; row heights (px)</div>
+        <table class="spec" style="font:var(--type-meta)">
+          <tr><th>Surface</th><th>Quiet</th><th>today</th></tr>
+          <tr><td>Soprano layout-tab row</td><td>32</td><td>34</td></tr>
+          <tr><td>Sidebar window row / pane row</td><td>28 / 40</td><td>32 / ~38</td></tr>
+          <tr><td>Pane header / pane tab</td><td>26 / 20</td><td>32 / 24</td></tr>
+          <tr><td>Status bar (Soprano / Git)</td><td>26 / 24</td><td>32 / 24</td></tr>
+          <tr><td>Palette search / row / footer</td><td>44 / 40 / 28</td><td>44 / 56 / 22</td></tr>
+          <tr><td>Git toolbar / graph row</td><td>36 / 26</td><td>40 / 28</td></tr>
+          <tr><td>Git file row / diff line / hunk</td><td>24 / 18 / 26</td><td>26 / 18 / 28</td></tr>
+          <tr><td>Cast search / row / footer</td><td>56 / 40 / 36</td><td>56 / 40 / 40</td></tr>
+          <tr><td>Tab header / search strip</td><td>24 / 30</td><td>24 / 30</td></tr>
+          <tr><td>Settings header / nav / form row</td><td>48 / 30 / ≥36</td><td>52 / 34 / ≥30</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 5. status -->
+  <section class="block" id="status">
+    <h2>Status system</h2>
+    <p class="lede">Solid = something is happening or needs you; ring = at rest. Only NEEDS INPUT and ERROR color their label. Aggregates take the most urgent member: error &gt; waiting &gt; running &gt; starting &gt; idle.</p>
+    <div style="display:grid;gap:24px">
+      <div class="panel mode-scope" data-mode="dark" data-states><div class="panel-label">Dark</div></div>
+      <div class="panel mode-scope" data-mode="light" data-states><div class="panel-label">Light</div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 6. focus vs attention vs selection -->
+  <section class="block" id="focus">
+    <h2>Focus · attention · selection</h2>
+    <p class="lede">Shape before hue: focus is a 1 px accent <b>frame</b> plus a raised header and a dim on the others; attention is a <b>band</b> on the header with a 2 px top line; selection is a neutral <b>fill</b>, with a 2 px accent tick only in the list that owns the keyboard.</p>
+    <div class="cols-2">
+      <div class="panel mode-scope" data-mode="dark" data-focusdemo><div class="panel-label">Dark</div></div>
+      <div class="panel mode-scope" data-mode="light" data-focusdemo><div class="panel-label">Light</div></div>
+    </div>
+    <template id="focus-demo">
+      <div class="grid-demo split">
+        <section class="pane is-focused" style="flex:1">
+          <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><div class="pane-actions"><span class="status-label is-working">Working</span><button class="btn-icon"><i data-icon="x"></i></button></div></header>
+          <div class="pane-body"><pre class="term mini-term"><span class="c2">⏺</span> <span class="b">Bash</span>(swift test --filter …)
+  <span class="d">⎿  Running…</span>
+
+<span class="c3">✻ Brewing…</span> <span class="d">(38s · esc to interrupt)</span></pre></div>
+        </section>
+        <div class="split-divider is-v"></div>
+        <div class="split is-col" style="flex:1">
+          <section class="pane is-attention" style="flex:1">
+            <header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><div class="pane-actions"><span class="status-label is-needs-input">Needs input</span><button class="btn-icon"><i data-icon="x"></i></button></div></header>
+            <div class="pane-body"><pre class="term mini-term"><span class="c3">▌ Allow command?</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes, run it</span>
+<span class="c3">▌</span>   2. No, tell Codex what to do</pre></div>
+          </section>
+          <div class="split-divider is-h"></div>
+          <div class="split" style="flex:1">
+            <section class="pane is-dimmed" style="flex:1">
+              <header class="pane-header"><i class="status-dot is-running"></i><div class="pane-tabs"><span class="pane-tab is-active is-running">swift build</span><span class="pane-tab">zsh</span></div><div class="pane-actions"><span class="status-label">Running</span></div></header>
+              <div class="pane-body"><pre class="term mini-term">[413/538] Compiling Soprano
+<span class="c2">❯</span> <span class="cursor"> </span></pre></div>
+            </section>
+            <div class="split-divider is-v"></div>
+            <section class="pane is-dimmed" style="flex:1">
+              <header class="pane-header"><i class="status-dot is-ready"></i><span class="pane-title">omp</span><div class="pane-actions"><span class="status-label">Ready</span></div></header>
+              <div class="pane-body"><pre class="term mini-term"><span class="d">Turn finished · 3 files changed</span></pre></div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="cols-2" style="margin-top:16px;gap:16px">
+        <div>
+          <div class="t-meta" style="margin-bottom:6px">.list.is-focused — fill + tick</div>
+          <div class="sidebar list is-focused" style="width:100%;box-shadow:none;border-radius:var(--r-card)">
+            <div class="row"><span class="kind kind-M">M</span><span class="row-title">CHANGELOG.md</span><span class="diffstat"><span class="add">+2</span> <span class="del">−0</span></span></div>
+            <div class="row is-selected"><span class="kind kind-M">M</span><span class="row-title"><span class="fg-muted">…/Views/</span>SidebarView.swift</span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+            <div class="row is-hover"><span class="kind kind-A">A</span><span class="row-title">…/SidebarCollapseAllTests.swift</span><span class="diffstat"><span class="add">+57</span> <span class="del">−0</span></span></div>
+          </div>
+        </div>
+        <div>
+          <div class="t-meta" style="margin-bottom:6px">.list — weaker fill, no tick</div>
+          <div class="sidebar list" style="width:100%;box-shadow:none;border-radius:var(--r-card)">
+            <div class="row"><span class="kind kind-M">M</span><span class="row-title">CHANGELOG.md</span><span class="diffstat"><span class="add">+2</span> <span class="del">−0</span></span></div>
+            <div class="row is-selected"><span class="kind kind-M">M</span><span class="row-title"><span class="fg-muted">…/Views/</span>SidebarView.swift</span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+            <div class="row is-hover"><span class="kind kind-A">A</span><span class="row-title">…/SidebarCollapseAllTests.swift</span><span class="diffstat"><span class="add">+57</span> <span class="del">−0</span></span></div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- ============================================================ 7. gallery -->
+  <section class="block" id="components">
+    <h2>Components</h2>
+    <p class="lede">Every class from the components.css index, rendered in both modes from the same markup. Hover / pressed / disabled are static examples. A disabled <span class="t-mono">.btn-primary</span> (empty field, nothing to send) takes the standard disabled look — bgRaised, muted text — so a view never shows orange on an action that can't run.</p>
+    <div class="mode-section mode-scope" data-mode="dark" data-gallery><div class="panel-label">Gallery · dark</div></div>
+    <div class="mode-section mode-scope" data-mode="light" data-gallery><div class="panel-label">Gallery · light</div></div>
+  </section>
+
+  <template id="gallery">
+    <div class="gallery">
+
+      <div class="spec-card span-2"><span class="cls">.desktop .menubar .window .titlebar .traffic (.is-inactive)</span>
+        <div style="position:relative;height:210px;border-radius:var(--r-card);overflow:hidden">
+          <div class="desktop"></div>
+          <div class="menubar"><span class="menubar-apple"></span><span class="menubar-app">Soprano</span><span class="menubar-item">Edit</span><span class="menubar-item">Commands</span>
+            <div class="menubar-right"><span class="tpl tpl-cast" title="Soprano Cast"></span><span class="tpl tpl-tab" title="Soprano Tab"></span><span class="tpl tpl-tab is-filled" title="Soprano Tab (filled)"></span><i data-icon="wifi"></i><i data-icon="battery"></i><span class="menubar-clock">Tue 21 Oct 21:41</span></div></div>
+          <div class="window" style="left:24px;top:44px;width:360px;height:150px">
+            <div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div><span class="titlebar-title">Soprano Cast Settings</span></div>
+            <div style="padding:12px" class="t-prose">Active window: system traffic colors, 1 px edge, window shadow, radius 10.</div>
+          </div>
+          <div class="window" style="left:410px;top:64px;width:300px;height:120px">
+            <div class="titlebar"><div class="traffic is-inactive"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div><span class="titlebar-title">Inactive</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">text roles · .fg-* · .match · .search-hit · .caret</span>
+        <div class="stack">
+          <span class="t-screen">Settings</span>
+          <span class="t-title">Commit d78be48</span>
+          <span class="t-label">Layout tab · button label</span>
+          <span class="t-row">fix: reduce idle terminal rendering</span>
+          <span class="t-meta">a3df281 · 4d</span>
+          <span class="t-eyebrow">Recent repositories</span>
+          <span class="t-prose">Edits save to settings.json as you make them.</span>
+          <span class="t-row">Google <span class="match">Chr</span>ome · <span class="search-hit">guide</span> · open<span class="caret"></span></span>
+          <span class="t-meta"><span class="fg-success">+57</span> <span class="fg-danger">−2</span> <span class="fg-cyan">@@</span> <span class="fg-yellow">↓1</span> <span class="fg-attention">1 needs attention</span> <span class="fg-accent">accent</span></span>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.btn · .btn-primary · .btn-danger (normal / hover / pressed / disabled)</span>
+        <div class="stack">
+          <div class="line"><button class="btn">Reload</button><button class="btn is-hover">Hover</button><button class="btn is-pressed">Pressed</button><button class="btn is-disabled">Disabled</button></div>
+          <div class="line"><button class="btn-primary">Commit 3 files <span class="hint-key" style="color:inherit;opacity:.7">⌘↩</span></button><button class="btn-primary is-hover">Hover</button><button class="btn-primary is-pressed">Pressed</button><button class="btn-primary is-disabled">Disabled</button></div>
+          <div class="line"><button class="btn-danger">Delete</button><button class="btn-danger is-pressed">Pressed</button><button class="btn btn-sm">Small 20</button><button class="btn btn-lg">Large 28</button></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.btn-plain + .hint-key (Git toolbar) · .btn-icon (.is-hover .is-on .is-disabled)</span>
+        <div class="stack">
+          <div class="line"><button class="btn-plain">Pull <span class="hint-key">⌃A P</span></button><button class="btn-plain is-hover">Push <span class="hint-key">⌃A ⇧P</span></button><button class="btn-plain is-disabled">Stash <span class="hint-key">⌃A S</span></button></div>
+          <div class="line"><button class="btn-icon"><i data-icon="gear"></i></button><button class="btn-icon is-hover"><i data-icon="plus"></i></button><button class="btn-icon is-on"><i data-icon="eye"></i></button><button class="btn-icon is-disabled"><i data-icon="collapse"></i></button><button class="btn-icon"><i data-icon="sidebar-right"></i></button><button class="btn-icon"><i data-icon="chart-line"></i></button><button class="btn-icon"><i data-icon="history"></i></button></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.kbd · .kbd-accent · .kbd-off · .kbd-lg · .kbd-field (.is-empty .is-recording) · .hint · .hints</span>
+        <div class="stack">
+          <div class="line"><kbd class="kbd">⌘P</kbd> <kbd class="kbd">⌃A</kbd><kbd class="kbd">|</kbd> <kbd class="kbd kbd-accent">Prefix</kbd> <kbd class="kbd kbd-accent">1</kbd> <kbd class="kbd kbd-accent">⇧K</kbd> <kbd class="kbd kbd-off">Off</kbd></div>
+          <div class="line"><kbd class="kbd kbd-lg">⌘1</kbd> <span class="kbd-field"><kbd class="kbd">⌘1</kbd></span><span class="kbd-field is-empty">record hotkey</span><span class="kbd-field is-recording"><kbd class="kbd">⌥⌘</kbd></span></div>
+          <div class="hints"><span class="hint"><kbd class="kbd">↑↓</kbd>navigate</span><span class="hint"><kbd class="kbd">↵</kbd>run</span><span class="hint"><kbd class="kbd">esc</kbd>close</span></div>
+          <div class="t-meta">Boxed caps only where the key IS the content (shortcut column, hotkeys, keycap fields); hint groups are plain console text.</div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.status-dot (.sm .lg) · .status-label · .status · .badge · .attention-dot</span>
+        <div class="stack">
+          <div class="line"><i class="status-dot is-starting"></i><i class="status-dot is-working"></i><i class="status-dot is-running"></i><i class="status-dot is-ready"></i><i class="status-dot is-needs-input"></i><i class="status-dot is-error"></i><i class="status-dot is-stopped"></i><i class="status-dot is-idle"></i> &nbsp; <i class="status-dot sm is-working"></i><i class="status-dot lg is-error"></i></div>
+          <div class="line"><span class="status-label is-starting">Starting</span><span class="status-label is-working">Working</span><span class="status-label is-running">Running</span><span class="status-label is-ready">Ready</span></div>
+          <div class="line"><span class="status-label is-needs-input">Needs input</span><span class="status-label is-error">Error</span><span class="status-label is-stopped">Stopped</span></div>
+          <div class="line"><span class="badge"><i class="status-dot is-needs-input"></i>3</span><span class="badge"><i class="status-dot is-running"></i>1</span><span class="badge"><i class="status-dot is-error"></i>2</span><span class="attention-dot"></span><span class="t-meta">attention</span></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.mode-chip (.is-normal .is-prefix .is-copy .is-select)</span>
+        <div class="line"><span class="mode-chip is-normal">Normal</span><span class="mode-chip is-prefix">Prefix</span><span class="mode-chip is-copy">Copy</span><span class="mode-chip is-select">Select</span></div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.tabbar .tab (.is-selected .is-attention) .tab-close .tab-add · .pane-tabs .pane-tab (.is-active .is-attention .is-running)</span>
+        <div class="stack" style="align-items:stretch">
+          <div class="tabbar">
+            <div class="tab is-selected"><span class="tab-title">Claude Code</span><span class="badge"><i class="status-dot is-needs-input"></i>3</span><span class="tab-close"><i data-icon="x"></i></span></div>
+            <div class="tab"><span class="tab-title">omp web</span><span class="tab-close"><i data-icon="x"></i></span></div>
+            <div class="tab is-attention"><span class="tab-title">2 valkental</span></div>
+            <button class="btn-icon tab-add"><i data-icon="plus"></i></button>
+            <div class="tabbar-spacer"></div>
+            <button class="btn-icon"><i data-icon="sidebar-right"></i></button>
+          </div>
+          <div class="pane-header" style="background:var(--bg-raised)"><i class="status-dot is-running"></i><div class="pane-tabs"><span class="pane-tab is-active is-running">swift build</span><span class="pane-tab">zsh</span><span class="pane-tab is-attention">claude</span></div></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-3"><span class="cls">.split .split-divider .pane (.is-focused .is-attention .is-dimmed) .pane-header .pane-title .pane-actions .pane-body</span>
+        <div class="split" style="height:150px;box-shadow:inset 0 0 0 1px var(--border-strong)">
+          <section class="pane is-focused" style="flex:1.2">
+            <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><div class="pane-actions"><span class="status-label">Working</span><button class="btn-icon"><i data-icon="x"></i></button></div></header>
+            <div class="pane-body"><pre class="term mini-term">&gt; Disable the sidebar's Collapse All button…
+<span class="c2">⏺</span> <span class="b">Search</span>(pattern: "collapseAllButton")
+  <span class="d">⎿  Found 3 files</span></pre></div>
+          </section>
+          <div class="split-divider is-v"></div>
+          <section class="pane is-attention" style="flex:1">
+            <header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><div class="pane-actions"><span class="status-label is-needs-input">Needs input</span><button class="btn-icon"><i data-icon="x"></i></button></div></header>
+            <div class="pane-body"><pre class="term mini-term"><span class="c3">▌ Allow command?</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes, run it</span></pre></div>
+          </section>
+          <div class="split-divider is-v"></div>
+          <section class="pane is-dimmed" style="flex:1">
+            <header class="pane-header"><i class="status-dot is-error"></i><span class="pane-title">omp</span><div class="pane-actions"><span class="status-label is-error">Error</span></div></header>
+            <div class="pane-body"><pre class="term mini-term"><span class="c1">Turn failed:</span> 429 rate limited</pre></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.sidebar .sidebar-header .list.is-focused .row (.row-28 .row-tall .indent-1) .disclosure .row-count .sidebar-footer</span>
+        <div class="sidebar" style="height:330px;width:240px;border-radius:var(--r-card);overflow:hidden">
+          <div class="sidebar-header"><span>Windows</span><button class="btn-icon"><i data-icon="collapse"></i></button><button class="btn-icon"><i data-icon="plus"></i></button></div>
+          <div class="list is-focused">
+            <div class="row row-28"><span class="disclosure"><i data-icon="chevron-down"></i></span><span class="row-title t-row-strong">soprano</span><span class="row-count">3 · <span class="fg-attention">●1</span></span></div>
+            <div class="row row-tall indent-1 is-selected"><i class="status-dot sm is-working"></i><div class="row-main"><span class="row-title">Claude Code</span><span class="row-sub"><i data-icon="git-branch"></i>feat/calm-chrome</span></div></div>
+            <div class="row row-tall indent-1"><i class="status-dot sm is-needs-input"></i><div class="row-main"><div class="row-line"><span class="row-title">Codex</span><span class="status-label is-needs-input">Needs input</span><span class="attention-dot"></span></div><span class="row-sub"><i data-icon="git-branch"></i>feat/calm-chrome</span></div></div>
+            <div class="row row-tall indent-1"><i class="status-dot sm is-running"></i><div class="row-main"><span class="row-title">zsh</span><span class="row-sub"><i data-icon="git-branch"></i>feat/calm-chrome</span></div><span class="row-count">2t</span></div>
+            <div class="row row-28"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span><span class="row-title fg-muted">soprano-git</span><span class="row-count">2</span></div>
+            <div class="row row-28"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span><span class="row-title fg-muted">valkental</span><span class="row-count">1</span></div>
+          </div>
+          <div class="sidebar-footer"><button class="btn-icon"><i data-icon="history"></i></button><button class="btn-icon"><i data-icon="chart-line"></i></button><span class="spacer"></span><button class="btn-icon"><i data-icon="gear"></i></button></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">⌃ held: .kbd-accent jump hints · .section-heading (.section-heading-actions) · .tick</span>
+        <div class="sidebar" style="width:240px;border-radius:var(--r-card);overflow:hidden;padding-bottom:6px">
+          <div class="section-heading">Changes <span class="row-count">4</span><span class="section-heading-actions"><button class="btn-plain btn-sm">Stage all</button></span></div>
+          <div class="list">
+            <div class="row row-28"><kbd class="kbd kbd-accent">1</kbd><span class="row-title t-row-strong">soprano</span><span class="row-count">3</span></div>
+            <div class="row indent-1"><i class="status-dot sm is-working"></i><span class="row-title">Claude Code</span><kbd class="kbd kbd-accent">⇧K</kbd></div>
+            <div class="row row-28"><kbd class="kbd kbd-accent">2</kbd><span class="row-title fg-muted">soprano-git</span><span class="row-count">2</span></div>
+          </div>
+          <div style="position:relative;height:28px;margin:4px 4px 0;padding-left:8px;display:flex;align-items:center" class="t-meta"><span class="tick"></span>standalone .tick</div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.region (.is-focused) · .panel-header (.is-focused) · .branch-chip · .banner (.is-danger)</span>
+        <div class="stack" style="align-items:stretch">
+          <div class="split" style="height:96px;box-shadow:inset 0 0 0 1px var(--border-subtle)">
+            <div class="sidebar region" style="flex:0 0 38%"><div class="panel-header">Refs</div><div class="list"><div class="row is-selected"><i data-icon="git-branch"></i><span class="row-title">main</span></div></div></div>
+            <div class="region is-focused" style="flex:1"><div class="panel-header is-focused">Commit d78be48<span class="spacer"></span><span class="hint"><kbd class="kbd">Y</kbd>copy</span></div><div class="list is-focused"><div class="row is-selected"><span class="kind kind-M">M</span><span class="row-title">SidebarView.swift</span></div></div></div>
+          </div>
+          <div class="line"><span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑2</span><span class="behind is-on">↓1</span></span></div>
+          <div class="banner"><i class="status-dot is-needs-input"></i>Rebase in progress · step 3/5<span class="spacer"></span><button class="btn-primary btn-sm">Continue</button></div>
+          <div class="banner is-danger"><i class="status-dot is-error"></i>Merge in progress · <span class="fg-danger">2 conflicts</span><span class="spacer"></span><button class="btn btn-sm">Abort</button></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-3"><span class="cls">.statusbar (.breadcrumb .crumb .crumb-sep .counts .usage .pct.is-warn .is-crit) · .toolbar .toolbar-group</span>
+        <div class="stack" style="align-items:stretch">
+          <div class="toolbar">
+            <span class="t-row-strong">soprano</span><span class="branch-chip"><i data-icon="git-branch"></i>main <span class="ahead">↑0</span><span class="behind">↓0</span></span>
+            <div class="toolbar-group"><button class="btn-plain">Pull <span class="hint-key">⌃A P</span></button><button class="btn-plain">Push <span class="hint-key">⌃A ⇧P</span></button></div>
+            <div class="toolbar-group"><button class="btn-plain">Branch <span class="hint-key">⌘B</span></button></div>
+            <div class="toolbar-group"><button class="btn-plain is-disabled">Stash <span class="hint-key">⌃A S</span></button><button class="btn-plain is-disabled">Pop <span class="hint-key">⌃A ⇧S</span></button></div>
+            <span class="tabbar-spacer"></span><span class="hint"><i data-icon="command"></i><kbd class="kbd">⌘P</kbd></span>
+          </div>
+          <div class="statusbar">
+            <span class="mode-chip is-normal">Normal</span>
+            <span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep">›</span><span class="crumb">soprano</span><span class="crumb-sep">›</span><span class="crumb is-current">Claude Code</span><span class="crumb">· tab 1</span></span>
+            <span class="statusbar-spacer"></span>
+            <span class="counts">1 session · 3 windows · 6 panes · <span class="is-attention">1 needs input</span></span>
+            <span class="usage"><span>Claude <span class="pct">42%</span> · 2h 10m</span><span>Codex <span class="pct is-warn">71%</span> · 3d 4h</span><span>omp <span class="pct is-crit">93%</span></span></span>
+            <span class="hints"><span class="hint"><span class="hint-key">⌘P</span> commands</span><span class="hint"><span class="hint-key">⌃A</span> prefix</span></span>
+          </div>
+          <div class="statusbar is-git"><span class="mode-chip is-prefix">Prefix</span><span class="status"><i class="status-dot sm is-working"></i><span class="fg-primary">Ready</span></span><span class="statusbar-spacer"></span><span>main · 204 commits</span></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.field (.is-focused) · .search-field · .textarea · .placeholder</span>
+        <div class="stack" style="align-items:stretch">
+          <div class="field"><span class="field-input placeholder">Folder path</span></div>
+          <div class="field is-focused"><span class="field-input">~/git/private<span class="caret"></span></span></div>
+          <div class="search-field"><i data-icon="search"></i><span class="field-input placeholder">Filter</span><kbd class="kbd">/</kbd></div>
+          <div class="textarea"><span class="placeholder">Description</span></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.checkbox (.is-checked .is-mixed) · .switch (.is-on) · .select · .segmented .segment.is-active</span>
+        <div class="stack">
+          <div class="line"><span class="checkbox"></span><span class="checkbox is-checked"></span><span class="checkbox is-mixed"></span> &nbsp; <span class="switch"></span><span class="switch is-on"></span></div>
+          <div class="line"><span class="select">Quiet<i data-icon="expand"></i></span></div>
+          <div class="line"><span class="segmented"><span class="segment is-active">System</span><span class="segment">Light</span><span class="segment">Dark</span></span></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.settings-nav (.is-focused) .nav-item (.is-active .is-hover)</span>
+        <div class="settings-nav is-focused" style="width:200px;border-radius:var(--r-card)">
+          <div class="nav-item is-active"><i data-icon="gear"></i>General</div>
+          <div class="nav-item is-hover"><i data-icon="keyboard"></i>Keyboard shortcuts</div>
+          <div class="nav-item"><i data-icon="cpu"></i>Agent profiles</div>
+          <div class="nav-item"><i data-icon="users"></i>Accounts</div>
+          <div class="nav-item"><i data-icon="info"></i>About</div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.card-title .card .form-row .form-label .form-note .form-control</span>
+        <div class="card-title">Appearance</div>
+        <div class="card">
+          <div class="form-row"><div><div class="form-label">Theme</div><div class="form-note">Quiet follows the system appearance.</div></div><div class="form-control"><span class="select">Quiet<i data-icon="expand"></i></span></div></div>
+          <div class="form-row"><div><div class="form-label">Appearance</div></div><div class="form-control"><span class="segmented"><span class="segment is-active">System</span><span class="segment">Light</span><span class="segment">Dark</span></span></div></div>
+          <div class="form-row"><div><div class="form-label">Hide window tabs</div><div class="form-note">Show the layout tabs of the focused window only.</div></div><div class="form-control"><span class="checkbox is-checked"></span></div></div>
+          <div class="form-row"><div><div class="form-label">Prefix</div><div class="form-note">Press the prefix, then a command key.</div></div><div class="form-control"><span class="kbd-field"><kbd class="kbd">⌃A</kbd></span></div></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.tooltip · .hud · .toast (.is-error) .toast-title .toast-body</span>
+        <div class="stack">
+          <span class="tooltip">3 panes, 1 agent needs input</span>
+          <span class="hud">Reloaded script directories</span>
+          <div class="toast is-error" style="width:100%"><i class="status-dot is-error"></i><div><div class="toast-title">Push failed</div><div class="toast-body">! [rejected] main -> main (fetch first)
+error: failed to push some refs</div></div><kbd class="kbd">esc</kbd></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.scrim .palette .palette-search .palette-list .palette-row (.is-selected .is-hover) .palette-icon .palette-title .palette-desc .palette-trail .palette-footer</span>
+        <div style="position:relative;height:360px;border-radius:var(--r-card);overflow:hidden;background:var(--bg-panel)">
+          <div class="scrim"></div>
+          <div class="palette" style="left:50%;top:16px;transform:translateX(-50%)">
+            <div class="palette-search"><i data-icon="search"></i><span>open<span class="caret"></span></span></div>
+            <div class="palette-list">
+              <div class="palette-row is-selected"><span class="palette-icon"><i data-icon="git-branch"></i></span><span class="palette-title">Open in Soprano Git</span><span class="palette-desc">Open the active tab's Git repository in Soprano Git</span><span class="palette-trail"><kbd class="kbd">⌃A</kbd><kbd class="kbd">G</kbd></span></div>
+              <div class="palette-row is-hover"><span class="palette-icon"><i data-icon="folder"></i></span><span class="palette-title">Open Project…</span><span class="palette-desc">Search configured projects or choose a directory</span><span class="palette-trail"><kbd class="kbd">⇧⌘P</kbd></span></div>
+              <div class="palette-row"><span class="palette-icon"><i data-icon="terminal"></i></span><span class="palette-title">Open Terminal</span><span class="palette-desc">Open a new terminal pane</span><span class="palette-trail"><kbd class="kbd">⌘D</kbd></span></div>
+              <div class="palette-row"><span class="palette-icon"><i data-icon="globe"></i></span><span class="palette-title">Open Browser</span><span class="palette-desc">Split a browser pane to the right</span><span class="palette-trail"><kbd class="kbd">⌘B</kbd></span></div>
+              <div class="palette-row"><span class="palette-icon"><i data-icon="file-text"></i></span><span class="palette-title">Open Markdown…</span><span class="palette-desc">Open a local Markdown file in a live reader</span></div>
+              <div class="palette-row"><span class="palette-icon"><i data-icon="globe"></i></span><span class="palette-title">omp web</span><span class="palette-desc">Start the omp web workspace in your default browser</span></div>
+            </div>
+            <div class="palette-footer"><span>6 results</span><span class="spacer"></span><span class="hints"><span class="hint"><kbd class="kbd">↑↓</kbd>navigate</span><span class="hint"><kbd class="kbd">↵</kbd>run</span><span class="hint"><kbd class="kbd">esc</kbd>close</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.menu (.is-static) .menu-heading .menu-row (.is-selected .is-danger .is-compact) .menu-sep</span>
+        <div class="menu is-static" style="width:100%">
+          <div class="menu-heading">Google Chrome</div>
+          <div class="menu-row is-selected">Open Application<kbd class="kbd">↵</kbd></div>
+          <div class="menu-row">Show in Finder<kbd class="kbd">⌘↵</kbd></div>
+          <div class="menu-row">Copy Path<kbd class="kbd">⇧⌘C</kbd></div>
+          <div class="menu-sep"></div>
+          <div class="menu-row is-danger"><i data-icon="power"></i>Quit Application</div>
+          <div class="menu-row is-compact">Set Hotkey…</div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.palette.is-launcher (Cast) .palette-search.is-query .palette-section .palette-icon.is-tile .palette-footer.is-cast</span>
+        <div style="position:relative;height:300px;border-radius:var(--r-card);overflow:hidden">
+          <div class="desktop"></div>
+          <div class="palette is-launcher" style="left:50%;top:16px;transform:translateX(-50%);width:640px;height:268px">
+            <div class="palette-search is-query"><span>chr<span class="caret" style="height:20px;vertical-align:-4px"></span></span></div>
+            <div class="palette-list">
+              <div class="palette-section">Results</div>
+              <div class="palette-row is-selected"><span class="palette-icon"><span class="app-glyph" style="position:static;transform:none;width:24px;height:24px;font-size:13px;border-radius:6px;background:#3b7be8">G</span></span><span class="palette-title">Google <span class="match">Chr</span>ome</span><span class="palette-desc is-mono">/Applications</span><span class="palette-trail"><kbd class="kbd">⌘1</kbd>Application</span></div>
+              <div class="palette-row"><span class="palette-icon is-tile"><i data-icon="app-window"></i></span><span class="palette-title">Center Third</span><span class="palette-desc is-mono">Window Management</span><span class="palette-trail">Command</span></div>
+            </div>
+            <div class="palette-footer is-cast"><span>Soprano Cast</span><span class="spacer"></span><span class="fg-primary t-row">Open Application</span><kbd class="kbd">↵</kbd><span class="divider-v"></span><span>actions</span><kbd class="kbd">⌘K</kbd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.dialog (.is-static) .dialog-title .dialog-body .dialog-footer</span>
+        <div class="dialog is-static" style="width:100%">
+          <div class="dialog-title">Delete branch feat/calm-chrome?</div>
+          <div class="dialog-body">The branch is merged into main. This removes the local branch only.</div>
+          <div class="dialog-footer"><span class="hints"><span class="hint"><kbd class="kbd">↵</kbd>delete</span><span class="hint"><kbd class="kbd">esc</kbd>cancel</span></span><button class="btn">Cancel</button><button class="btn-danger">Delete</button></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-3"><span class="cls">.table (.is-focused, --cols) .table-head .table-group .table-row (.is-selected .is-disabled) .cell-name .cell-muted</span>
+        <div class="table is-focused" style="--cols: 260px 140px 100px 120px 70px">
+          <div class="table-head"><span>Name</span><span>Type</span><span>Alias</span><span>Hotkey</span><span>Enabled</span></div>
+          <div class="table-group"><span class="disclosure"><i data-icon="chevron-down"></i></span>Applications <span class="row-count">14</span></div>
+          <div class="table-row is-selected"><span class="cell-name"><span class="app-glyph" style="position:static;transform:none;width:18px;height:18px;font-size:11px;border-radius:4px;background:#3b7be8">G</span>Google Chrome</span><span class="cell-muted">Application</span><span class="cell-muted">add alias</span><span><kbd class="kbd">⌘1</kbd></span><span><span class="checkbox is-checked"></span></span></div>
+          <div class="table-row"><span class="cell-name"><span class="app-glyph" style="position:static;transform:none;width:18px;height:18px;font-size:11px;border-radius:4px;background:#2f8be6">S</span>Safari</span><span class="cell-muted">Application</span><span></span><span></span><span><span class="checkbox is-checked"></span></span></div>
+          <div class="table-row is-disabled"><span class="cell-name"><span class="app-glyph" style="position:static;transform:none;width:18px;height:18px;font-size:11px;border-radius:4px;background:#8a8a8a;opacity:.6">X</span>Xcode</span><span>Application</span><span></span><span></span><span><span class="checkbox"></span></span></div>
+          <div class="table-group"><span class="disclosure is-collapsed"><i data-icon="chevron-down"></i></span>Window Management <span class="row-count">40</span></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.term · .c0–.c15 · .bg0–.bg15 · .b .d .i .u .inv .cursor .sel</span>
+        <pre class="term" style="border-radius:var(--r-row)"><span class="c0 bg7"> 0 </span><span class="c1">  1 </span><span class="c2">  2 </span><span class="c3">  3 </span><span class="c4">  4 </span><span class="c5">  5 </span><span class="c6">  6 </span><span class="c7">  7 </span>
+<span class="c8">  8 </span><span class="c9">  9 </span><span class="c10"> 10 </span><span class="c11"> 11 </span><span class="c12"> 12 </span><span class="c13"> 13 </span><span class="c14"> 14 </span><span class="c15"> 15 </span>
+<span class="bg1 c15"> bg1 </span> <span class="bg2 c0"> bg2 </span> <span class="bg4 c15"> bg4 </span> <span class="bg8 c15"> bg8 </span>  <span class="b">bold</span> <span class="d">dim</span> <span class="i">italic</span> <span class="u">under</span> <span class="inv">inverse</span> <span class="sel">selected</span> <span class="cursor">▊</span></pre>
+      </div>
+
+      <div class="spec-card"><span class="cls">.md (Markdown reader)</span>
+        <div class="md" style="padding:0;max-width:none">
+          <h2 style="margin-top:0">Toolchain</h2>
+          <p style="margin:0 0 8px">Homebrew Swift is required; run <code>swift build</code> from the repo root.</p>
+          <blockquote>The system CLT Swift has broken SPM.</blockquote>
+        </div>
+      </div>
+
+      <div class="spec-card span-3"><span class="cls">.diff .diff-row (.is-hunk .is-ctx .is-add .is-del .is-filler .is-current) .gutter .marker .code .w-add .w-del · .syn-kw .syn-type .syn-str .syn-com .syn-num .syn-fn .syn-attr — current hunk = .is-current on the hunk header + every LEFT-side row → one continuous 2 px bar · syntax: keywords textPrimary Semibold, attributes ANSI 5, numbers yellow, types cyan, strings green, functions blue — no orange in code</span>
+        <div class="diff is-wrap split" style="--wrap-indent:8ch;border-radius:var(--r-row);overflow:hidden;box-shadow:inset 0 0 0 1px var(--border-subtle)">
+          <div style="flex:1">
+            <div class="diff-row is-hunk is-current"><span class="gutter"></span><span class="marker"></span><span class="code">@@ -176,7 +186,7 @@ <span class="hunk-section">final class SidebarView: NSView {</span></span></div>
+            <div class="diff-row is-ctx is-current"><span class="gutter">177</span><span class="marker"></span><span class="code">    headerView.<span class="syn-fn">leadingAnchor</span>.<span class="syn-fn">constraint</span>(equalTo: x, constant: <span class="syn-num">14</span>),</span></div>
+            <div class="diff-row is-del is-current"><span class="gutter">178</span><span class="marker">−</span><span class="code">    headerView.trailingAnchor.constraint(equalTo: <span class="w-del">plusButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div>
+            <div class="diff-row is-filler is-current"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div>
+            <div class="diff-row is-ctx is-current"><span class="gutter">179</span><span class="marker"></span><span class="code">    <span class="syn-com">// MARK: - Menus</span></span></div>
+          </div>
+          <div class="split-divider is-v"></div>
+          <div style="flex:1">
+            <div class="diff-row is-hunk"><span class="gutter"></span><span class="marker"></span><span class="code"></span></div>
+            <div class="diff-row is-ctx"><span class="gutter">187</span><span class="marker"></span><span class="code">    <span class="syn-attr">@objc</span> <span class="syn-kw">private func</span> <span class="syn-fn">collapseAllClicked</span>() {</span></div>
+            <div class="diff-row is-add"><span class="gutter">188</span><span class="marker">+</span><span class="code">    headerView.trailingAnchor.constraint(equalTo: <span class="w-add">collapseAllButton</span>.leadingAnchor, constant: <span class="syn-num">-6</span>),</span></div>
+            <div class="diff-row is-add"><span class="gutter">189</span><span class="marker">+</span><span class="code">    <span class="syn-kw">private var</span> collapseAllButton: <span class="syn-type">RetroIconButton</span>!</span></div>
+            <div class="diff-row is-ctx"><span class="gutter">190</span><span class="marker"></span><span class="code">    symbolName: <span class="syn-str">"rectangle.compress.vertical"</span>,</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.lane-0…7 · SVG .edge .edge-wip .node .node-head-ring .node-merge .node-stash .node-wip · .ref-pill (.is-head)</span>
+        <div style="display:flex;gap:16px;align-items:flex-start">
+          <svg width="92" height="156" viewBox="0 0 92 156" style="flex:none">
+            <path class="edge-wip" d="M20 13 V39"/>
+            <g class="lane-0"><path class="edge" d="M20 39 V156"/></g>
+            <g class="lane-1"><path class="edge" d="M20 65 C20 78 34 78 34 91 V117 C34 130 20 130 20 143"/></g>
+            <g class="lane-2"><path class="edge" d="M48 52 V104 C48 117 20 117 20 130"/></g>
+            <circle class="node-wip" cx="20" cy="13" r="5.5"/>
+            <g class="lane-0"><circle class="node" cx="20" cy="39" r="5"/><circle class="node-head-ring" cx="20" cy="39" r="8"/></g>
+            <g class="lane-0"><circle class="node" cx="20" cy="65" r="5"/></g>
+            <g class="lane-1"><circle class="node" cx="34" cy="91" r="5"/></g>
+            <g class="lane-2"><rect class="node-stash" x="44" y="48" width="8" height="8"/></g>
+            <g class="lane-0"><circle class="node-merge" cx="20" cy="130" r="4.5"/></g>
+          </svg>
+          <div class="stack">
+            <div class="line"><span class="ref-pill lane-0 is-head"><i data-icon="check"></i><i data-icon="laptop"></i>main</span><span class="ref-pill lane-0"><i data-icon="cloud"></i>origin/main</span><span class="ref-pill lane-2"><i data-icon="laptop"></i>feat/dashboard-chat-view</span><span class="ref-pill lane-3"><i data-icon="tag"></i>v0.6.0</span><span class="ref-pill">+2</span></div>
+            <div class="line"><span class="lane-bg lane-0" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-1" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-2" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-3" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-4" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-5" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-6" style="width:28px;height:10px;border-radius:2px"></span><span class="lane-bg lane-7" style="width:28px;height:10px;border-radius:2px"></span></div>
+            <div class="t-meta">Lane order blue · green · ANSI 5 · yellow · cyan · accent · red · ANSI 12 → main is blue, not orange. HEAD: 2 px ring, no glow.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.kind .kind-M/A/D/R/C/U/T/Q · .diffstat (.add .del)</span>
+        <div class="stack">
+          <div class="line"><span class="kind kind-M">M</span><span class="kind kind-A">A</span><span class="kind kind-D">D</span><span class="kind kind-R">R</span><span class="kind kind-C">C</span><span class="kind kind-U">U</span><span class="kind kind-T">T</span><span class="kind kind-Q">?</span></div>
+          <div class="row" style="margin:0;width:100%;padding:0"><span class="kind kind-M">M</span><span class="row-title"><span class="fg-muted">Sources/Soprano/Views/</span><b style="font-weight:600">SidebarView.swift</b></span><span class="diffstat"><span class="add">+20</span> <span class="del">−2</span></span></div>
+        </div>
+      </div>
+
+      <div class="spec-card span-3"><span class="cls">.switcher .switcher-header .switcher-grid .tile (.is-selected .is-hover .is-windowless) .tile-title .tile-thumb .tile-chips .tile-chip · .lamps .lamp (.is-close .is-min .is-zoom)</span>
+        <div style="position:relative;height:216px;border-radius:var(--r-card);overflow:hidden">
+          <div class="desktop"></div>
+          <div class="switcher" style="left:24px;right:24px;top:20px">
+            <div class="switcher-header"><span class="t-row-strong">All windows</span><span class="t-meta">13</span><span class="hints"><span class="hint"><span class="hint-key">⇥</span>next</span><span class="hint"><span class="hint-key">⇧</span>back</span><span class="hint"><span class="hint-key">↩</span>open</span><span class="hint"><span class="hint-key">W</span>close</span><span class="hint"><span class="hint-key">M</span>min</span><span class="hint"><span class="hint-key">Q</span>quit</span><span class="hint"><span class="hint-key">S</span>search</span></span></div>
+            <div class="switcher-grid">
+              <div class="tile is-hover" style="width:230px;height:140px"><div class="tile-title"><img src="icons/soprano.svg" alt=""><span>soprano-tab — claude</span></div><div class="tile-thumb"><span class="lamps"><i class="lamp is-close"></i><i class="lamp is-min"></i><i class="lamp is-zoom"></i></span><div class="thumb-fake dark"></div></div></div>
+              <div class="tile" style="width:230px;height:140px"><div class="tile-title"><span class="app-glyph" style="position:static;transform:none;width:16px;height:16px;font-size:11px;border-radius:4px;background:#2f8be6">S</span><span>Features – AltTab</span></div><div class="tile-thumb"><div class="thumb-fake white"></div></div></div>
+              <div class="tile is-selected" style="width:230px;height:140px"><div class="tile-title"><img src="icons/soprano.svg" alt=""><span>valkental — zsh</span></div><div class="tile-thumb"><div class="thumb-fake dark"></div></div></div>
+              <div class="tile" style="width:230px;height:140px"><div class="tile-title"><span class="app-glyph" style="position:static;transform:none;width:16px;height:16px;font-size:11px;border-radius:4px;background:#3d7fe0">M</span><span>Inbox – 3 unread messages</span></div><div class="tile-thumb"><div class="thumb-fake white"></div><div class="tile-chips"><span class="tile-chip">hidden</span><span class="tile-chip">2</span></div></div></div>
+              <div class="tile is-windowless" style="width:150px;height:140px"><div class="tile-title"><span class="app-glyph" style="position:static;transform:none;width:16px;height:16px;font-size:11px;border-radius:4px;background:#c9a227">N</span><span>Notes</span></div><div class="tile-thumb"><span class="app-glyph tile-fallback" style="width:auto;height:50%;background:#c9a227">N</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-card span-2"><span class="cls">.tally .tally-value (.is-zero) .tally-label (.is-needs-input .is-error) · .agent-row</span>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+          <div class="tally"><span class="tally-value">4</span><span class="tally-label">Total</span></div>
+          <div class="tally"><span class="tally-value">1</span><span class="tally-label"><i class="status-dot sm is-working"></i>Working</span></div>
+          <div class="tally"><span class="tally-value">1</span><span class="tally-label is-needs-input"><i class="status-dot sm is-needs-input"></i>Needs input</span></div>
+          <div class="tally"><span class="tally-value is-zero">0</span><span class="tally-label">Errors</span></div>
+        </div>
+        <div class="list is-focused" style="margin-top:8px;padding:0">
+          <div class="row agent-row is-selected"><i class="status-dot is-working"></i><div class="row-main"><span class="row-title t-row-strong">soprano <span class="fg-muted">›</span> Claude Code</span><span class="row-sub">Bash · swift test --filter SidebarCollapseAllTests</span></div><div class="row-trail"><span class="status-label">Working</span><span class="t-meta">4m 12s</span></div></div>
+          <div class="row agent-row"><i class="status-dot is-needs-input"></i><div class="row-main"><span class="row-title t-row-strong">soprano <span class="fg-muted">›</span> Codex</span><span class="row-sub">Allow command? rg -l "bgRaised" …</span></div><div class="row-trail"><span class="status-label is-needs-input">Needs input</span><span class="attention-dot"></span><span class="t-meta">1m 03s</span></div></div>
+        </div>
+      </div>
+
+      <div class="spec-card"><span class="cls">.wordmark (.is-lg) · .brand-mark · .divider-v .divider-h · .scroll .scrollbar-v</span>
+        <div class="stack">
+          <div class="line"><img class="brand-mark" src="icons/soprano.svg" alt=""><span class="wordmark">soprano</span><span class="divider-v"></span><span class="t-meta">git · cast · tab</span></div>
+          <div class="divider-h" style="width:100%"></div>
+          <div style="position:relative;height:60px;width:100%;border-radius:var(--r-row);box-shadow:inset 0 0 0 1px var(--border-subtle)"><span class="scrollbar-v" style="top:6px;height:28px"></span><span class="scrollbar-h" style="left:6px;width:90px"></span></div>
+        </div>
+      </div>
+
+    </div>
+  </template>
+
+  <!-- ============================================================ 8. icons -->
+  <section class="block" id="app-icons">
+    <h2>App-icon family</h2>
+    <p class="lede">Same squircle, same cream glyphs, exactly one flat orange “where you are” part, no glow. That part stays ≤ 20% of the glyph area, except Tab, whose orange part is the front window card itself (≈ 35%, the switcher's selected window). Glyph geometry kept from today; Cast loses its orange frame.</p>
+    <div class="cols-2">
+      <div class="panel mode-scope" data-mode="dark"><div class="panel-label">Default (dark squircle)</div><div class="icons-row" data-icons=""></div></div>
+      <div class="panel mode-scope" data-mode="light"><div class="panel-label">Light / tinted variant (-light.svg)</div><div class="icons-row" data-icons="-light"></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 9. mapping -->
+  <section class="block" id="theme-mapping">
+    <h2>ThemeColors mapping</h2>
+    <p class="lede">Theme ids: <span class="t-mono">quiet</span> (default, follows the system) → <span class="t-mono">quiet-dark</span> / <span class="t-mono">quiet-light</span>. Old <span class="t-mono">mission-control</span> settings fall back to <span class="t-mono">quiet</span>.</p>
+    <table class="spec" id="mapping"><tr><th style="width:160px">Slot (Swift)</th><th style="width:150px">Quiet Dark</th><th style="width:150px">Quiet Light</th><th>Use</th></tr></table>
+  </section>
+
+  <!-- ============================================================ 10. third-party -->
+  <section class="block" id="third-party">
+    <h2>Third-party themes under Quiet rules</h2>
+    <p class="lede">Real 16 values from Theme.swift; selection, hover, chips and dim derive from them. Attention falls back to the theme's ANSI 5 when accent and blue are within 30° of hue (Dracula, Solarized, Nord, Tokyo Night, Atom One Dark).</p>
+    <div class="cols-3" id="themes"></div>
+    <template id="theme-sample">
+      <div class="tc-head"><span data-name></span><span class="t-meta" data-attn></span></div>
+      <div class="tc-body">
+        <div class="sidebar list is-focused" style="padding-top:6px">
+          <div class="row row-28"><span class="disclosure"><i data-icon="chevron-down"></i></span><span class="row-title t-row-strong">soprano</span><span class="row-count">3 · <span class="fg-attention">●1</span></span></div>
+          <div class="row row-tall indent-1 is-selected"><i class="status-dot sm is-working"></i><div class="row-main"><span class="row-title">Claude Code</span><span class="row-sub">feat/calm-chrome</span></div></div>
+          <div class="row indent-1"><i class="status-dot sm is-needs-input"></i><span class="row-title">Codex</span><span class="attention-dot"></span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;min-width:0">
+          <div class="tabbar"><div class="tab is-selected" style="min-width:0"><span class="tab-title">Claude Code</span><span class="badge"><i class="status-dot is-needs-input"></i>3</span></div><div class="tab" style="min-width:0"><span class="tab-title">omp web</span></div></div>
+          <section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span><div class="pane-actions"><span class="status-label">Working</span></div></header></section>
+          <section class="pane is-attention"><header class="pane-header"><i class="status-dot is-needs-input"></i><span class="pane-title">Codex</span><div class="pane-actions"><span class="status-label is-needs-input">Needs input</span></div></header></section>
+          <div style="display:flex;align-items:center;gap:7px;padding:10px 10px 8px">
+            <i class="status-dot is-starting"></i><i class="status-dot is-working"></i><i class="status-dot is-running"></i><i class="status-dot is-ready"></i><i class="status-dot is-needs-input"></i><i class="status-dot is-error"></i><i class="status-dot is-stopped"></i>
+            <span style="flex:1"></span><span class="mode-chip is-prefix">Prefix</span><button class="btn-primary btn-sm">Commit</button>
+          </div>
+        </div>
+      </div>
+      <div class="tc-note" data-note></div>
+    </template>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  var meta = (window.SOPRANO_DESIGNS || {}).a || { principles: [] };
+  var ol = document.getElementById('principles');
+  meta.principles.forEach(function (p) { var li = document.createElement('li'); li.textContent = p; ol.appendChild(li); });
+
+  function el(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
+  function cloneTpl(id) { return document.getElementById(id).content.cloneNode(true); }
+
+  /* ---------- colour swatches ---------- */
+  var SLOTS = [
+    ['--bg-base', 'bgBase'], ['--bg-panel', 'bgPanel'], ['--bg-raised', 'bgRaised'], ['--bg-overlay', 'bgOverlay'],
+    ['--text-primary', 'textPrimary'], ['--text-muted', 'textMuted'], ['--accent', 'accent'], ['--accent-strong', 'accentStrong'],
+    ['--border-subtle', 'borderSubtle'], ['--border-strong', 'borderStrong'], ['--success', 'success'], ['--danger', 'danger'],
+    ['--blue', 'blue'], ['--cyan', 'cyan'], ['--yellow', 'yellow'], ['--gray', 'gray']
+  ];
+  var DERIVED = [
+    ['--selection', 'textPrimary @ 8% / 7%'], ['--selection-inactive', 'textPrimary @ 5% / 4.5%'], ['--hover', 'textPrimary @ 5% / 4%'],
+    ['--focus-ring', '= accent (pane + Git region frame)'], ['--attention', 'blue (or ANSI 5)'], ['--attention-band', 'attention @ 18% / 14%'],
+    ['--chip-accent', 'chipFill(accent) 14% / 8%'], ['--chip-blue', 'chipFill(blue)'], ['--dim', 'bgBase @ 20% / 25% over panes'],
+    ['--scrim', 'dialogs, recorder'], ['--on-accent', 'ink on primary'], ['--diff-add', 'success @ 12% / 10%'], ['--diff-add-word', 'success @ 26% / 24%'],
+    ['--diff-del', 'danger @ 12% / 10%'], ['--diff-del-word', 'danger @ 26% / 24%'], ['--diff-filler', 'textMuted @ 5% / 6%, flat'],
+    ['--search-match', 'yellow @ 20% (Git search)']
+  ];
+  function rgbToHex(s) {
+    var m = s.match(/rgba?\(([^)]+)\)/) || s.match(/color\(srgb ([^)]+)\)/);
+    if (!m) return s;
+    var parts = m[1].replace(/\//, ' ').split(/[\s,]+/).filter(Boolean).map(Number);
+    var isSrgb = s.indexOf('color(srgb') === 0;
+    var rgb = parts.slice(0, 3).map(function (v) { return Math.round(isSrgb ? v * 255 : v); });
+    var a = parts.length > 3 ? parts[3] : 1;
+    var hex = '#' + rgb.map(function (v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+    return a < 1 ? hex + ' @ ' + Math.round(a * 1000) / 10 + '%' : hex;
+  }
+  function resolve(scope, prop) {
+    var probe = document.createElement('span');
+    probe.style.background = 'var(' + prop + ')';
+    scope.appendChild(probe);
+    var v = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return rgbToHex(v);
+  }
+  document.querySelectorAll('[data-swatches]').forEach(function (table) {
+    var scope = table.closest('[data-mode]');
+    table.appendChild(el('<tr><th style="width:44px"></th><th>Slot</th><th>Token</th><th>Value</th></tr>'));
+    SLOTS.forEach(function (s) {
+      table.appendChild(el('<tr><td><span class="sw" style="background:var(' + s[0] + ')"></span></td><td>' + s[1] + '</td><td class="t-meta">' + s[0] + '</td><td class="mono">' + resolve(scope, s[0]) + '</td></tr>'));
+    });
+    table.appendChild(el('<tr><th></th><th>Derived</th><th>Formula</th><th>Value</th></tr>'));
+    DERIVED.forEach(function (s) {
+      table.appendChild(el('<tr><td><span class="sw sw-check"><span class="sw-fill" style="background:var(' + s[0] + ')"></span></span></td><td class="t-meta">' + s[0] + '</td><td class="t-meta">' + s[1] + '</td><td class="mono t-meta" style="color:var(--text-primary)">' + resolve(scope, s[0]) + '</td></tr>'));
+    });
+  });
+
+  /* ---------- terminal palettes ---------- */
+  document.querySelectorAll('[data-term]').forEach(function (box) {
+    var head = el('<div class="line" style="display:flex;gap:16px;flex-wrap:wrap"></div>');
+    [['--term-bg', 'bg'], ['--term-fg', 'fg'], ['--term-cursor', 'cursor'], ['--term-selection', 'selection']].forEach(function (t) {
+      head.appendChild(el('<span class="t-meta" style="display:inline-flex;gap:6px;align-items:center"><span class="sw" style="background:var(' + t[0] + ')"></span>' + t[1] + ' ' + resolve(box, t[0]) + '</span>'));
+    });
+    box.appendChild(head);
+    var grid = el('<div class="ansi-grid"></div>');
+    function lum(hex) { var c = [1, 3, 5].map(function (k) { var v = parseInt(hex.substr(k, 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+    function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+    var tbg = resolve(box, '--term-bg'), tfg = resolve(box, '--term-fg');
+    for (var i = 0; i < 16; i++) {
+      var cell = resolve(box, '--ansi-' + i);
+      var ink = ratio(cell, tbg) >= ratio(cell, tfg) ? 'var(--term-bg)' : 'var(--term-fg)';
+      grid.appendChild(el('<div><div class="ansi-cell" style="background:var(--ansi-' + i + ');color:' + ink + '">' + i + '</div><div class="ansi-cap">' + cell + ' · ' + ratio(cell, tbg).toFixed(1) + ':1</div></div>'));
+    }
+    box.appendChild(grid);
+    box.appendChild(cloneTpl('term-snippet'));
+  });
+
+  /* ---------- status system ---------- */
+  var STATES = [
+    ['is-starting', 'Starting', 'ring · textMuted'], ['is-working', 'Working', 'solid · success'], ['is-running', 'Running', 'solid · cyan (plain shell)'],
+    ['is-ready', 'Ready', 'ring · blue'], ['is-needs-input', 'Needs input', 'solid · yellow, label yellow'], ['is-error', 'Error', 'solid · danger, label danger'],
+    ['is-stopped', 'Stopped', 'ring · gray'], ['is-idle', '', 'idle shell: 6 px ring, no label']
+  ];
+  document.querySelectorAll('[data-states]').forEach(function (box) {
+    var t = el('<table class="spec state-table"><tr><th>Pane header</th><th>Sidebar row</th><th>Tab badge</th><th>Dashboard row</th></tr></table>');
+    STATES.forEach(function (s) {
+      var label = s[1] ? '<span class="status-label ' + s[0] + '">' + s[1] + '</span>' : '';
+      var sidebarTrail = (s[0] === 'is-needs-input' || s[0] === 'is-error') ? '<span class="status-label ' + s[0] + '" style="margin-left:auto">' + s[1] + '</span>' : '<span class="row-count">' + (s[0] === 'is-running' ? '2t' : '') + '</span>';
+      t.appendChild(el('<tr>' +
+        '<td><div class="mini-header"><i class="status-dot ' + s[0] + '"></i><span class="pane-title">' + (s[1] ? 'Claude Code' : 'zsh') + '</span>' + label + '</div><div class="t-meta" style="margin-top:3px">' + s[2] + '</div></td>' +
+        '<td><div class="mini-row"><div class="row"><i class="status-dot sm ' + s[0] + '"></i><span class="row-title">' + (s[1] ? 'Codex' : 'zsh') + '</span>' + sidebarTrail + '</div></div></td>' +
+        '<td><span class="badge"><i class="status-dot ' + s[0] + '"></i>' + (s[0] === 'is-idle' ? '' : '1') + '</span></td>' +
+        '<td><div class="row" style="margin:0;width:340px"><i class="status-dot ' + s[0] + '"></i><span class="row-title">soprano › Claude Code</span><span class="row-trail">' + label + '<span class="t-meta">4m 12s</span></span></div></td>' +
+        '</tr>'));
+    });
+    box.appendChild(t);
+  });
+
+  document.querySelectorAll('[data-focusdemo]').forEach(function (box) { box.appendChild(cloneTpl('focus-demo')); });
+  document.querySelectorAll('[data-gallery]').forEach(function (box) { box.appendChild(cloneTpl('gallery')); });
+
+  /* ---------- icons ---------- */
+  document.querySelectorAll('[data-icons]').forEach(function (row) {
+    var suffix = row.getAttribute('data-icons');
+    [128, 64, 32].forEach(function (size) {
+      ['soprano', 'git', 'cast', 'tab'].forEach(function (app) {
+        row.appendChild(el('<figure><img src="icons/' + app + suffix + '.svg" width="' + size + '" height="' + size + '" alt="' + app + '"><figcaption>' + (size === 128 ? app + ' · ' : '') + size + '</figcaption></figure>'));
+      });
+    });
+  });
+
+  /* ---------- mapping ---------- */
+  var USE = {
+    bgBase: 'content, terminals, active tab, launcher/switcher panels', bgPanel: 'sidebars, bars, unfocused pane headers, settings nav',
+    bgRaised: 'fields, keycaps, focused pane header, buttons, light cards', bgOverlay: 'hover on tiles, pressed standard button',
+    textPrimary: 'titles, active text', textMuted: 'secondary text, icons, hints', accent: 'focus frame, tick, primary, caret',
+    accentStrong: 'pressed primary only (never syntax)', borderSubtle: 'dividers, field and keycap borders', borderStrong: 'split dividers, overlay edges, keycap edge on fills (dark)',
+    success: 'WORKING, + lines, granted', danger: 'ERROR, − lines, destructive', blue: 'READY, attention', cyan: 'RUNNING, renames, @@',
+    yellow: 'NEEDS INPUT, usage ≥ 70%, search matches', gray: 'STOPPED, ignored files (never text)'
+  };
+  var map = document.getElementById('mapping');
+  var dark = document.querySelector('.panel[data-mode="dark"]'), light = document.querySelector('.panel[data-mode="light"]');
+  SLOTS.forEach(function (s) {
+    map.appendChild(el('<tr><td class="mono">' + s[1] + '</td>' +
+      '<td class="mode-scope" data-mode="dark"><span class="sw" style="background:var(' + s[0] + ')"></span> <span class="t-meta" style="color:var(--text-primary)">' + resolve(dark, s[0]) + '</span></td>' +
+      '<td class="mode-scope" data-mode="light"><span class="sw" style="background:var(' + s[0] + ')"></span> <span class="t-meta" style="color:var(--text-primary)">' + resolve(light, s[0]) + '</span></td>' +
+      '<td class="t-prose" style="color:var(--text-primary)">' + USE[s[1]] + '</td></tr>'));
+  });
+
+  /* ---------- third-party themes (values from Sources/Soprano/Config/Theme.swift) ---------- */
+  var THEMES = [
+    ['Gruvbox Dark', ['#282828','#1d2021','#1d2021','#3c3836','#ebdbb2','#a89984','#fe8019','#fabd2f','#3c3836','#504945','#b8bb26','#fb4934','#83a598','#8ec07c','#fabd2f','#665c54'], null, null, 'bgRaised == bgPanel: the focused header does not change fill; the frame and dim carry focus. Keycaps and fields keep their borders.'],
+    ['Catppuccin Mocha', ['#1e1e2e','#181825','#11111b','#313244','#cdd6f4','#a6adc8','#cba6f7','#f5c2e7','#313244','#45475a','#a6e3a1','#f38ba8','#89b4fa','#94e2d5','#f9e2af','#45475a'], null, null, 'Purple frame and tick; attention stays blue (hue gap ≈ 50°). bgRaised is darker than bgPanel, so the focused header reads sunken; the frame still marks focus.'],
+    ['Dracula', ['#282a36','#21222c','#343746','#44475a','#f8f8f2','#6272a4','#bd93f9','#ff79c6','#44475a','#6272a4','#50fa7b','#ff5555','#bd93f9','#8be9fd','#f1fa8c','#6272a4'], '#ff79c6', null, 'blue == accent (#bd93f9), so attention falls back to ANSI 5 #ff79c6.'],
+    ['Solarized Dark', ['#002b36','#073642','#073642','#586e75','#93a1a1','#657b83','#268bd2','#6c71c4','#073642','#586e75','#859900','#dc322f','#268bd2','#2aa198','#b58900','#586e75'], '#d33682', '12%', 'accent == blue, so attention = ANSI 5 #d33682. textPrimary luminance < 0.35, so selection rises to 12%.'],
+    ['Nord', ['#2e3440','#3b4252','#434c5e','#4c566a','#eceff4','#81a1c1','#88c0d0','#8fbcbb','#434c5e','#4c566a','#a3be8c','#bf616a','#81a1c1','#88c0d0','#ebcb8b','#4c566a'], '#b48ead', null, 'Accent #88c0d0 is within 30° of blue, so attention = ANSI 5 #b48ead. The cyan frame and the cyan RUNNING dot differ in shape.'],
+    ['Tokyo Night', ['#1a1b26','#15161e','#24283b','#292e42','#c0caf5','#565f89','#7aa2f7','#bb9af7','#292e42','#414868','#9ece6a','#f7768e','#7aa2f7','#7dcfff','#e0af68','#414868'], '#bb9af7', null, 'accent == blue, so attention = ANSI 5 #bb9af7.'],
+    ['Atom One Dark', ['#21252b','#1b1f23','#282c34','#323844','#abb2bf','#5c6370','#61afef','#c678dd','#323844','#4b5263','#98c379','#e06c75','#61afef','#56b6c2','#e5c07b','#5c6370'], '#c678dd', null, 'accent == blue, so attention = ANSI 5 #c678dd.']
+  ];
+  var themesBox = document.getElementById('themes');
+  THEMES.forEach(function (th) {
+    var card = document.createElement('div');
+    card.className = 'theme-card';
+    card.setAttribute('data-mode', 'dark');
+    var style = SLOTS.map(function (s, i) { return s[0] + ':' + th[1][i]; }).join(';');
+    if (th[2]) style += ';--attention:' + th[2];
+    if (th[3]) style += ';--a-selection:' + th[3];
+    card.setAttribute('style', style);
+    card.appendChild(cloneTpl('theme-sample'));
+    card.querySelector('[data-name]').textContent = th[0];
+    card.querySelector('[data-attn]').textContent = 'attention ' + (th[2] || th[1][12]);
+    card.querySelector('[data-note]').textContent = th[4];
+    themesBox.appendChild(card);
+  });
+})();
+</script>
+</body>
+</html>

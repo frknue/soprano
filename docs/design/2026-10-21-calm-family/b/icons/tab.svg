@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Soprano Tab">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3eee4"/><stop offset="1" stop-color="#e9e2d4"/></linearGradient>
+    <filter id="s" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.22"/></filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#g)" filter="url(#s)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="rgba(43,38,32,0.10)" stroke-width="2"/>
+  <g fill="none" stroke="#2b2620" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="264" y="288" width="384" height="288" rx="44" fill="#fbf8f2"/>
+    <rect x="376" y="440" width="384" height="288" rx="44" fill="#fbf8f2"/>
+    <g stroke="#a34a17" stroke-width="44">
+      <path d="M452 584 H 640"/>
+      <path d="M584 528 L 640 584 L 584 640"/>
+      <path d="M692 520 V 648"/>
+    </g>
+  </g>
+</svg>

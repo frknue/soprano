@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en" data-mode="light">
+<head>
+<meta charset="utf-8">
+<title>Soprano — a tiling terminal multiplexer for AI coding agents</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  /* ── page frame: 1512 wide, scrolls vertically ───────────────────────── */
+  html, body { margin: 0; width: 1512px; }
+  html { background: var(--bg-base); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+  body { background: var(--bg-base); color: var(--text-primary); font: 400 17px/28px var(--font-sans); overflow-x: hidden; }
+  a { color: inherit; text-decoration: none; }
+  p { margin: 0; }
+  .wrap { width: 1120px; margin: 0 auto; }
+
+  /* mode-matched app icons */
+  .ic { display: block; width: 100%; height: 100%; }
+  [data-mode="light"] .ic-ink, [data-mode="dark"] .ic-paper { display: none; }
+  /* .icw holds both variants; in Ink a 1 px ring traces the squircle (svg ground 100…924 of 1024, r 185) so it reads on the ink page */
+  .icw { position: relative; display: block; flex: none; }
+  [data-mode="dark"] .icw::after { content: ""; position: absolute; inset: 9.77%; border-radius: 22.45%; box-shadow: inset 0 0 0 1px var(--border-strong); pointer-events: none; }
+
+  /* ── type roles for the site (serif ≥ 15 px only) ────────────────────── */
+  .eyebrow { font: var(--type-eyebrow); letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted); }
+  .h1 { font: 400 112px/104px var(--font-serif); letter-spacing: -2.6px; margin: 18px 0 28px; margin-left: -6px; }
+  .h2 { font: 400 42px/50px var(--font-serif); letter-spacing: -0.7px; margin: 14px 0 0; max-width: 21ch; text-wrap: balance; }
+  .lede { font: 400 26px/36px var(--font-serif); letter-spacing: -0.2px; color: var(--text-primary); max-width: 24ch; }
+  .sub { font: 400 16px/26px var(--font-sans); color: var(--text-muted); max-width: 46ch; margin-top: 18px; }
+  .body p { color: var(--text-muted); max-width: 58ch; }
+  .body p + p { margin-top: 16px; }
+  .body strong { color: var(--text-primary); font-weight: 500; }
+  .body code, .cell code { font: 400 13px/1 var(--font-mono); color: var(--text-primary); background: var(--bg-panel); border-radius: var(--radius-cap); padding: 2px 5px; }
+  .caption { font: italic 400 15px/22px var(--font-serif); color: var(--text-muted); margin-top: 20px; }
+  .caption code { font: 400 12px/1 var(--font-mono); color: var(--text-primary); }
+
+  /* ── masthead ─────────────────────────────────────────────────────────── */
+  .masthead { position: sticky; top: 0; z-index: 20; background: var(--bg-base); border-bottom: 1px solid var(--border-subtle); }
+  .masthead .wrap { height: 60px; display: flex; align-items: center; gap: 10px; }
+  .masthead .icw { width: 30px; height: 30px; margin-left: -3px; }
+  .masthead .wordmark { font-size: 19px; line-height: 24px; }
+  .nav { margin-left: auto; display: flex; align-items: center; gap: 26px; font: 400 13px/18px var(--font-sans); color: var(--text-muted); }
+  .nav a:hover { color: var(--text-primary); }
+  .jump { width: 168px; margin-left: 10px; height: 28px; font: var(--type-label); }
+  .jump .placeholder { flex: 1; }
+
+  /* ── hero ─────────────────────────────────────────────────────────────── */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) 548px; column-gap: 72px; align-items: center; padding: 84px 0 104px; }
+  .actions { display: flex; gap: 12px; margin-top: 40px; }
+  .btn-xl { height: 40px; padding: 0 18px; font: 500 14px/18px var(--font-sans); gap: 8px; }
+  .btn-xl .icon { --icon-size: 14px; }
+  .btn-ghost { background: transparent; border-color: var(--border-strong); }
+  .btn-ghost:hover { background: var(--hover); }
+
+  /* live pane status panel */
+  .panel { background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); box-shadow: var(--shadow-e2); overflow: hidden; }
+  .score-head { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 24px; border-bottom: 1px solid var(--border-subtle); }
+  .score-head .where { font: var(--type-label); color: var(--text-muted); }
+  .where b { color: var(--text-primary); font-weight: 500; }
+  .lane { display: grid; grid-template-columns: 156px minmax(0, 1fr) 112px; align-items: center; column-gap: 20px; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border-subtle); }
+  .lane.is-needs-input { background: var(--status-wash-needs-input); }
+  .lane .voice { font: 500 13px/18px var(--font-sans); color: var(--text-primary); }
+  .lane .voice small { display: block; font: var(--type-meta); color: var(--text-muted); margin-top: 2px; }
+  .track { height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text-primary) 9%, transparent); overflow: hidden; }
+  .track i { display: block; height: 100%; border-radius: 2px; background: var(--st, var(--gray)); }
+  .lane .status { justify-self: end; }
+  .score-foot { padding: 16px 24px 18px; font: 400 12px/16px var(--font-sans); color: var(--text-muted); }
+
+  /* ── sections ─────────────────────────────────────────────────────────── */
+  .section { border-top: 1px solid var(--border-subtle); padding: 96px 0 104px; }
+  .sec-head { display: grid; grid-template-columns: 600px minmax(0, 1fr); column-gap: 64px; align-items: start; margin-bottom: 56px; }
+  .sec-head > .body { padding-top: 34px; }
+  .sec-head.is-solo { grid-template-columns: 1fr; }
+
+  /* six states */
+  .states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 48px; list-style: none; margin: 0; padding: 0; }
+  .states li { border-top: 1px solid var(--border-subtle); padding: 22px 0 30px; }
+  .states .status { gap: 8px; }
+  .states p { font: 400 15px/23px var(--font-sans); color: var(--text-muted); margin-top: 8px; max-width: 32ch; }
+
+  /* attention: notification stage + dashboard */
+  .attention { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+  .stage { display: flex; flex-direction: column; }
+  .desk { position: relative; flex: 1; min-height: 340px; background: var(--desktop-wallpaper); overflow: hidden; isolation: isolate; }
+  .desk .menubar { position: absolute; height: 24px; font-size: 12px; gap: 16px; padding: 0 12px 0 14px; }
+  .desk .menubar-right { gap: 12px; }
+  .desk .menubar-right .icon { --icon-size: 14px; }
+  .ghost-win { position: absolute; left: 28px; top: 112px; width: 360px; height: 300px; background: var(--bg-base); border-radius: var(--radius-window); box-shadow: var(--shadow-window); overflow: hidden; display: flex; flex-direction: column; }
+  .ghost-win .titlebar { height: 24px; }
+  .ghost-win .traffic > i { width: 10px; height: 10px; }
+  .ghost-win .split { flex: 1; }
+  .ghost-win .pane-header { height: 22px; font-size: 11px; }
+  .ghost-win .pane-title { font-size: 11px; }
+  .ghost-win .term { font-size: 11px; line-height: 14px; padding: 6px 8px; }
+  .notif { position: absolute; top: 40px; right: 16px; width: 344px; display: flex; gap: 12px; padding: 12px 14px 13px 12px; background: var(--bg-raised); border: 1px solid var(--border-subtle); border-radius: 16px; box-shadow: var(--shadow-e3); }
+  .notif .icw { width: 36px; height: 36px; margin: -2px; }
+  .notif-body { flex: 1; min-width: 0; }
+  .notif-top { display: flex; align-items: baseline; justify-content: space-between; }
+  .notif-title { font: 600 13px/17px var(--font-sans); }
+  .notif-time { font: var(--type-meta); color: var(--text-muted); }
+  .notif-where { font: 500 12px/16px var(--font-sans); color: var(--text-primary); }
+  .notif-msg { font: 400 12px/16px var(--font-sans); color: var(--text-primary); margin-top: 1px; }
+  .notif-msg b { font-weight: 600; }
+  .stage-foot { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 20px; border-top: 1px solid var(--border-subtle); font: italic 400 15px/20px var(--font-serif); color: var(--text-muted); }
+  .stage-foot .chip { margin-left: auto; }
+
+  .dash-head { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 24px; border-bottom: 1px solid var(--border-subtle); }
+  .dash-head .t-meta { margin-top: 2px; }
+  .dash-head > .kbd { margin-left: auto; }
+  .tallies { display: flex; gap: 40px; padding: 18px 24px 20px; border-bottom: 1px solid var(--border-subtle); }
+  .tallies .stat { min-width: 0; }
+  .dash-rows { padding: 6px 0; }
+  /* rows use the shared .row / .row.is-attention (A1); grid layout and 24 px inset stay local (--indent 12 → 12 + 12) */
+  .dash-row { --indent: 12px; display: grid; grid-template-columns: 16px 1fr auto; align-items: center; column-gap: 10px; height: 50px; margin: 0; padding: 0 24px; border-radius: 0; white-space: normal; }
+  .dash-row .t-row b { font-weight: 500; }
+  .dash-row .sep { color: var(--text-muted); margin: 0 3px; }
+  .dash-row .t-meta { margin-top: 1px; }
+  .dash-foot { display: flex; align-items: center; height: 40px; padding: 0 24px; border-top: 1px solid var(--border-subtle); }
+
+  /* layout stage: a miniature Soprano window */
+  .appwin { position: relative; height: 580px; display: flex; flex-direction: column; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); box-shadow: var(--shadow-e2); overflow: hidden; }
+  .appwin > .titlebar { height: 30px; }
+  .appwin .split-row, .appwin .split-col { flex: 1; }
+  .appwin .term { font-size: 12px; line-height: 17px; padding: 10px 12px; height: 100%; }
+  .appwin .pane-actions .status-label { margin-right: 2px; }
+  .appwin .statusbar .kbd { height: 16px; min-width: 16px; padding: 0 4px; }
+
+  /* features */
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 48px; }
+  .cell { border-top: 1px solid var(--border-subtle); padding: 22px 0 32px; }
+  .cell h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; font: 500 18px/24px var(--font-serif); color: var(--text-primary); }
+  .cell h3 .kbd-group { margin-left: 4px; }
+  .cell p { font: 400 14px/22px var(--font-sans); color: var(--text-muted); margin-top: 8px; }
+  .cell p .kbd { height: 17px; min-width: 17px; padding: 0 4px; vertical-align: 1px; }
+  .cell code { font-size: 12px; }
+  .keymap-head { display: flex; align-items: baseline; gap: 12px; margin: 48px 0 14px; }
+  .keymap { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 48px; }
+  .km-row { display: grid; grid-template-columns: 196px 1fr; align-items: center; column-gap: 16px; min-height: 48px; border-top: 1px solid var(--border-subtle); font: 400 14px/20px var(--font-sans); color: var(--text-primary); }
+  .keymap > div > .km-row:last-child { border-bottom: 1px solid var(--border-subtle); }
+  .km-keys { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font: var(--type-meta); }
+  .km-keys .kbd-group { align-items: center; }
+  .km-keys .or { color: var(--text-muted); margin: 0 -1px; }
+
+  /* family */
+  .family { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: 32px; }
+  .member { border-top: 1px solid var(--border-subtle); padding-top: 28px; display: flex; flex-direction: column; }
+  .member .icw { width: 84px; height: 84px; margin: 0 0 18px -8px; }
+  .member h3 { margin: 0; font: 400 24px/30px var(--font-serif); letter-spacing: -0.3px; }
+  .member p { font: 400 15px/22px var(--font-sans); color: var(--text-muted); margin-top: 6px; min-height: 44px; }
+  .member .repo { display: block; font: var(--type-mono-sm); color: var(--text-muted); margin-top: 12px; }
+
+  /* themes */
+  .themes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 24px; }
+  .theme { display: flex; flex-direction: column; gap: 12px; }
+  .sample { position: relative; height: 128px; border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 0 0 1px var(--border-subtle); display: flex; }
+  .theme.is-selected .sample { outline: 2px solid var(--focus-mark); outline-offset: 3px; }
+  .sample > div { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+  .sample .pane { flex: 1; background: var(--bg-base); }
+  .sample .pane-header { height: 26px; padding: 0 8px; gap: 6px; }
+  .sample .pane-header .status-dot { --status-mark: 7px; }
+  .sample .pane-title { font-size: 11px; }
+  .sample .status-label { font-size: 11px; letter-spacing: 0.3px; }
+  .sample .term { flex: 1; background: var(--bg-base); color: var(--text-primary); font-size: 11px; line-height: 16px; padding: 8px 10px; }
+  .sample .bar { height: 22px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: var(--bg-panel); border-top: 1px solid var(--border-subtle); font: 400 11px/14px var(--font-sans); color: var(--text-muted); }
+  .sample .bar .status-dot { --status-mark: 6px; }
+  .theme-name { display: flex; align-items: center; gap: 8px; font: 500 13px/18px var(--font-sans); }
+  .swatch { display: inline-flex; gap: 3px; margin-left: auto; }
+  .swatch i { width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
+  .theme .t-meta { margin-top: -8px; }
+
+  /* install */
+  .termwin { background: var(--term-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); box-shadow: var(--shadow-e2); overflow: hidden; }
+  .termwin > .titlebar { height: 32px; }
+  .termwin > .titlebar .window-title { font: var(--type-label); color: var(--text-muted); }
+  .termwin .term { font-size: 14px; line-height: 24px; padding: 22px 28px 26px; }
+  .termwin .cm { color: var(--text-muted); }
+  .note { font: 400 14px/22px var(--font-sans); color: var(--text-muted); margin-top: 24px; max-width: 92ch; }
+  .note strong { color: var(--text-primary); font-weight: 500; }
+
+  /* footer */
+  .foot { border-top: 1px solid var(--border-subtle); }
+  .foot .wrap { display: flex; align-items: center; gap: 12px; height: 96px; font: 400 13px/18px var(--font-sans); color: var(--text-muted); }
+  .foot .icw { width: 26px; height: 26px; margin-left: -3px; }
+  .foot .links { margin-left: auto; display: flex; gap: 24px; }
+  .foot .links a { color: var(--text-muted); }
+  .foot .links a:hover { color: var(--text-primary); }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <span class="icw"><img class="ic ic-paper" src="icons/soprano.svg" alt=""><img class="ic ic-ink" src="icons/soprano-dark.svg" alt=""></span>
+    <span class="wordmark">Soprano</span>
+    <nav class="nav">
+      <a href="#status">Status</a>
+      <a href="#layout">Layout</a>
+      <a href="#features">Features</a>
+      <a href="#family">Family</a>
+      <a href="#themes">Themes</a>
+      <a href="#install">Install</a>
+      <a href="#">GitHub</a>
+      <span class="search-field jump"><i data-icon="search"></i><span class="placeholder">Jump to…</span><span class="kbd">⌘P</span></span>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- ── hero ── -->
+  <div class="wrap">
+    <section class="hero" id="status">
+      <div>
+        <p class="eyebrow">Native macOS · Swift 6 + libghostty · MIT</p>
+        <h1 class="h1">Soprano</h1>
+        <p class="lede">A tiling terminal multiplexer for the room full of coding agents you're already running.</p>
+        <p class="sub">Codex, Claude Code, and OpenCode side by side in real GPU-rendered terminals. Every pane says what its agent is doing, and macOS tells you which one is waiting on you.</p>
+        <div class="actions">
+          <a class="btn btn-primary btn-xl" href="#install"><i data-icon="download"></i>Install Soprano</a>
+          <a class="btn btn-ghost btn-xl" href="#"><i data-icon="code"></i>Read the source</a>
+        </div>
+      </div>
+
+      <div class="panel score" aria-label="Live pane status">
+        <div class="score-head">
+          <p class="eyebrow">Live pane status</p>
+          <p class="where">soprano ▸ <b>window 1</b></p>
+        </div>
+        <div class="lane" style="--st: var(--st-working)">
+          <p class="voice">Codex<small>editing SplitNode.swift</small></p>
+          <div class="track"><i style="width:56%"></i></div>
+          <span class="status"><i class="status-dot is-working"></i><span class="status-label is-working">Working</span></span>
+        </div>
+        <div class="lane is-needs-input" style="--st: var(--st-needs-input)">
+          <p class="voice">Claude Code<small>waiting on you</small></p>
+          <div class="track"><i style="width:100%"></i></div>
+          <span class="status"><i class="status-dot is-needs-input"></i><span class="status-label is-needs-input">Needs input</span></span>
+        </div>
+        <div class="lane" style="--st: var(--st-working)">
+          <p class="voice">OpenCode<small>writing tests</small></p>
+          <div class="track"><i style="width:31%"></i></div>
+          <span class="status"><i class="status-dot is-working"></i><span class="status-label is-working">Working</span></span>
+        </div>
+        <div class="lane" style="--st: var(--st-ready)">
+          <p class="voice">Terminal 1<small>252 tests, 0 failures</small></p>
+          <div class="track"><i style="width:0"></i></div>
+          <span class="status"><i class="status-dot is-ready"></i><span class="status-label is-ready">Ready</span></span>
+        </div>
+        <p class="score-foot">Driven by real agent lifecycle hooks — not output scraping.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── the problem ── -->
+  <div class="wrap">
+    <section class="section" id="how">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">The problem</p>
+          <h2 class="h2">One agent is easy. Four is a scheduling problem.</h2>
+        </div>
+        <div class="body">
+          <p>They run asynchronously, they all stop to ask you something eventually, and terminal tabs hide the one that is blocked. So you cycle through tabs looking for the agent that went quiet for the wrong reason.</p>
+          <p>Soprano is built around the question you actually have all day: <strong>which agent needs me right now?</strong> Panes answer it themselves — the launchers install lifecycle hooks per launch, so nothing scrapes output and nothing touches your global agent config.</p>
+        </div>
+      </div>
+      <ul class="states">
+        <li><span class="status"><i class="status-dot is-starting"></i><span class="status-label is-starting">Starting</span></span><p>The launcher is up, the agent has not reported in yet.</p></li>
+        <li><span class="status"><i class="status-dot is-working"></i><span class="status-label is-working">Working</span></span><p>A turn is in flight. Leave it alone.</p></li>
+        <li><span class="status"><i class="status-dot is-ready"></i><span class="status-label is-ready">Ready</span></span><p>Idle and waiting for a prompt.</p></li>
+        <li><span class="status"><i class="status-dot is-needs-input"></i><span class="status-label is-needs-input">Needs input</span></span><p>A question or a permission prompt. This is the one you came for.</p></li>
+        <li><span class="status"><i class="status-dot is-error"></i><span class="status-label is-error">Error</span></span><p>The turn failed. The pane keeps the state until you look.</p></li>
+        <li><span class="status"><i class="status-dot is-stopped"></i><span class="status-label is-stopped">Stopped</span></span><p>The process exited. The layout stays where you left it.</p></li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ── attention ── -->
+  <div class="wrap">
+    <section class="section" id="attention">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">Attention</p>
+          <h2 class="h2">It tells you where to look, not just that something happened.</h2>
+        </div>
+        <div class="body">
+          <p>Notifications only fire for panes that are not focused, and they are subtitled <strong>window ▸ pane</strong> so the banner names the location. Clicking one activates Soprano and focuses that exact tab. A pane's banners group together instead of stacking up.</p>
+        </div>
+      </div>
+
+      <div class="attention">
+        <div class="panel stage">
+          <div class="desk">
+            <div class="menubar">
+              <i class="menubar-apple"></i><b class="menubar-app">Soprano Git</b>
+              <span class="menubar-item">File</span><span class="menubar-item">Edit</span><span class="menubar-item">View</span><span class="menubar-item">Repository</span>
+              <div class="menubar-right"><svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Cast"><rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/><circle cx="5.3" cy="7.7" r="1.35"/><path d="M6.3 8.7 7.2 9.6"/><path d="M10.4 6.2v3.6"/></svg><svg class="tpl" viewBox="0 0 16 16" aria-label="Soprano Tab"><path d="M5.5 9.5H3A1.5 1.5 0 0 1 1.5 8V4A1.5 1.5 0 0 1 3 2.5h6A1.5 1.5 0 0 1 10.5 4v2.5"/><rect x="5.5" y="6.5" width="9" height="7" rx="1.5"/><path d="M8.3 10h3.4M10.6 8.8 11.8 10l-1.2 1.2"/></svg><i data-icon="wifi"></i><i data-icon="battery"></i><span class="menubar-clock">Tue 21 Oct 21:41</span></div>
+            </div>
+            <div class="ghost-win" aria-hidden="true">
+              <div class="titlebar"><div class="traffic is-inactive"><i></i><i></i><i></i></div><span class="window-title" style="font-size:11px">soprano — main</span></div>
+              <div class="split split-col">
+                <section class="pane is-dimmed" style="flex:1"><header class="pane-header"><span class="pane-title">Graph</span></header>
+                  <div class="pane-body"><pre class="term"><span class="t-muted">d78be48</span>  feat: add Collapse All Windows button
+<span class="t-muted">f55ec9e</span>  docs: document the Swift toolchain
+<span class="t-muted">653edce</span>  feat: Tab and Shift-Tab move focus
+<span class="t-muted">eb9df62</span>  fix: Reveal selected windows
+<span class="t-muted">a3df281</span>  fix: reduce idle terminal rendering
+<span class="t-muted">1ff140c</span>  feat: open the active tab's repository
+<span class="t-muted">8da9b7e</span>  fix: clear button hover when a cached
+<span class="t-muted">bb06fac</span>  chore: remove Soprano Desktop (#19)
+<span class="t-muted">49af635</span>  feat: show running commands in tabs
+<span class="t-muted">9a84512</span>  feat: add Soprano Desktop (#16)
+<span class="t-muted">5f31ecf</span>  feat: show agents as a live timeline
+<span class="t-muted">f6904b5</span>  feat: add a Source Control tab</pre></div></section>
+              </div>
+            </div>
+            <div class="notif">
+              <span class="icw"><img class="ic ic-paper" src="icons/soprano.svg" alt=""><img class="ic ic-ink" src="icons/soprano-dark.svg" alt=""></span>
+              <div class="notif-body">
+                <div class="notif-top"><span class="notif-title">Soprano</span><span class="notif-time">now</span></div>
+                <p class="notif-where">soprano ▸ Claude Code</p>
+                <p class="notif-msg"><b>Needs input</b> — Drop the legacy column? [y/n]</p>
+              </div>
+            </div>
+          </div>
+          <div class="stage-foot"><i data-icon="mouse-pointer" class="i13"></i>Click it and Soprano focuses that exact tab.<span class="chip">window ▸ pane</span></div>
+        </div>
+
+        <div class="panel dash">
+          <div class="dash-head">
+            <div>
+              <h3 class="t-screen">Agent Dashboard</h3>
+              <p class="t-meta">Monitoring 4 agents across 2 windows</p>
+            </div>
+            <span class="kbd">⇧⌘D</span>
+          </div>
+          <div class="tallies">
+            <div class="stat"><span class="stat-value">2</span><span class="stat-label"><i class="status-dot is-working"></i>Working</span></div>
+            <div class="stat"><span class="stat-value">1</span><span class="stat-label"><i class="status-dot is-needs-input"></i>Needs input</span></div>
+            <div class="stat"><span class="stat-value is-zero">0</span><span class="stat-label"><i class="status-dot is-error"></i>Error</span></div>
+          </div>
+          <div class="dash-rows">
+            <div class="row dash-row"><i class="status-dot is-working"></i><div><p class="t-row">soprano<span class="sep">▸</span><b>Codex</b></p><p class="t-meta">editing SplitNode.swift</p></div><span class="status-label is-working">Working</span></div>
+            <div class="row dash-row is-attention"><i class="status-dot is-needs-input"></i><div><p class="t-row">soprano<span class="sep">▸</span><b>Claude Code</b></p><p class="t-meta">Drop the legacy column? [y/n]</p></div><span class="status-label is-needs-input">Needs input</span></div>
+            <div class="row dash-row"><i class="status-dot is-working"></i><div><p class="t-row">webapp<span class="sep">▸</span><b>OpenCode</b></p><p class="t-meta">writing tests</p></div><span class="status-label is-working">Working</span></div>
+            <div class="row dash-row"><i class="status-dot is-ready"></i><div><p class="t-row">webapp<span class="sep">▸</span><b>Terminal</b></p><p class="t-meta">252 tests, 0 failures</p></div><span class="status-label is-ready">Ready</span></div>
+          </div>
+          <div class="dash-foot"><span class="hints"><span class="hint"><span class="kbd-group"><span class="kbd">J</span><span class="kbd">K</span></span>Navigate</span><span class="hint"><span class="kbd">⇥</span>Reply</span><span class="hint"><span class="kbd">↵</span>Open</span></span></div>
+        </div>
+      </div>
+      <p class="caption">Live agent states across every logical window. Navigate with J/K, open with Return.</p>
+    </section>
+  </div>
+
+  <!-- ── layout ── -->
+  <div class="wrap">
+    <section class="section" id="layout">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">The layout</p>
+          <h2 class="h2">Every pane is a node. Every split is a decision.</h2>
+        </div>
+        <div class="body">
+          <p>Panes live in a recursive split tree, so a window is never a fixed grid you have to fight. Then there is <strong>depth</strong>: any pane can open a private workspace on the window's z-axis, so one pane becomes a whole layout while its siblings keep running behind it.</p>
+        </div>
+      </div>
+
+      <div class="appwin" aria-label="Soprano window with four panes">
+        <div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div></div>
+        <div class="split split-row">
+          <section class="pane is-focused" style="flex:0 0 calc(50% - 1px)">
+            <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Codex</span><span class="pane-actions"><span class="status-label is-working">Working</span><span class="btn-icon"><i data-icon="x"></i></span></span></header>
+            <div class="pane-body"><pre class="term"><span class="b">&gt;_ OpenAI Codex</span> <span class="d">(v0.46.0)</span>
+<span class="d">   model: gpt-5-codex   directory: ~/git/private/soprano</span>
+
+<span class="d">›</span> Let any pane open a private workspace on the window's z-axis.
+
+<span class="c2">•</span> Explored
+  <span class="d">└</span> Read SplitNode.swift, SplitTreeView.swift, AgentManager.swift
+
+<span class="c2">•</span> Edited Sources/Soprano/Layout/SplitNode.swift <span class="c2">(+42</span> <span class="c1">−6)</span>
+    <span class="d">118</span> <span class="add-line"><span class="c2">+</span>    case depth(DepthLayer)                        </span>
+    <span class="d">119</span> <span class="add-line"><span class="c2">+</span>    var isDepthRoot: Bool { layer != nil }        </span>
+    <span class="d">120</span>      case leaf(PaneID)
+
+<span class="c2">•</span> Ran swift build
+  <span class="d">└</span> Build complete! (38.12s)
+
+<span class="c2">•</span> Running swift test --filter DepthTests
+  <span class="d">└</span> [212/538] Compiling Soprano SplitNode.swift
+
+<span class="d">•</span> Working <span class="d">(1m 14s · esc to interrupt)</span>
+
+<span class="d">›</span> <span class="cursor"> </span>
+<span class="d">  ⏎ send   ⇧⏎ newline   ⌃T transcript   ⌃C quit</span></pre></div>
+          </section>
+          <div class="split-divider is-vertical"></div>
+          <div class="split split-col" style="flex:1">
+            <section class="pane is-attention is-needs-input" style="flex:1">
+              <header class="pane-header"><i class="attention-dot"></i><i class="status-dot is-needs-input"></i><span class="pane-title">Claude Code</span><span class="pane-actions"><span class="status-label is-needs-input">Needs input</span><span class="btn-icon"><i data-icon="x"></i></span></span></header>
+              <div class="pane-body"><pre class="term"><span class="b">⏺</span> I'll drop the column in a new migration.
+
+<span class="c2">⏺</span> <span class="b">Bash</span>(swift run migrate --drop users.legacy_name)
+  <span class="d">⎿  Waiting for permission…</span>
+
+<span class="c3 b">▌ Drop the legacy column? [y/n]</span>
+<span class="c3">▌</span> <span class="b">› 1. Yes</span>
+<span class="c3">▌</span>   2. No, and tell Claude what to do differently
+
+<span class="d">  esc to cancel</span></pre></div>
+            </section>
+            <div class="split-divider is-horizontal"></div>
+            <div class="split split-row" style="flex:1">
+              <section class="pane is-dimmed" style="flex:1">
+                <header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">OpenCode</span><span class="pane-actions"><span class="status-label is-working">Working</span></span></header>
+                <div class="pane-body"><pre class="term"><span class="b">opencode</span> <span class="d">~/git/private/soprano</span>
+
+<span class="d">&gt;</span> Cover depth navigation with tests
+
+<span class="c6">◇</span> resolving imports
+<span class="c6">◇</span> writing tests
+  <span class="d">└ DepthTests.swift</span>
+<span class="c6">◆</span> <span class="d">42 files scanned</span></pre></div>
+              </section>
+              <div class="split-divider is-vertical"></div>
+              <section class="pane is-dimmed" style="flex:1">
+                <header class="pane-header"><i class="status-dot is-idle"></i><span class="pane-title">Terminal 1</span></header>
+                <div class="pane-body"><pre class="term"><span class="c4">~/git/private/soprano</span> on <span class="c5">main</span>
+<span class="c2">❯</span> swift test
+Test Suite 'All tests' passed
+Executed 252 tests, 0 failures
+<span class="d">in 4.21 s</span>
+
+<span class="c4">~/git/private/soprano</span> on <span class="c5">main</span>
+<span class="c2">❯</span> <span class="cursor-hollow"> </span></pre></div>
+              </section>
+            </div>
+          </div>
+        </div>
+        <footer class="statusbar">
+          <span class="mode-chip is-normal">Normal</span>
+          <span class="breadcrumb"><span class="crumb">soprano</span><span class="crumb-sep"></span><span class="crumb">window 1</span><span class="crumb-sep"></span><span class="crumb is-current">Codex</span><span class="t-meta">· Tab 1</span></span>
+          <span class="statusbar-spacer"></span>
+          <span class="counts">1 session · 1 window · 4 panes · <span class="is-attention">1 needs you</span></span>
+          <span class="usage">Claude <span class="pct">42%</span> · 2h 10m&nbsp;&nbsp; Codex <span class="pct is-warn">71%</span> · 3d 4h</span>
+          <span class="hints"><span class="hint"><span class="kbd">⌘P</span>Commands</span><span class="hint"><span class="kbd">⌃A</span>Prefix</span></span>
+        </footer>
+      </div>
+      <p class="caption">One pane becomes a layout — and every layout comes back on the next launch.</p>
+    </section>
+  </div>
+
+  <!-- ── features ── -->
+  <div class="wrap">
+    <section class="section" id="features">
+      <div class="sec-head is-solo">
+        <div>
+          <p class="eyebrow">What it does</p>
+          <h2 class="h2" style="max-width:none">A real terminal, arranged the way you think.</h2>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="cell"><h3>libghostty surfaces</h3><p>Every pane is a real GPU-rendered terminal hosted in AppKit — full keyboard routing, sided modifiers, a clipboard confirmation policy for paste. No Electron, no web view, no reimplemented VT parser.</p></div>
+        <div class="cell"><h3>Agent launchers <span class="kbd-group"><span class="kbd">⌘1</span><span class="kbd">⌘2</span><span class="kbd">⌘3</span></span></h3><p>Codex, Claude Code, and OpenCode start with lifecycle hooks scoped to that launch. Your global agent configuration is never modified.</p></div>
+        <div class="cell"><h3>Custom agents</h3><p>Define your own launcher under <code>agents</code> — command, args, env, cwd or a <code>launchScript</code>, colour, and its own launch key. It shows up in the sidebar and settings like a built-in.</p></div>
+        <div class="cell"><h3>Browser panes <span class="kbd-group"><span class="kbd">⌘B</span></span></h3><p>A WebKit pane with an address bar and history controls. Agents drive it from any terminal: <code>"$SOPRANO_BIN" browser click @e1</code>, with snapshots that assign element refs.</p></div>
+        <div class="cell"><h3>Copy mode <span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">[</span></span></h3><p>Vim motions over the scrollback — viewport and buffer jumps, character and line selection, clipboard yank.</p></div>
+        <div class="cell"><h3>Command palette <span class="kbd-group"><span class="kbd">⌘P</span></span></h3><p>Every action in one place, plus a project launcher and search over your configured project directories on <span class="kbd">⇧⌘P</span>.</p></div>
+        <div class="cell"><h3>Window switcher <span class="kbd-group"><span class="kbd">⌘F</span></span></h3><p>Searches window titles and nested pane details at once, prioritising window-title matches.</p></div>
+        <div class="cell"><h3>Sessions <span class="kbd-group"><span class="kbd">⇧⌘S</span></span></h3><p>The last workspace restores on launch. Save named sessions and toggle back to the previous one with <span class="kbd">⌃A</span> <span class="kbd">⇧L</span>.</p></div>
+        <div class="cell"><h3>Drag and drop</h3><p>Files, folders, URLs, and macOS screenshot thumbnails dropped on a terminal become shell-safe paths at the cursor.</p></div>
+        <div class="cell"><h3>Sidebar</h3><p>Every pane with its git branch, a spawn menu, a sessions footer, and jump hints that appear while <span class="kbd">⌃</span> is held.</p></div>
+        <div class="cell"><h3>tmux handoff</h3><p>Pane navigation passes through to tmux at layout boundaries, scoped to the issuing process, pane, and tab — so nesting behaves.</p></div>
+        <div class="cell"><h3>settings.json</h3><p>One commented file at <code>~/.config/soprano/settings.json</code>. Rebind any action by id, or set it to <code>null</code> to turn it off. Saving applies immediately — no restart.</p></div>
+      </div>
+
+      <div class="keymap-head"><p class="eyebrow">Keymap</p><span class="t-meta">defaults · prefix <span class="kbd kbd-sm">⌃A</span></span></div>
+      <div class="keymap">
+        <div>
+          <div class="km-row"><span class="km-keys"><span class="kbd">⌘1</span><span class="kbd">⌘2</span><span class="kbd">⌘3</span></span><span>Launch Codex, Claude Code, or OpenCode in the active pane</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">|</span></span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">-</span></span></span><span>Split the active pane vertically or horizontally</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd">⌃H</span><span class="kbd">⌃J</span><span class="kbd">⌃K</span><span class="kbd">⌃L</span></span><span>Move between panes — no prefix, wraps at layout boundaries</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">H</span><span class="or">/</span><span class="kbd">J</span><span class="or">/</span><span class="kbd">K</span><span class="or">/</span><span class="kbd">L</span></span></span><span>Resize the active pane by the configured step</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">M</span></span></span><span>Maximize the active pane, again to restore</span></div>
+        </div>
+        <div>
+          <div class="km-row"><span class="km-keys"><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">I</span></span><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">O</span></span></span><span>Dive into a pane's private workspace, and come back out</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd">⌃1</span>…<span class="kbd">⌃9</span></span><span>Select a pane tab by number</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd-group"><span class="kbd">⌃A</span><span class="kbd">⇧P</span></span></span><span>Jump to the most recently active window, again to toggle back</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd">⌘=</span><span class="kbd">⌘-</span><span class="kbd">⌘0</span></span><span>Terminal zoom in, out, and reset</span></div>
+          <div class="km-row"><span class="km-keys"><span class="kbd">⇧⌘D</span></span><span>Agent dashboard across every window</span></div>
+        </div>
+      </div>
+      <p class="caption">Every binding is rebindable by action id in <code>settings.json</code>.</p>
+    </section>
+  </div>
+
+  <!-- ── the family ── -->
+  <div class="wrap">
+    <section class="section" id="family">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">The family</p>
+          <h2 class="h2">Four apps on the same paper.</h2>
+        </div>
+        <div class="body">
+          <p>Soprano, Soprano Git, Soprano Cast and Soprano Tab share one design: paper and ink, a serif for titles, and one pencil mark where your keyboard is.</p>
+        </div>
+      </div>
+      <div class="family">
+        <div class="member">
+          <span class="icw"><img class="ic ic-paper" src="icons/soprano.svg" alt=""><img class="ic ic-ink" src="icons/soprano-dark.svg" alt=""></span>
+          <h3>Soprano</h3><p>Terminal multiplexer for coding agents</p><span class="repo">frknue/soprano</span>
+        </div>
+        <div class="member">
+          <span class="icw"><img class="ic ic-paper" src="icons/git.svg" alt=""><img class="ic ic-ink" src="icons/git-dark.svg" alt=""></span>
+          <h3>Soprano Git</h3><p>Keyboard-first Git client</p><span class="repo">frknue/soprano_git</span>
+        </div>
+        <div class="member">
+          <span class="icw"><img class="ic ic-paper" src="icons/cast.svg" alt=""><img class="ic ic-ink" src="icons/cast-dark.svg" alt=""></span>
+          <h3>Soprano Cast</h3><p>Launcher and hotkeys</p><span class="repo">frknue/soprano_cast</span>
+        </div>
+        <div class="member">
+          <span class="icw"><img class="ic ic-paper" src="icons/tab.svg" alt=""><img class="ic ic-ink" src="icons/tab-dark.svg" alt=""></span>
+          <h3>Soprano Tab</h3><p>Window switcher</p><span class="repo">frknue/soprano_tab</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── themes ── -->
+  <div class="wrap">
+    <section class="section" id="themes">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">Themes</p>
+          <h2 class="h2">Folio and seven more ship with it. Try them on this page.</h2>
+        </div>
+        <div class="body">
+          <p>These are the real palettes from <code>Theme.swift</code>, applied live to this page. Themes recolour open terminals — background, ANSI palette, pane headers — without a restart. <strong>Folio</strong> is the default: Paper in light mode, Ink in dark.</p>
+        </div>
+      </div>
+      <div class="themes" id="themes-list"></div>
+      <p class="caption">Your choice is remembered while you browse. It does not change how Soprano is configured.</p>
+    </section>
+  </div>
+
+  <!-- ── install ── -->
+  <div class="wrap">
+    <section class="section" id="install">
+      <div class="sec-head">
+        <div>
+          <p class="eyebrow">Install</p>
+          <h2 class="h2">Build it from source.</h2>
+        </div>
+        <div class="body">
+          <p>Soprano links libghostty statically, so the first build compiles it once. After that you only repeat it when the ghostty submodule moves.</p>
+        </div>
+      </div>
+      <div class="termwin">
+        <div class="titlebar"><div class="traffic"><i class="traffic-close"></i><i class="traffic-min"></i><i class="traffic-zoom"></i></div><span class="window-title">Fresh clone to installed app</span></div>
+        <pre class="term" aria-label="Installation commands"><span class="cm"># 1 · Toolchain. Homebrew Swift is required — the system CLT Swift has broken SPM.</span>
+<span class="c2">$</span> brew install swift zig
+<span class="c2">$</span> xcodebuild -downloadComponent MetalToolchain
+
+<span class="cm"># 2 · Clone with the ghostty submodule</span>
+<span class="c2">$</span> git clone --recurse-submodules https://github.com/frknue/soprano.git
+<span class="c2">$</span> cd soprano
+
+<span class="cm"># 3 · Build libghostty once (a few minutes)</span>
+<span class="c2">$</span> ./scripts/build-ghostty.sh
+
+<span class="cm"># 4 · Build the release app into /Applications</span>
+<span class="c2">$</span> ./install.sh<span class="cursor"> </span></pre>
+      </div>
+      <p class="note"><strong>Requirements:</strong> macOS 14 Sonoma or newer · full Xcode with the Metal Toolchain (Command Line Tools alone cannot build libghostty) · Homebrew Swift 6.2+ · Zig 0.15.2+.</p>
+    </section>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <span class="icw"><img class="ic ic-paper" src="icons/soprano.svg" alt=""><img class="ic ic-ink" src="icons/soprano-dark.svg" alt=""></span>
+    <p>Soprano is free software under the MIT license.</p>
+    <nav class="links">
+      <a href="#">Source</a>
+      <a href="#">Changelog</a>
+      <a href="#">Issues</a>
+      <a href="#">Built on ghostty</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+/* Theme tiles: the 16 ThemeColors slots from Sources/Soprano/Config/Theme.swift (order as tokens.css).
+   Each tile overrides the slots on a [data-theme] element so the Folio derived tokens recompute. */
+(function () {
+  var SLOTS = ['--bg-base', '--bg-panel', '--bg-raised', '--bg-overlay', '--text-primary', '--text-muted', '--accent', '--accent-strong',
+               '--border-subtle', '--border-strong', '--success', '--danger', '--blue', '--cyan', '--yellow', '--gray'];
+  var THEMES = [
+    ['Gruvbox Dark', ['#282828', '#1d2021', '#1d2021', '#3c3836', '#ebdbb2', '#a89984', '#fe8019', '#fabd2f', '#3c3836', '#504945', '#b8bb26', '#fb4934', '#83a598', '#8ec07c', '#fabd2f', '#665c54'], { raised: true }],
+    ['Catppuccin Mocha', ['#1e1e2e', '#181825', '#11111b', '#313244', '#cdd6f4', '#a6adc8', '#cba6f7', '#f5c2e7', '#313244', '#45475a', '#a6e3a1', '#f38ba8', '#89b4fa', '#94e2d5', '#f9e2af', '#45475a'], {}],
+    ['Dracula', ['#282a36', '#21222c', '#343746', '#44475a', '#f8f8f2', '#6272a4', '#bd93f9', '#ff79c6', '#44475a', '#6272a4', '#50fa7b', '#ff5555', '#bd93f9', '#8be9fd', '#f1fa8c', '#6272a4'], { attention: true }],
+    ['Nord', ['#2e3440', '#3b4252', '#434c5e', '#4c566a', '#eceff4', '#81a1c1', '#88c0d0', '#8fbcbb', '#434c5e', '#4c566a', '#a3be8c', '#bf616a', '#81a1c1', '#88c0d0', '#ebcb8b', '#4c566a'], { attention: true }],
+    ['Tokyo Night', ['#1a1b26', '#15161e', '#24283b', '#292e42', '#c0caf5', '#565f89', '#7aa2f7', '#bb9af7', '#292e42', '#414868', '#9ece6a', '#f7768e', '#7aa2f7', '#7dcfff', '#e0af68', '#414868'], { attention: true }],
+    ['Solarized Dark', ['#002b36', '#073642', '#073642', '#586e75', '#93a1a1', '#657b83', '#268bd2', '#6c71c4', '#073642', '#586e75', '#859900', '#dc322f', '#268bd2', '#2aa198', '#b58900', '#586e75'], { attention: true, raised: true }],
+    ['Atom One Dark', ['#21252b', '#1b1f23', '#282c34', '#323844', '#abb2bf', '#5c6370', '#61afef', '#c678dd', '#323844', '#4b5263', '#98c379', '#e06c75', '#61afef', '#56b6c2', '#e5c07b', '#5c6370'], { attention: true }]
+  ];
+
+  function sample(mode, style) {
+    return '<div' + (mode ? ' data-mode="' + mode + '"' : '') + ' data-theme' + (style ? ' style="' + style + '"' : '') + '>' +
+      '<section class="pane is-focused"><header class="pane-header"><i class="status-dot is-working"></i><span class="pane-title">Claude Code</span>' +
+      '<span class="pane-actions"><span class="status-label is-working">Working</span></span></header>' +
+      '<pre class="term"><span style="color:var(--success)">⏺</span> Update(SidebarView.swift)\n  <span style="color:var(--text-muted)">⎿  Updated with 1 addition</span>\n<span style="color:var(--text-muted)">&gt;</span> <span style="background:var(--accent)"> </span></pre></section>' +
+      '<div class="bar"><i class="status-dot is-working"></i>3<i class="status-dot is-needs-input"></i>1<i class="status-dot is-error"></i>0</div></div>';
+  }
+  function swatch(c) { return '<span class="swatch">' + c.map(function (x) { return '<i style="background:' + x + '"></i>'; }).join('') + '</span>'; }
+
+  var html = '<div class="theme is-selected"><div class="sample">' + sample() + '</div>' +
+    '<div class="theme-name">Folio<span class="chip">Default</span>' +
+    swatch(['var(--accent)', 'var(--yellow)', 'var(--success)', 'var(--blue)']) + '</div>' +
+    '<p class="t-meta">Paper in light mode, Ink in dark</p></div>';
+
+  THEMES.forEach(function (t) {
+    var v = t[1], style = '';
+    SLOTS.forEach(function (s, i) { style += s + ':' + v[i] + ';'; });
+    if (t[2].attention) style += '--attention:var(--yellow);';
+    if (t[2].raised) style += '--raised:color-mix(in srgb, ' + v[1] + ' 95%, ' + v[4] + ');';
+    html += '<div class="theme"><div class="sample">' + sample('dark', style) + '</div>' +
+      '<div class="theme-name">' + t[0] + swatch([v[6], v[14], v[10], v[12]]) + '</div>' +
+      '<p class="t-meta">Dark</p></div>';
+  });
+  document.getElementById('themes-list').innerHTML = html;
+})();
+</script>
+</body>
+</html>

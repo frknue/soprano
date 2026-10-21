@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<title>Soprano Cast — launcher · Quiet</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<script src="../shared/icons.js"></script>
+<script src="../shared/frame.js"></script>
+<style>
+  html, body { margin: 0; width: 1512px; height: 982px; overflow: hidden; }
+
+  /* launcher: 750×474, centered; top = visible frame top + visible height / 5
+     = 24 + (982 − 24) / 5 ≈ 216 (the recon's 223 = 33 + 949 / 5 on a 33 px notch menu bar) */
+  .launcher { left: 381px; top: 216px; }
+  .launcher .palette-search { padding: 0 18px; }
+  .launcher .caret { height: 22px; vertical-align: -5px; margin-left: 1px; }
+
+  /* app icon stand-in on the macOS 64 grid (52 px squircle), same drawing as cast-settings/tab:
+     a 30 px box shows a 24 px icon */
+  .aic { display: block; flex: none; width: 30px; height: 30px; margin: -3px; }
+
+  /* built-in glyph tile (window management) */
+  .palette-icon.is-tile svg.glyph { width: 16px; height: 16px; color: var(--text-muted); }
+
+  /* footer clusters keep their caps tight (8 px), clusters 16 px apart */
+  .foot-cluster { display: inline-flex; align-items: center; gap: 8px; }
+  .palette-footer.is-cast { padding: 0 12px 0 18px; }
+  .foot-brand { font: var(--type-label); color: var(--text-muted); }
+  .foot-primary { font: var(--type-row); color: var(--text-primary); }
+  .foot-actions { font: var(--type-label); color: var(--text-muted); }
+</style>
+</head>
+<body class="artboard">
+  <!-- app icon stand-in (mode-independent content imagery) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="ai-chrome" viewBox="0 0 64 64">
+      <rect x="6" y="6" width="52" height="52" rx="11.6" fill="#f7f7f7"/>
+      <rect x="6.5" y="6.5" width="51" height="51" rx="11.1" fill="none" stroke="#000" stroke-opacity=".12"/>
+      <path d="M32 32 L15.55 22.5 A19 19 0 0 1 48.45 22.5 Z" fill="#e5483d"/>
+      <path d="M32 32 L48.45 22.5 A19 19 0 0 1 32 51 Z" fill="#f4bf3a"/>
+      <path d="M32 32 L32 51 A19 19 0 0 1 15.55 22.5 Z" fill="#3a9d5a"/>
+      <circle cx="32" cy="32" r="9" fill="#ffffff"/>
+      <circle cx="32" cy="32" r="7" fill="#3a7fe0"/>
+    </symbol>
+  </svg>
+
+  <div class="desktop"></div>
+
+  <div class="menubar">
+    <span class="menubar-apple"></span>
+    <span class="menubar-app">Soprano</span>
+    <span class="menubar-item">Edit</span>
+    <span class="menubar-item">Commands</span>
+    <div class="menubar-right">
+      <span class="tpl tpl-cast" title="Soprano Cast"></span>
+      <span class="tpl tpl-tab" title="Soprano Tab"></span>
+      <i data-icon="wifi"></i>
+      <i data-icon="battery"></i>
+      <span class="menubar-clock">Tue 21 Oct 21:41</span>
+    </div>
+  </div>
+
+  <div class="palette is-launcher launcher" role="dialog" aria-label="Soprano Cast">
+    <div class="palette-search is-query"><span>chr<span class="caret"></span></span></div>
+
+    <div class="palette-list">
+      <div class="palette-section">Results</div>
+      <div class="palette-row is-selected">
+        <span class="palette-icon"><svg class="aic"><use href="#ai-chrome"/></svg></span>
+        <span class="palette-title">Google <span class="match">Chr</span>ome</span>
+        <span class="palette-desc is-mono">/Applications</span>
+        <span class="palette-trail"><kbd class="kbd">⌘1</kbd><span class="acc">Application</span></span>
+      </div>
+      <div class="palette-row">
+        <span class="palette-icon is-tile"><svg class="glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><rect x="6" y="5" width="4" height="6" rx=".5" fill="currentColor" stroke="none"/></svg></span>
+        <span class="palette-title"><span class="match">C</span>enter T<span class="match">h</span>i<span class="match">r</span>d</span>
+        <span class="palette-desc is-mono">Window Management</span>
+        <span class="palette-trail">Command</span>
+      </div>
+
+      <div class="palette-section">Use “chr” with…</div>
+      <div class="palette-row">
+        <span class="palette-icon is-tile"><i data-icon="search"></i></span>
+        <span class="palette-title">Search Google</span>
+        <span class="palette-desc is-mono">“chr”</span>
+        <span class="palette-trail">Command</span>
+      </div>
+    </div>
+
+    <div class="palette-footer is-cast">
+      <span class="foot-brand">Soprano Cast</span>
+      <span class="spacer"></span>
+      <span class="foot-cluster"><span class="foot-primary">Open Application</span><kbd class="kbd">↵</kbd></span>
+      <span class="divider-v"></span>
+      <span class="foot-cluster"><span class="foot-actions">Actions</span><kbd class="kbd">⌘K</kbd></span>
+    </div>
+  </div>
+</body>
+</html>
