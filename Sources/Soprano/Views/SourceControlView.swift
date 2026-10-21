@@ -30,8 +30,8 @@ final class SourceControlView: NSView {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let branchLabel = NSTextField(labelWithString: "")
-    private var refreshButton: RetroIconButton!
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private var refreshButton: ChromeIconButton!
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let scrollView = NSScrollView()
     private let outlineView = SourceControlOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
@@ -364,10 +364,10 @@ final class SourceControlView: NSView {
     }
 
     private func updateToolbar() {
-        titleLabel.setRetroText(rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control", color: colors.textPrimary)
+        titleLabel.setChromeText(rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control", color: colors.textPrimary)
         titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         branchLabel.stringValue = rootURL == nil ? "" : changeList.branch ?? ""
-        branchLabel.font = RetroFont.body(11)
+        branchLabel.font = ChromeFont.monospaced(size: 11)
         branchLabel.textColor = colors.textMuted
         refreshButton.isEnabled = rootURL != nil
     }
@@ -392,7 +392,7 @@ final class SourceControlView: NSView {
         }
         statusLabel.isHidden = message == nil
         statusLabel.stringValue = message ?? ""
-        statusLabel.font = RetroFont.body(11)
+        statusLabel.font = ChromeFont.sans(size: 11)
         statusLabel.textColor = colors.textMuted
         scrollView.isHidden = message != nil || showsSpinner
         if showsSpinner {
@@ -555,7 +555,7 @@ final class SourceControlView: NSView {
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(branchLabel)
 
-        refreshButton = RetroIconButton(
+        refreshButton = ChromeIconButton(
             symbolName: "arrow.clockwise",
             accessibilityLabel: "Refresh Source Control",
             pointSize: 12,
@@ -614,12 +614,12 @@ final class SourceControlView: NSView {
         statusSpinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusSpinner)
 
-        toastLabel.font = RetroFont.body(11)
+        toastLabel.font = ChromeFont.sans(size: 11)
         toastLabel.isHidden = true
         toastLabel.wantsLayer = true
         toastLabel.drawsBackground = true
         toastLabel.isBordered = false
-        toastLabel.layer?.borderWidth = Retro.hairline
+        toastLabel.layer?.borderWidth = Chrome.hairline
         toastLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toastLabel)
 
@@ -636,7 +636,7 @@ final class SourceControlView: NSView {
             toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
             toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -658,8 +658,8 @@ final class SourceControlView: NSView {
     func applyTheme() {
         let colors = colors
         layer?.backgroundColor = colors.bgPanel.cgColor
-        refreshButton.setTints(normal: colors.textMuted, hover: colors.accent)
-        toolbarRule.color = colors.borderStrong
+        refreshButton.apply(theme: themeManager.currentTheme)
+        toolbarRule.color = colors.borderSubtle
         toastLabel.backgroundColor = colors.bgRaised
         toastLabel.textColor = colors.textPrimary
         toastLabel.layer?.borderColor = colors.danger.cgColor
@@ -887,7 +887,7 @@ private final class SourceControlHeaderCell: NSTableCellView {
         chevronView.imageScaling = .scaleProportionallyDown
         titleField.lineBreakMode = .byTruncatingTail
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        countField.font = RetroFont.body(10)
+        countField.font = ChromeFont.meta
         countField.setContentCompressionResistancePriority(.required, for: .horizontal)
         for view in [chevronView, titleField, countField] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -918,7 +918,7 @@ private final class SourceControlHeaderCell: NSTableCellView {
             weight: .bold
         )
         chevronView.contentTintColor = colors.textMuted
-        titleField.attributedStringValue = RetroText.display(section.area.title, color: colors.textMuted)
+        titleField.attributedStringValue = ChromeText.attributed(section.area.title, font: ChromeFont.label, color: colors.textMuted)
         countField.stringValue = "\(section.items.count)"
         countField.textColor = colors.textMuted
     }
@@ -941,13 +941,13 @@ private final class SourceControlChangeCell: NSTableCellView {
         iconView.imageScaling = .scaleProportionallyDown
         nameField.lineBreakMode = .byTruncatingMiddle
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        directoryField.font = RetroFont.body(10)
+        directoryField.font = ChromeFont.monoSmall
         directoryField.lineBreakMode = .byTruncatingHead
         // The folder gives way before the name does.
         directoryField.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         directoryField.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
         for field in [addedField, deletedField, letterField] {
-            field.font = RetroFont.body(10)
+            field.font = ChromeFont.monoSmall
             field.alignment = .right
             field.setContentCompressionResistancePriority(.required, for: .horizontal)
             field.setContentHuggingPriority(.required, for: .horizontal)
@@ -996,7 +996,7 @@ private final class SourceControlChangeCell: NSTableCellView {
 
         let isDeleted = change.status == .deleted
         var nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: RetroFont.body(11),
+            .font: ChromeFont.sans(size: 11),
             .foregroundColor: isDeleted ? colors.textMuted : colors.textPrimary,
         ]
         if isDeleted {
@@ -1015,10 +1015,10 @@ private final class SourceControlChangeCell: NSTableCellView {
         deletedField.textColor = colors.danger
         deletedField.isHidden = (change.linesDeleted ?? 0) == 0
 
-        letterField.attributedStringValue = RetroText.display(
+        letterField.attributedStringValue = ChromeText.attributed(
             change.letter,
+            font: ChromeFont.label,
             color: statusColor,
-            tracking: 0,
             alignment: .right
         )
 

@@ -851,7 +851,7 @@ final class SplitTreeView: NSView {
 
         let label = NSTextField(labelWithString: text)
         label.alignment = .center
-        label.setRetroText(text, color: theme.colors.textMuted, size: 22)
+        label.setChromeText(text, font: ChromeFont.screen, color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
 
@@ -871,7 +871,7 @@ final class SplitTreeView: NSView {
 
         let label = NSTextField(labelWithString: "Empty")
         label.alignment = .center
-        label.setRetroText("Empty", color: theme.colors.textMuted)
+        label.setChromeText("Empty", color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         placeholder.addSubview(label)
 
@@ -894,7 +894,7 @@ final class PaneContainerView: NSView {
     let themeManager: ThemeManager
 
     private var headerView: PaneHeaderView
-    private let headerRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let headerRule = ChromeRuleView(axis: .horizontal)
     private var contentView: NSView
     private var displayedTabId: String?
 

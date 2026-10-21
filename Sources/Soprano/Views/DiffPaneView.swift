@@ -19,20 +19,20 @@ final class DiffPaneView: NSView {
     var onOpenFileRequested: ((URL) -> Void)?
 
     private let toolbar = NSView()
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let pathLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let statsLabel = NSTextField(labelWithString: "")
-    private var previousButton: RetroIconButton!
-    private var nextButton: RetroIconButton!
-    private var layoutButton: RetroIconButton!
-    private var openFileButton: RetroIconButton!
+    private var previousButton: ChromeIconButton!
+    private var nextButton: ChromeIconButton!
+    private var layoutButton: ChromeIconButton!
+    private var openFileButton: ChromeIconButton!
 
     /// The inline view, or the old side when side by side.
     private let primary = DiffColumn()
     /// The new side when side by side.
     private let secondary = DiffColumn()
-    private let columnRule = RetroRuleView(axis: .vertical, style: .single)
+    private let columnRule = ChromeRuleView(axis: .vertical)
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
     private var inlineConstraints: [NSLayoutConstraint] = []
     private var sideBySideConstraints: [NSLayoutConstraint] = []
@@ -101,14 +101,14 @@ final class DiffPaneView: NSView {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)
 
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monospaced(size: 11)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.stringValue = ConfigFile.abbreviatingHome(fileURL.path)
         pathLabel.toolTip = fileURL.path
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-        statsLabel.font = RetroFont.body(11)
+        statsLabel.font = ChromeFont.monospaced(size: 11)
         statsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statsLabel.setContentHuggingPriority(.required, for: .horizontal)
         let labels = NSStackView(views: [pathLabel, statusLabel, statsLabel])
@@ -139,7 +139,7 @@ final class DiffPaneView: NSView {
         addSubview(columnRule)
 
         messageLabel.alignment = .center
-        messageLabel.font = RetroFont.body(12)
+        messageLabel.font = ChromeFont.sans(size: 12)
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
 
@@ -167,14 +167,14 @@ final class DiffPaneView: NSView {
             toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
             toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             primaryView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             primaryView.bottomAnchor.constraint(equalTo: bottomAnchor),
             primaryView.leadingAnchor.constraint(equalTo: leadingAnchor),
             columnRule.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             columnRule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            columnRule.widthAnchor.constraint(equalToConstant: Retro.hairline),
+            columnRule.widthAnchor.constraint(equalToConstant: Chrome.hairline),
             columnRule.trailingAnchor.constraint(equalTo: secondaryView.leadingAnchor),
             secondaryView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             secondaryView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -195,8 +195,8 @@ final class DiffPaneView: NSView {
         ]
     }
 
-    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> RetroIconButton {
-        let button = RetroIconButton(
+    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> ChromeIconButton {
+        let button = ChromeIconButton(
             symbolName: symbol,
             accessibilityLabel: label,
             pointSize: 12,
@@ -232,7 +232,7 @@ final class DiffPaneView: NSView {
         columnRule.color = colors.borderStrong
         pathLabel.textColor = colors.textMuted
         for button in [previousButton, nextButton, layoutButton, openFileButton] {
-            button?.setTints(normal: colors.textMuted, hover: colors.accent)
+            button?.apply(theme: themeManager.currentTheme)
         }
         messageLabel.textColor = colors.textMuted
         primary.apply(colors: colors)
@@ -243,11 +243,11 @@ final class DiffPaneView: NSView {
     private func updateChrome() {
         let colors = themeManager.currentTheme.colors
         statusLabel.isHidden = !staged
-        statusLabel.setRetroText(staged ? "Staged" : "", color: colors.textMuted, tracking: 0)
+        statusLabel.setChromeText(staged ? "Staged" : "", color: colors.textMuted)
 
         let stats = NSMutableAttributedString()
         if let rendering {
-            let font = RetroFont.body(11)
+            let font = ChromeFont.monospaced(size: 11)
             if rendering.linesAdded > 0 {
                 stats.append(NSAttributedString(
                     string: "+\(rendering.linesAdded)",

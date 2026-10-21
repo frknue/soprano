@@ -181,8 +181,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
 
     private var currentTheme: AppTheme
     private var headerLabel: NSTextField!
-    private var headerStripe: RetroStripeView!
-    private var headerRule: RetroRuleView!
+    private var headerRule: ChromeRuleView!
     private var searchContainer: NSView!
     private var promptLabel: NSTextField!
     private var searchField: NSTextField!
@@ -206,24 +205,21 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     override func loadView() {
         let root = NSView()
         root.wantsLayer = true
-        root.layer?.cornerRadius = Retro.cornerRadius
-        root.layer?.borderWidth = Retro.hairline
+        root.layer?.cornerRadius = Chrome.Radius.panel
+        root.layer?.borderWidth = Chrome.hairline
         root.layer?.masksToBounds = true
 
         headerLabel = NSTextField(labelWithString: "COMMAND")
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(headerLabel)
 
-        headerStripe = RetroStripeView(layout: .slanted)
-        root.addSubview(headerStripe)
-
-        headerRule = RetroRuleView(axis: .horizontal, style: .double)
+        headerRule = ChromeRuleView(axis: .horizontal)
         root.addSubview(headerRule)
 
         searchContainer = NSView()
         searchContainer.wantsLayer = true
-        searchContainer.layer?.cornerRadius = Retro.cornerRadius
-        searchContainer.layer?.borderWidth = Retro.hairline
+        searchContainer.layer?.cornerRadius = Chrome.Radius.control
+        searchContainer.layer?.borderWidth = Chrome.hairline
         searchContainer.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(searchContainer)
 
@@ -238,7 +234,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         searchField.isBordered = false
         searchField.drawsBackground = false
         searchField.focusRingType = .none
-        searchField.font = RetroFont.body(13)
+        searchField.font = ChromeFont.sans(size: 13, weight: .regular)
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.delegate = self
         searchContainer.addSubview(searchField)
@@ -280,12 +276,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         NSLayoutConstraint.activate([
             headerLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
             headerLabel.centerYAnchor.constraint(equalTo: root.topAnchor, constant: 11),
-            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerStripe.leadingAnchor, constant: -12),
-
-            headerStripe.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
-            headerStripe.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            headerStripe.widthAnchor.constraint(equalToConstant: 22),
-            headerStripe.heightAnchor.constraint(equalToConstant: 12),
+            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -14),
 
             headerRule.topAnchor.constraint(equalTo: root.topAnchor, constant: 22),
             headerRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -346,15 +337,14 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         view.layer?.backgroundColor = colors.bgPanel.withAlphaComponent(0.985).cgColor
         view.layer?.borderColor = colors.borderStrong.cgColor
 
-        headerLabel.setRetroText("COMMAND", color: colors.accent, glow: true)
-        headerStripe.colors = colors.stripe
-        headerRule.color = colors.borderStrong
+        headerLabel.setEyebrowText("COMMAND", color: colors.textMuted)
+        headerRule.color = colors.borderSubtle
 
         searchField.textColor = colors.textPrimary
         searchContainer.layer?.backgroundColor = colors.bgRaised.cgColor
         searchContainer.layer?.borderColor = colors.borderStrong.cgColor
-        promptLabel.setRetroText("❯", color: colors.accent)
-        keyboardHintLabel.setRetroText(keyboardHintLabel.stringValue, color: colors.textMuted)
+        promptLabel.setChromeText("❯", color: colors.accent)
+        keyboardHintLabel.setChromeText(keyboardHintLabel.stringValue, color: colors.textMuted)
 
         refreshRows()
     }
@@ -409,7 +399,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
             row.removeFromSuperview()
         }
         resultRows.removeAll(keepingCapacity: true)
-        resultCountLabel.setRetroText(
+        resultCountLabel.setChromeText(
             "\(filtered.count) result\(filtered.count == 1 ? "" : "s")",
             color: currentTheme.colors.textMuted
         )
@@ -417,7 +407,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
         if filtered.isEmpty {
             let emptyLabel = NSTextField(labelWithString: "")
             emptyLabel.alignment = .center
-            emptyLabel.setRetroText("No matching results", color: currentTheme.colors.textMuted)
+            emptyLabel.setChromeText("No matching results", color: currentTheme.colors.textMuted)
             emptyLabel.translatesAutoresizingMaskIntoConstraints = false
             stackView.addArrangedSubview(emptyLabel)
             emptyLabel.widthAnchor.constraint(equalTo: stackView.widthAnchor).isActive = true
@@ -487,7 +477,7 @@ private final class CommandPaletteRowView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.control
         setupViews()
     }
 
@@ -508,15 +498,15 @@ private final class CommandPaletteRowView: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        descriptionLabel.font = RetroFont.body(11)
+        descriptionLabel.font = ChromeFont.sans(size: 11, weight: .regular)
         descriptionLabel.lineBreakMode = .byTruncatingTail
         descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(descriptionLabel)
 
         shortcutContainer.wantsLayer = true
-        shortcutContainer.layer?.cornerRadius = Retro.cornerRadius
-        shortcutContainer.layer?.borderWidth = Retro.hairline
+        shortcutContainer.layer?.cornerRadius = Chrome.Radius.cap
+        shortcutContainer.layer?.borderWidth = Chrome.hairline
         shortcutContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(shortcutContainer)
 
@@ -567,17 +557,17 @@ private final class CommandPaletteRowView: NSView {
 
     func setHighlighted(_ highlighted: Bool) {
         let colors = theme.colors
-        let ink = highlighted ? colors.bgPanel : colors.textMuted
-        layer?.backgroundColor = highlighted ? colors.accent.cgColor : NSColor.clear.cgColor
+        let ink = highlighted ? colors.textPrimary : colors.textMuted
+        layer?.backgroundColor = highlighted ? colors.selection.cgColor : NSColor.clear.cgColor
         iconView.contentTintColor = ink
-        titleLabel.setRetroText(title, color: highlighted ? colors.bgPanel : colors.textPrimary)
+        titleLabel.setChromeText(title, color: colors.textPrimary)
         descriptionLabel.textColor = ink
-        shortcutLabel.setRetroText(shortcut, color: ink)
+        shortcutLabel.setChromeText(shortcut, color: ink)
         shortcutContainer.layer?.backgroundColor = highlighted
             ? NSColor.clear.cgColor
             : colors.bgRaised.cgColor
         shortcutContainer.layer?.borderColor = highlighted
-            ? colors.bgPanel.cgColor
+            ? colors.borderStrong.cgColor
             : colors.borderSubtle.cgColor
     }
 

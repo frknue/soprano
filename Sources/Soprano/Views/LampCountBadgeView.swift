@@ -17,8 +17,8 @@ final class LampCountBadgeView: NSView {
         super.init(frame: .zero)
         self.identifier = NSUserInterfaceItemIdentifier(identifier)
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
-        layer?.borderWidth = Retro.hairline
+        layer?.cornerRadius = Chrome.Radius.cap
+        layer?.borderWidth = Chrome.hairline
         lamp.wantsLayer = true
         lamp.layer?.cornerRadius = Self.lampSize / 2
         addSubview(lamp)
@@ -47,8 +47,8 @@ final class LampCountBadgeView: NSView {
 
     private func configure(count: Int, color: NSColor) {
         isHidden = count == 0
-        countLabel.setRetroText("\(count)", color: color)
-        RetroLamp.light(lamp, color: color)
+        countLabel.setChromeText("\(count)", color: color)
+        lamp.layer?.backgroundColor = color.cgColor
         layer?.backgroundColor = color.withAlphaComponent(0.14).cgColor
         layer?.borderColor = color.cgColor
         badgeWidth = 20 + ceil(countLabel.intrinsicContentSize.width)

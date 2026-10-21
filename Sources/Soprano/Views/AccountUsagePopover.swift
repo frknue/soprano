@@ -25,9 +25,9 @@ final class AccountUsagePopoverViewController: NSViewController {
     var onManageAccounts: (() -> Void)?
 
     private let contentStack = NSStackView()
-    private let footerRule = RetroRuleView(axis: .horizontal, style: .single)
-    private var refreshButton: RetroButton!
-    private var manageButton: RetroButton!
+    private let footerRule = ChromeRuleView(axis: .horizontal)
+    private var refreshButton: ChromeButton!
+    private var manageButton: ChromeButton!
     private var contentWidthConstraint: NSLayoutConstraint!
 
     init(themeManager: ThemeManager) {
@@ -51,13 +51,13 @@ final class AccountUsagePopoverViewController: NSViewController {
         contentStack.spacing = 4
         contentStack.translatesAutoresizingMaskIntoConstraints = false
 
-        refreshButton = RetroButton(
+        refreshButton = ChromeButton(
             title: "Refresh",
             theme: theme,
             target: self,
             action: #selector(refreshClicked)
         )
-        manageButton = RetroButton(
+        manageButton = ChromeButton(
             title: "Manage Accounts…",
             theme: theme,
             target: self,
@@ -115,7 +115,7 @@ final class AccountUsagePopoverViewController: NSViewController {
         let theme = themeManager.currentTheme
         let colors = theme.colors
         view.layer?.backgroundColor = colors.bgPanel.cgColor
-        view.layer?.borderWidth = Retro.hairline
+        view.layer?.borderWidth = Chrome.hairline
         view.layer?.borderColor = colors.borderStrong.cgColor
         footerRule.color = colors.borderSubtle
         refreshButton.apply(theme: theme)
@@ -151,7 +151,7 @@ final class AccountUsagePopoverViewController: NSViewController {
                 if let last = contentStack.arrangedSubviews.last {
                     contentStack.setCustomSpacing(12, after: last)
                 }
-                add(RetroHeadingView(title: listID.provider.displayName, theme: theme), spacingAfter: 8)
+                add(ChromeEyebrowView(title: listID.provider.displayName, theme: theme), spacingAfter: 8)
                 currentProvider = listID.provider
             } else if let last = contentStack.arrangedSubviews.last {
                 contentStack.setCustomSpacing(10, after: last)
@@ -159,7 +159,7 @@ final class AccountUsagePopoverViewController: NSViewController {
 
             let isAutomatic = listID.tool == .omp && list.selectedAccountId == nil
             let caption = makeLabel()
-            caption.setRetroText(
+            caption.setChromeText(
                 isAutomatic ? "\(listID.tool.displayName) · automatic" : listID.tool.displayName,
                 color: colors.textMuted
             )
@@ -312,7 +312,7 @@ final class AccountUsagePopoverViewController: NSViewController {
 
     private func bodyText(_ string: String, color: NSColor) -> NSAttributedString {
         NSAttributedString(string: string, attributes: [
-            .font: RetroFont.body(11),
+            .font: ChromeFont.sans(size: 11, weight: .regular),
             .foregroundColor: color,
         ])
     }

@@ -15,14 +15,13 @@ final class AgentDashboardViewController: NSViewController {
     private let promptSender: PromptSender
     private let transcriptStore: AgentTranscriptStore
     private var headerView: NSView!
-    private var headerStripe: RetroStripeView!
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
-    private var doneButton: RetroButton!
-    private var headerRule: RetroRuleView!
+    private var doneButton: ChromeButton!
+    private var headerRule: ChromeRuleView!
     private var summaryContainer: NSView!
     private var leftPanel: NSView!
-    private var agentListHeading: RetroHeadingView!
+    private var agentListHeading: ChromeEyebrowView!
     private var keyboardHintLabel: NSTextField!
     private var rowsStack: NSStackView!
     private var detailView: AgentDashboardDetailView!
@@ -112,26 +111,22 @@ final class AgentDashboardViewController: NSViewController {
         headerView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(headerView)
 
-        headerStripe = RetroStripeView(layout: .slanted, colors: theme.colors.stripe)
-        headerView.addSubview(headerStripe)
-
         titleLabel = NSTextField(labelWithString: "Agent Dashboard")
-        titleLabel.setRetroText(
+        titleLabel.setChromeText(
             "Agent Dashboard",
-            color: theme.colors.textPrimary,
-            size: 22,
-            glow: true
+            font: ChromeFont.screen,
+            color: theme.colors.textPrimary
         )
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(titleLabel)
 
         subtitleLabel = NSTextField(labelWithString: "")
-        subtitleLabel.font = RetroFont.body(11)
+        subtitleLabel.font = ChromeFont.sans(size: 11, weight: .regular)
         subtitleLabel.textColor = theme.colors.textMuted
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
         headerView.addSubview(subtitleLabel)
 
-        doneButton = RetroButton(
+        doneButton = ChromeButton(
             title: "Done",
             theme: theme,
             kind: .standard,
@@ -143,10 +138,9 @@ final class AgentDashboardViewController: NSViewController {
         doneButton.toolTip = "Return to the workspace (Esc)"
         headerView.addSubview(doneButton)
 
-        headerRule = RetroRuleView(
+        headerRule = ChromeRuleView(
             axis: .horizontal,
-            style: .double,
-            color: theme.colors.borderStrong
+            color: theme.colors.borderSubtle
         )
         headerView.addSubview(headerRule)
 
@@ -208,12 +202,7 @@ final class AgentDashboardViewController: NSViewController {
             headerView.topAnchor.constraint(equalTo: root.topAnchor),
             headerView.heightAnchor.constraint(equalToConstant: 68),
 
-            headerStripe.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 28),
-            headerStripe.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            headerStripe.widthAnchor.constraint(equalToConstant: 22),
-            headerStripe.heightAnchor.constraint(equalToConstant: 12),
-
-            titleLabel.leadingAnchor.constraint(equalTo: headerStripe.trailingAnchor, constant: 10),
+            titleLabel.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 28),
             titleLabel.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 9),
             titleLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: doneButton.leadingAnchor,
@@ -281,20 +270,18 @@ final class AgentDashboardViewController: NSViewController {
         let colors = theme.colors
         view.layer?.backgroundColor = colors.bgBase.cgColor
         headerView.layer?.backgroundColor = colors.bgPanel.cgColor
-        headerStripe.colors = colors.stripe
-        titleLabel.setRetroText(
+        titleLabel.setChromeText(
             titleLabel.stringValue,
-            color: colors.textPrimary,
-            size: 22,
-            glow: true
+            font: ChromeFont.screen,
+            color: colors.textPrimary
         )
         subtitleLabel.textColor = colors.textMuted
         doneButton.apply(theme: theme)
-        headerRule.color = colors.borderStrong
+        headerRule.color = colors.borderSubtle
         leftPanel.layer?.backgroundColor = colors.bgPanel.cgColor
         leftPanel.layer?.borderColor = colors.borderStrong.cgColor
         agentListHeading.apply(theme: theme)
-        keyboardHintLabel.setRetroText(keyboardHintLabel.stringValue, color: colors.textMuted)
+        keyboardHintLabel.setChromeText(keyboardHintLabel.stringValue, color: colors.textMuted)
         detailView.apply(theme: theme)
         // Rows, the empty state, and the summary cards take their colors when
         // they are built, so a theme change rebuilds them.
@@ -409,8 +396,8 @@ final class AgentDashboardViewController: NSViewController {
         panel.wantsLayer = true
         panel.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         panel.layer?.borderColor = theme.colors.borderStrong.cgColor
-        panel.layer?.borderWidth = Retro.hairline
-        panel.layer?.cornerRadius = Retro.cornerRadius
+        panel.layer?.borderWidth = Chrome.hairline
+        panel.layer?.cornerRadius = 0
         panel.translatesAutoresizingMaskIntoConstraints = false
 
         let sectionHeader = makeSectionHeader(theme: theme)
@@ -609,14 +596,14 @@ final class AgentDashboardViewController: NSViewController {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        agentListHeading = RetroHeadingView(title: "AGENTS", theme: theme)
+        agentListHeading = ChromeEyebrowView(title: "AGENTS", theme: theme)
         container.addSubview(agentListHeading)
 
         let keyboardHint = "J/K  ·  TAB REPLY  ·  ↩ OPEN"
         keyboardHintLabel = NSTextField(labelWithString: keyboardHint)
         keyboardHintLabel.alignment = .right
         keyboardHintLabel.lineBreakMode = .byTruncatingHead
-        keyboardHintLabel.setRetroText(keyboardHint, color: theme.colors.textMuted)
+        keyboardHintLabel.setChromeText(keyboardHint, color: theme.colors.textMuted)
         keyboardHintLabel.setContentCompressionResistancePriority(
             .defaultLow,
             for: .horizontal
@@ -644,7 +631,7 @@ final class AgentDashboardViewController: NSViewController {
         card.layer?.backgroundColor = theme.colors.bgPanel.cgColor
         card.layer?.borderColor = theme.colors.borderSubtle.cgColor
         card.layer?.borderWidth = 1
-        card.layer?.cornerRadius = Retro.cornerRadius
+        card.layer?.cornerRadius = Chrome.Radius.card
         card.translatesAutoresizingMaskIntoConstraints = false
         card.heightAnchor.constraint(equalToConstant: 150).isActive = true
 
@@ -660,14 +647,14 @@ final class AgentDashboardViewController: NSViewController {
 
         let titleText = "No agents to monitor"
         let title = NSTextField(labelWithString: titleText)
-        title.setRetroText(titleText, color: theme.colors.textPrimary)
+        title.setChromeText(titleText, color: theme.colors.textPrimary)
         title.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(title)
 
         let detail = NSTextField(
             labelWithString: "Launch an agent from the sidebar or command palette."
         )
-        detail.font = RetroFont.body(11)
+        detail.font = ChromeFont.sans(size: 11, weight: .regular)
         detail.textColor = theme.colors.textMuted
         detail.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(detail)
@@ -731,16 +718,16 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     private let titleLabel = NSTextField(labelWithString: "No agent selected")
     private let locationLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
-    private let terminalHeading: RetroHeadingView
+    private let terminalHeading: ChromeEyebrowView
     private let terminalStateLabel = NSTextField(labelWithString: "UNAVAILABLE")
     private let timelineHintLabel = NSTextField(labelWithString: "")
     private let replyHintLabel = NSTextField(labelWithString: "")
-    private let openButton: RetroButton
-    private let stopButton: RetroButton
-    private let restartButton: RetroButton
-    private let viewButton: RetroButton
-    private let sendButton: RetroButton
-    private let separator: RetroRuleView
+    private let openButton: ChromeButton
+    private let stopButton: ChromeButton
+    private let restartButton: ChromeButton
+    private let viewButton: ChromeButton
+    private let sendButton: ChromeButton
+    private let separator: ChromeRuleView
     private let replyField = NSTextField()
     private let nowStrip = NSView()
     private let nowLabel = NSTextField(labelWithString: "")
@@ -758,22 +745,21 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     init(theme: AppTheme) {
         self.theme = theme
         timelineRenderer = AgentTimelineRenderer(colors: theme.colors)
-        terminalHeading = RetroHeadingView(title: "LIVE TERMINAL", theme: theme)
-        openButton = RetroButton(title: "Open", theme: theme)
-        stopButton = RetroButton(title: "Stop", theme: theme)
-        restartButton = RetroButton(title: "Restart", theme: theme)
-        viewButton = RetroButton(title: "Terminal", theme: theme)
-        sendButton = RetroButton(title: "Send", theme: theme, kind: .prominent)
-        separator = RetroRuleView(
+        terminalHeading = ChromeEyebrowView(title: "LIVE TERMINAL", theme: theme)
+        openButton = ChromeButton(title: "Open", theme: theme)
+        stopButton = ChromeButton(title: "Stop", theme: theme)
+        restartButton = ChromeButton(title: "Restart", theme: theme)
+        viewButton = ChromeButton(title: "Terminal", theme: theme)
+        sendButton = ChromeButton(title: "Send", theme: theme, kind: .ink)
+        separator = ChromeRuleView(
             axis: .horizontal,
-            style: .single,
             color: theme.colors.borderSubtle
         )
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail")
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
-        layer?.borderWidth = Retro.hairline
+        layer?.cornerRadius = 0
+        layer?.borderWidth = Chrome.hairline
         translatesAutoresizingMaskIntoConstraints = false
         build()
         apply(theme: theme)
@@ -1015,7 +1001,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        locationLabel.font = RetroFont.body(11)
+        locationLabel.font = ChromeFont.monospaced(size: 11)
         locationLabel.lineBreakMode = .byTruncatingMiddle
         locationLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(locationLabel)
@@ -1078,13 +1064,13 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
         nowStrip.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-now")
         nowStrip.wantsLayer = true
-        nowStrip.layer?.borderWidth = Retro.hairline
-        nowStrip.layer?.cornerRadius = Retro.cornerRadius
+        nowStrip.layer?.borderWidth = Chrome.hairline
+        nowStrip.layer?.cornerRadius = Chrome.Radius.control
         nowStrip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(nowStrip)
 
         nowLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-now-label")
-        nowLabel.font = RetroFont.body(11)
+        nowLabel.font = ChromeFont.sans(size: 11, weight: .regular)
         nowLabel.lineBreakMode = .byTruncatingTail
         nowLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         nowLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1119,10 +1105,10 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         replyField.usesSingleLineMode = true
         replyField.cell?.isScrollable = true
         replyField.cell?.wraps = false
-        replyField.font = RetroFont.body(11)
+        replyField.font = ChromeFont.sans(size: 11, weight: .regular)
         replyField.wantsLayer = true
-        replyField.layer?.borderWidth = Retro.hairline
-        replyField.layer?.cornerRadius = Retro.cornerRadius
+        replyField.layer?.borderWidth = Chrome.hairline
+        replyField.layer?.cornerRadius = Chrome.Radius.control
         replyField.focusRingType = .default
         replyField.delegate = self
         replyField.target = self
@@ -1137,7 +1123,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         )
         addSubview(sendButton)
 
-        replyHintLabel.font = RetroFont.body(10)
+        replyHintLabel.font = ChromeFont.meta
         replyHintLabel.lineBreakMode = .byTruncatingTail
         replyHintLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(replyHintLabel)
@@ -1206,7 +1192,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
             replyField.leadingAnchor.constraint(equalTo: terminalScrollView.leadingAnchor),
             replyField.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -8),
-            replyField.heightAnchor.constraint(equalToConstant: Retro.controlHeight),
+            replyField.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
 
             sendButton.trailingAnchor.constraint(equalTo: terminalScrollView.trailingAnchor),
             sendButton.centerYAnchor.constraint(equalTo: replyField.centerYAnchor),
@@ -1229,8 +1215,8 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.wantsLayer = true
-        scrollView.layer?.borderWidth = Retro.hairline
-        scrollView.layer?.cornerRadius = Retro.cornerRadius
+        scrollView.layer?.borderWidth = Chrome.hairline
+        scrollView.layer?.cornerRadius = Chrome.Radius.card
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -1253,14 +1239,14 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         textView.isSelectable = true
         textView.isRichText = true
         textView.importsGraphics = false
-        textView.font = RetroFont.body(11)
+        textView.font = ChromeFont.monospaced(size: 11)
         textView.textContainerInset = NSSize(width: 10, height: 10)
         scrollView.documentView = textView
         return (scrollView, textView)
     }
 
     private func configureButton(
-        _ button: RetroButton,
+        _ button: ChromeButton,
         identifier: String,
         action: Selector
     ) {
@@ -1304,7 +1290,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             timelineTextView.textStorage?.setAttributedString(NSAttributedString(
                 string: "Waiting for the agent's first message…",
                 attributes: [
-                    .font: RetroFont.body(11),
+                    .font: ChromeFont.monospaced(size: 11),
                     .foregroundColor: theme.colors.textMuted,
                 ]
             ))
@@ -1383,38 +1369,36 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         } else {
             hint = ""
         }
-        timelineHintLabel.setRetroText(hint, color: theme.colors.textMuted)
+        timelineHintLabel.setChromeText(hint, color: theme.colors.textMuted)
     }
 
     private func updateStateLabel() {
         let colors = theme.colors
         if showsTimeline {
-            terminalStateLabel.setRetroText(
+            terminalStateLabel.setStatusText(
                 isFollowing ? "LIVE" : "PAUSED",
-                color: isFollowing ? colors.success : colors.yellow,
-                glow: isFollowing
+                color: isFollowing ? colors.success : colors.yellow
             )
         } else {
-            terminalStateLabel.setRetroText(
+            terminalStateLabel.setStatusText(
                 terminal.isAvailable ? "LIVE" : "UNAVAILABLE",
-                color: terminal.isAvailable ? colors.success : colors.textMuted,
-                glow: terminal.isAvailable
+                color: terminal.isAvailable ? colors.success : colors.textMuted
             )
         }
     }
 
     private func refreshTitle() {
-        titleLabel.setRetroText(
+        titleLabel.setChromeText(
             entry?.projectName ?? "No agent selected",
-            color: theme.colors.textPrimary,
-            size: 22
+            font: ChromeFont.screen,
+            color: theme.colors.textPrimary
         )
     }
 
     private func setReplyPlaceholder(_ placeholder: String?) {
         replyField.placeholderAttributedString = placeholder.map {
             NSAttributedString(string: $0, attributes: [
-                .font: RetroFont.body(11),
+                .font: ChromeFont.sans(size: 11, weight: .regular),
                 .foregroundColor: theme.colors.textMuted,
             ])
         }
@@ -1439,13 +1423,13 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             attributedText = AgentOutputHighlighter.highlight(
                 displayText,
                 theme: theme,
-                font: RetroFont.body(11)
+                font: ChromeFont.monospaced(size: 11)
             )
         } else {
             attributedText = NSAttributedString(
                 string: displayText,
                 attributes: [
-                    .font: RetroFont.body(11),
+                    .font: ChromeFont.monospaced(size: 11),
                     .foregroundColor: theme.colors.textMuted,
                 ]
             )
@@ -1463,13 +1447,12 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
     private func refreshStatusColors() {
         guard let entry else {
-            statusLabel.setRetroText("", color: theme.colors.textMuted)
+            statusLabel.setStatusText("", color: theme.colors.textMuted)
             return
         }
-        statusLabel.setRetroText(
+        statusLabel.setStatusText(
             entry.status.displayLabel,
-            color: Self.statusColor(for: entry, theme: theme),
-            glow: entry.status == .running
+            color: Self.statusColor(for: entry, theme: theme)
         )
     }
 
@@ -1604,8 +1587,8 @@ private final class AgentDashboardSummaryCard: NSView {
         wantsLayer = true
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         layer?.borderColor = theme.colors.borderStrong.cgColor
-        layer?.borderWidth = Retro.hairline
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.borderWidth = Chrome.hairline
+        layer?.cornerRadius = Chrome.Radius.card
 
         let segmentBar = NSView()
         segmentBar.wantsLayer = true
@@ -1618,7 +1601,7 @@ private final class AgentDashboardSummaryCard: NSView {
 
         let titleText = title.uppercased()
         let titleLabel = NSTextField(labelWithString: titleText)
-        titleLabel.setRetroText(titleText, color: theme.colors.textMuted)
+        titleLabel.setEyebrowText(titleText, color: theme.colors.textMuted)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
@@ -1637,11 +1620,10 @@ private final class AgentDashboardSummaryCard: NSView {
     func update(value: Int) {
         guard value != self.value else { return }
         self.value = value
-        valueLabel.setRetroText(
+        valueLabel.setChromeText(
             "\(value)",
-            color: value == 0 ? theme.colors.textMuted : color,
-            size: 22,
-            glow: value != 0
+            font: ChromeFont.screen,
+            color: value == 0 ? theme.colors.textMuted : color
         )
     }
 
@@ -1677,7 +1659,7 @@ private final class AgentDashboardRowView: NSControl {
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-row")
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.card
         translatesAutoresizingMaskIntoConstraints = false
         // A fourth line appears once the agent's transcript says what it is doing.
         heightConstraint = heightAnchor.constraint(equalToConstant: Self.height(showsActivity: false))
@@ -1744,14 +1726,13 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     func updateElapsed(now: Date) {
-        elapsedLabel.setRetroText(
+        elapsedLabel.setChromeText(
             Self.elapsedText(
                 status: entry.status,
                 startedAt: entry.startedAt,
                 now: now
             ),
-            color: statusColor,
-            glow: entry.status == .running
+            color: statusColor
         )
     }
 
@@ -1781,8 +1762,8 @@ private final class AgentDashboardRowView: NSControl {
 
     private func build() {
         iconContainer.wantsLayer = true
-        iconContainer.layer?.borderWidth = Retro.hairline
-        iconContainer.layer?.cornerRadius = Retro.cornerRadius
+        iconContainer.layer?.borderWidth = Chrome.hairline
+        iconContainer.layer?.cornerRadius = Chrome.Radius.control
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconContainer)
 
@@ -1797,7 +1778,7 @@ private final class AgentDashboardRowView: NSControl {
         addSubview(titleLabel)
 
         detailLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-agent")
-        detailLabel.font = RetroFont.body(11)
+        detailLabel.font = ChromeFont.sans(size: 11, weight: .regular)
         detailLabel.textColor = theme.colors.textMuted
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1805,7 +1786,7 @@ private final class AgentDashboardRowView: NSControl {
         addSubview(detailLabel)
 
         pathLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-directory")
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monospaced(size: 11)
         pathLabel.textColor = theme.colors.textMuted
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1813,7 +1794,7 @@ private final class AgentDashboardRowView: NSControl {
         addSubview(pathLabel)
 
         activityLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-activity")
-        activityLabel.font = RetroFont.body(11)
+        activityLabel.font = ChromeFont.sans(size: 11, weight: .regular)
         activityLabel.lineBreakMode = .byTruncatingTail
         activityLabel.isHidden = true
         activityLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -1906,12 +1887,13 @@ private final class AgentDashboardRowView: NSControl {
             iconContainer.layer?.backgroundColor = statusColor.withAlphaComponent(0.14).cgColor
             iconContainer.layer?.borderColor = statusColor.cgColor
             icon.contentTintColor = statusColor
-            statusLabel.setRetroText(
+            statusLabel.setStatusText(
                 entry.status.displayLabel,
-                color: statusColor,
-                glow: entry.status == .running
+                color: statusColor
             )
-            RetroLamp.light(lamp, color: statusColor, lit: isStatusLit)
+            lamp.layer?.backgroundColor = (
+                isStatusLit ? statusColor : statusColor.withAlphaComponent(0.35)
+            ).cgColor
         }
         if statusChanged || previous?.startedAt != entry.startedAt {
             updateElapsed(now: Date())
@@ -1928,7 +1910,7 @@ private final class AgentDashboardRowView: NSControl {
             )
         }
         if previous?.projectName != entry.projectName {
-            titleLabel.setRetroText(entry.projectName, color: theme.colors.textPrimary)
+            titleLabel.setChromeText(entry.projectName, color: theme.colors.textPrimary)
         }
 
         let location = entry.location
@@ -1958,7 +1940,7 @@ private final class AgentDashboardRowView: NSControl {
     private func updateBackground() {
         layer?.backgroundColor = (
             isKeyboardSelected
-                ? theme.colors.bgSelected
+                ? theme.colors.selectionMuted
                 : isHovered
                     ? theme.colors.bgOverlay
                     : theme.colors.bgPanel

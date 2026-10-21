@@ -263,9 +263,9 @@ final class FileExplorerRowView: NSTableRowView {
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard let colors else { return }
-        (isEmphasized ? colors.bgSelectedStrong : colors.bgSelected).setFill()
+        (isEmphasized ? colors.selection : colors.selectionMuted).setFill()
         bounds.fill()
-        (isEmphasized ? colors.accent : colors.railMuted).setFill()
+        (isEmphasized ? colors.accent : colors.borderStrong).setFill()
         NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
     }
 
@@ -275,7 +275,7 @@ final class FileExplorerRowView: NSTableRowView {
         bounds.fill()
         colors.accent.setStroke()
         let frame = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-        frame.lineWidth = Retro.hairline
+        frame.lineWidth = Chrome.hairline
         frame.stroke()
     }
 
@@ -312,7 +312,7 @@ final class FileExplorerCellView: NSTableCellView {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)
 
-        nameField.font = RetroFont.body(11)
+        nameField.font = ChromeFont.sans(size: 11)
         nameField.lineBreakMode = .byTruncatingMiddle
         nameField.cell?.truncatesLastVisibleLine = true
         nameField.focusRingType = .none
@@ -400,7 +400,7 @@ final class FileExplorerCellView: NSTableCellView {
         } else {
             colors.textPrimary
         }
-        var font = RetroFont.body(11)
+        var font = ChromeFont.sans(size: 11)
         if isIgnored, status == nil {
             font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
         }
@@ -413,10 +413,10 @@ final class FileExplorerCellView: NSTableCellView {
 
         if let status {
             statusLabel.isHidden = false
-            statusLabel.attributedStringValue = RetroText.display(
+            statusLabel.attributedStringValue = ChromeText.attributed(
                 status.letter,
+                font: ChromeFont.label,
                 color: nameColor,
-                tracking: 0,
                 alignment: .right
             )
         } else {
@@ -438,10 +438,10 @@ final class FileExplorerCellView: NSTableCellView {
         nameField.drawsBackground = true
         nameField.backgroundColor = colors.bgRaised
         nameField.textColor = colors.textPrimary
-        nameField.font = RetroFont.body(11)
+        nameField.font = ChromeFont.sans(size: 11)
         nameField.delegate = delegate
         nameField.wantsLayer = true
-        nameField.layer?.borderWidth = Retro.hairline
+        nameField.layer?.borderWidth = Chrome.hairline
         nameField.layer?.borderColor = colors.accent.cgColor
     }
 

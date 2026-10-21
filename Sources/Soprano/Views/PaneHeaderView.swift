@@ -140,7 +140,7 @@ final class PaneHeaderView: NSView {
         let isFocused = agentManager.activePaneId == paneId
 
         titleLabel.textColor = theme.colors.textPrimary
-        titleLabel.setRetroText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
+        titleLabel.setChromeText(tab?.title ?? "Pane", color: theme.colors.textPrimary)
         if tab?.isFilePreview == true {
             titleLabel.attributedStringValue = Self.slanted(titleLabel.attributedStringValue)
         }
@@ -148,28 +148,20 @@ final class PaneHeaderView: NSView {
 
         if let agent = tab?.agent {
             let statusColor = colorForStatus(agent.status, theme: theme)
-            RetroLamp.light(statusDot, color: statusColor, lit: isLit(agent.status))
+            statusDot.layer?.backgroundColor = (isLit(agent.status)
+                ? statusColor
+                : statusColor.withAlphaComponent(0.35)).cgColor
             statusLabel.textColor = statusColor
-            statusLabel.setRetroText(
-                agent.status.displayLabel,
-                color: statusColor,
-                tracking: 0,
-                glow: agent.status == .running
-            )
+            statusLabel.setStatusText(agent.status.displayLabel, color: statusColor)
             statusLabel.isHidden = false
         } else if let tab, agentManager.isRunningCommand(tab, in: paneId) {
             let color = theme.colors.runningCommand
-            RetroLamp.light(statusDot, color: color)
+            statusDot.layer?.backgroundColor = color.cgColor
             statusLabel.textColor = color
-            statusLabel.setRetroText(
-                AgentManager.runningCommandLabel,
-                color: color,
-                tracking: 0,
-                glow: true
-            )
+            statusLabel.setStatusText(AgentManager.runningCommandLabel, color: color)
             statusLabel.isHidden = false
         } else {
-            RetroLamp.light(statusDot, color: theme.colors.textMuted, lit: false)
+            statusDot.layer?.backgroundColor = theme.colors.textMuted.withAlphaComponent(0.35).cgColor
             statusLabel.stringValue = ""
             statusLabel.isHidden = true
         }
@@ -241,10 +233,10 @@ final class PaneHeaderView: NSView {
             // its usual color; an agent's attention marker tints all of it.
             let label = NSMutableAttributedString()
             if isRunningCommand {
-                label.append(RetroText.display("● ", color: theme.colors.runningCommand, glow: true))
+                label.append(ChromeText.attributed("● ", font: ChromeFont.label, color: theme.colors.runningCommand))
                 button.toolTip = "Running a command"
             }
-            label.append(RetroText.display(title, color: color))
+            label.append(ChromeText.attributed(title, font: ChromeFont.label, color: color))
             button.attributedTitle = tab.isFilePreview ? Self.slanted(label) : label
             button.translatesAutoresizingMaskIntoConstraints = false
 
@@ -293,11 +285,10 @@ final class PaneHeaderView: NSView {
             ? theme.colors.textMuted
             : theme.colors.textMuted.withAlphaComponent(0.35)
         button.contentTintColor = color
-        button.attributedTitle = RetroText.display(
+        button.attributedTitle = ChromeText.attributed(
             button.title,
+            font: ChromeFont.screen,
             color: color,
-            size: 22,
-            tracking: 0,
             alignment: .center
         )
     }

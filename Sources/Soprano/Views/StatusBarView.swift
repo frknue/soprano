@@ -3,8 +3,8 @@ import AppKit
 /// Bottom status bar showing keybinding mode, pane list, account usage,
 /// notification count, and the mission clock.
 final class StatusBarView: NSView, NSPopoverDelegate {
-    /// A 28 pt content strip under the double rule along the top edge.
-    static let height: CGFloat = 28 + Retro.doubleRule
+    /// A 28 pt content strip under the hairline along the top edge.
+    static let height: CGFloat = 28 + Chrome.hairline
 
     /// When the mission clock reads T+00:00:00.
     private static let missionStart = NSRunningApplication.current.launchDate ?? Date()
@@ -15,8 +15,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     let agentManager: AgentManager
     let themeManager: ThemeManager
 
-    private let topRule = RetroRuleView(axis: .horizontal, style: .double)
-    private let stripeView = RetroStripeView(layout: .slanted)
+    private let topRule = ChromeRuleView(axis: .horizontal)
     private var brandLabel: NSTextField!
     private let modeChip = NSView()
     private var modeLabel: NSTextField!
@@ -95,14 +94,13 @@ final class StatusBarView: NSView, NSPopoverDelegate {
 
     private func setupViews() {
         addSubview(topRule)
-        addSubview(stripeView)
 
         brandLabel = NSTextField(labelWithString: "SOPRANO")
         brandLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(brandLabel)
 
         modeChip.wantsLayer = true
-        modeChip.layer?.cornerRadius = Retro.cornerRadius
+        modeChip.layer?.cornerRadius = Chrome.Radius.cap
         modeChip.translatesAutoresizingMaskIntoConstraints = false
         addSubview(modeChip)
 
@@ -158,12 +156,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
             content.topAnchor.constraint(equalTo: topRule.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            stripeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            stripeView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            stripeView.widthAnchor.constraint(equalToConstant: 22),
-            stripeView.heightAnchor.constraint(equalToConstant: 12),
-
-            brandLabel.leadingAnchor.constraint(equalTo: stripeView.trailingAnchor, constant: 8),
+            brandLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             brandLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
 
             modeChip.leadingAnchor.constraint(equalTo: brandLabel.trailingAnchor, constant: 14),
@@ -203,10 +196,10 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     func refreshTheme() {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        topRule.color = theme.colors.borderStrong
-        stripeView.colors = theme.colors.stripe
-        brandLabel.setRetroText("SOPRANO", color: theme.colors.accent, glow: true)
-        clockSeparatorLabel.setRetroText("▪", color: theme.colors.textMuted)
+        topRule.color = theme.colors.borderSubtle
+        brandLabel.setChromeText("SOPRANO", font: ChromeFont.labelStrong, color: theme.colors.accent)
+        clockSeparatorLabel.setChromeText("▪", color: theme.colors.textMuted)
+        usagePopover?.appearance = theme.appearance.nsAppearance
         applyMode(theme: theme)
         updateClock()
         refresh()
@@ -230,21 +223,23 @@ final class StatusBarView: NSView, NSPopoverDelegate {
             text = "SELECT"
             litColor = theme.colors.blue
         }
-        if let litColor {
-            modeLabel.setRetroText(text, color: theme.colors.bgPanel)
-            modeChip.layer?.backgroundColor = litColor.cgColor
-            modeChip.layer?.borderWidth = 0
+        if litColor != nil {
+            modeLabel.setChromeText(text, font: ChromeFont.status, color: theme.colors.textPrimary)
+            modeChip.layer?.backgroundColor = theme.colors.raised.cgColor
+            modeChip.layer?.borderWidth = Chrome.hairline
+            modeChip.layer?.borderColor = theme.colors.borderSubtle.cgColor
         } else {
-            modeLabel.setRetroText(text, color: theme.colors.textMuted)
+            modeLabel.setChromeText(text, font: ChromeFont.status, color: theme.colors.textMuted)
             modeChip.layer?.backgroundColor = NSColor.clear.cgColor
-            modeChip.layer?.borderWidth = Retro.hairline
+            modeChip.layer?.borderWidth = Chrome.hairline
             modeChip.layer?.borderColor = theme.colors.borderStrong.cgColor
         }
     }
 
     private func updateClock() {
-        clockLabel.setRetroText(
+        clockLabel.setChromeText(
             Self.missionElapsedText(Date().timeIntervalSince(Self.missionStart)),
+            font: ChromeFont.monoSmall,
             color: themeManager.currentTheme.colors.textMuted
         )
     }
@@ -269,15 +264,16 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         for provider in AccountProvider.allCases {
             guard let window = snapshot.headline(for: provider)?.usage.tightest else { continue }
             if text.length > 0 {
-                text.append(RetroText.display("  ", color: colors.textMuted))
+                text.append(ChromeText.attributed("  ", font: ChromeFont.meta, color: colors.textMuted))
             }
-            text.append(RetroText.display("\(provider.displayName) ", color: colors.textMuted))
-            text.append(RetroText.display(
+            text.append(ChromeText.attributed("\(provider.displayName) ", font: ChromeFont.meta, color: colors.textMuted))
+            text.append(ChromeText.attributed(
                 UsageFormat.percent(window.usedFraction),
+                font: ChromeFont.meta,
                 color: UsageSeverity.color(for: window.usedFraction, colors: colors)
             ))
             if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
-                text.append(RetroText.display(" · \(reset)", color: colors.textMuted))
+                text.append(ChromeText.attributed(" · \(reset)", font: ChromeFont.meta, color: colors.textMuted))
             }
         }
         return text.length > 0 ? text : nil
@@ -305,7 +301,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
-        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.appearance = themeManager.currentTheme.appearance.nsAppearance
         popover.contentViewController = controller
         popover.delegate = self
         controller.onManageAccounts = { [weak self, weak popover] in
@@ -353,7 +349,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
 
         let text = NSMutableAttributedString()
         func append(_ string: String, _ color: NSColor) {
-            text.append(RetroText.display(string, color: color))
+            text.append(ChromeText.attributed(string, font: ChromeFont.meta, color: color))
         }
 
         append(agentManager.activeSession?.name ?? "Session", theme.colors.accent)
@@ -392,11 +388,11 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
         let base = components.joined(separator: " · ")
         if agentManager.maximizedPaneId != nil {
-            paneCountLabel.setRetroText("\(base) · MAXIMIZED", color: theme.colors.accent)
+            paneCountLabel.setChromeText("\(base) · MAXIMIZED", font: ChromeFont.meta, color: theme.colors.accent)
         } else if agentManager.attentionCount > 0 {
-            paneCountLabel.setRetroText(base, color: theme.colors.blue)
+            paneCountLabel.setChromeText(base, font: ChromeFont.meta, color: theme.colors.blue)
         } else {
-            paneCountLabel.setRetroText(base, color: theme.colors.textMuted)
+            paneCountLabel.setChromeText(base, font: ChromeFont.meta, color: theme.colors.textMuted)
         }
     }
 }

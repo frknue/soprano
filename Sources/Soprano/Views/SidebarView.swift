@@ -12,19 +12,19 @@ final class SidebarView: NSView {
 
     private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
-    private var headerView: RetroHeadingView!
+    private var headerView: ChromeEyebrowView!
     private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
     private var listContentView: NSView!
     private var rowsStack: NSStackView!
     private var footerView: NSView!
-    private var footerSeparator: RetroRuleView!
-    private var trailingBorder: RetroRuleView!
-    private var settingsButton: RetroIconButton!
-    private var dashboardButton: RetroIconButton!
-    private var plusButton: RetroIconButton!
-    private var collapseAllButton: RetroIconButton!
-    private var sessionsButton: RetroIconButton!
+    private var footerSeparator: ChromeRuleView!
+    private var trailingBorder: ChromeRuleView!
+    private var settingsButton: ChromeIconButton!
+    private var dashboardButton: ChromeIconButton!
+    private var plusButton: ChromeIconButton!
+    private var collapseAllButton: ChromeIconButton!
+    private var sessionsButton: ChromeIconButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
     private var windowRows: [String: SidebarWindowRowView] = [:]
@@ -95,14 +95,14 @@ final class SidebarView: NSView {
         sessionSelector = NSPopUpButton(frame: .zero, pullsDown: false)
         sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
         sessionSelector.setAccessibilityLabel("Current Session")
-        sessionSelector.font = RetroFont.display(11)
+        sessionSelector.font = ChromeFont.label
         sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         sessionSelector.target = self
         sessionSelector.action = #selector(sessionSelected(_:))
         sessionSelector.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(sessionSelector)
 
-        headerView = RetroHeadingView(title: "WINDOWS", theme: themeManager.currentTheme)
+        headerView = ChromeEyebrowView(title: "WINDOWS", theme: themeManager.currentTheme)
         contentContainer.addSubview(headerView)
 
         plusButton = makeIconButton(
@@ -112,7 +112,7 @@ final class SidebarView: NSView {
         )
         contentContainer.addSubview(plusButton)
 
-        collapseAllButton = RetroIconButton(
+        collapseAllButton = ChromeIconButton(
             symbolName: "rectangle.compress.vertical",
             accessibilityLabel: "Collapse All Windows",
             pointSize: 12,
@@ -144,7 +144,7 @@ final class SidebarView: NSView {
         footerView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(footerView)
 
-        footerSeparator = RetroRuleView(axis: .horizontal, style: .single)
+        footerSeparator = ChromeRuleView(axis: .horizontal)
         footerView.addSubview(footerSeparator)
 
         settingsButton = makeIconButton(
@@ -168,7 +168,7 @@ final class SidebarView: NSView {
         )
         footerView.addSubview(dashboardButton)
 
-        trailingBorder = RetroRuleView(axis: .vertical, style: .double)
+        trailingBorder = ChromeRuleView(axis: .vertical)
         addSubview(trailingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
@@ -212,7 +212,7 @@ final class SidebarView: NSView {
             footerSeparator.topAnchor.constraint(equalTo: footerView.topAnchor),
             footerSeparator.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
             footerSeparator.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
-            footerSeparator.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            footerSeparator.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             settingsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -8),
             settingsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
@@ -232,7 +232,7 @@ final class SidebarView: NSView {
             trailingBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             trailingBorder.topAnchor.constraint(equalTo: topAnchor),
             trailingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailingBorder.widthAnchor.constraint(equalToConstant: Retro.doubleRule),
+            trailingBorder.widthAnchor.constraint(equalToConstant: Chrome.hairline),
         ])
     }
 
@@ -240,8 +240,8 @@ final class SidebarView: NSView {
         symbolName: String,
         accessibilityLabel: String,
         action: Selector
-    ) -> RetroIconButton {
-        RetroIconButton(
+    ) -> ChromeIconButton {
+        ChromeIconButton(
             symbolName: symbolName,
             accessibilityLabel: accessibilityLabel,
             target: self,
@@ -265,7 +265,7 @@ final class SidebarView: NSView {
     private func applyTrailingBorderColor(theme: AppTheme) {
         trailingBorder.color = isResizeHighlighted
             ? theme.colors.accent
-            : theme.colors.borderStrong
+            : theme.colors.borderSubtle
     }
 
     func setControlKeyHeld(_ isHeld: Bool) {
@@ -422,10 +422,10 @@ final class SidebarView: NSView {
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         headerView.apply(theme: theme)
-        footerSeparator.color = theme.colors.borderStrong
+        footerSeparator.color = theme.colors.borderSubtle
         applyTrailingBorderColor(theme: theme)
         for button in [settingsButton, dashboardButton, plusButton, collapseAllButton, sessionsButton] {
-            button?.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
+            button?.apply(theme: theme)
         }
         rebuildSessionSelector()
         collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }
@@ -704,7 +704,7 @@ final class SidebarView: NSView {
         return tabStatusColor(for: tab, theme: theme)
     }
 
-    /// Whether the pane's status lamp glows: something is happening or wants
+    /// Whether the pane's status lamp is lit: something is happening or wants
     /// attention. Idle, stopped, and plain panes stay dark. The active tab's
     /// agent speaks for the pane; without one, a command running in any of its
     /// tabs lights the lamp.
@@ -809,7 +809,7 @@ private final class SidebarWindowRowView: NSView {
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.control
         translatesAutoresizingMaskIntoConstraints = false
         setup()
     }
@@ -829,13 +829,13 @@ private final class SidebarWindowRowView: NSView {
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(disclosureButton)
 
-        titleLabel.font = RetroFont.display(11)
+        titleLabel.font = ChromeFont.label
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        countLabel.font = RetroFont.display(11)
+        countLabel.font = ChromeFont.label
         countLabel.alignment = .right
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -844,7 +844,7 @@ private final class SidebarWindowRowView: NSView {
         closeButton.target = self
         closeButton.action = #selector(handleClose)
         closeButton.isBordered = false
-        closeButton.font = RetroFont.display(11)
+        closeButton.font = ChromeFont.label
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
@@ -903,21 +903,23 @@ private final class SidebarWindowRowView: NSView {
         updateTrailingLabel()
         let accessibilityLabel = expanded ? "Collapse Window" : "Expand Window"
         let markerColor = highlighted ? theme.colors.accent : theme.colors.textMuted
-        disclosureButton.attributedTitle = RetroText.display(
+        disclosureButton.attributedTitle = ChromeText.attributed(
             expanded ? "▼" : "❯",
+            font: ChromeFont.label,
             color: markerColor,
             alignment: .center
         )
         disclosureButton.setAccessibilityLabel(accessibilityLabel)
         disclosureButton.toolTip = accessibilityLabel
-        titleLabel.setRetroText(title, color: markerColor)
-        closeButton.attributedTitle = RetroText.display(
+        titleLabel.setChromeText(title, color: markerColor)
+        closeButton.attributedTitle = ChromeText.attributed(
             "×",
+            font: ChromeFont.label,
             color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
             alignment: .center
         )
         layer?.backgroundColor = highlighted
-            ? theme.colors.bgSelected.cgColor
+            ? theme.colors.selectionMuted.cgColor
             : NSColor.clear.cgColor
         railView.setColor(highlighted ? theme.colors.accent : nil)
 
@@ -945,18 +947,18 @@ private final class SidebarWindowRowView: NSView {
         if showShortcutHint {
             countLabel.alignment = .center
             countLabel.drawsBackground = shortcutNumber != nil
-            countLabel.backgroundColor = theme.colors.accent
+            countLabel.backgroundColor = theme.colors.raised
             shortcutBlockWidthConstraint.isActive = shortcutNumber != nil
-            countLabel.setRetroText(
+            countLabel.setChromeText(
                 shortcutNumber.map(String.init) ?? "",
-                color: theme.colors.bgPanel
+                color: theme.colors.textPrimary
             )
             countLabel.toolTip = shortcutNumber.map { "Ctrl+\($0)" }
         } else {
             countLabel.alignment = .right
             countLabel.drawsBackground = false
             shortcutBlockWidthConstraint.isActive = false
-            countLabel.setRetroText(
+            countLabel.setChromeText(
                 attentionCount > 0
                     ? "\(paneCount) · \(attentionCount)!"
                     : "\(paneCount)",
@@ -1036,7 +1038,7 @@ private final class SidebarPaneRowView: NSView {
         self.titleColor = theme.colors.textPrimary
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.control
         translatesAutoresizingMaskIntoConstraints = false
         setup()
     }
@@ -1054,19 +1056,19 @@ private final class SidebarPaneRowView: NSView {
         dotView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(dotView)
 
-        titleLabel.font = RetroFont.display(11)
+        titleLabel.font = ChromeFont.label
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
         badgeContainer.wantsLayer = true
-        badgeContainer.layer?.cornerRadius = Retro.cornerRadius
-        badgeContainer.layer?.borderWidth = Retro.hairline
+        badgeContainer.layer?.cornerRadius = Chrome.Radius.cap
+        badgeContainer.layer?.borderWidth = Chrome.hairline
         badgeContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(badgeContainer)
 
-        badgeLabel.font = RetroFont.display(11)
+        badgeLabel.font = ChromeFont.label
         badgeLabel.alignment = .center
         badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1075,11 +1077,11 @@ private final class SidebarPaneRowView: NSView {
         closeButton.target = self
         closeButton.action = #selector(handleClose)
         closeButton.isBordered = false
-        closeButton.font = RetroFont.display(11)
+        closeButton.font = ChromeFont.label
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
-        branchLabel.font = RetroFont.body(10)
+        branchLabel.font = ChromeFont.monoSmall
         branchLabel.textColor = theme.colors.textMuted
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1154,7 +1156,7 @@ private final class SidebarPaneRowView: NSView {
     ) {
         self.onSelect = onSelect
         self.onClose = onClose
-        RetroLamp.light(dotView, color: dotColor, lit: dotLit)
+        dotView.layer?.backgroundColor = dotColor.cgColor
         closeButton.isHidden = !showsClose
 
         badgeLabel.identifier = layoutTabNumber == nil
@@ -1185,8 +1187,9 @@ private final class SidebarPaneRowView: NSView {
             )
             badgeContainer.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
         }
-        closeButton.attributedTitle = RetroText.display(
+        closeButton.attributedTitle = ChromeText.attributed(
             "×",
+            font: ChromeFont.label,
             color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
             alignment: .center
         )
@@ -1196,14 +1199,14 @@ private final class SidebarPaneRowView: NSView {
         titleColor = inActiveWindow
             ? theme.colors.textPrimary
             : theme.colors.textMuted
-        titleLabel.setRetroText(title, color: titleColor, tracking: 0)
+        titleLabel.setChromeText(title, color: titleColor)
         layer?.backgroundColor = highlighted
-            ? theme.colors.bgSelectedStrong.cgColor
+            ? theme.colors.selection.cgColor
             : NSColor.clear.cgColor
         railView.setColor(
             highlighted
                 ? theme.colors.accent
-                : (inActiveWindow ? theme.colors.railMuted : nil)
+                : (inActiveWindow ? theme.colors.borderStrong : nil)
         )
 
         setBranch(branch)
@@ -1212,12 +1215,12 @@ private final class SidebarPaneRowView: NSView {
     private func applyBadge(_ text: String, tint: NSColor) {
         badgeContainer.layer?.backgroundColor = tint.withAlphaComponent(0.14).cgColor
         badgeContainer.layer?.borderColor = tint.cgColor
-        badgeLabel.setRetroText(text, color: tint, tracking: 0)
+        badgeLabel.setChromeText(text, color: tint)
     }
 
     func setTitle(_ title: String) {
         guard titleLabel.stringValue != title else { return }
-        titleLabel.setRetroText(title, color: titleColor, tracking: 0)
+        titleLabel.setChromeText(title, color: titleColor)
     }
 
     func setBranch(_ branch: String?) {

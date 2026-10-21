@@ -159,10 +159,10 @@ final class AgentTimelineRenderer {
     // MARK: - Items
 
     private func appendPrompt(_ text: String, timestamp: Date?, to output: NSMutableAttributedString) {
-        let block = textBlock(background: colors.bgSelected, border: colors.accent, topMargin: 14)
+        let block = textBlock(background: colors.selectionMuted, border: colors.accent, topMargin: 14)
         let header = NSMutableAttributedString(
             string: "You",
-            attributes: [.font: RetroFont.display(11), .foregroundColor: colors.accent]
+            attributes: [.font: ChromeFont.labelStrong, .foregroundColor: colors.accent]
         )
         if let timestamp {
             header.append(NSAttributedString(
@@ -379,7 +379,7 @@ final class AgentTimelineRenderer {
     }
 
     private func font(weight: NSFont.Weight = .regular) -> NSFont {
-        RetroFont.body(fontSize, weight: weight)
+        ChromeFont.monospaced(size: fontSize, weight: weight)
     }
 
     private var characterWidth: CGFloat {

@@ -2,11 +2,36 @@ import AppKit
 
 /// A complete color theme for the app and terminal.
 struct AppTheme: Identifiable {
+    /// Whether the palette is light ink-on-paper or dark. Drives the window,
+    /// popover and alert appearance plus every per-mode derived token.
+    enum Appearance: String, CaseIterable, Sendable {
+        case light
+        case dark
+
+        /// The AppKit appearance windows, popovers and alerts adopt so system
+        /// controls match the theme. This is the only place Soprano names the
+        /// aqua appearances.
+        var nsAppearance: NSAppearance {
+            switch self {
+            case .light: NSAppearance(named: .aqua) ?? NSAppearance.currentDrawing()
+            case .dark: NSAppearance(named: .darkAqua) ?? NSAppearance.currentDrawing()
+            }
+        }
+
+        /// Maps an effective appearance (including the high-contrast and
+        /// vibrant variants) onto light or dark.
+        init(_ appearance: NSAppearance) {
+            let match = appearance.bestMatch(from: [.aqua, .darkAqua])
+            self = match == .darkAqua ? .dark : .light
+        }
+    }
+
     let id: String
     let name: String
     let colors: ThemeColors
     let terminalColors: TerminalColors
 
+    var appearance: Appearance { colors.appearance }
     var backgroundColor: NSColor { colors.bgBase }
     var panelColor: NSColor { colors.bgPanel }
     var textColor: NSColor { colors.textPrimary }
@@ -30,30 +55,239 @@ struct ThemeColors {
     let cyan: NSColor
     let yellow: NSColor
     let gray: NSColor
+    /// Third-party palettes are all dark; only Folio Paper is light.
+    var appearance: AppTheme.Appearance = .dark
 }
 
+/// A layer shadow recipe for elevation `e2` (popovers, toasts, HUD) and `e3`
+/// (palette, launcher, switcher). `blur` is the CSS blur radius; Core
+/// Animation's `shadowRadius` is half of it.
+struct ThemeShadow {
+    let color: NSColor
+    let opacity: Float
+    let offsetY: CGFloat
+    let blur: CGFloat
+    /// The 1 px contact ring drawn around the elevated surface.
+    let ring: NSColor
+
+    /// Applies the shadow and contact ring to `layer`. `layer` must not mask
+    /// to bounds, or the shadow is clipped away.
+    func apply(to layer: CALayer) {
+        layer.masksToBounds = false
+        layer.shadowColor = color.cgColor
+        layer.shadowOpacity = opacity
+        layer.shadowOffset = CGSize(width: 0, height: -offsetY)
+        layer.shadowRadius = blur / 2
+        layer.borderWidth = 1
+        layer.borderColor = ring.cgColor
+    }
+}
+
+/// Derived tokens: formulas over the 16 slots (Folio spec §4), so third-party
+/// themes inherit every idiom without declaring anything new.
 extension ThemeColors {
-    /// Background tint for the selected group in a list (the active logical
-    /// window and its panes).
-    ///
-    /// Derived from the accent rather than reusing `bgRaised`: themes are free to
-    /// define `bgRaised` identical to `bgPanel` (Gruvbox Dark does), which makes a
-    /// raised-background highlight completely invisible on a panel surface.
-    var bgSelected: NSColor { accent.withAlphaComponent(0.14) }
+    private var isLight: Bool { appearance == .light }
 
-    /// Stronger tint for the single focused row inside the selected group.
-    var bgSelectedStrong: NSColor { accent.withAlphaComponent(0.26) }
+    // MARK: Surfaces
 
-    /// Leading edge rail marking rows that belong to the active window.
-    var railMuted: NSColor { accent.withAlphaComponent(0.45) }
+    /// Hover fill for rows, tabs, icon buttons and standard buttons.
+    var hover: NSColor { bgOverlay }
 
-    /// The 70s racing stripe Soprano's chrome uses as its signature ornament:
-    /// warning red, accent, and the strong accent, read left to right.
-    var stripe: [NSColor] { [danger, accent, accentStrong] }
+    /// The raised surface: focused header, selected tab, cards, fields,
+    /// overlays. Themes whose `bgRaised` equals `bgPanel` (Gruvbox,
+    /// Solarized) get 5 % ink mixed into the panel so it still separates.
+    var raised: NSColor {
+        guard bgRaised.contrastRatio(with: bgPanel) < 1.05 else { return bgRaised }
+        return bgPanel.mixed(with: textPrimary, fraction: 0.05)
+    }
+
+    /// Built-in command tile behind a 16 px glyph.
+    var glyphTile: NSColor {
+        isLight ? bgOverlay : bgRaised.mixed(with: textPrimary, fraction: 0.09)
+    }
+
+    /// Dimmed backdrop behind a modal overlay.
+    var scrim: NSColor {
+        isLight ? textPrimary.withAlphaComponent(0.20) : NSColor.black.withAlphaComponent(0.45)
+    }
+
+    /// Elevation for popovers, toasts and the HUD.
+    var shadowE2: ThemeShadow {
+        isLight
+            ? ThemeShadow(color: Self.paperShadow, opacity: 0.12, offsetY: 6, blur: 18,
+                          ring: Self.paperShadow.withAlphaComponent(0.04))
+            : ThemeShadow(color: .black, opacity: 0.40, offsetY: 8, blur: 24,
+                          ring: NSColor.black.withAlphaComponent(0.30))
+    }
+
+    /// Elevation for the palette, launcher and switcher.
+    var shadowE3: ThemeShadow {
+        isLight
+            ? ThemeShadow(color: Self.paperShadow, opacity: 0.16, offsetY: 12, blur: 36,
+                          ring: Self.paperShadow.withAlphaComponent(0.05))
+            : ThemeShadow(color: .black, opacity: 0.55, offsetY: 14, blur: 40,
+                          ring: NSColor.black.withAlphaComponent(0.35))
+    }
+
+    private static let paperShadow = NSColor.fromHex("#2b2620")
+
+    // MARK: Selection and focus
+
+    /// Selected row in the focused list: a sienna wash on Paper, a neutral
+    /// 11 % ink fill on every dark theme (the pencil tick carries the accent).
+    var selection: NSColor {
+        isLight ? accent.withAlphaComponent(0.12) : textPrimary.withAlphaComponent(0.11)
+    }
+
+    /// Selected row in an unfocused list. No tick.
+    var selectionMuted: NSColor {
+        textPrimary.withAlphaComponent(isLight ? 0.06 : 0.07)
+    }
+
+    /// The 2×14 pencil tick inside a focused selection pill.
+    var pencilTick: NSColor { accent }
+    /// The 2 px rule under the focused pane or region header.
+    var focusMark: NSColor { accent }
+    /// Text caret and the focused terminal cursor.
+    var caret: NSColor { accent }
+    /// Matched characters on the selected row only; other rows match in ink.
+    var matchOnSelection: NSColor { accentStrong }
+    /// Selected text in fields and text views.
+    var textSelection: NSColor { accent.withAlphaComponent(0.22) }
+
+    /// Attention (a pane or row that wants you): blue, or yellow when the
+    /// theme's accent sits within 40° of blue so focus and attention never
+    /// share a hue.
+    var attention: NSColor {
+        accent.hueDistance(to: blue) < 40 ? yellow : blue
+    }
+
+    /// Header wash of an attention pane.
+    var attentionWash: NSColor { attention.withAlphaComponent(0.10) }
+    /// Full-bleed wash of an attention row in a list.
+    var attentionRowWash: NSColor { attention.withAlphaComponent(0.06) }
+
+    /// Unfocused-pane veil color. Paper composites `bgPanel` with a multiply
+    /// blend (`unfocusedVeilCompositingFilter`); dark themes lay black @ 18 %.
+    var unfocusedVeil: NSColor {
+        isLight ? bgPanel : NSColor.black.withAlphaComponent(0.18)
+    }
+
+    /// Core Animation `compositingFilter` for the veil layer, or nil for a
+    /// normal blend.
+    var unfocusedVeilCompositingFilter: String? {
+        isLight ? "multiplyBlendMode" : nil
+    }
+
+    // MARK: Status
 
     /// Lamp of a terminal running a command, apart from the agent colors so a
     /// dev server never reads as an agent at work.
     var runningCommand: NSColor { cyan }
+    /// Idle shell: a 6 px gray dot at 60 %.
+    var idleMark: NSColor { gray.withAlphaComponent(0.60) }
+    /// Pane-header wash for NEEDS INPUT.
+    var needsInputWash: NSColor { yellow.withAlphaComponent(0.10) }
+    /// Pane-header wash for ERROR.
+    var errorWash: NSColor { danger.withAlphaComponent(0.10) }
+
+    // MARK: Controls
+
+    /// Primary buttons, checked checkboxes and on-switch tracks are ink.
+    var inkButtonFill: NSColor { textPrimary }
+    var inkButtonLabel: NSColor { bgRaised }
+    var inkButtonPressed: NSColor { textPrimary.mixed(with: bgRaised, fraction: 0.15) }
+    var dangerButtonFill: NSColor { danger }
+    var dangerButtonLabel: NSColor { bgRaised }
+    var dangerButtonHover: NSColor { danger.mixed(with: textPrimary, fraction: 0.12) }
+    /// Edge of a focused text field (the caret carries the accent).
+    var fieldFocusEdge: NSColor { bgRaised.mixed(with: textPrimary, fraction: 0.38) }
+    /// Off-switch knob: a raised knob would vanish on dark cards.
+    var switchKnobOff: NSColor { isLight ? bgRaised : textMuted }
+    var keycapFill: NSColor { raised }
+    var keycapEdge: NSColor { borderStrong }
+    var scrollbarThumb: NSColor { textPrimary.withAlphaComponent(0.22) }
+
+    // MARK: Diff
+
+    /// Added-line wash. Paper uses a chromatic green because success @ 12 %
+    /// reads gray on paper.
+    var diffAdd: NSColor { diffAddTint.withAlphaComponent(0.16) }
+    var diffAddWord: NSColor { diffAddTint.withAlphaComponent(isLight ? 0.30 : 0.28) }
+    var diffDelete: NSColor { danger.withAlphaComponent(0.10) }
+    var diffDeleteWord: NSColor { danger.withAlphaComponent(0.22) }
+    var diffFiller: NSColor { textPrimary.withAlphaComponent(0.03) }
+    private var diffAddTint: NSColor { isLight ? .fromHex("#5f8f3a") : success }
+
+    // MARK: Syntax (no accent; keywords are bold ink)
+
+    var syntaxKeyword: NSColor { textPrimary }
+    var syntaxType: NSColor { cyan }
+    var syntaxString: NSColor { success }
+    var syntaxComment: NSColor { textMuted }
+    var syntaxNumber: NSColor { yellow }
+    var syntaxFunction: NSColor { blue }
+    var syntaxAttribute: NSColor { yellow }
+    var syntaxPlain: NSColor { textPrimary }
+}
+
+extension AppTheme {
+    /// Commit-graph lane colors: a graphite trunk (lane 0) and seven hues,
+    /// never the accent.
+    var graphLanes: [NSColor] {
+        [
+            colors.textMuted,
+            colors.blue,
+            colors.success,
+            terminalColors.magenta,
+            colors.cyan,
+            colors.yellow,
+            terminalColors.brightMagenta,
+            terminalColors.brightBlue,
+        ]
+    }
+}
+
+extension NSColor {
+    /// Linear sRGB mix: `fraction` 0 is `self`, 1 is `other`. Alpha mixes too.
+    func mixed(with other: NSColor, fraction: CGFloat) -> NSColor {
+        guard let a = usingColorSpace(.sRGB), let b = other.usingColorSpace(.sRGB) else {
+            return self
+        }
+        let t = min(max(fraction, 0), 1)
+        return NSColor(
+            srgbRed: a.redComponent + (b.redComponent - a.redComponent) * t,
+            green: a.greenComponent + (b.greenComponent - a.greenComponent) * t,
+            blue: a.blueComponent + (b.blueComponent - a.blueComponent) * t,
+            alpha: a.alphaComponent + (b.alphaComponent - a.alphaComponent) * t
+        )
+    }
+
+    /// WCAG contrast ratio between two opaque colors (1…21).
+    func contrastRatio(with other: NSColor) -> CGFloat {
+        let l1 = relativeLuminance
+        let l2 = other.relativeLuminance
+        return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    }
+
+    /// Shortest distance between two hues, in degrees (0…180).
+    func hueDistance(to other: NSColor) -> CGFloat {
+        guard let a = usingColorSpace(.sRGB), let b = other.usingColorSpace(.sRGB) else {
+            return 180
+        }
+        let delta = abs(a.hueComponent - b.hueComponent) * 360
+        return min(delta, 360 - delta)
+    }
+
+    private var relativeLuminance: CGFloat {
+        guard let color = usingColorSpace(.sRGB) else { return 0 }
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(color.redComponent)
+            + 0.7152 * linear(color.greenComponent)
+            + 0.0722 * linear(color.blueComponent)
+    }
 }
 
 struct TerminalColors {
@@ -143,51 +377,103 @@ private extension NSColor {
 // MARK: - Built-in Themes
 
 extension AppTheme {
-    /// Soprano's own palette: cream on deep space black, international orange
-    /// and mustard, after 1960s mission-control consoles.
-    static let missionControl = AppTheme(
-        id: "mission-control",
-        name: "Mission Control",
+    /// The default theme id. It is not a palette of its own: it resolves to
+    /// Folio Paper or Folio Ink from the effective appearance.
+    static let folioId = "folio"
+
+    /// Folio Paper: ink on warm paper with one sienna pencil mark.
+    static let folioPaper = AppTheme(
+        id: "folio-paper",
+        name: "Folio Paper",
         colors: ThemeColors(
-            bgBase: .fromHex("#0f1115"),
-            bgPanel: .fromHex("#0a0b0e"),
-            bgRaised: .fromHex("#171a20"),
-            bgOverlay: .fromHex("#222630"),
-            textPrimary: .fromHex("#f1e7cf"),
-            textMuted: .fromHex("#8c8778"),
-            accent: .fromHex("#ff6b1a"),
-            accentStrong: .fromHex("#f4b63f"),
-            borderSubtle: .fromHex("#23262d"),
-            borderStrong: .fromHex("#3b3f48"),
-            success: .fromHex("#9ccc65"),
-            danger: .fromHex("#ef4136"),
-            blue: .fromHex("#5ea7d1"),
-            cyan: .fromHex("#5ec4b6"),
-            yellow: .fromHex("#f4b63f"),
-            gray: .fromHex("#4b4f58")
+            bgBase: .fromHex("#f6f2ea"),
+            bgPanel: .fromHex("#ede7db"),
+            bgRaised: .fromHex("#fcfaf5"),
+            bgOverlay: .fromHex("#e5dece"),
+            textPrimary: .fromHex("#2b2620"),
+            textMuted: .fromHex("#62594d"),
+            accent: .fromHex("#a34a17"),
+            accentStrong: .fromHex("#863a0f"),
+            borderSubtle: .fromHex("#e0d8c9"),
+            borderStrong: .fromHex("#cbc0ad"),
+            success: .fromHex("#456b30"),
+            danger: .fromHex("#ae2f3c"),
+            blue: .fromHex("#2f5f8a"),
+            cyan: .fromHex("#266b66"),
+            yellow: .fromHex("#835f0b"),
+            gray: .fromHex("#857c6e"),
+            appearance: .light
         ),
         terminalColors: TerminalColors(
-            background: .fromHex("#0f1115"),
-            foreground: .fromHex("#ebe1c8"),
-            cursor: .fromHex("#ff6b1a"),
-            cursorAccent: .fromHex("#0f1115"),
-            selectionBackground: .fromHex("#3d2a1c"),
-            black: .fromHex("#1b1e24"),
-            red: .fromHex("#ef4136"),
-            green: .fromHex("#8db55a"),
-            yellow: .fromHex("#f4b63f"),
-            blue: .fromHex("#4f93c2"),
-            magenta: .fromHex("#c9719a"),
-            cyan: .fromHex("#4fb5a8"),
-            white: .fromHex("#cdc4ad"),
-            brightBlack: .fromHex("#5d616b"),
-            brightRed: .fromHex("#ff6b5e"),
-            brightGreen: .fromHex("#b5d978"),
-            brightYellow: .fromHex("#ffd36e"),
-            brightBlue: .fromHex("#84c0e6"),
-            brightMagenta: .fromHex("#e597ba"),
-            brightCyan: .fromHex("#84dccf"),
-            brightWhite: .fromHex("#fff7e3")
+            background: .fromHex("#f6f2ea"),
+            foreground: .fromHex("#2b2620"),
+            cursor: .fromHex("#a34a17"),
+            cursorAccent: .fromHex("#f6f2ea"),
+            selectionBackground: .fromHex("#e4cdbc"),
+            black: .fromHex("#2b2620"),
+            red: .fromHex("#ae2f3c"),
+            green: .fromHex("#456b30"),
+            yellow: .fromHex("#835f0b"),
+            blue: .fromHex("#2f5f8a"),
+            magenta: .fromHex("#8a3f78"),
+            cyan: .fromHex("#266b66"),
+            white: .fromHex("#6f665a"),
+            brightBlack: .fromHex("#5a5248"),
+            brightRed: .fromHex("#c0414a"),
+            brightGreen: .fromHex("#557f3b"),
+            brightYellow: .fromHex("#9a7212"),
+            brightBlue: .fromHex("#3d72a3"),
+            brightMagenta: .fromHex("#a04f8d"),
+            brightCyan: .fromHex("#2f817b"),
+            brightWhite: .fromHex("#8f8678")
+        )
+    )
+
+    /// Folio Ink: Paper's dark counterpart.
+    static let folioInk = AppTheme(
+        id: "folio-ink",
+        name: "Folio Ink",
+        colors: ThemeColors(
+            bgBase: .fromHex("#1d1b18"),
+            bgPanel: .fromHex("#181613"),
+            bgRaised: .fromHex("#26231f"),
+            bgOverlay: .fromHex("#2f2b26"),
+            textPrimary: .fromHex("#e2dacb"),
+            textMuted: .fromHex("#a0968a"),
+            accent: .fromHex("#e08a52"),
+            accentStrong: .fromHex("#f0a774"),
+            borderSubtle: .fromHex("#322e29"),
+            borderStrong: .fromHex("#443e37"),
+            success: .fromHex("#97ae76"),
+            danger: .fromHex("#e0707a"),
+            blue: .fromHex("#86a6cb"),
+            cyan: .fromHex("#74b3a9"),
+            yellow: .fromHex("#d6aa4f"),
+            gray: .fromHex("#776f64"),
+            appearance: .dark
+        ),
+        terminalColors: TerminalColors(
+            background: .fromHex("#1d1b18"),
+            foreground: .fromHex("#e2dacb"),
+            cursor: .fromHex("#e08a52"),
+            cursorAccent: .fromHex("#1d1b18"),
+            selectionBackground: .fromHex("#483325"),
+            black: .fromHex("#2a2622"),
+            red: .fromHex("#e0707a"),
+            green: .fromHex("#97ae76"),
+            yellow: .fromHex("#d6aa4f"),
+            blue: .fromHex("#86a6cb"),
+            magenta: .fromHex("#c191b8"),
+            cyan: .fromHex("#74b3a9"),
+            white: .fromHex("#cfc6b5"),
+            brightBlack: .fromHex("#7d7469"),
+            brightRed: .fromHex("#ec8f97"),
+            brightGreen: .fromHex("#b0c592"),
+            brightYellow: .fromHex("#e8c272"),
+            brightBlue: .fromHex("#a3bfdf"),
+            brightMagenta: .fromHex("#d5aacd"),
+            brightCyan: .fromHex("#93c9bf"),
+            brightWhite: .fromHex("#f4efe5")
         )
     )
 
@@ -513,8 +799,11 @@ extension AppTheme {
         )
     )
 
+    /// Every concrete palette. `folio` is not listed: it resolves to one of
+    /// the first two.
     static let allThemes: [AppTheme] = [
-        missionControl,
+        folioPaper,
+        folioInk,
         gruvboxDark,
         catppuccinMocha,
         dracula,
@@ -524,7 +813,27 @@ extension AppTheme {
         atomOneDark,
     ]
 
-    static func theme(for id: String) -> AppTheme {
-        allThemes.first { $0.id == id } ?? missionControl
+    /// One entry of the theme picker and the `theme` key's allowed values.
+    struct Option: Equatable {
+        let id: String
+        let name: String
+    }
+
+    /// Every id `settings.json` accepts, in picker order: Folio (following
+    /// the appearance), then each concrete palette.
+    static let options: [Option] = [Option(id: folioId, name: "Folio")]
+        + allThemes.map { Option(id: $0.id, name: $0.name) }
+
+    static func isKnownId(_ id: String) -> Bool {
+        options.contains { $0.id == id }
+    }
+
+    /// The palette for `id`. `folio`, and any unknown id, resolves to Folio
+    /// Paper or Folio Ink from `appearance`.
+    static func theme(for id: String, appearance: Appearance) -> AppTheme {
+        if let theme = allThemes.first(where: { $0.id == id }) {
+            return theme
+        }
+        return appearance == .light ? folioPaper : folioInk
     }
 }

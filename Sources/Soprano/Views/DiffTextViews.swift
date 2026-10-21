@@ -237,7 +237,7 @@ final class DiffColumn {
         textView.colors = colors
         textView.backgroundColor = colors.bgBase
         textView.insertionPointColor = colors.accent
-        textView.selectedTextAttributes = [.backgroundColor: colors.accent.withAlphaComponent(0.3)]
+        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
         scrollView.backgroundColor = colors.bgBase
         ruler.colors = colors
         textStorage.beginEditing()
@@ -247,7 +247,7 @@ final class DiffColumn {
 
     private func applyAttributes() {
         guard let colors else { return }
-        let font = RetroFont.body(12)
+        let font = ChromeFont.monospaced(size: 12)
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = []
         paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
@@ -272,8 +272,8 @@ final class DiffColumn {
                 range: token.range
             )
         }
-        let addedEmphasis = colors.success.withAlphaComponent(0.32)
-        let removedEmphasis = colors.danger.withAlphaComponent(0.32)
+        let addedEmphasis = colors.diffAddWord
+        let removedEmphasis = colors.diffDeleteWord
         for emphasis in side.emphasis where NSMaxRange(emphasis.range) <= length {
             textStorage.addAttribute(
                 .backgroundColor,
@@ -439,13 +439,13 @@ final class DiffTextView: NSTextView {
     static func tint(for kind: GitDiffRow.Kind, colors: ThemeColors) -> NSColor? {
         switch kind {
         case .context: nil
-        case .added: colors.success.withAlphaComponent(0.14)
-        case .removed: colors.danger.withAlphaComponent(0.14)
-        case .filler: colors.textMuted.withAlphaComponent(0.06)
+        case .added: colors.diffAdd
+        case .removed: colors.diffDelete
+        case .filler: colors.diffFiller
         }
     }
 
-    /// Thin diagonal stripes, placed by absolute position so stacked filler
+    /// Thin diagonal lines, placed by absolute position so stacked filler
     /// rows join into one hatched block.
     private static func drawHatch(in rect: NSRect, color: NSColor) {
         let spacing: CGFloat = 8
@@ -479,7 +479,7 @@ final class DiffGutterRuler: NSRulerView {
         didSet { needsDisplay = true }
     }
 
-    private let font = RetroFont.body(10)
+    private let font = ChromeFont.monoSmall
     private let padding: CGFloat = 6
 
     init(textView: DiffTextView) {

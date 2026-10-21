@@ -28,11 +28,7 @@ final class MainContentViewController: NSViewController {
     private var rightSidebarResizeHandle: SidebarResizeHandleView!
     private var rightSidebarWidth: CGFloat
     private var settingsContainerView: NSView!
-    private var settingsHeaderView: NSView!
-    private var settingsTitleLabel: NSTextField!
-    private var settingsStripeView: RetroStripeView!
-    private var settingsCloseButton: RetroButton!
-    private var settingsHeaderRule: RetroRuleView!
+    private var settingsHeaderView: SettingsHeaderView!
     private var settingsViewController: SettingsViewController?
     private var settingsViewConstraints: [NSLayoutConstraint] = []
     private var dashboardViewController: AgentDashboardViewController?
@@ -489,7 +485,7 @@ final class MainContentViewController: NSViewController {
             splitTreeView.isHidden = true
             settingsContainerView.isHidden = false
         }
-        view.window?.makeFirstResponder(settingsCloseButton)
+        view.window?.makeFirstResponder(settingsHeaderView.closeButton)
     }
 
     /// Opens Settings on the Accounts tab, as the status bar's usage popover
@@ -611,11 +607,7 @@ final class MainContentViewController: NSViewController {
         let theme = themeManager.currentTheme
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
         settingsContainerView?.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        settingsHeaderView?.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        settingsTitleLabel?.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
-        settingsStripeView?.colors = theme.colors.stripe
-        settingsCloseButton?.apply(theme: theme)
-        settingsHeaderRule?.color = theme.colors.borderStrong
+        settingsHeaderView?.apply(theme: theme)
         settingsViewController?.apply(theme: theme)
         dashboardViewController?.apply(theme: theme)
     }
@@ -635,34 +627,11 @@ final class MainContentViewController: NSViewController {
         settingsContainerView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(settingsContainerView, positioned: .above, relativeTo: nil)
 
-        settingsHeaderView = NSView()
-        settingsHeaderView.wantsLayer = true
-        settingsHeaderView.translatesAutoresizingMaskIntoConstraints = false
+        settingsHeaderView = SettingsHeaderView(theme: themeManager.currentTheme)
+        settingsHeaderView.onClose = { [weak self] in
+            self?.closeSettings()
+        }
         settingsContainerView.addSubview(settingsHeaderView)
-
-        let theme = themeManager.currentTheme
-        settingsTitleLabel = NSTextField(labelWithString: "Settings")
-        settingsTitleLabel.setRetroText("Settings", color: theme.colors.textPrimary, size: 22)
-        settingsTitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        settingsHeaderView.addSubview(settingsTitleLabel)
-
-        settingsStripeView = RetroStripeView(layout: .slanted, colors: theme.colors.stripe)
-        settingsHeaderView.addSubview(settingsStripeView)
-
-        settingsCloseButton = RetroButton(
-            title: "Done",
-            theme: theme,
-            kind: .standard,
-            target: self,
-            action: #selector(settingsCloseClicked)
-        )
-        settingsCloseButton.keyEquivalent = "\u{1b}"
-        settingsCloseButton.keyEquivalentModifierMask = []
-        settingsCloseButton.toolTip = "Return to the workspace (Esc)"
-        settingsHeaderView.addSubview(settingsCloseButton)
-
-        settingsHeaderRule = RetroRuleView(axis: .horizontal, style: .double, color: theme.colors.borderStrong)
-        settingsHeaderView.addSubview(settingsHeaderRule)
 
         NSLayoutConstraint.activate([
             settingsContainerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -673,27 +642,7 @@ final class MainContentViewController: NSViewController {
             settingsHeaderView.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
             settingsHeaderView.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
             settingsHeaderView.topAnchor.constraint(equalTo: settingsContainerView.topAnchor),
-            settingsHeaderView.heightAnchor.constraint(equalToConstant: 52),
-
-            settingsTitleLabel.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor, constant: 20),
-            settingsTitleLabel.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-
-            settingsStripeView.leadingAnchor.constraint(equalTo: settingsTitleLabel.trailingAnchor, constant: 12),
-            settingsStripeView.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-            settingsStripeView.widthAnchor.constraint(equalToConstant: 22),
-            settingsStripeView.heightAnchor.constraint(equalToConstant: 12),
-
-            settingsCloseButton.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor, constant: -20),
-            settingsCloseButton.centerYAnchor.constraint(equalTo: settingsHeaderView.centerYAnchor),
-
-            settingsHeaderRule.leadingAnchor.constraint(equalTo: settingsHeaderView.leadingAnchor),
-            settingsHeaderRule.trailingAnchor.constraint(equalTo: settingsHeaderView.trailingAnchor),
-            settingsHeaderRule.bottomAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
         ])
-    }
-
-    @objc private func settingsCloseClicked() {
-        closeSettings()
     }
 }
 

@@ -7,9 +7,10 @@ import Foundation
 /// user should never have to paste a complete document to change one value.
 struct SopranoConfig: Codable, Equatable {
     var theme: String?
+    var appearance: String?
     var hideWindowBar: Bool?
     var hideWindowTabs: Bool?
-    var crtEffect: Bool?
+    var statusBar: StatusBar?
     var restoreLastSession: Bool?
     var projectDirectories: [String]?
     var notifications: Notifications?
@@ -22,6 +23,11 @@ struct SopranoConfig: Codable, Equatable {
     /// the only thing configured here is what Soprano controls about it.
     struct Notifications: Codable, Equatable {
         var sound: Bool?
+    }
+
+    struct StatusBar: Codable, Equatable {
+        /// Opt-in `Up 2:14:07` uptime readout.
+        var uptime: Bool?
     }
 
     struct Keybindings: Codable, Equatable {
@@ -154,13 +160,25 @@ extension SopranoConfig {
         var settings = baseSettings
 
         if let theme {
-            if AppTheme.allThemes.contains(where: { $0.id == theme }) {
+            if AppTheme.isKnownId(theme) {
                 settings.themeId = theme
             } else {
-                let known = AppTheme.allThemes.map(\.id).joined(separator: ", ")
+                let known = AppTheme.options.map(\.id).joined(separator: ", ")
                 issues.append(.init(
                     severity: .warning,
                     message: "Unknown theme \"\(theme)\". Known themes: \(known)."
+                ))
+            }
+        }
+
+        if let appearance {
+            if let preference = AppearancePreference(rawValue: appearance) {
+                settings.appearance = preference
+            } else {
+                let known = AppearancePreference.allCases.map(\.rawValue).joined(separator: ", ")
+                issues.append(.init(
+                    severity: .warning,
+                    message: "Unknown appearance \"\(appearance)\". Use one of: \(known)."
                 ))
             }
         }
@@ -177,8 +195,8 @@ extension SopranoConfig {
             settings.hideWindowTabs = hideWindowTabs
         }
 
-        if let crtEffect {
-            settings.crtEffect = crtEffect
+        if let uptime = statusBar?.uptime {
+            settings.statusBarUptime = uptime
         }
 
         if let sound = notifications?.sound {

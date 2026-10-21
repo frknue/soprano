@@ -245,7 +245,7 @@ private struct Renderer {
         let language = languageName.flatMap { CodeLanguage.named($0) }
 
         let start = output.length
-        let font = RetroFont.body(fontSize)
+        let font = ChromeFont.monospaced(size: fontSize)
         output.append(NSAttributedString(
             string: code,
             attributes: [.font: font, .foregroundColor: colors.textPrimary]
@@ -472,7 +472,7 @@ private struct Renderer {
 
     private func attributes(_ style: InlineStyle) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: RetroFont.body(style.size, weight: style.bold ? .bold : .regular),
+            .font: ChromeFont.monospaced(size: style.size, weight: style.bold ? .bold : .regular),
             .foregroundColor: style.color,
         ]
         if style.oblique {

@@ -105,7 +105,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
     private let themeManager: ThemeManager
     private let webView: SopranoWebView
     private let navigationBar = NSView()
-    private let navigationRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let navigationRule = ChromeRuleView(axis: .horizontal)
     private let addressFrame = NSView()
     private let addressField = NSTextField()
     private let backButton = NSButton()
@@ -331,12 +331,12 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         )
 
         addressFrame.wantsLayer = true
-        addressFrame.layer?.cornerRadius = Retro.cornerRadius
-        addressFrame.layer?.borderWidth = Retro.hairline
+        addressFrame.layer?.cornerRadius = Chrome.Radius.control
+        addressFrame.layer?.borderWidth = Chrome.hairline
         addressFrame.translatesAutoresizingMaskIntoConstraints = false
         navigationBar.addSubview(addressFrame)
 
-        addressField.font = RetroFont.body(12)
+        addressField.font = ChromeFont.monospaced(size: 12)
         addressField.isBezeled = false
         addressField.isBordered = false
         addressField.drawsBackground = false
@@ -403,7 +403,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             addressFrame.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
             addressFrame.trailingAnchor.constraint(equalTo: progressIndicator.leadingAnchor, constant: -7),
             addressFrame.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            addressFrame.heightAnchor.constraint(equalToConstant: Retro.controlHeight),
+            addressFrame.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
 
             addressField.leadingAnchor.constraint(equalTo: addressFrame.leadingAnchor, constant: 6),
             addressField.trailingAnchor.constraint(equalTo: addressFrame.trailingAnchor, constant: -6),

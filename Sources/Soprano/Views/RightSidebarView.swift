@@ -40,10 +40,10 @@ final class RightSidebarView: NSView {
     private var contentWidthConstraint: NSLayoutConstraint!
     private let header = NSView()
     private var tabButtons: [Tab: RightSidebarTabButton] = [:]
-    private let headingView: RetroHeadingView
-    private var closeButton: RetroIconButton!
-    private let headerRule = RetroRuleView(axis: .horizontal, style: .double)
-    private let leadingBorder = RetroRuleView(axis: .vertical, style: .double)
+    private let headingView: ChromeEyebrowView
+    private var closeButton: ChromeIconButton!
+    private let headerRule = ChromeRuleView(axis: .horizontal)
+    private let leadingBorder = ChromeRuleView(axis: .vertical)
     private var isResizeHighlighted = false
     private(set) var isOpen = false
     private(set) var activeTab: Tab
@@ -59,7 +59,7 @@ final class RightSidebarView: NSView {
         sourceControlView = SourceControlView(agentManager: agentManager, themeManager: themeManager)
         let activeTab = defaults.string(forKey: Self.activeTabKey).flatMap(Tab.init(rawValue:)) ?? .explorer
         self.activeTab = activeTab
-        headingView = RetroHeadingView(title: activeTab.title, theme: themeManager.currentTheme)
+        headingView = ChromeEyebrowView(title: activeTab.title, theme: themeManager.currentTheme)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("right-sidebar")
         wantsLayer = true
@@ -99,7 +99,7 @@ final class RightSidebarView: NSView {
         }
 
         header.addSubview(headingView)
-        closeButton = RetroIconButton(
+        closeButton = ChromeIconButton(
             symbolName: "sidebar.right",
             accessibilityLabel: "Toggle Right Sidebar",
             target: self,
@@ -120,7 +120,7 @@ final class RightSidebarView: NSView {
         addSubview(leadingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
-            equalToConstant: SidebarWidthStore.right.defaultWidth - Retro.doubleRule
+            equalToConstant: SidebarWidthStore.right.defaultWidth - Chrome.hairline
         )
 
         NSLayoutConstraint.activate([
@@ -141,24 +141,24 @@ final class RightSidebarView: NSView {
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
             closeButton.centerYAnchor.constraint(
                 equalTo: header.topAnchor,
-                constant: (Self.headerHeight - Retro.doubleRule) / 2
+                constant: (Self.headerHeight - Chrome.hairline) / 2
             ),
 
             headerRule.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             headerRule.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             headerRule.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-            headerRule.heightAnchor.constraint(equalToConstant: Retro.doubleRule),
+            headerRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             leadingBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
             leadingBorder.topAnchor.constraint(equalTo: topAnchor),
             leadingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            leadingBorder.widthAnchor.constraint(equalToConstant: Retro.doubleRule),
+            leadingBorder.widthAnchor.constraint(equalToConstant: Chrome.hairline),
         ])
     }
 
     /// Width of the sidebar's content, kept in step with the dragged width.
     func setContentWidth(_ width: CGFloat) {
-        contentWidthConstraint.constant = max(0, width - Retro.doubleRule)
+        contentWidthConstraint.constant = max(0, width - Chrome.hairline)
     }
 
     /// Accents the leading border while the resize handle is hovered or dragged.
@@ -224,9 +224,9 @@ final class RightSidebarView: NSView {
         let colors = theme.colors
         layer?.backgroundColor = colors.bgPanel.cgColor
         headingView.apply(theme: theme)
-        headerRule.color = colors.borderStrong
+        headerRule.color = colors.borderSubtle
         setResizeHighlighted(isResizeHighlighted)
-        closeButton.setTints(normal: colors.textMuted, hover: colors.accent)
+        closeButton.apply(theme: theme)
         for (tab, button) in tabButtons {
             button.apply(colors: colors, isActive: tab == activeTab)
         }

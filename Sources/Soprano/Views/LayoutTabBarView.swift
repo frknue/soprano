@@ -20,8 +20,8 @@ final class LayoutTabBarView: NSView {
     private let scrollView = NSScrollView()
     private let tabContainer = NSView()
     private let addButton = NSButton(title: "+", target: nil, action: nil)
-    private var bottomRule = RetroRuleView(axis: .horizontal, style: .single)
-    private let rightSidebarToggle = RetroIconButton(
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
+    private let rightSidebarToggle = ChromeIconButton(
         symbolName: "sidebar.right",
         accessibilityLabel: "Toggle Right Sidebar",
         target: nil,
@@ -36,11 +36,7 @@ final class LayoutTabBarView: NSView {
     var isTopRow = false {
         didSet {
             guard isTopRow != oldValue else { return }
-            // A rule's style is fixed when it is made, so swap in a new one.
-            bottomRule.removeFromSuperview()
-            bottomRule = RetroRuleView(axis: .horizontal, style: isTopRow ? .double : .single)
-            bottomRule.translatesAutoresizingMaskIntoConstraints = true
-            addSubview(bottomRule)
+            // Rules are one hairline in either row; nothing to swap.
             refresh()
         }
     }
@@ -140,12 +136,12 @@ final class LayoutTabBarView: NSView {
 
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        bottomRule.color = theme.colors.borderStrong
-        rightSidebarToggle.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
-        addButton.attributedTitle = RetroText.display(
+        bottomRule.color = theme.colors.borderSubtle
+        rightSidebarToggle.apply(theme: theme)
+        addButton.attributedTitle = ChromeText.attributed(
             "+",
+            font: ChromeFont.screen,
             color: theme.colors.textMuted,
-            size: 22,
             alignment: .center
         )
         for (index, tab) in tabs.enumerated() {
@@ -197,7 +193,7 @@ final class LayoutTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        let rule = bottomRule.style.thickness
+        let rule = bottomRule.thickness
         let stripHeight = max(0, bounds.height - rule)
         let toggleWidth: CGFloat = showsRightSidebarToggle ? 30 : 0
         let viewportWidth = max(0, bounds.width - 38 - toggleWidth)
@@ -210,9 +206,9 @@ final class LayoutTabBarView: NSView {
         )
         rightSidebarToggle.frame = NSRect(
             x: max(0, bounds.width - 31),
-            y: rule + floor((stripHeight - RetroIconButton.defaultSize) / 2),
-            width: RetroIconButton.defaultSize,
-            height: RetroIconButton.defaultSize
+            y: rule + floor((stripHeight - ChromeIconButton.defaultSize) / 2),
+            width: ChromeIconButton.defaultSize,
+            height: ChromeIconButton.defaultSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
 
@@ -267,7 +263,7 @@ private final class LayoutTabButton: NSButton {
         isBordered = false
         refusesFirstResponder = true
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.control
         target = self
         action = #selector(selectTab)
         setAccessibilityRole(.radioButton)
@@ -301,8 +297,9 @@ private final class LayoutTabButton: NSButton {
         theme: AppTheme
     ) {
         self.title = title
-        attributedTitle = RetroText.display(
+        attributedTitle = ChromeText.attributed(
             title,
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
             color: isSelected ? theme.colors.textPrimary : theme.colors.textMuted,
             alignment: .left,
             lineBreakMode: .byTruncatingTail
@@ -322,8 +319,9 @@ private final class LayoutTabButton: NSButton {
         activeMarker.layer?.backgroundColor = theme.colors.accent.cgColor
         separator.isHidden = isSelected
         separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
-        closeButton.attributedTitle = RetroText.display(
+        closeButton.attributedTitle = ChromeText.attributed(
             "×",
+            font: ChromeFont.label,
             color: theme.colors.textMuted,
             alignment: .center
         )
@@ -370,9 +368,9 @@ private final class LayoutTabButton: NSButton {
             height: 2
         )
         separator.frame = NSRect(
-            x: bounds.maxX - Retro.hairline,
+            x: bounds.maxX - Chrome.hairline,
             y: 7,
-            width: Retro.hairline,
+            width: Chrome.hairline,
             height: max(0, bounds.height - 14)
         )
     }

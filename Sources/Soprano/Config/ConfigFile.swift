@@ -108,7 +108,9 @@ enum ConfigFile {
         settings: AppSettings,
         keybindings: KeyBindingConfig
     ) -> String {
-        let themes = AppTheme.allThemes.map { "\"\($0.id)\"" }.joined(separator: " | ")
+        let themes = AppTheme.options.map { "\"\($0.id)\"" }.joined(separator: " | ")
+        let appearances = AppearancePreference.allCases.map { "\"\($0.rawValue)\"" }
+            .joined(separator: " | ")
         let projectDirectories = jsonArrayLiteral(
             settings.projectDirectories.map(abbreviatingHome),
             indent: "  "
@@ -125,7 +127,12 @@ enum ConfigFile {
         // Every key is optional. Delete one to fall back to the default.
         {
           // Color theme: \(themes)
+          // "folio" follows the appearance: Folio Paper when light, Folio Ink
+          // when dark. The other themes are dark.
           "theme": "\(settings.themeId)",
+
+          // App appearance: \(appearances). "system" follows macOS.
+          "appearance": "\(settings.appearance.rawValue)",
 
           // Remove the macOS title bar and window controls so panes can use
           // the full window. Off by default.
@@ -136,9 +143,11 @@ enum ConfigFile {
           // set false to show the window tabs above the tab row.
           "hideWindowTabs": \(settings.hideWindowTabs),
 
-          // Scanlines and phosphor glow over terminal panes, like an old CRT
-          // monitor. Off by default.
-          "crtEffect": \(settings.crtEffect),
+          "statusBar": {
+            // Show how long Soprano has been running ("Up 2:14:07") in the
+            // status bar. Off by default.
+            "uptime": \(settings.statusBarUptime)
+          },
 
           // Restore the previous workspace on launch.
           "restoreLastSession": \(settings.restoreLastSession),

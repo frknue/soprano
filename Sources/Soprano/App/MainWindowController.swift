@@ -116,10 +116,9 @@ final class MainWindowController: NSWindowController {
         self.keybindingManager = keybindingManager
 
         themeManager.onThemeChanged = { [weak self] theme in
-            GhosttyAppManager.shared.applyAppearance(
-                theme: theme,
-                crtEffect: self?.settings.crtEffect ?? false
-            )
+            // The terminal palette is regenerated on every resolved change,
+            // including `folio` following the system into light or dark.
+            GhosttyAppManager.shared.applyAppearance(theme: theme)
             self?.applyTheme()
             self?.mainContentVC?.refreshTheme()
         }
@@ -150,18 +149,13 @@ final class MainWindowController: NSWindowController {
     /// Re-applies everything `settings.json` owns after the file changed.
     private func applyConfigChange() {
         let store = ConfigStore.shared
-        let previousCrtEffect = settings.crtEffect
         settings = store.settings
 
-        if themeManager.currentTheme.id != settings.themeId {
-            // setTheme fans out through onThemeChanged to the whole view tree,
-            // which rebuilds the terminal config with the new crtEffect too.
-            themeManager.setTheme(id: settings.themeId)
-        } else if previousCrtEffect != settings.crtEffect {
-            GhosttyAppManager.shared.applyAppearance(
-                theme: themeManager.currentTheme,
-                crtEffect: settings.crtEffect
-            )
+        if themeManager.themeId != settings.themeId
+            || themeManager.appearance != settings.appearance {
+            // Fans out through onThemeChanged to the terminal config and the
+            // whole view tree when the resolved palette changes.
+            themeManager.update(themeId: settings.themeId, appearance: settings.appearance)
         }
 
         applyWindowBarSetting()
@@ -199,7 +193,7 @@ final class MainWindowController: NSWindowController {
     private func applyTheme() {
         let theme = themeManager.currentTheme
         window?.backgroundColor = theme.backgroundColor
-        window?.appearance = NSAppearance(named: .darkAqua)
+        window?.appearance = theme.appearance.nsAppearance
     }
 
     private func applyWindowBarSetting() {

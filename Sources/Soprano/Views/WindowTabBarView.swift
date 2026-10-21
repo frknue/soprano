@@ -10,12 +10,12 @@ final class WindowTabBarView: NSView {
     private let scrollView = NSScrollView()
     private let tabContainer = NSView()
     private let addButton = NSButton(title: "+", target: nil, action: nil)
-    private let bottomRule = RetroRuleView(axis: .horizontal, style: .double)
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
     private var buttons: [WindowTabButton] = []
     private var activeWindowId: String?
     private var revealActiveTab = true
     private var previousViewportWidth: CGFloat = 0
-    private let rightSidebarToggle = RetroIconButton(
+    private let rightSidebarToggle = ChromeIconButton(
         symbolName: "sidebar.right",
         accessibilityLabel: "Toggle Right Sidebar",
         target: nil,
@@ -127,12 +127,12 @@ final class WindowTabBarView: NSView {
 
         let theme = themeManager.currentTheme
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        bottomRule.color = theme.colors.borderStrong
-        rightSidebarToggle.setTints(normal: theme.colors.textMuted, hover: theme.colors.accent)
-        addButton.attributedTitle = RetroText.display(
+        bottomRule.color = theme.colors.borderSubtle
+        rightSidebarToggle.apply(theme: theme)
+        addButton.attributedTitle = ChromeText.attributed(
             "+",
+            font: ChromeFont.screen,
             color: theme.colors.textMuted,
-            size: 22,
             alignment: .center
         )
         for (index, terminalWindow) in windows.enumerated() {
@@ -162,7 +162,7 @@ final class WindowTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        let rule = Retro.doubleRule
+        let rule = Chrome.hairline
         let stripHeight = max(0, bounds.height - rule)
         let toggleWidth: CGFloat = showsRightSidebarToggle ? 30 : 0
         let viewportWidth = max(0, bounds.width - 38 - toggleWidth)
@@ -175,9 +175,9 @@ final class WindowTabBarView: NSView {
         )
         rightSidebarToggle.frame = NSRect(
             x: max(0, bounds.width - 31),
-            y: rule + floor((stripHeight - RetroIconButton.defaultSize) / 2),
-            width: RetroIconButton.defaultSize,
-            height: RetroIconButton.defaultSize
+            y: rule + floor((stripHeight - ChromeIconButton.defaultSize) / 2),
+            width: ChromeIconButton.defaultSize,
+            height: ChromeIconButton.defaultSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
 
@@ -227,7 +227,7 @@ private final class WindowTabButton: NSButton {
         isBordered = false
         refusesFirstResponder = true
         wantsLayer = true
-        layer?.cornerRadius = Retro.cornerRadius
+        layer?.cornerRadius = Chrome.Radius.control
         target = self
         action = #selector(selectWindow)
         setAccessibilityRole(.radioButton)
@@ -253,9 +253,10 @@ private final class WindowTabButton: NSButton {
     ) {
         let text = "\(number):\(title)"
         self.title = text
-        attributedTitle = RetroText.display(
+        attributedTitle = ChromeText.attributed(
             text,
-            color: isSelected ? theme.colors.bgPanel : theme.colors.textMuted,
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
+            color: isSelected ? theme.colors.textPrimary : theme.colors.textMuted,
             alignment: .left,
             lineBreakMode: .byTruncatingTail
         )
@@ -270,7 +271,9 @@ private final class WindowTabButton: NSButton {
         let indicatorWidth = badges.isEmpty ? 0 : badges.reduce(4) { $0 + $1.badgeWidth + 4 }
         (cell as? WindowTabButtonCell)?.trailingInset = indicatorWidth
         tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24)) + indicatorWidth
-        layer?.backgroundColor = isSelected ? theme.colors.accent.cgColor : NSColor.clear.cgColor
+        layer?.backgroundColor = isSelected ? theme.colors.raised.cgColor : NSColor.clear.cgColor
+        layer?.borderWidth = isSelected ? Chrome.hairline : 0
+        layer?.borderColor = theme.colors.borderSubtle.cgColor
         separator.isHidden = isSelected
         separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
         var description = "Window \(number): \(title)"
@@ -303,9 +306,9 @@ private final class WindowTabButton: NSButton {
             badgeEdge = badge.frame.minX
         }
         separator.frame = NSRect(
-            x: bounds.maxX - Retro.hairline,
+            x: bounds.maxX - Chrome.hairline,
             y: 7,
-            width: Retro.hairline,
+            width: Chrome.hairline,
             height: max(0, bounds.height - 14)
         )
     }

@@ -47,7 +47,7 @@ final class SettingsViewController: NSViewController {
 
     private var rootContainer: NSView!
     private var sidebar: NSView!
-    private var sidebarRule: RetroRuleView!
+    private var sidebarRule: ChromeRuleView!
     private var tabStack: NSStackView!
     private var contentBackgroundView: NSView!
     private var scrollView: NSScrollView!
@@ -57,7 +57,6 @@ final class SettingsViewController: NSViewController {
 
     private var themePopup: NSPopUpButton?
     private var hideWindowBarButton: NSButton?
-    private var crtEffectButton: NSButton?
     private var restoreSessionButton: NSButton?
     private var notificationSoundButton: NSButton?
     private var notificationStatusLabel: NSTextField?
@@ -152,9 +151,8 @@ final class SettingsViewController: NSViewController {
             tabStack.addArrangedSubview(button)
         }
 
-        sidebarRule = RetroRuleView(
+        sidebarRule = ChromeRuleView(
             axis: .vertical,
-            style: .single,
             color: currentTheme.colors.borderStrong
         )
         sidebar.addSubview(sidebarRule)
@@ -212,7 +210,7 @@ final class SettingsViewController: NSViewController {
             sidebarRule.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             sidebarRule.topAnchor.constraint(equalTo: sidebar.topAnchor),
             sidebarRule.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
-            sidebarRule.widthAnchor.constraint(equalToConstant: Retro.hairline),
+            sidebarRule.widthAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.leadingAnchor.constraint(equalTo: contentBackgroundView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentBackgroundView.trailingAnchor),
@@ -381,12 +379,12 @@ final class SettingsViewController: NSViewController {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.setRetroText(title, color: currentTheme.colors.textPrimary, size: 22)
+        titleLabel.setChromeText(title, font: ChromeFont.screen, color: currentTheme.colors.textPrimary)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(titleLabel)
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-        subtitleLabel.font = RetroFont.body(11)
+        subtitleLabel.font = ChromeFont.sans(size: 11)
         subtitleLabel.textColor = currentTheme.colors.textMuted
         subtitleLabel.maximumNumberOfLines = 0
         subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -423,13 +421,13 @@ final class SettingsViewController: NSViewController {
         container.spacing = 8
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = RetroHeadingView(title: title.uppercased(), theme: currentTheme)
+        let heading = ChromeEyebrowView(title: title, theme: currentTheme)
         container.addArrangedSubview(heading)
         heading.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         if let subtitle, !subtitle.isEmpty {
             let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-            subtitleLabel.font = RetroFont.body(11)
+            subtitleLabel.font = ChromeFont.sans(size: 11)
             subtitleLabel.textColor = currentTheme.colors.textMuted
             subtitleLabel.maximumNumberOfLines = 0
             container.addArrangedSubview(subtitleLabel)
@@ -439,8 +437,8 @@ final class SettingsViewController: NSViewController {
 
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = Retro.cornerRadius
-        card.layer?.borderWidth = Retro.hairline
+        card.layer?.cornerRadius = Chrome.Radius.card
+        card.layer?.borderWidth = Chrome.hairline
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
         card.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         container.addArrangedSubview(card)
@@ -478,7 +476,7 @@ final class SettingsViewController: NSViewController {
 
         let labelField = NSTextField(labelWithString: label)
         labelField.lineBreakMode = .byTruncatingTail
-        labelField.setRetroText(label, color: currentTheme.colors.textPrimary)
+        labelField.setChromeText(label, color: currentTheme.colors.textPrimary)
         labelField.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(labelField)
 
@@ -537,12 +535,12 @@ final class SettingsViewController: NSViewController {
         field.focusRingType = .none
         field.drawsBackground = true
         field.wantsLayer = true
-        field.layer?.cornerRadius = Retro.cornerRadius
-        field.layer?.borderWidth = Retro.hairline
+        field.layer?.cornerRadius = Chrome.Radius.control
+        field.layer?.borderWidth = Chrome.hairline
         field.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         field.backgroundColor = currentTheme.colors.bgRaised
         field.textColor = currentTheme.colors.textPrimary
-        field.font = RetroFont.body(11)
+        field.font = ChromeFont.sans(size: 11)
         field.translatesAutoresizingMaskIntoConstraints = false
         return field
     }
@@ -577,13 +575,13 @@ final class SettingsViewController: NSViewController {
     private func makeActionButton(
         title: String,
         action: Selector,
-        kind: RetroButton.Kind = .standard
+        kind: ChromeButton.Kind = .standard
     ) -> NSButton {
-        RetroButton(title: title, theme: currentTheme, kind: kind, target: self, action: action)
+        ChromeButton(title: title, theme: currentTheme, kind: kind, target: self, action: action)
     }
 
     private func makeHairline() -> NSView {
-        RetroRuleView(axis: .horizontal, style: .single, color: currentTheme.colors.borderSubtle)
+        ChromeRuleView(axis: .horizontal, color: currentTheme.colors.borderSubtle)
     }
 
     private func buildGeneralTab() {
@@ -602,8 +600,8 @@ final class SettingsViewController: NSViewController {
         popup.action = #selector(themeChanged(_:))
         popup.translatesAutoresizingMaskIntoConstraints = false
         popup.removeAllItems()
-        popup.addItems(withTitles: AppTheme.allThemes.map(\.name))
-        if let selectedIndex = AppTheme.allThemes.firstIndex(where: { $0.id == settings.themeId }) {
+        popup.addItems(withTitles: AppTheme.options.map(\.name))
+        if let selectedIndex = AppTheme.options.firstIndex(where: { $0.id == settings.themeId }) {
             popup.selectItem(at: selectedIndex)
         }
         themePopup = popup
@@ -630,22 +628,11 @@ final class SettingsViewController: NSViewController {
         hideWindowTabsRow.toolTip =
             "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F"
 
-        let crtEffectBox = makeCheckbox(
-            action: #selector(crtEffectChanged(_:)),
-            isOn: settings.crtEffect,
-            accessibilityLabel: "CRT effect"
-        )
-        self.crtEffectButton = crtEffectBox
-        let crtEffectRow = makeSettingRow(label: "CRT effect", control: crtEffectBox)
-        crtEffectRow.toolTip =
-            "Scanlines and phosphor glow over terminal panes, like an old CRT monitor"
-
         addSettingRows(
             [
                 makeSettingRow(label: "Theme", control: popup),
                 hideWindowBarRow,
                 hideWindowTabsRow,
-                crtEffectRow,
             ],
             to: appearanceStack
         )
@@ -687,7 +674,7 @@ final class SettingsViewController: NSViewController {
         statusRow.spacing = 10
 
         let statusLabel = NSTextField(labelWithString: "")
-        statusLabel.font = RetroFont.body(11)
+        statusLabel.font = ChromeFont.sans(size: 11)
         statusLabel.textColor = currentTheme.colors.textMuted
         statusLabel.lineBreakMode = .byWordWrapping
         statusLabel.maximumNumberOfLines = 2
@@ -697,7 +684,7 @@ final class SettingsViewController: NSViewController {
         let fixButton = makeActionButton(
             title: "Open System Settings",
             action: #selector(openNotificationSystemSettings),
-            kind: .prominent
+            kind: .ink
         )
         fixButton.isHidden = true
         notificationFixButton = fixButton
@@ -750,7 +737,7 @@ final class SettingsViewController: NSViewController {
         let addButton = makeActionButton(
             title: "Add",
             action: #selector(addProjectDirectory),
-            kind: .prominent
+            kind: .ink
         )
         addRow.addArrangedSubview(addButton)
 
@@ -838,8 +825,8 @@ final class SettingsViewController: NSViewController {
     private func makeIssueRow(_ issue: ConfigIssue) -> NSView {
         let row = NSView()
         row.wantsLayer = true
-        row.layer?.cornerRadius = Retro.cornerRadius
-        row.layer?.borderWidth = Retro.hairline
+        row.layer?.cornerRadius = Chrome.Radius.control
+        row.layer?.borderWidth = Chrome.hairline
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let tint = issue.severity == .error
@@ -850,7 +837,7 @@ final class SettingsViewController: NSViewController {
 
         let location = issue.line.map { "Line \($0): " } ?? ""
         let label = NSTextField(wrappingLabelWithString: location + issue.message)
-        label.font = RetroFont.body(11)
+        label.font = ChromeFont.sans(size: 11)
         label.textColor = currentTheme.colors.textPrimary
         label.maximumNumberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -892,7 +879,7 @@ final class SettingsViewController: NSViewController {
         let directories = configuredProjectDirectories
         if directories.isEmpty {
             let empty = NSTextField(labelWithString: "No project directories configured")
-            empty.font = RetroFont.body(11)
+            empty.font = ChromeFont.sans(size: 11)
             empty.textColor = currentTheme.colors.textMuted
             list.addArrangedSubview(empty)
             return
@@ -917,7 +904,7 @@ final class SettingsViewController: NSViewController {
             let pathLabel = NSTextField(
                 labelWithString: isReachable ? directory : "\(directory)  ·  not found"
             )
-            pathLabel.font = RetroFont.body(11)
+            pathLabel.font = ChromeFont.monospaced(size: 11)
             pathLabel.textColor = isReachable
                 ? currentTheme.colors.textPrimary
                 : currentTheme.colors.textMuted
@@ -951,17 +938,17 @@ final class SettingsViewController: NSViewController {
 
     @objc private func themeChanged(_ sender: NSPopUpButton) {
         let index = sender.indexOfSelectedItem
-        guard index >= 0, index < AppTheme.allThemes.count else { return }
-        let selectedTheme = AppTheme.allThemes[index]
+        guard index >= 0, index < AppTheme.options.count else { return }
+        let option = AppTheme.options[index]
 
-        settings.themeId = selectedTheme.id
-        configStore.write(selectedTheme.id, at: ["theme"])
+        settings.themeId = option.id
+        configStore.write(option.id, at: ["theme"])
 
         // The shared store observer normally applies the theme during write().
         // Standalone settings controllers used in tests and previews have no
         // observer, so retain the local fallback without applying it twice.
-        if themeManager.currentTheme.id != selectedTheme.id {
-            themeManager.setTheme(id: selectedTheme.id)
+        if themeManager.themeId != option.id {
+            themeManager.setTheme(id: option.id)
         }
         apply(theme: themeManager.currentTheme)
     }
@@ -979,11 +966,6 @@ final class SettingsViewController: NSViewController {
     @objc private func hideWindowTabsChanged(_ sender: NSButton) {
         settings.hideWindowTabs = sender.state == .on
         configStore.write(settings.hideWindowTabs, at: ["hideWindowTabs"])
-    }
-
-    @objc private func crtEffectChanged(_ sender: NSButton) {
-        settings.crtEffect = sender.state == .on
-        configStore.write(settings.crtEffect, at: ["crtEffect"])
     }
 
     @objc private func notificationSoundChanged(_ sender: NSButton) {
@@ -1223,7 +1205,7 @@ final class SettingsViewController: NSViewController {
 
         let actionLabel = NSTextField(labelWithString: action)
         actionLabel.lineBreakMode = .byTruncatingTail
-        actionLabel.setRetroText(
+        actionLabel.setChromeText(
             action,
             color: isDisabled ? currentTheme.colors.textMuted : currentTheme.colors.textPrimary
         )
@@ -1231,7 +1213,7 @@ final class SettingsViewController: NSViewController {
         row.addSubview(actionLabel)
 
         let descriptionLabel = NSTextField(labelWithString: description)
-        descriptionLabel.font = RetroFont.body(10)
+        descriptionLabel.font = ChromeFont.meta
         descriptionLabel.textColor = currentTheme.colors.textMuted
         descriptionLabel.lineBreakMode = .byTruncatingTail
         descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1279,10 +1261,10 @@ final class SettingsViewController: NSViewController {
         if isDisabled {
             let off = NSTextField(labelWithString: "OFF")
             off.alignment = .center
-            off.setRetroText("OFF", color: currentTheme.colors.textMuted)
+            off.setChromeText("OFF", color: currentTheme.colors.textMuted)
             off.wantsLayer = true
-            off.layer?.cornerRadius = Retro.cornerRadius
-            off.layer?.borderWidth = Retro.hairline
+            off.layer?.cornerRadius = Chrome.Radius.cap
+            off.layer?.borderWidth = Chrome.hairline
             off.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
             off.layer?.backgroundColor = currentTheme.colors.gray.withAlphaComponent(0.14).cgColor
             off.translatesAutoresizingMaskIntoConstraints = false
@@ -1302,7 +1284,7 @@ final class SettingsViewController: NSViewController {
         for (sequenceIndex, sequence) in sequences.enumerated() {
             if sequenceIndex > 0 {
                 let arrow = NSTextField(labelWithString: "→")
-                arrow.setRetroText("→", color: currentTheme.colors.textMuted)
+                arrow.setChromeText("→", color: currentTheme.colors.textMuted)
                 stack.addArrangedSubview(arrow)
             }
             let parts = sequence.components(separatedBy: "+").filter { !$0.isEmpty }
@@ -1324,19 +1306,18 @@ final class SettingsViewController: NSViewController {
 
         let label = NSTextField(labelWithString: text)
         label.alignment = .center
-        label.setRetroText(
+        label.setChromeText(
             text,
-            color: highlighted ? currentTheme.colors.accent : currentTheme.colors.textPrimary
+            font: highlighted ? ChromeFont.labelStrong : ChromeFont.label,
+            color: currentTheme.colors.textPrimary
         )
         label.wantsLayer = true
-        label.layer?.cornerRadius = Retro.cornerRadius
-        label.layer?.borderWidth = Retro.hairline
+        label.layer?.cornerRadius = Chrome.Radius.cap
+        label.layer?.borderWidth = Chrome.hairline
         label.layer?.backgroundColor = isPrefixCap
-            ? currentTheme.colors.accent.withAlphaComponent(0.14).cgColor
-            : currentTheme.colors.bgRaised.cgColor
-        label.layer?.borderColor = highlighted
-            ? currentTheme.colors.accent.cgColor
-            : currentTheme.colors.borderStrong.cgColor
+            ? currentTheme.colors.selection.cgColor
+            : currentTheme.colors.raised.cgColor
+        label.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         label.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             label.widthAnchor.constraint(
@@ -1392,8 +1373,8 @@ final class SettingsViewController: NSViewController {
     private func makeAgentCard(_ profile: AgentProfile) -> NSView {
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = Retro.cornerRadius
-        card.layer?.borderWidth = Retro.hairline
+        card.layer?.cornerRadius = Chrome.Radius.card
+        card.layer?.borderWidth = Chrome.hairline
         card.layer?.backgroundColor = currentTheme.colors.bgPanel.cgColor
         card.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -1414,7 +1395,7 @@ final class SettingsViewController: NSViewController {
         let lamp = NSView()
         lamp.wantsLayer = true
         lamp.layer?.cornerRadius = 4
-        RetroLamp.light(lamp, color: profile.nsColor)
+        lamp.layer?.backgroundColor = profile.nsColor.cgColor
         lamp.translatesAutoresizingMaskIntoConstraints = false
         lamp.widthAnchor.constraint(equalToConstant: 8).isActive = true
         lamp.heightAnchor.constraint(equalToConstant: 8).isActive = true
@@ -1423,18 +1404,18 @@ final class SettingsViewController: NSViewController {
         let titleText = "\(profile.icon)  \(profile.name)"
         let title = NSTextField(labelWithString: titleText)
         title.lineBreakMode = .byTruncatingTail
-        title.setRetroText(titleText, color: currentTheme.colors.textPrimary)
+        title.setChromeText(titleText, color: currentTheme.colors.textPrimary)
         titleRow.addArrangedSubview(title)
 
         if configStore.resolved.configuredAgentIds.contains(profile.id) {
             let badge = NSTextField(labelWithString: "settings.json")
             badge.alignment = .center
-            badge.setRetroText("settings.json", color: currentTheme.colors.accent)
+            badge.setChromeText("settings.json", color: currentTheme.colors.textPrimary)
             badge.wantsLayer = true
-            badge.layer?.cornerRadius = Retro.cornerRadius
-            badge.layer?.borderWidth = Retro.hairline
-            badge.layer?.borderColor = currentTheme.colors.accent.cgColor
-            badge.layer?.backgroundColor = currentTheme.colors.accent.withAlphaComponent(0.14).cgColor
+            badge.layer?.cornerRadius = Chrome.Radius.cap
+            badge.layer?.borderWidth = Chrome.hairline
+            badge.layer?.borderColor = currentTheme.colors.borderStrong.cgColor
+            badge.layer?.backgroundColor = currentTheme.colors.raised.cgColor
             badge.translatesAutoresizingMaskIntoConstraints = false
             badge.widthAnchor.constraint(
                 equalToConstant: badge.intrinsicContentSize.width + 12
@@ -1446,13 +1427,13 @@ final class SettingsViewController: NSViewController {
         stack.addArrangedSubview(titleRow)
 
         let description = NSTextField(wrappingLabelWithString: profile.description)
-        description.font = RetroFont.body(11)
+        description.font = ChromeFont.sans(size: 11)
         description.textColor = currentTheme.colors.textMuted
         description.maximumNumberOfLines = 0
         stack.addArrangedSubview(description)
 
         let command = NSTextField(labelWithString: "$ \(profile.command) \(profile.args.joined(separator: " "))")
-        command.font = RetroFont.body(10)
+        command.font = ChromeFont.monoSmall
         command.textColor = currentTheme.colors.textPrimary
         command.lineBreakMode = .byTruncatingMiddle
         stack.addArrangedSubview(command)
@@ -1460,7 +1441,7 @@ final class SettingsViewController: NSViewController {
         let ready = profile.patterns?.ready?.joined(separator: ", ") ?? "-"
         let error = profile.patterns?.error?.joined(separator: ", ") ?? "-"
         let patterns = NSTextField(wrappingLabelWithString: "Patterns\nReady: \(ready)\nError: \(error)")
-        patterns.font = RetroFont.body(10)
+        patterns.font = ChromeFont.meta
         patterns.textColor = currentTheme.colors.textMuted
         patterns.maximumNumberOfLines = 0
         stack.addArrangedSubview(patterns)
@@ -1498,7 +1479,7 @@ final class SettingsViewController: NSViewController {
         refreshButton.isEnabled = !snapshot.isRefreshing
         refreshRow.addArrangedSubview(refreshButton)
         let refreshLabel = NSTextField(labelWithString: Self.accountsRefreshText(snapshot))
-        refreshLabel.font = RetroFont.body(11)
+        refreshLabel.font = ChromeFont.sans(size: 11)
         refreshLabel.textColor = currentTheme.colors.textMuted
         refreshRow.addArrangedSubview(refreshLabel)
         addContentSubview(refreshRow, widthInset: -36)
@@ -1562,7 +1543,7 @@ final class SettingsViewController: NSViewController {
 
     private func addAccountsNote(_ text: String, to stack: NSStackView) {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = RetroFont.body(11)
+        label.font = ChromeFont.sans(size: 11)
         label.textColor = currentTheme.colors.textMuted
         label.maximumNumberOfLines = 0
         stack.addArrangedSubview(label)
@@ -1675,7 +1656,7 @@ final class SettingsViewController: NSViewController {
         let lamp = NSView()
         lamp.wantsLayer = true
         lamp.layer?.cornerRadius = 4
-        RetroLamp.light(lamp, color: isSelected ? colors.accent : colors.borderStrong, lit: isSelected)
+        lamp.layer?.backgroundColor = (isSelected ? colors.accent : colors.borderStrong).cgColor
         lamp.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(lamp)
 
@@ -1695,7 +1676,7 @@ final class SettingsViewController: NSViewController {
 
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.lineBreakMode = .byTruncatingMiddle
-        titleLabel.setRetroText(title, color: colors.textPrimary)
+        titleLabel.setChromeText(title, color: colors.textPrimary)
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleRow.addArrangedSubview(titleLabel)
         if let badge {
@@ -1705,7 +1686,7 @@ final class SettingsViewController: NSViewController {
         titleRow.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor).isActive = true
 
         let detailLabel = NSTextField(wrappingLabelWithString: detail)
-        detailLabel.font = RetroFont.body(11)
+        detailLabel.font = ChromeFont.sans(size: 11)
         detailLabel.textColor = colors.textMuted
         detailLabel.maximumNumberOfLines = 0
         textStack.addArrangedSubview(detailLabel)
@@ -1713,7 +1694,7 @@ final class SettingsViewController: NSViewController {
 
         if let problem, !problem.isEmpty {
             let problemLabel = NSTextField(wrappingLabelWithString: problem)
-            problemLabel.font = RetroFont.body(11)
+            problemLabel.font = ChromeFont.sans(size: 11)
             problemLabel.textColor = colors.danger
             problemLabel.maximumNumberOfLines = 0
             textStack.addArrangedSubview(problemLabel)
@@ -1767,15 +1748,15 @@ final class SettingsViewController: NSViewController {
 
     /// Same chip as the "settings.json" badge on agent cards.
     private func makeAccountBadge(_ text: String) -> NSView {
-        let accent = currentTheme.colors.accent
+        let colors = currentTheme.colors
         let badge = NSTextField(labelWithString: text)
         badge.alignment = .center
-        badge.setRetroText(text, color: accent)
+        badge.setChromeText(text, color: colors.textPrimary)
         badge.wantsLayer = true
-        badge.layer?.cornerRadius = Retro.cornerRadius
-        badge.layer?.borderWidth = Retro.hairline
-        badge.layer?.borderColor = accent.cgColor
-        badge.layer?.backgroundColor = accent.withAlphaComponent(0.14).cgColor
+        badge.layer?.cornerRadius = Chrome.Radius.cap
+        badge.layer?.borderWidth = Chrome.hairline
+        badge.layer?.borderColor = colors.borderStrong.cgColor
+        badge.layer?.backgroundColor = colors.raised.cgColor
         badge.translatesAutoresizingMaskIntoConstraints = false
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         badge.widthAnchor.constraint(
@@ -1790,14 +1771,14 @@ final class SettingsViewController: NSViewController {
         let tint = currentTheme.colors.danger
         let row = NSView()
         row.wantsLayer = true
-        row.layer?.cornerRadius = Retro.cornerRadius
-        row.layer?.borderWidth = Retro.hairline
+        row.layer?.cornerRadius = Chrome.Radius.control
+        row.layer?.borderWidth = Chrome.hairline
         row.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
         row.layer?.borderColor = tint.withAlphaComponent(0.45).cgColor
         row.translatesAutoresizingMaskIntoConstraints = false
 
         let label = NSTextField(wrappingLabelWithString: message)
-        label.font = RetroFont.body(11)
+        label.font = ChromeFont.sans(size: 11)
         label.textColor = currentTheme.colors.textPrimary
         label.maximumNumberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -1854,7 +1835,7 @@ final class SettingsViewController: NSViewController {
                 AccountsController.shared.cancelLogin()
             })
         } else {
-            let add = makeAccountButton(title: "Add Account", kind: .prominent) {
+            let add = makeAccountButton(title: "Add Account", kind: .ink) {
                 AccountsController.shared.addAccount(to: listID)
             }
             // One browser sign-in at a time, across every list.
@@ -1897,7 +1878,7 @@ final class SettingsViewController: NSViewController {
 
     private func makeAccountButton(
         title: String,
-        kind: RetroButton.Kind = .standard,
+        kind: ChromeButton.Kind = .standard,
         handler: @escaping () -> Void
     ) -> NSButton {
         let button = makeActionButton(title: title, action: #selector(accountButtonClicked(_:)), kind: kind)
@@ -1916,26 +1897,23 @@ final class SettingsViewController: NSViewController {
         hero.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "Soprano")
-        title.setRetroText("Soprano", color: currentTheme.colors.textPrimary, size: 33, glow: true)
+        title.setChromeText("Soprano", font: ChromeFont.title, color: currentTheme.colors.textPrimary)
         title.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(title)
 
-        let stripe = RetroStripeView(layout: .slanted, colors: currentTheme.colors.stripe)
-        hero.addSubview(stripe)
-
         let tagline = NSTextField(labelWithString: "AI Agent Orchestration Platform")
-        tagline.setRetroText("AI Agent Orchestration Platform", color: currentTheme.colors.textMuted)
+        tagline.setChromeText("AI Agent Orchestration Platform", color: currentTheme.colors.textMuted)
         tagline.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(tagline)
 
         let version = NSTextField(labelWithString: "Version: \(AppVersion.current)")
-        version.font = RetroFont.body(11)
+        version.font = ChromeFont.sans(size: 11)
         version.textColor = currentTheme.colors.textPrimary
         version.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(version)
 
         let runtime = NSTextField(labelWithString: "Runtime: Swift + AppKit + libghostty")
-        runtime.font = RetroFont.body(11)
+        runtime.font = ChromeFont.sans(size: 11)
         runtime.textColor = currentTheme.colors.textMuted
         runtime.translatesAutoresizingMaskIntoConstraints = false
         hero.addSubview(runtime)
@@ -1943,12 +1921,7 @@ final class SettingsViewController: NSViewController {
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
             title.topAnchor.constraint(equalTo: hero.topAnchor),
-
-            stripe.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 14),
-            stripe.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            stripe.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
-            stripe.widthAnchor.constraint(equalToConstant: 44),
-            stripe.heightAnchor.constraint(equalToConstant: 22),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: hero.trailingAnchor),
 
             tagline.leadingAnchor.constraint(equalTo: hero.leadingAnchor),
             tagline.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
@@ -2054,15 +2027,12 @@ private final class SettingsTabButton: NSButton {
 
     override func draw(_ dirtyRect: NSRect) {
         let colors = theme.colors
-        let fill: NSColor = if isActive {
-            colors.accent
-        } else {
-            isHovered ? colors.bgOverlay : .clear
+        if isActive {
+            ChromeSelectionPill.draw(.raisedTab, in: bounds, colors: colors)
+        } else if isHovered {
+            ChromeSelectionPill.draw(.hover, in: bounds, colors: colors)
         }
-        let ink = isActive ? colors.bgPanel : colors.textMuted
-
-        fill.setFill()
-        bounds.fill()
+        let ink = isActive ? colors.textPrimary : colors.textMuted
 
         var x = Self.inset
         if let symbol {
@@ -2086,7 +2056,11 @@ private final class SettingsTabButton: NSButton {
             x += Self.symbolSlot + 10
         }
 
-        let label = RetroText.display(title, color: ink, tracking: 0)
+        let label = ChromeText.attributed(
+            title,
+            font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
+            color: ink
+        )
         let height = ceil(label.size().height)
         label.draw(in: NSRect(
             x: x,

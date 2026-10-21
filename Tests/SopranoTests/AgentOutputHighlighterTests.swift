@@ -2,6 +2,7 @@ import AppKit
 import Testing
 @testable import Soprano
 
+@MainActor
 struct AgentOutputHighlighterTests {
     @Test func semanticHighlightingPreservesEveryTerminalCharacter() throws {
         let theme = ThemeManager(themeId: "gruvbox-dark").currentTheme

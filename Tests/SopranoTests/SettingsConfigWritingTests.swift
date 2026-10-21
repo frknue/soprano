@@ -50,7 +50,7 @@ struct SettingsConfigWritingTests {
         let popup = controls(NSPopUpButton.self, in: controller.view).first
         #expect(popup != nil)
 
-        let mochaIndex = AppTheme.allThemes.firstIndex { $0.id == "catppuccin-mocha" }!
+        let mochaIndex = AppTheme.options.firstIndex { $0.id == "catppuccin-mocha" }!
         popup?.selectItem(at: mochaIndex)
         send(popup!)
 

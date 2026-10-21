@@ -29,20 +29,20 @@ final class FileExplorerView: NSView {
     // MARK: Views
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private var collapseAllButton: RetroIconButton!
-    private var refreshButton: RetroIconButton!
-    private var moreButton: RetroIconButton!
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private var collapseAllButton: ChromeIconButton!
+    private var refreshButton: ChromeIconButton!
+    private var moreButton: ChromeIconButton!
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let filterContainer = NSView()
     private let filterIcon = NSImageView()
     private let filterField = NSTextField(string: "")
-    private var clearFilterButton: RetroIconButton!
-    private let filterRule = RetroRuleView(axis: .horizontal, style: .single)
+    private var clearFilterButton: ChromeIconButton!
+    private let filterRule = ChromeRuleView(axis: .horizontal)
     private let scrollView = NSScrollView()
     let outlineView = FileExplorerOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let statusSpinner = NSProgressIndicator()
-    private var retryButton: RetroButton!
+    private var retryButton: ChromeButton!
     private let toastLabel = NSTextField(wrappingLabelWithString: "")
     private var toastTask: Task<Void, Never>?
 
@@ -798,7 +798,7 @@ final class FileExplorerView: NSView {
 
     private func updateToolbar() {
         let title = rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Explorer"
-        titleLabel.setRetroText(title, color: colors.textPrimary)
+        titleLabel.setChromeText(title, color: colors.textPrimary)
         titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         // Like Orca, Collapse All does nothing while the filter shows results.
         collapseAllButton.isEnabled = !isFiltering && !expandedPaths.isEmpty
@@ -829,7 +829,7 @@ final class FileExplorerView: NSView {
             }
         }
         statusLabel.isHidden = message == nil
-        statusLabel.setRetroText(message ?? "", color: colors.textMuted)
+        statusLabel.setChromeText(message ?? "", color: colors.textMuted)
         retryButton.isHidden = !showsRetry
         if showsSpinner {
             statusSpinner.startAnimation(nil)
@@ -1218,7 +1218,7 @@ final class FileExplorerView: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        collapseAllButton = RetroIconButton(
+        collapseAllButton = ChromeIconButton(
             symbolName: "rectangle.compress.vertical",
             accessibilityLabel: "Collapse All",
             pointSize: 12,
@@ -1226,7 +1226,7 @@ final class FileExplorerView: NSView {
             target: self,
             action: #selector(collapseAllClicked)
         )
-        refreshButton = RetroIconButton(
+        refreshButton = ChromeIconButton(
             symbolName: "arrow.clockwise",
             accessibilityLabel: "Refresh Explorer",
             pointSize: 12,
@@ -1234,7 +1234,7 @@ final class FileExplorerView: NSView {
             target: self,
             action: #selector(refreshClicked)
         )
-        moreButton = RetroIconButton(
+        moreButton = ChromeIconButton(
             symbolName: "ellipsis",
             accessibilityLabel: "More Explorer Actions",
             pointSize: 12,
@@ -1250,7 +1250,7 @@ final class FileExplorerView: NSView {
         addSubview(toolbarRule)
 
         filterContainer.wantsLayer = true
-        filterContainer.layer?.borderWidth = Retro.hairline
+        filterContainer.layer?.borderWidth = Chrome.hairline
         filterContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(filterContainer)
 
@@ -1262,7 +1262,7 @@ final class FileExplorerView: NSView {
         filterField.isBordered = false
         filterField.drawsBackground = false
         filterField.focusRingType = .none
-        filterField.font = RetroFont.body(11)
+        filterField.font = ChromeFont.sans(size: 11)
         filterField.cell?.isScrollable = true
         filterField.cell?.wraps = false
         filterField.delegate = self
@@ -1270,7 +1270,7 @@ final class FileExplorerView: NSView {
         filterField.translatesAutoresizingMaskIntoConstraints = false
         filterContainer.addSubview(filterField)
 
-        clearFilterButton = RetroIconButton(
+        clearFilterButton = ChromeIconButton(
             symbolName: "xmark",
             accessibilityLabel: "Clear Filter",
             pointSize: 9,
@@ -1334,7 +1334,7 @@ final class FileExplorerView: NSView {
         statusSpinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusSpinner)
 
-        retryButton = RetroButton(
+        retryButton = ChromeButton(
             title: "Retry",
             theme: themeManager.currentTheme,
             target: self,
@@ -1343,12 +1343,12 @@ final class FileExplorerView: NSView {
         retryButton.isHidden = true
         addSubview(retryButton)
 
-        toastLabel.font = RetroFont.body(11)
+        toastLabel.font = ChromeFont.sans(size: 11)
         toastLabel.isHidden = true
         toastLabel.wantsLayer = true
         toastLabel.drawsBackground = true
         toastLabel.isBordered = false
-        toastLabel.layer?.borderWidth = Retro.hairline
+        toastLabel.layer?.borderWidth = Chrome.hairline
         toastLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toastLabel)
 
@@ -1367,12 +1367,12 @@ final class FileExplorerView: NSView {
             toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
             toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             filterContainer.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 6),
             filterContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             filterContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            filterContainer.heightAnchor.constraint(equalToConstant: Retro.controlHeight + 2),
+            filterContainer.heightAnchor.constraint(equalToConstant: Chrome.controlHeight + 2),
 
             filterIcon.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor, constant: 8),
             filterIcon.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
@@ -1386,7 +1386,7 @@ final class FileExplorerView: NSView {
             filterRule.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 6),
             filterRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             filterRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            filterRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            filterRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: filterRule.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -1411,17 +1411,17 @@ final class FileExplorerView: NSView {
         let colors = colors
         layer?.backgroundColor = colors.bgPanel.cgColor
         for button in [collapseAllButton, refreshButton, moreButton, clearFilterButton] {
-            button?.setTints(normal: colors.textMuted, hover: colors.accent)
+            button?.apply(theme: themeManager.currentTheme)
         }
-        toolbarRule.color = colors.borderStrong
-        filterRule.color = colors.borderStrong
+        toolbarRule.color = colors.borderSubtle
+        filterRule.color = colors.borderSubtle
         filterContainer.layer?.backgroundColor = colors.bgRaised.cgColor
         filterContainer.layer?.borderColor = colors.borderStrong.cgColor
         filterIcon.contentTintColor = colors.textMuted
         filterField.textColor = colors.textPrimary
         filterField.placeholderAttributedString = NSAttributedString(
             string: "Find files",
-            attributes: [.foregroundColor: colors.textMuted, .font: RetroFont.body(11)]
+            attributes: [.foregroundColor: colors.textMuted, .font: ChromeFont.sans(size: 11)]
         )
         retryButton.apply(theme: themeManager.currentTheme)
         toastLabel.backgroundColor = colors.bgRaised

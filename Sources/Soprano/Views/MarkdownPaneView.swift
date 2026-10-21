@@ -49,7 +49,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     private let schemeHandler: MarkdownSchemeHandler
     private let webView: MarkdownWebView
     private let toolbar = NSView()
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let pathLabel = NSTextField(labelWithString: "")
     private let backButton = NSButton()
     private let forwardButton = NSButton()
@@ -190,7 +190,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             action: #selector(openInEditor)
         )
 
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monospaced(size: 11)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -321,7 +321,8 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     }
 
     private func htmlDocument(body: String) -> String {
-        let colors = themeManager.currentTheme.colors
+        let theme = themeManager.currentTheme
+        let colors = theme.colors
         return """
         <!doctype html>
         <html>
@@ -333,9 +334,8 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
                          style-src 'unsafe-inline'; font-src data:; script-src 'none';
                          object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
           <style>
-            \(RetroFont.cssFontFace)
             :root {
-              color-scheme: dark;
+              color-scheme: \(theme.appearance == .light ? "light" : "dark");
               --bg: \(colors.bgBase.markdownCSS);
               --panel: \(colors.bgPanel.markdownCSS);
               --raised: \(colors.bgRaised.markdownCSS);
@@ -351,7 +351,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             body {
               background: var(--bg);
               color: var(--text);
-              font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+              font-family: "New York", ui-serif, Georgia, serif;
               font-size: 15px;
               line-height: 1.65;
               margin: 0 auto;
@@ -366,13 +366,11 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
               scroll-margin-top: 20px;
             }
             h1, h2 {
-              font-family: "Departure Mono", ui-monospace, monospace;
-              font-variant-caps: small-caps;
+              font-family: "New York", ui-serif, Georgia, serif;
               font-weight: 400;
-              letter-spacing: 1px;
               padding-bottom: .3em;
             }
-            h1 { font-size: 33px; border-bottom: 3px double var(--border-strong); }
+            h1 { font-size: 33px; border-bottom: 1px solid var(--border); }
             h2 { font-size: 22px; border-bottom: 1px solid var(--border-strong); }
             h3 { font-size: 1.25em; font-weight: 700; }
             h4 { font-size: 1em; font-weight: 700; }
@@ -386,15 +384,15 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             code {
               background: var(--raised);
               border: 1px solid var(--border);
-              border-radius: 0;
-              font-family: "SFMono-Regular", Menlo, Monaco, monospace;
+              border-radius: 6px;
+              font-family: ui-monospace, "SF Mono", Menlo, monospace;
               font-size: .88em;
               padding: .15em .35em;
             }
             pre {
               background: var(--panel);
               border: 1px solid var(--border-strong);
-              border-radius: 0;
+              border-radius: 6px;
               line-height: 1.5;
               overflow: auto;
               padding: 16px;
@@ -411,7 +409,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             ul, ol { padding-left: 2em; }
             li + li { margin-top: .25em; }
             input[type="checkbox"] { accent-color: var(--accent); margin-right: .35em; }
-            hr { border: 0; border-top: 3px double var(--border-strong); margin: 24px 0; }
+            hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
             img { border-radius: 0; height: auto; max-width: 100%; }
             .table-scroll { overflow-x: auto; }
             table { border-collapse: collapse; width: max-content; min-width: 100%; }

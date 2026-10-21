@@ -8,10 +8,24 @@ struct ActiveLocationIndicatorTests {
         // Regression guard: selection highlights used bgRaised, which Gruvbox Dark
         // defines as the same color as bgPanel, so nothing looked selected.
         for theme in AppTheme.allThemes {
-            #expect(theme.colors.bgSelected != theme.colors.bgPanel)
-            #expect(theme.colors.bgSelectedStrong != theme.colors.bgPanel)
-            #expect(theme.colors.bgSelected != theme.colors.bgSelectedStrong)
+            let colors = theme.colors
+            #expect(colors.selection.alphaComponent > 0)
+            #expect(colors.selection != colors.selectionMuted)
+            #expect(colors.raised.contrastRatio(with: colors.bgPanel) > 1.0)
         }
+    }
+
+    @Test func paperSelectsWithASiennaWashAndDarkThemesWithANeutralInkFill() {
+        let paper = AppTheme.folioPaper.colors
+        #expect(paper.selection == paper.accent.withAlphaComponent(0.12))
+        for theme in AppTheme.allThemes where theme.appearance == .dark {
+            #expect(theme.colors.selection == theme.colors.textPrimary.withAlphaComponent(0.11))
+        }
+    }
+
+    @Test func attentionTurnsYellowWhenTheAccentIsNearlyBlue() {
+        #expect(AppTheme.folioPaper.colors.attention == AppTheme.folioPaper.colors.blue)
+        #expect(AppTheme.nord.colors.attention == AppTheme.nord.colors.yellow)
     }
 
     @Test func railMarksOnlyTheActiveWindowsRows() throws {

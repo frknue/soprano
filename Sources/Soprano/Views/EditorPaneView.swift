@@ -21,14 +21,14 @@ final class EditorPaneView: NSView {
     var onMarkdownPreviewRequested: ((URL) -> Void)?
 
     private let toolbar = NSView()
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let pathLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
-    private var reloadButton: RetroButton!
-    private var saveButton: RetroIconButton!
-    private var previewButton: RetroIconButton!
-    private var revealButton: RetroIconButton!
-    private var openExternallyButton: RetroIconButton!
+    private var reloadButton: ChromeButton!
+    private var saveButton: ChromeIconButton!
+    private var previewButton: ChromeIconButton!
+    private var revealButton: ChromeIconButton!
+    private var openExternallyButton: ChromeIconButton!
 
     private let scrollView = NSScrollView()
     private let layoutManager = NSLayoutManager()
@@ -36,7 +36,7 @@ final class EditorPaneView: NSView {
     private var ruler: EditorLineNumberRuler!
     private let imageView = NSImageView()
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private var messageButton: RetroButton!
+    private var messageButton: ChromeButton!
     private var pendingRestore: (selection: [NSValue], origin: NSPoint)?
     private var lastLineCountDigits = 0
 
@@ -107,7 +107,7 @@ final class EditorPaneView: NSView {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)
 
-        pathLabel.font = RetroFont.body(11)
+        pathLabel.font = ChromeFont.monospaced(size: 11)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         pathLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -118,7 +118,7 @@ final class EditorPaneView: NSView {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addSubview(statusLabel)
 
-        reloadButton = RetroButton(
+        reloadButton = ChromeButton(
             title: "Reload",
             theme: themeManager.currentTheme,
             target: self,
@@ -196,10 +196,10 @@ final class EditorPaneView: NSView {
         addSubview(imageView)
 
         messageLabel.alignment = .center
-        messageLabel.font = RetroFont.body(12)
+        messageLabel.font = ChromeFont.sans(size: 12)
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
-        messageButton = RetroButton(
+        messageButton = ChromeButton(
             title: "Open with Default App",
             theme: themeManager.currentTheme,
             target: self,
@@ -235,7 +235,7 @@ final class EditorPaneView: NSView {
             toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
             toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
+            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -255,8 +255,8 @@ final class EditorPaneView: NSView {
         ])
     }
 
-    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> RetroIconButton {
-        let button = RetroIconButton(
+    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> ChromeIconButton {
+        let button = ChromeIconButton(
             symbolName: symbol,
             accessibilityLabel: label,
             pointSize: 12,
@@ -277,13 +277,13 @@ final class EditorPaneView: NSView {
         toolbarRule.color = colors.borderStrong
         pathLabel.textColor = colors.textMuted
         for button in [saveButton, previewButton, revealButton, openExternallyButton] {
-            button?.setTints(normal: colors.textMuted, hover: colors.accent)
+            button?.apply(theme: themeManager.currentTheme)
         }
         reloadButton.apply(theme: themeManager.currentTheme)
         messageButton.apply(theme: themeManager.currentTheme)
         messageLabel.textColor = colors.textMuted
 
-        let font = RetroFont.body(12)
+        let font = ChromeFont.monospaced(size: 12)
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = []
         paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
@@ -296,7 +296,7 @@ final class EditorPaneView: NSView {
         textView.typingAttributes = attributes
         textView.backgroundColor = colors.bgBase
         textView.insertionPointColor = colors.accent
-        textView.selectedTextAttributes = [.backgroundColor: colors.accent.withAlphaComponent(0.3)]
+        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
         scrollView.backgroundColor = colors.bgBase
         ruler.colors = colors
         applyHighlights()
@@ -422,7 +422,7 @@ final class EditorPaneView: NSView {
             }
         }
         statusLabel.isHidden = status == nil
-        statusLabel.setRetroText(status?.text ?? "", color: status?.color ?? colors.textMuted, tracking: 0)
+        statusLabel.setChromeText(status?.text ?? "", color: status?.color ?? colors.textMuted)
         reloadButton.isHidden = document.diskState != .changed
         saveButton.isEnabled = document.content == .text && !document.isReadOnly
         previewButton.isHidden = !["md", "markdown"].contains(document.url.pathExtension.lowercased())
@@ -554,7 +554,7 @@ final class EditorLineNumberRuler: NSRulerView {
         didSet { needsDisplay = true }
     }
 
-    private let font = RetroFont.body(10)
+    private let font = ChromeFont.monoSmall
 
     init(textView: NSTextView, document: EditorDocument) {
         self.editorTextView = textView

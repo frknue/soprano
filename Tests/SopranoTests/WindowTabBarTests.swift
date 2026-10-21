@@ -138,7 +138,9 @@ struct WindowTabBarTests {
         #expect(descendants(in: badge).compactMap { ($0 as? NSTextField)?.stringValue } == ["12"])
         #expect(button.bounds.contains(badge.frame))
         #expect(button.bounds.maxX - badge.frame.maxX == 12)
-        #expect(badge.frame.midY == button.bounds.midY)
+        // The badge sits on whole points; a one-hairline rule leaves the tab an
+        // odd height, so it may sit half a point below the exact middle.
+        #expect(abs(badge.frame.midY - button.bounds.midY) <= 0.5)
         let titleRect = try #require(button.cell?.titleRect(forBounds: button.bounds))
         #expect(titleRect.maxX + 8 == badge.frame.minX)
         #expect(titleRect.width > 0)
