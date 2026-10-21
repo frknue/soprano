@@ -2,6 +2,9 @@ import AppKit
 
 /// Persistent sidebar showing collapsible logical windows and their panes.
 final class SidebarView: NSView {
+    /// The session popup's header and the WINDOWS heading are 32 pt each.
+    static let headerHeight: CGFloat = 32
+
     let agentManager: AgentManager
     let sessionManager: SessionManager
     let themeManager: ThemeManager
@@ -95,7 +98,7 @@ final class SidebarView: NSView {
         sessionSelector = NSPopUpButton(frame: .zero, pullsDown: false)
         sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
         sessionSelector.setAccessibilityLabel("Current Session")
-        sessionSelector.font = ChromeFont.label
+        sessionSelector.font = ChromeFont.labelStrong
         sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         sessionSelector.target = self
         sessionSelector.action = #selector(sessionSelected(_:))
@@ -135,8 +138,8 @@ final class SidebarView: NSView {
         rowsStack = NSStackView()
         rowsStack.orientation = .vertical
         rowsStack.alignment = .leading
-        rowsStack.spacing = 4
-        rowsStack.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 10, right: 10)
+        rowsStack.spacing = 1
+        rowsStack.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 8, right: 0)
         rowsStack.translatesAutoresizingMaskIntoConstraints = false
         listContentView.addSubview(rowsStack)
 
@@ -181,14 +184,22 @@ final class SidebarView: NSView {
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentWidthConstraint,
 
-            sessionSelector.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: 10),
-            sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 10),
-            sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -10),
-            headerView.topAnchor.constraint(equalTo: sessionSelector.bottomAnchor, constant: 14),
-            headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 14),
+            // Sidebar header (32): the session popup.
+            sessionSelector.centerYAnchor.constraint(
+                equalTo: contentContainer.topAnchor,
+                constant: Self.headerHeight / 2
+            ),
+            sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 8),
+            sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
+            // Section heading (32): WINDOWS, Collapse All and New on the right.
+            headerView.centerYAnchor.constraint(
+                equalTo: contentContainer.topAnchor,
+                constant: Self.headerHeight * 1.5
+            ),
+            headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 12),
             headerView.trailingAnchor.constraint(equalTo: collapseAllButton.leadingAnchor, constant: -6),
 
-            scrollView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: Self.headerHeight * 2),
             scrollView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
@@ -217,7 +228,7 @@ final class SidebarView: NSView {
             settingsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -8),
             settingsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
 
-            plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
+            plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -6),
             plusButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
 
             collapseAllButton.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -2),
@@ -255,8 +266,9 @@ final class SidebarView: NSView {
         contentWidthConstraint.constant = width
     }
 
-    /// Accents the trailing border while the resize handle is hovered or dragged,
-    /// so the draggable edge is visible before the mouse goes down.
+    /// Darkens the trailing border to the splitter color while the resize
+    /// handle is hovered or dragged, so the draggable edge is visible before
+    /// the mouse goes down.
     func setResizeHighlighted(_ isHighlighted: Bool) {
         isResizeHighlighted = isHighlighted
         applyTrailingBorderColor(theme: themeManager.currentTheme)
@@ -264,7 +276,7 @@ final class SidebarView: NSView {
 
     private func applyTrailingBorderColor(theme: AppTheme) {
         trailingBorder.color = isResizeHighlighted
-            ? theme.colors.accent
+            ? theme.colors.borderStrong
             : theme.colors.borderSubtle
     }
 
@@ -520,17 +532,15 @@ final class SidebarView: NSView {
                 for paneId in layoutTab.layout?.orderedLeafIds ?? [] {
                     guard let pane = agentManager.panes[paneId] else { continue }
                     let row = paneRows[pane.id] ?? {
-                        let row = SidebarPaneRowView(theme: theme, hierarchyIndent: 12)
+                        let row = SidebarPaneRowView(theme: theme)
                         row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
                         return row
                     }()
                     row.configure(
                         title: sidebarTitle(for: pane),
                         branch: branchForPane(pane),
-                        dotColor: paneStatusColor(for: pane, theme: theme),
-                        dotLit: paneLampLit(for: pane),
-                        agentStatus: pane.activeTab?.agent?.status,
-                        runsCommand: paneRunsCommand(pane),
+                        status: paneStatus(for: pane),
+                        statusWord: paneStatusWord(for: pane),
                         tabCount: pane.tabs.count,
                         layoutTabNumber: numbersLayoutTabs ? layoutTabIndex + 1 : nil,
                         shortcutKey: paneShortcutKeysById[pane.id],
@@ -552,10 +562,7 @@ final class SidebarView: NSView {
         windowRows = nextWindowRows
         paneRows = nextPaneRows
         rowsStack.setArrangedSubviews(rows) { row in
-            row.widthAnchor.constraint(
-                equalTo: rowsStack.widthAnchor,
-                constant: -20
-            ).isActive = true
+            row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         }
         if displayedWindowId != agentManager.activeWindowId {
             displayedWindowId = agentManager.activeWindowId
@@ -691,83 +698,54 @@ final class SidebarView: NSView {
         }
     }
 
-    // MARK: - Status & Sorting
+    // MARK: - Status
 
-    private func paneStatusColor(for pane: PaneState, theme: AppTheme) -> NSColor {
-        if pane.tabs.contains(where: { $0.agent?.needsAttention == true }) {
-            return theme.colors.blue
+    /// The pane's mark: the active tab's agent speaks for the pane; without
+    /// one, a command running in any of its tabs shows RUNNING. Plain shells
+    /// get the quiet idle dot.
+    private func paneStatus(for pane: PaneState) -> ChromeStatus {
+        if let agent = pane.activeTab?.agent {
+            return agent.status.chromeStatus
         }
-        guard let tab = pane.activeTab else { return theme.colors.gray }
-        if tab.agent == nil, paneRunsCommand(pane) {
-            return theme.colors.runningCommand
-        }
-        return tabStatusColor(for: tab, theme: theme)
+        return paneRunsCommand(pane) ? .running : .idle
     }
 
-    /// Whether the pane's status lamp is lit: something is happening or wants
-    /// attention. Idle, stopped, and plain panes stay dark. The active tab's
-    /// agent speaks for the pane; without one, a command running in any of its
-    /// tabs lights the lamp.
-    private func paneLampLit(for pane: PaneState) -> Bool {
-        if pane.tabs.contains(where: { $0.agent?.needsAttention == true }) {
-            return true
+    /// The status word beside the title; nil for plain shells.
+    private func paneStatusWord(for pane: PaneState) -> String? {
+        if let agent = pane.activeTab?.agent {
+            return agent.status.displayLabel
         }
-        switch pane.activeTab?.agent?.status {
-        case .starting, .running, .waiting, .error:
-            return true
-        case .idle, .stopped:
-            return false
-        case nil:
-            return paneRunsCommand(pane)
-        }
+        return paneRunsCommand(pane) ? AgentManager.runningCommandLabel : nil
     }
 
     private func paneRunsCommand(_ pane: PaneState) -> Bool {
         pane.tabs.contains { agentManager.isRunningCommand($0, in: pane.id) }
     }
-
-    private func tabStatusColor(for tab: PaneTab, theme: AppTheme) -> NSColor {
-        if let agent = tab.agent {
-            switch agent.status {
-            case .idle:
-                return theme.colors.blue
-            case .starting:
-                return theme.colors.yellow
-            case .running:
-                return theme.colors.success
-            case .waiting:
-                return theme.colors.yellow
-            case .error:
-                return theme.colors.danger
-            case .stopped:
-                return theme.colors.gray
-            }
-        }
-        switch tab.type {
-        case .terminal:
-            return theme.colors.accent
-        case .browser:
-            return theme.colors.blue
-        case .agent:
-            return theme.colors.textMuted
-        }
-    }
-
 }
 
-// MARK: - Selection Rail
+// MARK: - Row Chrome
 
-/// Leading-edge bar marking sidebar rows that belong to the active logical
-/// window. A nil color hides it, which keeps rows in inactive windows flush.
-private final class SidebarRailView: NSView {
-    static let width: CGFloat = 2
+/// Hover tracking shared by the sidebar rows: the row shows its close button
+/// and the hover pill only under the pointer.
+private class SidebarRowView: NSView {
+    let theme: AppTheme
+    let background: ChromeRowBackgroundView
+    private(set) var isHovered = false
+    private var trackingArea: NSTrackingArea?
 
-    init() {
+    init(theme: AppTheme) {
+        self.theme = theme
+        background = ChromeRowBackgroundView(theme: theme)
         super.init(frame: .zero)
-        wantsLayer = true
-        identifier = NSUserInterfaceItemIdentifier("sidebar-selection-rail")
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: Self.width).isActive = true
+        background.identifier = NSUserInterfaceItemIdentifier("sidebar-row-background")
+        addSubview(background)
+        NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor),
+            background.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     @available(*, unavailable)
@@ -775,42 +753,89 @@ private final class SidebarRailView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    /// The rail's current color, or nil while hidden. Read by tests.
-    private(set) var color: NSColor?
+    /// Re-applies the row's state after the pointer enters or leaves it.
+    func hoverStateDidChange() {}
 
-    func setColor(_ color: NSColor?) {
-        self.color = color
-        isHidden = color == nil
-        layer?.backgroundColor = color?.cgColor
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { setHovered(false) }
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        hoverStateDidChange()
+    }
+
+    func isInteractiveSubview(_ view: NSView?) -> Bool {
+        var current = view
+        while let candidate = current, candidate !== self {
+            if candidate is NSControl {
+                return true
+            }
+            current = candidate.superview
+        }
+        return false
+    }
+
+    static func makeCloseButton(accessibilityLabel: String) -> ChromeIconButton {
+        ChromeIconButton(
+            symbolName: "xmark",
+            accessibilityLabel: accessibilityLabel,
+            pointSize: 9,
+            size: 18,
+            target: nil,
+            action: nil
+        )
     }
 }
 
 // MARK: - Window Row
 
-private final class SidebarWindowRowView: NSView {
+/// `⌄ storefront   3 · 1!`: a 28 pt row with the disclosure chevron, the title
+/// (ink in the active window, muted elsewhere) and the pane count with the
+/// panes that need you in the attention color. Holding ⌃ swaps the count for
+/// the window's accent jump keycap; the pointer swaps it for a close button.
+private final class SidebarWindowRowView: SidebarRowView {
+    static let height: CGFloat = 28
+
     private let disclosureButton = NSButton(title: "", target: nil, action: nil)
-    private let railView = SidebarRailView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let countLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton(title: "×", target: nil, action: nil)
+    private let shortcutCap: ChromeKeycapView
+    private let closeButton = SidebarRowView.makeCloseButton(accessibilityLabel: "Close Window")
     private var onToggle: (() -> Void)?
     private var onSelect: (() -> Void)?
     private var onRename: (() -> Void)?
     private var onResetTitle: (() -> Void)?
     private var onClose: (() -> Void)?
-    private let theme: AppTheme
-    private var paneCount = 0
-    private var attentionCount = 0
-    private var shortcutNumber: Int?
-    private var showShortcutHint = false
-    private var shortcutBlockWidthConstraint: NSLayoutConstraint!
+    private var showsShortcut = false
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.control
-        translatesAutoresizingMaskIntoConstraints = false
+    override init(theme: AppTheme) {
+        shortcutCap = ChromeKeycapView(legend: "", theme: theme, style: .small, tone: .accent)
+        super.init(theme: theme)
         setup()
     }
 
@@ -820,60 +845,54 @@ private final class SidebarWindowRowView: NSView {
     }
 
     private func setup() {
-        addSubview(railView)
-
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
         disclosureButton.isBordered = false
-        disclosureButton.imagePosition = .noImage
+        disclosureButton.imagePosition = .imageOnly
+        disclosureButton.contentTintColor = theme.colors.textMuted
         disclosureButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(disclosureButton)
 
-        titleLabel.font = ChromeFont.label
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        countLabel.font = ChromeFont.label
         countLabel.alignment = .right
         countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(countLabel)
 
+        addSubview(shortcutCap)
+
         closeButton.target = self
         closeButton.action = #selector(handleClose)
-        closeButton.isBordered = false
-        closeButton.font = ChromeFont.label
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.apply(theme: theme)
         addSubview(closeButton)
 
+        let trailingInset = Chrome.pillInset + 8
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 32),
-            railView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            railView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
-            railView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            heightAnchor.constraint(equalToConstant: Self.height),
 
-            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4),
             disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            disclosureButton.widthAnchor.constraint(equalToConstant: 24),
-            disclosureButton.heightAnchor.constraint(equalToConstant: 24),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 18),
+            disclosureButton.heightAnchor.constraint(equalToConstant: 18),
 
-            titleLabel.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 2),
+            titleLabel.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 4),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: countLabel.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: countLabel.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCap.leadingAnchor, constant: -8),
 
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 24),
-            closeButton.heightAnchor.constraint(equalToConstant: 24),
-
-            countLabel.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+            countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
             countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            shortcutCap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
+            shortcutCap.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 4)),
+            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        shortcutBlockWidthConstraint = countLabel.widthAnchor.constraint(
-            greaterThanOrEqualToConstant: 16
-        )
     }
 
     func configure(
@@ -896,32 +915,42 @@ private final class SidebarWindowRowView: NSView {
         self.onRename = onRename
         self.onResetTitle = onResetTitle
         self.onClose = onClose
-        self.paneCount = paneCount
-        self.attentionCount = attentionCount
-        self.shortcutNumber = shortcutNumber
-        self.showShortcutHint = showShortcutHint
-        updateTrailingLabel()
+        let colors = theme.colors
+
         let accessibilityLabel = expanded ? "Collapse Window" : "Expand Window"
-        let markerColor = highlighted ? theme.colors.accent : theme.colors.textMuted
-        disclosureButton.attributedTitle = ChromeText.attributed(
-            expanded ? "▼" : "❯",
-            font: ChromeFont.label,
-            color: markerColor,
-            alignment: .center
-        )
+        disclosureButton.image = NSImage(
+            systemSymbolName: expanded ? "chevron.down" : "chevron.right",
+            accessibilityDescription: accessibilityLabel
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
         disclosureButton.setAccessibilityLabel(accessibilityLabel)
         disclosureButton.toolTip = accessibilityLabel
-        titleLabel.setChromeText(title, color: markerColor)
-        closeButton.attributedTitle = ChromeText.attributed(
-            "×",
-            font: ChromeFont.label,
-            color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
-            alignment: .center
+        titleLabel.setChromeText(
+            title,
+            font: ChromeFont.labelStrong,
+            color: highlighted ? colors.textPrimary : colors.textMuted
         )
-        layer?.backgroundColor = highlighted
-            ? theme.colors.selectionMuted.cgColor
-            : NSColor.clear.cgColor
-        railView.setColor(highlighted ? theme.colors.accent : nil)
+
+        let counts = NSMutableAttributedString(attributedString: ChromeText.attributed(
+            "\(paneCount)",
+            font: ChromeFont.count,
+            color: colors.textMuted
+        ))
+        if attentionCount > 0 {
+            counts.append(ChromeText.attributed(" · ", font: ChromeFont.count, color: colors.textMuted))
+            counts.append(ChromeText.attributed("\(attentionCount)!", font: ChromeFont.count, color: colors.attention))
+        }
+        countLabel.attributedStringValue = counts
+        let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
+        countLabel.toolTip = attentionCount > 0
+            ? "\(panes), \(attentionCount) agent\(attentionCount == 1 ? "" : "s") ready"
+            : panes
+
+        showsShortcut = showShortcutHint && shortcutNumber != nil
+        if let shortcutNumber {
+            shortcutCap.legend = "⌃\(shortcutNumber)"
+            shortcutCap.toolTip = "Ctrl+\(shortcutNumber)"
+        }
+        hoverStateDidChange()
 
         let contextMenu = NSMenu()
         let renameItem = NSMenuItem(
@@ -943,32 +972,11 @@ private final class SidebarWindowRowView: NSView {
         menu = contextMenu
     }
 
-    private func updateTrailingLabel() {
-        if showShortcutHint {
-            countLabel.alignment = .center
-            countLabel.drawsBackground = shortcutNumber != nil
-            countLabel.backgroundColor = theme.colors.raised
-            shortcutBlockWidthConstraint.isActive = shortcutNumber != nil
-            countLabel.setChromeText(
-                shortcutNumber.map(String.init) ?? "",
-                color: theme.colors.textPrimary
-            )
-            countLabel.toolTip = shortcutNumber.map { "Ctrl+\($0)" }
-        } else {
-            countLabel.alignment = .right
-            countLabel.drawsBackground = false
-            shortcutBlockWidthConstraint.isActive = false
-            countLabel.setChromeText(
-                attentionCount > 0
-                    ? "\(paneCount) · \(attentionCount)!"
-                    : "\(paneCount)",
-                color: attentionCount > 0 ? theme.colors.blue : theme.colors.textMuted
-            )
-            let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
-            countLabel.toolTip = attentionCount > 0
-                ? "\(panes), \(attentionCount) agent\(attentionCount == 1 ? "" : "s") ready"
-                : panes
-        }
+    override func hoverStateDidChange() {
+        background.style = isHovered ? .hover : .none
+        shortcutCap.isHidden = !showsShortcut
+        closeButton.isHidden = showsShortcut || !isHovered
+        countLabel.isHidden = showsShortcut || isHovered
     }
 
     @objc private func handleToggle() {
@@ -999,47 +1007,42 @@ private final class SidebarWindowRowView: NSView {
             onSelect?()
         }
     }
-
-    private func isInteractiveSubview(_ view: NSView?) -> Bool {
-        var current = view
-        while let candidate = current, candidate !== self {
-            if candidate is NSControl {
-                return true
-            }
-            current = candidate.superview
-        }
-        return false
-    }
 }
 
 // MARK: - Pane Row
 
-private final class SidebarPaneRowView: NSView {
-    private let railView = SidebarRailView()
-    private let dotView = NSView()
+/// A pane under its window: status mark, title and the colored status word,
+/// with `⎇ branch · 2T · Tab 2` muted on a second line (40 pt; 28 without
+/// one). The focused pane gets the selection pill and pencil tick; every
+/// other row is plain. Holding ⌃ swaps the status word for the pane's
+/// accent jump keycap; the pointer swaps it for a close button.
+private final class SidebarPaneRowView: SidebarRowView {
+    static let height: CGFloat = 40
+    static let singleLineHeight: CGFloat = 28
+    /// The mark sits under the window title, past the disclosure chevron.
+    private static let indent: CGFloat = 18
+
+    private let mark = ChromeStatusMark()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let badgeContainer = NSView()
-    private let badgeLabel = NSTextField(labelWithString: "")
-    private let closeButton = NSButton(title: "×", target: nil, action: nil)
-    private let branchLabel = NSTextField(labelWithString: "")
-    private var titleBottomConstraint: NSLayoutConstraint!
-    private var branchConstraints: [NSLayoutConstraint] = []
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let shortcutCap: ChromeKeycapView
+    private let closeButton = SidebarRowView.makeCloseButton(accessibilityLabel: "Close Pane")
+    private let metaLabel = NSTextField(labelWithString: "")
+    private var heightConstraint: NSLayoutConstraint!
+    private var titleTopConstraint: NSLayoutConstraint!
     private var onSelect: (() -> Void)?
     private var onClose: (() -> Void)?
-    private let theme: AppTheme
-    private let hierarchyIndent: CGFloat
-    private var displayedBranch: String?
-    private var hasConfiguredBranch = false
     private var titleColor: NSColor
+    private var branch: String?
+    private var tabCount = 1
+    private var layoutTabNumber: Int?
+    private var showsShortcut = false
+    private var isFocusedPane = false
 
-    init(theme: AppTheme, hierarchyIndent: CGFloat = 0) {
-        self.theme = theme
-        self.hierarchyIndent = hierarchyIndent
-        self.titleColor = theme.colors.textPrimary
-        super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.control
-        translatesAutoresizingMaskIntoConstraints = false
+    override init(theme: AppTheme) {
+        shortcutCap = ChromeKeycapView(legend: "", theme: theme, style: .small, tone: .accent)
+        titleColor = theme.colors.textPrimary
+        super.init(theme: theme)
         setup()
     }
 
@@ -1049,106 +1052,73 @@ private final class SidebarPaneRowView: NSView {
     }
 
     private func setup() {
-        addSubview(railView)
+        addSubview(mark)
 
-        dotView.wantsLayer = true
-        dotView.layer?.cornerRadius = 3
-        dotView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dotView)
-
-        titleLabel.font = ChromeFont.label
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
 
-        badgeContainer.wantsLayer = true
-        badgeContainer.layer?.cornerRadius = Chrome.Radius.cap
-        badgeContainer.layer?.borderWidth = Chrome.hairline
-        badgeContainer.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(badgeContainer)
+        statusLabel.identifier = NSUserInterfaceItemIdentifier("pane-status-label")
+        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        statusLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(statusLabel)
 
-        badgeLabel.font = ChromeFont.label
-        badgeLabel.alignment = .center
-        badgeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-        badgeContainer.addSubview(badgeLabel)
+        addSubview(shortcutCap)
 
         closeButton.target = self
         closeButton.action = #selector(handleClose)
-        closeButton.isBordered = false
-        closeButton.font = ChromeFont.label
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.apply(theme: theme)
         addSubview(closeButton)
 
-        branchLabel.font = ChromeFont.monoSmall
-        branchLabel.textColor = theme.colors.textMuted
-        branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(branchLabel)
+        metaLabel.identifier = NSUserInterfaceItemIdentifier("pane-row-meta")
+        metaLabel.lineBreakMode = .byTruncatingTail
+        metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        metaLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(metaLabel)
 
-        titleBottomConstraint = titleLabel.bottomAnchor.constraint(
-            equalTo: bottomAnchor, constant: -7
-        )
-        branchConstraints = [
-            branchLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 2),
-            branchLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
-            branchLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
-        ]
-
+        let trailingInset = Chrome.pillInset + 8
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.height)
+        titleTopConstraint = titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5)
         NSLayoutConstraint.activate([
-            railView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            railView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            railView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            heightConstraint,
+            titleTopConstraint,
 
-            dotView.leadingAnchor.constraint(
+            mark.leadingAnchor.constraint(
                 equalTo: leadingAnchor,
-                constant: 22 + hierarchyIndent
+                constant: Chrome.pillInset + 8 + Self.indent
             ),
-            dotView.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            dotView.widthAnchor.constraint(equalToConstant: 6),
-            dotView.heightAnchor.constraint(equalToConstant: 6),
+            mark.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            titleLabel.leadingAnchor.constraint(equalTo: dotView.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: badgeContainer.leadingAnchor, constant: -6
-            ),
+            titleLabel.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCap.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
 
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
+            statusLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            shortcutCap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
+            shortcutCap.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 4)),
             closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 24),
-            closeButton.heightAnchor.constraint(equalToConstant: 24),
 
-            badgeContainer.trailingAnchor.constraint(
-                equalTo: closeButton.leadingAnchor, constant: -4
-            ),
-            badgeContainer.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            badgeContainer.heightAnchor.constraint(equalToConstant: 16),
-
-            badgeLabel.leadingAnchor.constraint(
-                equalTo: badgeContainer.leadingAnchor, constant: 5
-            ),
-            badgeLabel.trailingAnchor.constraint(
-                equalTo: badgeContainer.trailingAnchor, constant: -5
-            ),
-            badgeLabel.centerYAnchor.constraint(equalTo: badgeContainer.centerYAnchor),
+            metaLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
+            metaLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            metaLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -trailingInset),
         ])
     }
 
     func configure(
         title: String,
         branch: String?,
-        dotColor: NSColor,
-        dotLit: Bool,
-        agentStatus: AgentStatus?,
-        runsCommand: Bool,
+        status: ChromeStatus,
+        statusWord: String?,
         tabCount: Int,
         layoutTabNumber: Int?,
         shortcutKey: String?,
         showShortcutHint: Bool,
-        showsClose: Bool = true,
         highlighted: Bool,
         inActiveWindow: Bool,
         onSelect: @escaping () -> Void,
@@ -1156,66 +1126,35 @@ private final class SidebarPaneRowView: NSView {
     ) {
         self.onSelect = onSelect
         self.onClose = onClose
-        dotView.layer?.backgroundColor = dotColor.cgColor
-        closeButton.isHidden = !showsClose
-
-        badgeLabel.identifier = layoutTabNumber == nil
-            ? nil
-            : NSUserInterfaceItemIdentifier("pane-layout-tab-badge")
-        if showShortcutHint, let shortcutKey {
-            badgeContainer.isHidden = false
-            applyBadge("⇧\(shortcutKey.uppercased())", tint: theme.colors.accent)
-            badgeContainer.toolTip = "Ctrl+Shift+\(shortcutKey.uppercased())"
+        let colors = theme.colors
+        mark.set(status: status, colors: colors)
+        if let statusWord {
+            statusLabel.setStatusText(statusWord, color: status.color(in: colors))
         } else {
-            var badgeParts: [String] = []
-            if let agentStatus {
-                badgeParts.append(agentStatus.displayLabel)
-            }
-            if runsCommand {
-                badgeParts.append(AgentManager.runningCommandLabel)
-            }
-            if tabCount > 1 {
-                badgeParts.append("\(tabCount)T")
-            }
-            if let layoutTabNumber {
-                badgeParts.append("TAB \(layoutTabNumber)")
-            }
-            badgeContainer.isHidden = badgeParts.isEmpty
-            applyBadge(
-                badgeParts.joined(separator: " · "),
-                tint: agentStatus == nil && !runsCommand ? theme.colors.textMuted : dotColor
-            )
-            badgeContainer.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
+            statusLabel.stringValue = ""
         }
-        closeButton.attributedTitle = ChromeText.attributed(
-            "×",
-            font: ChromeFont.label,
-            color: highlighted ? theme.colors.textPrimary : theme.colors.textMuted,
-            alignment: .center
-        )
 
-        // The rail runs down every pane of the active window so the group reads as
-        // one unit; only the focused pane also gets a filled background.
-        titleColor = inActiveWindow
-            ? theme.colors.textPrimary
-            : theme.colors.textMuted
+        showsShortcut = showShortcutHint && shortcutKey != nil
+        if let shortcutKey {
+            shortcutCap.legend = "⌃⇧\(shortcutKey.uppercased())"
+            shortcutCap.toolTip = "Ctrl+Shift+\(shortcutKey.uppercased())"
+        }
+
+        titleColor = inActiveWindow ? colors.textPrimary : colors.textMuted
         titleLabel.setChromeText(title, color: titleColor)
-        layer?.backgroundColor = highlighted
-            ? theme.colors.selection.cgColor
-            : NSColor.clear.cgColor
-        railView.setColor(
-            highlighted
-                ? theme.colors.accent
-                : (inActiveWindow ? theme.colors.borderStrong : nil)
-        )
-
-        setBranch(branch)
+        isFocusedPane = highlighted
+        self.tabCount = tabCount
+        self.layoutTabNumber = layoutTabNumber
+        self.branch = branch
+        updateMeta()
+        hoverStateDidChange()
     }
 
-    private func applyBadge(_ text: String, tint: NSColor) {
-        badgeContainer.layer?.backgroundColor = tint.withAlphaComponent(0.14).cgColor
-        badgeContainer.layer?.borderColor = tint.cgColor
-        badgeLabel.setChromeText(text, color: tint)
+    override func hoverStateDidChange() {
+        background.style = isFocusedPane ? .selected : (isHovered ? .hover : .none)
+        shortcutCap.isHidden = !showsShortcut
+        closeButton.isHidden = showsShortcut || !isHovered
+        statusLabel.isHidden = showsShortcut || isHovered || statusLabel.stringValue.isEmpty
     }
 
     func setTitle(_ title: String) {
@@ -1224,21 +1163,29 @@ private final class SidebarPaneRowView: NSView {
     }
 
     func setBranch(_ branch: String?) {
-        guard !hasConfiguredBranch || displayedBranch != branch else { return }
-        hasConfiguredBranch = true
-        displayedBranch = branch
+        guard self.branch != branch else { return }
+        self.branch = branch
+        updateMeta()
+    }
 
+    /// `⎇ main · 2T · Tab 2`: whichever parts apply. Without any the row is
+    /// a single 28 pt line.
+    private func updateMeta() {
+        var parts: [String] = []
         if let branch {
-            branchLabel.stringValue = "⎇ \(branch)"
-            branchLabel.isHidden = false
-            titleBottomConstraint.isActive = false
-            NSLayoutConstraint.activate(branchConstraints)
-        } else {
-            branchLabel.stringValue = ""
-            branchLabel.isHidden = true
-            NSLayoutConstraint.deactivate(branchConstraints)
-            titleBottomConstraint.isActive = true
+            parts.append("⎇ \(branch)")
         }
+        if tabCount > 1 {
+            parts.append("\(tabCount)T")
+        }
+        if let layoutTabNumber {
+            parts.append("Tab \(layoutTabNumber)")
+        }
+        metaLabel.setChromeText(parts.joined(separator: " · "), font: ChromeFont.meta, color: theme.colors.textMuted)
+        metaLabel.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
+        metaLabel.isHidden = parts.isEmpty
+        heightConstraint.constant = parts.isEmpty ? Self.singleLineHeight : Self.height
+        titleTopConstraint.constant = parts.isEmpty ? 6 : 5
     }
 
     @objc private func handleClose() {
@@ -1252,17 +1199,6 @@ private final class SidebarPaneRowView: NSView {
             return
         }
         onSelect?()
-    }
-
-    private func isInteractiveSubview(_ view: NSView?) -> Bool {
-        var current = view
-        while let candidate = current, candidate !== self {
-            if candidate is NSControl {
-                return true
-            }
-            current = candidate.superview
-        }
-        return false
     }
 }
 

@@ -89,6 +89,41 @@ struct FileExplorerTests {
         #expect(!snapshot.isIgnored(relativePath: "Sources/debug.log"))
     }
 
+    // MARK: - Rows
+
+    @Test func rowsUseThePencilTickPillOnlyWhileTheListHasTheKeyboard() {
+        let row = FileExplorerRowView()
+        #expect(row.pillStyle == .none)
+        row.isHovered = true
+        #expect(row.pillStyle == .hover)
+        row.isSelected = true
+        row.isEmphasized = true
+        #expect(row.pillStyle == .selected)
+        row.isEmphasized = false
+        #expect(row.pillStyle == .selectedUnfocused)
+    }
+
+    @Test func changedFilesKeepInkNamesAndCarryABareColoredLetter() throws {
+        let colors = AppTheme.folioPaper.colors
+        let cell = FileExplorerCellView(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        let node = FileExplorerNode(
+            url: URL(fileURLWithPath: "/tmp/project/App.swift"),
+            relativePath: "App.swift",
+            isDirectory: false
+        )
+
+        cell.configure(node: node, isExpanded: false, status: .modified, isIgnored: false, colors: colors)
+        #expect(cell.nameField.textColor == colors.textPrimary)
+        #expect(cell.statusLabel.stringValue == "M")
+        let letterColor = cell.statusLabel.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
+        #expect((letterColor as? NSColor) == colors.yellow)
+
+        cell.configure(node: node, isExpanded: false, status: nil, isIgnored: true, colors: colors)
+        #expect(cell.nameField.textColor == colors.gray)
+        #expect(cell.statusLabel.isHidden)
+        #expect(!cell.ignoredView.isHidden)
+    }
+
     @Test func readingARealRepositoryReportsChangesAndIgnoredPaths() throws {
         guard GitStatusReader.executableURL != nil else { return }
         try withTemporaryDirectory { root in

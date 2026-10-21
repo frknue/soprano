@@ -100,6 +100,7 @@ final class MainWindowController: NSWindowController {
         window.delegate = self
         self.mainContentVC = contentVC
         contentVC.setWindowTabsHidden(settings.hideWindowTabs)
+        contentVC.setStatusBarUptimeVisible(settings.statusBarUptime)
 
         let keybindingManager = KeybindingManager(
             agentManager: agentManager,
@@ -160,6 +161,7 @@ final class MainWindowController: NSWindowController {
 
         applyWindowBarSetting()
         mainContentVC?.setWindowTabsHidden(settings.hideWindowTabs)
+        mainContentVC?.setStatusBarUptimeVisible(settings.statusBarUptime)
         reloadKeybindingManager()
         // The Commands menu carries key equivalents for the actions AppKit
         // dispatches itself; rebuild it so a rebound chord takes effect and the
@@ -214,9 +216,47 @@ final class MainWindowController: NSWindowController {
         return panel
     }
 
-    private func commandShortcut(for bindingId: String) -> String? {
-        keybindingManager?.config.bindings.first(where: { $0.id == bindingId })?.defaultKeys
+    /// K1 keycaps of the first of `bindingIds` that is bound, or none.
+    private func commandShortcut(for bindingIds: String...) -> [String] {
+        guard let config = keybindingManager?.config else { return [] }
+        for bindingId in bindingIds {
+            guard let binding = config.bindings.first(where: { $0.id == bindingId }) else { continue }
+            let caps = Self.keycaps(for: binding, prefixKey: config.prefixKey)
+            if !caps.isEmpty { return caps }
+        }
+        return []
     }
+
+    /// A binding as K1 keycaps: one cap per chord with its modifiers in
+    /// ⌃⇧⌘ order (`⌘D`, `⇧⌘P`, `⌃⇧L`); a prefix binding is the prefix cap
+    /// then the key (`⌃A`, `G`). Letters are uppercase, `esc` lowercase, and
+    /// Shift is left off symbols that need it to type (`|`). Unbound → none.
+    nonisolated static func keycaps(for binding: KeyBinding, prefixKey: String) -> [String] {
+        let chord = KeyChord(binding: binding)
+        guard !chord.key.isEmpty else { return [] }
+        // KeyChord infers Shift for keys that cannot be typed without it.
+        let shiftIsImplied = KeyChord(mode: .direct, key: chord.key).shift
+        let shift = chord.shift && !shiftIsImplied ? "⇧" : ""
+        let key = keycapLegends[chord.key] ?? chord.key.uppercased()
+        switch chord.mode {
+        case .prefix:
+            return ["⌃" + prefixKey.uppercased(), shift + key]
+        case .direct:
+            return [(chord.ctrl ? "⌃" : "") + shift + (chord.meta ? "⌘" : "") + key]
+        }
+    }
+
+    private nonisolated static let keycapLegends: [String: String] = [
+        " ": "Space",
+        "\t": "⇥",
+        "\r": "↵",
+        "\u{1B}": "esc",
+        "\u{7F}": "⌫",
+        "\u{F700}": "↑",
+        "\u{F701}": "↓",
+        "\u{F702}": "←",
+        "\u{F703}": "→",
+    ]
 
     /// One launcher per agent in the catalog, so an agent defined in
     /// settings.json is reachable from `⌘P` exactly like a built-in one.
@@ -282,7 +322,6 @@ final class MainWindowController: NSWindowController {
                 icon: "pencil",
                 label: "Rename Session…",
                 description: "Rename the current session",
-                shortcut: nil,
                 action: { [weak self] in
                     DispatchQueue.main.async { self?.mainContentVC?.renameActiveSession() }
                 }
@@ -292,7 +331,6 @@ final class MainWindowController: NSWindowController {
                 icon: "rectangle.stack.badge.minus",
                 label: "Close Session…",
                 description: "Close the current session and its terminals",
-                shortcut: nil,
                 action: { [weak self] in
                     DispatchQueue.main.async { self?.mainContentVC?.closeActiveSession() }
                 }
@@ -401,7 +439,6 @@ final class MainWindowController: NSWindowController {
                 icon: "globe",
                 label: "omp web",
                 description: "Start the omp web workspace in your default browser",
-                shortcut: nil,
                 searchText: "ompweb web ui browser coding agent",
                 action: { [weak self] in
                     guard let self else { return }
@@ -428,7 +465,6 @@ final class MainWindowController: NSWindowController {
                 icon: "doc.richtext",
                 label: "Open Markdown…",
                 description: "Open a local Markdown file in a live reader",
-                shortcut: nil,
                 searchText: "read preview documentation readme md",
                 action: { [weak self] in
                     DispatchQueue.main.async {
@@ -475,7 +511,7 @@ final class MainWindowController: NSWindowController {
                 icon: "plus.rectangle.on.rectangle",
                 label: "New Tab",
                 description: "Open a tab with a new terminal in the active window",
-                shortcut: commandShortcut(for: "new-tab-direct") ?? commandShortcut(for: "new-tab"),
+                shortcut: commandShortcut(for: "new-tab-direct", "new-tab"),
                 action: { [weak self] in
                     _ = self?.agentManager.createLayoutTab()
                 }
@@ -515,7 +551,7 @@ final class MainWindowController: NSWindowController {
                 icon: "xmark.square",
                 label: "Close Pane",
                 description: "Close the active pane",
-                shortcut: commandShortcut(for: "close-pane") ?? commandShortcut(for: "close-active"),
+                shortcut: commandShortcut(for: "close-pane", "close-active"),
                 action: { [weak self] in
                     guard let self else { return }
                     self.agentManager.closePane(self.agentManager.activePaneId)
@@ -526,7 +562,6 @@ final class MainWindowController: NSWindowController {
                 icon: "arrow.clockwise",
                 label: "Restart Agent",
                 description: "Restart the active agent",
-                shortcut: nil,
                 action: { [weak self] in
                     guard let self else { return }
                     self.agentManager.restartAgent(paneId: self.agentManager.activePaneId)
@@ -537,7 +572,6 @@ final class MainWindowController: NSWindowController {
                 icon: "stop.square",
                 label: "Stop Agent",
                 description: "Stop the active agent",
-                shortcut: nil,
                 action: { [weak self] in
                     guard let self else { return }
                     self.agentManager.stopAgent(paneId: self.agentManager.activePaneId)
@@ -630,7 +664,6 @@ final class MainWindowController: NSWindowController {
                 icon: "person.2",
                 label: "Accounts",
                 description: "Claude and Codex logins and their usage",
-                shortcut: nil,
                 searchText: "account login usage claude codex omp switch",
                 action: { [weak self] in
                     DispatchQueue.main.async {
@@ -643,7 +676,6 @@ final class MainWindowController: NSWindowController {
                 icon: "curlybraces",
                 label: "Open settings.json",
                 description: ConfigStore.shared.displayPath,
-                shortcut: nil,
                 searchText: "config json edit settings file",
                 action: {
                     ConfigStore.shared.openInEditor()
@@ -739,7 +771,6 @@ extension MainWindowController: KeybindingDelegate {
                 icon: "rectangle.stack",
                 label: session.name,
                 description: "\(current)\(windows.count) window\(windows.count == 1 ? "" : "s")",
-                shortcut: nil,
                 searchText: windows.map(\.title).joined(separator: " "),
                 action: { [weak self] in self?.agentManager.activateSession(session.id) }
             )
@@ -763,7 +794,11 @@ extension MainWindowController: KeybindingDelegate {
 
         let panel = palettePanel()
         let commands = buildCommandPaletteItems()
-        panel.show(relativeTo: window, commands: commands)
+        panel.show(
+            relativeTo: window,
+            commands: commands,
+            searchShortcut: commandShortcut(for: "command-palette")
+        )
     }
 
     func keybindingFindWindow() {
@@ -839,7 +874,7 @@ private extension MainWindowController {
             }.joined(separator: " ")
             let shortcut = index < 9
                 ? commandShortcut(for: "select-window-\(index + 1)")
-                : nil
+                : []
 
             return CommandItem(
                 id: "activate-\(terminalWindow.id)",
@@ -892,7 +927,6 @@ private extension MainWindowController {
                 icon: "folder",
                 label: project.name,
                 description: project.path,
-                shortcut: nil,
                 action: { [weak self] in
                     guard let self else { return }
                     _ = self.agentManager.spawnTerminal(cwd: project.path)
@@ -905,7 +939,6 @@ private extension MainWindowController {
             icon: "folder.badge.plus",
             label: "Choose Directory…",
             description: "Open a terminal in any directory",
-            shortcut: nil,
             action: { [weak self] in
                 DispatchQueue.main.async {
                     self?.chooseProjectDirectory()

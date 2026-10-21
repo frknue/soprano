@@ -51,8 +51,8 @@ struct SettingsWindowTransitionTests {
         #expect(generalButton?.isHidden == false)
         #expect(generalButton?.frame.width ?? 0 > 0)
         #expect(generalButton?.frame.height ?? 0 > 0)
-        // Sections cap at the 660pt reading measure instead of stretching
-        // across a wide window; anything past ~600 proves layout settled.
+        // Cards cap at the 680pt card column instead of stretching across a
+        // wide window; anything past ~600 proves layout settled.
         let appearanceCard = cardContainingLabel(
             "Appearance",
             in: contentViewController.view
@@ -106,11 +106,20 @@ struct SettingsWindowTransitionTests {
     }
 
     private func cardContainingLabel(_ text: String, in view: NSView) -> NSView? {
-        // Section titles render as uppercase eyebrows whose superview is the
-        // section container, which shares the card's width.
+        // Section titles render as uppercase eyebrows in the margin column;
+        // the card is the nearest rounded, hairline-edged view beside them.
         let label = allSubviews(in: view)
             .compactMap { $0 as? NSTextField }
             .first { $0.stringValue == text.uppercased() }
-        return label?.superview
+        var ancestor = label?.superview
+        while let current = ancestor {
+            if let card = current.subviews.first(where: {
+                $0.layer?.cornerRadius == Chrome.Radius.card && $0.layer?.borderWidth == Chrome.hairline
+            }) {
+                return card
+            }
+            ancestor = current.superview
+        }
+        return nil
     }
 }

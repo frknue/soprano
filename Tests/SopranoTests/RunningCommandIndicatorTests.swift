@@ -46,22 +46,22 @@ struct RunningCommandIndicatorTests {
         runningTabIds = [serverTabId]
         splitTree.sampleRunningCommands()
         #expect(manager.runningCommandTargets == [server])
-        #expect(paneBadgeTexts(in: sidebar) == ["RUNNING · TAB 1", "TAB 2"])
+        #expect(paneRowTexts(in: sidebar) == ["RUNNING · Tab 1", "Tab 2"])
         #expect(commandBadge(in: serverLayoutTab) != nil)
         #expect(serverLayoutTab.toolTip?.hasSuffix("1 command running") == true)
         #expect(headerTexts(paneId: serverPaneId, manager: manager).contains("RUNNING"))
         #expect(!headerTexts(paneId: otherPaneId, manager: manager).contains("RUNNING"))
 
         manager.attachAgentIfNeeded(paneId: serverPaneId, tabId: serverTabId, profileId: "codex")
-        #expect(paneBadgeTexts(in: sidebar) == ["STARTING · TAB 1", "TAB 2"])
+        #expect(paneRowTexts(in: sidebar) == ["STARTING · Tab 1", "Tab 2"])
         #expect(commandBadge(in: serverLayoutTab) == nil)
 
         manager.agentProcessDidExit(target: server)
-        #expect(paneBadgeTexts(in: sidebar) == ["RUNNING · TAB 1", "TAB 2"])
+        #expect(paneRowTexts(in: sidebar) == ["RUNNING · Tab 1", "Tab 2"])
 
         runningTabIds = []
         splitTree.sampleRunningCommands()
-        #expect(paneBadgeTexts(in: sidebar) == ["TAB 1", "TAB 2"])
+        #expect(paneRowTexts(in: sidebar) == ["Tab 1", "Tab 2"])
         #expect(commandBadge(in: serverLayoutTab) == nil)
 
         runningTabIds = [otherTabId]
@@ -105,10 +105,23 @@ struct RunningCommandIndicatorTests {
         return sidebar
     }
 
-    private func paneBadgeTexts(in sidebar: NSView) -> [String] {
-        descendants(of: sidebar, as: NSTextField.self)
-            .filter { $0.identifier?.rawValue == "pane-layout-tab-badge" }
-            .map(\.stringValue)
+    /// Each pane row's visible status word and its meta line without the
+    /// branch, which depends on the machine's working directory.
+    private func paneRowTexts(in sidebar: NSView) -> [String] {
+        descendants(of: sidebar, as: NSView.self)
+            .filter { $0.identifier?.rawValue.hasPrefix("sidebar-pane-") == true }
+            .map { row in
+                let labels = descendants(of: row, as: NSTextField.self)
+                let status = labels.filter {
+                    $0.identifier?.rawValue == "pane-status-label" && !$0.isHidden
+                }.map(\.stringValue)
+                let meta = labels.filter {
+                    $0.identifier?.rawValue == "pane-row-meta" && !$0.isHidden
+                }.flatMap { $0.stringValue.components(separatedBy: " · ") }
+                return (status + meta.filter { !$0.hasPrefix("⎇") })
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " · ")
+            }
     }
 
     private func layoutTabs(in view: NSView) -> [NSButton] {

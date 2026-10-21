@@ -61,6 +61,9 @@ struct SourceControlViewTests {
             defer { window.contentView = nil }
             let inlineText = try #require(textViews(in: inline).first)
             try await waitUntil { inlineText.string == "one\ntwo\nthree\n" }
+            // The change being read carries the pencil tick on its first row.
+            let gutter = try #require(inlineText.enclosingScrollView?.verticalRulerView as? DiffGutterRuler)
+            #expect(gutter.currentChangeRow == 1)
 
             // The file changes on disk: the open diff reloads.
             try Data("one\nthree\nfour\n".utf8).write(to: fileURL)

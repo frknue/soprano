@@ -237,8 +237,8 @@ final class FileExplorerOutlineView: NSOutlineView {
 
 // MARK: - Row View
 
-/// Square, theme-colored selection, hover and drop-target backgrounds, with
-/// the accent rail Soprano marks selected rows with.
+/// Folio list rows: a hover pill under the pointer, the selection pill with
+/// the pencil tick while the tree has the keyboard, the muted pill otherwise.
 final class FileExplorerRowView: NSTableRowView {
     var colors: ThemeColors? {
         didSet { needsDisplay = true }
@@ -250,33 +250,43 @@ final class FileExplorerRowView: NSTableRowView {
         }
     }
 
+    /// The pill style this row draws in its current state.
+    var pillStyle: ChromeSelectionPill.Style {
+        if isSelected {
+            return isEmphasized ? .selected : .selectedUnfocused
+        }
+        return isHovered || isTargetForDropOperation ? .hover : .none
+    }
+
     override func drawBackground(in dirtyRect: NSRect) {
-        guard let colors else { return }
+        guard let colors, !isSelected else { return }
+        ChromeSelectionPill.draw(pillStyle, in: bounds, colors: colors)
         if isTargetForDropOperation {
-            colors.borderSubtle.setFill()
-            bounds.fill()
-        } else if isHovered, !isSelected {
-            colors.bgOverlay.setFill()
-            bounds.fill()
+            Self.strokeDropEdge(in: bounds, colors: colors)
         }
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard let colors else { return }
-        (isEmphasized ? colors.selection : colors.selectionMuted).setFill()
-        bounds.fill()
-        (isEmphasized ? colors.accent : colors.borderStrong).setFill()
-        NSRect(x: 0, y: 0, width: 2, height: bounds.height).fill()
+        ChromeSelectionPill.draw(pillStyle, in: bounds, colors: colors)
     }
 
     override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
         guard let colors else { return }
-        colors.borderSubtle.setFill()
-        bounds.fill()
-        colors.accent.setStroke()
-        let frame = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-        frame.lineWidth = Chrome.hairline
-        frame.stroke()
+        ChromeSelectionPill.draw(.hover, in: bounds, colors: colors)
+        Self.strokeDropEdge(in: bounds, colors: colors)
+    }
+
+    /// A drop target reads as a field edge around the hover pill, never accent.
+    private static func strokeDropEdge(in bounds: NSRect, colors: ThemeColors) {
+        let edge = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: Chrome.pillInset + 0.5, dy: 0.5),
+            xRadius: Chrome.Radius.control,
+            yRadius: Chrome.Radius.control
+        )
+        edge.lineWidth = Chrome.hairline
+        colors.fieldFocusEdge.setStroke()
+        edge.stroke()
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
@@ -284,7 +294,8 @@ final class FileExplorerRowView: NSTableRowView {
 
 // MARK: - Cell View
 
-/// Chevron, type icon, name, and the git letter or ignored mark on the right.
+/// Chevron, type icon, name, and the bare git letter or ignored mark on the
+/// right.
 final class FileExplorerCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("file-explorer-cell")
 
@@ -312,7 +323,7 @@ final class FileExplorerCellView: NSTableCellView {
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)
 
-        nameField.font = ChromeFont.sans(size: 11)
+        nameField.font = ChromeFont.label
         nameField.lineBreakMode = .byTruncatingMiddle
         nameField.cell?.truncatesLastVisibleLine = true
         nameField.focusRingType = .none
@@ -327,7 +338,9 @@ final class FileExplorerCellView: NSTableCellView {
         addSubview(statusLabel)
 
         NSLayoutConstraint.activate([
-            chevronView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            // Content starts 12 pt in (pill inset 4 + row padding 8), clear of
+            // the pencil tick.
+            chevronView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.contentInset),
             chevronView.centerYAnchor.constraint(equalTo: centerYAnchor),
             chevronView.widthAnchor.constraint(equalToConstant: 12),
             chevronView.heightAnchor.constraint(equalToConstant: 12),
@@ -347,15 +360,21 @@ final class FileExplorerCellView: NSTableCellView {
                 constant: -6
             ),
 
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 16),
 
-            ignoredView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            ignoredView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset - 2),
             ignoredView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            ignoredView.widthAnchor.constraint(equalToConstant: 11),
-            ignoredView.heightAnchor.constraint(equalToConstant: 11),
+            ignoredView.widthAnchor.constraint(equalToConstant: 12),
+            ignoredView.heightAnchor.constraint(equalToConstant: 12),
         ])
     }
+
+    /// Leading content inset: the 4 pt pill inset plus 8 pt row padding.
+    static let contentInset: CGFloat = Chrome.pillInset + Chrome.Space.s8
+    /// Trailing inset: the 4 pt pill inset plus 8 pt row padding.
+    static let trailingInset: CGFloat = Chrome.pillInset + Chrome.Space.s8
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
@@ -371,7 +390,7 @@ final class FileExplorerCellView: NSTableCellView {
     ) {
         let muted = colors.textMuted
         if node.isDirectory, node.placeholder == nil {
-            chevronView.image = Self.symbol(isExpanded ? "chevron.down" : "chevron.right", size: 9, weight: .bold)
+            chevronView.image = Self.symbol(isExpanded ? "chevron.down" : "chevron.right", size: 9, weight: .semibold)
             chevronView.contentTintColor = muted
         } else {
             chevronView.image = nil
@@ -384,7 +403,7 @@ final class FileExplorerCellView: NSTableCellView {
         } else {
             FileTypeIcon.symbolName(forFileNamed: node.name)
         }
-        iconView.image = Self.symbol(iconName, size: 11, weight: .regular)
+        iconView.image = Self.symbol(iconName, size: 12, weight: .regular)
         iconView.contentTintColor = muted
         iconView.isHidden = node.isLoading && node.children == nil
         if iconView.isHidden {
@@ -393,19 +412,11 @@ final class FileExplorerCellView: NSTableCellView {
             spinner.stopAnimation(nil)
         }
 
-        let nameColor: NSColor = if let status {
-            Self.color(for: status, colors: colors)
-        } else if isIgnored {
-            colors.gray
-        } else {
-            colors.textPrimary
-        }
-        var font = ChromeFont.sans(size: 11)
-        if isIgnored, status == nil {
-            font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-        }
+        // Ink names; color lives on the bare change letter. Ignored files are
+        // gray.
+        let nameColor: NSColor = isIgnored && status == nil ? colors.gray : colors.textPrimary
         if node.placeholder == nil, !nameField.isEditable {
-            nameField.font = font
+            nameField.font = ChromeFont.label
             nameField.textColor = nameColor
             nameField.stringValue = node.name
         }
@@ -413,11 +424,9 @@ final class FileExplorerCellView: NSTableCellView {
 
         if let status {
             statusLabel.isHidden = false
-            statusLabel.attributedStringValue = ChromeText.attributed(
+            statusLabel.attributedStringValue = Self.kindLetter(
                 status.letter,
-                font: ChromeFont.label,
-                color: nameColor,
-                alignment: .right
+                color: Self.color(for: status, colors: colors)
             )
         } else {
             statusLabel.isHidden = true
@@ -425,24 +434,37 @@ final class FileExplorerCellView: NSTableCellView {
         }
         ignoredView.isHidden = !(isIgnored && status == nil)
         if !ignoredView.isHidden {
-            ignoredView.image = Self.symbol("circle.slash", size: 9, weight: .regular)
+            ignoredView.image = Self.symbol("circle.slash", size: 10, weight: .regular)
             ignoredView.contentTintColor = colors.gray
         }
     }
 
-    /// Turns the name into an inline text field framed in the accent color.
+    /// A bare change letter (`.kind`): SF Mono 11 Semibold, centered in 16 pt,
+    /// in its change color.
+    static func kindLetter(_ letter: String, color: NSColor) -> NSAttributedString {
+        ChromeText.attributed(
+            letter,
+            font: ChromeFont.monospaced(size: 11, weight: .semibold),
+            color: color,
+            alignment: .center
+        )
+    }
+
+    /// Turns the name into an inline Folio field: raised fill, a
+    /// `fieldFocusEdge` edge and the accent caret (styled once editing starts).
     func beginEditing(colors: ThemeColors, delegate: NSTextFieldDelegate) {
         nameField.isEditable = true
         nameField.isSelectable = true
         nameField.isBordered = false
         nameField.drawsBackground = true
-        nameField.backgroundColor = colors.bgRaised
+        nameField.backgroundColor = colors.raised
         nameField.textColor = colors.textPrimary
-        nameField.font = ChromeFont.sans(size: 11)
+        nameField.font = ChromeFont.label
         nameField.delegate = delegate
         nameField.wantsLayer = true
+        nameField.layer?.cornerRadius = Chrome.Radius.cap
         nameField.layer?.borderWidth = Chrome.hairline
-        nameField.layer?.borderColor = colors.accent.cgColor
+        nameField.layer?.borderColor = colors.fieldFocusEdge.cgColor
     }
 
     func endEditing() {
@@ -465,5 +487,117 @@ final class FileExplorerCellView: NSTableCellView {
     static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size, weight: weight))
+    }
+}
+
+// MARK: - Field
+
+/// A text field that reports when it gains or loses the keyboard, so its
+/// `ChromeFieldView` can switch to the focused edge.
+final class FocusReportingTextField: NSTextField {
+    var onFocusChange: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became {
+            onFocusChange?(true)
+        }
+        return became
+    }
+
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        onFocusChange?(false)
+    }
+}
+
+// MARK: - Empty State
+
+/// Sidebar empty and error states: the first line in the serif empty-state
+/// voice (New York italic 17, muted), any further lines as muted meta.
+enum SidebarEmptyState {
+    static func text(_ message: String, colors: ThemeColors) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.paragraphSpacing = 4
+        let lines = message.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let text = NSMutableAttributedString(
+            string: String(lines.first ?? ""),
+            attributes: [.font: ChromeFont.empty, .foregroundColor: colors.textMuted, .paragraphStyle: paragraph]
+        )
+        if lines.count > 1 {
+            text.append(NSAttributedString(
+                string: "\n" + lines[1],
+                attributes: [.font: ChromeFont.meta, .foregroundColor: colors.textMuted, .paragraphStyle: paragraph]
+            ))
+        }
+        return text
+    }
+}
+
+// MARK: - Toast
+
+/// The sidebars' failure toast (`.toast.is-error`): a raised e2 surface with
+/// a 10 pt radius and a `borderSubtle` edge, a danger diamond, and the message
+/// as the 13 pt Semibold title in danger.
+final class SidebarToastView: NSView {
+    let messageLabel = NSTextField(wrappingLabelWithString: "")
+    private let mark = ChromeStatusMark(shape: .diamond, size: Chrome.statusMark)
+    private var colors: ThemeColors
+
+    var message: String {
+        get { messageLabel.stringValue }
+        set { applyMessage(newValue) }
+    }
+
+    init(colors: ThemeColors) {
+        self.colors = colors
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.isSelectable = false
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(mark)
+        addSubview(messageLabel)
+        NSLayoutConstraint.activate([
+            mark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            mark.widthAnchor.constraint(equalToConstant: Chrome.statusMark),
+            mark.heightAnchor.constraint(equalToConstant: Chrome.statusMark),
+            // Centered on the first 18 pt line.
+            mark.centerYAnchor.constraint(equalTo: messageLabel.topAnchor, constant: 9),
+            messageLabel.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 10),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            messageLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            messageLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+        ])
+        apply(colors: colors)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(colors: ThemeColors) {
+        self.colors = colors
+        guard let layer else { return }
+        ChromeSurface.applyFloating(to: layer, colors: colors, radius: Chrome.Radius.popover, shadow: colors.shadowE2)
+        layer.borderColor = colors.borderSubtle.cgColor
+        mark.color = colors.danger
+        applyMessage(messageLabel.stringValue)
+    }
+
+    private func applyMessage(_ text: String) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 18
+        paragraph.maximumLineHeight = 18
+        messageLabel.attributedStringValue = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: ChromeFont.sans(size: 13, weight: .semibold),
+                .foregroundColor: colors.danger,
+                .paragraphStyle: paragraph,
+            ]
+        )
     }
 }

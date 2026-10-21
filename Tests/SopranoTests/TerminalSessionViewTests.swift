@@ -56,11 +56,11 @@ struct TerminalSessionViewTests {
         let label = try #require(descendants(in: statusBar).compactMap { $0 as? NSTextField }.first {
             $0.identifier?.rawValue == "status-location"
         })
-        #expect(label.stringValue.hasPrefix("Work ▸ Editor ▸ "))
+        #expect(label.stringValue.hasPrefix("Work › Editor › "))
         _ = try #require(manager.createSession(name: "Personal"))
-        #expect(label.stringValue.hasPrefix("Personal ▸ "))
+        #expect(label.stringValue.hasPrefix("Personal › "))
         manager.activateSession(firstSessionId)
-        #expect(label.stringValue.hasPrefix("Work ▸ Editor ▸ "))
+        #expect(label.stringValue.hasPrefix("Work › Editor › "))
     }
 
     private func descendants(in view: NSView) -> [NSView] {

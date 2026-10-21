@@ -118,7 +118,7 @@ enum AgentOutputHighlighter {
             output.addAttributes(
                 [
                     .font: semibold,
-                    .foregroundColor: theme.colors.accentStrong,
+                    .foregroundColor: theme.colors.textPrimary,
                 ],
                 range: lineRange
             )
@@ -155,7 +155,7 @@ enum AgentOutputHighlighter {
                 output: output,
                 attributes: [
                     .font: semibold,
-                    .foregroundColor: theme.colors.accentStrong,
+                    .foregroundColor: theme.colors.textPrimary,
                 ]
             )
             apply(
@@ -165,7 +165,7 @@ enum AgentOutputHighlighter {
                 output: output,
                 attributes: [
                     .font: semibold,
-                    .foregroundColor: theme.colors.accent,
+                    .foregroundColor: theme.colors.textMuted,
                 ]
             )
             apply(
@@ -298,7 +298,7 @@ enum AgentOutputHighlighter {
         guard languageRange.location != NSNotFound else { return }
         output.addAttribute(
             .foregroundColor,
-            value: theme.colors.accent,
+            value: theme.colors.textPrimary,
             range: offset(languageRange, by: lineRange.location)
         )
     }
@@ -335,9 +335,13 @@ enum AgentOutputHighlighter {
             return
         }
 
-        let semibold = NSFont.monospacedSystemFont(
-            ofSize: font.pointSize,
-            weight: .semibold
+        let colors = theme.colors
+        apply(
+            Patterns.typeName,
+            to: line,
+            lineRange: lineRange,
+            output: output,
+            attributes: [.foregroundColor: colors.syntaxType]
         )
         if let keywordExpression = Patterns.keywordExpressions[language]
             ?? Patterns.keywordExpressions["generic"]
@@ -348,32 +352,38 @@ enum AgentOutputHighlighter {
                 lineRange: lineRange,
                 output: output,
                 attributes: [
-                    .font: semibold,
-                    .foregroundColor: theme.colors.accentStrong,
+                    .font: NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .bold),
+                    .foregroundColor: colors.syntaxKeyword,
                 ]
             )
         }
-
+        apply(
+            Patterns.attribute,
+            to: line,
+            lineRange: lineRange,
+            output: output,
+            attributes: [.foregroundColor: colors.syntaxAttribute]
+        )
         apply(
             Patterns.functionCall,
             to: line,
             lineRange: lineRange,
             output: output,
-            attributes: [.foregroundColor: theme.colors.blue]
+            attributes: [.foregroundColor: colors.syntaxFunction]
         )
         apply(
             Patterns.number,
             to: line,
             lineRange: lineRange,
             output: output,
-            attributes: [.foregroundColor: theme.colors.yellow]
+            attributes: [.foregroundColor: colors.syntaxNumber]
         )
         apply(
             Patterns.stringLiteral,
             to: line,
             lineRange: lineRange,
             output: output,
-            attributes: [.foregroundColor: theme.colors.success]
+            attributes: [.foregroundColor: colors.syntaxString]
         )
         if language == "json" {
             apply(
@@ -381,7 +391,7 @@ enum AgentOutputHighlighter {
                 to: line,
                 lineRange: lineRange,
                 output: output,
-                attributes: [.foregroundColor: theme.colors.blue]
+                attributes: [.foregroundColor: colors.syntaxFunction]
             )
         }
 
@@ -391,7 +401,7 @@ enum AgentOutputHighlighter {
                 to: line,
                 lineRange: lineRange,
                 output: output,
-                attributes: [.foregroundColor: theme.colors.textMuted]
+                attributes: [.foregroundColor: colors.syntaxComment]
             )
         }
     }
@@ -465,6 +475,10 @@ enum AgentOutputHighlighter {
         static let functionCall = expression(
             #"\b[A-Za-z_][A-Za-z0-9_]*(?=\s*\()"#
         )
+        /// Capitalized identifiers: types and initializers.
+        static let typeName = expression(#"\b[A-Z][A-Za-z0-9_]*\b"#)
+        /// Swift attributes, decorators and annotations.
+        static let attribute = expression(#"(?<![A-Za-z0-9_])@[A-Za-z_][A-Za-z0-9_]*"#)
         static let number = expression(
             #"\b(?:0x[0-9A-Fa-f]+|\d+(?:\.\d+)?)\b"#
         )

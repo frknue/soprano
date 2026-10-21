@@ -332,6 +332,11 @@ final class TerminalSurfaceView: NSView {
     private var lastSurfaceFocus: Bool?
     // Replaces only the Ghostty focus boundary in non-launching view fixtures.
     var surfaceFocusHandler: ((Bool) -> Void)?
+    /// The theme's caret and text-selection colors for the copy-mode
+    /// cursor. SplitTreeView sets them at creation and on theme changes.
+    var chromeColors: ThemeColors? {
+        didSet { updateCopyModeCursor() }
+    }
     private let surfaceDestructionGate = SurfaceDestructionGate()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
@@ -1073,12 +1078,15 @@ final class TerminalSurfaceView: NSView {
             width: metrics.cellWidth,
             height: metrics.cellHeight
         )
-        let color = NSColor.controlAccentColor
+        // Folio's one pencil mark: the caret edge over a text-selection fill.
+        // Theme-less fixtures fall back to the system's equivalents.
+        let edge = chromeColors?.caret ?? .textColor
+        let fill = chromeColors?.textSelection ?? .selectedTextBackgroundColor
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         cursorLayer.frame = frame
-        cursorLayer.backgroundColor = color.withAlphaComponent(0.24).cgColor
-        cursorLayer.borderColor = color.withAlphaComponent(0.95).cgColor
+        cursorLayer.backgroundColor = fill.cgColor
+        cursorLayer.borderColor = edge.cgColor
         CATransaction.commit()
     }
 

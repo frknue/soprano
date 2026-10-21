@@ -1043,11 +1043,17 @@ final class ChromeKeycapView: NSView {
         shape.lineWidth = Chrome.hairline
         shape.stroke()
 
+        // Center the cap height, not the line box: the box carries descender
+        // space, so a centered box draws ⌘, letters and digits high.
         let string = ChromeText.attributed(legend, font: font, color: text, lineBreakMode: .byClipping)
         let size = string.size()
+        let flipped = NSGraphicsContext.current?.isFlipped ?? false
+        let originY = flipped
+            ? rect.midY + font.capHeight / 2 - font.ascender
+            : rect.midY - font.capHeight / 2 + font.descender
         string.draw(at: NSPoint(
             x: rect.minX + floor((rect.width - size.width) / 2),
-            y: rect.minY + floor((rect.height - size.height) / 2)
+            y: round(originY)
         ))
     }
 

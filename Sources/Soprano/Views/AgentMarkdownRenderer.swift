@@ -6,10 +6,12 @@ import Markdown
 /// The timeline shows replies in a native text view, so Markdown becomes
 /// attributes instead of HTML. Raw HTML stays visible as source text: agent
 /// output echoes untrusted repository content and is never interpreted.
-/// Main-actor isolated because syntax colors come from `EditorPaneView`.
+/// Prose is SF Pro at `fontSize`; code, tables and inline code are SF Mono one
+/// point smaller (never below 11). Colors come from the theme tokens: ink
+/// text, the editor's syntax colors for code, blue links, no accent.
 @MainActor
 enum AgentMarkdownRenderer {
-    static func render(_ markdown: String, colors: ThemeColors, fontSize: CGFloat = 11) -> NSAttributedString {
+    static func render(_ markdown: String, colors: ThemeColors, fontSize: CGFloat = 13) -> NSAttributedString {
         let renderer = Renderer(colors: colors, fontSize: fontSize)
         let root = Context(
             indent: 0,
@@ -60,6 +62,8 @@ private struct InlineStyle {
     var bold = false
     var oblique = false
     var strikethrough = false
+    /// SF Mono: code, tables and symbol links.
+    var mono = false
     var background: NSColor?
     var link: Any?
 }
@@ -76,6 +80,9 @@ private struct Renderer {
         self.colors = colors
         self.fontSize = fontSize
     }
+
+    /// SF Mono runs one point smaller than the prose around them.
+    private var codeSize: CGFloat { max(11, fontSize - 1) }
 
     // MARK: Blocks
 
@@ -245,7 +252,8 @@ private struct Renderer {
         let language = languageName.flatMap { CodeLanguage.named($0) }
 
         let start = output.length
-        let font = ChromeFont.monospaced(size: fontSize)
+        let font = ChromeFont.monospaced(size: codeSize)
+        let emphasized = ChromeFont.monospaced(size: codeSize, weight: .semibold)
         output.append(NSAttributedString(
             string: code,
             attributes: [.font: font, .foregroundColor: colors.textPrimary]
@@ -254,21 +262,19 @@ private struct Renderer {
             let length = (code as NSString).length
             for token in CodeSyntaxHighlighter.tokens(in: code, language: language)
             where NSMaxRange(token.range) <= length {
-                output.addAttribute(
-                    .foregroundColor,
-                    value: EditorPaneView.color(for: token.kind, in: colors),
-                    range: NSRange(location: start + token.range.location, length: token.range.length)
-                )
+                let range = NSRange(location: start + token.range.location, length: token.range.length)
+                output.addAttribute(.foregroundColor, value: token.kind.color(in: colors), range: range)
+                if token.kind.isEmphasized {
+                    output.addAttribute(.font, value: emphasized, range: range)
+                }
             }
         }
         output.append(NSAttributedString(string: "\n", attributes: [.font: font]))
 
-        let block = NSTextBlock()
+        let block = RoundedTextBlock(radius: Chrome.Radius.control, edge: colors.borderSubtle)
         block.backgroundColor = colors.bgRaised
-        // Without an explicit width TextKit sizes the block to its narrowest
-        // content, which stacks a long code line one character per line.
-        block.setValue(100, type: .percentageValueType, for: .width)
         block.setWidth(8, type: .absoluteValueType, for: .padding)
+        block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
         block.setWidth(context.indent, type: .absoluteValueType, for: .margin, edge: .minX)
         block.setWidth(context.spacing, type: .absoluteValueType, for: .margin, edge: .maxY)
         applyParagraphStyle(
@@ -285,7 +291,9 @@ private struct Renderer {
     private func renderTable(_ table: Table, in context: Context) {
         var headerStyle = baseStyle(context)
         headerStyle.bold = true
-        let bodyStyle = baseStyle(context)
+        headerStyle.mono = true
+        var bodyStyle = baseStyle(context)
+        bodyStyle.mono = true
         var mutedStyle = bodyStyle
         mutedStyle.color = colors.textMuted
 
@@ -431,7 +439,8 @@ private struct Renderer {
             appendInlines(of: strikethrough, style: inner, to: target)
         case let code as InlineCode:
             var inner = style
-            inner.color = colors.accentStrong
+            inner.mono = true
+            inner.color = colors.textPrimary
             inner.background = colors.bgRaised
             target.append(NSAttributedString(string: code.code, attributes: attributes(inner)))
         case let link as Link:
@@ -452,7 +461,8 @@ private struct Renderer {
             target.append(NSAttributedString(string: "\n", attributes: attributes(style)))
         case let symbol as SymbolLink:
             var inner = style
-            inner.color = colors.accentStrong
+            inner.mono = true
+            inner.color = colors.textPrimary
             inner.background = colors.bgRaised
             target.append(NSAttributedString(string: symbol.destination ?? "", attributes: attributes(inner)))
         default:
@@ -471,8 +481,11 @@ private struct Renderer {
     }
 
     private func attributes(_ style: InlineStyle) -> [NSAttributedString.Key: Any] {
+        let weight: NSFont.Weight = style.bold ? .bold : .regular
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: ChromeFont.monospaced(size: style.size, weight: style.bold ? .bold : .regular),
+            .font: style.mono
+                ? ChromeFont.monospaced(size: max(11, style.size - 1), weight: weight)
+                : ChromeFont.sans(size: style.size, weight: weight),
             .foregroundColor: style.color,
         ]
         if style.oblique {

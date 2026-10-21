@@ -33,17 +33,16 @@ final class FileExplorerView: NSView {
     private var refreshButton: ChromeIconButton!
     private var moreButton: ChromeIconButton!
     private let toolbarRule = ChromeRuleView(axis: .horizontal)
-    private let filterContainer = NSView()
+    private let filterContainer: ChromeFieldView
     private let filterIcon = NSImageView()
-    private let filterField = NSTextField(string: "")
+    private let filterField = FocusReportingTextField(string: "")
     private var clearFilterButton: ChromeIconButton!
-    private let filterRule = ChromeRuleView(axis: .horizontal)
     private let scrollView = NSScrollView()
     let outlineView = FileExplorerOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let statusSpinner = NSProgressIndicator()
     private var retryButton: ChromeButton!
-    private let toastLabel = NSTextField(wrappingLabelWithString: "")
+    private let toast: SidebarToastView
     private var toastTask: Task<Void, Never>?
 
     // MARK: State
@@ -111,6 +110,8 @@ final class FileExplorerView: NSView {
         self.defaults = defaults
         showsIgnoredFiles = defaults.object(forKey: Self.showIgnoredKey) as? Bool ?? true
         dotfileHiddenRoots = Set(defaults.stringArray(forKey: Self.hiddenDotfileRootsKey) ?? [])
+        filterContainer = ChromeFieldView(theme: themeManager.currentTheme)
+        toast = SidebarToastView(colors: themeManager.currentTheme.colors)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
@@ -798,7 +799,7 @@ final class FileExplorerView: NSView {
 
     private func updateToolbar() {
         let title = rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Explorer"
-        titleLabel.setChromeText(title, color: colors.textPrimary)
+        titleLabel.setChromeText(title, font: ChromeFont.labelStrong, color: colors.textPrimary)
         titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         // Like Orca, Collapse All does nothing while the filter shows results.
         collapseAllButton.isEnabled = !isFiltering && !expandedPaths.isEmpty
@@ -829,7 +830,7 @@ final class FileExplorerView: NSView {
             }
         }
         statusLabel.isHidden = message == nil
-        statusLabel.setChromeText(message ?? "", color: colors.textMuted)
+        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "", colors: colors)
         retryButton.isHidden = !showsRetry
         if showsSpinner {
             statusSpinner.startAnimation(nil)
@@ -839,13 +840,13 @@ final class FileExplorerView: NSView {
     }
 
     private func showToast(_ message: String) {
-        toastLabel.stringValue = message
-        toastLabel.isHidden = false
+        toast.message = message
+        toast.isHidden = false
         toastTask?.cancel()
         toastTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
-            self?.toastLabel.isHidden = true
+            self?.toast.isHidden = true
         }
     }
 
@@ -1144,6 +1145,7 @@ final class FileExplorerView: NSView {
         cell.beginEditing(colors: colors, delegate: self)
         cell.nameField.stringValue = node.placeholder == nil ? node.name : ""
         window?.makeFirstResponder(cell.nameField)
+        ChromeFieldView.styleEditor(of: cell.nameField, colors: colors)
         if node.placeholder == nil {
             cell.nameField.currentEditor()?.selectedRange = FileExplorerNaming.stemRange(of: node.name)
         }
@@ -1249,23 +1251,24 @@ final class FileExplorerView: NSView {
         }
         addSubview(toolbarRule)
 
-        filterContainer.wantsLayer = true
-        filterContainer.layer?.borderWidth = Chrome.hairline
-        filterContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(filterContainer)
 
-        filterIcon.image = FileExplorerCellView.symbol("line.3.horizontal.decrease", size: 11, weight: .regular)
+        filterIcon.image = FileExplorerCellView.symbol("magnifyingglass", size: 12, weight: .regular)
         filterIcon.translatesAutoresizingMaskIntoConstraints = false
         filterContainer.addSubview(filterIcon)
 
         filterField.placeholderString = "Find files"
-        filterField.isBordered = false
-        filterField.drawsBackground = false
-        filterField.focusRingType = .none
-        filterField.font = ChromeFont.sans(size: 11)
+        ChromeFieldView.styleEmbedded(filterField, colors: colors)
         filterField.cell?.isScrollable = true
         filterField.cell?.wraps = false
         filterField.delegate = self
+        filterField.onFocusChange = { [weak self] isFocused in
+            guard let self else { return }
+            filterContainer.isFocused = isFocused
+            if isFocused {
+                ChromeFieldView.styleEditor(of: filterField, colors: colors)
+            }
+        }
         filterField.setAccessibilityLabel("Find files")
         filterField.translatesAutoresizingMaskIntoConstraints = false
         filterContainer.addSubview(filterField)
@@ -1280,7 +1283,6 @@ final class FileExplorerView: NSView {
         )
         clearFilterButton.isHidden = true
         filterContainer.addSubview(clearFilterButton)
-        addSubview(filterRule)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         column.resizingMask = .autoresizingMask
@@ -1343,90 +1345,80 @@ final class FileExplorerView: NSView {
         retryButton.isHidden = true
         addSubview(retryButton)
 
-        toastLabel.font = ChromeFont.sans(size: 11)
-        toastLabel.isHidden = true
-        toastLabel.wantsLayer = true
-        toastLabel.drawsBackground = true
-        toastLabel.isBordered = false
-        toastLabel.layer?.borderWidth = Chrome.hairline
-        toastLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(toastLabel)
+        toast.isHidden = true
+        addSubview(toast)
 
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: collapseAllButton.leadingAnchor, constant: -6),
 
-            moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             moreButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             refreshButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -2),
             refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             collapseAllButton.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -2),
             collapseAllButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
-            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
+            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight - Chrome.hairline),
             toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
-            filterContainer.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 6),
+            // The filter sits on the panel with space around it, no rule below.
+            filterContainer.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 8),
             filterContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             filterContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            filterContainer.heightAnchor.constraint(equalToConstant: Chrome.controlHeight + 2),
+            filterContainer.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
 
             filterIcon.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor, constant: 8),
             filterIcon.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
-            filterIcon.widthAnchor.constraint(equalToConstant: 12),
+            filterIcon.widthAnchor.constraint(equalToConstant: 13),
             filterField.leadingAnchor.constraint(equalTo: filterIcon.trailingAnchor, constant: 6),
             filterField.trailingAnchor.constraint(equalTo: clearFilterButton.leadingAnchor, constant: -2),
             filterField.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
             clearFilterButton.trailingAnchor.constraint(equalTo: filterContainer.trailingAnchor, constant: -4),
             clearFilterButton.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
 
-            filterRule.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 6),
-            filterRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            filterRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            filterRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            scrollView.topAnchor.constraint(equalTo: filterRule.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 4),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            statusLabel.topAnchor.constraint(equalTo: filterRule.bottomAnchor, constant: 24),
+            statusLabel.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 24),
             statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             statusSpinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            statusSpinner.topAnchor.constraint(equalTo: filterRule.bottomAnchor, constant: 24),
+            statusSpinner.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 24),
             retryButton.centerXAnchor.constraint(equalTo: centerXAnchor),
             retryButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 10),
 
-            toastLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            toastLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            toastLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            toast.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            toast.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            toast.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
         ])
     }
 
     func applyTheme() {
         let colors = colors
+        let theme = themeManager.currentTheme
         layer?.backgroundColor = colors.bgPanel.cgColor
         for button in [collapseAllButton, refreshButton, moreButton, clearFilterButton] {
-            button?.apply(theme: themeManager.currentTheme)
+            button?.apply(theme: theme)
         }
         toolbarRule.color = colors.borderSubtle
-        filterRule.color = colors.borderSubtle
-        filterContainer.layer?.backgroundColor = colors.bgRaised.cgColor
-        filterContainer.layer?.borderColor = colors.borderStrong.cgColor
+        filterContainer.apply(theme: theme)
         filterIcon.contentTintColor = colors.textMuted
-        filterField.textColor = colors.textPrimary
+        ChromeFieldView.styleEmbedded(filterField, colors: colors)
         filterField.placeholderAttributedString = NSAttributedString(
             string: "Find files",
-            attributes: [.foregroundColor: colors.textMuted, .font: ChromeFont.sans(size: 11)]
+            attributes: [.foregroundColor: colors.textMuted, .font: ChromeFont.label]
         )
-        retryButton.apply(theme: themeManager.currentTheme)
-        toastLabel.backgroundColor = colors.bgRaised
-        toastLabel.textColor = colors.textPrimary
-        toastLabel.layer?.borderColor = colors.danger.cgColor
+        if filterContainer.isFocused {
+            ChromeFieldView.styleEditor(of: filterField, colors: colors)
+        }
+        retryButton.apply(theme: theme)
+        toast.apply(colors: colors)
         updateToolbar()
         updateStatus()
         reconfigureVisibleRows()

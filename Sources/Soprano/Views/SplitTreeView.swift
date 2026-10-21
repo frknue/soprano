@@ -10,7 +10,7 @@ import AppKit
 ///   a full NSSplitView tree rebuild, but cached pane containers are detached and
 ///   reattached — not recreated.
 /// - **Non-topology changes** (focus, agent status, tab switch) only update styling
-///   (borders, header labels) via `updatePaneStyles()`.
+///   (attention frames, unfocused veils, headers) via `updatePaneStyles()`.
 final class SplitTreeView: NSView {
     typealias TerminalViewFactory = (TerminalTarget, TerminalConfig, Bool) -> NSView
     typealias CodexReadinessScheduler = (
@@ -623,6 +623,7 @@ final class SplitTreeView: NSView {
                 startsSurface
             )
             if let terminalView = terminalView as? TerminalSurfaceView {
+                terminalView.chromeColors = themeManager.currentTheme.colors
                 terminalView.onFocusRequested = { [weak self] in
                     self?.agentManager.focusTab(paneId: paneId, tabId: tab.id)
                 }
@@ -820,11 +821,13 @@ final class SplitTreeView: NSView {
     }
 
     func refreshTheme() {
+        let colors = themeManager.currentTheme.colors
         for view in tabContentViews.values {
             findBrowserView(in: view)?.applyTheme()
             findMarkdownView(in: view)?.applyTheme()
             findEditorView(in: view)?.applyTheme()
             findDiffView(in: view)?.applyTheme()
+            findTerminalView(in: view)?.chromeColors = colors
         }
         rebuildLayout()
     }
@@ -851,7 +854,7 @@ final class SplitTreeView: NSView {
 
         let label = NSTextField(labelWithString: text)
         label.alignment = .center
-        label.setChromeText(text, font: ChromeFont.screen, color: theme.colors.textMuted)
+        label.setChromeText(text, font: ChromeFont.empty, color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
 
@@ -871,7 +874,7 @@ final class SplitTreeView: NSView {
 
         let label = NSTextField(labelWithString: "Empty")
         label.alignment = .center
-        label.setChromeText("Empty", color: theme.colors.textMuted)
+        label.setChromeText("Empty", font: ChromeFont.empty, color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         placeholder.addSubview(label)
 
@@ -888,13 +891,17 @@ final class SplitTreeView: NSView {
 
 /// A cached container for a single pane. Holds the header and content area.
 /// This view survives layout rebuilds — it's detached and reattached, never destroyed.
+///
+/// Folio (direction §6): the focused pane has no frame, only its raised
+/// header and focus rule; every other pane's body sits under the unfocused
+/// veil; an attention pane gets a 2 pt `attention` frame and is never veiled.
 final class PaneContainerView: NSView {
     let paneId: String
     let agentManager: AgentManager
     let themeManager: ThemeManager
 
     private var headerView: PaneHeaderView
-    private let headerRule = ChromeRuleView(axis: .horizontal)
+    private let veilView = PaneVeilView()
     private var contentView: NSView
     private var displayedTabId: String?
 
@@ -919,7 +926,6 @@ final class PaneContainerView: NSView {
 
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = themeManager.currentTheme.panelColor.cgColor
 
         setupSubviews()
         update()
@@ -929,6 +935,9 @@ final class PaneContainerView: NSView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
+
+    /// Whether the body is under the unfocused veil (for tests and the harness).
+    var isVeiled: Bool { !veilView.isHidden }
 
     /// Replaces the content area (e.g., swapping placeholder for a terminal view).
     func setContentView(_ newContent: NSView, tabId: String?) {
@@ -941,7 +950,8 @@ final class PaneContainerView: NSView {
         contentView = newContent
         displayedTabId = tabId
         newContent.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(newContent)
+        // The veil stays above whatever body the pane shows.
+        addSubview(newContent, positioned: .below, relativeTo: veilView)
         NSLayoutConstraint.activate([
             newContent.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             newContent.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -955,25 +965,20 @@ final class PaneContainerView: NSView {
     }
 
     func update() {
-        let theme = themeManager.currentTheme
+        let colors = themeManager.currentTheme.colors
         let isActive = paneId == agentManager.activePaneId
         let needsAttention = agentManager.panes[paneId]?.tabs.contains {
             $0.agent?.needsAttention == true
         } ?? false
-        // Containers are cached for the lifetime of a pane, so the background
-        // set in init would otherwise keep the old theme's color forever.
-        layer?.backgroundColor = theme.panelColor.cgColor
-        // Inactive panes keep a hairline border so the focused pane's thicker
-        // accent frame reads as a deliberate marker instead of a stray edge.
-        layer?.borderWidth = needsAttention || isActive ? 2 : 1
-        layer?.borderColor = if needsAttention {
-            theme.colors.blue.cgColor
-        } else if isActive {
-            theme.accentColor.cgColor
-        } else {
-            theme.colors.borderStrong.cgColor
-        }
-        headerRule.color = theme.colors.borderStrong
+        // Containers are cached for the lifetime of a pane, so colors set
+        // once would otherwise keep the old theme forever.
+        layer?.backgroundColor = colors.bgBase.cgColor
+        // A layer border composites above every sublayer, so the frame
+        // stays on top of the header and a Metal terminal body alike.
+        layer?.borderWidth = needsAttention ? Chrome.attentionFrame : 0
+        layer?.borderColor = colors.attention.cgColor
+        veilView.isHidden = isActive || needsAttention
+        veilView.apply(colors: colors)
         headerView.update()
     }
 
@@ -982,9 +987,9 @@ final class PaneContainerView: NSView {
         contentView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(headerView)
         addSubview(contentView)
-        addSubview(headerRule)
+        addSubview(veilView)
 
-        let headerHeightConstraint = headerView.heightAnchor.constraint(equalToConstant: 32)
+        let headerHeightConstraint = headerView.heightAnchor.constraint(equalToConstant: PaneHeaderView.height)
         headerHeightConstraint.priority = .defaultHigh
 
         NSLayoutConstraint.activate([
@@ -993,14 +998,15 @@ final class PaneContainerView: NSView {
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
             headerHeightConstraint,
 
-            headerRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            headerRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            headerRule.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
-
             contentView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            veilView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            veilView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            veilView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            veilView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
@@ -1015,6 +1021,34 @@ final class PaneContainerView: NSView {
         window.makeFirstResponder(nil)
     }
 
+}
+
+// MARK: - PaneVeilView
+
+/// The unfocused-pane veil over a pane body. It hosts its own layer, so
+/// AppKit never resets the veil's compositing filter, and it is invisible to
+/// hit-testing, so clicks, drags and cursor rects reach the body beneath.
+private final class PaneVeilView: NSView {
+    private let veilLayer = CALayer()
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        layer = veilLayer
+        wantsLayer = true
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(colors: ThemeColors) {
+        ChromeSurface.applyVeil(to: veilLayer, colors: colors)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - ThemedSplitView
@@ -1045,11 +1079,13 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
         fatalError("init(coder:) is not supported")
     }
 
+    /// Panes are separated by one borderStrong hairline (tiled panes keep
+    /// square corners and no other edge).
     override var dividerColor: NSColor {
         themeManager.currentTheme.colors.borderStrong
     }
 
-    override var dividerThickness: CGFloat { 1 }
+    override var dividerThickness: CGFloat { Chrome.hairline }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

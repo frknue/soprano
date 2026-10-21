@@ -22,11 +22,17 @@ struct AgentMarkdownRendererTests {
         #expect(attribute(.strikethroughStyle, of: "gone", in: rendered) as? Int == NSUnderlineStyle.single.rawValue)
     }
 
-    @Test func inlineCodeKeepsItsTextInTheStrongAccentOnARaisedBackground() {
+    @Test func proseIsSystemSansAndInlineCodeIsInkMonospaceOnARaisedBackground() throws {
         let rendered = AgentMarkdownRenderer.render(#"Run `swift test` now."#, colors: colors)
 
         #expect(rendered.string == "Run swift test now.")
-        #expect(color(of: "swift test", in: rendered)?.isEqual(colors.accentStrong) == true)
+        let prose = try #require(font(of: "Run", in: rendered))
+        #expect(prose.pointSize == 13)
+        #expect(!prose.isFixedPitch)
+        let code = try #require(font(of: "swift test", in: rendered))
+        #expect(code.isFixedPitch)
+        #expect(code.pointSize == 12)
+        #expect(color(of: "swift test", in: rendered)?.isEqual(colors.textPrimary) == true)
         #expect((attribute(.backgroundColor, of: "swift test", in: rendered) as? NSColor)?.isEqual(colors.bgRaised) == true)
         #expect(color(of: "Run", in: rendered)?.isEqual(colors.textPrimary) == true)
         #expect(attribute(.backgroundColor, of: "Run", in: rendered) == nil)
@@ -47,8 +53,9 @@ struct AgentMarkdownRendererTests {
         let rendered = AgentMarkdownRenderer.render(markdown, colors: colors)
 
         #expect(rendered.string == "Before\nlet answer = 42\n  return answer\nAfter")
-        #expect(color(of: "let", in: rendered)?.isEqual(colors.accentStrong) == true)
-        #expect(color(of: "answer", in: rendered)?.isEqual(colors.accentStrong) == false)
+        #expect(color(of: "let", in: rendered)?.isEqual(colors.syntaxKeyword) == true)
+        #expect(font(of: "let", in: rendered) == ChromeFont.monospaced(size: 12, weight: .semibold))
+        #expect(font(of: "answer", in: rendered) == ChromeFont.monospaced(size: 12))
         let firstBlocks = paragraphStyle(of: "let answer", in: rendered)?.textBlocks ?? []
         let secondBlocks = paragraphStyle(of: "  return", in: rendered)?.textBlocks ?? []
         #expect(firstBlocks.count == 1)
@@ -132,6 +139,7 @@ struct AgentMarkdownRendererTests {
         #expect(header.map { NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } == true)
         let cell = font(of: "longer", in: rendered)
         #expect(cell.map { NSFontManager.shared.traits(of: $0).contains(.boldFontMask) } == false)
+        #expect(cell?.isFixedPitch == true)
     }
 
     @Test func quotesBreaksAndRulesReadAsPlainText() {

@@ -115,7 +115,7 @@ struct AgentDashboardSnapshotTests {
 
 @MainActor
 struct AgentDashboardViewTests {
-    @Test func projectRowsKeepNamesAboveAgentDetailsAndRefreshWhenTheDirectoryChanges() throws {
+    @Test func rowsShowProjectAndAgentOverTheFolderAndRefreshWhenTheDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
         let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
@@ -138,15 +138,15 @@ struct AgentDashboardViewTests {
         let fields = allSubviews(in: row).compactMap { $0 as? NSTextField }
         let project = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-project" })
         let agent = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-agent" })
-        let directory = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-directory" })
+        let activity = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-activity" })
         let status = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-status" })
+        #expect(row.frame.height == 52)
         #expect(project.stringValue == "storefront")
-        #expect(agent.stringValue == "Codex  ·  Session 1")
-        #expect(directory.stringValue == "/tmp/projects/storefront")
+        #expect(agent.stringValue == "Codex")
+        #expect(activity.stringValue == "/tmp/projects/storefront")
         #expect(status.stringValue == "NEEDS INPUT")
-        #expect(project.frame.width > agent.frame.width)
-        #expect(project.frame.minY > agent.frame.maxY)
-        #expect(agent.frame.minY > directory.frame.maxY)
+        #expect(agent.frame.minX > project.frame.maxX)
+        #expect(project.frame.minY > activity.frame.maxY)
         #expect(agent.frame.maxX < status.frame.minX)
         #expect(fields.allSatisfy { row.bounds.contains($0.frame) })
         #expect(row.toolTip?.contains("/tmp/projects/storefront") == true)
@@ -160,6 +160,7 @@ struct AgentDashboardViewTests {
             return label.stringValue
         }
         #expect(projectNames == ["payments", "payments"])
+        #expect(activity.stringValue == "/tmp/projects/payments")
         manager.renameWindow(manager.activeWindowId, to: "Payments App")
         #expect(labels(in: controller.view).filter { $0 == "Payments App" }.count == 2)
     }
@@ -223,12 +224,22 @@ struct AgentDashboardViewTests {
         let detail = allSubviews(in: contentViewController.view)
             .first { $0.identifier?.rawValue == "agent-dashboard-detail" }
         #expect(detail?.frame.width ?? 0 > 500)
-        let totalCard = allSubviews(in: contentViewController.view)
-            .first {
-                $0.identifier?.rawValue == "agent-dashboard-summary-total"
-            }
-        #expect(totalCard?.frame.width ?? 0 > 200)
-        #expect(totalCard?.frame.height == 92)
+        let dashboard = try #require(allSubviews(in: contentViewController.view)
+            .first { $0.identifier?.rawValue == "agent-dashboard" })
+        let header = try #require(allSubviews(in: dashboard).compactMap { $0 as? SettingsHeaderView }.first)
+        #expect(header.frame.height == SettingsHeaderView.height)
+        #expect(header.frame.maxY == dashboard.bounds.maxY)
+        #expect(header.displayedSubtitle == "Monitoring 1 agent across 1 window")
+        let list = try #require(allSubviews(in: dashboard).first { $0.identifier?.rawValue == "agent-dashboard-list" })
+        #expect(list.frame.width == 440)
+        // Working starts 24 pt after the rule that continues the list column's.
+        let working = try #require(allSubviews(in: dashboard).first {
+            $0.identifier?.rawValue == "agent-dashboard-summary-working"
+        })
+        #expect(working.convert(working.bounds, to: dashboard).minX == 464)
+        let colors = ThemeManager(themeId: "gruvbox-dark").currentTheme.colors
+        #expect(summaryValueColor("total", in: dashboard)?.isEqual(colors.textPrimary) == true)
+        #expect(summaryValueColor("needs-input", in: dashboard)?.isEqual(colors.textMuted) == true)
 
         let terminalScrollView = try #require(
             allSubviews(in: contentViewController.view)
@@ -362,18 +373,15 @@ struct AgentDashboardViewTests {
         let rows = allSubviews(in: contentViewController.view)
             .filter { $0.identifier?.rawValue == "agent-dashboard-row" }
         #expect(rows.count == 2)
-        #expect(rows[0].layer?.borderWidth == 2)
-        #expect(rows[1].layer?.borderWidth == 1)
+        #expect(rows.map { $0.isAccessibilitySelected() } == [true, false])
 
         let j = try #require(keyEvent(character: "j", keyCode: 38, window: window))
         #expect(dashboardRoot.performKeyEquivalent(with: j))
-        #expect(rows[0].layer?.borderWidth == 1)
-        #expect(rows[1].layer?.borderWidth == 2)
+        #expect(rows.map { $0.isAccessibilitySelected() } == [false, true])
 
         let k = try #require(keyEvent(character: "k", keyCode: 40, window: window))
         #expect(dashboardRoot.performKeyEquivalent(with: k))
-        #expect(rows[0].layer?.borderWidth == 2)
-        #expect(rows[1].layer?.borderWidth == 1)
+        #expect(rows.map { $0.isAccessibilitySelected() } == [true, false])
 
         #expect(dashboardRoot.performKeyEquivalent(with: j))
         let enter = try #require(keyEvent(character: "\r", keyCode: 36, window: window))
@@ -538,6 +546,16 @@ struct AgentDashboardViewTests {
             .compactMap { $0 as? NSTextField }
             .first { $0.identifier?.rawValue == "agent-dashboard-project" }?
             .stringValue
+    }
+
+    private func summaryValueColor(_ id: String, in view: NSView) -> NSColor? {
+        let value = allSubviews(in: view)
+            .first { $0.identifier?.rawValue == "agent-dashboard-summary-\(id)" }?
+            .subviews
+            .compactMap { $0 as? NSTextField }
+            .first { $0.identifier?.rawValue == "agent-dashboard-summary-value" }
+        guard let text = value?.attributedStringValue, text.length > 0 else { return nil }
+        return text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
     }
 
     private func labels(in view: NSView) -> [String] {

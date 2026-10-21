@@ -1,9 +1,11 @@
-import Foundation
+import AppKit
 
-// Syntax coloring for the file editor and the dashboard's fenced code. A
-// single linear scan over UTF-16 code units, so ranges map directly onto
-// NSRange and multi-line comments and strings come out right; no AppKit here,
-// the caller maps token kinds to theme colors.
+// Syntax coloring for the file editor, the diff view and the dashboard's
+// fenced code. A single linear scan over UTF-16 code units, so ranges map
+// directly onto NSRange and multi-line comments and strings come out right.
+// The scan is plain Foundation; `SyntaxTokenKind.color(in:)` at the end maps
+// kinds onto the theme's Folio syntax tokens for every caller (Soprano Git
+// vendors this file and uses the same map).
 
 enum SyntaxTokenKind: Equatable, Sendable {
     case keyword
@@ -20,6 +22,47 @@ enum SyntaxTokenKind: Equatable, Sendable {
     case heading
     case inserted
     case deleted
+}
+
+extension SyntaxTokenKind {
+    /// The Folio syntax color: keywords and tags ink, strings success,
+    /// comments muted, numbers and attributes yellow, types cyan, functions
+    /// and keys blue. Never the accent.
+    func color(in colors: ThemeColors) -> NSColor {
+        switch self {
+        case .keyword, .tag, .heading: colors.syntaxKeyword
+        case .string, .inserted: colors.syntaxString
+        case .comment: colors.syntaxComment
+        case .number: colors.syntaxNumber
+        case .attribute: colors.syntaxAttribute
+        case .type: colors.syntaxType
+        case .function, .key: colors.syntaxFunction
+        case .deleted: colors.danger
+        }
+    }
+
+    /// Keywords, tags and Markdown headings are set Semibold.
+    var isEmphasized: Bool {
+        switch self {
+        case .keyword, .tag, .heading: true
+        default: false
+        }
+    }
+
+    /// Comments are set italic.
+    var isItalic: Bool { self == .comment }
+
+    /// `base` with this kind's weight and slant (SF Mono has both).
+    func font(from base: NSFont) -> NSFont {
+        guard isEmphasized || isItalic else { return base }
+        var font = isEmphasized
+            ? NSFont.monospacedSystemFont(ofSize: base.pointSize, weight: .semibold)
+            : base
+        if isItalic {
+            font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        }
+        return font
+    }
 }
 
 struct SyntaxToken: Equatable, Sendable {

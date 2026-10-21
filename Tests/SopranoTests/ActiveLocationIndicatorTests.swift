@@ -28,20 +28,38 @@ struct ActiveLocationIndicatorTests {
         #expect(AppTheme.nord.colors.attention == AppTheme.nord.colors.yellow)
     }
 
-    @Test func railMarksOnlyTheActiveWindowsRows() throws {
+    @Test func onlyTheFocusedPaneRowCarriesTheSelectionPillAndNoRowHasARail() throws {
         let manager = AgentManager()
-        let firstWindowPanes = manager.orderedPanes(in: manager.activeWindowId).count
+        let firstWindowId = manager.activeWindowId
+        let firstPaneId = manager.activePaneId
         let secondWindowId = try #require(manager.createWindow())
         let sidebar = makeSidebar(manager: manager)
-
-        // The new window is active: its own window row plus each of its panes.
-        let activePanes = manager.orderedPanes(in: secondWindowId).count
-        #expect(visibleRailCount(in: sidebar) == activePanes + 1)
-
-        manager.activateWindow(secondWindowId)
         #expect(manager.activeWindowId == secondWindowId)
-        #expect(visibleRailCount(in: sidebar) == activePanes + 1)
-        #expect(hiddenRailCount(in: sidebar) == firstWindowPanes + 1)
+        #expect(selectedRowIdentifiers(in: sidebar) == ["sidebar-pane-\(manager.activePaneId)"])
+        #expect(descendants(of: sidebar, as: NSView.self).allSatisfy {
+            $0.identifier?.rawValue != "sidebar-selection-rail"
+        })
+
+        manager.activateWindow(firstWindowId)
+        #expect(selectedRowIdentifiers(in: sidebar) == ["sidebar-pane-\(firstPaneId)"])
+    }
+
+    @Test func holdingControlShowsAccentJumpKeycapsAndReleasingItHidesThem() throws {
+        let manager = AgentManager()
+        _ = try #require(manager.createWindow())
+        let sidebar = makeSidebar(manager: manager)
+        func visibleCaps() -> [ChromeKeycapView] {
+            descendants(of: sidebar, as: ChromeKeycapView.self).filter { !$0.isHidden }
+        }
+        #expect(visibleCaps().isEmpty)
+
+        sidebar.setControlKeyHeld(true)
+        let caps = visibleCaps()
+        #expect(caps.map(\.legend).filter { $0.hasPrefix("⌃") && !$0.hasPrefix("⌃⇧") } == ["⌃1", "⌃2"])
+        #expect(caps.allSatisfy { $0.tone == .accent })
+
+        sidebar.setControlKeyHeld(false)
+        #expect(visibleCaps().isEmpty)
     }
 
     @Test func statusBarNamesTheActiveWindowAndPane() throws {
@@ -56,7 +74,7 @@ struct ActiveLocationIndicatorTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
 
-        #expect(locationText(in: statusBar) == "Session 1 ▸ Soprano ▸ Claude")
+        #expect(locationText(in: statusBar) == "Session 1 › Soprano › Claude")
     }
 
     @Test func statusBarNamesTheActiveTabOnlyForWindowsWithSeveralTabs() throws {
@@ -66,16 +84,16 @@ struct ActiveLocationIndicatorTests {
             agentManager: manager,
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
-        #expect(locationText(in: statusBar)?.contains("· TAB") == false)
+        #expect(locationText(in: statusBar)?.contains("· Tab") == false)
 
         _ = try #require(manager.createLayoutTab())
-        #expect(locationText(in: statusBar)?.hasSuffix("· TAB 2") == true)
+        #expect(locationText(in: statusBar)?.hasSuffix("· Tab 2") == true)
 
         manager.activatePreviousLayoutTab()
-        #expect(locationText(in: statusBar)?.hasSuffix("· TAB 1") == true)
+        #expect(locationText(in: statusBar)?.hasSuffix("· Tab 1") == true)
 
         manager.closeLayoutTab(try #require(manager.windows[manager.activeWindowId]?.tabs.last?.id))
-        #expect(locationText(in: statusBar)?.contains("· TAB") == false)
+        #expect(locationText(in: statusBar)?.contains("· Tab") == false)
     }
 
     // MARK: - Helpers
@@ -92,18 +110,11 @@ struct ActiveLocationIndicatorTests {
         return sidebar
     }
 
-    private func rails(in view: NSView) -> [NSView] {
-        descendants(of: view, as: NSView.self).filter {
-            $0.identifier?.rawValue == "sidebar-selection-rail"
-        }
-    }
-
-    private func visibleRailCount(in view: NSView) -> Int {
-        rails(in: view).filter { !$0.isHidden }.count
-    }
-
-    private func hiddenRailCount(in view: NSView) -> Int {
-        rails(in: view).filter(\.isHidden).count
+    /// Rows whose background draws the focused-list pill and pencil tick.
+    private func selectedRowIdentifiers(in view: NSView) -> [String] {
+        descendants(of: view, as: ChromeRowBackgroundView.self)
+            .filter { $0.style == .selected }
+            .compactMap { $0.superview?.identifier?.rawValue }
     }
 
     private func locationText(in view: NSView) -> String? {

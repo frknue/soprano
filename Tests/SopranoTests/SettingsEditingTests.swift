@@ -12,16 +12,14 @@ struct SettingsEditingTests {
         )
 
         let fields = editableTextFields(in: controller.view)
-        let prefixField = fields.first { $0.stringValue == DefaultKeybindings.config.prefixKey }
         let timeoutField = fields.first {
             $0.stringValue == "\(DefaultKeybindings.config.prefixTimeoutMs)"
         }
         let resizeField = fields.first {
             $0.stringValue == "\(Int(DefaultKeybindings.config.resizeTickPercent))"
         }
-        let projectAddField = fields.first { $0.placeholderString == "Folder path" }
+        let projectAddField = fields.first { $0.placeholderAttributedString?.string == "Folder path" }
 
-        #expect(prefixField?.cell?.sendsActionOnEndEditing == true)
         #expect(timeoutField?.cell?.sendsActionOnEndEditing == true)
         #expect(resizeField?.cell?.sendsActionOnEndEditing == true)
         #expect(projectAddField?.cell?.sendsActionOnEndEditing == false)

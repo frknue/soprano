@@ -4,7 +4,7 @@ import AppKit
 /// with removed and added rows tinted, inline or side by side, kept current
 /// while the tab is shown.
 final class DiffPaneView: NSView {
-    static let toolbarHeight: CGFloat = 34
+    static let toolbarHeight: CGFloat = 32
     /// The layout new diff views start in; the toggle updates it.
     static let sideBySideDefaultsKey = "soprano-diff-side-by-side"
 
@@ -101,14 +101,14 @@ final class DiffPaneView: NSView {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(toolbar)
 
-        pathLabel.font = ChromeFont.monospaced(size: 11)
+        pathLabel.font = ChromeFont.monoSmall
         pathLabel.lineBreakMode = .byTruncatingMiddle
         pathLabel.stringValue = ConfigFile.abbreviatingHome(fileURL.path)
         pathLabel.toolTip = fileURL.path
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-        statsLabel.font = ChromeFont.monospaced(size: 11)
+        statsLabel.font = ChromeFont.monoSmall
         statsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statsLabel.setContentHuggingPriority(.required, for: .horizontal)
         let labels = NSStackView(views: [pathLabel, statusLabel, statsLabel])
@@ -139,7 +139,7 @@ final class DiffPaneView: NSView {
         addSubview(columnRule)
 
         messageLabel.alignment = .center
-        messageLabel.font = ChromeFont.sans(size: 12)
+        messageLabel.font = ChromeFont.empty
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(messageLabel)
 
@@ -151,11 +151,11 @@ final class DiffPaneView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
 
-            labels.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 10),
+            labels.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 12),
             labels.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            labels.trailingAnchor.constraint(lessThanOrEqualTo: previousButton.leadingAnchor, constant: -10),
+            labels.trailingAnchor.constraint(lessThanOrEqualTo: previousButton.leadingAnchor, constant: -8),
 
-            openFileButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -6),
+            openFileButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
             openFileButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             layoutButton.trailingAnchor.constraint(equalTo: openFileButton.leadingAnchor, constant: -2),
             layoutButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -228,9 +228,9 @@ final class DiffPaneView: NSView {
         let colors = themeManager.currentTheme.colors
         layer?.backgroundColor = colors.bgBase.cgColor
         toolbar.layer?.backgroundColor = colors.bgPanel.cgColor
-        toolbarRule.color = colors.borderStrong
-        columnRule.color = colors.borderStrong
-        pathLabel.textColor = colors.textMuted
+        toolbarRule.color = colors.borderSubtle
+        columnRule.color = colors.borderSubtle
+        pathLabel.textColor = colors.textPrimary
         for button in [previousButton, nextButton, layoutButton, openFileButton] {
             button?.apply(theme: themeManager.currentTheme)
         }
@@ -243,11 +243,11 @@ final class DiffPaneView: NSView {
     private func updateChrome() {
         let colors = themeManager.currentTheme.colors
         statusLabel.isHidden = !staged
-        statusLabel.setChromeText(staged ? "Staged" : "", color: colors.textMuted)
+        statusLabel.setChromeText(staged ? "Staged" : "", font: ChromeFont.meta, color: colors.textMuted)
 
         let stats = NSMutableAttributedString()
         if let rendering {
-            let font = ChromeFont.monospaced(size: 11)
+            let font = ChromeFont.monoSmall
             if rendering.linesAdded > 0 {
                 stats.append(NSAttributedString(
                     string: "+\(rendering.linesAdded)",
@@ -382,6 +382,19 @@ final class DiffPaneView: NSView {
             primary.show(rendering.inline)
             secondary.show(nil)
         }
+        updateCurrentChange()
+    }
+
+    /// The change being read is the last one starting at or above the row a
+    /// third of the way down (where navigation puts it), else the first; its
+    /// first row gets the pencil tick in each visible gutter.
+    private func updateCurrentChange() {
+        let row: Int? = primary.side.flatMap { side in
+            guard let anchor = primary.anchorRow() else { return side.changeStarts.first }
+            return side.changeStarts.last(where: { $0 <= anchor }) ?? side.changeStarts.first
+        }
+        primary.ruler.currentChangeRow = row
+        secondary.ruler.currentChangeRow = isSideBySide ? row : nil
     }
 
     /// The first change is scrolled to once the view has a height, which a
@@ -471,6 +484,9 @@ final class DiffPaneView: NSView {
         let source = isPrimary ? primary : secondary
         let other = isPrimary ? secondary : primary
         source.ruler.needsDisplay = true
+        if isPrimary {
+            updateCurrentChange()
+        }
         guard isSideBySide, !isSyncingScroll else { return }
         let otherClip = other.clipView
         guard otherClip.bounds.minY != clip.bounds.minY else { return }

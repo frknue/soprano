@@ -2,14 +2,20 @@ import AppKit
 
 /// The current session's windows, presented as a horizontal row above the terminals.
 final class WindowTabBarView: NSView {
-    static let height: CGFloat = 34
+    static let height: CGFloat = TabPillButton.rowHeight
 
     private let agentManager: AgentManager
     private let themeManager: ThemeManager
     private let observerId = "WindowTabBarView-\(UUID().uuidString)"
     private let scrollView = NSScrollView()
     private let tabContainer = NSView()
-    private let addButton = NSButton(title: "+", target: nil, action: nil)
+    private let addButton = ChromeIconButton(
+        symbolName: "plus",
+        accessibilityLabel: "New Window",
+        pointSize: 12,
+        target: nil,
+        action: nil
+    )
     private let bottomRule = ChromeRuleView(axis: .horizontal)
     private var buttons: [WindowTabButton] = []
     private var activeWindowId: String?
@@ -50,13 +56,11 @@ final class WindowTabBarView: NSView {
         addSubview(scrollView)
 
         addButton.identifier = NSUserInterfaceItemIdentifier("new-window-tab")
-        addButton.isBordered = false
         addButton.refusesFirstResponder = true
         addButton.target = self
         addButton.action = #selector(addWindow)
-        addButton.toolTip = "New Window"
-        addButton.setAccessibilityLabel("New Window")
-        addSubview(addButton)
+        addButton.translatesAutoresizingMaskIntoConstraints = true
+        tabContainer.addSubview(addButton)
 
         rightSidebarToggle.identifier = NSUserInterfaceItemIdentifier("right-sidebar-toggle")
         rightSidebarToggle.refusesFirstResponder = true
@@ -129,12 +133,7 @@ final class WindowTabBarView: NSView {
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         bottomRule.color = theme.colors.borderSubtle
         rightSidebarToggle.apply(theme: theme)
-        addButton.attributedTitle = ChromeText.attributed(
-            "+",
-            font: ChromeFont.screen,
-            color: theme.colors.textMuted,
-            alignment: .center
-        )
+        addButton.apply(theme: theme)
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
             let panes = agentManager.orderedPanes(in: terminalWindow.id)
@@ -164,28 +163,32 @@ final class WindowTabBarView: NSView {
         super.layout()
         let rule = Chrome.hairline
         let stripHeight = max(0, bounds.height - rule)
-        let toggleWidth: CGFloat = showsRightSidebarToggle ? 30 : 0
-        let viewportWidth = max(0, bounds.width - 38 - toggleWidth)
+        let iconSize = ChromeIconButton.defaultSize
+        let toggleWidth: CGFloat = showsRightSidebarToggle ? iconSize + 8 : 0
+        let viewportWidth = max(0, bounds.width - toggleWidth)
         scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
-        addButton.frame = NSRect(
-            x: max(0, bounds.width - 34 - toggleWidth),
-            y: rule + floor((stripHeight - 28) / 2),
-            width: 28,
-            height: 28
-        )
         rightSidebarToggle.frame = NSRect(
-            x: max(0, bounds.width - 31),
-            y: rule + floor((stripHeight - ChromeIconButton.defaultSize) / 2),
-            width: ChromeIconButton.defaultSize,
-            height: ChromeIconButton.defaultSize
+            x: max(0, bounds.width - 8 - iconSize),
+            y: rule + floor((stripHeight - iconSize) / 2),
+            width: iconSize,
+            height: iconSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
 
-        var x: CGFloat = 0
+        // `padding: 0 4px` around the row; pills carry their own 2 pt gap.
+        var x: CGFloat = 4
         for button in buttons {
             button.frame = NSRect(x: x, y: 0, width: button.tabWidth, height: stripHeight)
             x += button.tabWidth
         }
+        x += 4
+        addButton.frame = NSRect(
+            x: x,
+            y: floor((stripHeight - iconSize) / 2),
+            width: iconSize,
+            height: iconSize
+        )
+        x += iconSize + 4
         let documentWidth = max(viewportWidth, x)
         tabContainer.setFrameSize(NSSize(width: documentWidth, height: stripHeight))
         if viewportWidth != previousViewportWidth {
@@ -194,7 +197,8 @@ final class WindowTabBarView: NSView {
         }
         if revealActiveTab, viewportWidth > 0,
            let selected = buttons.first(where: { $0.windowId == activeWindowId }) {
-            selected.scrollToVisible(selected.bounds)
+            // Include the row's 4 pt padding so the first tab reveals flush.
+            selected.scrollToVisible(selected.bounds.insetBy(dx: -4, dy: 0))
             revealActiveTab = false
         }
     }
@@ -208,33 +212,26 @@ final class WindowTabBarView: NSView {
     }
 }
 
-private final class WindowTabButton: NSButton {
+/// `1  storefront ● 3`: a muted index, the window title, then unboxed badges
+/// for its running commands and agents.
+private final class WindowTabButton: TabPillButton {
+    private static let maxTitleWidth: CGFloat = 200
+    private static let minWidth: CGFloat = 64
+
     let windowId: String
     private let onSelect: () -> Void
-    private let separator = TabPlateView()
-    private let badgeUnderlay = TabPlateView()
-    private let agentBadge = LampCountBadgeView(identifier: "window-agent-badge")
-    private let commandBadgeUnderlay = TabPlateView()
-    private let commandBadge = LampCountBadgeView(identifier: "window-command-badge")
+    private let agentBadge = StatusCountBadgeView(identifier: "window-agent-badge")
+    private let commandBadge = StatusCountBadgeView(identifier: "window-command-badge")
     private(set) var tabWidth: CGFloat = 80
 
     init(windowId: String, onSelect: @escaping () -> Void) {
         self.windowId = windowId
         self.onSelect = onSelect
         super.init(frame: .zero)
-        cell = WindowTabButtonCell()
         identifier = NSUserInterfaceItemIdentifier("window-tab-\(windowId)")
-        isBordered = false
-        refusesFirstResponder = true
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.control
         target = self
         action = #selector(selectWindow)
-        setAccessibilityRole(.radioButton)
-        addSubview(separator)
-        addSubview(badgeUnderlay)
         addSubview(agentBadge)
-        addSubview(commandBadgeUnderlay)
         addSubview(commandBadge)
     }
 
@@ -251,35 +248,29 @@ private final class WindowTabButton: NSButton {
         runningCommands: Int,
         theme: AppTheme
     ) {
-        let text = "\(number):\(title)"
-        self.title = text
-        attributedTitle = ChromeText.attributed(
-            text,
+        let colors = theme.colors
+        let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
+            "\(number)  ",
+            font: ChromeFont.label,
+            color: colors.textMuted
+        ))
+        text.append(ChromeText.attributed(
+            title,
             font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
-            color: isSelected ? theme.colors.textPrimary : theme.colors.textMuted,
-            alignment: .left,
-            lineBreakMode: .byTruncatingTail
-        )
+            color: isSelected ? colors.textPrimary : colors.textMuted
+        ))
+        attributedTitle = text
         agentBadge.configure(agents: agents, theme: theme)
         commandBadge.configure(runningCommands: runningCommands, theme: theme)
-        badgeUnderlay.isHidden = agentBadge.isHidden
-        commandBadgeUnderlay.isHidden = commandBadge.isHidden
-        for underlay in [badgeUnderlay, commandBadgeUnderlay] {
-            underlay.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        }
-        let badges = [agentBadge, commandBadge].filter { !$0.isHidden }
-        let indicatorWidth = badges.isEmpty ? 0 : badges.reduce(4) { $0 + $1.badgeWidth + 4 }
-        (cell as? WindowTabButtonCell)?.trailingInset = indicatorWidth
-        tabWidth = min(200, max(72, ceil(attributedTitle.size().width) + 24)) + indicatorWidth
-        layer?.backgroundColor = isSelected ? theme.colors.raised.cgColor : NSColor.clear.cgColor
-        layer?.borderWidth = isSelected ? Chrome.hairline : 0
-        layer?.borderColor = theme.colors.borderSubtle.cgColor
-        separator.isHidden = isSelected
-        separator.layer?.backgroundColor = theme.colors.borderSubtle.cgColor
+        let titleWidth = min(Self.maxTitleWidth, ceil(text.size().width))
+        tabWidth = max(Self.minWidth, Self.chromeWidth + titleWidth + badgeAreaWidth)
+        isSelectedTab = isSelected
+        applyPill(colors: colors)
+
         var description = "Window \(number): \(title)"
         for summary in [
-            LampCountBadgeView.summary(of: agents),
-            LampCountBadgeView.summary(ofRunningCommands: runningCommands),
+            StatusCountBadgeView.summary(of: agents),
+            StatusCountBadgeView.summary(ofRunningCommands: runningCommands),
         ].compactMap({ $0 }) {
             description += " — \(summary)"
         }
@@ -290,49 +281,40 @@ private final class WindowTabButton: NSButton {
         needsDisplay = true
     }
 
+    private var visibleBadges: [StatusCountBadgeView] {
+        // Agents sit at the trailing edge, running commands before them.
+        [agentBadge, commandBadge].filter { !$0.isHidden }
+    }
+
+    /// The badges plus the gap that separates them from the title.
+    private var badgeAreaWidth: CGFloat {
+        visibleBadges.reduce(0) { $0 + Self.contentGap + $1.badgeWidth }
+    }
+
     override func layout() {
         super.layout()
-        // Agents sit at the trailing edge, running commands before them.
-        var badgeEdge = bounds.maxX - 8
-        for (badge, underlay) in [(agentBadge, badgeUnderlay), (commandBadge, commandBadgeUnderlay)]
-            where !badge.isHidden {
+        let pill = pillRect
+        var edge = pill.maxX - Self.trailingPadding
+        for badge in visibleBadges {
             badge.frame = NSRect(
-                x: badgeEdge - 4 - badge.badgeWidth,
-                y: floor(bounds.midY - 8),
+                x: edge - badge.badgeWidth,
+                y: floor(bounds.midY - StatusCountBadgeView.height / 2),
                 width: badge.badgeWidth,
-                height: 16
+                height: StatusCountBadgeView.height
             )
-            underlay.frame = badge.frame
-            badgeEdge = badge.frame.minX
+            edge = badge.frame.minX - Self.contentGap
         }
-        separator.frame = NSRect(
-            x: bounds.maxX - Chrome.hairline,
-            y: 7,
-            width: Chrome.hairline,
-            height: max(0, bounds.height - 14)
+        let titleMinX = pill.minX + Self.leadingPadding
+        let titleMaxX = visibleBadges.isEmpty ? pill.maxX - Self.trailingPadding : edge
+        (cell as? TabPillButtonCell)?.titleFrame = NSRect(
+            x: titleMinX,
+            y: 0,
+            width: max(0, titleMaxX - titleMinX),
+            height: bounds.height
         )
     }
 
     @objc private func selectWindow() {
         onSelect()
-    }
-}
-
-/// Draw the title in a fixed padded area so the badge never crowds or clips it.
-private final class WindowTabButtonCell: NSButtonCell {
-    var trailingInset: CGFloat = 0
-
-    override func titleRect(forBounds rect: NSRect) -> NSRect {
-        let height = ceil(attributedTitle.size().height)
-        return NSRect(
-            x: rect.minX + 12,
-            y: floor(rect.midY - height / 2),
-            width: max(0, rect.width - 24 - trailingInset),
-            height: height
-        )
-    }
-
-    override func drawInterior(withFrame cellFrame: NSRect, in controlView: NSView) {
-        attributedTitle.draw(in: titleRect(forBounds: cellFrame))
     }
 }

@@ -46,6 +46,23 @@ struct CommandPaletteSearchTests {
         #expect(results.map(\.id) == ["second", "first"])
     }
 
+    @Test func theMatchedTitleRangeIgnoresCaseAndSurroundingWhitespace() throws {
+        let label = "Open in Soprano Git"
+
+        let range = try #require(CommandPaletteSearch.matchRange(in: label, query: "  OPEN "))
+
+        #expect(label[range] == "Open")
+    }
+
+    @Test func aTitleWithoutTheQueryHasNoMatchedRange() {
+        #expect(CommandPaletteSearch.matchRange(in: "omp web", query: "open") == nil)
+        #expect(CommandPaletteSearch.matchRange(in: "omp web", query: " ") == nil)
+    }
+
+    @Test func aCommandWithoutAShortcutHasNoKeycaps() {
+        #expect(item(id: "plain", label: "Plain").shortcut.isEmpty)
+    }
+
     private func item(
         id: String,
         label: String,
@@ -57,7 +74,6 @@ struct CommandPaletteSearchTests {
             icon: "macwindow",
             label: label,
             description: description,
-            shortcut: nil,
             searchText: searchText,
             action: {}
         )
