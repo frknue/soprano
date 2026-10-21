@@ -1044,8 +1044,13 @@ private final class PaneVeilView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    /// The veil layer is standalone, so its property changes would animate
+    /// implicitly (a 0.25 s cross-fade on a theme switch); they snap instead.
     func apply(colors: ThemeColors) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         ChromeSurface.applyVeil(to: veilLayer, colors: colors)
+        CATransaction.commit()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

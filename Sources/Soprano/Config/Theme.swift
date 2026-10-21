@@ -71,12 +71,15 @@ struct ThemeShadow {
     let ring: NSColor
 
     /// Applies the shadow and contact ring to `layer`. `layer` must not mask
-    /// to bounds, or the shadow is clipped away.
+    /// to bounds, or the shadow is clipped away. Call it once `layer` is in
+    /// its layer tree: the shadow casts down whether or not the layer or an
+    /// ancestor flips its geometry (a flipped NSView's backing layer), since
+    /// `contentsAreFlipped()` counts every `isGeometryFlipped` up the chain.
     func apply(to layer: CALayer) {
         layer.masksToBounds = false
         layer.shadowColor = color.cgColor
         layer.shadowOpacity = opacity
-        layer.shadowOffset = CGSize(width: 0, height: -offsetY)
+        layer.shadowOffset = CGSize(width: 0, height: layer.contentsAreFlipped() ? offsetY : -offsetY)
         layer.shadowRadius = blur / 2
         layer.borderWidth = 1
         layer.borderColor = ring.cgColor
@@ -233,10 +236,12 @@ extension ThemeColors {
 
 extension AppTheme {
     /// Commit-graph lane colors: a graphite trunk (lane 0) and seven hues,
-    /// never the accent.
+    /// never the accent. Themes whose palettes repeat a hue (Nord's blue is
+    /// its bright blue, Catppuccin's bright magenta is its magenta and its
+    /// accent) skip the repeat and take the next distinct candidate, so the
+    /// 8 lanes stay pairwise distinct (CIELAB ΔE ≥ `minimumLaneDistance`).
     var graphLanes: [NSColor] {
-        [
-            colors.textMuted,
+        let preferred = [
             colors.blue,
             colors.success,
             terminalColors.magenta,
@@ -245,7 +250,43 @@ extension AppTheme {
             terminalColors.brightMagenta,
             terminalColors.brightBlue,
         ]
+        let fallbacks = [
+            terminalColors.brightCyan,
+            terminalColors.brightGreen,
+            terminalColors.brightYellow,
+            terminalColors.blue,
+            terminalColors.green,
+            terminalColors.cyan,
+            terminalColors.yellow,
+            terminalColors.red,
+            terminalColors.brightRed,
+        ]
+
+        var lanes = [colors.textMuted]
+        func consider(_ candidate: NSColor) {
+            guard lanes.count < Self.graphLaneCount,
+                  ([colors.accent] + lanes).allSatisfy({
+                      candidate.labDistance(to: $0) >= Self.minimumLaneDistance
+                  })
+            else { return }
+            lanes.append(candidate)
+        }
+        (preferred + fallbacks).forEach(consider)
+        // Last resort: the hues lifted toward ink, then sunk toward the page.
+        for fraction in [0.4, -0.4] where lanes.count < Self.graphLaneCount {
+            for hue in preferred + fallbacks {
+                consider(fraction > 0
+                    ? hue.mixed(with: colors.textPrimary, fraction: fraction)
+                    : hue.mixed(with: colors.bgBase, fraction: -fraction))
+            }
+        }
+        return lanes
     }
+
+    static let graphLaneCount = 8
+    /// Lanes closer than this CIELAB ΔE (1976) count as the same color.
+    /// Folio's own closest designed pair (ANSI 5 / ANSI 13 on Paper) is 7.7.
+    static let minimumLaneDistance: CGFloat = 6
 }
 
 extension NSColor {
@@ -277,6 +318,31 @@ extension NSColor {
         }
         let delta = abs(a.hueComponent - b.hueComponent) * 360
         return min(delta, 360 - delta)
+    }
+
+    /// CIELAB ΔE (1976) between two colors under D65: about 2.3 is just
+    /// noticeable, above 10 reads as a different color at a glance.
+    func labDistance(to other: NSColor) -> CGFloat {
+        let a = lab
+        let b = other.lab
+        return sqrt(pow(a.l - b.l, 2) + pow(a.a - b.a, 2) + pow(a.b - b.b, 2))
+    }
+
+    private var lab: (l: CGFloat, a: CGFloat, b: CGFloat) {
+        guard let color = usingColorSpace(.sRGB) else { return (0, 0, 0) }
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        let r = linear(color.redComponent)
+        let g = linear(color.greenComponent)
+        let b = linear(color.blueComponent)
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        func f(_ t: CGFloat) -> CGFloat {
+            t > 0.008856 ? pow(t, 1.0 / 3.0) : 7.787 * t + 16.0 / 116.0
+        }
+        return (116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z)))
     }
 
     private var relativeLuminance: CGFloat {
@@ -334,8 +400,26 @@ extension TerminalColors {
         cursor-color = \(hex[2])
         cursor-text = \(hex[3])
         selection-background = \(hex[4])
+        faint-opacity = \(Self.faintOpacity)
         \(hex.dropFirst(5).enumerated().map { "palette = \($0.offset)=\($0.element)" }.joined(separator: "\n"))
         """
+    }
+
+    /// Faint (dim) text: 66 % of the foreground over the background.
+    static let faintOpacity = 0.66
+
+    /// Layered on `ghosttyConfiguration` for a surface without keyboard
+    /// focus: ghostty draws an unfocused cursor as a hollow block in
+    /// `cursor-color`, so that becomes the foreground at 55 % over the
+    /// background instead of the accent.
+    var ghosttyUnfocusedConfiguration: String {
+        "cursor-color = \(unfocusedCursor.ghosttyRGBHex)"
+    }
+
+    /// The hollow cursor's 1 px outline: fg @ 55 %, opaque because ghostty
+    /// draws unfocused cursors at full opacity.
+    var unfocusedCursor: NSColor {
+        background.mixed(with: foreground, fraction: 0.55)
     }
 
     private var palette: [NSColor] {

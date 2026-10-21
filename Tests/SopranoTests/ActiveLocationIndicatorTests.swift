@@ -44,6 +44,51 @@ struct ActiveLocationIndicatorTests {
         #expect(selectedRowIdentifiers(in: sidebar) == ["sidebar-pane-\(firstPaneId)"])
     }
 
+    @Test func theFocusedRowDropsItsPencilTickWhileItsWindowIsNotKey() throws {
+        let manager = AgentManager()
+        let sidebar = makeSidebar(manager: manager)
+        let window = KeyStateWindow()
+        window.contentView?.addSubview(sidebar)
+        let focusedRow = "sidebar-pane-\(manager.activePaneId)"
+
+        window.changeKeyStatus(to: false)
+        #expect(selectedRowIdentifiers(in: sidebar).isEmpty)
+        #expect(rowIdentifiers(in: sidebar, style: .selectedUnfocused) == [focusedRow])
+
+        window.changeKeyStatus(to: true)
+        #expect(selectedRowIdentifiers(in: sidebar) == [focusedRow])
+        #expect(rowIdentifiers(in: sidebar, style: .selectedUnfocused).isEmpty)
+    }
+
+    @Test func closeButtonsStayAccessibleButOnlyTakeClicksUnderThePointer() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        _ = try #require(manager.splitPane(direction: .horizontal, paneId: paneId))
+        let sidebar = makeSidebar(manager: manager)
+        let row = try #require(descendants(of: sidebar, as: NSView.self).first {
+            $0.identifier?.rawValue == "sidebar-pane-\(paneId)"
+        })
+        let close = try #require(descendants(of: row, as: NSButton.self).first {
+            $0.accessibilityLabel() == "Close Pane"
+        })
+        // Faded, not hidden: VoiceOver and Full Keyboard Access still reach it.
+        #expect(!close.isHiddenOrHasHiddenAncestor)
+        #expect(close.alphaValue == 0)
+        let center = row.convert(NSPoint(x: close.frame.midX, y: close.frame.midY), to: row.superview)
+        #expect(row.hitTest(center) === row)
+
+        let enter = try #require(NSEvent.enterExitEvent(
+            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        ))
+        row.mouseEntered(with: enter)
+        #expect(close.alphaValue == 1)
+        #expect(row.hitTest(center) === close)
+
+        close.accessibilityPerformPress()
+        #expect(manager.panes[paneId] == nil)
+    }
+
     @Test func holdingControlShowsAccentJumpKeycapsAndReleasingItHidesThem() throws {
         let manager = AgentManager()
         _ = try #require(manager.createWindow())
@@ -117,6 +162,12 @@ struct ActiveLocationIndicatorTests {
             .compactMap { $0.superview?.identifier?.rawValue }
     }
 
+    private func rowIdentifiers(in view: NSView, style: ChromeSelectionPill.Style) -> [String] {
+        descendants(of: view, as: ChromeRowBackgroundView.self)
+            .filter { $0.style == style }
+            .compactMap { $0.superview?.identifier?.rawValue }
+    }
+
     private func locationText(in view: NSView) -> String? {
         descendants(of: view, as: NSTextField.self)
             .first { $0.identifier?.rawValue == "status-location" }?
@@ -128,5 +179,31 @@ struct ActiveLocationIndicatorTests {
             let current = (subview as? T).map { [$0] } ?? []
             return current + descendants(of: subview, as: type)
         }
+    }
+}
+
+/// A window whose key status the test sets, posting the notifications AppKit
+/// would.
+@MainActor
+private final class KeyStateWindow: NSWindow {
+    private var simulatedKeyStatus = false
+    override var isKeyWindow: Bool { simulatedKeyStatus }
+
+    init() {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 800),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        isReleasedWhenClosed = false
+    }
+
+    func changeKeyStatus(to isKey: Bool) {
+        simulatedKeyStatus = isKey
+        NotificationCenter.default.post(
+            name: isKey ? NSWindow.didBecomeKeyNotification : NSWindow.didResignKeyNotification,
+            object: self
+        )
     }
 }

@@ -182,12 +182,6 @@ final class EditorPaneView: NSView {
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(visibleTextChanged),
-            name: NSTextView.didChangeSelectionNotification,
-            object: textView
-        )
         addSubview(scrollView)
 
         imageView.imageScaling = .scaleProportionallyDown

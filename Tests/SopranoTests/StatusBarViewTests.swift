@@ -33,23 +33,45 @@ struct StatusBarViewTests {
         #expect(label("status-counts", in: statusBar)?.stringValue == "1 session · 1 window · 1 pane")
         // The caps follow settings.json, so read the expected chords from it.
         let keybindings = ConfigStore.shared.keybindings
-        let palette = keybindings.bindings.first { $0.id == "command-palette" }.map(StatusBarView.keycapLegend(for:))
-        let caps = descendants(of: statusBar, as: ChromeKeycapView.self).filter { !$0.isHiddenOrHasHiddenAncestor }
-        #expect(caps.map(\.legend) == [palette, "⌃" + keybindings.prefixKey.uppercased()].compactMap { $0 })
-        #expect(caps.allSatisfy { $0.style == .small && $0.tone == .muted })
+        let palette = keybindings.bindings.first { $0.id == "command-palette" }
+            .map { MainWindowController.keycaps(for: $0, prefixKey: keybindings.prefixKey) } ?? []
+        let groups = hintGroups(in: statusBar)
+        #expect(groups.map(\.caps) == [palette, ["⌃" + keybindings.prefixKey.uppercased()]].filter { !$0.isEmpty })
+        #expect(groups.allSatisfy { $0.style == .small && $0.tone == .muted })
     }
 
-    @Test func keycapLegendsFollowK1() {
-        let palette = KeyBinding(
-            id: "command-palette", label: "Commands", description: "", category: .general,
-            defaultKeys: "⌘P", mode: .direct, key: "p", meta: true
+    @Test func thePaletteHintFollowsPrefixBindingsShiftInferenceAndRemoval() {
+        let statusBar = makeStatusBar(manager: AgentManager())
+        var config = DefaultKeybindings.config
+        config.prefixKey = "b"
+        let index = config.bindings.firstIndex { $0.id == "command-palette" }!
+        let palette = config.bindings[index]
+
+        // A prefix binding is the prefix cap, then the key.
+        config.bindings[index] = KeyBinding(
+            id: palette.id, label: palette.label, description: palette.description,
+            category: palette.category, defaultKeys: "Prefix → P", mode: .prefix, key: "p"
         )
-        #expect(StatusBarView.keycapLegend(for: palette) == "⌘P")
-        var rebound = palette
-        rebound.ctrl = true
-        rebound.shift = true
-        rebound.meta = nil
-        #expect(StatusBarView.keycapLegend(for: rebound) == "⌃⇧P")
+        statusBar.refreshKeyHints(config)
+        #expect(hintGroups(in: statusBar).map(\.caps) == [["⌃B", "P"], ["⌃B"]])
+
+        // Shift that the key needs anyway is not drawn; special keys get legends.
+        config.bindings[index] = KeyBinding(
+            id: palette.id, label: palette.label, description: palette.description,
+            category: palette.category, defaultKeys: "⌘|", mode: .direct, key: "|", meta: true, shift: true
+        )
+        statusBar.refreshKeyHints(config)
+        #expect(hintGroups(in: statusBar).first?.caps == ["⌘|"])
+
+        // A disabled palette binding drops its hint.
+        config.bindings.remove(at: index)
+        statusBar.refreshKeyHints(config)
+        #expect(hintGroups(in: statusBar).map(\.caps) == [["⌃B"]])
+    }
+
+    /// Hints left out of the bar are detached, so only shown groups are found.
+    private func hintGroups(in statusBar: StatusBarView) -> [ChromeKeycapGroupView] {
+        descendants(of: statusBar, as: ChromeKeycapGroupView.self)
     }
 
     private func makeStatusBar(manager: AgentManager) -> StatusBarView {

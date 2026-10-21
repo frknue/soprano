@@ -1,5 +1,13 @@
 import AppKit
 
+/// A control that uses Esc itself while it holds keyboard focus, such as the
+/// Prefix key recorder ending a recording. The overlay header's `Done esc`
+/// leaves Esc to it.
+@MainActor
+protocol EscapeConsumingControl: AnyObject {
+    var consumesEscape: Bool { get }
+}
+
 /// The header shared by the full-window overlays (Settings and the Agent
 /// Dashboard): a New York screen title, an optional muted subtitle, a
 /// `Done esc` button that returns to the workspace, and one hairline under
@@ -95,6 +103,15 @@ final class SettingsHeaderView: NSView {
         let subtitle = subtitle ?? ""
         subtitleLabel.setChromeText(subtitle, font: ChromeFont.meta, color: colors.textMuted)
         subtitleLabel.isHidden = subtitle.isEmpty
+    }
+
+    /// AppKit offers Esc to key equivalents before the first responder's
+    /// `keyDown`, so Done would win over a control that needs Esc.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.keyCode == 53, (window?.firstResponder as? EscapeConsumingControl)?.consumesEscape == true {
+            return false
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     @objc private func closeClicked() {

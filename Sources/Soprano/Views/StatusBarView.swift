@@ -80,15 +80,6 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         return String(format: "Up %ld:%02ld:%02ld", total / 3600, total / 60 % 60, total % 60)
     }
 
-    /// One K1 cap for a direct chord: modifiers in macOS order, then the key.
-    static func keycapLegend(for binding: KeyBinding) -> String {
-        var legend = ""
-        if binding.ctrl == true { legend += "⌃" }
-        if binding.shift == true { legend += "⇧" }
-        if binding.meta == true { legend += "⌘" }
-        return legend + (binding.key.count == 1 ? binding.key.uppercased() : binding.key)
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         clockTimer?.invalidate()
@@ -189,15 +180,12 @@ final class StatusBarView: NSView, NSPopoverDelegate {
 
     /// Reads the palette chord and the prefix key from `settings.json`, so the
     /// hints follow a rebound key. A disabled palette binding drops its hint.
-    func refreshKeyHints() {
-        let keybindings = ConfigStore.shared.keybindings
-        if let palette = keybindings.bindings.first(where: { $0.id == "command-palette" }) {
-            paletteHint.legend = Self.keycapLegend(for: palette)
-            showsPaletteHint = true
-        } else {
-            showsPaletteHint = false
-        }
-        prefixHint.legend = "⌃" + keybindings.prefixKey.uppercased()
+    func refreshKeyHints(_ keybindings: KeyBindingConfig = ConfigStore.shared.keybindings) {
+        let paletteCaps = keybindings.bindings.first { $0.id == "command-palette" }
+            .map { MainWindowController.keycaps(for: $0, prefixKey: keybindings.prefixKey) } ?? []
+        paletteHint.caps = paletteCaps
+        showsPaletteHint = !paletteCaps.isEmpty
+        prefixHint.caps = ["⌃" + keybindings.prefixKey.uppercased()]
         updateTrailingViews()
     }
 
@@ -216,6 +204,10 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         layer?.backgroundColor = theme.colors.bgPanel.cgColor
         topRule.color = theme.colors.borderSubtle
         usagePopover?.appearance = theme.appearance.nsAppearance
+        // An open popover re-renders in the new palette rather than waiting
+        // for the next account change.
+        (usagePopover?.contentViewController as? AccountUsagePopoverViewController)?
+            .render(AccountsController.shared.snapshot)
         modeChip.apply(theme: theme)
         paletteHint.apply(theme: theme)
         prefixHint.apply(theme: theme)
@@ -410,28 +402,29 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     }
 }
 
-/// `⌘P Commands`: a muted 16 pt keycap and its muted label.
+/// `⌘P Commands` or `⌃A` `P` `Commands`: muted 16 pt keycaps, one per chord
+/// step, and a muted label.
 private final class StatusHintView: NSStackView {
-    private let cap: ChromeKeycapView
+    let keycaps: ChromeKeycapGroupView
     private let label = NSTextField(labelWithString: "")
     private let title: String
 
-    var legend: String {
-        get { cap.legend }
+    var caps: [String] {
+        get { keycaps.caps }
         set {
-            cap.legend = newValue
-            setAccessibilityLabel("\(newValue) \(title)")
+            keycaps.caps = newValue
+            setAccessibilityLabel("\(newValue.joined(separator: " ")) \(title)")
         }
     }
 
     init(title: String, theme: AppTheme) {
         self.title = title
-        cap = ChromeKeycapView(legend: "", theme: theme, style: .small, tone: .muted)
+        keycaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .muted)
         super.init(frame: .zero)
         orientation = .horizontal
         alignment = .centerY
         spacing = 5
-        addArrangedSubview(cap)
+        addArrangedSubview(keycaps)
         addArrangedSubview(label)
         apply(theme: theme)
     }
@@ -442,7 +435,7 @@ private final class StatusHintView: NSStackView {
     }
 
     func apply(theme: AppTheme) {
-        cap.apply(theme: theme)
+        keycaps.apply(theme: theme)
         label.setChromeText(title, font: ChromeFont.meta, color: theme.colors.textMuted)
     }
 }

@@ -51,15 +51,28 @@ struct TerminalThemeTests {
         for theme in AppTheme.allThemes {
             let lines = theme.terminalColors.ghosttyConfiguration.split(separator: "\n")
 
-            #expect(lines.count == 21)
+            #expect(lines.count == 22)
             #expect(lines.contains { $0.hasPrefix("background = ") })
             #expect(lines.contains { $0.hasPrefix("foreground = ") })
             #expect(lines.contains { $0.hasPrefix("cursor-color = ") })
             #expect(lines.contains { $0.hasPrefix("cursor-text = ") })
             #expect(lines.contains { $0.hasPrefix("selection-background = ") })
+            #expect(lines.contains("faint-opacity = 0.66"))
             for index in 0..<16 {
                 #expect(lines.contains { $0.hasPrefix("palette = \(index)=") })
             }
+        }
+    }
+
+    @Test func unfocusedSurfacesDrawTheirHollowCursorInTheForegroundAt55PercentNeverTheAccent() {
+        for theme in AppTheme.allThemes {
+            let terminal = theme.terminalColors
+            let config = terminal.ghosttyUnfocusedConfiguration
+            #expect(config.split(separator: "\n").count == 1)
+            #expect(config.hasPrefix("cursor-color = "))
+            #expect(!theme.terminalColors.ghosttyConfiguration.contains(config))
+            #expect(terminal.unfocusedCursor.labDistance(to: theme.colors.accent) > 10)
+            #expect(terminal.unfocusedCursor == terminal.background.mixed(with: terminal.foreground, fraction: 0.55))
         }
     }
 

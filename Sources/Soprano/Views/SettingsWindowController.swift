@@ -1428,7 +1428,7 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
                     makeShortcutRow(
                         action: binding.label,
                         description: "\(binding.id) · \(binding.description)",
-                        keys: binding.defaultKeys,
+                        binding: binding,
                         isCustomized: customized.contains(binding.id),
                         isDisabled: isDisabled
                     ),
@@ -1455,7 +1455,7 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     private func makeShortcutRow(
         action: String,
         description: String,
-        keys: String,
+        binding: KeyBinding,
         isCustomized: Bool = false,
         isDisabled: Bool = false
     ) -> NSView {
@@ -1488,10 +1488,10 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         } else if isCustomized {
             // Same chip as a configured agent profile: this one comes from the file.
             let chip = ChromeChip(text: "settings.json", theme: currentTheme)
-            keysView = makeButtonGroup([chip, makeKeycaps(keys)], spacing: 8)
+            keysView = makeButtonGroup([chip, makeKeycaps(binding)], spacing: 8)
             keysView.toolTip = "Customized in settings.json"
         } else {
-            keysView = makeKeycaps(keys)
+            keysView = makeKeycaps(binding)
         }
 
         return makeFormRow(
@@ -1502,11 +1502,11 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         )
     }
 
-    /// A binding's keys as K1 keycaps: one cap per chord, a prefix sequence as
-    /// separate caps (`⌃A` then `P`). Alternatives ("⌘+ / ⌘=") keep their
-    /// muted slash between them.
-    private func makeKeycaps(_ keys: String) -> NSView {
-        let alternatives = SettingsKeycaps.alternatives(keys, prefixKey: keybindingConfig.prefixKey)
+    /// A binding's keys as K1 keycaps, the same caps the command palette
+    /// shows: one cap per chord, a prefix sequence as separate caps (`⌃A`
+    /// then `P`). Alternatives ("⌘+ / ⌘=") keep their muted slash between them.
+    private func makeKeycaps(_ binding: KeyBinding) -> NSView {
+        let alternatives = SettingsKeycaps.alternatives(for: binding, prefixKey: keybindingConfig.prefixKey)
         var views: [NSView] = []
         for (index, caps) in alternatives.enumerated() {
             if index > 0 {
@@ -2033,14 +2033,14 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
 
         let rows = addSection(title: "Quick Reference")
         addRows(
-            quickReferenceBindings().map { keys, label in
-                makeSettingRow(label: label, control: makeKeycaps(keys))
+            quickReferenceBindings().map { binding in
+                makeSettingRow(label: binding.label, control: makeKeycaps(binding))
             },
             to: rows
         )
     }
 
-    private func quickReferenceBindings() -> [(String, String)] {
+    private func quickReferenceBindings() -> [KeyBinding] {
         let preferredIds = [
             "command-palette",
             "find-window",
@@ -2052,13 +2052,9 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
             "toggle-sidebar",
             "save-session",
         ]
-        var rows: [(String, String)] = []
-        for id in preferredIds {
-            if let binding = keybindingConfig.bindings.first(where: { $0.id == id }) {
-                rows.append((binding.defaultKeys, binding.label))
-            }
+        return preferredIds.compactMap { id in
+            keybindingConfig.bindings.first { $0.id == id }
         }
-        return rows
     }
 }
 
@@ -2080,44 +2076,25 @@ private extension AppearancePreference {
     }
 }
 
-/// Rule K1 for the shortcut strings in `KeyBinding.defaultKeys`: one cap per
-/// chord with macOS modifier glyphs in ⌃⇧⌘ order (`Ctrl+Shift+H` → `⌃⇧H`),
-/// the prefix step as the configured prefix chord (`Prefix → P` → `⌃A`, `P`),
-/// named keys as macOS writes them (`esc`).
-private enum SettingsKeycaps {
-    private static let modifierGlyphs: [(name: String, glyph: String)] = [
-        ("Ctrl", "⌃"),
-        ("Shift", "⇧"),
-        ("Cmd", "⌘"),
-    ]
-
-    /// One cap list per alternative ("⌘+ / ⌘=" has two).
-    static func alternatives(_ keys: String, prefixKey: String) -> [[String]] {
-        keys.components(separatedBy: " / ").map { alternative in
-            alternative.components(separatedBy: " → ").map { cap(for: $0, prefixKey: prefixKey) }
-        }
+/// K1 keycaps for Settings, built from the `KeyBinding` itself through the
+/// palette's `MainWindowController.keycaps(for:prefixKey:)`, so a shortcut
+/// reads the same in both places (`⌃⇥`, `⌘esc`, `↵`).
+enum SettingsKeycaps {
+    /// One cap list per alternative. Only a built-in binding whose
+    /// `defaultKeys` lists several K1 chords (`⌘+ / ⌘=`) has more than one;
+    /// the bound chord keeps its place among them.
+    static func alternatives(for binding: KeyBinding, prefixKey: String) -> [[String]] {
+        let caps = MainWindowController.keycaps(for: binding, prefixKey: prefixKey)
+        guard !caps.isEmpty else { return [] }
+        let listed = binding.defaultKeys.components(separatedBy: " / ")
+        let bound = caps.joined()
+        guard caps.count == 1, listed.count > 1, listed.contains(bound) else { return [caps] }
+        return listed.map { $0 == bound ? caps : [$0] }
     }
 
     /// The prefix chord as one cap: `⌃A`.
     static func prefixLegend(_ prefixKey: String) -> String {
         "⌃" + prefixKey.uppercased()
-    }
-
-    private static func cap(for step: String, prefixKey: String) -> String {
-        if step == "Prefix" { return prefixLegend(prefixKey) }
-        let parts = step.components(separatedBy: "+")
-        let modifierNames = Set(modifierGlyphs.map(\.name))
-        // "⌘+" splits into an empty part: it is already a glyph chord.
-        guard parts.count > 1,
-              !parts.contains(where: \.isEmpty),
-              parts.dropLast().allSatisfy(modifierNames.contains)
-        else { return keyLegend(step) }
-        let glyphs = modifierGlyphs.filter { parts.contains($0.name) }.map(\.glyph).joined()
-        return glyphs + keyLegend(parts[parts.count - 1])
-    }
-
-    private static func keyLegend(_ key: String) -> String {
-        key == "Esc" ? "esc" : key
     }
 }
 
@@ -2372,12 +2349,14 @@ private final class SettingsSegmentButton: NSButton {
 /// The Prefix key control: the configured prefix as an accent field keycap
 /// (`⌃A`). Click it (or press Space) and type a key to make Control plus that
 /// key the prefix.
-private final class SettingsPrefixKeyControl: NSControl {
+private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl {
     private let cap: ChromeKeycapView
     private(set) var key: String
     private var isRecording = false {
         didSet { refresh() }
     }
+
+    var consumesEscape: Bool { isRecording }
 
     init(key: String, theme: AppTheme, target: AnyObject, action: Selector) {
         self.key = key
@@ -2411,7 +2390,41 @@ private final class SettingsPrefixKeyControl: NSControl {
         fatalError("init(coder:) is not supported")
     }
 
-    override var acceptsFirstResponder: Bool { true }
+    /// A key view only under Full Keyboard Access, like the Chrome switch;
+    /// a click or an accessibility press still takes focus for the length
+    /// of one recording.
+    override var canBecomeKeyView: Bool { isEnabled && NSApp.isFullKeyboardAccessEnabled }
+
+    override var acceptsFirstResponder: Bool { isEnabled && (isRecording || canBecomeKeyView) }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: Chrome.Radius.control,
+            yRadius: Chrome.Radius.control
+        ).fill()
+    }
+
+    /// Esc ends a recording and keeps the current prefix. The overlay
+    /// header's Done steps aside while `consumesEscape`, so Esc reaches this
+    /// key-equivalent pass.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if isRecording, event.keyCode == 53 {
+            endRecording()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if isRecording {
+            endRecording()
+        } else {
+            nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
+        }
+    }
 
     override func mouseDown(with event: NSEvent) {
         beginRecording()
@@ -2433,7 +2446,7 @@ private final class SettingsPrefixKeyControl: NSControl {
         }
         // Esc keeps the current prefix.
         if event.keyCode == 53 {
-            isRecording = false
+            endRecording()
             return
         }
         guard let typed = event.charactersIgnoringModifiers?.lowercased(),
@@ -2448,7 +2461,7 @@ private final class SettingsPrefixKeyControl: NSControl {
             return
         }
         key = typed
-        isRecording = false
+        endRecording()
         sendAction(action, to: target)
     }
 
@@ -2458,8 +2471,27 @@ private final class SettingsPrefixKeyControl: NSControl {
     }
 
     private func beginRecording() {
-        window?.makeFirstResponder(self)
+        guard isEnabled else { return }
         isRecording = true
+        if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
+            isRecording = false
+        }
+    }
+
+    /// Without Full Keyboard Access the control is not a key view, so it
+    /// hands focus back once the recording is over.
+    private func endRecording() {
+        isRecording = false
+        if !canBecomeKeyView, window?.firstResponder === self {
+            window?.makeFirstResponder(nil)
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window {
+            isRecording = false
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     private func refresh() {

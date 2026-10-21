@@ -392,6 +392,62 @@ struct AgentDashboardViewTests {
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
     }
 
+    @Test func jFromTheDetailTextMovesTheSelectionAndGivesTheListKeyboardFocus() throws {
+        let suiteName = "AgentDashboardListFocusTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let agentManager = AgentManager()
+        _ = try #require(agentManager.spawnAgent("codex"))
+        _ = try #require(agentManager.spawnAgent("claude-code"))
+        let contentViewController = MainContentViewController(
+            agentManager: agentManager,
+            sessionManager: SessionManager(
+                agentManager: agentManager,
+                defaults: defaults
+            ),
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            gitBranchMonitor: GitBranchMonitor(),
+            defaults: defaults,
+            splitTreeViewFactory: { agentManager, themeManager in
+                SplitTreeView(
+                    agentManager: agentManager,
+                    themeManager: themeManager,
+                    terminalViewFactory: { _, _, _ in NSView() }
+                )
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 1_100, height: 720),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = contentViewController
+        contentViewController.showDashboard()
+        contentViewController.view.layoutSubtreeIfNeeded()
+
+        let dashboardRoot = try #require(
+            allSubviews(in: contentViewController.view)
+                .first { $0.identifier?.rawValue == "agent-dashboard" }
+        )
+        let rows = allSubviews(in: contentViewController.view)
+            .filter { $0.identifier?.rawValue == "agent-dashboard-row" }
+        let detailText = try #require(
+            allSubviews(in: dashboardRoot)
+                .compactMap { $0 as? NSTextView }
+                .first { !$0.isFieldEditor && $0.acceptsFirstResponder }
+        )
+        #expect(window.makeFirstResponder(detailText))
+        #expect(window.firstResponder === detailText)
+
+        let j = try #require(keyEvent(character: "j", keyCode: 38, window: window))
+        detailText.keyDown(with: j)
+
+        #expect(rows.map { $0.isAccessibilitySelected() } == [false, true])
+        #expect(window.firstResponder === dashboardRoot)
+    }
+
     @Test func tabMovesIntoTheReplyFieldAndShiftTabReturnsToTheAgentListKeepingTheDraft() throws {
         let suiteName = "AgentDashboardReplyFocusTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

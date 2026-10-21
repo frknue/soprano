@@ -9,7 +9,10 @@ if [[ $# -ne 0 ]]; then
     exit 2
 fi
 
-export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+# Defaults only: a caller's own toolchain choice wins.
+: "${DEVELOPER_DIR:=/Library/Developer/CommandLineTools}"
+: "${SDKROOT:=$DEVELOPER_DIR/SDKs/MacOSX26.sdk}"
+export DEVELOPER_DIR SDKROOT
 export PATH="/opt/homebrew/opt/swift/bin:$PATH"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

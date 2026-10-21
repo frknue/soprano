@@ -189,6 +189,31 @@ struct WindowTabBarTests {
         #expect(scrollView.documentVisibleRect.contains(try #require(selectedTabs(in: bar).first).frame))
     }
 
+    @Test func newWindowFollowsTheLastTabUntilTheTabsOverflowThenStaysPinnedAndClickable() throws {
+        let manager = AgentManager()
+        let bar = makeBar(manager: manager, width: 360)
+        let scrollView = try #require(descendants(in: bar).compactMap { $0 as? NSScrollView }.first)
+        let addButton = try #require(descendants(in: bar).compactMap { $0 as? NSButton }.first {
+            $0.identifier?.rawValue == "new-window-tab"
+        })
+        // One tab: `+` sits right after it and the strip keeps the full width.
+        #expect(addButton.frame.minX == tabs(in: bar)[0].frame.maxX + 4)
+        #expect(scrollView.frame.width == bar.bounds.width)
+
+        for _ in 1...10 { _ = try #require(manager.createWindow()) }
+        // Back at the first window the strip scrolls to the start, far from
+        // the last tab, yet `+` stays on screen beside the strip.
+        manager.activateWindow(number: 1)
+        bar.layoutSubtreeIfNeeded()
+        #expect(scrollView.documentVisibleRect.minX == 0)
+        #expect(bar.bounds.contains(addButton.frame))
+        #expect(addButton.frame.minX >= scrollView.frame.maxX)
+        let center = NSPoint(x: addButton.frame.midX, y: addButton.frame.midY)
+        #expect(bar.hitTest(center) === addButton)
+        addButton.performClick(nil)
+        #expect(tabs(in: bar).count == 12)
+    }
+
     @Test func tabsStayVisibleAboveTheTerminalWhenTheWindowBarAndBothSidebarsAreHidden() throws {
         let suiteName = "WindowTabBarTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

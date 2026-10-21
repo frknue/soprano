@@ -326,7 +326,10 @@ final class AccountUsagePopoverViewController: NSViewController {
         percent.setChromeText(UsageFormat.percent(window.usedFraction), font: ChromeFont.badge, color: severity)
 
         var views: [NSView] = [label, bar, percent]
-        var width = Self.windowLabelWidth + 8 + Self.barWidth + 8 + Self.percentWidth
+        // Labels take at least the column width; a longer omp label
+        // (`<window> <tier>`) widens its line instead of truncating.
+        let labelWidth = max(Self.windowLabelWidth, ceil(label.intrinsicContentSize.width))
+        var width = labelWidth + 8 + Self.barWidth + 8 + Self.percentWidth
         if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
             let resetLabel = makeLabel()
             resetLabel.setChromeText(reset, font: ChromeFont.count, color: colors.textMuted)
@@ -340,7 +343,7 @@ final class AccountUsagePopoverViewController: NSViewController {
         line.spacing = 8
         line.setCustomSpacing(10, after: percent)
         NSLayoutConstraint.activate([
-            label.widthAnchor.constraint(equalToConstant: Self.windowLabelWidth),
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.windowLabelWidth),
             bar.widthAnchor.constraint(equalToConstant: Self.barWidth),
             percent.widthAnchor.constraint(equalToConstant: Self.percentWidth),
         ])

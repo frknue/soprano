@@ -124,6 +124,84 @@ struct FileExplorerTests {
         #expect(!cell.ignoredView.isHidden)
     }
 
+    @Test func onlyRowsWithAMarkReserveRoomForIt() {
+        let colors = AppTheme.folioPaper.colors
+        let width: CGFloat = 240
+        let cell = FileExplorerCellView(frame: NSRect(x: 0, y: 0, width: width, height: 24))
+        let node = FileExplorerNode(
+            url: URL(fileURLWithPath: "/tmp/project/\(String(repeating: "LongFileName", count: 6)).swift"),
+            relativePath: "long.swift",
+            isDirectory: false
+        )
+        // Constraints place alignment rects; text fields inset theirs by 2 pt.
+        func alignment(_ view: NSView) -> NSRect { view.alignmentRect(forFrame: view.frame) }
+        func nameEnd(status: GitFileStatus?, ignored: Bool) -> CGFloat {
+            cell.configure(node: node, isExpanded: false, status: status, isIgnored: ignored, colors: colors)
+            cell.layoutSubtreeIfNeeded()
+            return alignment(cell.nameField).maxX
+        }
+
+        let clean = nameEnd(status: nil, ignored: false)
+        #expect(abs(clean - (width - FileExplorerCellView.trailingInset)) < 1)
+        let changed = nameEnd(status: .modified, ignored: false)
+        #expect(changed <= alignment(cell.statusLabel).minX - 6)
+        #expect(changed < clean - 16)
+        let ignored = nameEnd(status: nil, ignored: true)
+        #expect(ignored <= alignment(cell.ignoredView).minX - 6)
+        // Back to clean: the letter's column goes away again.
+        #expect(abs(nameEnd(status: nil, ignored: false) - clean) < 1)
+    }
+
+    @Test func theRenameFieldIsClippedToTheControlRadiusOnlyWhileEditing() throws {
+        final class Delegate: NSObject, NSTextFieldDelegate {}
+        let delegate = Delegate()
+        let cell = FileExplorerCellView(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+
+        cell.beginEditing(colors: AppTheme.folioPaper.colors, delegate: delegate)
+        let layer = try #require(cell.nameField.layer)
+        #expect(layer.masksToBounds)
+        #expect(layer.cornerRadius == Chrome.Radius.control)
+
+        cell.endEditing()
+        #expect(!layer.masksToBounds)
+        #expect(layer.cornerRadius == 0)
+        #expect(!cell.nameField.drawsBackground)
+    }
+
+    @Test func theToastRestoresItsShadowAndRingAfterAnAppearanceChange() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 120),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: true
+        )
+        window.appearance = NSAppearance(named: .aqua)
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
+        window.contentView = host
+        defer { window.contentView = nil }
+        let colors = AppTheme.folioPaper.colors
+        let toast = SidebarToastView(colors: colors)
+        toast.translatesAutoresizingMaskIntoConstraints = true
+        toast.frame = NSRect(x: 16, y: 16, width: 288, height: 64)
+        host.addSubview(toast)
+        toast.display()
+        let layer = try #require(toast.layer)
+        #expect(layer.shadowOpacity == colors.shadowE2.opacity)
+        toast.needsDisplay = false
+
+        // AppKit drops a backing layer's shadow when the appearance flips;
+        // the flip alone marks the toast for a restyle.
+        layer.shadowOpacity = 0
+        layer.borderWidth = 0
+        window.appearance = NSAppearance(named: .darkAqua)
+        #expect(toast.needsDisplay)
+        toast.display()
+
+        #expect(layer.shadowOpacity == colors.shadowE2.opacity)
+        #expect(layer.borderWidth == Chrome.hairline)
+        #expect(layer.borderColor == colors.borderSubtle.cgColor)
+    }
+
     @Test func readingARealRepositoryReportsChangesAndIgnoredPaths() throws {
         guard GitStatusReader.executableURL != nil else { return }
         try withTemporaryDirectory { root in

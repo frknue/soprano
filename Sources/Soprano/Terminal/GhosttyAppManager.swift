@@ -5,6 +5,9 @@ extension Notification.Name {
     static let ghosttyCloseSurface = Notification.Name("GhosttyCloseSurface")
     static let ghosttyDesktopNotification = Notification.Name("GhosttyDesktopNotification")
     static let ghosttyDidFocusSurface = Notification.Name("GhosttyDidFocusSurface")
+    /// Posted after `ghostty_app_update_config` handed every surface the new
+    /// focused config, so surfaces without focus re-apply the unfocused one.
+    static let ghosttyDidUpdateConfig = Notification.Name("GhosttyDidUpdateConfig")
 }
 
 @MainActor
@@ -13,6 +16,10 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
+    /// `config` plus the unfocused cursor color (`ghosttyUnfocusedConfiguration`),
+    /// handed to each surface without keyboard focus. Nil when it could not
+    /// be built; surfaces then keep the accent cursor.
+    private var unfocusedConfig: ghostty_config_t?
     private(set) var clearsSelectionOnCopy = false
     let clipboardConfirmationCoordinator = ClipboardConfirmationCoordinator(
         presenter: AppKitClipboardConfirmationPresenter()
@@ -44,6 +51,7 @@ final class GhosttyAppManager: @unchecked Sendable {
         }
 
         var runtimeConfig = makeRuntimeConfig()
+        var loadsDefaultFiles = true
 
         if let primaryApp = ghostty_app_new(&runtimeConfig, primary.config) {
             config = primary.config
@@ -63,12 +71,18 @@ final class GhosttyAppManager: @unchecked Sendable {
                 config = fallback.config
                 clearsSelectionOnCopy = fallback.clearsSelectionOnCopy
                 app = fallbackApp
+                loadsDefaultFiles = false
             } else {
                 ghostty_config_free(fallback.config)
                 print("[Soprano] Failed to create ghostty app")
                 return
             }
         }
+        unfocusedConfig = createConfig(
+            theme: theme,
+            loadDefaultFiles: loadsDefaultFiles,
+            unfocused: true
+        )?.config
 
         guard let app else { return }
 
@@ -89,13 +103,38 @@ final class GhosttyAppManager: @unchecked Sendable {
             print("[Soprano] Failed to apply terminal theme \(theme.id)")
             return
         }
+        let updatedUnfocused = createConfig(
+            theme: theme,
+            loadDefaultFiles: true,
+            unfocused: true
+        )?.config
 
-        ghostty_app_update_config(app, updated.config)
-        if let config {
-            ghostty_config_free(config)
-        }
+        // Every surface derives its own copy synchronously, so the old
+        // configs can be freed as soon as the surfaces have the new ones.
+        let previous = config
+        let previousUnfocused = unfocusedConfig
         config = updated.config
+        unfocusedConfig = updatedUnfocused
         clearsSelectionOnCopy = updated.clearsSelectionOnCopy
+        ghostty_app_update_config(app, updated.config)
+        NotificationCenter.default.post(name: .ghosttyDidUpdateConfig, object: self)
+        if let previous {
+            ghostty_config_free(previous)
+        }
+        if let previousUnfocused {
+            ghostty_config_free(previousUnfocused)
+        }
+    }
+
+    /// Gives `surface` the focused config (accent block cursor) or the
+    /// unfocused one (hollow cursor in fg @ 55 %). Called only on focus
+    /// changes and after a theme apply, never per frame. Returns whether a
+    /// config was applied.
+    @discardableResult
+    func applyFocusConfig(to surface: ghostty_surface_t, focused: Bool) -> Bool {
+        guard let selected = focused ? config : unfocusedConfig else { return false }
+        ghostty_surface_update_config(surface, selected)
+        return true
     }
 
     func tick() {
@@ -105,7 +144,8 @@ final class GhosttyAppManager: @unchecked Sendable {
 
     private func createConfig(
         theme: AppTheme,
-        loadDefaultFiles: Bool
+        loadDefaultFiles: Bool,
+        unfocused: Bool = false
     ) -> (config: ghostty_config_t, clearsSelectionOnCopy: Bool)? {
         guard let cfg = ghostty_config_new() else { return nil }
         if loadDefaultFiles {
@@ -113,6 +153,16 @@ final class GhosttyAppManager: @unchecked Sendable {
         }
         let clearsSelectionOnCopy = applySopranoCopyModeConfig(to: cfg)
         guard applyTerminalThemeConfig(theme, to: cfg) else {
+            ghostty_config_free(cfg)
+            return nil
+        }
+        if unfocused,
+           !loadGeneratedConfig(
+               theme.terminalColors.ghosttyUnfocusedConfiguration,
+               named: "terminal-unfocused",
+               into: cfg
+           )
+        {
             ghostty_config_free(cfg)
             return nil
         }

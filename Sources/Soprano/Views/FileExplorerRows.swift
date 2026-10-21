@@ -305,6 +305,12 @@ final class FileExplorerCellView: NSTableCellView {
     let nameField = NSTextField(labelWithString: "")
     let statusLabel = NSTextField(labelWithString: "")
     let ignoredView = NSImageView()
+    /// The 16 pt letter column and the name's stops before the letter or the
+    /// ignored mark only hold while those marks show, so clean rows use the
+    /// full width.
+    private var statusWidth: NSLayoutConstraint!
+    private var nameBeforeStatus: NSLayoutConstraint!
+    private var nameBeforeIgnored: NSLayoutConstraint!
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -355,20 +361,19 @@ final class FileExplorerCellView: NSTableCellView {
 
             nameField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
             nameField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            nameField.trailingAnchor.constraint(
-                lessThanOrEqualTo: statusLabel.leadingAnchor,
-                constant: -6
-            ),
+            nameField.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.trailingInset),
 
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset),
             statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 16),
 
             ignoredView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset - 2),
             ignoredView.centerYAnchor.constraint(equalTo: centerYAnchor),
             ignoredView.widthAnchor.constraint(equalToConstant: 12),
             ignoredView.heightAnchor.constraint(equalToConstant: 12),
         ])
+        statusWidth = statusLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 16)
+        nameBeforeStatus = nameField.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6)
+        nameBeforeIgnored = nameField.trailingAnchor.constraint(lessThanOrEqualTo: ignoredView.leadingAnchor, constant: -6)
     }
 
     /// Leading content inset: the 4 pt pill inset plus 8 pt row padding.
@@ -432,7 +437,10 @@ final class FileExplorerCellView: NSTableCellView {
             statusLabel.isHidden = true
             statusLabel.stringValue = ""
         }
+        statusWidth.isActive = status != nil
+        nameBeforeStatus.isActive = status != nil
         ignoredView.isHidden = !(isIgnored && status == nil)
+        nameBeforeIgnored.isActive = !ignoredView.isHidden
         if !ignoredView.isHidden {
             ignoredView.image = Self.symbol("circle.slash", size: 10, weight: .regular)
             ignoredView.contentTintColor = colors.gray
@@ -450,8 +458,9 @@ final class FileExplorerCellView: NSTableCellView {
         )
     }
 
-    /// Turns the name into an inline Folio field: raised fill, a
-    /// `fieldFocusEdge` edge and the accent caret (styled once editing starts).
+    /// Turns the name into an inline Folio field: raised fill clipped to the
+    /// 6 pt control radius, a `fieldFocusEdge` edge and the accent caret
+    /// (styled once editing starts).
     func beginEditing(colors: ThemeColors, delegate: NSTextFieldDelegate) {
         nameField.isEditable = true
         nameField.isSelectable = true
@@ -462,7 +471,8 @@ final class FileExplorerCellView: NSTableCellView {
         nameField.font = ChromeFont.label
         nameField.delegate = delegate
         nameField.wantsLayer = true
-        nameField.layer?.cornerRadius = Chrome.Radius.cap
+        nameField.layer?.cornerRadius = Chrome.Radius.control
+        nameField.layer?.masksToBounds = true
         nameField.layer?.borderWidth = Chrome.hairline
         nameField.layer?.borderColor = colors.fieldFocusEdge.cgColor
     }
@@ -473,6 +483,8 @@ final class FileExplorerCellView: NSTableCellView {
         nameField.isSelectable = false
         nameField.drawsBackground = false
         nameField.layer?.borderWidth = 0
+        nameField.layer?.cornerRadius = 0
+        nameField.layer?.masksToBounds = false
     }
 
     static func color(for status: GitFileStatus, colors: ThemeColors) -> NSColor {
@@ -539,7 +551,9 @@ enum SidebarEmptyState {
 
 /// The sidebars' failure toast (`.toast.is-error`): a raised e2 surface with
 /// a 10 pt radius and a `borderSubtle` edge, a danger diamond, and the message
-/// as the 13 pt Semibold title in danger.
+/// as the 13 pt Semibold title in danger. AppKit resets a backing layer's
+/// shadow when the effective appearance changes, so the surface is restyled
+/// in `updateLayer`, like the command palette.
 final class SidebarToastView: NSView {
     let messageLabel = NSTextField(wrappingLabelWithString: "")
     private let mark = ChromeStatusMark(shape: .diamond, size: Chrome.statusMark)
@@ -580,11 +594,22 @@ final class SidebarToastView: NSView {
 
     func apply(colors: ThemeColors) {
         self.colors = colors
+        mark.color = colors.danger
+        applyMessage(messageLabel.stringValue)
+        needsDisplay = true
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
         guard let layer else { return }
         ChromeSurface.applyFloating(to: layer, colors: colors, radius: Chrome.Radius.popover, shadow: colors.shadowE2)
         layer.borderColor = colors.borderSubtle.cgColor
-        mark.color = colors.danger
-        applyMessage(messageLabel.stringValue)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 
     private func applyMessage(_ text: String) {

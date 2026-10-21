@@ -747,7 +747,7 @@ final class ChromeButton: NSButton {
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        hover.update(in: self, options: .activeInKeyWindow)
+        hover.update(in: self, options: .activeInActiveApp)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -756,6 +756,16 @@ final class ChromeButton: NSButton {
 
     override func mouseExited(with event: NSEvent) {
         hover.set(false)
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: Chrome.Radius.control,
+            yRadius: Chrome.Radius.control
+        ).fill()
     }
 
     private func label(color: NSColor) -> NSAttributedString {
@@ -851,6 +861,16 @@ final class ChromeIconButton: NSButton {
 
     override func mouseExited(with event: NSEvent) {
         hover.set(false)
+    }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        NSBezierPath(
+            roundedRect: bounds,
+            xRadius: Chrome.Radius.control,
+            yRadius: Chrome.Radius.control
+        ).fill()
     }
 
     private func refresh() {
@@ -1116,7 +1136,10 @@ final class ChromeKeycapGroupView: NSStackView {
             view.removeFromSuperview()
         }
         for legend in caps {
-            addArrangedSubview(ChromeKeycapView(legend: legend, theme: theme, style: style, tone: tone))
+            let cap = ChromeKeycapView(legend: legend, theme: theme, style: style, tone: tone)
+            // The group reads the whole sequence once; the caps stay silent.
+            cap.setAccessibilityElement(false)
+            addArrangedSubview(cap)
         }
         setAccessibilityLabel(caps.joined(separator: " then "))
     }
@@ -1376,32 +1399,38 @@ final class ChromeRowBackgroundView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-// MARK: - Switch
+// MARK: - Toggles
 
-/// A 26×16 switch. Off: `bgOverlay` track with a `borderStrong` edge and a
-/// `switchKnobOff` knob. On: ink track, `bgRaised` knob. Space toggles it
-/// when focused.
-final class ChromeSwitch: NSControl {
-    var isOn: Bool = false {
+/// Shared behavior of `ChromeSwitch` and `ChromeCheckbox`:
+///
+/// - A click toggles on mouse-up, and only when the pointer is released
+///   inside the control, so dragging off cancels it.
+/// - Like `NSButton`, the control takes keyboard focus only under Full
+///   Keyboard Access, then shows the system focus ring around its shape and
+///   toggles with Space.
+/// - Every value change is announced to VoiceOver.
+class ChromeToggleControl: NSControl {
+    fileprivate var toggleValue: Bool {
         didSet {
-            guard isOn != oldValue else { return }
+            guard toggleValue != oldValue else { return }
             needsDisplay = true
-            setAccessibilityValue(isOn)
+            setAccessibilityValue(toggleValue)
+            NSAccessibility.post(element: self, notification: .valueChanged)
         }
     }
 
     /// `NSButton`-style state so checkbox call sites migrate unchanged.
     var state: NSControl.StateValue {
-        get { isOn ? .on : .off }
-        set { isOn = newValue == .on }
+        get { toggleValue ? .on : .off }
+        set { toggleValue = newValue == .on }
     }
 
-    private var theme: AppTheme
+    /// True between a mouse-down on the control and the matching mouse-up.
+    private(set) var isTracking = false
 
-    init(isOn: Bool = false, theme: AppTheme, target: AnyObject? = nil, action: Selector? = nil) {
-        self.isOn = isOn
-        self.theme = theme
-        super.init(frame: NSRect(origin: .zero, size: Chrome.switchSize))
+    fileprivate init(value: Bool, size: NSSize, target: AnyObject?, action: Selector?) {
+        toggleValue = value
+        super.init(frame: NSRect(origin: .zero, size: size))
         self.target = target
         self.action = action
         translatesAutoresizingMaskIntoConstraints = false
@@ -1409,8 +1438,95 @@ final class ChromeSwitch: NSControl {
         setContentHuggingPriority(.required, for: .vertical)
         setAccessibilityElement(true)
         setAccessibilityRole(.checkBox)
+        setAccessibilityValue(value)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var isEnabled: Bool {
+        didSet {
+            alphaValue = isEnabled ? 1 : 0.45
+            if !isEnabled {
+                isTracking = false
+            }
+        }
+    }
+
+    override var isFlipped: Bool { false }
+
+    // MARK: Focus
+
+    override var canBecomeKeyView: Bool {
+        isEnabled && NSApplication.shared.isFullKeyboardAccessEnabled
+    }
+
+    override var acceptsFirstResponder: Bool { canBecomeKeyView }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        focusShape.fill()
+    }
+
+    /// The outline the focus ring follows: the track or the box.
+    fileprivate var focusShape: NSBezierPath { NSBezierPath(rect: bounds) }
+
+    // MARK: Input
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        isTracking = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isTracking else { return }
+        isTracking = false
+        guard isEnabled else { return }
+        let location = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(location) else { return }
+        toggle()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isEnabled, event.charactersIgnoringModifiers == " " else {
+            super.keyDown(with: event)
+            return
+        }
+        toggle()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        toggle()
+        return true
+    }
+
+    private func toggle() {
+        toggleValue.toggle()
+        sendAction(action, to: target)
+    }
+}
+
+// MARK: - Switch
+
+/// A 26×16 switch. Off: `bgOverlay` track with a `borderStrong` edge and a
+/// `switchKnobOff` knob. On: ink track, `bgRaised` knob. Clicks toggle on
+/// release; Space toggles it when focused under Full Keyboard Access.
+final class ChromeSwitch: ChromeToggleControl {
+    var isOn: Bool {
+        get { toggleValue }
+        set { toggleValue = newValue }
+    }
+
+    private var theme: AppTheme
+
+    init(isOn: Bool = false, theme: AppTheme, target: AnyObject? = nil, action: Selector? = nil) {
+        self.theme = theme
+        super.init(value: isOn, size: Chrome.switchSize, target: target, action: action)
         setAccessibilitySubrole(.switch)
-        setAccessibilityValue(isOn)
     }
 
     @available(*, unavailable)
@@ -1424,22 +1540,26 @@ final class ChromeSwitch: NSControl {
     }
 
     override var intrinsicContentSize: NSSize { Chrome.switchSize }
-    override var acceptsFirstResponder: Bool { isEnabled }
 
-    override var isEnabled: Bool {
-        didSet { alphaValue = isEnabled ? 1 : 0.45 }
-    }
-    override var isFlipped: Bool { false }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let colors = theme.colors
+    private var track: NSRect {
         let size = Chrome.switchSize
-        let track = NSRect(
+        return NSRect(
             x: floor((bounds.width - size.width) / 2),
             y: floor((bounds.height - size.height) / 2),
             width: size.width,
             height: size.height
         )
+    }
+
+    override fileprivate var focusShape: NSBezierPath {
+        let radius = Chrome.switchSize.height / 2
+        return NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colors = theme.colors
+        let size = Chrome.switchSize
+        let track = track
         let trackPath = NSBezierPath(roundedRect: track, xRadius: size.height / 2, yRadius: size.height / 2)
         (isOn ? colors.inkButtonFill : colors.bgOverlay).setFill()
         trackPath.fill()
@@ -1470,37 +1590,15 @@ final class ChromeSwitch: NSControl {
             knobPath.stroke()
         }
     }
-
-    override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { return }
-        toggle()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.charactersIgnoringModifiers == " " {
-            toggle()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        guard isEnabled else { return false }
-        toggle()
-        return true
-    }
-
-    private func toggle() {
-        isOn.toggle()
-        sendAction(action, to: target)
-    }
 }
 
 // MARK: - Checkbox
 
 /// A 14 pt checkbox. Checked is an ink fill with a tick; the `quiet` style
-/// for dense tables keeps the outline and draws an ink tick only.
-final class ChromeCheckbox: NSControl {
+/// for dense tables keeps the outline and draws an ink tick only. Clicks
+/// toggle on release; Space toggles it when focused under Full Keyboard
+/// Access.
+final class ChromeCheckbox: ChromeToggleControl {
     enum Style {
         case standard
         case quiet
@@ -1508,18 +1606,9 @@ final class ChromeCheckbox: NSControl {
 
     static let side: CGFloat = 14
 
-    var isChecked: Bool = false {
-        didSet {
-            guard isChecked != oldValue else { return }
-            needsDisplay = true
-            setAccessibilityValue(isChecked)
-        }
-    }
-
-    /// `NSButton`-style state so checkbox call sites migrate unchanged.
-    var state: NSControl.StateValue {
-        get { isChecked ? .on : .off }
-        set { isChecked = newValue == .on }
+    var isChecked: Bool {
+        get { toggleValue }
+        set { toggleValue = newValue }
     }
 
     var style: Style {
@@ -1534,18 +1623,14 @@ final class ChromeCheckbox: NSControl {
         target: AnyObject? = nil,
         action: Selector? = nil
     ) {
-        self.isChecked = isChecked
         self.theme = theme
         self.style = style
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.side, height: Self.side))
-        self.target = target
-        self.action = action
-        translatesAutoresizingMaskIntoConstraints = false
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentHuggingPriority(.required, for: .vertical)
-        setAccessibilityElement(true)
-        setAccessibilityRole(.checkBox)
-        setAccessibilityValue(isChecked)
+        super.init(
+            value: isChecked,
+            size: NSSize(width: Self.side, height: Self.side),
+            target: target,
+            action: action
+        )
     }
 
     @available(*, unavailable)
@@ -1559,20 +1644,23 @@ final class ChromeCheckbox: NSControl {
     }
 
     override var intrinsicContentSize: NSSize { NSSize(width: Self.side, height: Self.side) }
-    override var acceptsFirstResponder: Bool { isEnabled }
 
-    override var isEnabled: Bool {
-        didSet { alphaValue = isEnabled ? 1 : 0.45 }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let colors = theme.colors
-        let box = NSRect(
+    private var box: NSRect {
+        NSRect(
             x: floor((bounds.width - Self.side) / 2),
             y: floor((bounds.height - Self.side) / 2),
             width: Self.side,
             height: Self.side
         )
+    }
+
+    override fileprivate var focusShape: NSBezierPath {
+        NSBezierPath(roundedRect: box, xRadius: Chrome.Radius.cap, yRadius: Chrome.Radius.cap)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colors = theme.colors
+        let box = box
         let shape = NSBezierPath(
             roundedRect: box.insetBy(dx: 0.5, dy: 0.5),
             xRadius: Chrome.Radius.cap,
@@ -1595,30 +1683,6 @@ final class ChromeCheckbox: NSControl {
         tick.lineJoinStyle = .round
         (filled ? colors.inkButtonLabel : colors.textPrimary).setStroke()
         tick.stroke()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { return }
-        toggle()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.charactersIgnoringModifiers == " " {
-            toggle()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        guard isEnabled else { return false }
-        toggle()
-        return true
-    }
-
-    private func toggle() {
-        isChecked.toggle()
-        sendAction(action, to: target)
     }
 }
 
@@ -1672,6 +1736,33 @@ final class ChromeFieldView: NSView {
         edge.setStroke()
         shape.lineWidth = Chrome.hairline
         shape.stroke()
+    }
+
+    /// A click on the padding around the embedded field focuses the field,
+    /// so the whole visible surface is a click target.
+    override func mouseDown(with event: NSEvent) {
+        guard let field = embeddedField, field.isEditable || field.isSelectable,
+              let window
+        else {
+            super.mouseDown(with: event)
+            return
+        }
+        if field.currentEditor() == nil {
+            window.makeFirstResponder(field)
+        }
+    }
+
+    /// The first text field inside this surface.
+    var embeddedField: NSTextField? {
+        var queue = subviews
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let field = view as? NSTextField, !field.isHidden {
+                return field
+            }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
     }
 
     /// Makes `field` a borderless, backgroundless SF Pro field that sits on a

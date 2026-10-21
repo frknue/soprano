@@ -2,8 +2,6 @@ import Foundation
 
 /// One agent tab as presented by the global monitoring dashboard.
 struct AgentDashboardEntry: Identifiable, Equatable {
-    static let fallbackProfileIcon = "command.square"
-
     var id: String { "\(paneId):\(tabId)" }
 
     let paneId: String
@@ -18,9 +16,6 @@ struct AgentDashboardEntry: Identifiable, Equatable {
     let cwd: String?
     var sessionName: String? = nil
     var isWindowTitleCustom: Bool = false
-    /// Resolved when the snapshot is taken, so an icon edited in settings.json
-    /// makes the entry differ and the dashboard redraws it.
-    var profileIcon: String = fallbackProfileIcon
     /// The agent's own conversation, which locates the transcript the
     /// dashboard renders as a timeline.
     var conversation: AgentConversation? = nil

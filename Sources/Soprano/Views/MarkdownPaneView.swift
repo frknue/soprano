@@ -379,7 +379,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             }
             pre {
               background: var(--panel);
-              border-radius: 6px;
+              border-radius: \(Int(Chrome.Radius.card))px;
               font: 13px/20px var(--mono);
               overflow: auto;
               padding: 12px 14px;

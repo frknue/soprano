@@ -62,7 +62,8 @@ final class LayoutTabBarView: NSView {
         addButton.target = self
         addButton.action = #selector(addTab)
         addButton.translatesAutoresizingMaskIntoConstraints = true
-        tabContainer.addSubview(addButton)
+        // A row subview above the strip, so it can stay put when tabs overflow.
+        addSubview(addButton)
 
         rightSidebarToggle.identifier = NSUserInterfaceItemIdentifier("right-sidebar-toggle")
         rightSidebarToggle.refusesFirstResponder = true
@@ -180,8 +181,7 @@ final class LayoutTabBarView: NSView {
         let stripHeight = max(0, bounds.height - rule)
         let iconSize = ChromeIconButton.defaultSize
         let toggleWidth: CGFloat = showsRightSidebarToggle ? iconSize + 8 : 0
-        let viewportWidth = max(0, bounds.width - toggleWidth)
-        scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
+        let availableWidth = max(0, bounds.width - toggleWidth)
         rightSidebarToggle.frame = NSRect(
             x: max(0, bounds.width - 8 - iconSize),
             y: rule + floor((stripHeight - iconSize) / 2),
@@ -189,22 +189,15 @@ final class LayoutTabBarView: NSView {
             height: iconSize
         )
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
-
-        // `padding: 0 4px` around the row; pills carry their own 2 pt gap.
-        var x: CGFloat = 4
-        for button in buttons {
-            button.frame = NSRect(x: x, y: 0, width: button.tabWidth, height: stripHeight)
-            x += button.tabWidth
-        }
-        x += 4
-        addButton.frame = NSRect(
-            x: x,
-            y: floor((stripHeight - iconSize) / 2),
-            width: iconSize,
-            height: iconSize
+        let viewportWidth = TabRowLayout.layout(
+            tabs: buttons.map { ($0, $0.tabWidth) },
+            addButton: addButton,
+            scrollView: scrollView,
+            container: tabContainer,
+            availableWidth: availableWidth,
+            rule: rule,
+            stripHeight: stripHeight
         )
-        x += iconSize + 4
-        tabContainer.setFrameSize(NSSize(width: max(viewportWidth, x), height: stripHeight))
         if viewportWidth != previousViewportWidth {
             previousViewportWidth = viewportWidth
             revealActiveTab = true

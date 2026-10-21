@@ -725,8 +725,9 @@ final class SidebarView: NSView {
 
 // MARK: - Row Chrome
 
-/// Hover tracking shared by the sidebar rows: the row shows its close button
-/// and the hover pill only under the pointer.
+/// Hover and key-window tracking shared by the sidebar rows: the row shows its
+/// close button and the hover pill only under the pointer, and the focused
+/// row's pencil tick only while its window is key.
 private class SidebarRowView: NSView {
     let theme: AppTheme
     let background: ChromeRowBackgroundView
@@ -746,6 +747,16 @@ private class SidebarRowView: NSView {
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        // The palette, an alert or another app taking the keyboard drops the
+        // pencil tick, like the pane header's focus rule.
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(keyWindowDidChange(_:)),
+                name: name,
+                object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -753,8 +764,34 @@ private class SidebarRowView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    /// Re-applies the row's state after the pointer enters or leaves it.
+    /// Re-applies the row's state after the pointer, the key window or the
+    /// row's configuration changes.
     func hoverStateDidChange() {}
+
+    /// Whether the row's window holds the keyboard. A row outside any window
+    /// (tests) counts as focused.
+    var isInKeyWindow: Bool {
+        window.map(\.isKeyWindow) ?? true
+    }
+
+    @objc private func keyWindowDidChange(_ notification: Notification) {
+        hoverStateDidChange()
+    }
+
+    /// Close buttons fade out instead of hiding, so VoiceOver and Full
+    /// Keyboard Access keep them; a faded control ignores the pointer and the
+    /// click selects the row instead.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        var current: NSView? = hit
+        while let candidate = current, candidate !== self {
+            if candidate is NSControl, candidate.alphaValue == 0 {
+                return self
+            }
+            current = candidate.superview
+        }
+        return hit
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -781,6 +818,7 @@ private class SidebarRowView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { setHovered(false) }
+        hoverStateDidChange()
     }
 
     private func setHovered(_ hovered: Bool) {
@@ -975,7 +1013,7 @@ private final class SidebarWindowRowView: SidebarRowView {
     override func hoverStateDidChange() {
         background.style = isHovered ? .hover : .none
         shortcutCap.isHidden = !showsShortcut
-        closeButton.isHidden = showsShortcut || !isHovered
+        closeButton.alphaValue = showsShortcut || !isHovered ? 0 : 1
         countLabel.isHidden = showsShortcut || isHovered
     }
 
@@ -1151,9 +1189,11 @@ private final class SidebarPaneRowView: SidebarRowView {
     }
 
     override func hoverStateDidChange() {
-        background.style = isFocusedPane ? .selected : (isHovered ? .hover : .none)
+        background.style = isFocusedPane
+            ? (isInKeyWindow ? .selected : .selectedUnfocused)
+            : (isHovered ? .hover : .none)
         shortcutCap.isHidden = !showsShortcut
-        closeButton.isHidden = showsShortcut || !isHovered
+        closeButton.alphaValue = showsShortcut || !isHovered ? 0 : 1
         statusLabel.isHidden = showsShortcut || isHovered || statusLabel.stringValue.isEmpty
     }
 

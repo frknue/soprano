@@ -63,6 +63,20 @@ struct ChromeHoverTests {
         #expect(fillColor(of: button) != hovered)
     }
 
+    @Test func buttonsTrackHoverWhileTheAppIsActiveSoLeavingTheKeyWindowCannotStrandIt() {
+        // With `.activeInKeyWindow`, ⌘Tab away while hovered left the fill on.
+        let button = ChromeButton(title: "Reload", theme: .folioPaper)
+        let icon = ChromeIconButton(
+            symbolName: "eye", accessibilityLabel: "Probe", target: nil, action: nil
+        )
+        for view in [button, icon] as [NSView] {
+            view.updateTrackingAreas()
+            let options = view.trackingAreas.map(\.options)
+            #expect(options.contains { $0.contains(.activeInActiveApp) })
+            #expect(!options.contains { $0.contains(.activeInKeyWindow) })
+        }
+    }
+
     @Test func aToggledOnIconStaysInkWithoutTheAccent() {
         let theme = AppTheme.folioPaper
         let icon = ChromeIconButton(

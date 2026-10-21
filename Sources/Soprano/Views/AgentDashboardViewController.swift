@@ -424,6 +424,9 @@ final class AgentDashboardViewController: NSViewController {
             agentRows.firstIndex { $0.entry.id == selectedId }
         } ?? 0
         let nextIndex = min(max(0, currentIndex + delta), agentRows.count - 1)
+        // J/K drive the list even from the timeline or terminal; take focus
+        // back so the moved row shows the focused pill and pencil tick.
+        view.window?.makeFirstResponder(view)
         selectedEntryId = agentRows[nextIndex].entry.id
         updateRowSelection(scrollIntoView: true)
         updateDetail()

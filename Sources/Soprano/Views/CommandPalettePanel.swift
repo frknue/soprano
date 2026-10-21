@@ -363,13 +363,17 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(origin: .zero, size: preferredContentSize))
+        let root = CommandPaletteRootView(frame: NSRect(origin: .zero, size: preferredContentSize))
         root.wantsLayer = true
 
         // The surface carries the fill, radius, shadow and contact ring; it
         // must not clip, or the shadow goes. `clip` rounds the content.
         surface = CommandPaletteSurfaceView(colors: currentTheme.colors)
         root.addSubview(surface)
+        root.surface = surface
+        root.onClickOutsideSurface = { [weak self] in
+            self?.onDismiss?()
+        }
 
         let clip = NSView()
         clip.wantsLayer = true
@@ -686,6 +690,23 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     private func executeSelection() {
         guard selectedIndex >= 0, selectedIndex < filtered.count else { return }
         onExecute?(filtered[selectedIndex])
+    }
+}
+
+/// The panel's content: the surface plus its transparent shadow margin. A
+/// click in that margin looks like a click on the window behind, so it
+/// closes the palette as the scrim does.
+private final class CommandPaletteRootView: NSView {
+    weak var surface: NSView?
+    var onClickOutsideSurface: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let surface, !surface.frame.contains(point) {
+            onClickOutsideSurface?()
+        } else {
+            super.mouseDown(with: event)
+        }
     }
 }
 
