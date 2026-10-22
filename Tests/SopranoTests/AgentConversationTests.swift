@@ -405,6 +405,29 @@ struct AgentConversationTests {
         #expect(run.lines == ["agent-ran", "reported agent-event stopped", "fallback-shell"])
     }
 
+    @Test func anAgentStartedByHandAfterTheLaunchedOneExitsIsNotTakenForTheLaunchedOne() throws {
+        let config = TerminalConfig.forAgent(
+            DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2",
+            conversation: AgentConversation(id: "saved-chat"), loginShell: "/bin/zsh"
+        )
+        // omp's ambient extension stays quiet under SOPRANO_AGENT_PROFILE,
+        // trusting the launcher's --extension. An omp typed into the shell
+        // the pane falls back to has no --extension, so the shell must not
+        // carry the launched agent's identity.
+        let run = try runAgentLaunchCommand(
+            config,
+            stubs: ["omp": "echo \"agent profile=${SOPRANO_AGENT_PROFILE-unset}\""],
+            zprofile: """
+            [[ -z $ZSH_EXECUTION_STRING ]] && echo "shell profile=${SOPRANO_AGENT_PROFILE-unset} \\
+            name=${SOPRANO_AGENT_NAME-unset} resume=${SOPRANO_RESUME_SESSION_ID-unset} pane=${SOPRANO_PANE_ID-unset}"
+            """
+        )
+        #expect(run.lines == [
+            "agent profile=omp",
+            "shell profile=unset name=unset resume=unset pane=pane-1",
+        ])
+    }
+
     @Test func aCtrlCWhileTheFallbackShellStartsLeavesItsStartupFilesIntact() throws {
         let config = TerminalConfig.forAgent(
             DefaultAgents.omp, paneId: "pane-1", tabId: "tab-2", loginShell: "/bin/zsh"
@@ -489,10 +512,13 @@ func runAgentLaunchCommand(
     let launch = ["/bin/bash", "--noprofile", "--norc", "-c", "exec -l \(try #require(config.command))"]
     process.executableURL = URL(fileURLWithPath: inTerminal ? "/usr/bin/script" : launch[0])
     process.arguments = inTerminal ? ["-q", "/dev/null"] + launch : Array(launch.dropFirst())
-    var environment = [
+    // Ghostty starts the command with the config's environment; the
+    // harness's own variables win, and SOPRANO_BIN is set only below.
+    var environment = config.env.filter { $0.key != "SOPRANO_BIN" }
+    environment.merge([
         "HOME": directory.path, "ZDOTDIR": directory.path,
         "PATH": "/usr/bin:/bin", "TERM": "dumb",
-    ]
+    ]) { _, harness in harness }
     if let reportsThrough {
         environment["SOPRANO_BIN"] = bin.appendingPathComponent(reportsThrough).path
     }

@@ -89,7 +89,10 @@ struct TerminalConfig {
             // on the user's interactive PATH can also start after workspace restore.
             // When the agent exits, report it and continue in an interactive login
             // shell (see `fallbackShell`) so the pane stays a usable terminal
-            // instead of a dead surface.
+            // instead of a dead surface. That shell is no longer the agent: an
+            // agent typed into it must report on its own (omp's ambient
+            // extension stays quiet under SOPRANO_AGENT_PROFILE, trusting the
+            // launcher's --extension), so the launch identity goes first.
             // The INT trap stops an interactive zsh from abandoning the rest of the
             // line when Ctrl+C kills the agent; children still get default SIGINT.
             // Account variables are exported again after the rc files ran, so a
@@ -100,6 +103,7 @@ struct TerminalConfig {
             let script = (["trap true INT"] + accountExports + [
                 fullCommand,
                 "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped",
+                "unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID",
                 fallbackShell(loginShell),
             ]).joined(separator: "; ")
             config.command = fullCommand.isEmpty ? nil : [

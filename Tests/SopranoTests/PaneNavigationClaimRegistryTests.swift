@@ -74,33 +74,38 @@ struct PaneNavigationClaimRegistryTests {
     }
 
     @Test func claimedTerminalControlKeysBypassPaneHints() {
-        var focusedKeys: [String] = []
-
-        let handled = KeybindingManager.handlePaneShortcut(
+        let step = KeybindingManager.paneHintStep(
+            typed: "",
             key: "d",
-            terminalClaimsControlKeys: true
-        ) { key in
-            focusedKeys.append(key)
-            return true
-        }
-
-        #expect(!handled)
-        #expect(focusedKeys.isEmpty)
+            terminalClaimsControlKeys: true,
+            assignments: [(key: "d", paneId: "pane-1")]
+        )
+        #expect(step == .passThrough)
     }
 
     @Test func unclaimedControlShiftKeysActivatePaneHints() {
-        var focusedKeys: [String] = []
+        let step = KeybindingManager.paneHintStep(
+            typed: "",
+            key: "D",
+            terminalClaimsControlKeys: false,
+            assignments: [(key: "d", paneId: "pane-1")]
+        )
+        #expect(step == .focus(paneId: "pane-1"))
+    }
 
-        let handled = KeybindingManager.handlePaneShortcut(
-            key: "d",
-            terminalClaimsControlKeys: false
-        ) { key in
-            focusedKeys.append(key)
-            return true
+    @Test func aTwoLetterHintWaitsForItsSecondLetterAndAnythingElseFallsThrough() {
+        let assignments = [(key: "b", paneId: "pane-1"), (key: "zb", paneId: "pane-2"), (key: "zd", paneId: "pane-3")]
+        func step(_ typed: String, _ key: String) -> KeybindingManager.PaneHintStep {
+            KeybindingManager.paneHintStep(typed: typed, key: key, terminalClaimsControlKeys: false, assignments: assignments)
         }
-
-        #expect(handled)
-        #expect(focusedKeys == ["d"])
+        #expect(step("", "z") == .pending("z"))
+        #expect(step("z", "d") == .focus(paneId: "pane-3"))
+        #expect(step("z", "b") == .focus(paneId: "pane-2"))
+        // A letter that continues no hint, or one no hint starts with, is the
+        // terminal's again.
+        #expect(step("z", "x") == .passThrough)
+        #expect(step("", "x") == .passThrough)
+        #expect(step("", "b") == .focus(paneId: "pane-1"))
     }
 
     @Test func repeatedPrefixForwardsLiteralControlA() {

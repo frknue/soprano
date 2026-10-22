@@ -18,7 +18,7 @@ final class SidebarView: NSView {
     private var headerView: ChromeEyebrowView!
     private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
-    private var listContentView: NSView!
+    private var listContentView: SidebarListView!
     private var rowsStack: NSStackView!
     private var footerView: NSView!
     private var footerSeparator: ChromeRuleView!
@@ -30,6 +30,7 @@ final class SidebarView: NSView {
     private var sessionsButton: ChromeIconButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
+    private var typedPaneHint = ""
     private var windowRows: [String: SidebarWindowRowView] = [:]
     private var paneRows: [String: SidebarPaneRowView] = [:]
     private var displayedWindowId: String?
@@ -131,7 +132,7 @@ final class SidebarView: NSView {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(scrollView)
 
-        listContentView = FlippedView()
+        listContentView = SidebarListView()
         listContentView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = listContentView
 
@@ -142,6 +143,7 @@ final class SidebarView: NSView {
         rowsStack.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 8, right: 0)
         rowsStack.translatesAutoresizingMaskIntoConstraints = false
         listContentView.addSubview(rowsStack)
+        listContentView.rowsStack = rowsStack
 
         footerView = NSView()
         footerView.translatesAutoresizingMaskIntoConstraints = false
@@ -283,6 +285,14 @@ final class SidebarView: NSView {
     func setControlKeyHeld(_ isHeld: Bool) {
         guard isControlKeyHeld != isHeld else { return }
         isControlKeyHeld = isHeld
+        rebuildRows(theme: themeManager.currentTheme)
+    }
+
+    /// Letters of a longer pane hint typed so far. The hints stay up, even
+    /// once ⌃ is released, narrowed to the panes the letters still reach.
+    func setTypedPaneHint(_ typed: String) {
+        guard typedPaneHint != typed else { return }
+        typedPaneHint = typed
         rebuildRows(theme: themeManager.currentTheme)
     }
 
@@ -485,12 +495,14 @@ final class SidebarView: NSView {
                 ($0.paneId, $0.key)
             }
         )
+        // Holding ⌃ shows the hints; a started hint keeps them up.
+        let showsHints = isControlKeyHeld || !typedPaneHint.isEmpty
         var rows: [NSView] = []
         var nextWindowRows: [String: SidebarWindowRowView] = [:]
         var nextPaneRows: [String: SidebarPaneRowView] = [:]
         for (index, terminalWindow) in agentManager.activeSessionWindows.enumerated() {
             let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
-            let isExpanded = isControlKeyHeld
+            let isExpanded = showsHints
                 || !terminalWindow.isSidebarCollapsed
             let paneIds = terminalWindow.paneIds
             let windowRow = windowRows[terminalWindow.id] ?? SidebarWindowRowView(theme: theme)
@@ -503,7 +515,7 @@ final class SidebarView: NSView {
                     }.count ?? 0
                 },
                 shortcutNumber: index < 9 ? index + 1 : nil,
-                showShortcutHint: isControlKeyHeld,
+                showShortcutHint: isControlKeyHeld && typedPaneHint.isEmpty,
                 expanded: isExpanded,
                 highlighted: isActiveWindow,
                 isTitleCustom: terminalWindow.isTitleCustom,
@@ -543,8 +555,10 @@ final class SidebarView: NSView {
                         statusWord: paneStatusWord(for: pane),
                         tabCount: pane.tabs.count,
                         layoutTabNumber: numbersLayoutTabs ? layoutTabIndex + 1 : nil,
-                        shortcutKey: paneShortcutKeysById[pane.id],
-                        showShortcutHint: isControlKeyHeld,
+                        shortcutCaps: paneShortcutKeysById[pane.id].flatMap {
+                            Self.paneHintCaps(for: $0, typed: typedPaneHint)
+                        },
+                        showShortcutHint: showsHints,
                         highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
                         inActiveWindow: isActiveWindow,
                         onSelect: { [weak self] in
@@ -569,6 +583,17 @@ final class SidebarView: NSView {
             needsActiveWindowReveal = true
             needsLayout = true
         }
+        // Rows that moved under a resting pointer hand the hover on.
+        listContentView.needsLayout = true
+    }
+
+    /// K1 caps for what is left of a pane hint after `typed`, or nil when the
+    /// hint does not go on from it: `⌃⇧B`, or `⌃⇧Z` `B`, which reads `B` once
+    /// `Z` is typed.
+    private static func paneHintCaps(for hint: String, typed: String) -> [String]? {
+        guard hint.count > typed.count, hint.hasPrefix(typed) else { return nil }
+        let letters = hint.dropFirst(typed.count).map { $0.uppercased() }
+        return typed.isEmpty ? ["⌃⇧\(letters[0])"] + letters.dropFirst() : letters
     }
 
     func promptToRenameActiveWindow() {
@@ -725,14 +750,19 @@ final class SidebarView: NSView {
 
 // MARK: - Row Chrome
 
-/// Hover and key-window tracking shared by the sidebar rows: the row shows its
-/// close button and the hover pill only under the pointer, and the focused
-/// row's pencil tick only while its window is key.
+/// Key-window tracking shared by the sidebar rows. The row shows its close
+/// button and the hover pill only while `isHovered`, which the list sets for
+/// the row under the pointer, and the focused row's pencil tick only while
+/// its window is key.
 private class SidebarRowView: NSView {
     let theme: AppTheme
     let background: ChromeRowBackgroundView
-    private(set) var isHovered = false
-    private var trackingArea: NSTrackingArea?
+    var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            hoverStateDidChange()
+        }
+    }
 
     init(theme: AppTheme) {
         self.theme = theme
@@ -793,37 +823,9 @@ private class SidebarRowView: NSView {
         return hit
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        trackingArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        setHovered(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        setHovered(false)
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { setHovered(false) }
-        hoverStateDidChange()
-    }
-
-    private func setHovered(_ hovered: Bool) {
-        guard isHovered != hovered else { return }
-        isHovered = hovered
+        if window == nil { isHovered = false }
         hoverStateDidChange()
     }
 
@@ -1053,7 +1055,7 @@ private final class SidebarWindowRowView: SidebarRowView {
 /// with `⎇ branch · 2T · Tab 2` muted on a second line (40 pt; 28 without
 /// one). The focused pane gets the selection pill and pencil tick; every
 /// other row is plain. Holding ⌃ swaps the status word for the pane's
-/// accent jump keycap; the pointer swaps it for a close button.
+/// accent jump keycaps; the pointer swaps it for a close button.
 private final class SidebarPaneRowView: SidebarRowView {
     static let height: CGFloat = 40
     static let singleLineHeight: CGFloat = 28
@@ -1063,7 +1065,7 @@ private final class SidebarPaneRowView: SidebarRowView {
     private let mark = ChromeStatusMark()
     private let titleLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
-    private let shortcutCap: ChromeKeycapView
+    private let shortcutCaps: ChromeKeycapGroupView
     private let closeButton = SidebarRowView.makeCloseButton(accessibilityLabel: "Close Pane")
     private let metaLabel = NSTextField(labelWithString: "")
     private var heightConstraint: NSLayoutConstraint!
@@ -1078,7 +1080,7 @@ private final class SidebarPaneRowView: SidebarRowView {
     private var isFocusedPane = false
 
     override init(theme: AppTheme) {
-        shortcutCap = ChromeKeycapView(legend: "", theme: theme, style: .small, tone: .accent)
+        shortcutCaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .accent)
         titleColor = theme.colors.textPrimary
         super.init(theme: theme)
         setup()
@@ -1102,7 +1104,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusLabel)
 
-        addSubview(shortcutCap)
+        addSubview(shortcutCaps)
 
         closeButton.target = self
         closeButton.action = #selector(handleClose)
@@ -1130,14 +1132,14 @@ private final class SidebarPaneRowView: SidebarRowView {
 
             titleLabel.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCap.leadingAnchor, constant: -6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCaps.leadingAnchor, constant: -6),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
 
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
             statusLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
-            shortcutCap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
-            shortcutCap.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            shortcutCaps.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
+            shortcutCaps.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 4)),
             closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
@@ -1155,7 +1157,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         statusWord: String?,
         tabCount: Int,
         layoutTabNumber: Int?,
-        shortcutKey: String?,
+        shortcutCaps caps: [String]?,
         showShortcutHint: Bool,
         highlighted: Bool,
         inActiveWindow: Bool,
@@ -1172,10 +1174,12 @@ private final class SidebarPaneRowView: SidebarRowView {
             statusLabel.stringValue = ""
         }
 
-        showsShortcut = showShortcutHint && shortcutKey != nil
-        if let shortcutKey {
-            shortcutCap.legend = "⌃⇧\(shortcutKey.uppercased())"
-            shortcutCap.toolTip = "Ctrl+Shift+\(shortcutKey.uppercased())"
+        showsShortcut = showShortcutHint && caps != nil
+        // Rebuilding the caps costs views, and this runs on every refresh.
+        if let caps, shortcutCaps.caps != caps {
+            shortcutCaps.caps = caps
+            shortcutCaps.toolTip = caps.map { $0.replacingOccurrences(of: "⌃⇧", with: "Ctrl+Shift+") }
+                .joined(separator: ", then ")
         }
 
         titleColor = inActiveWindow ? colors.textPrimary : colors.textMuted
@@ -1192,7 +1196,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         background.style = isFocusedPane
             ? (isInKeyWindow ? .selected : .selectedUnfocused)
             : (isHovered ? .hover : .none)
-        shortcutCap.isHidden = !showsShortcut
+        shortcutCaps.isHidden = !showsShortcut
         closeButton.alphaValue = showsShortcut || !isHovered ? 0 : 1
         statusLabel.isHidden = showsShortcut || isHovered || statusLabel.stringValue.isEmpty
     }
@@ -1242,21 +1246,118 @@ private final class SidebarPaneRowView: SidebarRowView {
     }
 }
 
-// MARK: - Flipped Document View
+// MARK: - List
 
 /// Document view for the pane list's NSScrollView. Flipping the coordinate
 /// system anchors content to the top and lets the view grow taller than the
 /// viewport (via a `>=` bottom pin) so the scroller engages on overflow
 /// instead of Auto Layout forcing document height to equal viewport height.
-private final class FlippedView: NSView {
+///
+/// It also owns the hover, like the file explorer: one tracking area follows
+/// the pointer and marks the row under it, so at most one row shows its pill
+/// and close button. Rows must not track the pointer themselves. They move
+/// under a resting pointer whenever ⌃ expands collapsed windows, a pane opens
+/// or closes, or the list scrolls, and AppKit sends no exit for a tracking
+/// area that is replaced as its view moves, which left rows hovered for good.
+/// The hover is therefore re-read from the last pointer position after every
+/// layout and scroll.
+private final class SidebarListView: NSView {
+    weak var rowsStack: NSStackView?
+    /// The pointer in window coordinates while it is over the list.
+    private var pointerInWindow: NSPoint?
+    private var hoverArea: NSTrackingArea?
+    private weak var hoveredRow: SidebarRowView?
+
     override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // Tracking stops while another app is active, without an exit event.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidResignActive(_:)),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+    }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: nil)
+        guard let clipView = superview as? NSClipView else { return }
+        clipView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(clipViewDidScroll(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: clipView
+        )
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea {
+            removeTrackingArea(hoverArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        pointerInWindow = event.locationInWindow
+        refreshHover()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        pointerInWindow = event.locationInWindow
+        refreshHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        pointerInWindow = nil
+        refreshHover()
+    }
+
+    /// Rows settle inside the stack after this view's own layout, so they are
+    /// laid out before the hover is re-read.
+    override func layout() {
+        super.layout()
+        rowsStack?.layoutSubtreeIfNeeded()
+        refreshHover()
+    }
+
+    @objc private func clipViewDidScroll(_ notification: Notification) {
+        refreshHover()
+    }
+
+    @objc private func applicationDidResignActive(_ notification: Notification) {
+        pointerInWindow = nil
+        refreshHover()
+    }
+
+    private func refreshHover() {
+        let pointed = pointerInWindow.flatMap { row(at: convert($0, from: nil)) }
+        guard pointed !== hoveredRow else { return }
+        hoveredRow?.isHovered = false
+        hoveredRow = pointed
+        pointed?.isHovered = true
+    }
+
+    private func row(at point: NSPoint) -> SidebarRowView? {
+        guard visibleRect.contains(point), let rowsStack else { return nil }
+        return rowsStack.arrangedSubviews.lazy
+            .compactMap { $0 as? SidebarRowView }
+            .first { $0.convert($0.bounds, to: self).contains(point) }
     }
 }

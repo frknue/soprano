@@ -257,7 +257,7 @@ key; `Esc` keeps the current one.
 | `⌃A` → `P` / `N` | Previous / next logical window |
 | `⌃A` → `⇧L` | Jump to the most recently active logical window; press again to toggle back |
 | `⌃1`…`⌃9` | Select logical window 1–9 |
-| `⌃⇧` + the letter shown in the sidebar | Select the matching pane across windows in the current session |
+| `⌃⇧` + the letters shown in the sidebar | Select the matching pane across windows in the current session |
 | `⌘N` | New logical window |
 | `⌃A` → `C` | New logical window in the active terminal's directory |
 | `⇧⌘R` / `⇧⌘W` | Rename / close the active logical window |
@@ -298,7 +298,9 @@ key; `Esc` keeps the current one.
 
 Holding Control reveals the window and pane hints in the sidebar. Pane hints include `⇧`
 because they require Control+Shift; unmodified alphabetic Control chords remain available
-to the terminal.
+to the terminal. Every pane gets a hint: past 20 panes the last ones take two letters,
+like Vimium link hints. Type the first with Control+Shift (`⌃⇧Z`), then the second with or
+without the modifiers; the sidebar narrows to the panes still matching, and `esc` cancels.
 
 ## Sessions and windows
 

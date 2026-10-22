@@ -77,11 +77,13 @@ struct ActiveLocationIndicatorTests {
         let center = row.convert(NSPoint(x: close.frame.midX, y: close.frame.midY), to: row.superview)
         #expect(row.hitTest(center) === row)
 
-        let enter = try #require(NSEvent.enterExitEvent(
-            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
-            windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        // The list, not the row, tracks the pointer.
+        let list = try #require(descendants(of: sidebar, as: NSScrollView.self).first?.documentView)
+        let move = try #require(NSEvent.mouseEvent(
+            with: .mouseMoved, location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil),
+            modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
         ))
-        row.mouseEntered(with: enter)
+        list.mouseMoved(with: move)
         #expect(close.alphaValue == 1)
         #expect(row.hitTest(center) === close)
 
@@ -94,7 +96,7 @@ struct ActiveLocationIndicatorTests {
         _ = try #require(manager.createWindow())
         let sidebar = makeSidebar(manager: manager)
         func visibleCaps() -> [ChromeKeycapView] {
-            descendants(of: sidebar, as: ChromeKeycapView.self).filter { !$0.isHidden }
+            descendants(of: sidebar, as: ChromeKeycapView.self).filter { !$0.isHiddenOrHasHiddenAncestor }
         }
         #expect(visibleCaps().isEmpty)
 
@@ -105,6 +107,35 @@ struct ActiveLocationIndicatorTests {
 
         sidebar.setControlKeyHeld(false)
         #expect(visibleCaps().isEmpty)
+    }
+
+    @Test func everyPaneRowDownToTheLastWindowShowsItsHintAndATypedLetterNarrowsThem() throws {
+        let manager = AgentManager()
+        for _ in 0..<29 {
+            _ = try #require(manager.createWindow())
+        }
+        let sidebar = makeSidebar(manager: manager)
+        func paneCaps() -> [[String]] {
+            descendants(of: sidebar, as: ChromeKeycapGroupView.self)
+                .filter { !$0.isHiddenOrHasHiddenAncestor }
+                .sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
+                .map(\.caps)
+        }
+
+        sidebar.setControlKeyHeld(true)
+        let caps = paneCaps()
+        #expect(caps.count == 30)
+        #expect(caps.first == ["⌃⇧B"])
+        #expect(caps.last == ["⌃⇧Z", "Q"])
+
+        // After ⌃⇧Z only its panes keep caps, showing the letter left to
+        // type, and they stay up once ⌃ is released.
+        sidebar.setTypedPaneHint("z")
+        sidebar.setControlKeyHeld(false)
+        #expect(paneCaps() == ["B", "D", "E", "F", "G", "I", "M", "N", "O", "P", "Q"].map { [$0] })
+
+        sidebar.setTypedPaneHint("")
+        #expect(paneCaps().isEmpty)
     }
 
     @Test func statusBarNamesTheActiveWindowAndPane() throws {
