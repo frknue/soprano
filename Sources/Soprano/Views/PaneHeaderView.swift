@@ -23,6 +23,7 @@ final class PaneHeaderView: NSView {
     private let bottomRule = ChromeRuleView(axis: .horizontal)
     private let focusRule = ChromeRuleView(axis: .horizontal, thickness: Chrome.focusMarkWidth)
     private var closeButton: ChromeIconButton!
+    private var tabButtons: [(id: String, button: PaneTabButton)] = []
 
     init(paneId: String, agentManager: AgentManager, themeManager: ThemeManager) {
         self.paneId = paneId
@@ -261,17 +262,40 @@ final class PaneHeaderView: NSView {
     }
 
     private func clearTabButtons() {
-        for button in tabStackView.arrangedSubviews {
-            tabStackView.removeArrangedSubview(button)
-            button.removeFromSuperview()
+        for entry in tabButtons {
+            tabStackView.removeArrangedSubview(entry.button)
+            entry.button.removeFromSuperview()
         }
+        tabButtons = []
     }
 
+    /// Reuses each tab's button while its tab lives: agents notify throughout
+    /// a run, and a rebuild on every update would drop the hovered tab's
+    /// close button under the pointer.
     private func rebuildTabButtons(for pane: PaneState, colors: ThemeColors) {
-        clearTabButtons()
+        let tabIds = pane.tabs.map(\.id)
+        if tabButtons.map(\.id) != tabIds {
+            clearTabButtons()
+            tabButtons = pane.tabs.map { tab in
+                let button = PaneTabButton(
+                    tabId: tab.id,
+                    target: self,
+                    action: #selector(tabClicked(_:)),
+                    onClose: { [weak self] in
+                        guard let self else { return }
+                        self.agentManager.removeTabFromPane(self.paneId, tabId: tab.id)
+                    }
+                )
+                tabStackView.addArrangedSubview(button)
+                button.heightAnchor.constraint(equalTo: tabStackView.heightAnchor).isActive = true
+                return (tab.id, button)
+            }
+        }
 
         let activeTabId = pane.activeTab?.id
-        for (index, tab) in pane.tabs.enumerated() {
+        let theme = themeManager.currentTheme
+        for (index, tab) in pane.tabs.enumerated() where index < tabButtons.count {
+            let button = tabButtons[index].button
             let isActive = tab.id == activeTabId
             // Attention wins over a running command; either is a dot before
             // the title, which keeps its active or muted ink.
@@ -291,21 +315,28 @@ final class PaneHeaderView: NSView {
                 font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
                 color: isActive ? colors.textPrimary : colors.textMuted
             ))
-
-            let button = PaneTabButton(
-                title: tab.isFilePreview ? Self.slanted(label) : label,
-                underline: isActive ? colors.textPrimary : nil,
-                target: self,
-                action: #selector(tabClicked(_:))
+            // A long title truncates before it reaches the close button.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
+            label.addAttribute(
+                .paragraphStyle,
+                value: paragraph,
+                range: NSRange(location: 0, length: label.length)
             )
+
             button.tag = index
+            button.attributedTitle = tab.isFilePreview ? Self.slanted(label) : label
+            button.underlineColor = isActive ? colors.textPrimary : nil
+            button.isSelectedTab = isActive
+            button.applyTheme(theme)
+            button.invalidateIntrinsicContentSize()
             if tab.agent?.needsAttention == true {
                 button.toolTip = "Needs attention"
             } else if prefixColor != nil {
                 button.toolTip = "Running a command"
+            } else {
+                button.toolTip = tab.title
             }
-            tabStackView.addArrangedSubview(button)
-            button.heightAnchor.constraint(equalTo: tabStackView.heightAnchor).isActive = true
         }
     }
 
@@ -328,24 +359,56 @@ final class PaneHeaderView: NSView {
     }
 }
 
-/// One pane tab: 8 pt side padding, and for the active tab a 2 pt ink
-/// underline inset by that padding on the tab's bottom edge.
+/// One pane tab: the title with 8 pt side padding, its own close button, and
+/// for the active tab a 2 pt ink underline inset by that padding on the tab's
+/// bottom edge. The close button reserves its place on every tab so widths
+/// never jump, and shows on the active tab and under the pointer.
 private final class PaneTabButton: NSButton {
     static let padding: CGFloat = 8
+    static let closeSize: CGFloat = 14
+    static let closeGap: CGFloat = 4
 
-    private let underlineColor: NSColor?
+    private let closeButton = ChromeIconButton(
+        symbolName: "xmark",
+        accessibilityLabel: "Close Tab",
+        pointSize: 9,
+        size: PaneTabButton.closeSize,
+        target: nil,
+        action: nil
+    )
+    private let onClose: () -> Void
+    private var trackingArea: NSTrackingArea?
 
-    init(title: NSAttributedString, underline: NSColor?, target: AnyObject, action: Selector) {
-        underlineColor = underline
+    var underlineColor: NSColor? {
+        didSet { needsDisplay = true }
+    }
+    var isSelectedTab = false {
+        didSet { updateCloseButton() }
+    }
+    private(set) var isHovered = false
+
+    init(tabId: String, target: AnyObject, action: Selector, onClose: @escaping () -> Void) {
+        self.onClose = onClose
         super.init(frame: .zero)
         self.target = target
         self.action = action
+        identifier = NSUserInterfaceItemIdentifier("pane-tab-\(tabId)")
+        // The title sits in a rect that leaves the close button its corner.
+        cell = TabPillButtonCell()
         isBordered = false
+        refusesFirstResponder = true
         setButtonType(.momentaryChange)
-        attributedTitle = title
         setContentHuggingPriority(.defaultLow, for: .horizontal)
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         translatesAutoresizingMaskIntoConstraints = false
+
+        closeButton.identifier = NSUserInterfaceItemIdentifier("close-pane-tab-\(tabId)")
+        closeButton.refusesFirstResponder = true
+        closeButton.target = self
+        closeButton.action = #selector(closeClicked)
+        closeButton.translatesAutoresizingMaskIntoConstraints = true
+        addSubview(closeButton)
+        updateCloseButton()
     }
 
     @available(*, unavailable)
@@ -353,10 +416,31 @@ private final class PaneTabButton: NSButton {
         fatalError("init(coder:) is not supported")
     }
 
+    func applyTheme(_ theme: AppTheme) {
+        closeButton.apply(theme: theme)
+    }
+
     override var intrinsicContentSize: NSSize {
         NSSize(
-            width: ceil(attributedTitle.size().width) + Self.padding * 2,
+            width: ceil(attributedTitle.size().width) + Self.padding * 2
+                + Self.closeGap + Self.closeSize,
             height: NSView.noIntrinsicMetric
+        )
+    }
+
+    override func layout() {
+        super.layout()
+        closeButton.frame = NSRect(
+            x: bounds.maxX - Self.padding - Self.closeSize,
+            y: floor(bounds.midY - Self.closeSize / 2),
+            width: Self.closeSize,
+            height: Self.closeSize
+        )
+        (cell as? TabPillButtonCell)?.titleFrame = NSRect(
+            x: Self.padding,
+            y: 0,
+            width: max(0, closeButton.frame.minX - Self.closeGap - Self.padding),
+            height: bounds.height
         )
     }
 
@@ -371,5 +455,46 @@ private final class PaneTabButton: NSButton {
             height: Chrome.focusMarkWidth
         )
         NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setHovered(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setHovered(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { setHovered(false) }
+    }
+
+    private func setHovered(_ hovered: Bool) {
+        guard isHovered != hovered else { return }
+        isHovered = hovered
+        updateCloseButton()
+    }
+
+    private func updateCloseButton() {
+        closeButton.isHidden = !(isSelectedTab || isHovered)
+    }
+
+    @objc private func closeClicked() {
+        onClose()
     }
 }

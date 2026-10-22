@@ -564,8 +564,10 @@ the active tab.
 **Pane tabs** are different: they live inside a single pane, such as editor files or a
 Markdown reader sharing the pane with its terminal, and appear in the pane header only
 when the pane has more than one. `⌃A` then `⇧T` opens a terminal pane tab in the active
-pane, `>` / `<` cycle them, and `⇧W` closes the active one. The `×` in a pane header
-closes only that pane's active pane tab; closing the last one closes the pane.
+pane, `>` / `<` cycle them, and `⇧W` closes the active one. Every pane tab shows its
+own `×` on the active tab and under the pointer, and that `×` closes only that tab;
+the `×` at the header's trailing edge closes the active pane tab. Closing the last tab
+closes the pane.
 
 ## Markdown reader
 

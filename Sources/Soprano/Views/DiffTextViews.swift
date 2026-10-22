@@ -480,6 +480,7 @@ final class DiffGutterRuler: NSRulerView {
         super.init(scrollView: nil, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 36
+        clipsToBounds = true
     }
 
     @available(*, unavailable)
@@ -521,7 +522,7 @@ final class DiffGutterRuler: NSRulerView {
         bounds.fill()
         drawHashMarksAndLabels(in: dirtyRect)
         colors.borderSubtle.setFill()
-        NSRect(x: bounds.maxX - 1, y: dirtyRect.minY, width: 1, height: dirtyRect.height).fill()
+        NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {

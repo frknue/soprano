@@ -102,7 +102,7 @@ struct PaneFrameTests {
 
         let header = PaneHeaderView(paneId: paneId, agentManager: manager, themeManager: themeManager)
         let tabs = descendants(of: header, as: NSButton.self)
-            .filter { $0.identifier?.rawValue != "pane-close-button" }
+            .filter { $0.identifier?.rawValue.hasPrefix("pane-tab-") == true }
         #expect(tabs.map(\.attributedTitle.string) == ["● server", "● Codex"])
 
         let server = tabs[0].attributedTitle
