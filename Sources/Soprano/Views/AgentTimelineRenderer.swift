@@ -95,8 +95,9 @@ struct AgentTimelineActivity: Equatable {
 
     /// The line in chrome type: the lead in `titleFont`, the subject in
     /// `codeFont` and `codeColor`, the elapsed time with tabular digits,
-    /// joined by ` · `. `compact` (agent rows, which show their own status and
-    /// time) leaves out the glyph and the elapsed time.
+    /// joined by ` · ` and truncated at the tail, never wrapped. `compact`
+    /// (agent rows, which show their own status and time) leaves out the
+    /// glyph and the elapsed time.
     func attributed(
         font: NSFont,
         titleFont: NSFont,
@@ -125,6 +126,9 @@ struct AgentTimelineActivity: Equatable {
             append(" · ", font, color)
             append(elapsed, ChromeFont.sans(size: font.pointSize, tabular: true), color)
         }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        line.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: line.length))
         return line
     }
 

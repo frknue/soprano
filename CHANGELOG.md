@@ -146,6 +146,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- The agents dashboard keeps a long activity line, such as an agent's question, on one
+  truncated line under its row instead of wrapping it over the agent's name and status.
+  The NOW strip in the agent detail view truncates the same way.
 - **Find Window** (`⌘F`) now lands on the pane and tab your search matched, switching to
   its window tab when needed, instead of only opening the window; with several matches it
   picks the first. A search that matches the window's own name still keeps its last focus.

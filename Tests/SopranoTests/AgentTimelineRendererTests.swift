@@ -103,6 +103,30 @@ struct AgentTimelineRendererTests {
         #expect(font(of: "swift test", in: line)?.isFixedPitch == true)
     }
 
+    @Test func aLongActivityLaysOutOnOneTruncatedLineInANarrowRowLabel() throws {
+        let activity = AgentTimelineActivity(
+            title: "Asks",
+            detail: "I deployed dbeb77e to abtool: your #33 plus my #32. The selftest passes on the server, "
+                + "the dashboard API answers 200, and the server's main matches origin.",
+            tone: .waiting
+        )
+        // Configured like the dashboard row's activity label.
+        let label = NSTextField(labelWithString: "")
+        label.lineBreakMode = .byTruncatingTail
+        label.attributedStringValue = activity.attributed(
+            font: ChromeFont.meta,
+            titleFont: ChromeFont.meta,
+            codeFont: ChromeFont.monoSmall,
+            color: colors.textPrimary,
+            codeColor: colors.textPrimary,
+            compact: true
+        )
+        let cell = try #require(label.cell)
+        let drawn = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: 200, height: 1_000))
+
+        #expect(drawn.height == label.intrinsicContentSize.height)
+    }
+
     private func range(of text: String, in rendered: NSAttributedString) -> NSRange? {
         let range = (rendered.string as NSString).range(of: text)
         return range.location == NSNotFound ? nil : range
