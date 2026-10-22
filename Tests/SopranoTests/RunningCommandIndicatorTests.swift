@@ -84,7 +84,7 @@ struct RunningCommandIndicatorTests {
         )
 
         let titles = descendants(of: header, as: NSButton.self)
-            .filter { $0.identifier?.rawValue != "pane-close-button" }
+            .filter { $0.identifier?.rawValue.hasPrefix("pane-tab-") == true }
             .map(\.attributedTitle.string)
         let idleTitle = try #require(manager.panes[paneId]?.tabs.first { $0.id == idleTabId }?.title)
         let serverTitle = try #require(manager.panes[paneId]?.tabs.first { $0.id == serverTabId }?.title)

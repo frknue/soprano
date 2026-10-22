@@ -627,6 +627,9 @@ final class EditorLineNumberRuler: NSRulerView {
         super.init(scrollView: nil, orientation: .verticalRuler)
         clientView = textView
         ruleThickness = 36
+        // A ruler sits beside the scroll view, not inside its clip view; the
+        // gutter must keep its hairline and numbers off the toolbar.
+        clipsToBounds = true
     }
 
     @available(*, unavailable)
@@ -649,10 +652,13 @@ final class EditorLineNumberRuler: NSRulerView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let colors else { return }
+        // The dirty rect can reach past the ruler's bounds; clip so the
+        // hairline and numbers stay inside the gutter.
+        NSBezierPath.clip(bounds)
         colors.bgPanel.setFill()
         bounds.fill()
         colors.borderSubtle.setFill()
-        NSRect(x: bounds.maxX - 1, y: dirtyRect.minY, width: 1, height: dirtyRect.height).fill()
+        NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
         drawHashMarksAndLabels(in: dirtyRect)
     }
 

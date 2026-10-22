@@ -46,6 +46,52 @@ struct PaneHeaderCloseButtonTests {
         #expect(manager.windows[manager.activeWindowId]?.activeTabIndex == 1)
     }
 
+    @Test func eachPaneTabRevealsItsOwnCloseButtonOnHoverAndClosesOnlyItself() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let firstTabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let secondTabId = try #require(manager.addTabToPane(paneId, type: .terminal))
+        let header = PaneHeaderView(
+            paneId: paneId,
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+
+        let buttons = descendants(of: header, as: NSButton.self)
+        let firstTab = try #require(buttons.first {
+            $0.identifier?.rawValue == "pane-tab-\(firstTabId)"
+        })
+        let firstClose = try #require(buttons.first {
+            $0.identifier?.rawValue == "close-pane-tab-\(firstTabId)"
+        })
+        let activeClose = try #require(buttons.first {
+            $0.identifier?.rawValue == "close-pane-tab-\(secondTabId)"
+        })
+        #expect(!activeClose.isHidden)
+        #expect(firstClose.isHidden)
+
+        let entered = try #require(NSEvent.enterExitEvent(
+            with: .mouseEntered,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 0,
+            trackingNumber: 0,
+            userData: nil
+        ))
+        firstTab.mouseEntered(with: entered)
+        #expect(!firstClose.isHidden)
+        firstTab.mouseExited(with: entered)
+        #expect(firstClose.isHidden)
+
+        firstClose.performClick(nil)
+
+        #expect(manager.panes[paneId]?.tabs.map(\.id) == [secondTabId])
+        #expect(manager.panes[paneId]?.activeTab?.id == secondTabId)
+    }
+
     @Test func closingAMarkdownPreviewClearsTheEditorsEyeHoverTint() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaneHeaderCloseButtonTests-\(UUID().uuidString)")

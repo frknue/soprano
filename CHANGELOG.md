@@ -34,6 +34,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   (`⌘F`), undo, and save (`⌘S`). Modified tabs show `●`; changes from agents land in
   unmodified editors, and closing or quitting asks before unsaved changes are lost.
   Images are shown; renaming in the Explorer moves open tabs along.
+- Every pane tab has its own **×**, shown on the active tab and under the pointer, so a
+  tab closes without switching to it first; the **×** at the header's trailing edge
+  still closes the active tab.
 - A **Source Control** tab in the right sidebar, after Orca's, lists the focused pane's
   git changes under Conflicts, Changes, Staged Changes, and Untracked Files with status
   letters and `+`/`−` line counts. Clicking a file opens its diff beside the focused pane
@@ -146,6 +149,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- The editor's line-number gutter no longer paints its right-hand hairline up over the
+  toolbar and pane header, where it looked like a vertical line crossing the pane tabs.
 - The agents dashboard keeps a long activity line, such as an agent's question, on one
   truncated line under its row instead of wrapping it over the agent's name and status.
   The NOW strip in the agent detail view truncates the same way.
