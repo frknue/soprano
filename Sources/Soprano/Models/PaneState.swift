@@ -114,6 +114,17 @@ struct PaneTab: Identifiable {
         }
         return FileManager.default.currentDirectoryPath
     }
+
+    /// What window search (⌘F) matches the tab by: title, directory, page,
+    /// and the attached agent's name.
+    var searchTerms: [String] {
+        [
+            title,
+            cwd,
+            url,
+            agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name },
+        ].compactMap { $0 }
+    }
 }
 
 /// A pane in one tab's split layout, containing one or more logical tabs.

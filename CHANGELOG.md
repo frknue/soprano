@@ -146,6 +146,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Find Window** (`⌘F`) now lands on the pane and tab your search matched, switching to
+  its window tab when needed, instead of only opening the window; with several matches it
+  picks the first. A search that matches the window's own name still keeps its last focus.
 - A custom shader in your Ghostty config no longer redraws unchanged terminals on every
   display refresh, reducing unnecessary CPU and GPU work.
 - Switching to another app or window now unfocuses its terminal surfaces, stopping

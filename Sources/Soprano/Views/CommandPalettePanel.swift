@@ -9,7 +9,8 @@ struct CommandItem {
     /// Empty when the command has no shortcut.
     let shortcut: [String]
     let searchText: String?
-    let action: () -> Void
+    /// Runs the command with the query it was picked under.
+    let action: (_ query: String) -> Void
 
     init(
         id: String,
@@ -20,13 +21,33 @@ struct CommandItem {
         searchText: String? = nil,
         action: @escaping () -> Void
     ) {
+        self.init(
+            id: id,
+            icon: icon,
+            label: label,
+            description: description,
+            shortcut: shortcut,
+            searchText: searchText,
+            queryAction: { _ in action() }
+        )
+    }
+
+    init(
+        id: String,
+        icon: String,
+        label: String,
+        description: String,
+        shortcut: [String] = [],
+        searchText: String? = nil,
+        queryAction: @escaping (_ query: String) -> Void
+    ) {
         self.id = id
         self.icon = icon
         self.label = label
         self.description = description
         self.shortcut = shortcut
         self.searchText = searchText
-        self.action = action
+        self.action = queryAction
     }
 }
 
@@ -136,8 +157,8 @@ final class CommandPalettePanel: NSPanel {
         contentVC.onDismiss = { [weak self] in
             self?.dismiss()
         }
-        contentVC.onExecute = { [weak self] item in
-            item.action()
+        contentVC.onExecute = { [weak self] item, query in
+            item.action(query)
             self?.dismiss()
         }
         contentVC.onSizeChange = { [weak self] size in
@@ -309,7 +330,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
     var selectedIndex: Int = 0
 
     var onDismiss: (() -> Void)?
-    var onExecute: ((CommandItem) -> Void)?
+    var onExecute: ((CommandItem, String) -> Void)?
     /// The panel size (surface plus shadow margin) changed with the results.
     var onSizeChange: ((NSSize) -> Void)?
 
@@ -689,7 +710,7 @@ final class CommandPaletteViewController: NSViewController, NSTextFieldDelegate 
 
     private func executeSelection() {
         guard selectedIndex >= 0, selectedIndex < filtered.count else { return }
-        onExecute?(filtered[selectedIndex])
+        onExecute?(filtered[selectedIndex], query)
     }
 }
 

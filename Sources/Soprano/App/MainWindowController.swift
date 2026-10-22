@@ -865,16 +865,9 @@ private extension MainWindowController {
                 ? "Current · "
                 : ""
             let description = "\(currentPrefix)\(paneCount) pane\(paneCount == 1 ? "" : "s") · Active: \(activePaneTitle)"
-            let searchText = panes.flatMap { pane in
-                pane.tabs.flatMap { tab -> [String] in
-                    [
-                        tab.title,
-                        tab.cwd,
-                        tab.url,
-                        tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name },
-                    ].compactMap { $0 }
-                }
-            }.joined(separator: " ")
+            let searchText = panes
+                .flatMap { pane in pane.tabs.flatMap(\.searchTerms) }
+                .joined(separator: " ")
             let shortcut = index < 9
                 ? commandShortcut(for: "select-window-\(index + 1)")
                 : []
@@ -886,8 +879,17 @@ private extension MainWindowController {
                 description: description,
                 shortcut: shortcut,
                 searchText: searchText,
-                action: { [weak self] in
-                    self?.agentManager.activateWindow(terminalWindow.id)
+                queryAction: { [weak self] query in
+                    guard let self else { return }
+                    // A hit on the window's own title keeps its last focus;
+                    // otherwise land on the first pane tab the query found.
+                    if CommandPaletteSearch.matchRange(in: terminalWindow.title, query: query) == nil,
+                       let match = self.agentManager.firstTab(inWindow: terminalWindow.id, matching: query)
+                    {
+                        self.agentManager.focusTab(paneId: match.paneId, tabId: match.tabId)
+                    } else {
+                        self.agentManager.activateWindow(terminalWindow.id)
+                    }
                 }
             )
         }

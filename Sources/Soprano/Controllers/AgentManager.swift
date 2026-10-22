@@ -783,6 +783,22 @@ final class AgentManager: @unchecked Sendable {
         windows[windowId]?.orderedPaneIds.compactMap { panes[$0] } ?? []
     }
 
+    /// The first tab in `windowId`, in on-screen pane order and then tab
+    /// order, whose search terms contain `query` case-insensitively. Nil for
+    /// a blank query or no match.
+    func firstTab(inWindow windowId: String, matching query: String) -> (paneId: String, tabId: String)? {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
+        for pane in orderedPanes(in: windowId) {
+            if let tab = pane.tabs.first(where: { tab in
+                tab.searchTerms.contains { $0.range(of: needle, options: .caseInsensitive) != nil }
+            }) {
+                return (pane.id, tab.id)
+            }
+        }
+        return nil
+    }
+
     /// Every pane of the session's windows, top to bottom, with its hint.
     var paneShortcutAssignments: [(key: String, paneId: String)] {
         let orderedPaneIds = activeSessionWindows.flatMap { terminalWindow in

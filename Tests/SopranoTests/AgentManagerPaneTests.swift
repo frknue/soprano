@@ -293,4 +293,37 @@ struct AgentManagerPaneTests {
             (1..<hint.count).allSatisfy { !byLength.contains(String(hint.prefix($0))) }
         })
     }
+
+    @Test func windowSearchLandsOnTheFirstMatchingPaneTabEvenInABackgroundLayoutTab() throws {
+        let manager = AgentManager()
+        let windowId = manager.activeWindowId
+        let firstLayoutTabId = try #require(manager.windows[windowId]?.activeTab.id)
+        let themePane = try #require(manager.panes[manager.activePaneId])
+        themePane.tabs[0].title = "theme"
+
+        _ = try #require(manager.createLayoutTab())
+        let appPane = try #require(manager.panes[manager.activePaneId])
+        appPane.tabs[0].title = "logs"
+        appPane.tabs.append(PaneTab(id: "b2c-tab", type: .terminal, title: "B2C app"))
+        appPane.tabs.append(PaneTab(id: "b2c-later", type: .terminal, title: "b2c dev"))
+        let laterPaneId = try #require(manager.splitPane(direction: .horizontal, paneId: appPane.id))
+        let laterPane = try #require(manager.panes[laterPaneId])
+        laterPane.tabs[0].title = "b2c shell"
+
+        manager.activateLayoutTab(firstLayoutTabId)
+        _ = try #require(manager.createWindow())
+
+        #expect(manager.firstTab(inWindow: windowId, matching: "   ") == nil)
+        #expect(manager.firstTab(inWindow: windowId, matching: "missing") == nil)
+        let match = try #require(manager.firstTab(inWindow: windowId, matching: " b2c "))
+        #expect(match.paneId == appPane.id)
+        #expect(match.tabId == "b2c-tab")
+
+        manager.focusTab(paneId: match.paneId, tabId: match.tabId)
+
+        #expect(manager.activeWindowId == windowId)
+        #expect(manager.activePaneId == appPane.id)
+        #expect(appPane.activeTab?.id == "b2c-tab")
+        #expect(manager.windows[windowId]?.layout?.containsLeaf(appPane.id) == true)
+    }
 }
