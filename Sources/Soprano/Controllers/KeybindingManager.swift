@@ -96,9 +96,14 @@ final class KeybindingManager: @unchecked Sendable {
     private var paneNavigationPassthroughClaims = PaneNavigationClaimRegistry()
     private let paneNavigationClaimObserverId = "KeybindingManager"
     private(set) var isControlKeyHeld: Bool
+    /// Letters of a longer pane hint typed so far. After its first ⌃⇧ letter
+    /// the rest may be typed with or without ⌃⇧, within the prefix timeout.
+    private(set) var typedPaneHint = ""
+    private var paneHintTimer: Timer?
 
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
     var controlKeyStateChangeHandler: (@MainActor (Bool) -> Void)?
+    var paneHintChangeHandler: (@MainActor (String) -> Void)?
 
     /// The config is injected rather than loaded here: `settings.json` is the
     /// source of truth for keybindings, and `ConfigStore` is main-actor
@@ -116,6 +121,7 @@ final class KeybindingManager: @unchecked Sendable {
     deinit {
         stopMonitoring()
         prefixTimer?.invalidate()
+        paneHintTimer?.invalidate()
         if let appResignObserver {
             NotificationCenter.default.removeObserver(appResignObserver)
         }
@@ -168,6 +174,7 @@ final class KeybindingManager: @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             self?.setControlKeyHeld(false)
+            self?.setTypedPaneHint("")
         }
     }
 
@@ -236,6 +243,25 @@ final class KeybindingManager: @unchecked Sendable {
         let key = Self.bindingKey(for: event)
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
+        // A started pane hint takes its next letter with or without ⌃⇧. Esc
+        // drops it; any other key drops it and then does what it always does.
+        if !typedPaneHint.isEmpty {
+            let typed = typedPaneHint
+            setTypedPaneHint("")
+            if event.keyCode == Self.escapeKeyCode {
+                return nil
+            }
+            if flags.isDisjoint(with: [.command, .option]),
+               performPaneHintStep(Self.paneHintStep(
+                   typed: typed,
+                   key: key,
+                   terminalClaimsControlKeys: false,
+                   assignments: agentManager.paneShortcutAssignments
+               )) {
+                return nil
+            }
+        }
+
         if isCtrlOnly(flags) && key == config.prefixKey.lowercased() {
             if Self.shouldForwardPrefixKey(in: state) {
                 clearPrefixMode()
@@ -283,11 +309,12 @@ final class KeybindingManager: @unchecked Sendable {
             let terminalClaimsControlKeys = activeTerminalTarget.map {
                 paneNavigationPassthroughClaims.hasClaims(for: $0)
             } ?? false
-            if Self.handlePaneShortcut(
+            if performPaneHintStep(Self.paneHintStep(
+                typed: "",
                 key: key,
                 terminalClaimsControlKeys: terminalClaimsControlKeys,
-                focusPane: agentManager.focusPane(shortcutKey:)
-            ) {
+                assignments: agentManager.paneShortcutAssignments
+            )) {
                 return nil
             }
         }
@@ -347,13 +374,65 @@ final class KeybindingManager: @unchecked Sendable {
             && !flags.contains(.command)
     }
 
-    static func handlePaneShortcut(
+    /// What a pane hint letter does, given the letters typed before it.
+    enum PaneHintStep: Equatable {
+        /// No hint goes on with it: the key does what it would anyway.
+        case passThrough
+        /// It starts or continues a longer hint, typed so far.
+        case pending(String)
+        /// It completes the hint of this pane.
+        case focus(paneId: String)
+    }
+
+    static func paneHintStep(
+        typed: String,
         key: String,
         terminalClaimsControlKeys: Bool,
-        focusPane: (String) -> Bool
-    ) -> Bool {
-        guard !terminalClaimsControlKeys else { return false }
-        return focusPane(key)
+        assignments: [(key: String, paneId: String)]
+    ) -> PaneHintStep {
+        guard !terminalClaimsControlKeys, key.count == 1 else { return .passThrough }
+        let candidate = typed + key.lowercased()
+        if let assignment = assignments.first(where: { $0.key == candidate }) {
+            return .focus(paneId: assignment.paneId)
+        }
+        return assignments.contains { $0.key.hasPrefix(candidate) } ? .pending(candidate) : .passThrough
+    }
+
+    /// Returns whether the step used the key.
+    private func performPaneHintStep(_ step: PaneHintStep) -> Bool {
+        switch step {
+        case .passThrough:
+            return false
+        case .pending(let typed):
+            setTypedPaneHint(typed)
+        case .focus(let paneId):
+            agentManager.focusPane(paneId)
+        }
+        return true
+    }
+
+    private func setTypedPaneHint(_ typed: String) {
+        paneHintTimer?.invalidate()
+        paneHintTimer = nil
+        if !typed.isEmpty {
+            paneHintTimer = Timer.scheduledTimer(
+                timeInterval: TimeInterval(config.prefixTimeoutMs) / 1000.0,
+                target: self,
+                selector: #selector(handlePaneHintTimeout(_:)),
+                userInfo: nil,
+                repeats: false
+            )
+        }
+        guard typedPaneHint != typed else { return }
+        typedPaneHint = typed
+        MainActor.assumeIsolated {
+            paneHintChangeHandler?(typed)
+        }
+    }
+
+    @objc
+    private func handlePaneHintTimeout(_ timer: Timer) {
+        setTypedPaneHint("")
     }
 
     static func shouldForwardPrefixKey(in state: KeybindingState) -> Bool {
@@ -390,6 +469,7 @@ final class KeybindingManager: @unchecked Sendable {
     }
 
     private static let tabKeyCode: UInt16 = 48
+    private static let escapeKeyCode: UInt16 = 53
 
     /// The key `event` names for binding lookups: the lowercased
     /// `charactersIgnoringModifiers`, except for Tab. Shift turns Tab into the

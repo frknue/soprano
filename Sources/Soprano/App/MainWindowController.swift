@@ -113,6 +113,9 @@ final class MainWindowController: NSWindowController {
         keybindingManager.controlKeyStateChangeHandler = { [weak contentVC] isHeld in
             contentVC?.setControlKeyHeld(isHeld)
         }
+        keybindingManager.paneHintChangeHandler = { [weak contentVC] typed in
+            contentVC?.setTypedPaneHint(typed)
+        }
         contentVC.setControlKeyHeld(keybindingManager.isControlKeyHeld)
         self.keybindingManager = keybindingManager
 

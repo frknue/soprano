@@ -435,6 +435,10 @@ final class MainContentViewController: NSViewController {
         sidebarView.setControlKeyHeld(isHeld)
     }
 
+    func setTypedPaneHint(_ typed: String) {
+        sidebarView.setTypedPaneHint(typed)
+    }
+
     func changeActiveTerminalFontSize(delta: Int) {
         splitTreeView.changeActiveTerminalFontSize(delta: delta)
     }

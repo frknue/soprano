@@ -783,24 +783,39 @@ final class AgentManager: @unchecked Sendable {
         windows[windowId]?.orderedPaneIds.compactMap { panes[$0] } ?? []
     }
 
+    /// Every pane of the session's windows, top to bottom, with its hint.
     var paneShortcutAssignments: [(key: String, paneId: String)] {
         let orderedPaneIds = activeSessionWindows.flatMap { terminalWindow in
             orderedPanes(in: terminalWindow.id).map(\.id)
         }
-        return zip(Self.paneShortcutKeys, orderedPaneIds).map {
-            (key: String($0.0), paneId: $0.1)
+        return zip(Self.paneHints(count: orderedPaneIds.count), orderedPaneIds).map {
+            (key: $0.0, paneId: $0.1)
         }
     }
 
-    @discardableResult
-    func focusPane(shortcutKey: String) -> Bool {
-        guard let assignment = paneShortcutAssignments.first(where: {
-            $0.key == shortcutKey.lowercased()
-        }) else {
-            return false
+    /// `count` pane hints in list order, the way Vimium labels links: single
+    /// letters while they last; past that, the last letters become the first
+    /// key of two-letter hints (three past 400 panes), so every pane gets one
+    /// and no hint starts another.
+    static func paneHints(count: Int) -> [String] {
+        let letters = paneShortcutKeys.map(String.init)
+        guard count > letters.count else { return Array(letters.prefix(count)) }
+        // `capacity` hints of `length` letters exist; enough for `count`.
+        var length = 1
+        var capacity = letters.count
+        while capacity < count {
+            length += 1
+            capacity *= letters.count
         }
-        focusPane(assignment.paneId)
-        return true
+        var shorter = [""]
+        for _ in 1..<length {
+            shorter = shorter.flatMap { prefix in letters.map { prefix + $0 } }
+        }
+        // Keep as many one-letter-shorter hints as still leave room for the
+        // rest; each of the others becomes the start of `letters.count` hints.
+        let kept = (capacity - count) / (letters.count - 1)
+        let expanded = shorter.dropFirst(kept).flatMap { prefix in letters.map { prefix + $0 } }
+        return Array((shorter.prefix(kept) + expanded).prefix(count))
     }
 
     func navigateToPane(direction: NavigationDirection) {

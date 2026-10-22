@@ -233,13 +233,24 @@ struct AgentManagerPaneTests {
             secondPaneId,
         ])
 
-        #expect(manager.focusPane(shortcutKey: "d"))
+        func focus(_ key: String) -> Bool {
+            guard case .focus(let paneId) = KeybindingManager.paneHintStep(
+                typed: "",
+                key: key,
+                terminalClaimsControlKeys: false,
+                assignments: manager.paneShortcutAssignments
+            ) else { return false }
+            manager.focusPane(paneId)
+            return true
+        }
+
+        #expect(focus("d"))
         #expect(manager.activePaneId == "pane-1")
 
-        #expect(manager.focusPane(shortcutKey: "E"))
+        #expect(focus("E"))
         #expect(manager.activePaneId == secondPaneId)
 
-        #expect(!manager.focusPane(shortcutKey: "a"))
+        #expect(!focus("a"))
         #expect(manager.activePaneId == secondPaneId)
 
         let firstWindowId = manager.activeWindowId
@@ -248,9 +259,38 @@ struct AgentManagerPaneTests {
         #expect(manager.paneShortcutAssignments.last?.key == "f")
         #expect(manager.paneShortcutAssignments.last?.paneId == secondWindowPaneId)
 
-        #expect(manager.focusPane(shortcutKey: "b"))
+        #expect(focus("b"))
         #expect(manager.activeWindowId == firstWindowId)
         #expect(manager.activePaneId == thirdPaneId)
         #expect(manager.activeWindowId != secondWindowId)
+    }
+
+    @Test func everyPaneDownToTheLastWindowGetsAHintOnceThereAreMorePanesThanLetters() throws {
+        let manager = AgentManager()
+        for _ in 0..<29 {
+            _ = try #require(manager.createWindow())
+        }
+        let paneIds = manager.activeSessionWindows.flatMap { manager.orderedPanes(in: $0.id).map(\.id) }
+        let assignments = manager.paneShortcutAssignments
+
+        #expect(paneIds.count == 30)
+        #expect(assignments.map(\.paneId) == paneIds)
+        // Single letters while they last; the last one turns into the first
+        // key of the two-letter hints that cover the rest.
+        #expect(assignments.prefix(19).map(\.key) == "bdefgimnopqrstuvwxy".map(String.init))
+        #expect(assignments.dropFirst(19).map(\.key) == ["zb", "zd", "ze", "zf", "zg", "zi", "zm", "zn", "zo", "zp", "zq"])
+    }
+
+    @Test(arguments: [1, 20, 21, 45, 400, 401])
+    func paneHintsAreUniqueShortestFirstAndNeverStartAnotherHint(count: Int) {
+        let hints = AgentManager.paneHints(count: count)
+        #expect(hints.count == count)
+        #expect(Set(hints).count == count)
+        #expect(hints.map(\.count) == hints.map(\.count).sorted())
+        #expect(hints.last?.count == (count <= 20 ? 1 : count <= 400 ? 2 : 3))
+        let byLength = Set(hints)
+        #expect(hints.allSatisfy { hint in
+            (1..<hint.count).allSatisfy { !byLength.contains(String(hint.prefix($0))) }
+        })
     }
 }

@@ -191,6 +191,15 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   their spinner titles no longer redraw the window tabs, and the sidebar updates its
   rows in place, so focusing a pane or an agent status change no longer stalls the
   window for tens of milliseconds with many panes open.
+- Sidebar rows no longer keep their hover highlight and **×** after the pointer leaves.
+  Rows sliding under a resting pointer — holding `⌃` expands collapsed windows, panes
+  open and close, the list scrolls — used to stay highlighted, several at once.
+- Pane hints reach every pane down to the last window: past 20 panes the last ones take
+  two letters, like Vimium. Type `⌃⇧` and the first letter, then the second with or
+  without `⌃⇧`; the sidebar narrows to the matching panes and `esc` cancels.
+- omp started by hand in a pane whose launched agent had exited (for example after
+  quitting a restored session) shows its status in the sidebar and the Agent Dashboard
+  again.
 
 ## [0.6.0] - 2026-07-31
 
