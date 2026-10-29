@@ -118,7 +118,13 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
         NSLayoutConstraint.activate([
             searchSurface.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.page),
             searchSurface.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2),
-            searchSurface.widthAnchor.constraint(equalToConstant: 280),
+            // 280 when there is room; narrower rather than widening the window.
+            searchSurface.widthAnchor.constraint(lessThanOrEqualToConstant: 280),
+            {
+                let preferred = searchSurface.widthAnchor.constraint(equalToConstant: 280)
+                preferred.priority = Chrome.fillPriority
+                return preferred
+            }(),
             searchSurface.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
             searchIcon.leadingAnchor.constraint(equalTo: searchSurface.leadingAnchor, constant: 8),
             searchIcon.centerYAnchor.constraint(equalTo: searchSurface.centerYAnchor),
@@ -412,7 +418,7 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
         container.addSubview(grid)
 
         let fill = grid.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -Chrome.Space.page * 2)
-        fill.priority = .defaultHigh
+        fill.priority = Chrome.fillPriority
         NSLayoutConstraint.activate([
             title.topAnchor.constraint(equalTo: container.topAnchor, constant: Chrome.Space.s48),
             title.leadingAnchor.constraint(equalTo: grid.leadingAnchor),

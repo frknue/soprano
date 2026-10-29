@@ -198,8 +198,15 @@ enum AutomationPrecheck {
         process.standardError = pipe
 
         let collected = OutputBuffer()
+        let reachedEnd = DispatchSemaphore(value: 0)
         pipe.fileHandleForReading.readabilityHandler = { handle in
-            collected.append(handle.availableData)
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                reachedEnd.signal()
+            } else {
+                collected.append(chunk)
+            }
         }
         let finished = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in finished.signal() }
@@ -218,8 +225,12 @@ enum AutomationPrecheck {
                 finished.wait()
             }
         }
+        // The output ends with the command unless something it started in
+        // the background still holds the pipe; that is not waited for, or
+        // it would hold every automation's setup until it was done.
+        _ = reachedEnd.wait(timeout: .now() + 0.5)
         pipe.fileHandleForReading.readabilityHandler = nil
-        collected.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        try? pipe.fileHandleForReading.close()
         let text = collected.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return Outcome(
             exitCode: process.terminationStatus,

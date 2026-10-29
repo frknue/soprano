@@ -203,4 +203,116 @@ struct AutomationControllerTests {
         #expect(run.message == "Soprano quit before the run finished.")
         #expect(run.target == nil)
     }
+
+    @Test func aFinishedRunFromAnEarlierLaunchNeverTakesOverTheTabThatNowHasItsIds() throws {
+        // Pane and tab ids start over on relaunch, so the ids a finished run
+        // kept can belong to an unrelated agent of the same CLI by now.
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("omp", cwd: "/tmp"))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .idle)
+        let store = AutomationStore(fileURL: nil)
+        var finished = AutomationRun(
+            id: "run-1", automationId: "audit", number: 1, trigger: .scheduled,
+            startedAt: Date(), status: .completed, profileId: "omp", folder: "/tmp"
+        )
+        finished.paneId = paneId
+        finished.tabId = tabId
+        store.insert(finished)
+        var prompts: [String] = []
+
+        let controller = AutomationController(
+            store: store,
+            agentManager: manager,
+            configStore: ConfigStore(fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("absent-\(UUID().uuidString).json")),
+            environment: .init(
+                startTerminal: { _ in true },
+                submitPrompt: { prompt, _ in prompts.append(prompt); return true },
+                visibleText: { _ in nil },
+                notify: { _, _, _ in }
+            )
+        )
+
+        #expect(store.run("run-1")?.target == nil)
+        #expect(!controller.openRun("run-1"))
+        #expect(prompts.isEmpty)
+    }
+
+    /// A repository with one commit in the fixture's automation folder.
+    private func initRepository(in fixture: Fixture) throws {
+        let folder = fixture.directory.appendingPathComponent("repo").path
+        for arguments in [
+            ["init", "--quiet", "--initial-branch=main"],
+            ["config", "user.email", "test@example.com"],
+            ["config", "user.name", "Test"],
+            ["commit", "--quiet", "--allow-empty", "-m", "init"],
+        ] {
+            _ = try Git.output(arguments, in: folder)
+        }
+    }
+
+    private func finishTurn(_ target: TerminalTarget, in fixture: Fixture) {
+        fixture.agentManager.updateAgentStatus(paneId: target.paneId, tabId: target.tabId, status: .running)
+        fixture.agentManager.updateAgentStatus(
+            paneId: target.paneId, tabId: target.tabId, status: .waiting, waitingReason: .turnEnded
+        )
+    }
+
+    @Test(.enabled(if: Git.executableURL != nil))
+    func anUntouchedWorktreeStaysWhileItsRunsWindowIsOpenAndGoesWithAnUnseenOne() async throws {
+        let worktreeAudit = #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER", "prompt": "Audit.", "schedule": "0 9 * * *", "worktree": true }"#
+        let fixture = try makeFixture(automation: worktreeAudit)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        try initRepository(in: fixture)
+        let controller = fixture.controller
+
+        // Someone opened this run while it worked: its agent stays, in its worktree.
+        controller.runNow("audit")
+        try await waitUntil { controller.lastRun(for: "audit")?.target != nil }
+        let watched = try #require(controller.lastRun(for: "audit"))
+        let watchedTarget = try #require(watched.target)
+        #expect(controller.openRun(watched.id))
+        finishTurn(watchedTarget, in: fixture)
+        // The report is read on the background queue that also removes worktrees.
+        try await waitUntil { controller.run(watched.id)?.status == .completed }
+        try await Task.sleep(for: .milliseconds(300))
+        let watchedWorktree = try #require(controller.run(watched.id)?.worktree)
+        #expect(!watchedWorktree.removed)
+        #expect(FileManager.default.fileExists(atPath: watchedWorktree.path))
+        #expect(fixture.agentManager.panes[watchedTarget.paneId] != nil)
+
+        // Nobody looked: the window closes and the untouched worktree goes too.
+        controller.runNow("audit")
+        try await waitUntil { controller.lastRun(for: "audit")?.id != watched.id && controller.lastRun(for: "audit")?.target != nil }
+        let unseen = try #require(controller.lastRun(for: "audit"))
+        finishTurn(try #require(unseen.target), in: fixture)
+        try await waitUntil { controller.run(unseen.id)?.worktree?.removed == true }
+        let unseenWorktree = try #require(controller.run(unseen.id)?.worktree)
+        #expect(!FileManager.default.fileExists(atPath: unseenWorktree.path))
+    }
+
+    @Test func openingAClosedRunTwiceReturnsToTheConversationItResumedInsteadOfStartingAnother() async throws {
+        let fixture = try makeFixture(automation: omp)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let controller = fixture.controller
+        controller.runNow("audit")
+        try await waitUntil { controller.lastRun(for: "audit")?.target != nil }
+        let run = try #require(controller.lastRun(for: "audit"))
+        let target = try #require(run.target)
+        fixture.agentManager.recordAgentConversation(
+            AgentConversation(id: "01a186a9-695e-72bb-abf9-4646ac0bf7ea", cwd: "/tmp"),
+            paneId: target.paneId, tabId: target.tabId, profileId: "omp"
+        )
+        finishTurn(target, in: fixture)
+        #expect(controller.run(run.id)?.target == nil)
+        let panesBefore = fixture.agentManager.panes.count
+
+        #expect(controller.openRun(run.id))
+        #expect(controller.openRun(run.id))
+
+        #expect(fixture.agentManager.panes.count == panesBefore + 1)
+        let resumed = try #require(controller.run(run.id)?.target)
+        #expect(fixture.agentManager.agent(paneId: resumed.paneId, tabId: resumed.tabId)?.conversation?.id
+            == "01a186a9-695e-72bb-abf9-4646ac0bf7ea")
+    }
 }

@@ -41,6 +41,15 @@ enum Chrome {
     static let iconButtonSize: CGFloat = 24
     static let switchSize = NSSize(width: 26, height: 16)
 
+    /// For a constraint that makes content fill the width (or height) it is
+    /// given: above content hugging, so it wins inside the window, and just
+    /// below AppKit's `.windowSizeStayPut`, so content that cannot fill a
+    /// wide window (a capped reading column) never resizes the window
+    /// itself. `.defaultHigh` would: AppKit shrinks the window to satisfy it.
+    static let fillPriority = NSLayoutConstraint.Priority(
+        rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1
+    )
+
     /// macOS radii. Tiled panes and splitters stay square (0).
     enum Radius {
         /// Floating panels: palette, launcher, switcher.

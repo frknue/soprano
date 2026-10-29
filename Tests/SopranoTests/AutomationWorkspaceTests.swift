@@ -121,4 +121,15 @@ struct AutomationWorkspaceTests {
         #expect(!outcome.passed)
         #expect(Date().timeIntervalSince(started) < 10)
     }
+
+    @Test func aPrecheckThatLeavesABackgroundProcessRunningStillAnswersWhenItExits() {
+        // The child inherits the output pipe; waiting for the pipe to close
+        // held every automation's setup until the child was done.
+        let started = Date()
+        let outcome = AutomationPrecheck.run("sleep 20 & echo started", in: "/tmp", timeout: 10, shell: "/bin/sh")
+
+        #expect(outcome.passed)
+        #expect(outcome.output == "started")
+        #expect(Date().timeIntervalSince(started) < 5)
+    }
 }

@@ -12,11 +12,7 @@ final class AutomationRunDetailView: NSView {
 
     private var theme: AppTheme
     private let stack = NSStackView()
-    private var shown: (run: AutomationRun, automation: Automation?, isLive: Bool, at: Date)?
-
-    /// Unchanged content is not rebuilt more often than this, so text
-    /// selected in the report survives notifications about other runs.
-    private static let minimumRefresh: TimeInterval = 25
+    private var shown: (run: AutomationRun, automation: Automation?, isLive: Bool, clock: String)?
 
     init(theme: AppTheme) {
         self.theme = theme
@@ -45,16 +41,20 @@ final class AutomationRunDetailView: NSView {
         update(run: shown.run, automation: shown.automation, isLive: shown.isLive, now: Date())
     }
 
-    /// `isLive`: the run's tab is still open in this Soprano.
+    /// `isLive`: the run's tab is still open in this Soprano. The report is
+    /// rebuilt only when what it shows changed, so text selected in it
+    /// survives notifications about other runs and the half-minute refresh.
     func update(run: AutomationRun, automation: Automation?, isLive: Bool, now: Date) {
+        // An unfinished run states how long it has been going.
+        let clock = run.finishedAt == nil ? AutomationFormat.duration(now.timeIntervalSince(run.startedAt)) : ""
         if let shown,
            shown.run == run,
            shown.automation == automation,
            shown.isLive == isLive,
-           run.status.isFinal || now.timeIntervalSince(shown.at) < Self.minimumRefresh {
+           shown.clock == clock {
             return
         }
-        shown = (run, automation, isLive, now)
+        shown = (run, automation, isLive, clock)
         rebuild(run: run, automation: automation, isLive: isLive, now: now)
     }
 

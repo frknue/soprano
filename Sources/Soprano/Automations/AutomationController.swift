@@ -22,7 +22,8 @@ final class AutomationController {
         var notify: (_ title: String, _ body: String, _ runId: String) -> Void
         var displayIsAwake: () -> Bool = AutomationController.anyDisplayIsActive
         var now: () -> Date = Date.init
-        var calendar: Calendar = .current
+        /// Follows the Mac's time zone as it changes (travel), not the one at launch.
+        var calendar: Calendar = .autoupdatingCurrent
         var worktreeDirectory: URL = AutomationWorktree.defaultDirectory()
         var claudeConfig: URL? = ClaudeWorkspaceTrust.configURL()
         var home: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -61,12 +62,16 @@ final class AutomationController {
         self.environment = environment
 
         // Their agents went with the Soprano that quit; a restored window
-        // resumes the conversation as an ordinary agent.
-        for run in store.openRuns {
+        // resumes the conversation as an ordinary agent. Pane and tab ids
+        // start over, so no run keeps the ids it had: by now they may name
+        // someone else's tab, which Open or a reused session would take over.
+        for run in store.runs where run.target != nil || !run.status.isFinal {
             store.update(run.id) {
-                $0.status = .failed
-                $0.finishedAt = $0.finishedAt ?? environment.now()
-                $0.message = "Soprano quit before the run finished."
+                if !$0.status.isFinal {
+                    $0.status = .failed
+                    $0.finishedAt = $0.finishedAt ?? environment.now()
+                    $0.message = "Soprano quit before the run finished."
+                }
                 $0.paneId = nil
                 $0.tabId = nil
             }
@@ -168,10 +173,19 @@ final class AutomationController {
     }
 
     /// Removes the automation and its run history. Windows of runs still
-    /// open stay, and so do worktrees runs left work in.
+    /// open stay, as ordinary agents again, and so do worktrees runs left
+    /// work in.
     @discardableResult
     func delete(_ automationId: String) -> Bool {
         guard configStore.remove(at: ["automations", automationId]) else { return false }
+        for run in store.runs(for: automationId) {
+            waitingForDisplay.remove(run.id)
+            if let target = run.target,
+               let agent = agentManager.agent(paneId: target.paneId, tabId: target.tabId),
+               agent.automationRunId == run.id {
+                agent.automationRunId = nil
+            }
+        }
         store.removeAll(for: automationId)
         return true
     }
@@ -183,8 +197,9 @@ final class AutomationController {
     }
 
     /// Shows the run's agent: its tab while it is open, or its conversation
-    /// resumed in a new window when the run's window was closed. False when
-    /// there is neither.
+    /// resumed in a new window when the run's window was closed, which the
+    /// run then keeps so opening it again returns there instead of starting
+    /// a second agent on the same conversation. False when there is neither.
     @discardableResult
     func openRun(_ runId: String) -> Bool {
         guard let run = store.run(runId) else { return false }
@@ -198,14 +213,23 @@ final class AutomationController {
         else { return false }
         let automation = automation(run.automationId)
         let title = Self.runTitle(name: automation?.name ?? run.automationId, number: run.number)
+        // A worktree the run left untouched is gone; its repository is not.
+        let cwd = [conversation.cwd, run.folder, run.worktree?.repository, automation?.folder]
+            .compactMap { $0 }
+            .first { FileManager.default.fileExists(atPath: $0) } ?? run.folder
         guard let target = agentManager.openAutomationWindow(
             title: title,
             profileId: run.profileId,
-            cwd: conversation.cwd ?? run.folder,
+            cwd: cwd,
             runId: nil,
             launch: AgentLaunch(prompt: "", model: automation?.model, skipsApprovals: true),
             conversation: conversation
         ) else { return false }
+        store.update(runId) {
+            $0.paneId = target.paneId
+            $0.tabId = target.tabId
+            $0.viewed = true
+        }
         agentManager.focusTab(paneId: target.paneId, tabId: target.tabId)
         return true
     }
@@ -406,6 +430,11 @@ final class AutomationController {
             finish(runId, status: .failed, message: failure)
             return
         }
+        // Its automation was deleted while the run was being prepared.
+        guard store.run(runId) != nil else {
+            discard(preparation.checkout)
+            return
+        }
         var workingDirectory = automation.folder
         if let checkout = preparation.checkout {
             workingDirectory = checkout.workingDirectory
@@ -422,23 +451,38 @@ final class AutomationController {
             runId: runId,
             launch: AgentLaunch(prompt: automation.prompt, model: automation.model, skipsApprovals: true)
         ) else {
+            discard(preparation.checkout)
+            store.update(runId) { $0.worktree?.removed = preparation.checkout != nil }
             finish(runId, status: .failed, message: "Soprano couldn't open a window for the run.")
             return
         }
         store.update(runId) {
             $0.paneId = target.paneId
             $0.tabId = target.tabId
-            $0.startedAt = environment.now()
         }
         startTerminal(of: runId, at: target)
     }
 
+    /// Removes a worktree made for a run that never started in it.
+    private func discard(_ checkout: AutomationWorktree.Checkout?) {
+        guard let worktree = checkout?.worktree else { return }
+        workQueue.async {
+            AutomationWorktree.remove(worktree)
+        }
+    }
+
     /// Starts the run's terminal, or waits for a display to wake: libghostty
-    /// draws on one, so a run due at night begins when a display wakes.
+    /// draws on one, so a run due at night begins when a display wakes. The
+    /// run counts from the terminal's start, so a night's wait does not read
+    /// as an agent that never came up.
     private func startTerminal(of runId: String, at target: TerminalTarget) {
         if environment.startTerminal(target) {
             waitingForDisplay.remove(runId)
-            store.update(runId) { if $0.message == Self.waitingForDisplayMessage { $0.message = nil } }
+            let now = environment.now()
+            store.update(runId) {
+                $0.startedAt = now
+                if $0.message == Self.waitingForDisplayMessage { $0.message = nil }
+            }
             return
         }
         waitingForDisplay.insert(runId)
@@ -481,8 +525,18 @@ final class AutomationController {
 
     // MARK: - Following runs
 
-    /// Moves every open run along with what its agent reports.
+    /// Moves every open run along with what its agent reports, and forgets
+    /// the tab of a finished run once it is closed.
     private func followRuns() {
+        for run in store.runs where run.status.isFinal {
+            guard let target = run.target,
+                  agentManager.panes[target.paneId]?.tabs.contains(where: { $0.id == target.tabId }) != true
+            else { continue }
+            store.update(run.id) {
+                $0.paneId = nil
+                $0.tabId = nil
+            }
+        }
         for run in store.openRuns {
             guard let target = run.target else { continue }
             let tab = agentManager.panes[target.paneId]?.tabs.first { $0.id == target.tabId }
@@ -537,7 +591,8 @@ final class AutomationController {
     }
 
     /// Keeps what the agent said, closes the run's window when nobody opened
-    /// it, and takes back a worktree the run left untouched.
+    /// it, and then takes back a worktree the run left untouched. A window
+    /// that stays open keeps its worktree: the agent there still works in it.
     private func complete(_ run: AutomationRun, target: TerminalTarget, automationName: String) {
         let agent = agentManager.agent(paneId: target.paneId, tabId: target.tabId)
         let fallback = AutomationRun.trimmedOutput(agent?.lastMessage ?? environment.visibleText(target))
@@ -550,7 +605,8 @@ final class AutomationController {
         )
 
         let automation = automation(run.automationId)
-        if !run.viewed, automation?.session != .reuse {
+        let closesWindow = !run.viewed && automation?.session != .reuse
+        if closesWindow {
             agentManager.closeAutomationRun(target)
             store.update(run.id) {
                 $0.paneId = nil
@@ -558,7 +614,7 @@ final class AutomationController {
             }
         }
 
-        let worktree = run.worktree
+        let worktree = closesWindow ? run.worktree : nil
         let profileId = run.profileId
         let home = environment.home
         workQueue.async {

@@ -234,7 +234,13 @@ struct TerminalConfig {
 
         let settings: [String: Any] = [
             "hooks": [
-                "SessionStart": hook(command("ready")),
+                // Claude Code also starts a session after compacting the
+                // context mid-turn; READY then would claim a working agent
+                // is done.
+                "SessionStart": [[
+                    "matcher": "startup|resume|clear",
+                    "hooks": [["type": "command", "command": command("ready"), "timeout": 5]],
+                ]],
                 "UserPromptSubmit": hook(command("running")),
                 "SessionEnd": hook(command("stopped")),
                 "Stop": hook(command("needs-input", notify: true, body: "Response ready")),
