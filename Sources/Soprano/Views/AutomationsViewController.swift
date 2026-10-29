@@ -232,9 +232,16 @@ final class AutomationsViewController: NSViewController {
 
     /// Brings the visible page up to date with the controller. A page whose
     /// automation or run went away (deleted, or removed from settings.json)
-    /// falls back to the list.
+    /// falls back to the list. A rebuild that replaced the view holding the
+    /// keyboard hands it back to the page, so J/K and ⌘N keep working.
     private func reload() {
         guard isViewLoaded else { return }
+        let hadKeyboard = keyboardIsInPage
+        defer {
+            if hadKeyboard, !keyboardIsInPage {
+                focusPage()
+            }
+        }
         let now = Date()
         let automations = controller.automations
         let subtitle = subtitle(for: automations, now: now)
@@ -276,6 +283,13 @@ final class AutomationsViewController: NSViewController {
                 now: now
             )
         }
+    }
+
+    /// Whether the keyboard is on the page or a view inside it (the search
+    /// field's editor counts).
+    private var keyboardIsInPage: Bool {
+        guard let responder = view.window?.firstResponder as? NSView else { return false }
+        return responder === rootView || responder.isDescendant(of: rootView)
     }
 
     /// `4 automations · next run in 2 hr`.
@@ -739,7 +753,7 @@ enum AutomationViews {
         document.addSubview(stack)
 
         let fill = stack.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -Chrome.Space.page * 2)
-        fill.priority = .defaultHigh
+        fill.priority = Chrome.fillPriority
         // The document fills the viewport when the page is shorter, but the
         // stack keeps its own height at the top: with an equal bottom it
         // stretched to the viewport and the spare height landed inside

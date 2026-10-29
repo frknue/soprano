@@ -167,6 +167,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- A Claude Code pane no longer turns READY while it is still working, after Claude Code
+  compacts its context mid-turn.
 - The editor's line-number gutter no longer paints its right-hand hairline up over the
   toolbar and pane header, where it looked like a vertical line crossing the pane tabs.
 - The agents dashboard keeps a long activity line, such as an agent's question, on one

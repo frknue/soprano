@@ -26,11 +26,7 @@ final class AutomationDetailView: NSView {
     private let stack = NSStackView()
     private var runRows: [AutomationRunRowView] = []
     private var selectedRunId: String?
-    private var shown: (automation: Automation, runs: [AutomationRun], nextRun: Date?, at: Date)?
-
-    /// Unchanged content is not rebuilt more often than this, so a burst of
-    /// controller notifications for other automations costs nothing.
-    private static let minimumRefresh: TimeInterval = 25
+    private var shown: (automation: Automation, runs: [AutomationRun], nextRun: Date?, clock: String)?
 
     init(theme: AppTheme) {
         self.theme = theme
@@ -59,15 +55,20 @@ final class AutomationDetailView: NSView {
         update(automation: shown.automation, runs: shown.runs, nextRun: shown.nextRun, now: Date())
     }
 
+    /// Rebuilds the page only when what it shows changed: the automation,
+    /// its runs, or a time it states (`in 3 hr`, `4m so far`). Rebuilding
+    /// replaces every view, which would take a text selection and the
+    /// keyboard with it on each half-minute refresh.
     func update(automation: Automation, runs: [AutomationRun], nextRun: Date?, now: Date) {
+        let clock = Self.clockText(runs: runs, nextRun: nextRun, now: now)
         if let shown,
            shown.automation == automation,
            shown.runs == runs,
            shown.nextRun == nextRun,
-           now.timeIntervalSince(shown.at) < Self.minimumRefresh {
+           shown.clock == clock {
             return
         }
-        shown = (automation, runs, nextRun, now)
+        shown = (automation, runs, nextRun, clock)
         if let pendingRunSelection, runs.contains(where: { $0.id == pendingRunSelection }) {
             selectedRunId = pendingRunSelection
             self.pendingRunSelection = nil
@@ -77,6 +78,15 @@ final class AutomationDetailView: NSView {
         }
         rebuild(automation: automation, runs: runs, nextRun: nextRun, now: now)
         updateRunSelection(scrollIntoView: selectedRunId != runs.first?.id)
+    }
+
+    /// The page's times as it states them, which change with the clock alone.
+    private static func clockText(runs: [AutomationRun], nextRun: Date?, now: Date) -> String {
+        var parts = [nextRun.map { AutomationFormat.relative($0, now: now) } ?? ""]
+        for run in runs where run.finishedAt == nil {
+            parts.append(AutomationFormat.duration(now.timeIntervalSince(run.startedAt)))
+        }
+        return parts.joined(separator: "|")
     }
 
     // MARK: - Content

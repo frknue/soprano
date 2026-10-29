@@ -24,10 +24,12 @@ enum AutomationRunTracking {
     /// What `observation` means for `run`, or nil when nothing changed.
     ///
     /// A finished turn completes the run: the agent got its prompt at launch,
-    /// so its first turn is the run. Some CLIs say they are working only when
-    /// hooks are installed, so a finished turn counts without having seen the
-    /// work; a bare READY counts only after the agent was seen working, since
-    /// every CLI also reports READY when it first comes up.
+    /// so its first turn is the run. Every CLI reports a finished turn as
+    /// needs-input (omp and OpenCode say so, Claude Code's Stop and Codex's
+    /// turn notification read as one), and some say they are working only
+    /// when hooks are installed, so it counts without having seen the work.
+    /// READY never completes a run: CLIs report it when they come up, and
+    /// Claude Code again after compacting its context in the middle of work.
     static func change(for run: AutomationRun, observing observation: Observation) -> Change? {
         guard !run.status.isFinal else { return nil }
         guard observation.tabExists else {
@@ -39,7 +41,7 @@ enum AutomationRunTracking {
                 : "The agent exited before it started working.")
         }
         switch status {
-        case .starting:
+        case .starting, .idle, .stopped:
             return nil
         case .running:
             return run.status == .running ? nil : .running
@@ -48,12 +50,8 @@ enum AutomationRunTracking {
                 return run.status == .needsInput ? nil : .needsInput(message: observation.message)
             }
             return .completed
-        case .idle:
-            return run.sawWork ? .completed : nil
         case .error:
             return .failed(message: observation.message ?? "The agent stopped with an error.")
-        case .stopped:
-            return nil
         }
     }
 }

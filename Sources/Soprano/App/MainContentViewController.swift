@@ -105,7 +105,9 @@ final class MainContentViewController: NSViewController {
             self?.toggleAutomations()
         }
         sidebarView.onWorkspaceRowSelected = { [weak self] in
-            self?.closeAutomations(restoreKeyboardFocus: false)
+            // Focus goes back to the panes: a row that names the pane already
+            // focused changes nothing that would move the keyboard itself.
+            self?.closeAutomations()
         }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)

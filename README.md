@@ -466,8 +466,9 @@ records its folder as trusted in `~/.claude.json`, as that dialog would. When it
 turn ends the run is **Done**: Soprano keeps the agent's final reply, shows it as
 Markdown in the run's details, and posts a notification naming the automation. A run
 whose window you never opened then closes it; **Resume Conversation** reopens the
-agent's conversation later. A worktree the run left untouched is removed with its
-branch; one with changes or commits stays for you to review. A run that stops to ask
+agent's conversation later. When that window closes, a worktree the run left untouched
+goes with its branch; one with changes or commits stays for you to review, and so does
+any worktree whose run you kept open. A run that stops to ask
 something or wait for an approval is **Needs input** and keeps its window open. A
 scheduled run due while the previous one still works is skipped.
 

@@ -35,10 +35,13 @@ struct AutomationRunTrackingTests {
         #expect(AutomationRunTracking.change(for: run(), observing: agent(.idle)) == nil)
     }
 
-    @Test func readyAfterTheAgentWasSeenWorkingCompletesTheRun() {
+    @Test func readyMidRunDoesNotCompleteItBecauseOnlyAFinishedTurnDoes() {
+        // Claude Code starts a session again after compacting its context
+        // mid-turn; every CLI reports a finished turn as needs-input instead.
         let working = run(status: .running, sawWork: true)
 
-        #expect(AutomationRunTracking.change(for: working, observing: agent(.idle)) == .completed)
+        #expect(AutomationRunTracking.change(for: working, observing: agent(.idle)) == nil)
+        #expect(AutomationRunTracking.change(for: working, observing: agent(.waiting, reason: .turnEnded)) == .completed)
     }
 
     @Test func anApprovalOrQuestionPutsTheRunOnHoldWithWhatTheAgentAsked() {

@@ -206,12 +206,9 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
             equalTo: scrollDocumentView.widthAnchor,
             constant: -(SettingsLayout.pageLeading + SettingsLayout.pageTrailing)
         )
-        // Keep this above content hugging so the settings use the available
-        // width, but just below AppKit's `.windowSizeStayPut` priority so the
-        // fitting width cannot shrink the main window.
-        fillDocumentWidth.priority = NSLayoutConstraint.Priority(
-            rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1
-        )
+        // Use the available width without letting the fitting width shrink
+        // the main window; see `Chrome.fillPriority`.
+        fillDocumentWidth.priority = Chrome.fillPriority
 
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: rootContainer.leadingAnchor),
