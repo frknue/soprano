@@ -391,32 +391,38 @@ only inside a split pane; selecting a result restores that window's remembered a
 pane.
 
 Open the **Agent Dashboard** from the sidebar chart button, the **Commands** menu, or the
-`⇧⌘D` (`agent-dashboard`). It summarizes agents that are working, waiting for input, or
-in an error state across every logical window. Entries are ordered by urgency, update
-from the same lifecycle events as pane headers and notifications, and show elapsed
-runtime and working directory. Each entry is named like a sidebar row: the agent's task
-(its name before it has one), with the agent, its folder, and a branch other than the
-repository's default underneath, followed by what the agent is doing right now.
-Selecting a Claude Code, Codex, or omp entry shows its **timeline**, read from the
-transcript the agent writes while it runs in its pane: your prompts as cards, the agent's
-replies rendered as Markdown, one line per tool call with its result (✓, ✗, or ▶ while
-it runs) and the diff of every edit, plus a **NOW** strip saying what the agent is doing
-right now; the entry in the list repeats that line. Claude Code and omp report their
-transcript through Soprano's hooks; Codex is found once its first reply arrives, or right
-away with the [Codex hooks](#agents-that-report-in) installed. Plain terminals, OpenCode,
-and custom agents show their live terminal instead, with theme-aware highlighting for
-prompts, diagnostics, paths, diffs, and fenced code. **Reply**, **Open**, **Stop**, and
-**Restart** work in both views. Replies are available while the agent is working, ready,
-waiting for input, or in an error state and are typed into that exact pane tab.
+`⇧⌘D` (`agent-dashboard`). It is laid out like a mail client: a sidebar lists every
+agent across all logical windows under **Needs you** (waiting for input, failed, or
+asking for attention), **Working**, **Ready**, and **Stopped**, each with its count, and
+the selected agent fills the rest. Entries update from the same lifecycle events as pane
+headers and notifications and show elapsed runtime. Each entry is named like a sidebar
+row: the agent's task (its name before it has one), with the agent, its folder, and a
+branch other than the repository's default underneath, followed by what the agent is
+doing right now.
+
+The selected agent shows its title and location over a toolbar: **Timeline** /
+**Terminal**, **Show details**, and **Open**, **Stop**, and **Restart**. For a Claude
+Code, Codex, or omp agent the **timeline** reads as a conversation from the transcript
+the agent writes while it runs in its pane: your prompts as cards, each answer under the
+agent's name with its replies rendered as Markdown, and every run of tool calls in one
+card — a line per call with its result (✓, ✗, or ▶ while it runs) and the diff of every
+edit. It keeps to a readable column on wide windows; **Jump to latest** appears once you
+scroll away from the newest entry. Claude Code and omp report their transcript through
+Soprano's hooks; Codex is found once its first reply arrives, or right away with the
+[Codex hooks](#agents-that-report-in) installed. Plain terminals, OpenCode, and custom
+agents show their live terminal in a card instead, with theme-aware highlighting for
+prompts, diagnostics, paths, diffs, and fenced code. Under either view, the composer
+says what the agent is doing right now (the entry in the list repeats that line) above
+the reply field. Replies are available while the agent is working, ready, waiting for
+input, or in an error state and are typed into that exact pane tab.
 
 Use `J` / `K` or the arrow keys to move through agents, `Tab` (or `R`) to focus the reply
 field and `⇧Tab` to leave it again, `Return` to open the selected agent, and `Esc` to
 close the dashboard without changing the active agent. In the timeline, `⇧J` / `⇧K` (or
 `Page Down` / `Page Up`) scroll, `[` / `]` jump to the previous or next prompt, `O`
-toggles details (thinking, full
-commands, and output), `G` jumps back to the newest entry and keeps following it, and
-`T` switches between the timeline and the live terminal. Clicking into the text to copy
-from it leaves these keys working.
+toggles details (thinking, full commands, and output), `G` jumps back to the newest
+entry and keeps following it, and `T` switches between the timeline and the live
+terminal. Clicking into the text to copy from it leaves these keys working.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow

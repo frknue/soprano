@@ -1,9 +1,9 @@
 import AppKit
 
 /// What an agent is doing right now, in one line, for its dashboard row and
-/// the detail view's NOW strip: an optional call-state glyph, a lead (tool
-/// name or short phrase), the tool's subject in mono, a plain detail and the
-/// time it has been going.
+/// the activity line above the detail view's reply field: an optional
+/// call-state glyph, a lead (tool name or short phrase), the tool's subject
+/// in mono, a plain detail and the time it has been going.
 struct AgentTimelineActivity: Equatable {
     enum Tone: Equatable {
         case working
@@ -150,11 +150,13 @@ struct AgentTimelineActivity: Equatable {
     }
 }
 
-/// Lays out an agent's timeline as attributed text for the dashboard: prompts
-/// as `You` cards, replies as rendered Markdown, one line per tool call (state
-/// glyph, name, mono subject, muted meta, diffstat) with its diff in a
-/// hairline box, and notices centered between them. The text view showing it
-/// must use TextKit 1, which draws the `NSTextBlock` boxes.
+/// Lays out an agent's timeline as attributed text for the dashboard, as a
+/// conversation: prompts as `You` cards, each answer under the agent's name,
+/// replies rendered as Markdown, and every run of tool calls in one hairline
+/// card with a line per call (state glyph, name, mono subject, muted meta,
+/// diffstat) and its diff in a nested box. Notices sit centered between them.
+/// The text view showing it must use TextKit 1, which draws the `NSTextBlock`
+/// boxes.
 @MainActor
 final class AgentTimelineRenderer {
     struct Output {
@@ -180,6 +182,8 @@ final class AgentTimelineRenderer {
     private static let gap: CGFloat = 10
     /// Space between timeline items.
     private static let itemSpacing: CGFloat = 12
+    /// Space between the lines of one tool card.
+    private static let groupSpacing: CGFloat = 6
     private static let lineHeight: CGFloat = 18
     /// Diff rows: 48 pt gutter, 18 pt marker column, then the code.
     private static let diffRowHeight: CGFloat = 18
@@ -199,11 +203,40 @@ final class AgentTimelineRenderer {
     }
 
     /// `isAgentActive` tells whether calls without a result are still running;
-    /// once the agent is idle or gone they were cut short.
-    func render(_ timeline: AgentTimeline, detailed: Bool, isAgentActive: Bool) -> Output {
+    /// once the agent is idle or gone they were cut short. `agentName` heads
+    /// each answer, so the timeline reads as a conversation.
+    func render(
+        _ timeline: AgentTimeline,
+        detailed: Bool,
+        isAgentActive: Bool,
+        agentName: String? = nil
+    ) -> Output {
         let output = NSMutableAttributedString()
         var turnStarts: [Int] = []
         var shownReplies = Set<String>()
+        /// The card the current run of tool calls and thinking shares.
+        var group: RoundedTextBlock?
+        /// Whether the next agent item starts an answer and gets the name.
+        var startsAnswer = true
+
+        func closeGroup() {
+            guard group != nil else { return }
+            trimTrailingSpacing(of: output)
+            group = nil
+        }
+        func beginAgentItem(_ timestamp: Date?) {
+            guard startsAnswer else { return }
+            startsAnswer = false
+            if let agentName {
+                appendAuthor(agentName, timestamp: timestamp, to: output)
+            }
+        }
+        func openGroup() -> RoundedTextBlock {
+            if let group { return group }
+            let block = groupBlock()
+            group = block
+            return block
+        }
 
         if timeline.items.isEmpty {
             appendNotice("No messages yet.", isError: false, to: output)
@@ -211,22 +244,30 @@ final class AgentTimelineRenderer {
         for item in timeline.items {
             switch item.kind {
             case .prompt(let text):
+                closeGroup()
                 turnStarts.append(output.length)
                 appendPrompt(text, timestamp: item.timestamp, to: output)
+                startsAnswer = true
             case .reply(let markdown):
+                closeGroup()
+                beginAgentItem(item.timestamp)
                 shownReplies.insert(item.id)
                 appendReply(markdown, id: item.id, to: output)
             case .thinking(let text):
-                appendThinking(text, detailed: detailed, to: output)
+                beginAgentItem(item.timestamp)
+                appendThinking(text, detailed: detailed, group: openGroup(), to: output)
             case .tool(var call):
                 if call.state == .running, !isAgentActive {
                     call.state = .interrupted
                 }
-                appendTool(call, startedAt: item.timestamp, detailed: detailed, to: output)
+                beginAgentItem(item.timestamp)
+                appendTool(call, startedAt: item.timestamp, detailed: detailed, group: openGroup(), to: output)
             case .notice(let text, let isError):
+                closeGroup()
                 appendNotice(text, isError: isError, to: output)
             }
         }
+        closeGroup()
         replyCache = replyCache.filter { shownReplies.contains($0.key) }
         return Output(text: output, turnStarts: turnStarts)
     }
@@ -234,7 +275,7 @@ final class AgentTimelineRenderer {
     // MARK: - Items
 
     /// `You` card: panel fill, radius 8, ink label and muted time over the
-    /// prompt in 13/19. No accent.
+    /// prompt in 13/19, set apart from the answer before it. No accent.
     private func appendPrompt(_ text: String, timestamp: Date?, to output: NSMutableAttributedString) {
         let block = RoundedTextBlock(radius: Chrome.Radius.card)
         block.backgroundColor = colors.bgPanel
@@ -242,20 +283,10 @@ final class AgentTimelineRenderer {
         block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxY)
         block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .minX)
         block.setWidth(14, type: .absoluteValueType, for: .padding, edge: .maxX)
+        block.setWidth(Self.itemSpacing, type: .absoluteValueType, for: .margin, edge: .minY)
         block.setWidth(Self.itemSpacing + 4, type: .absoluteValueType, for: .margin, edge: .maxY)
 
-        let header = NSMutableAttributedString(
-            string: "You",
-            attributes: [.font: ChromeFont.labelStrong, .foregroundColor: colors.textPrimary]
-        )
-        if let timestamp {
-            header.append(gap(8, after: ChromeFont.labelStrong))
-            header.append(NSAttributedString(
-                string: Self.timeFormatter.string(from: timestamp),
-                attributes: [.font: ChromeFont.count, .foregroundColor: colors.textMuted]
-            ))
-        }
-        header.append(NSAttributedString(string: "\n", attributes: [.font: ChromeFont.labelStrong]))
+        let header = speakerLine("You", timestamp: timestamp)
         header.addAttribute(
             .paragraphStyle,
             value: paragraph(blocks: [block], spacing: 4),
@@ -277,6 +308,35 @@ final class AgentTimelineRenderer {
         ))
     }
 
+    /// The agent's name and the time over its answer, like the `You` label
+    /// over a prompt.
+    private func appendAuthor(_ name: String, timestamp: Date?, to output: NSMutableAttributedString) {
+        let line = speakerLine(name, timestamp: timestamp)
+        line.addAttribute(
+            .paragraphStyle,
+            value: paragraph(spacing: 6),
+            range: NSRange(location: 0, length: line.length)
+        )
+        output.append(line)
+    }
+
+    /// `Name  14:32`: the name in ink, the time muted, then a line break.
+    private func speakerLine(_ name: String, timestamp: Date?) -> NSMutableAttributedString {
+        let line = NSMutableAttributedString(
+            string: name,
+            attributes: [.font: ChromeFont.labelStrong, .foregroundColor: colors.textPrimary]
+        )
+        if let timestamp {
+            line.append(gap(8, after: ChromeFont.labelStrong))
+            line.append(NSAttributedString(
+                string: Self.timeFormatter.string(from: timestamp),
+                attributes: [.font: ChromeFont.count, .foregroundColor: colors.textMuted]
+            ))
+        }
+        line.append(NSAttributedString(string: "\n", attributes: [.font: ChromeFont.labelStrong]))
+        return line
+    }
+
     private func appendReply(_ markdown: String, id: String, to output: NSMutableAttributedString) {
         let rendered: NSAttributedString
         if let cached = replyCache[id], cached.markdown == markdown {
@@ -292,8 +352,14 @@ final class AgentTimelineRenderer {
         ))
     }
 
-    /// `▸ Thinking` in muted italic; detailed timelines show the whole text.
-    private func appendThinking(_ text: String, detailed: Bool, to output: NSMutableAttributedString) {
+    /// `▸ Thinking` in muted italic in the tool card; detailed timelines show
+    /// the whole text.
+    private func appendThinking(
+        _ text: String,
+        detailed: Bool,
+        group: RoundedTextBlock,
+        to output: NSMutableAttributedString
+    ) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: ChromeFont.row,
             .foregroundColor: colors.textMuted,
@@ -309,7 +375,11 @@ final class AgentTimelineRenderer {
         line.append(NSAttributedString(string: summary + "\n", attributes: attributes))
         line.addAttribute(
             .paragraphStyle,
-            value: itemParagraph(glyph: expanded ? "▾" : "▸", spacing: expanded ? 4 : Self.itemSpacing),
+            value: itemParagraph(
+                glyph: expanded ? "▾" : "▸",
+                spacing: expanded ? 4 : Self.groupSpacing,
+                blocks: [group]
+            ),
             range: NSRange(location: 0, length: line.length)
         )
         output.append(line)
@@ -317,7 +387,7 @@ final class AgentTimelineRenderer {
             output.append(NSAttributedString(
                 string: trimmed + "\n",
                 attributes: attributes.merging([
-                    .paragraphStyle: paragraph(spacing: Self.itemSpacing, indent: Self.textInset),
+                    .paragraphStyle: paragraph(blocks: [group], spacing: Self.groupSpacing, indent: Self.textInset),
                 ]) { $1 }
             ))
         }
@@ -327,6 +397,7 @@ final class AgentTimelineRenderer {
         _ call: AgentToolCall,
         startedAt: Date?,
         detailed: Bool,
+        group: RoundedTextBlock,
         to output: NSMutableAttributedString
     ) {
         let nameFont = ChromeFont.sans(size: 13, weight: .medium)
@@ -387,21 +458,21 @@ final class AgentTimelineRenderer {
         let hasBoxes = detail != nil || call.diff != nil || (detailed && call.output != nil) || failureLines != nil
         line.addAttribute(
             .paragraphStyle,
-            value: itemParagraph(glyph: glyphText, spacing: hasBoxes ? 0 : Self.itemSpacing),
+            value: itemParagraph(glyph: glyphText, spacing: hasBoxes ? 0 : Self.groupSpacing, blocks: [group]),
             range: NSRange(location: 0, length: line.length)
         )
         output.append(line)
 
         if let detail {
-            appendBlock(detail, color: colors.textPrimary, to: output)
+            appendBlock(detail, color: colors.textPrimary, in: group, to: output)
         }
         if let diff = call.diff {
-            appendDiff(diff, detailed: detailed, to: output)
+            appendDiff(diff, detailed: detailed, in: group, to: output)
         }
         if detailed, let text = call.output {
-            appendBlock(text, color: colors.textMuted, to: output)
+            appendBlock(text, color: colors.textMuted, in: group, to: output)
         } else if let failureLines {
-            appendBlock(failureLines, color: colors.danger, to: output)
+            appendBlock(failureLines, color: colors.danger, in: group, to: output)
         }
     }
 
@@ -419,9 +490,15 @@ final class AgentTimelineRenderer {
         ))
     }
 
-    /// A diff in one hairline box: a muted mono gutter with line numbers from
-    /// the hunk headers, a marker column, and add/delete rows washed full width.
-    private func appendDiff(_ diff: String, detailed: Bool, to output: NSMutableAttributedString) {
+    /// A diff in one hairline box inside the tool card: a muted mono gutter
+    /// with line numbers from the hunk headers, a marker column, and
+    /// add/delete rows washed full width.
+    private func appendDiff(
+        _ diff: String,
+        detailed: Bool,
+        in group: RoundedTextBlock,
+        to output: NSMutableAttributedString
+    ) {
         var lines = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var elided = 0
         if !detailed, lines.count > Self.compactDiffLines {
@@ -432,6 +509,7 @@ final class AgentTimelineRenderer {
         // The gutter starts inside the box's hairline padding.
         block.gutterWidth = Chrome.hairline + Self.diffGutter
         block.gutterFill = colors.bgPanel
+        let blocks = [group, block]
         let text = NSMutableAttributedString()
         var oldLine: Int?
         var newLine: Int?
@@ -443,7 +521,7 @@ final class AgentTimelineRenderer {
                 // The first hunk's position is in the gutter already.
                 if index > 0 {
                     text.append(diffRow(gutter: nil, marker: "", code: line, codeFont: ChromeFont.monoSmall,
-                                        codeColor: colors.cyan, wash: colors.diffFiller, block: block))
+                                        codeColor: colors.cyan, wash: colors.diffFiller, blocks: blocks))
                 }
                 continue
             }
@@ -452,7 +530,7 @@ final class AgentTimelineRenderer {
                 newLine = nil
                 text.append(diffRow(gutter: nil, marker: "", code: String(line.dropFirst(5)),
                                     codeFont: ChromeFont.sans(size: 12, weight: .medium),
-                                    codeColor: colors.textPrimary, wash: colors.diffFiller, block: block))
+                                    codeColor: colors.textPrimary, wash: colors.diffFiller, blocks: blocks))
                 continue
             }
             let marker = line.first.map(String.init) ?? ""
@@ -460,21 +538,21 @@ final class AgentTimelineRenderer {
             switch marker {
             case "+":
                 text.append(diffRow(gutter: newLine, marker: "+", code: code, markerColor: colors.success,
-                                    wash: colors.diffAdd, block: block))
+                                    wash: colors.diffAdd, blocks: blocks))
                 newLine = newLine.map { $0 + 1 }
             case "-":
                 text.append(diffRow(gutter: oldLine, marker: "−", code: code, markerColor: colors.danger,
-                                    wash: colors.diffDelete, block: block))
+                                    wash: colors.diffDelete, blocks: blocks))
                 oldLine = oldLine.map { $0 + 1 }
             default:
-                text.append(diffRow(gutter: newLine, marker: "", code: marker == " " ? code : line, block: block))
+                text.append(diffRow(gutter: newLine, marker: "", code: marker == " " ? code : line, blocks: blocks))
                 oldLine = oldLine.map { $0 + 1 }
                 newLine = newLine.map { $0 + 1 }
             }
         }
         if elided > 0 {
             text.append(diffRow(gutter: nil, marker: "", code: "⋯ \(elided) more lines · O shows all",
-                                codeFont: ChromeFont.meta, codeColor: colors.textMuted, block: block))
+                                codeFont: ChromeFont.meta, codeColor: colors.textMuted, blocks: blocks))
         }
         output.append(text)
     }
@@ -487,7 +565,7 @@ final class AgentTimelineRenderer {
         codeColor: NSColor? = nil,
         markerColor: NSColor? = nil,
         wash: NSColor? = nil,
-        block: NSTextBlock
+        blocks: [NSTextBlock]
     ) -> NSAttributedString {
         let row = NSMutableAttributedString()
         row.append(NSAttributedString(
@@ -506,7 +584,7 @@ final class AgentTimelineRenderer {
             attributes: [.font: codeFont, .foregroundColor: codeColor ?? colors.textPrimary]
         ))
         let style = NSMutableParagraphStyle()
-        style.textBlocks = [block]
+        style.textBlocks = blocks
         style.minimumLineHeight = Self.diffRowHeight
         style.maximumLineHeight = Self.diffRowHeight
         style.headIndent = Self.diffCode
@@ -525,8 +603,14 @@ final class AgentTimelineRenderer {
         return row
     }
 
-    /// Tool details and output: mono text in a hairline box.
-    private func appendBlock(_ text: String, color: NSColor, to output: NSMutableAttributedString) {
+    /// Tool details and output: mono text in a hairline box inside the tool
+    /// card.
+    private func appendBlock(
+        _ text: String,
+        color: NSColor,
+        in group: RoundedTextBlock,
+        to output: NSMutableAttributedString
+    ) {
         let block = boxBlock()
         block.setWidth(8, type: .absoluteValueType, for: .padding)
         block.setWidth(10, type: .absoluteValueType, for: .padding, edge: .minX)
@@ -535,20 +619,46 @@ final class AgentTimelineRenderer {
             attributes: [
                 .font: ChromeFont.mono,
                 .foregroundColor: color,
-                .paragraphStyle: paragraph(blocks: [block]),
+                .paragraphStyle: paragraph(blocks: [group, block]),
             ]
         ))
     }
 
     /// A box under a tool line, aligned with its name: borderSubtle edge,
-    /// radius 6, 6 pt above and the item gap below.
+    /// radius 6, 6 pt above and the card's line gap below.
     private func boxBlock() -> RoundedTextBlock {
         let block = RoundedTextBlock(radius: Chrome.Radius.control, edge: colors.borderSubtle)
         block.setWidth(Chrome.hairline, type: .absoluteValueType, for: .padding)
         block.setWidth(Self.textInset, type: .absoluteValueType, for: .margin, edge: .minX)
         block.setWidth(6, type: .absoluteValueType, for: .margin, edge: .minY)
-        block.setWidth(Self.itemSpacing, type: .absoluteValueType, for: .margin, edge: .maxY)
+        block.setWidth(Self.groupSpacing + 2, type: .absoluteValueType, for: .margin, edge: .maxY)
         return block
+    }
+
+    /// The card a run of tool calls and thinking shares: borderSubtle edge,
+    /// radius 8, its lines inset 8 and the item gap below.
+    private func groupBlock() -> RoundedTextBlock {
+        let block = RoundedTextBlock(radius: Chrome.Radius.card, edge: colors.borderSubtle)
+        block.setWidth(9, type: .absoluteValueType, for: .padding, edge: .minY)
+        block.setWidth(9, type: .absoluteValueType, for: .padding, edge: .maxY)
+        block.setWidth(8, type: .absoluteValueType, for: .padding, edge: .minX)
+        block.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX)
+        block.setWidth(Self.itemSpacing + 2, type: .absoluteValueType, for: .margin, edge: .maxY)
+        return block
+    }
+
+    /// Takes the paragraph spacing off the last paragraph, so a card ends on
+    /// its padding rather than on the gap meant for a following line.
+    private func trimTrailingSpacing(of output: NSMutableAttributedString) {
+        guard output.length > 0 else { return }
+        let last = output.length - 1
+        guard let style = output.attribute(.paragraphStyle, at: last, effectiveRange: nil) as? NSParagraphStyle,
+              style.paragraphSpacing > 0,
+              let trimmed = style.mutableCopy() as? NSMutableParagraphStyle
+        else { return }
+        trimmed.paragraphSpacing = 0
+        let range = (output.string as NSString).paragraphRange(for: NSRange(location: last, length: 0))
+        output.addAttribute(.paragraphStyle, value: trimmed, range: range)
     }
 
     // MARK: - Styling
@@ -583,9 +693,10 @@ final class AgentTimelineRenderer {
 
     /// One timeline line: the glyph centered in its column, wrapped text
     /// hanging at the text column.
-    private func itemParagraph(glyph: String, spacing: CGFloat) -> NSParagraphStyle {
+    private func itemParagraph(glyph: String, spacing: CGFloat, blocks: [NSTextBlock] = []) -> NSParagraphStyle {
         let width = (glyph as NSString).size(withAttributes: [.font: Self.glyphFont]).width
         let style = NSMutableParagraphStyle()
+        style.textBlocks = blocks
         style.firstLineHeadIndent = max(0, floor((Self.glyphColumn - width) / 2))
         style.headIndent = Self.textInset
         style.tabStops = [NSTextTab(textAlignment: .left, location: Self.textInset)]
@@ -778,6 +889,10 @@ final class RoundedTextBlock: NSTextBlock {
         }
         storage.enumerateAttribute(.timelineRowWash, in: characterRange) { value, range, _ in
             guard let wash = value as? NSColor else { return }
+            // A wash belongs to the innermost box (the diff), not to the tool
+            // card around it, which would paint it across its whole width.
+            let style = storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            guard style?.textBlocks.last === self else { return }
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             wash.setFill()
             layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { line, _, _, _, _ in

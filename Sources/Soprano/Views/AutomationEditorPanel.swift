@@ -63,10 +63,10 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     private let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let folderPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let folderNote = NSTextField(labelWithString: "")
-    private let workspaceControl: AutomationSegmentedControl
+    private let workspaceControl: ChromeSegmentedControl
     private let baseBranchField = NSTextField(string: "")
     private var baseBranchSurface: ChromeFieldView!
-    private let sessionControl: AutomationSegmentedControl
+    private let sessionControl: ChromeSegmentedControl
     private let cadencePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let minuteLabel = NSTextField(labelWithString: "")
     private let minuteField = NSTextField(string: "")
@@ -106,8 +106,8 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         folderChoices = Self.folderChoices(automations: automations, projectDirectories: projectDirectories)
         selectedFolder = automation?.folder
         promptSurface = ChromeFieldView(theme: theme)
-        workspaceControl = AutomationSegmentedControl(titles: ["Folder", "New worktree"], theme: theme)
-        sessionControl = AutomationSegmentedControl(titles: ["Fresh", "Reuse"], theme: theme)
+        workspaceControl = ChromeSegmentedControl(titles: ["Folder", "New worktree"], theme: theme)
+        sessionControl = ChromeSegmentedControl(titles: ["Fresh", "Reuse"], theme: theme)
         enabledSwitch = ChromeSwitch(isOn: automation?.enabled ?? true, theme: theme)
         rule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
         cancelButton = ChromeButton(title: "Cancel", theme: theme)
@@ -784,12 +784,12 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         refreshValidation()
     }
 
-    @objc private func workspaceChanged(_ sender: AutomationSegmentedControl) {
+    @objc private func workspaceChanged(_ sender: ChromeSegmentedControl) {
         refreshSessionControl()
         refreshValidation()
     }
 
-    @objc private func sessionChanged(_ sender: AutomationSegmentedControl) {
+    @objc private func sessionChanged(_ sender: ChromeSegmentedControl) {
         refreshSessionControl()
     }
 
@@ -1001,147 +1001,5 @@ private final class AutomationPromptTextView: NSTextView {
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
-    }
-}
-
-// MARK: - Segmented control
-
-/// A segmented control (`.segmented`): an overlay track with a raised active
-/// segment, like the Settings one, with segments that can be disabled.
-final class AutomationSegmentedControl: NSControl {
-    private(set) var selectedSegment = 0
-    private var segments: [AutomationSegmentButton] = []
-    private var theme: AppTheme
-
-    init(titles: [String], theme: AppTheme) {
-        self.theme = theme
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.control
-        setAccessibilityElement(true)
-        setAccessibilityRole(.radioGroup)
-        setContentHuggingPriority(.required, for: .horizontal)
-
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.spacing = 2
-        stack.edgeInsets = NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-        ])
-        for (index, title) in titles.enumerated() {
-            let segment = AutomationSegmentButton(title: title, theme: theme)
-            segment.target = self
-            segment.action = #selector(segmentClicked(_:))
-            segment.tag = index
-            segment.isActive = index == 0
-            segments.append(segment)
-            stack.addArrangedSubview(segment)
-        }
-        apply(theme: theme)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    /// Selects `index` without sending the action.
-    func select(_ index: Int) {
-        selectedSegment = index
-        for segment in segments {
-            segment.isActive = segment.tag == index
-        }
-    }
-
-    func setEnabled(_ enabled: Bool, forSegment index: Int) {
-        guard segments.indices.contains(index) else { return }
-        segments[index].isEnabled = enabled
-    }
-
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        layer?.backgroundColor = theme.colors.bgOverlay.cgColor
-        for segment in segments {
-            segment.apply(theme: theme)
-        }
-    }
-
-    @objc private func segmentClicked(_ sender: NSButton) {
-        guard sender.tag != selectedSegment else { return }
-        select(sender.tag)
-        sendAction(action, to: target)
-    }
-}
-
-private final class AutomationSegmentButton: NSButton {
-    private static let padding: CGFloat = 10
-
-    var isActive = false {
-        didSet {
-            needsDisplay = true
-            setAccessibilityValue(isActive)
-        }
-    }
-    private var theme: AppTheme
-
-    init(title: String, theme: AppTheme) {
-        self.theme = theme
-        super.init(frame: .zero)
-        self.title = title
-        isBordered = false
-        setButtonType(.momentaryPushIn)
-        translatesAutoresizingMaskIntoConstraints = false
-        setAccessibilityRole(.radioButton)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        needsDisplay = true
-    }
-
-    override var isEnabled: Bool {
-        didSet { needsDisplay = true }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let width = ceil(ChromeText.attributed(title, font: ChromeFont.labelStrong, color: .labelColor).size().width)
-        return NSSize(width: Self.padding * 2 + width, height: 20)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let colors = theme.colors
-        if isActive {
-            let shape = NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-                xRadius: Chrome.Radius.cap,
-                yRadius: Chrome.Radius.cap
-            )
-            colors.bgRaised.setFill()
-            shape.fill()
-            colors.borderSubtle.setStroke()
-            shape.lineWidth = Chrome.hairline
-            shape.stroke()
-        }
-        let color = isActive ? colors.textPrimary : colors.textMuted
-        let label = ChromeText.attributed(
-            title,
-            font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
-            color: isEnabled ? color : color.withAlphaComponent(0.45)
-        )
-        let size = label.size()
-        label.draw(at: NSPoint(x: floor((bounds.width - size.width) / 2), y: floor((bounds.height - size.height) / 2)))
     }
 }

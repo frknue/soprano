@@ -31,6 +31,29 @@ struct AgentDashboardSnapshotTests {
         ])
     }
 
+    @Test func sectionsGroupAgentsThatNeedYouAheadOfWorkingReadyAndStoppedOnes() {
+        let snapshot = AgentDashboardSnapshot(entries: [
+            entry(id: "running", status: .running),
+            entry(id: "idle", status: .idle),
+            entry(id: "error", status: .error),
+            entry(id: "stopped", status: .stopped),
+            entry(id: "attention", status: .idle, needsAttention: true),
+            entry(id: "starting", status: .starting),
+            entry(id: "waiting", status: .waiting),
+        ])
+
+        let sections = AgentDashboardSection.group(snapshot.entries)
+
+        #expect(sections.map(\.section) == [.needsYou, .working, .ready, .stopped])
+        #expect(sections.map { $0.entries.map(\.tabId) } == [
+            ["attention", "waiting", "error"],
+            ["running", "starting"],
+            ["idle"],
+            ["stopped"],
+        ])
+        #expect(AgentDashboardSection.group([entry(id: "idle", status: .idle)]).map(\.section) == [.ready])
+    }
+
     @Test func managerSnapshotIncludesAgentTabsAcrossLogicalWindows() throws {
         let manager = AgentManager()
         let codexPaneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/one"))
@@ -251,16 +274,7 @@ struct AgentDashboardViewTests {
         #expect(header.frame.height == SettingsHeaderView.height)
         #expect(header.frame.maxY == dashboard.bounds.maxY)
         #expect(header.displayedSubtitle == "Monitoring 1 agent across 1 window")
-        let list = try #require(allSubviews(in: dashboard).first { $0.identifier?.rawValue == "agent-dashboard-list" })
-        #expect(list.frame.width == 440)
-        // Working starts 24 pt after the rule that continues the list column's.
-        let working = try #require(allSubviews(in: dashboard).first {
-            $0.identifier?.rawValue == "agent-dashboard-summary-working"
-        })
-        #expect(working.convert(working.bounds, to: dashboard).minX == 464)
-        let colors = ThemeManager(themeId: "gruvbox-dark").currentTheme.colors
-        #expect(summaryValueColor("total", in: dashboard)?.isEqual(colors.textPrimary) == true)
-        #expect(summaryValueColor("needs-input", in: dashboard)?.isEqual(colors.textMuted) == true)
+        #expect(sectionHeadings(in: dashboard) == ["WORKING 1"])
 
         let terminalScrollView = try #require(
             allSubviews(in: contentViewController.view)
@@ -314,6 +328,7 @@ struct AgentDashboardViewTests {
         #expect(
             agentManager.agent(paneId: paneId, tabId: tabId)?.status == .stopped
         )
+        #expect(sectionHeadings(in: dashboard) == ["STOPPED 1"])
 
         let restartButton = try #require(
             allSubviews(in: contentViewController.view)
@@ -327,13 +342,7 @@ struct AgentDashboardViewTests {
             agentManager.agent(paneId: paneId, tabId: tabId)?.status == .starting
         )
 
-        let needsInputCardLabels = allSubviews(in: contentViewController.view)
-            .first {
-                $0.identifier?.rawValue == "agent-dashboard-summary-needs-input"
-            }?
-            .subviews
-            .compactMap { ($0 as? NSTextField)?.stringValue }
-        #expect(needsInputCardLabels?.contains("0") == true)
+        #expect(sectionHeadings(in: dashboard) == ["WORKING 1"])
 
         let dashboardRoot = try #require(
             allSubviews(in: contentViewController.view)
@@ -585,14 +594,56 @@ struct AgentDashboardViewTests {
         let reordered = try arrangedRows(in: controller.view)
         #expect(reordered.map(folder(of:)) == ["project-2", "project-0", "project-1", "project-3"])
         #expect(reordered.prefix(3).elementsEqual([rows[2], rows[0], rows[1]]) { $0 === $1 })
-        let needsInputCard = try #require(allSubviews(in: controller.view).first {
-            $0.identifier?.rawValue == "agent-dashboard-summary-needs-input"
-        })
-        #expect(needsInputCard.subviews.contains { ($0 as? NSTextField)?.stringValue == "1" })
+        #expect(sectionHeadings(in: controller.view) == ["NEEDS YOU 1", "WORKING 3"])
+    }
+
+    @Test func stopAndRestartStayInTheToolbarAndWorkInTheNarrowestWindow() throws {
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        let (controller, window) = openDashboard(
+            for: manager,
+            width: MainWindowSizing.minimumFrameSize.width,
+            height: MainWindowSizing.minimumFrameSize.height
+        )
+        #expect(controller.view.frame.width == MainWindowSizing.minimumFrameSize.width)
+
+        func button(_ id: String) throws -> NSButton {
+            try #require(allSubviews(in: controller.view).compactMap { $0 as? NSButton }.first {
+                $0.identifier?.rawValue == id
+            })
+        }
+        let stop = try button("agent-dashboard-stop")
+        #expect(stop.window === window)
+        #expect(controller.view.bounds.contains(stop.convert(stop.bounds, to: controller.view)))
+        stop.performClick(nil)
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .stopped)
+
+        controller.view.layoutSubtreeIfNeeded()
+        let restart = try button("agent-dashboard-restart")
+        #expect(restart.window === window)
+        #expect(controller.view.bounds.contains(restart.convert(restart.bounds, to: controller.view)))
+        restart.performClick(nil)
+        #expect(manager.agent(paneId: paneId, tabId: tabId)?.status == .starting)
+    }
+
+    @Test func aNarrowWindowGivesTheSidebarItsShareAndLaysOutUnambiguously() throws {
+        let manager = AgentManager()
+        _ = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        for (width, sidebar) in [(700.0, 280.0), (1_000.0, 380.0)] {
+            let (controller, _) = openDashboard(for: manager, width: width, height: 600)
+            let list = try #require(allSubviews(in: controller.view).first {
+                $0.identifier?.rawValue == "agent-dashboard-list"
+            })
+            #expect(abs(list.frame.width - sidebar) < 0.5)
+            #expect(allSubviews(in: controller.view).filter(\.hasAmbiguousLayout).isEmpty)
+        }
     }
 
     private func openDashboard(
         for manager: AgentManager,
+        width: CGFloat = 900,
         height: CGFloat
     ) -> (AgentDashboardViewController, NSWindow) {
         let controller = AgentDashboardViewController(
@@ -600,22 +651,26 @@ struct AgentDashboardViewTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: height),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask: [.titled, .resizable],
             backing: .buffered,
             defer: false
         )
         window.contentViewController = controller
+        window.setContentSize(NSSize(width: width, height: height))
         controller.view.layoutSubtreeIfNeeded()
         return (controller, window)
     }
 
-    /// The agent rows in the order the list shows them.
+    /// The agent rows in the order the list shows them, without the section
+    /// headings between them.
     private func arrangedRows(in view: NSView) throws -> [NSView] {
         let row = try #require(allSubviews(in: view).first {
             $0.identifier?.rawValue == "agent-dashboard-row"
         })
-        return try #require(row.superview as? NSStackView).arrangedSubviews
+        return try #require(row.superview as? NSStackView).arrangedSubviews.filter {
+            $0.identifier?.rawValue == "agent-dashboard-row"
+        }
     }
 
     /// The second line of an agent without a task title or activity: its folder.
@@ -626,14 +681,20 @@ struct AgentDashboardViewTests {
             .stringValue
     }
 
-    private func summaryValueColor(_ id: String, in view: NSView) -> NSColor? {
-        let value = allSubviews(in: view)
-            .first { $0.identifier?.rawValue == "agent-dashboard-summary-\(id)" }?
-            .subviews
-            .compactMap { $0 as? NSTextField }
-            .first { $0.identifier?.rawValue == "agent-dashboard-summary-value" }
-        guard let text = value?.attributedStringValue, text.length > 0 else { return nil }
-        return text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+    /// The list's section headings in order, as `NEEDS YOU 2`.
+    private func sectionHeadings(in view: NSView) -> [String] {
+        guard let stack = allSubviews(in: view)
+            .first(where: { $0.identifier?.rawValue == "agent-dashboard-section" })?
+            .superview as? NSStackView
+        else { return [] }
+        return stack.arrangedSubviews
+            .filter { $0.identifier?.rawValue == "agent-dashboard-section" }
+            .map { heading in
+                let labels = allSubviews(in: heading).compactMap { $0 as? NSTextField }
+                let count = labels.first { $0.identifier?.rawValue == "agent-dashboard-section-count" }
+                let title = labels.first { $0 !== count }
+                return [title?.stringValue, count?.stringValue].compactMap { $0 }.joined(separator: " ")
+            }
     }
 
     private func labels(in view: NSView) -> [String] {

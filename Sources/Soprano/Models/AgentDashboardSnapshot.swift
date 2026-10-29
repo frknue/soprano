@@ -39,6 +39,49 @@ struct AgentDashboardEntry: Identifiable, Equatable {
     }
 }
 
+/// The groups the dashboard lists agents under, most urgent first. Each
+/// covers a contiguous run of the snapshot's urgency order.
+enum AgentDashboardSection: CaseIterable, Equatable {
+    /// Asks for attention, waits for input, or failed.
+    case needsYou
+    case working
+    case ready
+    case stopped
+
+    init(entry: AgentDashboardEntry) {
+        if entry.needsAttention {
+            self = .needsYou
+            return
+        }
+        switch entry.status {
+        case .waiting, .error: self = .needsYou
+        case .running, .starting: self = .working
+        case .idle: self = .ready
+        case .stopped: self = .stopped
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .needsYou: "Needs you"
+        case .working: "Working"
+        case .ready: "Ready"
+        case .stopped: "Stopped"
+        }
+    }
+
+    /// `entries`, already in urgency order, under their sections, leaving out
+    /// empty ones.
+    static func group(
+        _ entries: [AgentDashboardEntry]
+    ) -> [(section: AgentDashboardSection, entries: [AgentDashboardEntry])] {
+        allCases.compactMap { section in
+            let members = entries.filter { AgentDashboardSection(entry: $0) == section }
+            return members.isEmpty ? nil : (section, members)
+        }
+    }
+}
+
 /// A point-in-time, presentation-ready view of every attached agent.
 ///
 /// This deliberately contains no mutable state. AgentManager remains the source

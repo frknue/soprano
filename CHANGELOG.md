@@ -103,6 +103,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- The Agent Dashboard is laid out like a mail client instead of a stack of terminals: a
+  sidebar groups agents under **Needs you**, **Working**, **Ready**, and **Stopped** in
+  place of the four summary figures, and the selected agent gets a toolbar
+  (**Timeline** / **Terminal**, **Show details**, **Open**, **Stop**, **Restart**). The
+  timeline reads as a conversation in a readable column, each answer under the agent's
+  name with every run of tool calls in one card; a live terminal sits in its own card;
+  what the agent is doing now moves above the reply field; and **Jump to latest** (`G`)
+  appears once you scroll back.
 - The left sidebar is quieter: shells are named by their folder instead of their
   `user@host:~/path` prompt title, agents by their task without omp's `π >` or Claude
   Code's spinner, and a branch shows only when it is not the repository's default. Plain
@@ -116,7 +124,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   manual scrolling alone.
 - The Agent Dashboard shows Claude Code, Codex, and omp agents as a live timeline read
   from their own transcripts instead of a copy of the terminal screen: prompts, rendered
-  replies, one line per tool call with its diff, and a NOW strip saying what the agent is
+  replies, one line per tool call with its diff, and a line saying what the agent is
   doing right now, which its row in the list repeats. `⇧J` / `⇧K` scroll it, `[` / `]`
   jump between prompts, `O` adds thinking, commands, and full output, `G` follows the
   newest entry, and `T` (or **Terminal**) switches to the live terminal, which plain
@@ -173,7 +181,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   toolbar and pane header, where it looked like a vertical line crossing the pane tabs.
 - The agents dashboard keeps a long activity line, such as an agent's question, on one
   truncated line under its row instead of wrapping it over the agent's name and status.
-  The NOW strip in the agent detail view truncates the same way.
+  The activity line above the reply field truncates the same way.
 - **Find Window** (`⌘F`) now lands on the pane and tab your search matched, switching to
   its window tab when needed, instead of only opening the window; with several matches it
   picks the first. A search that matches the window's own name still keeps its last focus.

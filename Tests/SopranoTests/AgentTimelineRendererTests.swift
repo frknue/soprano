@@ -67,12 +67,89 @@ struct AgentTimelineRendererTests {
         #expect((attribute(.timelineRowWash, of: "old line", in: text) as? NSColor)?.isEqual(colors.diffDelete) == true)
         #expect(attribute(.timelineRowWash, of: "context", in: text) == nil)
         let rows = ["context", "old line", "new line"].map {
-            paragraphStyle(of: $0, in: text)?.textBlocks.first as? RoundedTextBlock
+            paragraphStyle(of: $0, in: text)?.textBlocks.last as? RoundedTextBlock
         }
         let box = try #require(rows.first ?? nil)
         #expect(rows.allSatisfy { $0 === box })
         #expect(box.edge?.isEqual(colors.borderSubtle) == true)
         #expect(box.radius == Chrome.Radius.control)
+    }
+
+    @Test func anAnswerIsHeadedByTheAgentAndKeepsEachRunOfToolCallsInOneCard() throws {
+        let timeline = AgentTimeline(entries: [
+            AgentTranscriptEntry(items: [AgentTimelineItem(id: "p1", kind: .prompt("Fix the build"))]),
+            AgentTranscriptEntry(items: [
+                AgentTimelineItem(id: "c1", kind: .tool(AgentToolCall(name: "Read", summary: "Package.swift", state: .succeeded))),
+                AgentTimelineItem(id: "t1", kind: .thinking("Check the target")),
+                AgentTimelineItem(id: "c2", kind: .tool(AgentToolCall(
+                    name: "Edit",
+                    summary: "App.swift",
+                    state: .succeeded,
+                    diff: "@@ -1,1 +1,1 @@\n-old line\n+new line"
+                ))),
+                AgentTimelineItem(id: "r1", kind: .reply("Fixed it.")),
+                AgentTimelineItem(id: "c3", kind: .tool(AgentToolCall(name: "Bash", summary: "swift build", state: .succeeded))),
+            ]),
+        ])
+
+        let text = AgentTimelineRenderer(colors: colors)
+            .render(timeline, detailed: false, isAgentActive: true, agentName: "Claude Code")
+            .text
+
+        // One name per answer, in ink, between the prompt and the first call.
+        #expect(text.string.components(separatedBy: "Claude Code").count == 2)
+        #expect(color(of: "Claude Code", in: text)?.isEqual(colors.textPrimary) == true)
+        let name = try #require(range(of: "Claude Code", in: text))
+        #expect(try #require(range(of: "Fix the build", in: text)).location < name.location)
+        #expect(name.location < (try #require(range(of: "Package.swift", in: text))).location)
+
+        let card = try #require(paragraphStyle(of: "Package.swift", in: text)?.textBlocks.first as? RoundedTextBlock)
+        #expect(card.radius == Chrome.Radius.card)
+        #expect(card.edge?.isEqual(colors.borderSubtle) == true)
+        #expect(paragraphStyle(of: "Check the target", in: text)?.textBlocks.first === card)
+        #expect(paragraphStyle(of: "App.swift", in: text)?.textBlocks.first === card)
+        // The diff box nests inside the card.
+        let diffBlocks = try #require(paragraphStyle(of: "new line", in: text)?.textBlocks)
+        #expect(diffBlocks.first === card)
+        #expect((diffBlocks.last as? RoundedTextBlock)?.radius == Chrome.Radius.control)
+        // A reply ends the card; the next call opens a new one.
+        #expect(paragraphStyle(of: "Fixed it.", in: text)?.textBlocks.isEmpty == true)
+        let nextCard = paragraphStyle(of: "swift build", in: text)?.textBlocks.first
+        #expect(nextCard != nil && nextCard !== card)
+    }
+
+    @Test func aDiffInsideAToolCardWashesItsRowsOnlyInsideTheDiffBox() throws {
+        let call = AgentToolCall(name: "Edit", summary: "App.swift", state: .succeeded, diff: "@@ -1,1 +1,1 @@\n-old line\n+new line")
+        let timeline = AgentTimeline(entries: [
+            AgentTranscriptEntry(items: [AgentTimelineItem(id: "c1", kind: .tool(call))]),
+        ])
+        let text = AgentTimelineRenderer(colors: colors).render(timeline, detailed: false, isAgentActive: true).text
+        let textView = NSTextView(usingTextLayoutManager: false)
+        textView.frame = NSRect(x: 0, y: 0, width: 600, height: 200)
+        textView.backgroundColor = colors.bgBase
+        textView.textStorage?.setAttributedString(text)
+        let layoutManager = try #require(textView.layoutManager)
+        layoutManager.ensureLayout(for: try #require(textView.textContainer))
+        let row = try #require(range(of: "new line", in: text))
+        let line = layoutManager.lineFragmentRect(forGlyphAt: layoutManager.glyphIndexForCharacter(at: row.location), effectiveRange: nil)
+        let rep = try #require(textView.bitmapImageRepForCachingDisplay(in: textView.bounds))
+        textView.cacheDisplay(in: textView.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / textView.bounds.width
+        func pixel(x: CGFloat) -> NSColor? {
+            let origin = textView.textContainerOrigin
+            return rep.colorAt(x: Int((origin.x + x) * scale), y: Int((origin.y + line.midY) * scale))?.usingColorSpace(.sRGB)
+        }
+        let base = try #require(colors.bgBase.usingColorSpace(.sRGB))
+        func isBase(_ color: NSColor?) -> Bool {
+            guard let color else { return false }
+            return abs(color.redComponent - base.redComponent) < 0.02
+                && abs(color.greenComponent - base.greenComponent) < 0.02
+                && abs(color.blueComponent - base.blueComponent) < 0.02
+        }
+        // In the card's padding, left of the diff box, the add row shows the page.
+        #expect(isBase(pixel(x: 16)))
+        // Inside the diff box's code column, the row is washed.
+        #expect(!isBase(pixel(x: 200)))
     }
 
     @Test func aRunningCallIsTheActivityWithItsCommandAndElapsedTime() throws {
