@@ -150,6 +150,14 @@ final class MainWindowController: NSWindowController {
 
     private static let configObserverId = "MainWindowController"
 
+    /// Hands the automation controller to the content, which shows
+    /// Automations and hosts its runs' terminals.
+    func install(automationController: AutomationController) {
+        mainContentVC?.automationController = automationController
+    }
+
+    var contentController: MainContentViewController? { mainContentVC }
+
     /// Re-applies everything `settings.json` owns after the file changed.
     private func applyConfigChange() {
         let store = ConfigStore.shared
@@ -604,6 +612,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "automations",
+                icon: "calendar.badge.clock",
+                label: "Automations",
+                description: "Scheduled prompts, their runs and reports",
+                searchText: "automation schedule scheduled cron prompt runs recurring",
+                action: { [weak self] in
+                    // After the palette closes, so the page takes the keyboard.
+                    DispatchQueue.main.async {
+                        self?.mainContentVC?.showAutomations()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "toggle-sidebar",
                 icon: "sidebar.leading",
                 label: "Toggle Sidebar",
@@ -742,6 +763,9 @@ extension MainWindowController: KeybindingDelegate {
             }
             if current is EditorPaneView {
                 return .editor
+            }
+            if current is AutomationsRootView {
+                return .automations
             }
             view = current.superview
         }
@@ -1031,6 +1055,14 @@ private extension MainWindowController {
         )
         commandsMenu.addItem(dashboardItem)
 
+        let automationsItem = NSMenuItem(
+            title: "Automations",
+            action: #selector(openAutomationsMenuItemSelected),
+            keyEquivalent: ""
+        )
+        automationsItem.target = self
+        commandsMenu.addItem(automationsItem)
+
         commandsMenu.addItem(.separator())
         let settingsFileItem = NSMenuItem(
             title: "Open settings.json",
@@ -1113,6 +1145,10 @@ private extension MainWindowController {
 
     @objc func openDashboardMenuItemSelected() {
         keybindingOpenAgentDashboard()
+    }
+
+    @objc func openAutomationsMenuItemSelected() {
+        mainContentVC?.showAutomations()
     }
 
     func openSettings() {

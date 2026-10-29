@@ -42,11 +42,13 @@ struct PaneNavigationClaimRegistry {
 enum KeybindingFocusedContent: Equatable, Sendable {
     case browser
     case editor
+    case automations
     case other
 
     /// Like Orca's scoped shortcuts: a browser keeps ⌘L (address bar),
-    /// ⌘[ / ⌘] and ⌘R; an editor keeps ⌘F / ⌘G / ⇧⌘G (find) and ⌘S. Soprano
-    /// bindings on those chords apply everywhere else.
+    /// ⌘[ / ⌘] and ⌘R; an editor keeps ⌘F / ⌘G / ⇧⌘G (find) and ⌘S; the
+    /// Automations page keeps ⌘N (New Automation). Soprano bindings on those
+    /// chords apply everywhere else.
     func ownsChord(key: String, flags: NSEvent.ModifierFlags) -> Bool {
         let modifiers = flags.intersection([.command, .control, .option, .shift])
         switch self {
@@ -55,6 +57,8 @@ enum KeybindingFocusedContent: Equatable, Sendable {
         case .editor:
             return (modifiers == .command && ["f", "g", "s"].contains(key))
                 || (modifiers == [.command, .shift] && key == "g")
+        case .automations:
+            return modifiers == .command && key == "n"
         case .other:
             return false
         }

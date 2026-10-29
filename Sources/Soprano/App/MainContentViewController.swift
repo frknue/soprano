@@ -33,7 +33,11 @@ final class MainContentViewController: NSViewController {
     private var settingsViewController: SettingsViewController?
     private var settingsViewConstraints: [NSLayoutConstraint] = []
     private var dashboardViewController: AgentDashboardViewController?
+    /// Runs the automations; set once by the app delegate after launch.
+    var automationController: AutomationController?
     private var dashboardViewConstraints: [NSLayoutConstraint] = []
+    private var automationsViewController: AutomationsViewController?
+    private var automationsViewConstraints: [NSLayoutConstraint] = []
 
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
     private static let rightSidebarVisibleKey = "soprano-right-sidebar-visible"
@@ -96,6 +100,12 @@ final class MainContentViewController: NSViewController {
         sidebarView.onSettingsRequested = onSettingsRequested
         sidebarView.onDashboardRequested = { [weak self] in
             self?.showDashboard()
+        }
+        sidebarView.onAutomationsRequested = { [weak self] in
+            self?.toggleAutomations()
+        }
+        sidebarView.onWorkspaceRowSelected = { [weak self] in
+            self?.closeAutomations(restoreKeyboardFocus: false)
         }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
@@ -221,6 +231,14 @@ final class MainContentViewController: NSViewController {
 
         self.view = root
         applyTheme()
+
+        // A banner for an automation run opens its report here.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openAutomationRunRequested(_:)),
+            name: .sopranoOpenAutomationRun,
+            object: nil
+        )
     }
 
     func toggleSidebar() {
@@ -439,6 +457,25 @@ final class MainContentViewController: NSViewController {
         sidebarView.setTypedPaneHint(typed)
     }
 
+    // MARK: - Automation terminals
+
+    /// Starts the terminal of an automation run's tab, whose window nobody
+    /// has shown yet.
+    func startBackgroundTerminal(for target: TerminalTarget) -> Bool {
+        loadViewIfNeeded()
+        return splitTreeView.startBackgroundTerminal(for: target)
+    }
+
+    /// Types `prompt` into an agent's terminal and submits it.
+    func submitAgentPrompt(_ prompt: String, to target: TerminalTarget) -> Bool {
+        loadViewIfNeeded()
+        return splitTreeView.submitAgentPrompt(prompt, to: target)
+    }
+
+    func visibleTerminalText(for target: TerminalTarget) -> String? {
+        splitTreeView?.visibleTerminalText(for: target)
+    }
+
     func changeActiveTerminalFontSize(delta: Int) {
         splitTreeView.changeActiveTerminalFontSize(delta: delta)
     }
@@ -468,6 +505,9 @@ final class MainContentViewController: NSViewController {
         loadViewIfNeeded()
         if dashboardViewController != nil {
             closeDashboard(restoreKeyboardFocus: false)
+        }
+        if automationsViewController != nil {
+            closeAutomations(restoreKeyboardFocus: false)
         }
         preservingWindowFrame {
             let settingsViewController: SettingsViewController
@@ -555,6 +595,9 @@ final class MainContentViewController: NSViewController {
         if !settingsContainerView.isHidden {
             closeSettings()
         }
+        if automationsViewController != nil {
+            closeAutomations(restoreKeyboardFocus: false)
+        }
         guard dashboardViewController == nil else { return }
 
         preservingWindowFrame {
@@ -567,6 +610,9 @@ final class MainContentViewController: NSViewController {
                 },
                 promptSender: { [weak splitTreeView] target, prompt in
                     splitTreeView?.submitAgentPrompt(prompt, to: target) ?? false
+                },
+                branchProvider: { [gitBranchMonitor] cwd in
+                    gitBranchMonitor.notableBranch(for: cwd)
                 }
             )
             controller.onDismiss = { [weak self] in
@@ -609,6 +655,93 @@ final class MainContentViewController: NSViewController {
         }
     }
 
+    // MARK: - Automations
+
+    var isShowingAutomations: Bool { automationsViewController != nil }
+
+    /// The sidebar's Automations entry: opens the page, or closes it when it
+    /// is open.
+    func toggleAutomations() {
+        if isShowingAutomations {
+            closeAutomations()
+        } else {
+            showAutomations()
+        }
+    }
+
+    /// Covers the workspace right of the sidebar with the Automations page,
+    /// on the list or, with `runId`, on that run's report. The sidebar stays
+    /// usable: its Automations entry shows selected, and choosing a window
+    /// closes the page.
+    func showAutomations(selectingRun runId: String? = nil) {
+        loadViewIfNeeded()
+        guard let automationController else { return }
+        if !settingsContainerView.isHidden {
+            closeSettings()
+        }
+        if dashboardViewController != nil {
+            closeDashboard(restoreKeyboardFocus: false)
+        }
+        if automationsViewController == nil {
+            preservingWindowFrame {
+                let controller = AutomationsViewController(
+                    controller: automationController,
+                    themeManager: themeManager
+                )
+                controller.isTargetLive = { [weak agentManager] target in
+                    agentManager?.panes[target.paneId]?.tabs.contains { $0.id == target.tabId } == true
+                }
+                controller.onDismiss = { [weak self] in
+                    self?.closeAutomations()
+                }
+                controller.onRunOpened = { [weak self] in
+                    guard let self else { return }
+                    self.closeAutomations(restoreKeyboardFocus: false)
+                    self.splitTreeView.restoreKeyboardFocus()
+                }
+                addChild(controller)
+                controller.view.translatesAutoresizingMaskIntoConstraints = false
+                view.addSubview(controller.view, positioned: .above, relativeTo: nil)
+                automationsViewConstraints = [
+                    controller.view.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
+                    controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                    controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                    controller.view.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
+                ]
+                NSLayoutConstraint.activate(automationsViewConstraints)
+                automationsViewController = controller
+                splitTreeView.isHidden = true
+            }
+            sidebarView.setAutomationsSelected(true)
+        }
+        if let runId {
+            automationsViewController?.showRun(runId)
+        }
+        automationsViewController?.focusPage()
+    }
+
+    func closeAutomations(restoreKeyboardFocus: Bool = true) {
+        guard let automationsViewController else { return }
+        automationsViewController.stop()
+        preservingWindowFrame {
+            NSLayoutConstraint.deactivate(automationsViewConstraints)
+            automationsViewConstraints.removeAll()
+            automationsViewController.view.removeFromSuperview()
+            automationsViewController.removeFromParent()
+            self.automationsViewController = nil
+            splitTreeView.isHidden = false
+        }
+        sidebarView.setAutomationsSelected(false)
+        if restoreKeyboardFocus {
+            splitTreeView.restoreKeyboardFocus()
+        }
+    }
+
+    @objc private func openAutomationRunRequested(_ notification: Notification) {
+        guard let runId = notification.userInfo?["runId"] as? String else { return }
+        showAutomations(selectingRun: runId)
+    }
+
     func refreshTheme() {
         applyTheme()
         sidebarView.refreshTheme()
@@ -629,6 +762,7 @@ final class MainContentViewController: NSViewController {
         settingsHeaderView?.apply(theme: theme)
         settingsViewController?.apply(theme: theme)
         dashboardViewController?.apply(theme: theme)
+        automationsViewController?.apply(theme: theme)
     }
 
     private func preservingWindowFrame(_ update: () -> Void) {

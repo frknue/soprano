@@ -395,6 +395,81 @@ final class AgentManager: @unchecked Sendable {
         spawnAgent("terminal", cwd: cwd)
     }
 
+    /// The session automation runs open in.
+    static let automationSessionName = "Automations"
+
+    /// Opens an automation run's agent in a window of its own in the
+    /// Automations session, creating the session when missing, without
+    /// switching to it: the run works in the background and its window is
+    /// there when someone opens it. `conversation` resumes a closed run
+    /// instead of starting a new one; a resumed run is the person's agent
+    /// again, so it has no `runId` and its banners are ordinary ones.
+    @discardableResult
+    func openAutomationWindow(
+        title: String,
+        profileId: String,
+        cwd: String,
+        runId: String?,
+        launch: AgentLaunch,
+        conversation: AgentConversation? = nil
+    ) -> TerminalTarget? {
+        guard let profile = AgentCatalog.profile(for: profileId), profile.id != "terminal" else { return nil }
+        let sessionId = terminalSessions.values.first { $0.name == Self.automationSessionName }?.id
+            ?? makeAutomationSession()
+        let paneId = nextPaneId()
+        let tabId = nextTabId()
+        let agent = AgentInstance(id: tabId, profileId: profile.id, launch: launch, automationRunId: runId)
+        agent.conversation = conversation
+        panes[paneId] = PaneState(
+            id: paneId,
+            tabs: [PaneTab(id: tabId, type: .agent, title: title, agent: agent, cwd: cwd)]
+        )
+        let windowId = nextWindowId()
+        windows[windowId] = WorkspaceWindowState(
+            id: windowId,
+            sessionId: sessionId,
+            title: uniqueAutomaticWindowTitle(title, in: sessionId),
+            isTitleCustom: true,
+            tabs: [LayoutTab(id: nextLayoutTabId(), layout: .leaf(paneId), activePaneId: paneId)]
+        )
+        if terminalSessions[sessionId].map({ windows[$0.activeWindowId] == nil }) ?? false {
+            terminalSessions[sessionId]?.activeWindowId = windowId
+        }
+        notifyChange(layoutChanged: true)
+        return TerminalTarget(paneId: paneId, tabId: tabId)
+    }
+
+    private func makeAutomationSession() -> String {
+        nextId += 1
+        let sessionId = "session-\(nextId)"
+        terminalSessions[sessionId] = TerminalSessionState(
+            id: sessionId,
+            name: Self.automationSessionName,
+            activeWindowId: ""
+        )
+        return sessionId
+    }
+
+    /// Closes a finished run's agent tab. Panes or tabs someone added beside
+    /// it stay; a window holding only the run closes with it, and the last
+    /// run window takes the Automations session along while that session is
+    /// in the background, rather than leaving an empty shell window behind.
+    func closeAutomationRun(_ target: TerminalTarget) {
+        guard let terminalWindow = window(containingPane: target.paneId) else { return }
+        guard terminalWindow.paneIds.count == 1, panes[target.paneId]?.tabs.count == 1 else {
+            removeTabFromPane(target.paneId, tabId: target.tabId)
+            return
+        }
+        let sessionId = terminalWindow.sessionId
+        if sessionId != activeSessionId,
+           terminalSessions[sessionId]?.name == Self.automationSessionName,
+           orderedWindows(in: sessionId).count == 1 {
+            closeSession(sessionId)
+        } else {
+            closeWindow(terminalWindow.id)
+        }
+    }
+
     @discardableResult
     func spawnOmpWeb(launcherURL: URL) -> String? {
         guard canAddPane(to: activeWindowId) else { return nil }
@@ -1050,16 +1125,21 @@ final class AgentManager: @unchecked Sendable {
         paneId: String,
         tabId: String,
         status: AgentStatus,
-        needsAttention: Bool? = nil
+        needsAttention: Bool? = nil,
+        waitingReason: AgentWaitingReason? = nil
     ) {
         guard let agent = agent(paneId: paneId, tabId: tabId),
               agent.status != .stopped
         else { return }
 
+        // A waiting agent without a stated reason finished its turn: every
+        // CLI reports that, and only some say why they wait.
+        let reason = status == .waiting ? (waitingReason ?? .turnEnded) : nil
         let attentionChanged = needsAttention.map { agent.needsAttention != $0 } ?? false
-        guard agent.status != status || attentionChanged else { return }
+        guard agent.status != status || attentionChanged || agent.waitingReason != reason else { return }
 
         agent.status = status
+        agent.waitingReason = reason
         if let needsAttention {
             agent.needsAttention = needsAttention
         }

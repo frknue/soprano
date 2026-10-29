@@ -30,6 +30,11 @@ struct AgentEventPayload {
     let body: String
     var conversation: AgentConversation? = nil
     var processId: Int32? = nil
+    /// Why a needs-input event waits; a finished turn when nothing says so.
+    var waitingReason: AgentWaitingReason? = nil
+    /// What the agent itself said, in full (capped), without the banner's
+    /// status prefix.
+    var message: String? = nil
 }
 
 /// A distributed notification prepared for delivery by a command bridge.
@@ -98,6 +103,7 @@ enum AgentEventCommand {
         var processId: Int32?
         var readsStandardInput = false
         var payloads: [String] = []
+        var reason: AgentWaitingReason?
         var index = 3
 
         while index < arguments.count {
@@ -116,6 +122,9 @@ enum AgentEventCommand {
                 index += 2
             case "--pid" where index + 1 < arguments.count:
                 processId = Int32(arguments[index + 1]).flatMap { $0 > 0 ? $0 : nil }
+                index += 2
+            case "--reason" where index + 1 < arguments.count:
+                reason = AgentWaitingReason(rawValue: arguments[index + 1])
                 index += 2
             case "--message-from-stdin":
                 readsStandardInput = true
@@ -144,8 +153,9 @@ enum AgentEventCommand {
 
         // The agent's own words beat the caller's static description: a banner
         // saying what was asked is the whole point of notifying at all.
-        if let message = payloads.lazy.compactMap(agentMessage(fromPayload:)).first {
-            body = "\(label(for: state)) — \(message)"
+        let message = payloads.lazy.compactMap(agentMessageText(fromPayload:)).first
+        if let summary = message.flatMap(summarize) {
+            body = "\(label(for: state)) — \(summary)"
         }
 
         var userInfo: [String: String] = [
@@ -161,6 +171,13 @@ enum AgentEventCommand {
         }
         if let processId {
             userInfo["processId"] = String(processId)
+        }
+        if let message {
+            userInfo["message"] = String(message.prefix(fullMessageLimit))
+        }
+        if state == .needsInput,
+           let reason = reason ?? payloads.lazy.compactMap(waitingReason(fromPayload:)).first {
+            userInfo["reason"] = reason.rawValue
         }
         if let conversation = payloads.lazy.compactMap(AgentConversation.fromPayload).first {
             userInfo["conversationId"] = conversation.id
@@ -217,10 +234,19 @@ enum AgentEventCommand {
         }
     }
 
+    /// Longest agent message an event carries for an automation run's record;
+    /// the transcript, when the CLI writes one, has the rest.
+    static let fullMessageLimit = 8_192
+
     /// Pulls a human-readable line out of an agent payload. Every agent hands us
     /// a different shape, so this reads whichever known key is present instead of
     /// modelling three schemas that upstream can change at will.
     static func agentMessage(fromPayload payload: String) -> String? {
+        agentMessageText(fromPayload: payload).flatMap(summarize)
+    }
+
+    /// The agent's message from a payload as it wrote it, untrimmed.
+    static func agentMessageText(fromPayload payload: String) -> String? {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8) else { return nil }
         guard let object = try? JSONSerialization.jsonObject(with: data),
@@ -228,8 +254,9 @@ enum AgentEventCommand {
         else { return nil }
 
         for key in messageKeys {
-            if let value = json[key] as? String, let summary = summarize(value) {
-                return summary
+            if let value = json[key] as? String,
+               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value.trimmingCharacters(in: .whitespacesAndNewlines)
             }
         }
 
@@ -237,6 +264,27 @@ enum AgentEventCommand {
             return message(forNotificationType: type)
         }
 
+        return nil
+    }
+
+    /// What a hook payload says the agent waits for: Claude Code's
+    /// notification types tell a blocked tool call or question from a turn
+    /// that ended; its Stop hook and Codex's turn notification end turns.
+    static func waitingReason(fromPayload payload: String) -> AgentWaitingReason? {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"),
+              let object = try? JSONSerialization.jsonObject(with: Data(trimmed.utf8)),
+              let json = object as? [String: Any]
+        else { return nil }
+        switch json["notification_type"] as? String {
+        case "permission_prompt": return .approval
+        case "elicitation_dialog": return .question
+        case "idle_prompt": return .turnEnded
+        default: break
+        }
+        if json["hook_event_name"] as? String == "Stop" || json["type"] as? String == "agent-turn-complete" {
+            return .turnEnded
+        }
         return nil
     }
 
@@ -429,7 +477,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                     transcriptPath: info["conversationTranscript"] as? String
                 )
             },
-            processId: (info["processId"] as? String).flatMap(Int32.init)
+            processId: (info["processId"] as? String).flatMap(Int32.init),
+            waitingReason: (info["reason"] as? String).flatMap(AgentWaitingReason.init(rawValue:)),
+            message: info["message"] as? String
         ))
     }
 
@@ -446,6 +496,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         let needsInput = profileId == "codex"
             || ["approval", "permission", "question", "input required"]
                 .contains { combined.contains($0) }
+        // Codex rings the terminal bell this way only for approvals.
+        let reason: AgentWaitingReason = profileId == "codex" || combined.contains("approv")
+            || combined.contains("permission") ? .approval : .question
 
         if profileId == nil {
             let isFocused = MainActor.assumeIsolated {
@@ -464,7 +517,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             state: needsInput ? .needsInput : .ready,
             shouldNotify: true,
             title: title.isEmpty ? agentName(for: profileId) : title,
-            body: body.isEmpty ? (needsInput ? "Input required" : "Ready for a prompt") : body
+            body: body.isEmpty ? (needsInput ? "Input required" : "Ready for a prompt") : body,
+            waitingReason: needsInput ? reason : nil
         ))
     }
 
@@ -505,6 +559,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                 profileId: event.profileId
             )
         }
+        if let message = event.message {
+            agent.lastMessage = message
+        }
         let target = Target(paneId: event.paneId, tabId: event.tabId)
         let fingerprint = EventFingerprint(
             state: event.state,
@@ -537,10 +594,14 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             paneId: event.paneId,
             tabId: event.tabId,
             status: event.state.agentStatus,
-            needsAttention: needsAttention
+            needsAttention: needsAttention,
+            waitingReason: event.waitingReason
         )
 
-        if needsAttention {
+        // An automation's run announces itself, naming the automation, once
+        // it has the run's outcome; a banner for its pane would name a window
+        // nobody opened.
+        if needsAttention, agent.automationRunId == nil {
             deliverNotification(
                 title: event.title,
                 body: event.body,
@@ -548,6 +609,12 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                 tabId: event.tabId
             )
         }
+    }
+
+    /// A banner for an automation run; clicking it opens the run in
+    /// Automations rather than its terminal, which may already be closed.
+    func deliverAutomationNotification(title: String, body: String, runId: String) {
+        deliverNotification(title: title, body: body, paneId: "automation-\(runId)", tabId: runId, runId: runId)
     }
 
     private func agentName(for profileId: String?) -> String {
@@ -576,18 +643,25 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         )
     }
 
-    private func deliverNotification(title: String, body: String, paneId: String, tabId: String) {
+    private func deliverNotification(
+        title: String,
+        body: String,
+        paneId: String,
+        tabId: String,
+        runId: String? = nil
+    ) {
         guard let notificationCenter else { return }
 
         // Both are main-actor state, read here rather than inside the
         // background completion below, so a settings.json edit applies to the
         // very next banner without a restart.
-        let (subtitle, playsSound) = MainActor.assumeIsolated {
+        let (location, playsSound) = MainActor.assumeIsolated {
             (
                 locationSubtitle(paneId: paneId, tabId: tabId),
                 ConfigStore.shared.settings.notificationSound
             )
         }
+        let subtitle = runId == nil ? location : AgentManager.automationSessionName
 
         notificationCenter.getNotificationSettings { [weak self] settings in
             guard let self else { return }
@@ -600,7 +674,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                     subtitle: subtitle,
                     playsSound: playsSound,
                     paneId: paneId,
-                    tabId: tabId
+                    tabId: tabId,
+                    runId: runId
                 )
             case .notDetermined:
                 self.notificationCenter?.requestAuthorization(options: [.alert, .sound]) { granted, _ in
@@ -612,7 +687,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
                         subtitle: subtitle,
                         playsSound: playsSound,
                         paneId: paneId,
-                        tabId: tabId
+                        tabId: tabId,
+                        runId: runId
                     )
                 }
             case .denied:
@@ -695,7 +771,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         subtitle: String?,
         playsSound: Bool,
         paneId: String,
-        tabId: String
+        tabId: String,
+        runId: String? = nil
     ) {
         guard let notificationCenter else { return }
 
@@ -710,7 +787,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         }
         // Groups a pane's banners together instead of stacking one per event.
         content.threadIdentifier = paneId
-        content.userInfo = ["paneId": paneId, "tabId": tabId]
+        var userInfo = ["paneId": paneId, "tabId": tabId]
+        userInfo["automationRunId"] = runId
+        content.userInfo = userInfo
 
         let identifier = UUID().uuidString
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
@@ -777,8 +856,18 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        if let paneId = info["paneId"] as? String,
-           let tabId = info["tabId"] as? String {
+        if let runId = info["automationRunId"] as? String {
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first(where: \.canBecomeKey)?.makeKeyAndOrderFront(nil)
+                NotificationCenter.default.post(
+                    name: .sopranoOpenAutomationRun,
+                    object: nil,
+                    userInfo: ["runId": runId]
+                )
+            }
+        } else if let paneId = info["paneId"] as? String,
+                  let tabId = info["tabId"] as? String {
             DispatchQueue.main.async { [weak self] in
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.windows.first(where: \.canBecomeKey)?.makeKeyAndOrderFront(nil)

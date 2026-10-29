@@ -33,14 +33,14 @@ export default function (omp) {
     const text = lastAnswer?.content?.filter((part) => part.type === "text")
       .map((part) => part.text).join("\n").slice(0, 4096)
     await report("needs-input", ctx, [
-      "--notify", "--title", "omp", "--body", "Response ready",
+      "--notify", "--title", "omp", "--body", "Response ready", "--reason", "turn",
       ...(text ? ["--message-json", JSON.stringify({ message: text })] : []),
     ])
   })
   omp.on("tool_approval_requested", async (event, ctx) => {
     if (event.sessionId !== ctx.sessionManager.getSessionId()) return
     await report("needs-input", ctx, [
-      "--notify", "--title", "omp", "--body", "Approval required",
+      "--notify", "--title", "omp", "--body", "Approval required", "--reason", "approval",
       "--message-json", JSON.stringify({ message: event.reason || `Approve ${event.toolName}?` }),
     ])
   })
@@ -53,7 +53,7 @@ export default function (omp) {
     const questions = (Array.isArray(event.args?.questions) ? event.args.questions : [])
       .map((question) => question?.question).filter(Boolean).join("\n").slice(0, 4096)
     await report("needs-input", ctx, [
-      "--notify", "--title", "omp", "--body", "Question",
+      "--notify", "--title", "omp", "--body", "Question", "--reason", "question",
       ...(questions ? ["--message-json", JSON.stringify({ message: questions })] : []),
     ])
   })

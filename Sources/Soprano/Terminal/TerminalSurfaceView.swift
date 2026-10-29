@@ -18,6 +18,7 @@ struct TerminalConfig {
         paneId: String,
         tabId: String,
         conversation: AgentConversation? = nil,
+        launch: AgentLaunch? = nil,
         loginShell: String = DefaultAgents.terminal.command,
         accounts: AccountLaunchState = .shared
     ) -> TerminalConfig {
@@ -58,7 +59,7 @@ struct TerminalConfig {
                 withExtension: "js"
             )
             if let pluginURL,
-               let configContent = openCodeConfigContent(pluginURL: pluginURL) {
+               let configContent = openCodeConfigContent(pluginURL: pluginURL, model: launch?.model) {
                 config.env["OPENCODE_CONFIG_CONTENT"] = configContent
             }
         case "omp":
@@ -76,6 +77,15 @@ struct TerminalConfig {
         let accountAdjustments = accounts.adjustments(forProfile: profile.id)
         arguments.append(contentsOf: accountAdjustments.arguments)
         config.env.merge(accountAdjustments.environment) { _, chosen in chosen }
+
+        if let launch {
+            // A resumed conversation already has its prompt.
+            arguments.append(contentsOf: launchArguments(
+                profileId: profile.id,
+                launch: launch,
+                includingPrompt: conversation == nil
+            ))
+        }
 
         if let launchScript = profile.launchScript, !launchScript.isEmpty {
             config.launchScript = launchScript
@@ -111,6 +121,36 @@ struct TerminalConfig {
             ].map(shellQuoted).joined(separator: " ")
         }
         return config
+    }
+
+    /// What an automation run adds to its CLI's command line: the model, the
+    /// switch that skips approval prompts, then the prompt as the first
+    /// message, after `--` so a prompt that starts with a dash (a Markdown
+    /// list) is not read as an option. OpenCode takes its prompt by flag.
+    static func launchArguments(profileId: String, launch: AgentLaunch, includingPrompt: Bool) -> [String] {
+        let prompt = includingPrompt ? launch.prompt.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        var arguments: [String] = []
+        switch profileId {
+        case "claude-code":
+            if let model = launch.model { arguments += ["--model", model] }
+            if launch.skipsApprovals { arguments.append("--dangerously-skip-permissions") }
+            if !prompt.isEmpty { arguments += ["--", prompt] }
+        case "codex":
+            if let model = launch.model { arguments += ["--model", model] }
+            if launch.skipsApprovals { arguments.append("--dangerously-bypass-approvals-and-sandbox") }
+            if !prompt.isEmpty { arguments += ["--", prompt] }
+        case "omp":
+            if let model = launch.model { arguments.append("--model=\(model)") }
+            if launch.skipsApprovals { arguments.append("--auto-approve") }
+            if !prompt.isEmpty { arguments += ["--", prompt] }
+        case "opencode":
+            // Its model goes into OPENCODE_CONFIG_CONTENT; there is no flag.
+            if launch.skipsApprovals { arguments.append("--auto") }
+            if !prompt.isEmpty { arguments.append("--prompt=\(prompt)") }
+        default:
+            break
+        }
+        return arguments
     }
 
     static func forCommand(
@@ -219,7 +259,8 @@ struct TerminalConfig {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func openCodeConfigContent(pluginURL: URL) -> String? {
+    /// OpenCode has no model flag; a run's model goes into the inline config.
+    private static func openCodeConfigContent(pluginURL: URL, model: String? = nil) -> String? {
         let inherited = ProcessInfo.processInfo.environment["OPENCODE_CONFIG_CONTENT"]
         var content: [String: Any] = [:]
 
@@ -236,6 +277,9 @@ struct TerminalConfig {
             plugins.append(pluginURL.absoluteString)
         }
         content["plugin"] = plugins
+        if let model {
+            content["model"] = model
+        }
 
         guard let data = try? JSONSerialization.data(withJSONObject: content) else { return nil }
         return String(data: data, encoding: .utf8)

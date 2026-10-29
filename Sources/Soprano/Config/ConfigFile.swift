@@ -194,7 +194,31 @@ enum ConfigFile {
           //     "color": "#8bd5ca",
           //     "launchKey": "cmd+5"
           //   }
-          "agents": []
+          "agents": [],
+
+          // Prompts an agent runs on a schedule while Soprano is open; the
+          // sidebar's Automations page creates and edits them too. Each run
+          // opens its agent in the "Automations" session without switching to
+          // it, skips the agent's approval prompts (nobody is there to answer),
+          // keeps the agent's final reply, and closes its window if you never
+          // looked at it.
+          //
+          //   "weekday-audit": {
+          //     "name": "Weekday repo audit",
+          //     "agent": "omp",                  // omp | claude-code | codex | opencode
+          //     "folder": "~/git/shop",
+          //     "prompt": "Review the repository health and summarize what needs attention.",
+          //     "schedule": "0 9 * * 1-5",       // cron: minute hour day month weekday
+          //     "enabled": true,
+          //     "worktree": false,               // true: each run in a fresh git worktree
+          //     "baseBranch": "origin/main",     // worktree base; default origin's default branch
+          //     "session": "fresh",              // "reuse": hand the prompt to the last run's open agent
+          //     "graceMinutes": 720,             // how late a run missed while asleep may still start
+          //     "precheck": "gh pr list --json number -q '.[0].number'",  // skip unless it exits 0
+          //     "precheckTimeoutSeconds": 60,
+          //     "model": "sonnet"                // the CLI's default when left out
+          //   }
+          "automations": {}
         }
 
         """

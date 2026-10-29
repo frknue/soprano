@@ -58,15 +58,29 @@ struct AgentDashboardSnapshotTests {
         #expect(snapshot.entries[0].windowTitle == manager.windows[secondWindowId]?.title)
         #expect(snapshot.entries[0].cwd == "/tmp/two")
         #expect(snapshot.entries[1].cwd == "/tmp/one")
-        #expect(snapshot.entries.map(\.projectName) == ["two", "one"])
+        #expect(snapshot.entries.map(\.title) == ["Claude Code", "Codex"])
+        #expect(snapshot.entries.map(\.context) == [
+            PaneContextLine(context: ["two"]),
+            PaneContextLine(context: ["one"]),
+        ])
 
         manager.renameWindow(secondWindowId, to: "Storefront")
         manager.updateWorkingDirectory(paneId: claudePaneId, tabId: claudeTabId, to: "/tmp/two/src")
-        #expect(manager.agentDashboardSnapshot().entries[0].projectName == "Storefront")
+        let renamed = manager.agentDashboardSnapshot().entries[0]
+        #expect(renamed.windowTitle == "Storefront")
+        #expect(renamed.context == PaneContextLine(context: ["src"]))
     }
 
-    @Test func projectsWithoutAWorkingFolderFallBackToTheirWindowName() {
-        #expect(entry(id: "codex", status: .idle).projectName == "Window")
+    @Test func anAgentIsNamedByItsTaskOverItsNameFolderAndBranch() {
+        var working = entry(id: "omp", status: .running, tabTitle: "π ⠋ \u{F04E1} MIGR: Plan the migration", cwd: "/tmp/ab_tool")
+        working.branch = "feat/migration"
+        #expect(working.title == "MIGR: Plan the migration")
+        #expect(working.context == PaneContextLine(context: ["Codex", "ab_tool"], branch: "feat/migration"))
+        #expect(working.location == "Window ▸ MIGR: Plan the migration")
+
+        let fresh = entry(id: "codex", status: .idle, tabTitle: "Codex: ab_tool", cwd: "/tmp/ab_tool")
+        #expect(fresh.title == "Codex")
+        #expect(fresh.context == PaneContextLine(context: ["ab_tool"]))
     }
 
     @Test func focusingADashboardTargetShowsItsBackgroundTabAndExactPaneTab() throws {
@@ -96,33 +110,36 @@ struct AgentDashboardSnapshotTests {
     private func entry(
         id: String,
         status: AgentStatus,
-        needsAttention: Bool = false
+        needsAttention: Bool = false,
+        tabTitle: String? = nil,
+        cwd: String? = nil
     ) -> AgentDashboardEntry {
         AgentDashboardEntry(
             paneId: "pane-\(id)",
             tabId: id,
-            tabTitle: id,
+            tabTitle: tabTitle ?? id,
             windowTitle: "Window",
             profileId: "codex",
             profileName: "Codex",
             status: status,
             needsAttention: needsAttention,
             startedAt: nil,
-            cwd: nil
+            cwd: cwd
         )
     }
 }
 
 @MainActor
 struct AgentDashboardViewTests {
-    @Test func rowsShowProjectAndAgentOverTheFolderAndRefreshWhenTheDirectoryChanges() throws {
+    @Test func rowsShowTheTaskOverTheAgentAndFolderAndFollowRenamesAndDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
         let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
         manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .waiting)
         let controller = AgentDashboardViewController(
             agentManager: manager,
-            themeManager: ThemeManager(themeId: "gruvbox-dark")
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            branchProvider: { $0 == "/tmp/projects/payments" ? "feat/refunds" : nil }
         )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
@@ -136,33 +153,37 @@ struct AgentDashboardViewTests {
             $0.identifier?.rawValue == "agent-dashboard-row"
         })
         let fields = allSubviews(in: row).compactMap { $0 as? NSTextField }
-        let project = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-project" })
-        let agent = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-agent" })
-        let activity = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-activity" })
+        let title = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-title" })
+        let context = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-activity" })
         let status = try #require(fields.first { $0.identifier?.rawValue == "agent-dashboard-status" })
         #expect(row.frame.height == 52)
-        #expect(project.stringValue == "storefront")
-        #expect(agent.stringValue == "Codex")
-        #expect(activity.stringValue == "/tmp/projects/storefront")
+        // Before Codex titles itself, it goes by its name over its folder.
+        #expect(title.stringValue == "Codex")
+        #expect(context.stringValue == "storefront")
         #expect(status.stringValue == "NEEDS INPUT")
-        #expect(agent.frame.minX > project.frame.maxX)
-        #expect(project.frame.minY > activity.frame.maxY)
-        #expect(agent.frame.maxX < status.frame.minX)
+        #expect(title.frame.minY > context.frame.maxY)
+        #expect(title.frame.maxX < status.frame.minX)
         #expect(fields.allSatisfy { row.bounds.contains($0.frame) })
         #expect(row.toolTip?.contains("/tmp/projects/storefront") == true)
-        #expect(row.accessibilityLabel()?.hasPrefix("storefront, Codex") == true)
+        #expect(row.accessibilityLabel()?.hasPrefix("Codex, Codex") == true)
 
+        manager.renameTab(paneId, tabId: tabId, to: "⠙ Fix the checkout total")
         manager.updateWorkingDirectory(paneId: paneId, tabId: tabId, to: "/tmp/projects/payments")
-        let projectNames = allSubviews(in: controller.view).compactMap { view -> String? in
+        manager.renameWindow(manager.activeWindowId, to: "Payments App")
+        let titles = allSubviews(in: controller.view).compactMap { view -> String? in
             guard let label = view as? NSTextField,
-                  ["agent-dashboard-project", "agent-dashboard-detail-project"].contains(label.identifier?.rawValue)
+                  ["agent-dashboard-title", "agent-dashboard-detail-title"].contains(label.identifier?.rawValue)
             else { return nil }
             return label.stringValue
         }
-        #expect(projectNames == ["payments", "payments"])
-        #expect(activity.stringValue == "/tmp/projects/payments")
-        manager.renameWindow(manager.activeWindowId, to: "Payments App")
-        #expect(labels(in: controller.view).filter { $0 == "Payments App" }.count == 2)
+        #expect(titles == ["Fix the checkout total", "Fix the checkout total"])
+        // The branch glyph is an attachment character before the name.
+        #expect(context.stringValue.hasPrefix("Codex · payments · "))
+        #expect(context.stringValue.hasSuffix(" feat/refunds"))
+        let location = try #require(allSubviews(in: controller.view).compactMap { $0 as? NSTextField }.first {
+            $0.identifier?.rawValue == "agent-dashboard-detail-location"
+        })
+        #expect(location.stringValue.hasPrefix("Payments App ▸ Codex · payments · "))
     }
 
     @Test func dashboardOpensWithoutResizingTheMainWindowAndShowsLiveCounts() throws {
@@ -541,7 +562,7 @@ struct AgentDashboardViewTests {
         let busyRow = try #require(rowsAfterTitles.first {
             $0.toolTip?.contains("/tmp/projects/project-5") == true
         })
-        #expect(busyRow.toolTip?.contains("✻ Running the tests") == true)
+        #expect(busyRow.toolTip?.hasPrefix("Running the tests\n") == true)
         #expect(scrollView.contentView.bounds.origin.y == 300)
     }
 
@@ -556,13 +577,13 @@ struct AgentDashboardViewTests {
         }
         let (controller, _) = openDashboard(for: manager, height: 700)
         let rows = try arrangedRows(in: controller.view)
-        #expect(rows.map(projectName(of:)) == ["project-0", "project-1", "project-2"])
+        #expect(rows.map(folder(of:)) == ["project-0", "project-1", "project-2"])
 
         manager.updateAgentStatus(paneId: targets[2].paneId, tabId: targets[2].tabId, status: .waiting)
         _ = try #require(manager.spawnAgent("claude-code", cwd: "/tmp/projects/project-3"))
 
         let reordered = try arrangedRows(in: controller.view)
-        #expect(reordered.map(projectName(of:)) == ["project-2", "project-0", "project-1", "project-3"])
+        #expect(reordered.map(folder(of:)) == ["project-2", "project-0", "project-1", "project-3"])
         #expect(reordered.prefix(3).elementsEqual([rows[2], rows[0], rows[1]]) { $0 === $1 })
         let needsInputCard = try #require(allSubviews(in: controller.view).first {
             $0.identifier?.rawValue == "agent-dashboard-summary-needs-input"
@@ -597,10 +618,11 @@ struct AgentDashboardViewTests {
         return try #require(row.superview as? NSStackView).arrangedSubviews
     }
 
-    private func projectName(of row: NSView) -> String? {
+    /// The second line of an agent without a task title or activity: its folder.
+    private func folder(of row: NSView) -> String? {
         allSubviews(in: row)
             .compactMap { $0 as? NSTextField }
-            .first { $0.identifier?.rawValue == "agent-dashboard-project" }?
+            .first { $0.identifier?.rawValue == "agent-dashboard-activity" }?
             .stringValue
     }
 

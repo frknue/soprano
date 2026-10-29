@@ -6,6 +6,8 @@ import AppKit
 final class AgentDashboardViewController: NSViewController {
     typealias TerminalStateProvider = (TerminalTarget) -> TerminalInteractionState
     typealias PromptSender = (TerminalTarget, String) -> Bool
+    /// A folder's branch when it is not its repository's default, else nil.
+    typealias BranchProvider = (String) -> String?
 
     /// The agent list column. Its trailing hairline continues the summary's
     /// second rule.
@@ -21,6 +23,7 @@ final class AgentDashboardViewController: NSViewController {
 
     private let terminalStateProvider: TerminalStateProvider
     private let promptSender: PromptSender
+    private let branchProvider: BranchProvider
     private let transcriptStore: AgentTranscriptStore
     private var headerView: SettingsHeaderView!
     private var summaryView: AgentDashboardSummaryView!
@@ -47,12 +50,14 @@ final class AgentDashboardViewController: NSViewController {
         themeManager: ThemeManager,
         terminalStateProvider: @escaping TerminalStateProvider = { _ in .unavailable },
         promptSender: @escaping PromptSender = { _, _ in false },
+        branchProvider: @escaping BranchProvider = { _ in nil },
         transcriptStore: AgentTranscriptStore = AgentTranscriptStore()
     ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
         self.terminalStateProvider = terminalStateProvider
         self.promptSender = promptSender
+        self.branchProvider = branchProvider
         self.transcriptStore = transcriptStore
         super.init(nibName: nil, bundle: nil)
         agentManager.addObserver(id: observerId) { [weak self] change in
@@ -229,16 +234,17 @@ final class AgentDashboardViewController: NSViewController {
     private func refresh() {
         guard isViewLoaded else { return }
         let snapshot = agentManager.agentDashboardSnapshot()
+        let entries = snapshot.entries.map(withBranch)
         let theme = themeManager.currentTheme
         let previousSelection = selectedEntryId
         let previousSelectedEntry = previousSelection.flatMap { entriesById[$0] }
         entriesById = Dictionary(
-            uniqueKeysWithValues: snapshot.entries.map { ($0.id, $0) }
+            uniqueKeysWithValues: entries.map { ($0.id, $0) }
         )
-        selectedEntryId = snapshot.entries.contains {
+        selectedEntryId = entries.contains {
             $0.id == previousSelection
-        } ? previousSelection : snapshot.entries.first?.id
-        trackTranscripts(of: snapshot.entries)
+        } ? previousSelection : entries.first?.id
+        trackTranscripts(of: entries)
         let subtitle = monitoringSubtitle(
             agentCount: snapshot.totalCount,
             windowCount: agentManager.windowCount
@@ -256,7 +262,7 @@ final class AgentDashboardViewController: NSViewController {
         if agentCountLabel.stringValue != count {
             agentCountLabel.setChromeText(count, font: ChromeFont.count, color: theme.colors.textMuted)
         }
-        reconcileRows(with: snapshot.entries, theme: theme)
+        reconcileRows(with: entries, theme: theme)
         updateRowSelection(
             scrollIntoView: previousSelection != nil && selectedEntryId != previousSelection
         )
@@ -274,13 +280,22 @@ final class AgentDashboardViewController: NSViewController {
               let row = agentRows.first(where: {
                   $0.entry.paneId == target.paneId && $0.entry.tabId == target.tabId
               }),
-              let entry = agentManager.agentDashboardEntry(for: target)
+              let entry = agentManager.agentDashboardEntry(for: target).map(withBranch)
         else { return }
         entriesById[entry.id] = entry
         row.update(entry: entry)
         if entry.id == selectedEntryId {
             updateDetail()
         }
+    }
+
+    /// The entry with its notable branch. A branch read on each refresh is a
+    /// cache lookup in the shared monitor, which watches every pane's HEAD;
+    /// a checkout comes with agent activity that refreshes the dashboard.
+    private func withBranch(_ entry: AgentDashboardEntry) -> AgentDashboardEntry {
+        var entry = entry
+        entry.branch = entry.cwd.flatMap(branchProvider)
+        return entry
     }
 
     /// Updates surviving rows in place, adds rows for new agents, drops rows
@@ -878,7 +893,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     private func build() {
         addSubview(statusMark)
 
-        titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail-project")
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail-title")
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -1277,11 +1292,12 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Title row (mark, New York title, status, timer) and the location line.
+    /// Title row (mark, New York title, status, timer) and the location line:
+    /// the agent's task as the sidebar names it, over `window ▸ omp · folder`.
     private func refreshEntryLabels() {
         let colors = theme.colors
         titleLabel.setChromeText(
-            entry?.projectName ?? "No agent selected",
+            entry?.title ?? "No agent selected",
             font: ChromeFont.headline,
             color: entry == nil ? colors.textMuted : colors.textPrimary
         )
@@ -1300,19 +1316,16 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         statusMark.set(status: status, colors: colors)
         statusLabel.setStatusText(status.label, color: status.color(in: colors))
         updateTimer()
-        titleLabel.toolTip = entry.projectName
+        titleLabel.toolTip = entry.title
 
         let location = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            "\(entry.windowTitle) ▸ \(entry.profileName)",
+            "\(entry.windowTitle) ▸ ",
             font: ChromeFont.meta,
             color: colors.textMuted
         ))
-        let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
-        if let path {
-            location.append(ChromeText.attributed(" · ", font: ChromeFont.meta, color: colors.textMuted))
-            location.append(ChromeText.attributed(path, font: ChromeFont.monoSmall, color: colors.textMuted))
-        }
+        location.append(entry.context.attributed(font: ChromeFont.meta, color: colors.textMuted))
         locationLabel.attributedStringValue = location
+        let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         locationLabel.toolTip = [entry.location, path].compactMap { $0 }.joined(separator: "\n")
         setReplyPlaceholder("Reply to \(entry.profileName)…")
     }
@@ -1700,10 +1713,12 @@ private final class AgentDashboardHintsView: NSStackView {
     }
 }
 
-/// One agent: 52 pt, two lines. Mark, `project ▸ Agent`, the running time and
-/// the status word; under it what the agent is doing (or its folder). The
-/// selected row is the pill (with the pencil tick while the list has the
-/// keyboard); a row that needs you gets the full-bleed attention wash.
+/// One agent: 52 pt, two lines, named the way the sidebar names it. Mark,
+/// the agent's task (or its name before it has one), the running time and
+/// the status word; under it `omp · folder · ⎇ branch` and then what the
+/// agent is doing. The selected row is the pill (with the pencil tick while
+/// the list has the keyboard); a row that needs you gets the full-bleed
+/// attention wash.
 private final class AgentDashboardRowView: NSControl {
     private static let height: CGFloat = 52
 
@@ -1719,9 +1734,7 @@ private final class AgentDashboardRowView: NSControl {
 
     private let theme: AppTheme
     private let statusMark = ChromeStatusMark()
-    private let projectLabel = NSTextField(labelWithString: "")
-    private let separatorLabel = NSTextField(labelWithString: "▸")
-    private let agentLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "")
     private let elapsedLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let activityLabel = NSTextField(labelWithString: "")
@@ -1834,8 +1847,8 @@ private final class AgentDashboardRowView: NSControl {
         elapsedLabel.setChromeText(text, font: ChromeFont.count, color: theme.colors.textMuted)
     }
 
-    /// Shows what the agent is doing according to its transcript; without one
-    /// the second line shows the agent's folder.
+    /// Shows what the agent is doing according to its transcript after its
+    /// context on the second line.
     func updateActivity(_ activity: AgentTimelineActivity?) {
         guard activity != self.activity else { return }
         self.activity = activity
@@ -1852,25 +1865,21 @@ private final class AgentDashboardRowView: NSControl {
     private func build() {
         addSubview(statusMark)
 
-        projectLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-project")
-        separatorLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-separator")
-        agentLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-agent")
+        titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-title")
         elapsedLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-elapsed")
         statusLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-status")
         activityLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-activity")
-        for label in [projectLabel, separatorLabel, agentLabel, elapsedLabel, statusLabel, activityLabel] {
+        for label in [titleLabel, elapsedLabel, statusLabel, activityLabel] {
             label.lineBreakMode = .byTruncatingTail
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
         }
-        projectLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
-        agentLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         activityLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        for label in [separatorLabel, elapsedLabel, statusLabel] {
+        for label in [elapsedLabel, statusLabel] {
             label.setContentCompressionResistancePriority(.required, for: .horizontal)
             label.setContentHuggingPriority(.required, for: .horizontal)
         }
-        separatorLabel.setChromeText("▸", font: ChromeFont.label, color: theme.colors.textMuted)
 
         // Two lines (16 + 3 + 14) centered in the 52 pt row. The pill sits
         // 4 pt in, and `.agent` pads 14 / 12 inside it.
@@ -1880,20 +1889,16 @@ private final class AgentDashboardRowView: NSControl {
             statusMark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 14),
             statusMark.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
 
-            projectLabel.leadingAnchor.constraint(equalTo: statusMark.trailingAnchor, constant: 8),
-            projectLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
-            separatorLabel.leadingAnchor.constraint(equalTo: projectLabel.trailingAnchor, constant: 3),
-            separatorLabel.firstBaselineAnchor.constraint(equalTo: projectLabel.firstBaselineAnchor),
-            agentLabel.leadingAnchor.constraint(equalTo: separatorLabel.trailingAnchor, constant: 3),
-            agentLabel.firstBaselineAnchor.constraint(equalTo: projectLabel.firstBaselineAnchor),
-            agentLabel.trailingAnchor.constraint(lessThanOrEqualTo: elapsedLabel.leadingAnchor, constant: -8),
+            titleLabel.leadingAnchor.constraint(equalTo: statusMark.trailingAnchor, constant: 8),
+            titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: elapsedLabel.leadingAnchor, constant: -8),
 
             elapsedLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -8),
-            elapsedLabel.firstBaselineAnchor.constraint(equalTo: projectLabel.firstBaselineAnchor),
+            elapsedLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
             statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 12)),
             statusLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
 
-            activityLabel.leadingAnchor.constraint(equalTo: projectLabel.leadingAnchor),
+            activityLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             activityLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.trailingAnchor),
             activityLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: secondLine),
         ])
@@ -1903,8 +1908,9 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     /// Redraws what depends on fields that differ from `previous`, or the
-    /// whole row when there is none. A busy agent mostly changes its tab
-    /// title, which only feeds the tooltip, so that path skips the labels.
+    /// whole row when there is none. A busy agent retitles its tab several
+    /// times a second, mostly with a new spinner frame its title drops, so
+    /// the labels are set only when what they show changed.
     private func render(previous: AgentDashboardEntry?) {
         let colors = theme.colors
         let statusChanged = previous?.status != entry.status
@@ -1918,13 +1924,12 @@ private final class AgentDashboardRowView: NSControl {
         if statusChanged || previous?.startedAt != entry.startedAt {
             updateElapsed(now: Date())
         }
-        if previous?.projectName != entry.projectName {
-            projectLabel.setChromeText(entry.projectName, font: ChromeFont.labelStrong, color: colors.textPrimary)
+        let title = entry.title
+        if previous?.title != title {
+            titleLabel.setChromeText(title, font: ChromeFont.labelStrong, color: colors.textPrimary)
         }
-        if previous?.profileName != entry.profileName {
-            agentLabel.setChromeText(entry.profileName, font: ChromeFont.label, color: colors.textPrimary)
-        }
-        if previous?.cwd != entry.cwd || previous?.location != entry.location {
+        let context = entry.context
+        if previous?.context != context {
             renderActivity()
         }
 
@@ -1932,34 +1937,40 @@ private final class AgentDashboardRowView: NSControl {
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         let agentDescription = [entry.profileName, entry.sessionName]
             .compactMap { $0 }.joined(separator: " · ")
-        toolTip = [entry.projectName, agentDescription, location, path, "Double-click to open agent"]
+        toolTip = [title, agentDescription, location, path, "Double-click to open agent"]
             .compactMap { $0 }.joined(separator: "\n")
         setAccessibilityLabel(
-            "\(entry.projectName), \(entry.profileName), \(entry.status.displayLabel), \(location)"
+            "\(title), \(entry.profileName), \(entry.status.displayLabel), \(location)"
         )
     }
 
+    /// `omp · folder · ⎇ branch — Bash · swift test`: the context, then after
+    /// a dash what the agent is doing, all muted like a sidebar row's second
+    /// line (the subject in mono), or the activity in the danger color when
+    /// it failed. The detail's NOW strip keeps the subject in ink.
     private func renderActivity() {
         let colors = theme.colors
+        let line = NSMutableAttributedString(
+            attributedString: entry.context.attributed(font: ChromeFont.meta, color: colors.textMuted)
+        )
         if let activity {
-            let failed = activity.tone == .failed
-            activityLabel.attributedStringValue = activity.attributed(
+            let color = activity.tone == .failed ? colors.danger : colors.textMuted
+            if line.length > 0 {
+                line.append(ChromeText.attributed(" — ", font: ChromeFont.meta, color: colors.textMuted))
+            }
+            line.append(activity.attributed(
                 font: ChromeFont.meta,
                 titleFont: ChromeFont.meta,
                 codeFont: ChromeFont.monoSmall,
-                color: failed ? colors.danger : colors.textMuted,
-                codeColor: failed ? colors.danger : colors.textPrimary,
+                color: color,
+                codeColor: color,
                 compact: true
-            )
-        } else if let cwd = entry.cwd {
-            activityLabel.setChromeText(
-                (cwd as NSString).abbreviatingWithTildeInPath,
-                font: ChromeFont.monoSmall,
-                color: colors.textMuted
-            )
-        } else {
-            activityLabel.setChromeText(entry.location, font: ChromeFont.meta, color: colors.textMuted)
+            ))
         }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        line.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: line.length))
+        activityLabel.attributedStringValue = line
     }
 }
 

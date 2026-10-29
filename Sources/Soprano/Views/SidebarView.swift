@@ -4,6 +4,14 @@ import AppKit
 final class SidebarView: NSView {
     /// The session popup's header and the WINDOWS heading are 32 pt each.
     static let headerHeight: CGFloat = 32
+    /// The Automations entry between them, a 28 pt row like a window row.
+    static let navRowHeight: CGFloat = 28
+    /// Rows sit 1 pt apart. Panes that share a tab stay that close, a new tab
+    /// starts a little further down, and a new window further still, so the
+    /// list groups itself without a label on every row.
+    static let rowGap: CGFloat = 1
+    static let tabGap: CGFloat = 5
+    static let windowGap: CGFloat = 10
 
     let agentManager: AgentManager
     let sessionManager: SessionManager
@@ -12,10 +20,17 @@ final class SidebarView: NSView {
 
     var onSettingsRequested: (() -> Void)?
     var onDashboardRequested: (() -> Void)?
+    /// The Automations entry was clicked; the page opens, or closes when it
+    /// is open.
+    var onAutomationsRequested: (() -> Void)?
+    /// A window or pane row was clicked, so whatever page covers the
+    /// workspace makes way.
+    var onWorkspaceRowSelected: (() -> Void)?
 
     private var contentWidthConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
     private var headerView: ChromeEyebrowView!
+    private var automationsRow: SidebarNavRowView!
     private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
     private var listContentView: SidebarListView!
@@ -100,6 +115,9 @@ final class SidebarView: NSView {
         sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
         sessionSelector.setAccessibilityLabel("Current Session")
         sessionSelector.font = ChromeFont.labelStrong
+        // Borderless, like the rows under it: the bezel made the session
+        // name the heaviest thing in the sidebar.
+        sessionSelector.isBordered = false
         sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         sessionSelector.target = self
         sessionSelector.action = #selector(sessionSelected(_:))
@@ -107,6 +125,17 @@ final class SidebarView: NSView {
         contentContainer.addSubview(sessionSelector)
 
         headerView = ChromeEyebrowView(title: "WINDOWS", theme: themeManager.currentTheme)
+
+        automationsRow = SidebarNavRowView(
+            title: "Automations",
+            symbolName: "calendar.badge.clock",
+            theme: themeManager.currentTheme
+        )
+        automationsRow.identifier = NSUserInterfaceItemIdentifier("sidebar-automations")
+        automationsRow.onClick = { [weak self] in
+            self?.onAutomationsRequested?()
+        }
+        contentContainer.addSubview(automationsRow)
         contentContainer.addSubview(headerView)
 
         plusButton = makeIconButton(
@@ -193,15 +222,23 @@ final class SidebarView: NSView {
             ),
             sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 8),
             sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
+            // Automations (28): the page entry under the popup.
+            automationsRow.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: Self.headerHeight),
+            automationsRow.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+            automationsRow.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+            automationsRow.heightAnchor.constraint(equalToConstant: Self.navRowHeight),
             // Section heading (32): WINDOWS, Collapse All and New on the right.
             headerView.centerYAnchor.constraint(
                 equalTo: contentContainer.topAnchor,
-                constant: Self.headerHeight * 1.5
+                constant: Self.headerHeight * 1.5 + Self.navRowHeight
             ),
             headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 12),
             headerView.trailingAnchor.constraint(equalTo: collapseAllButton.leadingAnchor, constant: -6),
 
-            scrollView.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: Self.headerHeight * 2),
+            scrollView.topAnchor.constraint(
+                equalTo: contentContainer.topAnchor,
+                constant: Self.headerHeight * 2 + Self.navRowHeight
+            ),
             scrollView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
@@ -302,6 +339,11 @@ final class SidebarView: NSView {
 
     @objc private func dashboardClicked() {
         onDashboardRequested?()
+    }
+
+    /// Shows the Automations entry selected while its page is open.
+    func setAutomationsSelected(_ selected: Bool) {
+        automationsRow.isSelected = selected
     }
 
     @objc private func collapseAllClicked() {
@@ -449,6 +491,7 @@ final class SidebarView: NSView {
         for button in [settingsButton, dashboardButton, plusButton, collapseAllButton, sessionsButton] {
             button?.apply(theme: theme)
         }
+        automationsRow.apply(theme: theme)
         rebuildSessionSelector()
         collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }
 
@@ -466,14 +509,18 @@ final class SidebarView: NSView {
             guard let pane = agentManager.panes[target.paneId],
                   pane.activeTab?.id == target.tabId
             else { return }
-            paneRows[target.paneId]?.setTitle(sidebarTitle(for: pane))
+            let title = sidebarTitle(for: pane)
+            paneRows[target.paneId]?.setTitle(title)
+            paneRows[target.paneId]?.setMeta(meta(for: pane, title: title))
 
         case .tabWorkingDirectory(let target):
             gitBranchMonitor.setWatchedPaths(watchedCwds())
             guard let pane = agentManager.panes[target.paneId],
                   pane.activeTab?.id == target.tabId
             else { return }
-            paneRows[target.paneId]?.setBranch(branchForPane(pane))
+            let title = sidebarTitle(for: pane)
+            paneRows[target.paneId]?.setTitle(title)
+            paneRows[target.paneId]?.setMeta(meta(for: pane, title: title))
 
         case .browserURL:
             break
@@ -498,6 +545,8 @@ final class SidebarView: NSView {
         // Holding ⌃ shows the hints; a started hint keeps them up.
         let showsHints = isControlKeyHeld || !typedPaneHint.isEmpty
         var rows: [NSView] = []
+        // The gap under each row, by index into `rows`.
+        var gaps: [CGFloat] = []
         var nextWindowRows: [String: SidebarWindowRowView] = [:]
         var nextPaneRows: [String: SidebarPaneRowView] = [:]
         for (index, terminalWindow) in agentManager.activeSessionWindows.enumerated() {
@@ -505,7 +554,11 @@ final class SidebarView: NSView {
             let isExpanded = showsHints
                 || !terminalWindow.isSidebarCollapsed
             let paneIds = terminalWindow.paneIds
-            let windowRow = windowRows[terminalWindow.id] ?? SidebarWindowRowView(theme: theme)
+            let windowRow = windowRows[terminalWindow.id] ?? {
+                let row = SidebarWindowRowView(theme: theme)
+                row.identifier = NSUserInterfaceItemIdentifier("sidebar-window-\(terminalWindow.id)")
+                return row
+            }()
             windowRow.configure(
                 title: terminalWindow.title,
                 paneCount: paneIds.count,
@@ -523,6 +576,7 @@ final class SidebarView: NSView {
                     self?.agentManager.toggleSidebarWindowCollapsed(terminalWindow.id)
                 },
                 onSelect: { [weak self] in
+                    self?.onWorkspaceRowSelected?()
                     self?.agentManager.activateWindow(terminalWindow.id)
                 },
                 onRename: { [weak self] in
@@ -535,26 +589,32 @@ final class SidebarView: NSView {
                     self?.agentManager.closeWindow(terminalWindow.id)
                 }
             )
+            if !rows.isEmpty {
+                gaps[gaps.count - 1] = Self.windowGap
+            }
             rows.append(windowRow)
+            gaps.append(Self.rowGap)
             nextWindowRows[terminalWindow.id] = windowRow
 
             guard isExpanded else { continue }
-            let numbersLayoutTabs = terminalWindow.tabs.count > 1
-            for (layoutTabIndex, layoutTab) in terminalWindow.tabs.enumerated() {
-                for paneId in layoutTab.layout?.orderedLeafIds ?? [] {
+            for layoutTab in terminalWindow.tabs {
+                let paneIds = layoutTab.layout?.orderedLeafIds ?? []
+                if paneIds.contains(where: { agentManager.panes[$0] != nil }), rows.last is SidebarPaneRowView {
+                    gaps[gaps.count - 1] = Self.tabGap
+                }
+                for paneId in paneIds {
                     guard let pane = agentManager.panes[paneId] else { continue }
                     let row = paneRows[pane.id] ?? {
                         let row = SidebarPaneRowView(theme: theme)
                         row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
                         return row
                     }()
+                    let title = sidebarTitle(for: pane)
                     row.configure(
-                        title: sidebarTitle(for: pane),
-                        branch: branchForPane(pane),
+                        title: title,
+                        meta: meta(for: pane, title: title),
                         status: paneStatus(for: pane),
                         statusWord: paneStatusWord(for: pane),
-                        tabCount: pane.tabs.count,
-                        layoutTabNumber: numbersLayoutTabs ? layoutTabIndex + 1 : nil,
                         shortcutCaps: paneShortcutKeysById[pane.id].flatMap {
                             Self.paneHintCaps(for: $0, typed: typedPaneHint)
                         },
@@ -562,6 +622,7 @@ final class SidebarView: NSView {
                         highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
                         inActiveWindow: isActiveWindow,
                         onSelect: { [weak self] in
+                            self?.onWorkspaceRowSelected?()
                             self?.agentManager.focusPane(pane.id)
                         },
                         onClose: { [weak self] in
@@ -569,6 +630,7 @@ final class SidebarView: NSView {
                         }
                     )
                     rows.append(row)
+                    gaps.append(Self.rowGap)
                     nextPaneRows[pane.id] = row
                 }
             }
@@ -577,6 +639,10 @@ final class SidebarView: NSView {
         paneRows = nextPaneRows
         rowsStack.setArrangedSubviews(rows) { row in
             row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
+        }
+        // Reused rows keep the gap they had; every row's is set each time.
+        for (row, gap) in zip(rows, gaps) {
+            rowsStack.setCustomSpacing(gap, after: row)
         }
         if displayedWindowId != agentManager.activeWindowId {
             displayedWindowId = agentManager.activeWindowId
@@ -692,29 +758,35 @@ final class SidebarView: NSView {
         agentManager.renameWindow(windowId, to: field.stringValue)
     }
 
-    // MARK: - Branch Resolution
+    // MARK: - Row Content
 
     private func sidebarTitle(for pane: PaneState) -> String {
         guard let tab = pane.activeTab else { return "Pane" }
         return sidebarTitle(for: tab)
     }
 
+    /// Browser, Markdown, editor and diff tabs are named after their page or
+    /// file already; a terminal's or agent's title is tidied by `TerminalTitle`.
     private func sidebarTitle(for tab: PaneTab) -> String {
-        guard tab.type == .terminal,
-              let agent = tab.agent,
-              let profile = AgentCatalog.profile(for: agent.profileId)
-        else { return tab.title }
-        return profile.name
+        guard tab.type != .browser else { return tab.title }
+        return TerminalTitle.display(
+            tab.title,
+            workingDirectory: tab.effectiveWorkingDirectory,
+            agentName: tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name }
+        )
     }
 
-    private func branchForPane(_ pane: PaneState) -> String? {
-        guard let tab = pane.activeTab else { return nil }
-        return branchForTab(tab)
-    }
-
-    private func branchForTab(_ tab: PaneTab) -> String? {
-        guard let cwd = tab.effectiveWorkingDirectory else { return nil }
-        return gitBranchMonitor.branch(for: cwd)
+    /// The second line under `title`; see `PaneContextLine`.
+    private func meta(for pane: PaneState, title: String) -> PaneContextLine {
+        guard let tab = pane.activeTab else { return PaneContextLine() }
+        let cwd = tab.effectiveWorkingDirectory
+        return PaneContextLine(
+            title: title,
+            agentName: tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name },
+            workingDirectory: cwd,
+            branch: cwd.flatMap { gitBranchMonitor.notableBranch(for: $0) },
+            tabCount: pane.tabs.count
+        )
     }
 
     private func watchedCwds() -> [String] {
@@ -726,8 +798,8 @@ final class SidebarView: NSView {
     // MARK: - Status
 
     /// The pane's mark: the active tab's agent speaks for the pane; without
-    /// one, a command running in any of its tabs shows RUNNING. Plain shells
-    /// get the quiet idle dot.
+    /// one, a command running in any of its tabs shows RUNNING. A plain shell
+    /// is `.idle`, which its row draws as no mark at all.
     private func paneStatus(for pane: PaneState) -> ChromeStatus {
         if let agent = pane.activeTab?.agent {
             return agent.status.chromeStatus
@@ -1052,10 +1124,12 @@ private final class SidebarWindowRowView: SidebarRowView {
 // MARK: - Pane Row
 
 /// A pane under its window: status mark, title and the colored status word,
-/// with `⎇ branch · 2T · Tab 2` muted on a second line (40 pt; 28 without
-/// one). The focused pane gets the selection pill and pencil tick; every
-/// other row is plain. Holding ⌃ swaps the status word for the pane's
-/// accent jump keycaps; the pointer swaps it for a close button.
+/// with `omp · soprano · ⎇ feat/x · 2 tabs` muted on a second line when any
+/// of it applies (40 pt; 28 without). A plain shell has no mark, so the
+/// marks that remain are the agents and commands worth looking at. The
+/// focused pane gets the selection pill and pencil tick; every other row is
+/// plain. Holding ⌃ swaps the status word for the pane's accent jump
+/// keycaps; the pointer swaps it for a close button.
 private final class SidebarPaneRowView: SidebarRowView {
     static let height: CGFloat = 40
     static let singleLineHeight: CGFloat = 28
@@ -1073,9 +1147,7 @@ private final class SidebarPaneRowView: SidebarRowView {
     private var onSelect: (() -> Void)?
     private var onClose: (() -> Void)?
     private var titleColor: NSColor
-    private var branch: String?
-    private var tabCount = 1
-    private var layoutTabNumber: Int?
+    private var meta = PaneContextLine()
     private var showsShortcut = false
     private var isFocusedPane = false
 
@@ -1152,11 +1224,9 @@ private final class SidebarPaneRowView: SidebarRowView {
 
     func configure(
         title: String,
-        branch: String?,
+        meta: PaneContextLine,
         status: ChromeStatus,
         statusWord: String?,
-        tabCount: Int,
-        layoutTabNumber: Int?,
         shortcutCaps caps: [String]?,
         showShortcutHint: Bool,
         highlighted: Bool,
@@ -1168,6 +1238,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         self.onClose = onClose
         let colors = theme.colors
         mark.set(status: status, colors: colors)
+        mark.isHidden = status == .idle
         if let statusWord {
             statusLabel.setStatusText(statusWord, color: status.color(in: colors))
         } else {
@@ -1185,9 +1256,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         titleColor = inActiveWindow ? colors.textPrimary : colors.textMuted
         titleLabel.setChromeText(title, color: titleColor)
         isFocusedPane = highlighted
-        self.tabCount = tabCount
-        self.layoutTabNumber = layoutTabNumber
-        self.branch = branch
+        self.meta = meta
         updateMeta()
         hoverStateDidChange()
     }
@@ -1206,30 +1275,18 @@ private final class SidebarPaneRowView: SidebarRowView {
         titleLabel.setChromeText(title, color: titleColor)
     }
 
-    func setBranch(_ branch: String?) {
-        guard self.branch != branch else { return }
-        self.branch = branch
+    func setMeta(_ meta: PaneContextLine) {
+        guard self.meta != meta else { return }
+        self.meta = meta
         updateMeta()
     }
 
-    /// `⎇ main · 2T · Tab 2`: whichever parts apply. Without any the row is
-    /// a single 28 pt line.
     private func updateMeta() {
-        var parts: [String] = []
-        if let branch {
-            parts.append("⎇ \(branch)")
-        }
-        if tabCount > 1 {
-            parts.append("\(tabCount)T")
-        }
-        if let layoutTabNumber {
-            parts.append("Tab \(layoutTabNumber)")
-        }
-        metaLabel.setChromeText(parts.joined(separator: " · "), font: ChromeFont.meta, color: theme.colors.textMuted)
-        metaLabel.toolTip = layoutTabNumber.map { "In tab \($0) of this window" }
-        metaLabel.isHidden = parts.isEmpty
-        heightConstraint.constant = parts.isEmpty ? Self.singleLineHeight : Self.height
-        titleTopConstraint.constant = parts.isEmpty ? 6 : 5
+        metaLabel.attributedStringValue = meta.attributed(font: ChromeFont.meta, color: theme.colors.textMuted)
+        metaLabel.toolTip = meta.branch.map { "On branch \($0)" }
+        metaLabel.isHidden = meta.isEmpty
+        heightConstraint.constant = meta.isEmpty ? Self.singleLineHeight : Self.height
+        titleTopConstraint.constant = meta.isEmpty ? 6 : 5
     }
 
     @objc private func handleClose() {
@@ -1359,5 +1416,140 @@ private final class SidebarListView: NSView {
         return rowsStack.arrangedSubviews.lazy
             .compactMap { $0 as? SidebarRowView }
             .first { $0.convert($0.bounds, to: self).contains(point) }
+    }
+}
+
+// MARK: - Nav Row
+
+/// A page entry above the windows (`Automations`): a 28 pt row with a muted
+/// SF Symbol and an SF Pro label. The pointer gives it the `hover` pill;
+/// while its page is open it is the raised nav pill, as Settings marks its
+/// open tab, with the icon in ink.
+private final class SidebarNavRowView: NSView {
+    var onClick: (() -> Void)?
+    var isSelected = false {
+        didSet {
+            guard isSelected != oldValue else { return }
+            setAccessibilitySelected(isSelected)
+            refresh()
+        }
+    }
+
+    private let background: ChromeRowBackgroundView
+    private let iconView = NSImageView()
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let title: String
+    private var theme: AppTheme
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            refresh()
+        }
+    }
+
+    init(title: String, symbolName: String, theme: AppTheme) {
+        self.title = title
+        self.theme = theme
+        background = ChromeRowBackgroundView(theme: theme)
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(background)
+
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        iconView.imageScaling = .scaleNone
+        iconView.setAccessibilityElement(false)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(iconView)
+
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            background.leadingAnchor.constraint(equalTo: leadingAnchor),
+            background.trailingAnchor.constraint(equalTo: trailingAnchor),
+            background.topAnchor.constraint(equalTo: topAnchor),
+            background.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            // The icon sits where a window row's disclosure chevron does.
+            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4 + 9),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4 + 18 + 4),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -(Chrome.pillInset + 8)),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+        refresh()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        background.apply(theme: theme)
+        refresh()
+    }
+
+    private func refresh() {
+        let colors = theme.colors
+        background.style = isSelected ? .raisedTab : (isHovered ? .hover : .none)
+        iconView.contentTintColor = isSelected || isHovered ? colors.textPrimary : colors.textMuted
+        titleLabel.setChromeText(
+            title,
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
+            color: colors.textPrimary
+        )
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        super.hitTest(point) == nil ? nil : self
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { isHovered = false }
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        isHovered = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 0 else { return }
+        onClick?()
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
     }
 }
