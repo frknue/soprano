@@ -499,18 +499,52 @@ final class SplitTreeView: NSView {
             cwd: tab.cwd,
             paneId: paneId,
             tabId: tab.id,
-            conversation: agent.conversation
+            conversation: agent.conversation,
+            launch: agent.launch
         )
     }
 
-    private func contentViewForTab(_ tab: PaneTab, paneId: String) -> NSView {
+    /// Starts the agent of a tab in a window nobody is looking at, such as an
+    /// automation's run: no pane container would start it until the window is
+    /// shown. The terminal gets this view's size (or a typical one before it
+    /// has a size), so the CLI lays out for a real screen until it is shown
+    /// and resized. False when the surface could not start, which happens
+    /// while every display sleeps; calling again later retries.
+    @discardableResult
+    func startBackgroundTerminal(for target: TerminalTarget) -> Bool {
+        guard let tab = agentManager.panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
+              tab.type == .agent
+        else { return false }
+        let view: NSView
+        if let existing = tabContentViews[target] {
+            if terminalViewHasLiveSurface(existing) { return true }
+            view = existing
+        } else {
+            view = contentViewForTab(tab, paneId: target.paneId, startsSurface: false)
+            let size = bounds.width > 0 && bounds.height > 0 ? bounds.size : NSSize(width: 1_000, height: 700)
+            view.setFrameSize(size)
+        }
+        guard restartTerminalView(view, terminalConfig(for: tab, paneId: target.paneId)) else { return false }
+        scheduleCodexReadinessIfNeeded(for: target)
+        return true
+    }
+
+    /// The text a live terminal shows, or nil when it has no surface.
+    func visibleTerminalText(for target: TerminalTarget) -> String? {
+        guard let contentView = tabContentViews[target],
+              terminalViewHasLiveSurface(contentView)
+        else { return nil }
+        return terminalVisibleText(contentView)
+    }
+
+    private func contentViewForTab(_ tab: PaneTab, paneId: String, startsSurface: Bool? = nil) -> NSView {
         let target = TerminalTarget(paneId: paneId, tabId: tab.id)
         if let existing = tabContentViews[target] {
             return existing
         }
 
         let view: NSView
-        let startsSurface = tab.type != .agent || tab.agent?.status != .stopped
+        let startsSurface = startsSurface ?? (tab.type != .agent || tab.agent?.status != .stopped)
         switch tab.type {
         case .browser:
             if tab.isDiff,

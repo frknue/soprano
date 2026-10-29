@@ -11,6 +11,8 @@ final class GitBranchMonitor: @unchecked Sendable {
     private var headPathByCwd: [String: String?] = [:]
     /// HEAD path -> cached branch name.
     private var branchByHeadPath: [String: String] = [:]
+    /// HEAD path -> the repository's default branch (`origin/HEAD`), nil without one.
+    private var defaultBranchByHeadPath: [String: String?] = [:]
     /// HEAD path -> active file watcher.
     private var watchers: [String: DispatchSourceFileSystemObject] = [:]
 
@@ -40,6 +42,45 @@ final class GitBranchMonitor: @unchecked Sendable {
         return branch
     }
 
+    /// The branch a pane row names: the current one unless it is the
+    /// repository's default, which most checkouts sit on most of the time.
+    /// The default is what `origin/HEAD` points at; a repository without one
+    /// counts `main` and `master`. A detached HEAD is always named.
+    func notableBranch(for cwd: String) -> String? {
+        guard let branch = branch(for: cwd), let headPath = headPathByCwd[cwd] ?? nil else { return nil }
+        let remoteDefault: String?
+        if let cached = defaultBranchByHeadPath[headPath] {
+            remoteDefault = cached
+        } else {
+            remoteDefault = Self.remoteDefaultBranch(headPath: headPath)
+            defaultBranchByHeadPath[headPath] = remoteDefault
+        }
+        let isDefault = remoteDefault.map { $0 == branch } ?? Self.conventionalDefaultBranches.contains(branch)
+        return isDefault ? nil : branch
+    }
+
+    static let conventionalDefaultBranches: Set<String> = ["main", "master"]
+
+    /// `main` from `<common git dir>/refs/remotes/origin/HEAD`, which a clone
+    /// writes as `ref: refs/remotes/origin/main`. A linked worktree's git dir
+    /// names the common one in its `commondir` file.
+    static func remoteDefaultBranch(headPath: String) -> String? {
+        let gitDirectory = URL(fileURLWithPath: headPath).deletingLastPathComponent()
+        var commonDirectory = gitDirectory
+        if let pointer = try? String(contentsOf: gitDirectory.appendingPathComponent("commondir"), encoding: .utf8) {
+            let path = pointer.trimmingCharacters(in: .whitespacesAndNewlines)
+            commonDirectory = path.hasPrefix("/")
+                ? URL(fileURLWithPath: path)
+                : gitDirectory.appendingPathComponent(path).standardizedFileURL
+        }
+        let remoteHead = commonDirectory.appendingPathComponent("refs/remotes/origin/HEAD")
+        guard let contents = try? String(contentsOf: remoteHead, encoding: .utf8) else { return nil }
+        let prefix = "ref: refs/remotes/origin/"
+        let line = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard line.hasPrefix(prefix), line.count > prefix.count else { return nil }
+        return String(line.dropFirst(prefix.count))
+    }
+
     /// Reconcile watchers with the current set of pane working directories.
     func setWatchedPaths(_ paths: [String]) {
         var newHeadPathByCwd: [String: String?] = [:]
@@ -62,6 +103,7 @@ final class GitBranchMonitor: @unchecked Sendable {
             watcher.cancel()
             watchers.removeValue(forKey: headPath)
             branchByHeadPath.removeValue(forKey: headPath)
+            defaultBranchByHeadPath.removeValue(forKey: headPath)
         }
         for headPath in neededHeadPaths where watchers[headPath] == nil {
             addWatcher(for: headPath)
@@ -100,6 +142,9 @@ final class GitBranchMonitor: @unchecked Sendable {
         watchers[headPath]?.cancel()
         watchers.removeValue(forKey: headPath)
         branchByHeadPath.removeValue(forKey: headPath)
+        // A checkout or `git remote set-head` comes with a HEAD change often
+        // enough; re-reading origin/HEAD then is cheap.
+        defaultBranchByHeadPath.removeValue(forKey: headPath)
         if FileManager.default.fileExists(atPath: headPath) {
             addWatcher(for: headPath)
         }

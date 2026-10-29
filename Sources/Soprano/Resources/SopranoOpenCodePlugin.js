@@ -96,6 +96,7 @@ export const SopranoNotificationPlugin = async ({ client, directory } = {}) => {
             "--notify",
             "--title", "OpenCode",
             "--body", "Response ready",
+            "--reason", "turn",
             ...conversation,
             ...payloadOf(event),
           ])
@@ -105,6 +106,7 @@ export const SopranoNotificationPlugin = async ({ client, directory } = {}) => {
             "--notify",
             "--title", "OpenCode",
             "--body", "Approval required",
+            "--reason", "approval",
             ...conversation,
             ...payloadOf(event),
           ])

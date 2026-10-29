@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentNotificationManager: AgentNotificationManager?
     private var browserAutomationController: BrowserAutomationController?
     private var markdownCommandController: MarkdownCommandController?
+    private var automationController: AutomationController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -54,6 +55,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.agentNotificationManager = agentNotificationManager
         browserAutomationController = BrowserAutomationController(agentManager: agentManager)
         markdownCommandController = MarkdownCommandController(agentManager: agentManager)
+
+        let automationController = AutomationController(
+            store: AutomationStore(fileURL: AutomationStore.defaultFileURL()),
+            agentManager: agentManager,
+            environment: AutomationController.Environment(
+                startTerminal: { [weak controller] target in
+                    controller?.contentController?.startBackgroundTerminal(for: target) ?? false
+                },
+                submitPrompt: { [weak controller] prompt, target in
+                    controller?.contentController?.submitAgentPrompt(prompt, to: target) ?? false
+                },
+                visibleText: { [weak controller] target in
+                    controller?.contentController?.visibleTerminalText(for: target)
+                },
+                notify: { [weak agentNotificationManager] title, body, runId in
+                    agentNotificationManager?.deliverAutomationNotification(title: title, body: body, runId: runId)
+                }
+            )
+        )
+        controller.install(automationController: automationController)
+        automationController.start()
+        self.automationController = automationController
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

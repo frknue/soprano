@@ -15,18 +15,27 @@ struct AgentDashboardEntry: Identifiable, Equatable {
     let startedAt: Date?
     let cwd: String?
     var sessionName: String? = nil
-    var isWindowTitleCustom: Bool = false
     /// The agent's own conversation, which locates the transcript the
     /// dashboard renders as a timeline.
     var conversation: AgentConversation? = nil
+    /// The branch the agent works on when it is not its repository's default;
+    /// the dashboard fills it in from the shared `GitBranchMonitor`.
+    var branch: String? = nil
 
-    var projectName: String {
-        if isWindowTitleCustom { return windowTitle }
-        return cwd?.split(separator: "/").last.map(String.init) ?? windowTitle
+    /// What the agent works on, as the sidebar names it: its task title
+    /// without the CLI's brand and spinner, or its name before it has one.
+    var title: String {
+        TerminalTitle.display(tabTitle, workingDirectory: cwd, agentName: profileName)
     }
 
+    /// `omp · soprano · ⎇ feat/x`, the line under the title.
+    var context: PaneContextLine {
+        PaneContextLine(title: title, agentName: profileName, workingDirectory: cwd, branch: branch)
+    }
+
+    /// `session ▸ window ▸ title`, for tooltips.
     var location: String {
-        [sessionName, windowTitle, tabTitle].compactMap { $0 }.joined(separator: " ▸ ")
+        [sessionName, windowTitle, title].compactMap { $0 }.joined(separator: " ▸ ")
     }
 }
 

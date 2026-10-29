@@ -10,6 +10,16 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- **Automations**, like Orca's: the top of the sidebar, **Commands ▸ Automations**, or
+  `⌘P` → *Automations* lists prompts an agent (omp, Claude Code, Codex, or OpenCode) runs
+  on a schedule — hourly, daily, weekdays, weekly, or any cron expression — in a folder or
+  a fresh git worktree, with an optional precheck command, a grace period for runs missed
+  while the Mac slept, and a fresh or reused agent per run. Each run works in its own
+  window in the **Automations** session without switching to it, skips the agent's
+  approval prompts, keeps the agent's final reply, notifies you when it is done or needs
+  you, and closes its window if you never opened it. Start from a template, **Run Now**,
+  pause, edit, and read each run's report in its history; automations live under
+  `automations` in `settings.json`.
 - **Open in Soprano Git** (`⌃A` → `G`, the command palette, or **Commands ▸ Open in
   Soprano Git**) opens the active tab's Git repository in Soprano Git, or selects its tab
   there when it is already open. The Explorer's **Open in** menu lists Soprano Git too.
@@ -62,8 +72,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   with `⌃Tab` / `⌃⇧Tab`, open with `⌘T`, `⌃A` → `T`, or `+`, close with `⌃A` → `W`, `×`,
   or a middle-click (**New Tab**, **Next Tab**, **Previous Tab**, **Close Tab** in the
   palette; `new-tab-direct`, `new-tab`, `close-tab`, `next-tab`, `previous-tab` in
-  `settings.json`). Focusing a pane in another tab switches to it, the status bar and
-  sidebar show `Tab n` in windows with several tabs, and tabs restore with the workspace.
+  `settings.json`). Focusing a pane in another tab switches to it, the status bar shows
+  `Tab n` in windows with several tabs, and tabs restore with the workspace.
 - **Hide window tabs** in **Settings ▸ General** (`"hideWindowTabs"`) is on by default:
   the tab row sits on top, and you switch windows from the sidebar, `⌃1`…`⌃9`, or `⌘F`.
 - Turning it off shows windows as numbered tabs above the terminals, with the active tab
@@ -93,6 +103,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- The left sidebar is quieter: shells are named by their folder instead of their
+  `user@host:~/path` prompt title, agents by their task without omp's `π >` or Claude
+  Code's spinner, and a branch shows only when it is not the repository's default. Plain
+  shells lose their gray dot, most rows fit on one line, and spacing groups panes by tab
+  and window instead of `Tab n` on every row. The session picker lost its bezel.
+- Agent Dashboard entries follow suit: each is named by the agent's task (its name before
+  it has one) over `omp · folder · ⎇ branch — what it is doing`, and the detail header
+  reads the same, instead of `Window ▸ omp` over the full path.
 - The left sidebar scrolls the selected window into view when switching through the
   Agent Dashboard, Find Window, or window shortcuts, while background updates leave
   manual scrolling alone.

@@ -377,8 +377,13 @@ as `session › window › pane · Tab n` (the `· Tab n` only when the window h
 one tab) and counts the panes that need you (`1 needs you`), and the focused pane gets a
 raised header with an accent rule under it while the other panes sit under a light veil.
 A pane that needs you is framed in the attention color instead and is never veiled.
-Sidebar rows also show each pane's current git branch, refreshed as `HEAD` changes on
-disk.
+Sidebar rows name each pane briefly: a shell by its folder (the `user@host:~/git/shop`
+title a shell prompt sets reads as `shop`) or by the command it runs, an agent by its
+task, with the agent and its folder on a second line. A pane's branch shows only when it
+is not the repository's default (what `origin/HEAD` points at, else `main` or `master`),
+refreshed as `HEAD` changes on disk. Plain shells carry no status mark, so the marks
+left are the agents and running commands. Panes that share a tab sit together, and
+each tab and window starts a little further down.
 
 Press `⌘F` to search the current session's windows by window title, pane or tab title, working
 directory, browser URL, or agent name. Window-title matches rank ahead of matches found
@@ -389,8 +394,9 @@ Open the **Agent Dashboard** from the sidebar chart button, the **Commands** men
 `⇧⌘D` (`agent-dashboard`). It summarizes agents that are working, waiting for input, or
 in an error state across every logical window. Entries are ordered by urgency, update
 from the same lifecycle events as pane headers and notifications, and show elapsed
-runtime and working directory. Each entry leads with its custom window name or project
-folder, followed by the agent and session, then the directory on its own line.
+runtime and working directory. Each entry is named like a sidebar row: the agent's task
+(its name before it has one), with the agent, its folder, and a branch other than the
+repository's default underneath, followed by what the agent is doing right now.
 Selecting a Claude Code, Codex, or omp entry shows its **timeline**, read from the
 transcript the agent writes while it runs in its pane: your prompts as cards, the agent's
 replies rendered as Markdown, one line per tool call with its result (✓, ✗, or ▶ while
@@ -421,6 +427,53 @@ explorer open too, dragging either sidebar still leaves panes those 320 points.
 
 Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly onto a
 terminal to insert their shell-safe paths.
+
+## Automations
+
+Automations give an agent a prompt on a schedule, the way Orca's do: a weekday repo
+audit, a nightly review of yesterday's commits, an hourly check for stuck work. Open
+**Automations** from the top of the sidebar, the **Commands** menu, or `⌘P` →
+*Automations*. The page lists every automation with its schedule, folder, next run, and
+last run; **New Automation** (`⌘N`, or a template when there are none yet) opens the
+editor. `J` / `K` or the arrow keys move through automations and runs, `Return` opens
+one, and `Esc` steps back to the list and then closes the page. The editor asks for:
+
+- **Prompt** and **Agent**: omp, Claude Code, Codex, or OpenCode — the CLIs that take a
+  first prompt on their command line and report their turns back to Soprano.
+- **Folder**, and whether each run works there or in a **new worktree**: a fresh
+  `automation/<id>-<yyyyMMdd-HHmm>` branch from `baseBranch` (origin's default branch
+  when left empty), checked out under
+  `~/Library/Application Support/<Soprano's bundle id>/worktrees/<repository>/`. A
+  worktree holds only tracked files; ignored ones such as `.env` are not copied.
+- **Schedule**: hourly, daily, weekdays, weekly, or any five-field cron expression
+  (`minute hour day month weekday`), in the Mac's time zone.
+- **Session**: a fresh agent every run, or **Reuse**, which hands the prompt to the
+  previous run's agent while it is still open and done with its turn.
+- **Grace**: how late a run that came due while the Mac slept or Soprano was closed may
+  still start. Only the latest missed run starts; one past its grace is listed as
+  skipped instead of starting hours late.
+- **Precheck**: a shell command run in the folder before a scheduled run; the run is
+  skipped unless it exits 0 (`gh pr list --json number -q '.[0].number'`). **Run Now**
+  skips the precheck.
+- **Model**, passed to the CLI; left empty, the CLI's default.
+
+A run opens its agent in a window of its own in a session named **Automations**,
+without switching to it, and the agent starts with the prompt and with its approval
+prompts skipped — nobody is there to answer them (`--dangerously-skip-permissions`,
+`--dangerously-bypass-approvals-and-sandbox`, `--auto-approve`, `--auto`). Claude Code
+asks whether to trust a folder it has not seen even then, so a Claude Code run first
+records its folder as trusted in `~/.claude.json`, as that dialog would. When its
+turn ends the run is **Done**: Soprano keeps the agent's final reply, shows it as
+Markdown in the run's details, and posts a notification naming the automation. A run
+whose window you never opened then closes it; **Resume Conversation** reopens the
+agent's conversation later. A worktree the run left untouched is removed with its
+branch; one with changes or commits stays for you to review. A run that stops to ask
+something or wait for an approval is **Needs input** and keeps its window open. A
+scheduled run due while the previous one still works is skipped.
+
+Runs happen only while Soprano is open. Each automation keeps its last 100 finished
+runs in `automations.json` beside the worktrees. Automations themselves live under
+`automations` in [`settings.json`](#settings), where you can edit them by hand too.
 
 ## File explorer
 
@@ -554,7 +607,7 @@ exiting, does not switch tabs. Each tab holds up to 20 panes.
 Focusing a pane that lives in another tab — from its sidebar row, a `⌃⇧`+letter pane
 hint, a notification, **Open** in the Agent Dashboard, or a Markdown or editor open —
 switches to that tab (and window). Switching tabs clears a maximized pane (`⌃A` → `M`).
-In windows with more than one tab, sidebar pane rows show `Tab n` on their second line.
+In the sidebar, the panes of one tab sit together, a little apart from the next tab's.
 
 Tabs and the active tab restore with the workspace, on relaunch and from Saved
 Workspaces. Workspaces saved by older builds with window depth reopen with each depth
@@ -820,7 +873,26 @@ default.
       "env": { "AIDER_DARK_MODE": "1" },
       "cwd": "~/git"
     }
-  ]
+  ],
+
+  // Prompts an agent runs on a schedule; see Automations.
+  "automations": {
+    "weekday-audit": {
+      "name": "Weekday repo audit",
+      "agent": "omp",                   // omp | claude-code | codex | opencode
+      "folder": "~/git/shop",
+      "prompt": "Review the repository health and summarize what needs attention.",
+      "schedule": "0 9 * * 1-5",        // cron: minute hour day month weekday
+      "enabled": true,
+      "worktree": false,                // true: each run in a fresh git worktree
+      "baseBranch": "origin/main",      // a worktree's base; default origin's default branch
+      "session": "fresh",               // "reuse": the last run's agent, while it is open
+      "graceMinutes": 720,              // 0–2880
+      "precheck": "gh pr list --json number -q '.[0].number'",
+      "precheckTimeoutSeconds": 60,     // 5–600
+      "model": "sonnet"
+    }
+  }
 }
 ```
 

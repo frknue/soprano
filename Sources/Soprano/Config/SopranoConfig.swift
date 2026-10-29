@@ -16,6 +16,8 @@ struct SopranoConfig: Codable, Equatable {
     var notifications: Notifications?
     var keybindings: Keybindings?
     var agents: [Agent]?
+    /// Scheduled prompts, keyed by a stable id. See `AutomationEntry`.
+    var automations: [String: AutomationEntry]?
 
     static let empty = SopranoConfig()
 
@@ -119,6 +121,7 @@ struct ResolvedConfig {
     var settings: AppSettings
     var keybindings: KeyBindingConfig
     var agents: [AgentProfile]
+    var automations: [Automation]
     var issues: [ConfigIssue]
     /// Binding ids the file overrides — the UI badges these as customized.
     var customizedBindingIds: Set<String>
@@ -131,6 +134,7 @@ struct ResolvedConfig {
         settings: .defaultSettings,
         keybindings: DefaultKeybindings.config,
         agents: DefaultAgents.all,
+        automations: [],
         issues: [],
         customizedBindingIds: [],
         disabledBindingIds: [],
@@ -232,6 +236,12 @@ extension SopranoConfig {
             issues: &issues
         )
 
+        let resolvedAutomations = Self.resolveAutomations(
+            automations ?? [:],
+            agentIds: Set(agentResolution.profiles.map(\.id)),
+            issues: &issues
+        )
+
         let keybindingResolution = Self.resolveKeybindings(
             keybindings,
             baseKeybindings: baseKeybindings,
@@ -244,6 +254,7 @@ extension SopranoConfig {
             settings: settings,
             keybindings: keybindingResolution.config,
             agents: agentResolution.profiles,
+            automations: resolvedAutomations,
             issues: issues,
             customizedBindingIds: keybindingResolution.customized,
             disabledBindingIds: keybindingResolution.disabled,
