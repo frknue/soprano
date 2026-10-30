@@ -115,7 +115,11 @@ modelId}`, `set_thinking_level`, `set_fast_mode`); a runtime-mode change relaunc
 `write`, auto → `always-ask-cached`, full-access → `yolo`. Turns: `prompt {message, images?}`
 (attachment paths listed in the text) with the command id as provider turn id; the turn ends at
 `prompt_result` with the same id (extension runs such as auto-double-check happen before it),
-`completed` / `aborted|interrupted|cancelled` → interrupted / else failed. Steer = `steer`,
+`completed` / `aborted|interrupted|cancelled` → interrupted / else failed. A `prompt_result` with
+`sessionSettled:false` (async bash/task/eval jobs still running) holds that outcome: the turn,
+its dialogs, steer and interrupt stay live and the runs those jobs wake stream into it until
+`session_settled`, so the checkpoint and the queue wait for them; Stop in that phase sends `abort`
+and ends the turn at once. Steer = `steer`,
 interrupt = `abort`. Host UI arrives as `extension_ui_request`: a `select` titled `Allow tool:
 <tool>\n<details>` is an approval (accept → `Approve Once` or `Approve`, acceptForSession → the
 `… for this session` label or `Approve File`, decline → `Deny`, cancel → `cancelled:true`, all

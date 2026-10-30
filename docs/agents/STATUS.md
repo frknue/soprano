@@ -10,7 +10,7 @@ in the Soprano family (`~/git/private/soprano-agents`, local only, no GitHub rem
   status, commit/push/PR via gh), sidebar, chat header, timeline, composer, right-panel diff,
   terminal drawer (SwiftTerm), thread details card, palette, settings screen, dialogs,
   notifications, icon.
-- `swift test`: 379 tests. Offscreen snapshots of every fixture in light and dark.
+- `swift test`: 381 tests. Offscreen snapshots of every fixture in light and dark.
 - Live end-to-end smoke (real CLIs, throwaway repos): Codex thread in a new worktree with an
   approval, checkpoint, turn diff, generated title and branch rename, revert with file restore;
   Claude thread in the project root with a file-change approval, a second turn, and reload from

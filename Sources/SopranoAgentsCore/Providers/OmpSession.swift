@@ -134,6 +134,12 @@ public actor OmpSession: ProviderSession {
     public func interrupt() async {
         guard let client, activePromptID != nil else { return }
         _ = try? await client.request("abort")
+        // Yielded but unsettled: nothing of the prompt is left to stop, so end the turn here
+        // instead of waiting for background jobs to finish.
+        if mapper.isAwaitingSettlement, activePromptID != nil {
+            endPrompt()
+            for event in mapper.interruptAwaitingSettlement() { continuation.yield(event) }
+        }
     }
 
     public func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async {
@@ -343,13 +349,23 @@ public actor OmpSession: ProviderSession {
             }
         case "prompt_result":
             guard let id = frame["id"]?.stringValue, id == activePromptID else { return }
-            activePromptID = nil
-            for (id, _) in pending { continuation.yield(.requestResolved(id: id)) }
-            pending.removeAll()
+            // `sessionSettled:false`: background work can still wake the agent; the prompt
+            // (dialogs, steer, interrupt) stays live until `session_settled`.
+            if frame["sessionSettled"]?.boolValue != false { endPrompt() }
+        case "session_settled":
+            guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
+            endPrompt()
         default:
             break
         }
         for event in mapper.map(frame) { continuation.yield(event) }
+    }
+
+    /// The prompt's turn is over: withdraw dialogs nobody can answer any more.
+    private func endPrompt() {
+        activePromptID = nil
+        for (id, _) in pending { continuation.yield(.requestResolved(id: id)) }
+        pending.removeAll()
     }
 
     private func finish(error: String?) {

@@ -3,8 +3,9 @@ import Testing
 @testable import SopranoAgentsCore
 
 /// `OmpSession` against a fake `omp --mode rpc-ui` that answers like omp 18.14 (recorded live):
-/// `ready`, responses echoing the command id, `prompt` acked then ended by `prompt_result`, and a
-/// tool approval as an `extension_ui_request` `select`.
+/// `ready`, responses echoing the command id, `prompt` acked then ended by `prompt_result`, a
+/// tool approval as an `extension_ui_request` `select`, and a prompt that yields with
+/// `sessionSettled:false` while a background job is still running.
 @MainActor
 struct OmpSessionLifecycleTests {
     private static let fakeCLI = #"""
@@ -42,12 +43,31 @@ struct OmpSessionLifecycleTests {
         elif kind == "prompt":
             prompt = msg["id"]
             ok(msg)
-            if "approve" in msg["message"]:
+            if "background" in msg["message"]:
+                # Yield with a background job pending, as omp does after an async bash/task.
+                out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "job started"}})
+                out({"type": "agent_end", "messages": [], "isTerminal": True, "yielded": True})
+                out({"type": "prompt_result", "id": prompt, "agentInvoked": True, "status": "completed", "sessionSettled": False})
+                prompt = None
+                if "wakes" in msg["message"]:
+                    # The job finishes and wakes the agent: a follow-up run in the same turn.
+                    out({"type": "agent_start"})
+                    out({"type": "tool_execution_start", "toolCallId": "t2", "toolName": "write", "args": {"path": "late.txt", "content": "x\n"}})
+                    out({"type": "extension_ui_request", "id": "ui-2", "method": "select", "title": "Allow tool: write\nPath: late.txt",
+                         "options": ["Approve", "Approve write for this session", "Deny"]})
+            elif "approve" in msg["message"]:
                 out({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}})
                 out({"type": "extension_ui_request", "id": "ui-1", "method": "select", "title": "Allow tool: bash\nCommand: ls",
                      "options": ["Approve", "Approve bash for this session", "Deny"]})
             else:
                 finish("completed")
+        elif kind == "extension_ui_response" and msg["id"] == "ui-2":
+            out({"type": "tool_execution_end", "toolCallId": "t2", "toolName": "write", "isError": False,
+                 "result": {"content": [{"type": "text", "text": "Successfully wrote 2 bytes to late.txt"}], "details": {}}})
+            out({"type": "message_update", "messageId": "msg-2", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "late file written"}})
+            out({"type": "message_update", "messageId": "msg-2", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_end", "contentIndex": 0, "content": "late file written"}})
+            out({"type": "agent_end", "messages": [], "isTerminal": True, "yielded": True})
+            out({"type": "session_settled"})
         elif kind == "extension_ui_response":
             out({"type": "tool_execution_end", "toolCallId": "t1", "toolName": "bash", "isError": False,
                  "result": {"content": [{"type": "text", "text": "a.txt\n"}], "details": {}}})
@@ -227,6 +247,54 @@ struct OmpSessionLifecycleTests {
         let finished = await recorder.wait(until: Self.completed)
         await session.close()
 
+        #expect(finished)
+        #expect(fake.received("abort").count == 1)
+        #expect(recorder.events.contains(.turnCompleted(outcome: .interrupted, error: nil)))
+    }
+
+    @Test func anUnsettledYieldKeepsTheTurnOpenUntilBackgroundWorkHasFinished() async throws {
+        let fake = try makeFake()
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path))
+
+        _ = try await session.startTurn(input("start a background job; it wakes you"))
+        let asked = await recorder.wait { $0.contains { if case .approvalRequested = $0 { true } else { false } } }
+        let completedBeforeSettling = Self.completed(recorder.events)
+        await session.respond(toApproval: "ui-2", decision: .accept, feedback: nil)
+        let finished = await recorder.wait(until: Self.completed)
+        await session.close()
+
+        // The follow-up run's dialog reached the host instead of being cancelled, and the turn
+        // stayed open (so nothing checkpoints or dequeues) until `session_settled`.
+        #expect(asked && finished)
+        #expect(!completedBeforeSettling)
+        #expect(fake.received("extension_ui_response") == [["type": "extension_ui_response", "id": "ui-2", "value": "Approve"]])
+        let events = recorder.events
+        let completion = try #require(events.firstIndex(of: .turnCompleted(outcome: .completed, error: nil)))
+        let lateWrite = try #require(events.lastIndex { if case let .itemUpdated(item) = $0 { item.id == "t2" && item.status == .completed } else { false } })
+        #expect(lateWrite < completion)
+        let finals = events.compactMap { event -> String? in
+            if case let .itemUpdated(item) = event, case let .assistantMessage(text, true) = item.kind { return text }
+            return nil
+        }
+        #expect(finals == ["late file written"])
+    }
+
+    @Test func stoppingWhileBackgroundWorkRunsEndsTheTurnAtOnce() async throws {
+        let fake = try makeFake()
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path))
+
+        _ = try await session.startTurn(input("start a background job"))
+        _ = await recorder.wait { $0.contains(.assistantDelta(itemID: "msg-1:0", delta: "job started", isFinal: false)) }
+        let completedBeforeStop = await recorder.wait(0.3, until: Self.completed)
+        await session.interrupt()
+        let finished = await recorder.wait(until: Self.completed)
+        await session.close()
+
+        #expect(!completedBeforeStop)
         #expect(finished)
         #expect(fake.received("abort").count == 1)
         #expect(recorder.events.contains(.turnCompleted(outcome: .interrupted, error: nil)))

@@ -70,7 +70,9 @@ public struct OmpUIRequest: Sendable, Hashable {
 /// - `auto_compaction_end` → "Context compacted"; `auto_retry_start` → retry notice.
 /// - `prompt_result` → the last assistant text marked final, then `turnCompleted`
 ///   (`completed`; `aborted`/`interrupted`/`cancelled` → interrupted; else failed with
-///   `error.message`).
+///   `error.message`). With `sessionSettled:false` background work (async bash/task/eval jobs)
+///   can still wake the agent, so the outcome is held and the turn completes at the following
+///   `session_settled`; runs in between stream into the same turn.
 public struct OmpEventMapper: Sendable {
     private struct Tool: Sendable {
         var name: String
@@ -92,6 +94,18 @@ public struct OmpEventMapper: Sendable {
     private var approvalTools: [String: String] = [:]
     private var declinedTools: Set<String> = []
     private var noticeCount = 0
+    /// The yielded prompt's outcome while omp waits out background work (`sessionSettled:false`).
+    private var heldOutcome: (outcome: ProviderTurnOutcome, error: String?)?
+
+    /// The prompt yielded but the session has not settled: the turn is still open.
+    public var isAwaitingSettlement: Bool { heldOutcome != nil }
+
+    /// The user stopped the turn while it waited for settlement: it ends now, as interrupted
+    /// (`abort` does not wait for background jobs; a later `session_settled` is ignored).
+    public mutating func interruptAwaitingSettlement() -> [ProviderEvent] {
+        guard heldOutcome != nil else { return [] }
+        return complete(.interrupted, error: nil)
+    }
 
     public init(cwd: String? = nil, contextWindow: Int? = nil, itemPrefix: String = "") {
         self.cwd = cwd
@@ -111,6 +125,7 @@ public struct OmpEventMapper: Sendable {
         tools.removeAll()
         approvalTools.removeAll()
         declinedTools.removeAll()
+        heldOutcome = nil
     }
 
     public mutating func map(_ frame: JSONValue) -> [ProviderEvent] {
@@ -138,6 +153,9 @@ public struct OmpEventMapper: Sendable {
             return [notice(text)]
         case "prompt_result":
             return mapPromptResult(frame)
+        case "session_settled":
+            guard let held = heldOutcome else { return [] }
+            return complete(held.outcome, error: held.error)
         default:
             return []
         }
@@ -189,19 +207,31 @@ public struct OmpEventMapper: Sendable {
     }
 
     private mutating func mapPromptResult(_ frame: JSONValue) -> [ProviderEvent] {
+        let outcome: ProviderTurnOutcome
+        var error: String?
+        switch frame["status"]?.stringValue {
+        case "completed", nil:
+            outcome = .completed
+        case "aborted", "interrupted", "cancelled":
+            outcome = .interrupted
+        default:
+            outcome = .failed
+            let message = frame["error"]?["message"]?.nonEmptyString ?? frame["error"]?.nonEmptyString
+            error = message ?? "omp ended the turn with \(frame["status"]?.stringValue ?? "an error")."
+        }
+        if frame["sessionSettled"]?.boolValue == false {
+            heldOutcome = (outcome, error)
+            return []
+        }
+        return complete(outcome, error: error)
+    }
+
+    private mutating func complete(_ outcome: ProviderTurnOutcome, error: String?) -> [ProviderEvent] {
         var events: [ProviderEvent] = []
         if let last = lastText {
             events.append(.itemUpdated(TurnItem(id: last.id, kind: .assistantMessage(text: last.text, isFinal: true), status: .completed)))
         }
-        switch frame["status"]?.stringValue {
-        case "completed", nil:
-            events.append(.turnCompleted(outcome: .completed, error: nil))
-        case "aborted", "interrupted", "cancelled":
-            events.append(.turnCompleted(outcome: .interrupted, error: nil))
-        default:
-            let message = frame["error"]?["message"]?.nonEmptyString ?? frame["error"]?.nonEmptyString
-            events.append(.turnCompleted(outcome: .failed, error: message ?? "omp ended the turn with \(frame["status"]?.stringValue ?? "an error")."))
-        }
+        events.append(.turnCompleted(outcome: outcome, error: error))
         resetTurn()
         return events
     }
