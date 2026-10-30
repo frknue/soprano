@@ -456,6 +456,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         permissionsChip.setAccessibilityLabel("Permissions: \(mode.title)")
 
         let plan = interactionMode == .plan
+        modeChip.isHidden = !selection.provider.supportsPlanMode
         modeChip.configure(title: plan ? "Plan" : "Build", image: NSImage.symbol(plan ? Icon.pencilRuler : Icon.bot, size: 13))
         modeChip.isOpen = plan
         modeChip.toolTip = plan ? "Plan mode. Click to return to normal build mode" : "Default mode. Click to enter plan mode"
@@ -845,6 +846,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     /// Shift+Tab: Build ↔ Plan.
     func togglePlanMode() {
+        guard selection.provider.supportsPlanMode else { return }
         let next: InteractionMode = interactionMode == .plan ? .build : .plan
         if let thread = currentThread {
             engine.setInteractionMode(thread.id, next)

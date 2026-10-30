@@ -8,6 +8,11 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Added
 
+- omp (oh-my-pi) threads, the new default provider: Soprano Agents drives `omp --mode rpc-ui`, so
+  omp's tool approvals (Approve, Approve for this session, Deny) and its `ask` questions appear
+  inline; every model omp knows is in the model picker (search with several words, e.g.
+  `opus openrouter`), with omp's thinking levels as Reasoning. Set `providers.ompPath` if `omp`
+  is not on `PATH`.
 - Codex (`codex app-server`) and Claude Code (`claude -p` stream-json) threads in one app, with
   T3 Code's look in light and dark (`theme`: `t3`, `t3-light`, `t3-dark`, `soprano` to follow Soprano, or a Soprano theme).
 - Thread inbox sidebar: search (titles, branches, messages), project filter, Add project, New

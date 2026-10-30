@@ -95,8 +95,9 @@ Engine behavior:
   (passed to sessions as an additional directory); scratch threads work in `<data>/scratch/<thread>`.
 
 ### Providers (Core/Providers)
-`ProviderDriver` per kind (`CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s, probes the
-CLI (`probe()` → version, account, models), and runs one-shot `generateJSON`.
+`ProviderDriver` per kind (`OmpDriver`, `CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s,
+probes the CLI (`probe()` → version, account, models), and runs one-shot `generateJSON`.
+`ProviderKind` declaration order (omp, Codex, Claude Code) is display order everywhere.
 
 **Codex** — `codex app-server` (path from `EngineSettings.codexPath` or PATH; GUI apps get a
 minimal PATH, so search `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin`,
@@ -221,7 +222,7 @@ buttons, and the snapshot harness runs them with `--perform <id>`. `CommandConte
 ### Settings (`Shell/AppEnvironment.swift`, `SettingsResolution.swift`, `SettingsFile.swift`)
 `~/.config/soprano-agents/settings.json` (JSONC, `SOPRANO_AGENTS_CONFIG` overrides), live
 reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultProvider, defaultModel,
-defaultRuntimeMode}`, `providers.{codexPath, claudePath}`, `textGeneration.{provider, model,
+defaultRuntimeMode}` (default provider `omp`), `providers.{ompPath, codexPath, claudePath}`, `textGeneration.{provider, model,
 titles}`, `worktrees.{directory, branchPrefix}`, `chat.{followUp, width}`,
 `notifications.{enabled, sound}`, `editor.app`, `keybindings.{prefixKey, prefixTimeoutMs,
 bindings}`. `AppSettings.engineSettings` feeds `AgentEngine.settings`. Window geometry, panel

@@ -96,9 +96,9 @@ enum SettingsFile {
           "theme": "t3",
 
           "agents": {
-            // Provider new threads start with: "codex" or "claude".
-            "defaultProvider": "codex",
-            // Model id; omit for the provider's default.
+            // Provider new threads start with: "omp", "codex" or "claude".
+            "defaultProvider": "omp",
+            // Model id ("provider/id" for omp); omit for the provider's default (omp: its own configured model).
             // "defaultModel": "gpt-6.1-sol",
             // "approval-required" (Supervised), "auto-accept-edits", "auto", or "full-access".
             "defaultRuntimeMode": "full-access"
@@ -106,6 +106,7 @@ enum SettingsFile {
 
           "providers": {
             // Executables; omit to find them on PATH.
+            // "ompPath": "~/.bun/bin/omp",
             // "codexPath": "~/.local/bin/codex",
             // "claudePath": "~/.local/bin/claude"
           },

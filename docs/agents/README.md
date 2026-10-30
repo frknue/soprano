@@ -2,7 +2,7 @@
 
 **A native macOS app for coding agents, in the Soprano family.**
 
-Soprano Agents gives the `codex` and `claude` CLIs the look and feel of
+Soprano Agents gives the `omp`, `codex` and `claude` CLIs the look and feel of
 [T3 Code](https://github.com/pingdotgg/t3code): a thread inbox on the left, a centered chat lane
 with a floating composer, collapsible work logs, approvals and questions inline, per-turn diffs
 from hidden git checkpoints, worktrees, a terminal drawer and a diff panel on the right. It is a
@@ -12,6 +12,11 @@ Swift 6 / AppKit app, not a web view, and it talks to the agent CLIs directly: t
 
 - macOS 14 or later.
 - At least one agent CLI, installed and signed in:
+  - **omp** ([oh-my-pi](https://github.com/can1357/oh-my-pi), the default): the `omp` CLI with at
+    least one model provider logged in (`omp login`). Soprano Agents runs
+    `omp --mode rpc-ui`, omp's host-UI protocol, so omp's tool approvals and its `ask` tool show
+    up inline. Every model omp knows (its `/model` list across Anthropic, OpenAI, Copilot,
+    OpenRouter, …) is in the model picker; "configured" is whatever omp itself defaults to.
   - **Codex**: the `codex` CLI (`codex login` once). Soprano Agents runs `codex app-server`.
   - **Claude Code**: the `claude` CLI (run `claude` once to sign in). Soprano Agents runs
     `claude -p` with the stream-json protocol.
@@ -19,8 +24,8 @@ Swift 6 / AppKit app, not a web view, and it talks to the agent CLIs directly: t
 
 Apps started from the Dock get a minimal `PATH`, so Soprano Agents also looks in
 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin` and `~/.cargo/bin`. If a CLI
-lives elsewhere, set its path in **Settings › Providers** (`providers.codexPath` /
-`providers.claudePath`). The same page shows each provider's version, account and health.
+lives elsewhere, set its path in **Settings › Providers** (`providers.ompPath`,
+`providers.codexPath`, `providers.claudePath`). The same page shows each provider's version, account and health.
 
 ## Install and build
 
@@ -107,11 +112,11 @@ keeping your comments.
 | Key | Default | |
 |---|---|---|
 | `theme` | `"t3"` | `t3` (follows macOS), `t3-light`, `t3-dark`, `soprano` (follow Soprano), or a Soprano theme id |
-| `agents.defaultProvider` | `"codex"` | `codex` or `claude` |
-| `agents.defaultModel` | provider default | model id |
+| `agents.defaultProvider` | `"omp"` | `omp`, `codex` or `claude` |
+| `agents.defaultModel` | provider default | model id (`provider/id` for omp, e.g. `anthropic/claude-opus-5-5`) |
 | `agents.defaultRuntimeMode` | `"full-access"` | `approval-required`, `auto-accept-edits`, `auto`, `full-access` |
-| `providers.codexPath`, `providers.claudePath` | found on `PATH` | executable paths |
-| `textGeneration.provider` / `.model` / `.titles` | `codex` / provider default / `true` | titles, commit messages, branch names |
+| `providers.ompPath`, `providers.codexPath`, `providers.claudePath` | found on `PATH` | executable paths |
+| `textGeneration.provider` / `.model` / `.titles` | `codex` / provider default / `true` | titles, commit messages, branch names (`omp`, `codex` or `claude`) |
 | `worktrees.directory` | `~/.soprano-agents/worktrees` | new worktrees go to `<directory>/<repo>/<branch>` |
 | `worktrees.branchPrefix` | `"soprano"` | `soprano/fix-login-error` |
 | `chat.followUp` | `"steer"` | `steer` or `queue` |

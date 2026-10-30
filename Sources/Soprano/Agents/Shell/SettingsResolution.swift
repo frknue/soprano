@@ -86,7 +86,7 @@ enum SettingsResolver {
                 if let raw = value as? String, let provider = ProviderKind(rawValue: raw) {
                     result.settings.defaultProvider = provider
                 } else {
-                    warn("agents.defaultProvider must be \"codex\" or \"claude\".")
+                    warn("agents.defaultProvider must be \"omp\", \"codex\" or \"claude\".")
                 }
             }
             if let value = agents["defaultModel"] {
@@ -107,9 +107,10 @@ enum SettingsResolver {
         }
 
         if let providers = section("providers", in: root, warn: warn) {
-            for key in providers.keys.sorted() where !["codexPath", "claudePath"].contains(key) {
+            for key in providers.keys.sorted() where !["ompPath", "codexPath", "claudePath"].contains(key) {
                 warn("Unknown setting \"providers.\(key)\".")
             }
+            result.settings.ompPath = optionalPath(providers["ompPath"], key: "providers.ompPath", warn: warn) ?? result.settings.ompPath
             result.settings.codexPath = optionalPath(providers["codexPath"], key: "providers.codexPath", warn: warn) ?? result.settings.codexPath
             result.settings.claudePath = optionalPath(providers["claudePath"], key: "providers.claudePath", warn: warn) ?? result.settings.claudePath
         }
@@ -122,7 +123,7 @@ enum SettingsResolver {
                 if let raw = value as? String, let provider = ProviderKind(rawValue: raw) {
                     result.settings.textGenerationProvider = provider
                 } else {
-                    warn("textGeneration.provider must be \"codex\" or \"claude\".")
+                    warn("textGeneration.provider must be \"omp\", \"codex\" or \"claude\".")
                 }
             }
             if let value = generation["model"] {

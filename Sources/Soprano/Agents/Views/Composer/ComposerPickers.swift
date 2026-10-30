@@ -147,24 +147,56 @@ final class ModelPickerContent: ComposerPopoverContent {
         requestResize?()
     }
 
-    private func reload() {
-        let query = search.text.trimmingCharacters(in: .whitespaces).lowercased()
-        let models = ModelChoice.models(for: shownProvider, status: statuses[shownProvider])
-        shownModels = query.isEmpty ? models : models.filter {
-            $0.name.lowercased().contains(query) || $0.slug.lowercased().contains(query)
+    /// omp lists every model of every configured provider (700+); rebuilding that many rows per
+    /// keystroke stalls, so the list shows the first matches and a count of the rest.
+    nonisolated static let rowLimit = 80
+
+    /// Models whose name or slug contains every whitespace-separated word of `query`.
+    nonisolated static func matching(_ models: [ProviderModel], query: String) -> [ProviderModel] {
+        let tokens = query.lowercased().split(whereSeparator: \.isWhitespace)
+        guard !tokens.isEmpty else { return models }
+        return models.filter { model in
+            let haystack = "\(model.name) \(model.slug)".lowercased()
+            return tokens.allSatisfy { haystack.contains($0) }
         }
-        let rows = shownModels.enumerated().map { index, model in
+    }
+
+    /// The first `limit` matches, with the current model kept visible in the last slot when it
+    /// falls past the cut, and how many matches stay hidden.
+    nonisolated static func window(_ matches: [ProviderModel], limit: Int, isCurrent: (ProviderModel) -> Bool) -> (shown: [ProviderModel], hidden: Int) {
+        let hidden = max(0, matches.count - limit)
+        var shown = Array(matches.prefix(limit))
+        if hidden > 0, !shown.contains(where: isCurrent), let current = matches.first(where: isCurrent) {
+            shown[shown.count - 1] = current
+        }
+        return (shown, hidden)
+    }
+
+    private func reload() {
+        let query = search.text.trimmingCharacters(in: .whitespaces)
+        let models = ModelChoice.models(for: shownProvider, status: statuses[shownProvider])
+        let isCurrent = { [shownProvider, selection] (model: ProviderModel) in
+            shownProvider == selection.provider && model.slug == selection.model
+        }
+        let (shown, hidden) = Self.window(Self.matching(models, query: query), limit: Self.rowLimit, isCurrent: isCurrent)
+        shownModels = shown
+        var rows = shownModels.enumerated().map { index, model in
             ComposerListRow.Model(
                 title: model.name,
                 badge: model.isDefault ? "Default" : nil,
                 kbd: index < 9 ? "⌘\(index + 1)" : nil,
                 showsCheck: true,
-                isChecked: shownProvider == selection.provider && model.slug == selection.model,
-                isCurrent: shownProvider == selection.provider && model.slug == selection.model
+                isChecked: isCurrent(model),
+                isCurrent: isCurrent(model)
             )
         }
-        let current = shownModels.firstIndex { shownProvider == selection.provider && $0.slug == selection.model }
-        list.setRows(rows, actions: shownModels.map { model in { [weak self] in self?.pick(model) } }, highlight: query.isEmpty ? (current ?? 0) : 0)
+        var actions: [() -> Void] = shownModels.map { model in { [weak self] in self?.pick(model) } }
+        if hidden > 0 {
+            rows.append(ComposerListRow.Model(title: "\(hidden) more — type to search", isDisabled: true))
+            actions.append {}
+        }
+        let current = shownModels.firstIndex(where: isCurrent)
+        list.setRows(rows, actions: actions, highlight: query.isEmpty ? (current ?? 0) : 0)
         list.isHidden = shownModels.isEmpty
         emptyLabel.isHidden = !shownModels.isEmpty
         for (kind, tile) in tiles {

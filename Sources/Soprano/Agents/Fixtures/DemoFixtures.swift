@@ -28,12 +28,22 @@ enum DemoFixtures {
         )
         let engine = AgentEngine(environment: environment)
         for kind in ProviderKind.allCases {
+            let version: String = switch kind {
+            case .omp: "18.14.0"
+            case .codex: "0.166.0"
+            case .claude: "2.1.314"
+            }
+            let account: String? = switch kind {
+            case .omp: nil
+            case .codex: "ChatGPT Pro 100 Subscription"
+            case .claude: "Claude Max"
+            }
             engine.setProviderStatus(ProviderStatus(
                 kind: kind,
                 health: .ready,
-                version: kind == .codex ? "0.166.0" : "2.1.314",
-                accountLabel: kind == .codex ? "ChatGPT Pro 100 Subscription" : "Claude Max",
-                models: ProviderCatalog.fallback(kind)
+                version: version,
+                accountLabel: account,
+                models: kind == .omp ? ompModels : ProviderCatalog.fallback(kind)
             ))
         }
         let selection: WorkspaceState.Selection = switch scenario {
@@ -79,7 +89,23 @@ enum DemoFixtures {
         ]
     }
 
+    static let omp = ModelSelection(provider: .omp, model: "anthropic/claude-opus-5-5", options: [ModelOptionID.effort: "high"])
     static let codex = ModelSelection(provider: .codex, model: "gpt-6.1-sol", options: [ModelOptionID.effort: "high"])
+
+    /// A slice of omp's catalog as `get_available_models` reports it (`provider/id`, "<name> · <provider>").
+    static let ompModels: [ProviderModel] = {
+        let efforts = ProviderCatalog.effortOption(["off", "low", "medium", "high", "xhigh", "max"], default: "high")
+        let entries: [(String, String)] = [
+            ("anthropic/claude-opus-5-5", "Claude Opus 5.5 · anthropic"),
+            ("anthropic/claude-sonnet-5-5", "Claude Sonnet 5.5 · anthropic"),
+            ("anthropic/claude-haiku-5-5", "Claude Haiku 5.5 · anthropic"),
+            ("openai-codex/gpt-6.1-sol", "GPT-6.1 Sol · openai-codex"),
+            ("github-copilot/gpt-6-luna", "GPT-6 Luna · github-copilot"),
+            ("openrouter/qwen/qwen3-coder", "Qwen3 Coder · openrouter"),
+        ]
+        return [ProviderModel(slug: ModelSelection.ompDefaultModel, name: "Claude Opus 5.5 · configured", isDefault: true, options: [efforts])]
+            + entries.map { ProviderModel(slug: $0.0, name: $0.1, options: [efforts]) }
+    }()
     static let claude = ModelSelection(provider: .claude, model: "claude-opus-5-5", options: [ModelOptionID.effort: "medium"])
 
     static func threads(_ now: Date) -> [AgentThread] {
@@ -91,7 +117,7 @@ enum DemoFixtures {
             id: "turn-login-1",
             ordinal: 1,
             userMessage: UserMessage(id: "msg-login-1", text: "Users get stuck in a redirect loop after logging in with SSO. Find out why and fix it, with a regression test.", createdAt: ago(1500)),
-            modelSelection: codex,
+            modelSelection: omp,
             status: .completed,
             startedAt: ago(1500),
             completedAt: ago(1308),
@@ -120,7 +146,7 @@ enum DemoFixtures {
             id: "turn-login-2",
             ordinal: 2,
             userMessage: UserMessage(id: "msg-login-2", text: "Nice. Also log the redirect target at debug level.", createdAt: ago(600)),
-            modelSelection: codex,
+            modelSelection: omp,
             status: .completed,
             startedAt: ago(600),
             completedAt: ago(548),
@@ -134,7 +160,7 @@ enum DemoFixtures {
         )
         result.append(AgentThread(
             id: ID.demo, projectID: ID.app, title: "Fix SSO login redirect loop", createdAt: ago(1500), updatedAt: ago(548),
-            modelSelection: codex, branch: "soprano/fix-login-redirect", worktreePath: "/Users/demo/.soprano-agents/worktrees/app/soprano-fix-login-redirect",
+            modelSelection: omp, branch: "soprano/fix-login-redirect", worktreePath: "/Users/demo/.soprano-agents/worktrees/app/soprano-fix-login-redirect",
             lastVisitedAt: ago(30), providerThreadID: "01a18ca6-e395-70f2-aa8c-32a625c98cc3", turns: [loginTurn1, loginTurn2]
         ))
 

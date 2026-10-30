@@ -29,11 +29,12 @@ struct AppSettings: Equatable, Sendable {
     /// (follow Soprano's own theme), or an id from `AppTheme.options`.
     var theme: String = "t3"
 
-    var defaultProvider: ProviderKind = .codex
+    var defaultProvider: ProviderKind = .omp
     /// nil = the provider's default model.
     var defaultModel: String?
     var defaultRuntimeMode: RuntimeMode = .fullAccess
     /// Executable overrides; nil = find on PATH.
+    var ompPath: String?
     var codexPath: String?
     var claudePath: String?
 
@@ -71,6 +72,7 @@ struct AppSettings: Equatable, Sendable {
             branchPrefix: branchPrefix,
             worktreesDirectory: worktreesDirectory,
             generateTitles: generateTitles,
+            ompPath: ompPath,
             codexPath: codexPath,
             claudePath: claudePath
         )

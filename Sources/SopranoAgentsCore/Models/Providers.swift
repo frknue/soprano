@@ -27,6 +27,9 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
         }
     }
 
+    /// Build/Plan applies: omp's RPC has no plan-mode switch, so its composer hides the toggle.
+    public var supportsPlanMode: Bool { self != .omp }
+
     /// Default chat model when the provider's live catalog is not known yet. For omp this is
     /// `ModelSelection.ompDefaultModel`: whatever omp itself is configured to use.
     public var defaultModel: String {

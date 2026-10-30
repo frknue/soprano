@@ -114,7 +114,7 @@ extension SettingsController {
             return [status.version.map { "Version \($0)" }, status.accountLabel].compactMap { $0 }.joined(separator: " · ")
         }
         if let message = status.message, !message.isEmpty { return message }
-        let command = status.kind == .codex ? "codex" : "claude"
+        let command = status.kind.executableName
         return switch status.health {
         case .notInstalled: "\(command) was not found. Install it or set its path below."
         case .unauthenticated: "Sign in with \(command) in a terminal, then check again."
@@ -132,7 +132,8 @@ extension SettingsController {
         let models = models(for: kind)
         let defaultName = models.first { $0.slug == defaultSlug }?.name ?? defaultSlug
         var options = [SelectOption(title: "Default (\(defaultName))", value: "")]
-        for (index, model) in models.enumerated() {
+        // omp's "default" entry is the same choice as the empty value above.
+        for (index, model) in models.filter({ $0.slug != ModelSelection.ompDefaultModel }).enumerated() {
             options.append(SelectOption(title: model.name, value: model.slug, separatorBefore: index == 0))
         }
         return options
@@ -152,8 +153,8 @@ extension SettingsController {
                 guard let engine = self?.engine else { return }
                 Task { await engine.refreshProviders() }
             }
-            let key = kind == .codex ? "codexPath" : "claudePath"
-            let command = kind == .codex ? "codex" : "claude"
+            let key = "\(kind.rawValue)Path"
+            let command = kind.executableName
             let configured = center.configuredValue(at: ["providers", key]) as? String
             let path = form.field(configured ?? "", placeholder: "\(command) on PATH", width: 256, identifier: "providers.\(key)", mono: true) { [weak self] value in
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

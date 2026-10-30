@@ -4,7 +4,8 @@ Deliberately not built yet. T3 Code features this app leaves out for now, so nob
 their absence for a bug:
 
 - Remote environments (SSH, Tailscale, T3 Connect relay, WSL), pairing, guest sharing.
-- Providers other than Codex and Claude Code (Cursor, OpenCode, Pi, Grok, ACP registry agents).
+- Providers other than omp, Codex and Claude Code (Cursor, OpenCode, upstream Pi, Grok, ACP
+  registry agents). omp has no Plan mode here: its RPC has no plan-mode switch.
 - Right-panel surfaces other than Diff: in-app browser preview, files, pull request pages, device.
 - Usage page and rate-limit meters; scheduled tasks / automations; subagent lineage tree.
 - Snooze, drag-and-drop inbox reordering, multi-select sidebar actions.

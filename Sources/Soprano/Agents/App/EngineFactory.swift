@@ -18,18 +18,19 @@ enum AppPaths {
 /// Executable overrides from settings.json, readable from the drivers' background tasks.
 final class ExecutablePaths: @unchecked Sendable {
     private let lock = NSLock()
-    private var codex: String?
-    private var claude: String?
+    private var paths: [ProviderKind: String] = [:]
 
-    func update(codex: String?, claude: String?) {
+    func update(_ settings: EngineSettings) {
         lock.withLock {
-            self.codex = codex
-            self.claude = claude
+            paths = [:]
+            paths[.omp] = settings.ompPath
+            paths[.codex] = settings.codexPath
+            paths[.claude] = settings.claudePath
         }
     }
 
     func path(for kind: ProviderKind) -> String? {
-        lock.withLock { kind == .codex ? codex : claude }
+        lock.withLock { paths[kind] }
     }
 }
 
@@ -42,7 +43,7 @@ enum EngineFactory {
     static func live(settings: EngineSettings) -> AgentEngine {
         let dataDirectory = AppPaths.dataDirectory()
         try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
-        executablePaths.update(codex: settings.codexPath, claude: settings.claudePath)
+        executablePaths.update(settings)
         let paths = executablePaths
         let environment = EngineEnvironment(
             drivers: [

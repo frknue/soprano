@@ -66,17 +66,19 @@ public struct EngineSettings: Sendable, Hashable {
     public var worktreesDirectory: String
     /// Generate thread titles with `textGenerationModel` after the first message.
     public var generateTitles: Bool
-    /// Executable overrides; nil = find `codex` / `claude` on PATH.
+    /// Executable overrides; nil = find `omp` / `codex` / `claude` on PATH.
+    public var ompPath: String?
     public var codexPath: String?
     public var claudePath: String?
 
     public init(
-        defaultModel: ModelSelection = .default(for: .codex),
+        defaultModel: ModelSelection = .default(for: .omp),
         defaultRuntimeMode: RuntimeMode = .fullAccess,
         textGenerationModel: ModelSelection = ModelSelection(provider: .codex, model: ProviderKind.codex.textGenerationModel, options: ["effort": "low"]),
         branchPrefix: String = "soprano",
         worktreesDirectory: String = NSString(string: "~/.soprano-agents/worktrees").expandingTildeInPath,
         generateTitles: Bool = true,
+        ompPath: String? = nil,
         codexPath: String? = nil,
         claudePath: String? = nil
     ) {
@@ -86,6 +88,7 @@ public struct EngineSettings: Sendable, Hashable {
         self.branchPrefix = branchPrefix
         self.worktreesDirectory = worktreesDirectory
         self.generateTitles = generateTitles
+        self.ompPath = ompPath
         self.codexPath = codexPath
         self.claudePath = claudePath
     }

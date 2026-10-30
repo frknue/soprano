@@ -17,7 +17,7 @@ struct SettingsTests {
         {
           "theme": "t3-dark",
           "agents": { "defaultProvider": "claude", "defaultModel": "claude-sonnet-5", "defaultRuntimeMode": "approval-required" },
-          "providers": { "codexPath": "/opt/homebrew/bin/codex", "claudePath": "~/bin/claude" },
+          "providers": { "ompPath": "~/.bun/bin/omp", "codexPath": "/opt/homebrew/bin/codex", "claudePath": "~/bin/claude" },
           "textGeneration": { "provider": "claude", "model": "claude-haiku-5-5", "titles": false },
           "worktrees": { "directory": "~/worktrees", "branchPrefix": "agent" },
           "chat": { "followUp": "queue", "width": "wide" },
@@ -32,6 +32,7 @@ struct SettingsTests {
         expected.defaultProvider = .claude
         expected.defaultModel = "claude-sonnet-5"
         expected.defaultRuntimeMode = .approvalRequired
+        expected.ompPath = home + "/.bun/bin/omp"
         expected.codexPath = "/opt/homebrew/bin/codex"
         expected.claudePath = home + "/bin/claude"
         expected.textGenerationProvider = .claude
@@ -82,12 +83,12 @@ struct SettingsTests {
 
     @Test func engineSettingsCarryTheDefaultsAndTheProviderFallbacks() {
         let defaults = AppSettings.defaults.engineSettings
-        #expect(defaults.defaultModel == ModelSelection(provider: .codex, model: ProviderKind.codex.defaultModel))
+        #expect(defaults.defaultModel == ModelSelection(provider: .omp, model: ModelSelection.ompDefaultModel))
         #expect(defaults.defaultRuntimeMode == .fullAccess)
         #expect(defaults.textGenerationModel == ModelSelection(provider: .codex, model: "gpt-6-luna", options: ["effort": "low"]))
         #expect(defaults.branchPrefix == "soprano")
         #expect(defaults.generateTitles)
-        #expect(defaults.codexPath == nil && defaults.claudePath == nil)
+        #expect(defaults.ompPath == nil && defaults.codexPath == nil && defaults.claudePath == nil)
 
         var settings = AppSettings()
         settings.defaultProvider = .claude
