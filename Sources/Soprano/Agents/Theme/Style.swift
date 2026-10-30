@@ -105,6 +105,8 @@ enum Icon {
     static let circleCheck = "checkmark.circle"                    // Done
     static let terminal = "terminal"
     static let fileDiff = "doc.badge.ellipsis"
+    static let files = "folder"                                    // Files surface
+    static let fileText = "doc.text"                               // A file tab
     static let gitBranch = "arrow.triangle.branch"
     static let gitFork = "arrow.triangle.branch"
     static let copy = "doc.on.doc"

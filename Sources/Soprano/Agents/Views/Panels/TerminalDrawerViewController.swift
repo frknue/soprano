@@ -2,18 +2,17 @@ import AppKit
 import SopranoAgentsCore
 import SwiftTerm
 
-/// The bottom terminal drawer of the chat column: SwiftTerm
-/// terminals running the user's login shell in the thread's working directory. Each thread keeps
-/// its terminals while the user switches threads; processes end when their thread is deleted or
-/// the app quits. A 6 pt handle on the top edge resizes the drawer; with several terminals a
+/// The bottom terminal drawer of the chat column: the selected thread's `.drawer` terminals from
+/// the window's `ThreadTerminalStore` (SwiftTerm running the user's login shell in the thread's
+/// working directory). A 6 pt handle on the top edge resizes the drawer; with several terminals a
 /// 144 pt list sits on the right, a single one gets a floating New / Close toolbar.
 @MainActor
-final class TerminalDrawerViewController: NSViewController, FocusRegionController, LocalProcessTerminalViewDelegate {
+final class TerminalDrawerViewController: NSViewController, FocusRegionController {
     let engine: AgentEngine
     let state: WorkspaceState
+    /// Every terminal of the window; the right panel's terminal tabs share it.
+    let store: ThreadTerminalStore
 
-    private(set) var sessions = TerminalSessions()
-    private var terminals: [String: LocalProcessTerminalView] = [:]
     /// Threads whose drawer already opened once (the first open creates a terminal).
     private var autoCreated: Set<String> = []
 
@@ -23,18 +22,6 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     private let toolbar = TerminalFloatingToolbar()
     let emptyState = TerminalEmptyState()
     private var listWidth: NSLayoutConstraint?
-
-    /// Starts the shell in a new terminal view (`executable`, `cwd`). Tests replace it to record
-    /// launches instead of spawning shells.
-    var launchShell: (LocalProcessTerminalView, _ executable: String, _ cwd: String) -> Void = { terminal, shell, cwd in
-        terminal.startProcess(
-            executable: shell,
-            args: ["-l"],
-            environment: TerminalDrawerViewController.environment(),
-            execName: "-" + URL(fileURLWithPath: shell).lastPathComponent,
-            currentDirectory: cwd
-        )
-    }
 
     /// Reports a thread whose workspace folder is gone (no terminal or script starts). Defaults to
     /// an alert over the window; tests replace it.
@@ -54,6 +41,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     init(engine: AgentEngine, state: WorkspaceState) {
         self.engine = engine
         self.state = state
+        self.store = ThreadTerminalStore(engine: engine)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -107,13 +95,19 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
             case .filter, .composerRestore: break
             }
         }
-        engine.addObserver(self) { [weak self] event in
-            if event == .threadListChanged || event == .projectsChanged { self?.pruneDeletedThreads() }
+        store.addObserver(self) { [weak self] change in
+            switch change {
+            case .sessions(let threadID):
+                guard let self else { return }
+                if engine.thread(threadID) == nil { autoCreated.remove(threadID) }
+                if threadID == self.threadID { update() }
+            }
         }
-        PaletteCenter.shared.addObserver(self) { [weak self] palette in self?.applyPalette(palette) }
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(applicationWillTerminate), name: NSApplication.willTerminateNotification, object: nil
-        )
+        // A worktree that appears after launch (or a project that moves back) ends "Workspace
+        // not found" and starts the first terminal; the list changes when that happens.
+        engine.addObserver(self) { [weak self] event in
+            if event == .threadListChanged || event == .projectsChanged { self?.update() }
+        }
         update()
     }
 
@@ -121,28 +115,27 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
 
     private var threadID: String? { state.selectedThreadID }
 
-    /// Shows the selected thread's active terminal (creating the first one when the drawer opens).
+    /// Shows the selected thread's active drawer terminal (creating the first one when the drawer opens).
     private func update() {
         guard isViewLoaded else { return }
         // A thread whose folder is missing shows that instead of an empty drawer, and gets its
         // first terminal once the folder is back.
-        let missingWorkspace = threadID.flatMap { id -> String? in
-            guard let thread = engine.thread(id), workingDirectory(for: id) == nil else { return nil }
-            return engine.workingDirectory(for: thread)
-        }
+        let missingWorkspace = threadID.flatMap { store.missingWorkspace(for: $0) }
         if state.isTerminalVisible, let threadID, missingWorkspace == nil, !autoCreated.contains(threadID) {
             autoCreated.insert(threadID)
-            if sessions.sessions(for: threadID).isEmpty {
-                _ = createTerminal(in: threadID)
+            if store.sessions(for: threadID, placement: .drawer).isEmpty {
+                // Re-renders through the store observer.
+                if createTerminal(in: threadID) != nil { return }
             }
         }
         emptyState.missingWorkspace = missingWorkspace
-        let list = threadID.map { sessions.sessions(for: $0) } ?? []
-        let active = threadID.flatMap { sessions.activeSession(for: $0) }
-        for (id, terminal) in terminals where id != active?.id && terminal.superview != nil {
-            terminal.removeFromSuperview()
+        let list = threadID.map { store.sessions(for: $0, placement: .drawer) } ?? []
+        let active = threadID.flatMap { store.activeSession(for: $0, placement: .drawer) }
+        for subview in terminalHost.subviews where subview !== active.flatMap({ store.terminalView($0.id) }) {
+            subview.removeFromSuperview()
         }
-        if let active, let terminal = terminals[active.id], terminal.superview !== terminalHost {
+        if let active, let terminal = store.terminalView(active.id), terminal.superview !== terminalHost {
+            terminal.removeFromSuperview()
             terminal.translatesAutoresizingMaskIntoConstraints = false
             terminalHost.addSubview(terminal)
             NSLayoutConstraint.activate([
@@ -160,52 +153,17 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         listPanel.update(sessions: list, activeID: active?.id)
     }
 
-    /// The directory a new terminal starts in: the thread's working directory (a scratch
-    /// directory is created on demand); nil when it does not exist.
-    private func workingDirectory(for threadID: String) -> String? {
-        guard let thread = engine.thread(threadID) else { return nil }
-        let path = engine.workingDirectory(for: thread)
-        var isDirectory: ObjCBool = false
-        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
-            return path
-        }
-        if thread.projectID == nil && thread.worktreePath == nil {
-            try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-            return FileManager.default.fileExists(atPath: path) ? path : nil
-        }
-        return nil
-    }
-
-    /// Starts a terminal for `threadID` in its working directory and makes it active. Returns its
-    /// session id, or nil (after reporting it) when that directory no longer exists: a terminal or
-    /// project script never falls back to another folder.
+    /// Starts a drawer terminal for `threadID` and makes it active. Returns its session id, or nil
+    /// (after reporting it) when the thread's directory no longer exists: a terminal or project
+    /// script never falls back to another folder.
     @discardableResult
     private func createTerminal(in threadID: String) -> String? {
-        guard let thread = engine.thread(threadID) else { return nil }
-        guard let cwd = workingDirectory(for: threadID) else {
-            reportMissingWorkspace(engine.workingDirectory(for: thread))
+        guard engine.thread(threadID) != nil else { return nil }
+        guard let session = store.create(in: threadID, placement: .drawer) else {
+            if let path = store.missingWorkspace(for: threadID) { reportMissingWorkspace(path) }
             return nil
         }
-        let session = sessions.add(to: threadID)
-        let terminal = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
-        terminal.processDelegate = self
-        terminal.optionAsMetaKey = false
-        terminal.font = Typography.mono(Typography.terminalSize)
-        style(terminal, palette: PaletteCenter.shared.palette)
-        terminals[session.id] = terminal
-        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
-        launchShell(terminal, shell, cwd)
         return session.id
-    }
-
-    /// The app's environment for the shell, with terminal capabilities set.
-    static func environment() -> [String] {
-        var environment = ProcessInfo.processInfo.environment
-        environment["TERM"] = "xterm-256color"
-        environment["COLORTERM"] = "truecolor"
-        environment["TERM_PROGRAM"] = "Soprano Agents"
-        if environment["LANG"] == nil { environment["LANG"] = "en_US.UTF-8" }
-        return environment.map { "\($0.key)=\($0.value)" }
     }
 
     /// "New Terminal" (⌘N in the drawer): opens the drawer and adds a terminal to the thread.
@@ -225,7 +183,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     /// scripts; the leading space keeps it out of shell history).
     func run(command: String, in threadID: String) {
         autoCreated.insert(threadID)
-        guard let sessionID = createTerminal(in: threadID), let terminal = terminals[sessionID] else { return }
+        guard let sessionID = createTerminal(in: threadID), let terminal = store.terminalView(sessionID) else { return }
         if state.selectedThreadID == threadID {
             if !state.isTerminalVisible { state.setTerminalVisible(true) } else { update() }
         }
@@ -235,7 +193,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
 
     /// "Close Terminal" (⌘W in the drawer), confirming first.
     func closeActiveTerminal() {
-        guard let threadID, let active = sessions.activeSession(for: threadID) else { return }
+        guard let threadID, let active = store.activeSession(for: threadID, placement: .drawer) else { return }
         Task { @MainActor in
             let confirmed = await Dialogs.confirm(
                 title: "Close terminal \"\(active.title)\"?",
@@ -245,54 +203,19 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
                 in: view.window
             )
             guard confirmed else { return }
-            close(sessionID: active.id, in: threadID)
-        }
-    }
-
-    private func close(sessionID: String, in threadID: String) {
-        guard sessions.close(sessionID, in: threadID) else { return }
-        end(sessionID)
-        update()
-        if sessions.sessions(for: threadID).isEmpty, state.selectedThreadID == threadID {
-            focusActiveTerminal()
+            store.close(active.id)
         }
     }
 
     private func select(sessionID: String) {
-        guard let threadID else { return }
-        sessions.select(sessionID, in: threadID)
+        store.select(sessionID)
         update()
         focusActiveTerminal()
     }
 
-    private func end(_ sessionID: String) {
-        guard let terminal = terminals.removeValue(forKey: sessionID) else { return }
-        terminal.processDelegate = nil
-        let pid = terminal.process?.shellPid ?? 0
-        if pid > 0 { kill(pid, SIGHUP) }
-        terminal.terminate()
-        terminal.removeFromSuperview()
-    }
-
-    private func pruneDeletedThreads() {
-        let live = Set(engine.threads.map(\.id))
-        for session in sessions.prune(keeping: live) {
-            end(session.id)
-        }
-        autoCreated.formIntersection(live)
-        update()
-    }
-
-    @objc private func applicationWillTerminate() {
-        for session in sessions.removeAll() {
-            end(session.id)
-        }
-    }
-
     private func focusActiveTerminal() {
-        guard let threadID, let active = sessions.activeSession(for: threadID), let terminal = terminals[active.id] else {
-            return
-        }
+        guard let threadID, let active = store.activeSession(for: threadID, placement: .drawer),
+              let terminal = store.terminalView(active.id) else { return }
         view.window?.makeFirstResponder(terminal)
     }
 
@@ -303,49 +226,6 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         let column = chat.view.bounds.height
         let maximum = max(Metrics.terminalMinHeight, min(column * 0.75, column - Metrics.topbarHeight - 120))
         chat.terminalDrawerHeight = min(max(chat.terminalDrawerHeight + delta, Metrics.terminalMinHeight), maximum)
-    }
-
-    // MARK: - Palette
-
-    private func applyPalette(_ palette: Palette) {
-        for terminal in terminals.values {
-            style(terminal, palette: palette)
-        }
-    }
-
-    private func style(_ terminal: LocalProcessTerminalView, palette: Palette) {
-        terminal.nativeBackgroundColor = palette.terminalBackground
-        terminal.nativeForegroundColor = palette.terminalForeground
-        terminal.caretColor = palette.terminalCursor
-        terminal.selectedTextBackgroundColor = palette.terminalSelection
-        terminal.installColors(palette.terminalANSI.map(Self.terminalColor))
-    }
-
-    /// SwiftTerm's 16-bit-per-channel color for an sRGB `NSColor`.
-    private static func terminalColor(_ color: NSColor) -> SwiftTerm.Color {
-        let srgb = color.usingColorSpace(.sRGB) ?? color
-        func channel(_ value: CGFloat) -> UInt16 { UInt16((max(0, min(1, value)) * 65535).rounded()) }
-        return SwiftTerm.Color(red: channel(srgb.redComponent), green: channel(srgb.greenComponent), blue: channel(srgb.blueComponent))
-    }
-
-    // MARK: - LocalProcessTerminalViewDelegate
-
-    nonisolated func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
-
-    nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
-
-    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-
-    /// The shell exited: its session closes (exited terminals close).
-    nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
-        let identifier = ObjectIdentifier(source)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let (sessionID, _) = terminals.first(where: { ObjectIdentifier($0.value) == identifier }) else { return }
-            for threadID in sessions.threadIDs where sessions.sessions(for: threadID).contains(where: { $0.id == sessionID }) {
-                close(sessionID: sessionID, in: threadID)
-            }
-        }
     }
 
     // MARK: - FocusRegionController

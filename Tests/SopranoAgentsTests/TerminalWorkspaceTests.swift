@@ -24,7 +24,7 @@ struct TerminalWorkspaceTests {
         let drawer = TerminalDrawerViewController(engine: built.engine, state: state)
         var launches: [String] = []
         var reported: [String] = []
-        drawer.launchShell = { _, _, cwd in launches.append(cwd) }
+        drawer.store.launchShell = { _, _, cwd in launches.append(cwd) }
         drawer.reportMissingWorkspace = { path in reported.append(path) }
         return Harness(engine: built.engine, state: state, drawer: drawer, launches: { launches }, reported: { reported })
     }
@@ -36,7 +36,7 @@ struct TerminalWorkspaceTests {
         harness.drawer.run(command: "swift test", in: DemoFixtures.ID.demo)
 
         #expect(harness.launches().isEmpty)
-        #expect(harness.drawer.sessions.sessions(for: DemoFixtures.ID.demo).isEmpty)
+        #expect(harness.drawer.store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).isEmpty)
         #expect(harness.reported() == [missing])
     }
 
@@ -49,7 +49,7 @@ struct TerminalWorkspaceTests {
         harness.drawer.run(command: "swift test", in: DemoFixtures.ID.demo)
 
         #expect(harness.launches() == [worktree.path])
-        #expect(harness.drawer.sessions.sessions(for: DemoFixtures.ID.demo).count == 1)
+        #expect(harness.drawer.store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).count == 1)
         #expect(harness.reported().isEmpty)
     }
 
@@ -70,5 +70,79 @@ struct TerminalWorkspaceTests {
 
         #expect(harness.launches() == [folder.path])
         #expect(harness.drawer.emptyState.missingWorkspace == nil)
+    }
+
+    @Test func anOpenDrawerStartsTheShellWhenTheThreadListChangesAfterItsWorktreeAppears() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("soprano-agents-wt-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let harness = try makeHarness(worktree: folder.path)
+        _ = harness.drawer.view
+        harness.state.setTerminalVisible(true)
+        #expect(harness.drawer.emptyState.missingWorkspace == folder.path)
+
+        // A new-worktree launch: the folder appears, then the branch rename / title updates the list.
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        harness.engine.rename(DemoFixtures.ID.demo, title: "Renamed")
+
+        #expect(harness.launches() == [folder.path])
+        #expect(harness.drawer.emptyState.missingWorkspace == nil)
+    }
+
+    private func makeWorktree() throws -> URL {
+        let worktree = FileManager.default.temporaryDirectory.appendingPathComponent("soprano-agents-wt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        return worktree
+    }
+
+    @Test func panelTerminalsContinueTheDrawersNumberingAndStayOutOfItsList() throws {
+        let worktree = try makeWorktree()
+        defer { try? FileManager.default.removeItem(at: worktree) }
+        let harness = try makeHarness(worktree: worktree.path)
+        let store = harness.drawer.store
+
+        let drawer = store.create(in: DemoFixtures.ID.demo, placement: .drawer)
+        let panel = store.create(in: DemoFixtures.ID.demo, placement: .panel)
+
+        #expect(drawer?.title == "Terminal 1")
+        #expect(panel?.title == "Terminal 2")
+        #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).map(\.id) == [drawer?.id])
+        #expect(store.activeSession(for: DemoFixtures.ID.demo, placement: .drawer)?.id == drawer?.id)
+        #expect(store.session(panel?.id ?? "")?.placement == .panel)
+        #expect(harness.launches() == [worktree.path, worktree.path])
+    }
+
+    @Test func closingASessionEndsItsViewAndNotifiesItsThread() throws {
+        let worktree = try makeWorktree()
+        defer { try? FileManager.default.removeItem(at: worktree) }
+        let harness = try makeHarness(worktree: worktree.path)
+        let store = harness.drawer.store
+        let session = try #require(store.create(in: DemoFixtures.ID.demo, placement: .panel))
+        var changes: [ThreadTerminalStore.Change] = []
+        store.addObserver(harness.state) { changes.append($0) }
+
+        store.close(session.id)
+
+        #expect(changes == [.sessions(threadID: DemoFixtures.ID.demo)])
+        #expect(store.terminalView(session.id) == nil)
+        #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .panel).isEmpty)
+    }
+
+    @Test func deletingAThreadEndsItsTerminalsInBothPlacements() throws {
+        let worktree = try makeWorktree()
+        defer { try? FileManager.default.removeItem(at: worktree) }
+        let harness = try makeHarness(worktree: worktree.path)
+        let store = harness.drawer.store
+        let drawer = try #require(store.create(in: DemoFixtures.ID.demo, placement: .drawer))
+        let panel = try #require(store.create(in: DemoFixtures.ID.demo, placement: .panel))
+        var changes: [ThreadTerminalStore.Change] = []
+        store.addObserver(harness.state) { changes.append($0) }
+
+        harness.engine.removeThreadRecord(DemoFixtures.ID.demo)
+
+        #expect(store.terminalView(drawer.id) == nil)
+        #expect(store.terminalView(panel.id) == nil)
+        #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).isEmpty)
+        #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .panel).isEmpty)
+        #expect(changes.contains(.sessions(threadID: DemoFixtures.ID.demo)))
     }
 }

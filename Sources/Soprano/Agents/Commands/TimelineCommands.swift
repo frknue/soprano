@@ -13,7 +13,8 @@ enum TimelineCommands {
                 id: "chat.find",
                 title: "Find in Thread",
                 category: .thread,
-                scopes: notTerminal,
+                // The right panel has its own ⌘F (`rightPanel.find`), which falls back to this.
+                scopes: [.sidebar, .timeline, .composer],
                 defaultKeys: ["cmd+f"],
                 icon: "magnifyingglass",
                 isEnabled: { hasThread($0) },

@@ -25,7 +25,8 @@ final class WorkspaceViewController: NSViewController {
         self.defaults = defaults
         sidebar = SidebarViewController(engine: engine, state: state)
         chat = ChatViewController(engine: engine, state: state)
-        rightPanel = RightPanelViewController(engine: engine, state: state)
+        // The panel's terminal tabs live in the drawer's store: one numbering, one set of shells.
+        rightPanel = RightPanelViewController(engine: engine, state: state, terminals: chat.terminal.store)
         super.init(nibName: nil, bundle: nil)
     }
 

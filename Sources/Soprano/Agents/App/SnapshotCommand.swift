@@ -26,6 +26,7 @@ enum SnapshotCommand {
         var terminal = false
         var rightPanel = false
         var diff: String?
+        var openFiles: [String] = []
         var perform: [String] = []
         var type: String?
         var keys: [String] = []
@@ -40,7 +41,7 @@ enum SnapshotCommand {
     usage: SopranoAgents snapshot --out <png> [--fixture \(DemoFixtures.scenarios.joined(separator: "|"))]
                                   [--size WxH] [--appearance light|dark] [--theme <id>]
                                   [--hide-sidebar] [--details] [--terminal] [--right-panel]
-                                  [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
+                                  [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
                                   [--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--click <label>]…
                                   [--settings \(SettingsPage.allCases.map(\.rawValue).joined(separator: "|"))]
                                   [--dialog \(dialogs.joined(separator: "|"))] [--wait <seconds>]
@@ -79,6 +80,7 @@ enum SnapshotCommand {
             case "--terminal": options.terminal = true
             case "--right-panel": options.rightPanel = true
             case "--diff": options.diff = try value(option)
+            case "--open-file": options.openFiles.append(try value(option))
             case "--perform": options.perform.append(try value(option))
             case "--type": options.type = try value(option)
             case "--keys": options.keys = try value(option).split(separator: " ").map(String.init)
@@ -147,6 +149,9 @@ enum SnapshotCommand {
         if options.rightPanel { state.setRightPanelVisible(true) }
         if let diff = options.diff {
             state.showDiff(try diffScope(diff))
+        }
+        for path in options.openFiles {
+            state.showRightPanel(.file(path))
         }
 
         // Far outside every display: real window-server backing, never seen.

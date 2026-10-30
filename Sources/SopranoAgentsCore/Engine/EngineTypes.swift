@@ -178,6 +178,8 @@ public struct EngineEnvironment: Sendable {
     public var store: any ThreadStore
     /// App data root: attachments, scratch workspaces.
     public var dataDirectory: URL
+    /// Lists and reads working-directory files for the right panel.
+    public var files: any WorkspaceFileService
     public var now: @Sendable () -> Date
 
     public init(
@@ -185,12 +187,14 @@ public struct EngineEnvironment: Sendable {
         git: any GitService,
         store: any ThreadStore,
         dataDirectory: URL,
+        files: any WorkspaceFileService = LiveWorkspaceFileService(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.drivers = drivers
         self.git = git
         self.store = store
         self.dataDirectory = dataDirectory
+        self.files = files
         self.now = now
     }
 }

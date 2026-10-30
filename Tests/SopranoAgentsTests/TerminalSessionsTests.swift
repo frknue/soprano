@@ -66,11 +66,33 @@ struct TerminalSessionsTests {
         let kept = sessions.add(to: "a")
         let gone = [sessions.add(to: "b"), sessions.add(to: "b")]
         let removed = sessions.prune(keeping: ["a"])
-        #expect(Set(removed.map(\.id)) == Set(gone.map(\.id)))
+        #expect(Set(removed.map(\.info.id)) == Set(gone.map(\.id)))
+        #expect(removed.allSatisfy { $0.threadID == "b" })
         #expect(sessions.sessions(for: "a") == [kept])
         #expect(sessions.sessions(for: "b").isEmpty)
         let all = sessions.removeAll()
         #expect(all.map(\.id) == [kept.id])
         #expect(sessions.threadIDs.isEmpty)
+    }
+
+    @Test func numbersAreSharedAcrossPlacementsOfAThread() {
+        var sessions = makeSessions()
+        let drawer = sessions.add(to: "a", placement: .drawer)
+        let panel = sessions.add(to: "a", placement: .panel)
+        #expect(drawer.title == "Terminal 1")
+        #expect(panel.title == "Terminal 2")
+        #expect(sessions.locate(panel.id)?.placement == .panel)
+    }
+
+    @Test func eachPlacementListsAndActivatesOnlyItsOwnTerminals() {
+        var sessions = makeSessions()
+        let drawer = sessions.add(to: "a", placement: .drawer)
+        let panel = sessions.add(to: "a", placement: .panel)
+        #expect(sessions.sessions(for: "a", placement: .drawer) == [drawer])
+        #expect(sessions.activeSession(for: "a", placement: .drawer) == drawer)
+        #expect(sessions.activeSession(for: "a", placement: .panel) == panel)
+        sessions.close(drawer.id, in: "a")
+        #expect(sessions.activeSession(for: "a", placement: .drawer) == nil)
+        #expect(sessions.activeSession(for: "a", placement: .panel) == panel)
     }
 }

@@ -24,6 +24,7 @@ enum DemoFixtures {
             git: FixtureGitService(),
             store: InMemoryThreadStore(snapshot),
             dataDirectory: dataDirectory,
+            files: FixtureWorkspaceFiles(),
             now: { now }
         )
         let engine = AgentEngine(environment: environment)

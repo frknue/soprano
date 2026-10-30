@@ -1,7 +1,8 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Panels module: diff toggle and view options, terminal new/close, open in editor, git actions.
+/// Panels module: diff and files toggles, right-panel tabs, diff view options, terminal
+/// new/close (drawer or panel tab, whichever has focus), open in editor, git actions.
 @MainActor
 enum PanelCommands {
     private static let notTerminal = FocusRegion.outsideTerminal
@@ -44,6 +45,74 @@ enum PanelCommands {
                 diff.toggleFileTree()
             },
             AppCommand(
+                id: "files.toggle",
+                title: "Toggle Files",
+                category: .view,
+                scopes: notTerminal,
+                defaultKeys: ["cmd+shift+f"],
+                icon: Icon.files,
+                isEnabled: { $0.state?.selectedThreadID != nil }
+            ) { context in
+                guard let state = context.state else { return }
+                if state.isRightPanelVisible && state.rightPanelSurface == .files {
+                    state.setRightPanelVisible(false)
+                } else {
+                    context.workspace?.rightPanel.open(.files)
+                }
+            },
+            AppCommand(
+                id: "files.search",
+                title: "Search Files",
+                category: .view,
+                icon: "magnifyingglass",
+                isEnabled: { $0.state?.selectedThreadID != nil }
+            ) { context in
+                guard let panel = context.workspace?.rightPanel else { return }
+                panel.open(.files)
+                panel.files.focusSearch()
+            },
+            AppCommand(
+                id: "rightPanel.newTerminal",
+                title: "New Terminal in Right Panel",
+                category: .terminal,
+                defaultKeys: ["cmd+shift+j"],
+                icon: Icon.terminal,
+                isEnabled: { $0.state?.selectedThreadID != nil }
+            ) { context in
+                context.workspace?.rightPanel.newTerminal()
+            },
+            AppCommand(
+                id: "rightPanel.closeTab",
+                title: "Close Tab",
+                category: .view,
+                scopes: [.rightPanel],
+                defaultKeys: ["cmd+w"],
+                icon: "xmark",
+                isEnabled: { $0.state?.isRightPanelVisible == true && $0.state?.rightPanelSurface != nil }
+            ) { context in
+                context.workspace?.rightPanel.closeActiveTab()
+            },
+            AppCommand(
+                id: "rightPanel.find",
+                title: "Find in Panel",
+                category: .view,
+                scopes: [.rightPanel],
+                defaultKeys: ["cmd+f"],
+                icon: "magnifyingglass",
+                isEnabled: { $0.state?.selectedThreadID != nil }
+            ) { context in
+                // The open file's find bar, the Files search field, else Find in Thread.
+                guard let workspace = context.workspace else { return }
+                switch context.state?.rightPanelSurface {
+                case .file where workspace.rightPanel.fileViewer.showFind():
+                    return
+                case .files:
+                    workspace.rightPanel.files.focusSearch()
+                default:
+                    workspace.chat.timeline.showFind()
+                }
+            },
+            AppCommand(
                 id: "rightPanel.toggleMaximized",
                 title: "Maximize Right Panel",
                 category: .view,
@@ -62,7 +131,12 @@ enum PanelCommands {
                 icon: Icon.terminal,
                 isEnabled: { $0.state?.selectedThreadID != nil }
             ) { context in
-                context.workspace?.chat.terminal.newTerminal()
+                guard let workspace = context.workspace else { return }
+                if workspace.rightPanel.ownsFirstResponder {
+                    workspace.rightPanel.newTerminal()
+                } else {
+                    workspace.chat.terminal.newTerminal()
+                }
             },
             AppCommand(
                 id: "terminal.close",
@@ -73,7 +147,12 @@ enum PanelCommands {
                 icon: "trash",
                 isEnabled: { $0.state?.selectedThreadID != nil }
             ) { context in
-                context.workspace?.chat.terminal.closeActiveTerminal()
+                guard let workspace = context.workspace else { return }
+                if workspace.rightPanel.ownsFirstResponder {
+                    workspace.rightPanel.closeActiveTab()
+                } else {
+                    workspace.chat.terminal.closeActiveTerminal()
+                }
             },
             AppCommand(
                 id: "editor.openFavorite",

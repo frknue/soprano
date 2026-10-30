@@ -51,6 +51,10 @@ The installer never restarts a running Soprano Agents; the update applies on the
    composer.
 5. Open a turn's diff from its changed-files card, or the whole thread's with `⌘D`. "Edit from
    here" rewinds the thread (and optionally the files) to before that turn.
+6. The right panel (`⌃⌘B`) keeps tabs per thread, as in T3 Code: Diff, Files (`⇧⌘F`: browse and
+   search the thread's workspace; ignored files stay out) with a read-only, syntax-colored tab per
+   opened file, and terminals (`⇧⌘J`) next to the bottom drawer's. `+` adds a surface; with every
+   tab closed, "Open a surface" offers Terminal (`T`), Files (`F`) and Diff (`D`).
 
 `⌘K` opens the command palette: every action, recent threads, projects and settings pages, with
 fuzzy search; `>` lists actions only. When the app is in the background, finished, failed and
@@ -59,7 +63,8 @@ waiting threads post a notification, and the Dock icon counts threads waiting fo
 ## Keyboard shortcuts
 
 Every shortcut can be changed in **Settings › Keybindings** (Record, Off, Reset) or in
-`settings.json`. Shortcuts marked *not terminal* don't fire while the terminal drawer has focus.
+`settings.json`. Shortcuts marked *not terminal* don't fire while a terminal (in the drawer or a
+right-panel tab) has focus.
 
 | Action | Shortcut | Where |
 |---|---|---|
@@ -78,7 +83,7 @@ Every shortcut can be changed in **Settings › Keybindings** (Record, Off, Rese
 | Pin Thread | `⇧⌘P` | not terminal |
 | Rename Thread | `F2` | sidebar |
 | Copy Thread Reference | `⇧⌘C` | not terminal |
-| Find in Thread | `⌘F` | not terminal |
+| Find in Thread | `⌘F` | sidebar, timeline, composer |
 | Jump to Latest | `⌘↓` | timeline |
 | Focus Composer | `⌘L` | everywhere |
 | Model Picker | `⇧⌘M` | not terminal |
@@ -89,13 +94,17 @@ Every shortcut can be changed in **Settings › Keybindings** (Record, Off, Rese
 | Toggle Plan Mode | `⇧⇥` | composer |
 | Steer or Queue (the other one) | `⌘↩` | composer |
 | Toggle Diff | `⌘D` | not terminal |
-| New Terminal | `⌘N` | terminal |
-| Close Terminal | `⌘W` | terminal |
+| Toggle Files | `⇧⌘F` | not terminal |
+| New Terminal in Right Panel | `⇧⌘J` | everywhere |
+| Close Tab | `⌘W` | right panel |
+| Find in Panel (find bar in a file tab, search in Files, else Find in Thread) | `⌘F` | right panel |
+| New Terminal | `⌘N` | terminal (drawer or right-panel tab) |
+| Close Terminal | `⌘W` | terminal (drawer or right-panel tab) |
 | Open in Editor | `⌘O` | everywhere |
 
 Unbound by default (bind them in Settings): Open settings.json, Add Project, Archive / Delete
 Thread, Search Threads, Filter Threads by Project, Expand / Collapse All Work, Interrupt, Commit,
-Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel.
+Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel, Search Files.
 
 `⌃A` starts a prefix chord (`prefix+p` = `⌃A`, then `P`); the prefix key and its timeout are
 settings. Chords with `⌥` are left alone so they keep typing characters on layouts that need

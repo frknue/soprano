@@ -24,7 +24,8 @@ swift test
 | `Sources/SopranoAgentsCore/Models/` | Contract | Domain types: `Project`, `AgentThread`, `Turn`, `TurnItem(Kind)`, approvals, user input, `ModelSelection`, `ProviderStatus`, `ThreadStatus`/`InboxSection`, `DurationText`, `JSONValue`. Foundation only. |
 | `Sources/SopranoAgentsCore/Providers/ProviderSession.swift` | Contract | `ProviderDriver`, `ProviderSession`, `ProviderEvent`, `SessionConfig`, `TurnInput`. |
 | `Sources/SopranoAgentsCore/Providers/` (rest) | Providers | `LineProcess` (stdio JSON-lines transport), Codex app-server client + session + driver, Claude stream-json session + driver, model catalogs, `generateJSON` for both. |
-| `Sources/SopranoAgentsCore/Engine/` | Engine | `AgentEngine` (state owner, observers, inbox lifecycle) and `AgentEngine+Turns.swift` (sessions, sending, steering, queue, approvals, checkpoints, revert, diffs, titles, git actions). `EngineTypes.swift` is contract. |
+| `Sources/SopranoAgentsCore/Engine/` | Engine | `AgentEngine` (state owner, observers, inbox lifecycle), `AgentEngine+Turns.swift` (sessions, sending, steering, queue, approvals, checkpoints, revert, diffs, titles, git actions) and `AgentEngine+Files.swift` (workspace files). `EngineTypes.swift` is contract. |
+| `Sources/SopranoAgentsCore/Files/` | Files | `WorkspaceFileService` (contract), `WorkspaceFileContent`, `WorkspaceFilePath` (the one escape check), `LiveWorkspaceFileService`. |
 | `Sources/SopranoAgentsCore/Store/` | Engine | `JSONFileThreadStore`. |
 | `Sources/SopranoAgentsCore/Git/GitService.swift` | Contract | `GitService`, `SourceControlWriter`, status/branch/action value types. |
 | `Sources/SopranoAgentsCore/Git/` (rest) | Git | `GitRunner` (the only place that spawns git), `LiveGitService` (checkpoints, diffs, status, branches, worktrees, commit/push/PR via `gh`), parsers. |
@@ -33,15 +34,15 @@ swift test
 | `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox, chat header + title-bar toggles. |
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
 | `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, draft hero + context strip. |
-| `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (diff), terminal drawer, Thread details card (editor, scripts, branch, git actions). |
-| `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` for snapshots and UI tests. |
+| `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
+| `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
 | `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`. **Never edit.** |
 
 Modules talk only through the contracts: views read `AgentEngine` state and call its methods;
 UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never talks to
 a provider and never spawns git: read-only git queries (status, branches) go through
 `engine.environment.git`, every write through an engine method. The only processes the UI layer
-starts itself are terminal-drawer shells (SwiftTerm) and `NSWorkspace` opens (editor, Finder, URLs).
+starts itself are terminal shells (SwiftTerm, drawer and right-panel tabs) and `NSWorkspace` opens (editor, Finder, URLs).
 
 ## Seams
 
@@ -57,8 +58,9 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`, `setInteractionMode`,
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
-  `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`. Contracts in the doc comments
-  of `AgentEngine.swift` and `AgentEngine+Turns.swift`.
+  `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`. Reads: `workspaceFiles`,
+  `readWorkspaceFile`, `workspaceFileURL`. Contracts in the doc comments of `AgentEngine.swift`,
+  `AgentEngine+Turns.swift` and `AgentEngine+Files.swift`.
 
 Engine behavior:
 - Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
@@ -92,6 +94,11 @@ Engine behavior:
 - Data root: `AppPaths.dataDirectory()` = `~/Library/Application Support/<bundle name>`
   (`SOPRANO_AGENTS_DATA_DIR` overrides). Attachments in `<data>/attachments/<uuid>/<name>`
   (passed to sessions as an additional directory); scratch threads work in `<data>/scratch/<thread>`.
+- Workspace files (`EngineEnvironment.files`, default `LiveWorkspaceFileService`): in a git repo
+  `ls-files -z --cached --others --exclude-standard` (ignored files stay out, deleted ones are
+  dropped); elsewhere a walk skipping `.git`, `node_modules`, `.build`, `DerivedData` (≤ 20 000
+  files). Reads resolve symlinks and refuse anything outside the working directory; text up to
+  2 MiB, images by extension up to 20 MiB, NUL or invalid UTF-8 = binary.
 
 ### Providers (Core/Providers)
 `ProviderDriver` per kind (`OmpDriver`, `CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s,
@@ -251,21 +258,32 @@ action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config
 
 ### `WorkspaceState` (Shell)
 UI state: `selection` (`.draft(projectID:)` or `.thread(id)`), panel visibility (sidebar, thread
-details card, terminal drawer, right panel), right-panel surface + diff scope + focused path,
+details card, terminal drawer, right panel), the right-panel tabs per thread (`RightPanelSurface`:
+`.diff`, `.files`, `.file(path)`, `.terminal(sessionID)`; `rightPanelSurfaces`, the active
+`rightPanelSurface` — nil = "Open a surface" launcher —, `showRightPanel(_:)`,
+`closeRightPanelTab(_:threadID:)`, `pruneRightPanelTabs(keeping:)`), diff scope + focused path,
 sidebar project filter and search text, and `restoreComposer(with:)` / `takeComposerRestore()`
 ("Edit from here" hands the user message back to the composer). Observe `Change` (`.selection`,
-`.panels`, `.filter`, `.composerRestore`).
+`.panels`, `.filter`, `.composerRestore`); a thread switch changes the active tab too.
 
 ### Regions (view controllers)
 `WorkspaceViewController` lays out sidebar | chat column | right panel (resizable rails, widths
 in an injectable `UserDefaults`). `ChatViewController` stacks header (52 pt), timeline, the
 floating composer (centered, ≤ 736 pt, 20 pt above the terminal drawer; vertically centered for
 drafts), the terminal drawer, and the Thread details card (top-right, 280 pt).
+`RightPanelViewController` hosts the tab strip ("+" = native menu: Terminal, Files, Diff), the
+launcher (`T`/`F`/`D` while it has focus; Terminal and Files need a thread) and one controller per
+surface kind: `DiffSurfaceViewController`, `FilesSurfaceViewController` (explorer, search,
+context menu), `FileViewerViewController` (breadcrumbs, line numbers, syntax colors, images),
+`TerminalSurfaceViewController` (focus region `.terminal`).
 
-Region controllers keep `init(engine:state:)`. Contracts the container relies on:
-`TimelineViewController.bottomInset` (space the composer covers), `ComposerViewController.onHeightChange`
-and `focusEditor()`, `ChatViewController.terminalDrawerHeight`. Region controllers that take
-keyboard focus adopt `FocusRegionController`.
+Region controllers keep `init(engine:state:)`, except `RightPanelViewController`, which also takes
+the drawer's `ThreadTerminalStore`: one store owns every terminal of the window (sessions with a
+`.drawer`/`.panel` placement and shared "Terminal N" numbering, SwiftTerm views, shells), so a
+panel terminal's exit, a deleted thread and app quit end shells in one place. Contracts the
+container relies on: `TimelineViewController.bottomInset` (space the composer covers),
+`ComposerViewController.onHeightChange` and `focusEditor()`, `ChatViewController.terminalDrawerHeight`.
+Region controllers that take keyboard focus adopt `FocusRegionController`.
 
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's
@@ -314,7 +332,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `thread.copyReference` | Copy Thread Reference | not terminal | `cmd+shift+c` | Sidebar |
 | `sidebar.search` | Search Threads | global | — | Sidebar |
 | `sidebar.filterProjects` | Filter Threads by Project | global | — | Sidebar |
-| `chat.find` | Find in Thread | not terminal | `cmd+f` | Timeline |
+| `chat.find` | Find in Thread | sidebar, timeline, composer | `cmd+f` | Timeline |
 | `timeline.jumpToLatest` | Jump to Latest | timeline | `cmd+down` | Timeline |
 | `timeline.expandAll` / `timeline.collapseAll` | Expand / Collapse All Work | — | — | Timeline |
 | `composer.focus` | Focus Composer | global | `cmd+l` | Composer |
@@ -327,22 +345,27 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `composer.sendAlternate` | Steer or Queue (opposite) | composer | `cmd+enter` | Composer |
 | `thread.stop` | Interrupt | global | — | Composer |
 | `diff.toggle` | Toggle Diff | not terminal | `cmd+d` | Panels |
-| `terminal.new` | New Terminal | terminal | `cmd+n` | Panels |
-| `terminal.close` | Close Terminal | terminal | `cmd+w` | Panels |
+| `files.toggle` | Toggle Files | not terminal | `cmd+shift+f` | Panels |
+| `files.search` | Search Files | — | — | Panels |
+| `rightPanel.newTerminal` | New Terminal in Right Panel | global | `cmd+shift+j` | Panels |
+| `rightPanel.closeTab` | Close Tab | rightPanel | `cmd+w` | Panels |
+| `rightPanel.find` | Find in Panel (file tab: find bar; Files: search; else Find in Thread) | rightPanel | `cmd+f` | Panels |
+| `terminal.new` | New Terminal (drawer, or a panel tab when one has focus) | terminal | `cmd+n` | Panels |
+| `terminal.close` | Close Terminal (drawer, or the focused panel tab) | terminal | `cmd+w` | Panels |
 | `editor.openFavorite` | Open in Editor | global | `cmd+o` | Panels |
 | `git.commit` / `git.push` / `git.createPR` | Commit / Push / Create PR | — | — | Panels |
 | `diff.toggleLayout` / `diff.toggleFileTree` | Toggle Split Diff View / Diff File Tree | — | — | Panels |
 | `rightPanel.toggleMaximized` | Maximize Right Panel | — | — | Panels |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
-router as global).
+router as global). A right-panel terminal tab is focus region `terminal`, like the drawer.
 
 ## Layout and visual design
 
 
 ```
 ┌ sidebar 256 (208…) ┬ chat column (≥ 640) ──────────────────────────────┬ right panel 540 (360…70%) ┐
-│ [traffic lights]   │ header 52: favicon project / Title ⌄   [▤][▭][◫]   │ tabs + diff surface         │
+│ [traffic lights]   │ header 52: favicon project / Title ⌄   [▤][▭][◫]   │ tabs [Diff][Files][x.swift]+│
 │ Search  [⫶][📁][✎] │   lane ≤ 736 centered                ┌ details ┐   │                             │
 │ Pinned / Active    │   user bubble right (≤ 80%, r16)    │ card 280 │   │                             │
 │ cards (78)         │   Worked for 3m 12s ›               └──────────┘   │                             │
@@ -355,7 +378,7 @@ router as global).
 
 - Colors only from `PaletteCenter.shared.palette`, which `Palette(soprano:)` derives from the
   Soprano theme in force (`theme: "soprano"` by default, following Soprano's own theme and
-  appearance; `folio` follows macOS light/dark). The terminal drawer uses the theme's terminal
+  appearance; `folio` follows macOS light/dark). Terminals (drawer and panel tabs) use the theme's terminal
   palette, project monograms its accent hues. Views subclass `PaletteView` and re-color in
   `applyPalette(_:)`.
 - Fonts from `Typography`: system font (14 body, 13 detail rows, 12 meta/pills, 11 kbd), SF Mono
@@ -375,12 +398,13 @@ router as global).
 
 `SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
-[--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
+[--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|text-generation|worktrees|notifications|keybindings|archive|about]
 [--dialog confirm|choose|prompt|alert] [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
 [--click <label>]… [--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
 of it and its child windows. `--perform` runs any registered command (open the palette, the model
-picker, …); `--settings` opens the settings screen on a page; `--dialog` presents a sample
+picker, `files.toggle`, `files.search`, `rightPanel.newTerminal`, …); `--open-file` opens a
+workspace-relative file tab; `--settings` opens the settings screen on a page; `--dialog` presents a sample
 `Dialogs` dialog; `--type` inserts text into the first responder (of the topmost overlay when one
 shows); `--keys` replays chords through the router (or into the topmost overlay); `--hover` sets
 the hover state of the `InteractiveView` with that accessibility label or tooltip; `--click` sends

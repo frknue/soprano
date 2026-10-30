@@ -70,6 +70,8 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         viewMenu.addItem(commandItem("view.toggleTerminal"))
         viewMenu.addItem(commandItem("view.toggleRightPanel"))
         viewMenu.addItem(commandItem("diff.toggle", title: "Toggle Diff"))
+        viewMenu.addItem(commandItem("files.toggle", title: "Toggle Files"))
+        viewMenu.addItem(commandItem("rightPanel.newTerminal", title: "New Terminal in Right Panel"))
         viewMenu.addItem(.separator())
         viewMenu.addItem(commandItem("composer.focus", title: "Focus Composer"))
         viewMenu.addItem(commandItem("timeline.jumpToLatest", title: "Jump to Latest"))
