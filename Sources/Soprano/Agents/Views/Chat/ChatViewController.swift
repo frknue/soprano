@@ -67,9 +67,10 @@ final class ChatViewController: NSViewController {
 
         let terminalHeight = terminalView.heightAnchor.constraint(equalToConstant: 0)
         self.terminalHeight = terminalHeight
-        // Centered and capped at the chat lane width, keeping the page gutter.
+        // Centered and capped at the chat lane width, keeping the page gutter. Below the
+        // window-size priority so a narrow column shrinks the composer instead of growing the window.
         let composerWidth = composerView.widthAnchor.constraint(equalToConstant: Metrics.chatMaxWidth)
-        composerWidth.priority = .defaultHigh
+        composerWidth.priority = .dragThatCannotResizeWindow
         let composerBottom = composerView.bottomAnchor.constraint(equalTo: terminalView.topAnchor, constant: -Metrics.gutter)
         let composerCentered = composerView.centerYAnchor.constraint(equalTo: timelineView.centerYAnchor)
         self.composerBottom = composerBottom
