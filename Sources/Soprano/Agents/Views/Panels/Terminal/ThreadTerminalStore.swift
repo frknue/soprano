@@ -107,7 +107,7 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         let terminal = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
         terminal.processDelegate = self
         terminal.optionAsMetaKey = false
-        terminal.font = Typography.mono(Typography.terminalSize)
+        terminal.font = Typography.terminal()
         style(terminal, palette: PaletteCenter.shared.palette)
         terminals[session.id] = terminal
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"

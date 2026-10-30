@@ -1,7 +1,7 @@
 import AppKit
 
 /// Fonts by a Tailwind-style size scale. The UI font is the system font (the
-/// `-apple-system` stack); code is SF Mono.
+/// `-apple-system` stack); code is SF Mono; the terminal prefers an installed Nerd Font.
 enum Typography {
     /// `text-sm` 14 pt: titles, body, assistant prose.
     static let bodySize: CGFloat = 14
@@ -26,6 +26,37 @@ enum Typography {
     /// Tabular digits for live durations ("Working for 12s").
     static func tabular(_ size: CGFloat = bodySize, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+    }
+
+    /// The terminal font. Prompts and CLIs (Powerlevel10k, Starship, eza, lazygit) draw icons
+    /// and powerline separators from the Nerd Font Private Use Area, which SF Mono cannot render,
+    /// so an installed Nerd Font family is used whole: every weight and style has the glyphs.
+    /// Without one, SF Mono, falling back to Symbols Nerd Font Mono when installed; SwiftTerm
+    /// derives bold and italic without that fallback, so only regular cells get the icons there.
+    @MainActor
+    static func terminal(_ size: CGFloat = terminalSize) -> NSFont {
+        let fonts = NSFontManager.shared
+        if let family = terminalFamily, let font = fonts.font(withFamily: family, traits: [], weight: 5, size: size) {
+            return font
+        }
+        let base = mono(size)
+        guard fonts.availableFontFamilies.contains(symbolsFamily) else { return base }
+        let symbols = NSFontDescriptor(fontAttributes: [.family: symbolsFamily])
+        let cascade = NSFontDescriptor.AttributeName(rawValue: kCTFontCascadeListAttribute as String)
+        return NSFont(descriptor: base.fontDescriptor.addingAttributes([cascade: [symbols]]), size: size) ?? base
+    }
+
+    @MainActor private static let terminalFamily = terminalFontFamily(among: NSFontManager.shared.availableFontFamilies)
+    private static let symbolsFamily = "Symbols Nerd Font Mono"
+
+    /// The Nerd Font family for the terminal among `families`: JetBrains Mono (Ghostty's default
+    /// face, as in Soprano's terminal), else the first other one alphabetically. Only "Nerd Font
+    /// Mono" families with letters qualify: their icons are one cell wide (the plain and "Propo"
+    /// variants' icons overflow the cell grid), and Symbols Nerd Font Mono has only the icons.
+    static func terminalFontFamily(among families: [String]) -> String? {
+        let candidates = families.filter { $0.hasSuffix(" Nerd Font Mono") && $0 != symbolsFamily }
+        if candidates.contains("JetBrainsMono Nerd Font Mono") { return "JetBrainsMono Nerd Font Mono" }
+        return candidates.sorted().first
     }
 }
 
