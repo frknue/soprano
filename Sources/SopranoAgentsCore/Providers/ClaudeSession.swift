@@ -71,7 +71,7 @@ public actor ClaudeSession: ProviderSession {
         options = ClaudeProtocol.LaunchOptions(config.modelSelection, runtime: config.runtimeMode, interaction: config.interactionMode)
         sessionID = config.resumeID ?? UUID().uuidString.lowercased()
         hasConversation = config.resumeID != nil
-        mapper = ClaudeEventMapper(cwd: config.cwd)
+        mapper = ClaudeEventMapper(cwd: config.cwd, sessionID: sessionID)
         do {
             try await spawn()
         } catch {
@@ -171,7 +171,7 @@ public actor ClaudeSession: ProviderSession {
             sessionID = UUID().uuidString.lowercased()
             hasConversation = false
             resumeAt = nil
-            mapper.rewound(to: nil)
+            mapper = ClaudeEventMapper(cwd: mapper.cwd ?? config?.cwd, sessionID: sessionID)
             continuation.yield(.conversationID(sessionID))
         case let .message(uuid):
             resumeAt = uuid

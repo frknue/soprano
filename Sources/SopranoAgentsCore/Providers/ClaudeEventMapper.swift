@@ -48,8 +48,10 @@ public struct ClaudeEventMapper: Sendable {
     private var todoItemID: String?
     private var lastUsage: JSONValue?
 
-    public init(cwd: String? = nil) {
+    /// `sessionID`: the id the session already announced (no second `conversationID`).
+    public init(cwd: String? = nil, sessionID: String? = nil) {
         self.cwd = cwd
+        self.sessionID = sessionID
     }
 
     /// The user denied this tool; its error result becomes `declined`.
