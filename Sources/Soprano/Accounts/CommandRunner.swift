@@ -45,8 +45,10 @@ enum CommandError: LocalizedError, Equatable {
 /// them — through the user's interactive login shell, so PATH and environment
 /// match — and plain executables such as `/usr/bin/security`.
 struct CommandRunner: Sendable {
-    /// The login shell agent panes use.
-    var shell: String = DefaultAgents.terminal.command
+    /// The login shell agent panes use: `$SHELL`, else `/bin/zsh` (the same
+    /// resolution as `DefaultAgents.terminal`, kept local so the accounts
+    /// layer compiles on its own).
+    var shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
 
     /// Marks where the rc files' output ends and the command's begins on
     /// stderr (ASCII record separator): prompt themes complain on stderr when
