@@ -81,9 +81,10 @@ public enum CodexProtocol {
 
     /// `turn/start` params:
     /// `{threadId, input, cwd, model, effort?, summary:"detailed", approvalPolicy,
-    /// approvalsReviewer, sandboxPolicy, serviceTier:"priority"?, collaborationMode:{mode:
+    /// approvalsReviewer, sandboxPolicy, serviceTier:"priority"|null, collaborationMode:{mode:
     /// "plan"|"default", settings:{model, reasoning_effort?}}}`. `collaborationMode` is sent in
-    /// both modes so leaving Plan clears it.
+    /// both modes so leaving Plan clears it; `serviceTier` persists for later turns, so Fast off
+    /// sends an explicit null to clear it.
     public static func turnStartParams(threadID: String, cwd: String, input: TurnInput) -> JSONValue {
         let model = input.modelSelection.model
         var settings: [String: JSONValue] = ["model": .string(model)]
@@ -101,9 +102,7 @@ public enum CodexProtocol {
             params["effort"] = .string(effort)
             settings["reasoning_effort"] = .string(effort)
         }
-        if input.modelSelection.fastMode {
-            params["serviceTier"] = "priority"
-        }
+        params["serviceTier"] = input.modelSelection.fastMode ? "priority" : .null
         params["collaborationMode"] = ["mode": .string(input.interactionMode.rawValue), "settings": .object(settings)]
         return .object(params)
     }

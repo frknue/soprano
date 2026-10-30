@@ -46,12 +46,13 @@ public actor CodexSession: ProviderSession {
         guard let executable = ExecutableLocator.locate("codex", explicitPath: explicit) else {
             throw ProviderError.notInstalled(.codex, path: explicit)
         }
+        try ProviderError.requireWorkspace(config.cwd)
         cwd = config.cwd
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
             arguments: ["app-server"],
             environment: ExecutableLocator.childEnvironment(overrides: CodexProtocol.originatorEnvironment),
-            directory: FileManager.default.fileExists(atPath: config.cwd) ? config.cwd : nil
+            directory: config.cwd
         ))
         do {
             try process.start()

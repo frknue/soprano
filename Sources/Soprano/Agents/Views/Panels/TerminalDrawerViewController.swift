@@ -21,7 +21,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     private let terminalHost = NSView()
     private let listPanel = TerminalListPanel()
     private let toolbar = TerminalFloatingToolbar()
-    private let emptyState = TerminalEmptyState()
+    let emptyState = TerminalEmptyState()
     private var listWidth: NSLayoutConstraint?
 
     /// Starts the shell in a new terminal view (`executable`, `cwd`). Tests replace it to record
@@ -43,7 +43,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         Task { @MainActor in
             await Dialogs.alert(
                 title: "Workspace not found",
-                message: "\(path) no longer exists, so no terminal or script was started. Restore the folder or start a new thread.",
+                message: "\(path) doesn't exist, so no terminal or script was started. Restore the folder or start a new thread.",
                 in: window
             )
         }
@@ -124,12 +124,19 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     /// Shows the selected thread's active terminal (creating the first one when the drawer opens).
     private func update() {
         guard isViewLoaded else { return }
-        if state.isTerminalVisible, let threadID, !autoCreated.contains(threadID) {
+        // A thread whose folder is missing shows that instead of an empty drawer, and gets its
+        // first terminal once the folder is back.
+        let missingWorkspace = threadID.flatMap { id -> String? in
+            guard let thread = engine.thread(id), workingDirectory(for: id) == nil else { return nil }
+            return engine.workingDirectory(for: thread)
+        }
+        if state.isTerminalVisible, let threadID, missingWorkspace == nil, !autoCreated.contains(threadID) {
             autoCreated.insert(threadID)
-            if sessions.sessions(for: threadID).isEmpty, workingDirectory(for: threadID) != nil {
+            if sessions.sessions(for: threadID).isEmpty {
                 _ = createTerminal(in: threadID)
             }
         }
+        emptyState.missingWorkspace = missingWorkspace
         let list = threadID.map { sessions.sessions(for: $0) } ?? []
         let active = threadID.flatMap { sessions.activeSession(for: $0) }
         for (id, terminal) in terminals where id != active?.id && terminal.superview != nil {
@@ -371,7 +378,16 @@ final class TerminalEmptyState: PaletteView {
         didSet { button.isEnabled = isEnabled }
     }
 
-    private let label = NSTextField.label("No terminal sessions for this thread yet.", size: Typography.rowSize)
+    /// The thread's folder that doesn't exist; the empty state says so instead of offering a shell.
+    var missingWorkspace: String? {
+        didSet {
+            label.stringValue = missingWorkspace.map { "Workspace not found: \($0)" } ?? Self.emptyText
+            button.isHidden = missingWorkspace != nil
+        }
+    }
+
+    private static let emptyText = "No terminal sessions for this thread yet."
+    private let label = NSTextField.label(TerminalEmptyState.emptyText, size: Typography.rowSize)
     private let button = TextButton("New Terminal", symbol: "plus", variant: .outline, size: .xs)
 
     override init(frame frameRect: NSRect) {
@@ -389,6 +405,7 @@ final class TerminalEmptyState: PaletteView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         button.onClick = { [weak self] in self?.onNewTerminal?() }
+        label.lineBreakMode = .byTruncatingMiddle
         applyPalette(palette)
     }
 

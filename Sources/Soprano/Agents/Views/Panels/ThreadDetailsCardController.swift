@@ -573,14 +573,20 @@ final class ThreadDetailsCardController: NSViewController {
         }
     }
 
-    /// Runs a stacked action for the selected thread, asking first on the default branch.
+    /// Runs a stacked action for the selected thread, asking first on the default branch. The
+    /// status is read fresh: from the palette the card may be hidden with no (or stale) status.
     func run(_ action: GitStackedAction, commitMessage: String? = nil, filePaths: [String]? = nil, featureBranch: Bool = false) {
         guard let thread, !isGitActionRunning else { return }
         let threadID = thread.id
         Task { @MainActor [weak self] in
             guard let self else { return }
             var featureBranch = featureBranch
-            if let status = gitStatus, let branch = status.branch, !featureBranch,
+            var status = gitStatus
+            if let cwd = workingDirectory {
+                status = await loadStatus(cwd: cwd)
+                gitStatus = status
+            }
+            if let status, let branch = status.branch, !featureBranch,
                GitQuickAction.requiresDefaultBranchConfirmation(action, isDefaultBranch: status.isDefaultBranch) {
                 let includesCommit = GitQuickAction.includesCommit(action) && status.hasChanges
                 let copy = GitQuickAction.defaultBranchCopy(action, branch: branch, includesCommit: includesCommit)

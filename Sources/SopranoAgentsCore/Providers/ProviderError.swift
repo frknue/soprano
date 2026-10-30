@@ -13,6 +13,8 @@ public enum ProviderError: Error, LocalizedError, Sendable, Hashable {
     case invalidOutput(String)
     case notStarted
     case noActiveTurn
+    /// The thread's working directory does not exist; the agent is never started elsewhere.
+    case workspaceMissing(String)
     case message(String)
 
     public var errorDescription: String? {
@@ -32,7 +34,16 @@ public enum ProviderError: Error, LocalizedError, Sendable, Hashable {
         case let .invalidOutput(reason): return reason
         case .notStarted: return "The provider session is not running."
         case .noActiveTurn: return "There is no running turn to steer."
+        case let .workspaceMissing(path): return EngineError.workspaceMissing(path).errorDescription
         case let .message(text): return text
+        }
+    }
+
+    /// Throws `workspaceMissing` unless `path` is an existing directory.
+    static func requireWorkspace(_ path: String) throws {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw ProviderError.workspaceMissing(path)
         }
     }
 

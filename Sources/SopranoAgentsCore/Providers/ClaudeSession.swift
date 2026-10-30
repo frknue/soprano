@@ -57,20 +57,32 @@ public actor ClaudeSession: ProviderSession {
     private var nextControlID = 1
     private var isTurnRunning = false
     private var interruptRequested = false
+    /// A steer was written: Claude Code aborts the running request with a `result` whose
+    /// `terminal_reason` is `aborted_tools`/`aborted_streaming`, then answers the steer in the
+    /// same engine turn with a second `result`.
+    private var steerPending = false
     private var isClosing = false
     private var hasEnded = false
 
-    public init(executablePath: @escaping @Sendable () -> String? = { nil }) {
+    /// Claude Code's config folder for transcript lookups; nil = `$CLAUDE_CONFIG_DIR` or `~/.claude`.
+    private let configDirectory: String?
+
+    public init(executablePath: @escaping @Sendable () -> String? = { nil }, configDirectory: String? = nil) {
         self.executablePath = executablePath
+        self.configDirectory = configDirectory
         (events, continuation) = AsyncStream.makeStream(of: ProviderEvent.self, bufferingPolicy: .unbounded)
     }
 
     public func start(_ config: SessionConfig) async throws -> String {
         guard self.config == nil, !hasEnded else { throw ProviderError.message("The Claude session was already started.") }
+        try ProviderError.requireWorkspace(config.cwd)
         self.config = config
         options = ClaudeProtocol.LaunchOptions(config.modelSelection, runtime: config.runtimeMode, interaction: config.interactionMode)
         sessionID = config.resumeID ?? UUID().uuidString.lowercased()
-        hasConversation = config.resumeID != nil
+        // A saved id whose transcript never got a prompt (stopped while starting, rewound to the
+        // start) cannot be resumed: Claude Code answers "No conversation found" forever. Start a
+        // fresh session under the same id instead.
+        hasConversation = config.resumeID.map { ClaudeTranscript.transcriptURL(sessionID: $0, configDirectory: configDirectory) != nil } ?? false
         mapper = ClaudeEventMapper(cwd: config.cwd, sessionID: sessionID)
         do {
             try await spawn()
@@ -113,6 +125,7 @@ public actor ClaudeSession: ProviderSession {
         resumeAt = nil
         isTurnRunning = true
         interruptRequested = false
+        steerPending = false
         return uuid
     }
 
@@ -120,6 +133,7 @@ public actor ClaudeSession: ProviderSession {
         guard process != nil else { throw ProviderError.notStarted }
         guard isTurnRunning else { throw ProviderError.noActiveTurn }
         try write(ClaudeProtocol.userMessage(input, uuid: UUID().uuidString.lowercased(), steer: true))
+        steerPending = true
     }
 
     public func interrupt() async {
@@ -208,7 +222,7 @@ public actor ClaudeSession: ProviderSession {
             executable: executable,
             arguments: arguments,
             environment: ClaudeProtocol.environment(),
-            directory: FileManager.default.fileExists(atPath: config.cwd) ? config.cwd : nil
+            directory: config.cwd
         ))
         do {
             try process.start()
@@ -318,7 +332,15 @@ public actor ClaudeSession: ProviderSession {
         default:
             var events = mapper.map(message)
             if message["type"]?.stringValue == "result" {
+                if steerPending, !interruptRequested, ClaudeEventMapper.isAbortedResult(message) {
+                    // The request the steer replaced: the turn goes on with the steered answer.
+                    steerPending = false
+                    events = events.filter { if case .tokenUsage = $0 { return true } else { return false } }
+                    for event in events { continuation.yield(event) }
+                    return
+                }
                 isTurnRunning = false
+                steerPending = false
                 if interruptRequested {
                     interruptRequested = false
                     events = events.map { event in

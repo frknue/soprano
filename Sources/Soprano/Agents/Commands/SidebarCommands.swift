@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum SidebarCommands {
     /// T3 Code's `!terminalFocus`.
-    private static let notTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
+    private static let notTerminal = FocusRegion.outsideTerminal
 
     static var all: [AppCommand] {
         var commands: [AppCommand] = [

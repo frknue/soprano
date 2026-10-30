@@ -9,7 +9,7 @@ struct EngineRevertTests {
         let driver = ScriptedDriver()
         let git = RecordingGit()
         let engine = EngineHarness.engine(driver: driver, git: git)
-        let project = engine.addProject(path: "/tmp/project")
+        let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
         let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), worktreePath: worktreePath)
         engine.insertThread(thread)
         for text in texts {
@@ -36,7 +36,7 @@ struct EngineRevertTests {
     }
 
     @Test func revertingWithFilesRestoresTheTurnsStartingCheckpointInAnIsolatedWorktree() async throws {
-        let (engine, threadID, _, git) = try await threadWithTurns(["one", "two"], worktreePath: "/tmp/worktrees/project/soprano-abc")
+        let (engine, threadID, _, git) = try await threadWithTurns(["one", "two"], worktreePath: EngineHarness.temporaryDirectory().path)
         let first = try #require(engine.thread(threadID)?.turns.first)
 
         _ = try await engine.revert(threadID, toBeforeTurn: first.id, restoreFiles: true)

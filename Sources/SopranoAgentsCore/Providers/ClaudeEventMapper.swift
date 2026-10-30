@@ -187,7 +187,9 @@ public struct ClaudeEventMapper: Sendable {
             events.append(.itemUpdated(final))
         }
         let succeeded = message["subtype"]?.stringValue == "success" && message["is_error"]?.boolValue != true
-        if succeeded {
+        if Self.isAbortedResult(message) {
+            events.append(.turnCompleted(outcome: .interrupted, error: nil))
+        } else if succeeded {
             events.append(.turnCompleted(outcome: .completed, error: nil))
         } else {
             let errors = (message["errors"]?.arrayValue ?? []).compactMap(\.stringValue)
@@ -196,6 +198,13 @@ public struct ClaudeEventMapper: Sendable {
         }
         resetTurn()
         return events
+    }
+
+    /// A `result` for a request Claude Code abandoned (`terminal_reason` `aborted_tools` /
+    /// `aborted_streaming`), which it reports even with subtype `success`.
+    static func isAbortedResult(_ message: JSONValue) -> Bool {
+        let reason = message["terminal_reason"]?.stringValue
+        return reason == "aborted_tools" || reason == "aborted_streaming"
     }
 
     private mutating func resetTurn() {

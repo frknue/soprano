@@ -49,6 +49,30 @@ struct KeyboardRouterTests {
         #expect(log.ran == ["timeline.next", "global.j"])
     }
 
+    /// T3 Code's `!terminalFocus`: with no region focused (after Esc in a search field, a click on
+    /// the window background) the shortcut still fires; only the terminal keeps it.
+    @Test func aNotTerminalBindingFiresWithNoRegionFocusedButNotInTheTerminal() {
+        let log = Log()
+        let notTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
+        let router = makeRouter([command("composer.workspace", scopes: notTerminal, keys: ["cmd+shift+x"], log: log)])
+
+        #expect(router.handle(KeyStroke(key: "x", meta: true, shift: true), in: context(nil)) == .handled)
+        #expect(router.handle(KeyStroke(key: "x", meta: true, shift: true), in: context(.terminal)) == .passThrough)
+        #expect(log.ran == ["composer.workspace"])
+    }
+
+    @Test func menusOfferACommandOnlyWhereItsShortcutWouldFire() {
+        let notTerminal = AppCommand(id: "diff.toggle", title: "Toggle Diff", category: .diff, scopes: [.sidebar, .timeline, .composer, .rightPanel]) { _ in }
+        let timelineOnly = AppCommand(id: "timeline.jumpToLatest", title: "Jump", category: .navigation, scopes: [.timeline]) { _ in }
+        let global = AppCommand(id: "palette.open", title: "Palette", category: .app) { _ in }
+
+        #expect(!notTerminal.isAvailable(in: .terminal))
+        #expect(notTerminal.isAvailable(in: nil))
+        #expect(!timelineOnly.isAvailable(in: .composer))
+        #expect(timelineOnly.isAvailable(in: .timeline))
+        #expect(global.isAvailable(in: .terminal))
+    }
+
     @Test func aScopedBindingNeverFiresOutsideItsRegions() {
         let log = Log()
         let router = makeRouter([command("timeline.next", scopes: [.timeline], keys: ["j"], log: log)])

@@ -11,6 +11,9 @@ enum FocusRegion: String, CaseIterable, Sendable {
     case terminal
     case rightPanel
     case settings
+
+    /// T3 Code's `!terminalFocus`: everywhere except the terminal drawer (and settings).
+    static let outsideTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
 }
 
 /// A view controller that owns a focus area. The router finds the focused area by walking up
@@ -91,6 +94,17 @@ struct AppCommand {
         self.inPalette = inPalette
         self.isEnabled = isEnabled
         self.perform = perform
+    }
+}
+
+extension AppCommand {
+    /// Whether the command's shortcut (and menu item) applies with `focus`: global commands
+    /// everywhere, scoped ones in their regions. With no region focused, commands available
+    /// everywhere outside the terminal still apply.
+    func isAvailable(in focus: FocusRegion?) -> Bool {
+        if scopes.isEmpty { return true }
+        guard let focus else { return scopes.isSuperset(of: FocusRegion.outsideTerminal) }
+        return scopes.contains(focus)
     }
 }
 

@@ -4,6 +4,11 @@ import Testing
 
 @MainActor
 struct EngineLaunchTests {
+    /// A project folder that exists (the engine refuses to run agents in missing folders).
+    private static func repository() -> String {
+        EngineHarness.temporaryDirectory().path
+    }
+
     private func image(_ name: String) -> SopranoAgentsCore.Attachment {
         SopranoAgentsCore.Attachment(kind: .image, name: name, path: "/tmp/\(name)", mimeType: "image/png", byteSize: 10)
     }
@@ -42,8 +47,9 @@ struct EngineLaunchTests {
             prompt.hasPrefix("You generate concise git branch names.") ? .object(["branch": .string("Fix Login Redirect")]) : .object([:])
         }
         let git = RecordingGit()
-        let engine = EngineHarness.engine(driver: driver, git: git, settings: EngineSettings(branchPrefix: "soprano", worktreesDirectory: "/tmp/wt", generateTitles: false))
-        let project = engine.addProject(path: "/tmp/repo")
+        let worktrees = EngineHarness.temporaryDirectory().path
+        let engine = EngineHarness.engine(driver: driver, git: git, settings: EngineSettings(branchPrefix: "soprano", worktreesDirectory: worktrees, generateTitles: false))
+        let project = engine.addProject(path: Self.repository())
         let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "main"))
 
         let threadID = try await engine.launchThread(draft, text: "Fix the login redirect", attachments: [])
@@ -56,7 +62,7 @@ struct EngineLaunchTests {
         let thread = try #require(engine.thread(threadID))
         #expect(git.calls.contains("worktree main \(temporary)"))
         #expect(git.calls.contains("rename \(temporary) -> soprano/fix-login-redirect"))
-        #expect(thread.worktreePath == "/tmp/wt/repo/\(temporary.replacingOccurrences(of: "/", with: "-"))")
+        #expect(thread.worktreePath == "\(worktrees)/repo/\(temporary.replacingOccurrences(of: "/", with: "-"))")
         #expect(thread.branch == "soprano/fix-login-redirect")
         #expect(driver.session?.configs.first?.cwd == thread.worktreePath)
         #expect(driver.session?.turns.map(\.text) == ["Fix the login redirect"])
@@ -67,7 +73,7 @@ struct EngineLaunchTests {
         let git = RecordingGit()
         git.currentBranch = "develop"
         let engine = EngineHarness.engine(driver: driver, git: git)
-        let project = engine.addProject(path: "/tmp/repo")
+        let project = engine.addProject(path: Self.repository())
         let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), runtimeMode: .approvalRequired, interactionMode: .plan)
 
         let threadID = try await engine.launchThread(draft, text: "Plan it", attachments: [])
@@ -87,7 +93,7 @@ struct EngineLaunchTests {
         let git = RecordingGit()
         git.worktreeError = EngineError.message("fatal: invalid reference: nope")
         let engine = EngineHarness.engine(driver: driver, git: git)
-        let project = engine.addProject(path: "/tmp/repo")
+        let project = engine.addProject(path: Self.repository())
         let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "nope"))
 
         let threadID = try await engine.launchThread(draft, text: "Do it", attachments: [])
@@ -103,7 +109,7 @@ struct EngineLaunchTests {
         let driver = ScriptedDriver()
         let git = RecordingGit()
         let engine = EngineHarness.engine(driver: driver, git: git)
-        let project = engine.addProject(path: "/tmp/repo")
+        let project = engine.addProject(path: Self.repository())
         let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "main"))
 
         let threadID = try await engine.launchThread(draft, text: "Do it", attachments: [])

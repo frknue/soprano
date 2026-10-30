@@ -16,7 +16,8 @@ struct EngineTurnTests {
         try await engine.send(threadID, text: "  Fix the login bug \n", attachments: [])
 
         let session = try #require(driver.session)
-        #expect(session.configs.first?.cwd == "/tmp/project")
+        let thread = try #require(engine.thread(threadID))
+        #expect(session.configs.first?.cwd == engine.project(thread.projectID)?.path)
         #expect(session.turns.map(\.text) == ["Fix the login bug"])
         #expect(engine.thread(threadID)?.providerThreadID == "conv-1")
         let running = try #require(engine.thread(threadID)?.activeTurn)

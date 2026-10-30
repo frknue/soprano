@@ -203,8 +203,13 @@ public final class AgentEngine {
         updateThread(threadID) { $0.lastVisitedAt = nil }
     }
 
+    /// A provider switch also forgets the old provider's conversation id: the new CLI cannot
+    /// resume another provider's conversation.
     public func setModelSelection(_ threadID: String, _ selection: ModelSelection) {
-        updateThread(threadID) { $0.modelSelection = selection }
+        updateThread(threadID) { thread in
+            if thread.modelSelection.provider != selection.provider { thread.providerThreadID = nil }
+            thread.modelSelection = selection
+        }
     }
 
     public func setRuntimeMode(_ threadID: String, _ mode: RuntimeMode) {

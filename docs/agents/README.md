@@ -89,7 +89,8 @@ Every shortcut can be changed in **Settings › Keybindings** (Record, Off, Rese
 | Open in Editor | `⌘O` | everywhere |
 
 Unbound by default (bind them in Settings): Open settings.json, Add Project, Archive / Delete
-Thread, Search Threads, Interrupt, Commit, Push, Create PR.
+Thread, Search Threads, Filter Threads by Project, Expand / Collapse All Work, Interrupt, Commit,
+Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel.
 
 `⌃A` starts a prefix chord (`prefix+p` = `⌃A`, then `P`); the prefix key and its timeout are
 settings. Chords with `⌥` are left alone so they keep typing characters on layouts that need
@@ -123,11 +124,15 @@ keeping your comments.
 ## Data
 
 - Threads, projects and attachments: `~/Library/Application Support/Soprano Agents/`
-  (`threads/`, `projects.json`, `attachments/`). The dev build uses `Soprano Agents Dev`;
+  (`threads/`, `projects.json`, `attachments/`, and `scratch/<thread>` as the working folder of
+  threads without a project). The dev build uses `Soprano Agents Dev`;
   `SOPRANO_AGENTS_DATA_DIR` overrides the location.
 - Checkpoints: hidden refs `refs/soprano-agents/checkpoints/<thread>/<turn>` in each project's
   repository. They never touch your index, HEAD or branches.
 - Worktrees: `~/.soprano-agents/worktrees/<repository>/<branch>` unless configured otherwise.
+- An agent, terminal or project script only ever runs in its thread's folder. If that folder is
+  gone (a deleted worktree, a moved project), it refuses with "Workspace not found" instead of
+  running anywhere else.
 - Window size and panel widths: the app's `UserDefaults`.
 
 ## License

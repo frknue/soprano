@@ -9,7 +9,7 @@ All notable changes to Soprano Agents are documented here. The format follows
 ### Added
 
 - Codex (`codex app-server`) and Claude Code (`claude -p` stream-json) threads in one app, with
-  T3 Code's look in light and dark (`theme`: `t3`, `t3-light`, `t3-dark`, or a Soprano theme).
+  T3 Code's look in light and dark (`theme`: `t3`, `t3-light`, `t3-dark`, `soprano` to follow Soprano, or a Soprano theme).
 - Thread inbox sidebar: search (titles, branches, messages), project filter, Add project, New
   thread (⌘N, ⇧⌘N, ⌃⌘N), Pinned and Active cards with live status pills (Working, Approval,
   Input, Failed, Done), Working and Settled shelves, inline rename (double-click or F2), thread

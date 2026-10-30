@@ -263,6 +263,14 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             do {
                 let message = try await engine.revert(threadID, toBeforeTurn: turnID, restoreFiles: choice == 1)
                 state.restoreComposer(with: message)
+            } catch let failure as EngineError {
+                if case let .filesNotRestored(message, _) = failure {
+                    // The conversation was rewound: the prompt still goes back to the composer.
+                    state.restoreComposer(with: message)
+                    await Dialogs.alert(title: "Files not restored", message: failure.localizedDescription, in: window)
+                } else {
+                    await Dialogs.alert(title: "Couldn’t edit from here", message: failure.localizedDescription, in: window)
+                }
             } catch {
                 await Dialogs.alert(title: "Couldn’t edit from here", message: error.localizedDescription, in: window)
             }

@@ -39,7 +39,7 @@ enum ShellCommands {
                 id: "view.toggleThreadDetails",
                 title: "Toggle Thread Details",
                 category: .view,
-                scopes: [.sidebar, .timeline, .composer, .rightPanel],
+                scopes: FocusRegion.outsideTerminal,
                 defaultKeys: ["cmd+shift+b"],
                 icon: Icon.squareMenu
             ) { context in

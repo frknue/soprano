@@ -154,7 +154,7 @@ final class KeyboardRouter {
             guard keymap.chords(for: command.id).contains(where: { stroke.matches($0, mode: mode) }) else { continue }
             if command.scopes.isEmpty {
                 global.append(command)
-            } else if let focus, command.scopes.contains(focus) {
+            } else if command.isAvailable(in: focus) {
                 scoped.append(command)
             }
         }

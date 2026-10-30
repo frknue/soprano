@@ -74,6 +74,20 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
             for item in turn.items.indices where turn.items[item].status.isActive {
                 turn.items[item].status = .interrupted
             }
+            // The provider that asked is gone: answering now would reach nobody.
+            for item in turn.items.indices {
+                switch turn.items[item].kind {
+                case var .approval(request) where request.decision == nil:
+                    request.decision = .cancel
+                    turn.items[item].kind = .approval(request)
+                    turn.items[item].status = .declined
+                case var .userInput(request) where request.answers == nil && !request.dismissed:
+                    request.dismissed = true
+                    turn.items[item].kind = .userInput(request)
+                default:
+                    break
+                }
+            }
             thread.turns[index] = turn
         }
         return thread
@@ -87,7 +101,11 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
             do {
                 loaded = try JSONDecoder().decode([Project].self, from: data)
             } catch {
-                Self.log.error("Ignoring unreadable projects.json: \(String(describing: error), privacy: .public)")
+                // Keep the unreadable file beside the store so the next save cannot destroy it.
+                let stamp = Int(Date().timeIntervalSince1970)
+                let aside = directory.appendingPathComponent("projects.json.unreadable-\(stamp)")
+                try? FileManager.default.moveItem(at: projectsURL, to: aside)
+                Self.log.error("Moved unreadable projects.json to \(aside.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
             }
         }
         projects = loaded

@@ -108,16 +108,23 @@ final class ComposerTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // ⌘↩ is `composer.sendAlternate`, which the keyboard router runs before this view sees the
+        // key; unbound, it is just a newline-free no-op here like any other ⌘ chord.
         if (event.keyCode == 36 || event.keyCode == 76), flags.contains(.command) {
-            onSubmit?(true)
             return
         }
         // Shift+Tab arrives as backtab from the keyboard but as a shifted tab from synthesized events.
-        if event.keyCode == 48, flags == .shift {
+        if event.keyCode == 48, flags == .shift, Self.shiftTabTogglesPlan {
             onTogglePlan?()
             return
         }
         super.keyDown(with: event)
+    }
+
+    /// The router never runs chords without ⌘/⌃ in text input, so the editor handles
+    /// `composer.togglePlan` itself, and only while it is bound to Shift+Tab.
+    static var shiftTabTogglesPlan: Bool {
+        SettingsCenter.shared.chords(for: "composer.togglePlan").contains { KeyStroke(key: "\t", shift: true).matches($0, mode: .direct) }
     }
 
     override func doCommand(by selector: Selector) {
@@ -133,7 +140,7 @@ final class ComposerTextView: NSTextView {
         case #selector(moveDown(_:)):
             if onHistory?(false) != true { super.doCommand(by: selector) }
         case #selector(insertBacktab(_:)):
-            onTogglePlan?()
+            if Self.shiftTabTogglesPlan { onTogglePlan?() } else { super.doCommand(by: selector) }
         case #selector(cancelOperation(_:)):
             // Escape closes an open picker; it never opens NSTextView's completion list.
             onEscape?()

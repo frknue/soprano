@@ -98,6 +98,11 @@ public enum EngineError: Error, LocalizedError, Sendable, Hashable {
     case emptyMessage
     case turnRunning
     case nothingToRevert
+    /// The thread's working directory (worktree or project root) is gone.
+    case workspaceMissing(String)
+    /// "Edit from here" rewound the conversation (`message` goes back to the composer) but the
+    /// files could not be restored.
+    case filesNotRestored(message: UserMessage, reason: String)
     case message(String)
 
     public var errorDescription: String? {
@@ -108,6 +113,8 @@ public enum EngineError: Error, LocalizedError, Sendable, Hashable {
         case .emptyMessage: "Turn requires non-empty text or attachments."
         case .turnRunning: "Interrupt the current turn before reverting checkpoints."
         case .nothingToRevert: "There is no checkpoint to revert to."
+        case let .workspaceMissing(path): "The workspace folder \(path) doesn't exist, so the agent was not started. Restore the folder or start a new thread."
+        case let .filesNotRestored(_, reason): "The conversation was rewound, but the files could not be restored: \(reason)"
         case let .message(text): text
         }
     }

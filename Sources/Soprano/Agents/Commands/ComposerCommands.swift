@@ -5,7 +5,7 @@ import SopranoAgentsCore
 @MainActor
 enum ComposerCommands {
     /// T3 Code's `!terminalFocus`.
-    private static let notTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
+    private static let notTerminal = FocusRegion.outsideTerminal
 
     private static func composer(_ context: CommandContext) -> ComposerViewController? {
         context.workspace?.chat.composer

@@ -67,6 +67,10 @@ extension AgentEngine {
             guard let project else { throw EngineError.message("A new worktree needs a project.") }
             let branch = TextGeneration.temporaryBranchName(prefix: settings.branchPrefix)
             thread.branch = branch
+            // The thread owns its worktree path from the start: until setup succeeds the folder
+            // doesn't exist, so the agent, terminals and scripts refuse to run instead of falling
+            // back to the shared project root (during setup or after it failed).
+            thread.worktreePath = LiveGitService.worktreePath(directory: settings.worktreesDirectory, projectRoot: project.path, branch: branch)
             worktree = (project, baseBranch, branch)
         case let .existingWorktree(path, branch):
             thread.worktreePath = path
@@ -232,8 +236,15 @@ extension AgentEngine {
             }
         }
 
+        // The provider has rolled back: from here on the thread is trimmed to match it even when
+        // restoring the files fails.
+        var restoreFailure: String?
         if restoreFiles {
-            try await runtime.git.run(cwd) { try await git.restoreCheckpoint(cwd: cwd, ref: baseline) }
+            do {
+                try await runtime.git.run(cwd) { try await git.restoreCheckpoint(cwd: cwd, ref: baseline) }
+            } catch {
+                restoreFailure = Self.describe(error)
+            }
         }
 
         let lastOrdinal = thread.turns.map(\.ordinal).max() ?? turn.ordinal
@@ -251,6 +262,9 @@ extension AgentEngine {
         updateThread(threadID) { thread in
             thread.turns.removeAll { $0.ordinal >= turn.ordinal }
             thread.updatedAt = now
+        }
+        if let restoreFailure {
+            throw EngineError.filesNotRestored(message: turn.userMessage, reason: restoreFailure)
         }
         return turn.userMessage
     }

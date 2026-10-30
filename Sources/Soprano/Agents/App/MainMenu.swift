@@ -151,6 +151,9 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         if let key = NSApp.keyWindow, !(key is MainWindow) { return false }
         guard let controller = windowController() else { return false }
         if controller.window?.attachedSheet != nil { return false }
-        return command.isEnabled(controller.commandContext())
+        // A menu key equivalent must not do what the shortcut wouldn't (⌘D in the terminal,
+        // ⌘↓ in the composer): out of scope, the key reaches the focused view instead.
+        let context = controller.commandContext()
+        return command.isAvailable(in: context.focus) && command.isEnabled(context)
     }
 }

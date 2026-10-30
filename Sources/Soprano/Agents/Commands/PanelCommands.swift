@@ -4,7 +4,7 @@ import SopranoAgentsCore
 /// Panels module: diff toggle and view options, terminal new/close, open in editor, git actions.
 @MainActor
 enum PanelCommands {
-    private static let notTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
+    private static let notTerminal = FocusRegion.outsideTerminal
 
     static var all: [AppCommand] {
         [

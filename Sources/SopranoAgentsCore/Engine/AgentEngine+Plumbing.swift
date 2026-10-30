@@ -64,6 +64,12 @@ extension AgentEngine {
     /// and starts the provider turn. Failures finish the turn as failed.
     func runTurn(_ threadID: String, _ turnID: String) async {
         guard let snapshot = thread(threadID), let turn = snapshot.turns.last(where: { $0.id == turnID }) else { return }
+        do {
+            try requireWorkspace(for: snapshot)
+        } catch {
+            finishTurn(threadID, turnID, status: .failed, error: Self.describe(error))
+            return
+        }
         await captureBaseline(threadID: threadID, cwd: workingDirectory(for: snapshot), ordinal: turn.ordinal - 1)
         guard isTurnRunning(threadID, turnID) else { return }
         do {
@@ -177,6 +183,20 @@ extension AgentEngine {
     // MARK: Sessions
 
     /// The thread's live session, started (or resumed from `providerThreadID`) on first use.
+    /// The agent only ever runs in the thread's own working directory: a projectless thread gets
+    /// its scratch folder created, any other missing folder (deleted worktree, moved or removed
+    /// project, worktree still being set up or failed) refuses with `workspaceMissing`.
+    func requireWorkspace(for thread: AgentThread) throws {
+        let path = workingDirectory(for: thread)
+        if thread.projectID == nil, thread.worktreePath == nil {
+            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw EngineError.workspaceMissing(path)
+        }
+    }
+
     func ensureSession(_ threadID: String) async throws -> any ProviderSession {
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         let rt = runtime.thread(threadID)
@@ -187,6 +207,7 @@ extension AgentEngine {
             await session.close()
             return try await ensureSession(threadID)
         }
+        try requireWorkspace(for: thread)
         let kind = thread.modelSelection.provider
         guard let driver = environment.drivers[kind] else {
             throw EngineError.providerUnavailable(kind, "No driver is configured.")

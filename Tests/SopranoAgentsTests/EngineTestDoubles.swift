@@ -112,6 +112,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
     var files = [ChangedFileStat(path: "README.md", additions: 3, deletions: 1)]
     var existingBranches: [String] = []
     var worktreeError: (any Error)?
+    var restoreError: (any Error)?
 
     var calls: [String] { lock.withLock { _calls } }
 
@@ -151,6 +152,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func restoreCheckpoint(cwd: String, ref: String) async throws {
         record("restore \(ref)")
+        if let restoreError { throw restoreError }
     }
 
     func deleteRefs(cwd: String, refs deleted: [String]) async throws {
@@ -176,7 +178,9 @@ final class RecordingGit: GitService, @unchecked Sendable {
     func createWorktree(projectRoot: String, baseBranch: String, newBranch: String, directory: String) async throws -> String {
         record("worktree \(baseBranch) \(newBranch)")
         if let worktreeError { throw worktreeError }
-        return "\(directory)/repo/\(newBranch.replacingOccurrences(of: "/", with: "-"))"
+        let path = "\(directory)/repo/\(newBranch.replacingOccurrences(of: "/", with: "-"))"
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
     }
 
     func removeWorktree(projectRoot: String, path: String, force: Bool) async throws {}
@@ -212,9 +216,9 @@ enum EngineHarness {
         return engine
     }
 
-    /// A project thread with no turns yet, working in `/tmp/project`.
+    /// A project thread with no turns yet, working in a fresh temporary project folder.
     static func idleThread(in engine: AgentEngine) -> String {
-        let project = engine.addProject(path: "/tmp/project")
+        let project = engine.addProject(path: temporaryDirectory().path)
         let thread = AgentThread(projectID: project.id, title: "Thread", modelSelection: .default(for: .codex))
         engine.insertThread(thread)
         return thread.id

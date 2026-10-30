@@ -94,4 +94,50 @@ struct StoreJSONFileTests {
 
         #expect(loaded.threads.map(\.title) == ["Good"])
     }
+
+    @Test func approvalsAndQuestionsPendingAtACrashComeBackAnsweredAsCancelled() throws {
+        let dir = directory()
+        let store = JSONFileThreadStore(directory: dir)
+        let running = Turn(
+            ordinal: 1,
+            userMessage: UserMessage(text: "go"),
+            modelSelection: .default(for: .codex),
+            items: [
+                TurnItem(id: "ap1", kind: .approval(ApprovalRequest(id: "ap1", kind: .command, detail: "rm -rf build")), status: .pending),
+                TurnItem(id: "q1", kind: .userInput(UserInputRequest(id: "q1", questions: [
+                    UserInputQuestion(id: "a", header: "H", question: "Which?", options: [UserInputOption(label: "One")]),
+                ])), status: .pending),
+            ]
+        )
+        store.save(thread: thread(title: "Crash", turns: [running]))
+        store.flush()
+
+        let loaded = try #require(try JSONFileThreadStore(directory: dir).load().threads.first)
+        let turn = try #require(loaded.turns.first)
+
+        #expect(turn.pendingApproval == nil)
+        #expect(turn.pendingUserInput == nil)
+        if case let .approval(request) = turn.items[0].kind {
+            #expect(request.decision == .cancel)
+        } else {
+            Issue.record("the approval item changed kind")
+        }
+    }
+
+    @Test func anUnreadableProjectsFileIsKeptAsideInsteadOfBeingOverwritten() throws {
+        let dir = directory()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let projectsURL = dir.appendingPathComponent("projects.json")
+        try Data("[{ truncated".utf8).write(to: projectsURL)
+        let store = JSONFileThreadStore(directory: dir)
+        _ = try store.load()
+
+        store.save(project: Project(id: "p2", title: "new", path: "/tmp/new"))
+        store.flush()
+
+        let kept = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasPrefix("projects.json.unreadable") }
+        #expect(kept.count == 1)
+        let original = try kept.first.map { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8) }
+        #expect(original == "[{ truncated")
+    }
 }

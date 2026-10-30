@@ -48,11 +48,18 @@ struct CodexProtocolTests {
         #expect(params["collaborationMode"] == ["mode": "plan", "settings": ["model": "gpt-6.1-sol", "reasoning_effort": "high"]])
     }
 
-    @Test func turnStartOmitsEffortAndTierByDefaultButStillSendsTheDefaultMode() {
+    @Test func turnStartOmitsEffortByDefaultButStillSendsTheDefaultMode() {
         let params = CodexProtocol.turnStartParams(threadID: "th", cwd: "/repo", input: Self.input())
         #expect(params["effort"] == nil)
-        #expect(params["serviceTier"] == nil)
         #expect(params["collaborationMode"] == ["mode": "default", "settings": ["model": "gpt-6.1-sol"]])
+    }
+
+    /// `serviceTier` persists for later turns (`Option<Option<String>>`): leaving it out after a
+    /// Fast turn would keep the priority tier, so Fast off must clear it with an explicit null.
+    @Test func turnStartClearsTheServiceTierWhenFastModeIsOff() {
+        let params = CodexProtocol.turnStartParams(threadID: "th", cwd: "/repo", input: Self.input(options: ["effort": "high"]))
+        #expect(params.objectValue?.keys.contains("serviceTier") == true)
+        #expect(params["serviceTier"] == .null)
     }
 
     @Test func imagesBecomeLocalImagesAndEveryAttachmentPathIsAppendedToTheText() {

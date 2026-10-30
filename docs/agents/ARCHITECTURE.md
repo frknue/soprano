@@ -33,7 +33,7 @@ swift test
 | `Sources/SopranoAgentsCore/Git/GitService.swift` | Contract | `GitService`, `SourceControlWriter`, status/branch/action value types. |
 | `Sources/SopranoAgentsCore/Git/` (rest) | Git | `GitRunner` (the only place that spawns git), `LiveGitService` (checkpoints, diffs, status, branches, worktrees, commit/push/PR via `gh`), parsers. |
 | `Sources/SopranoAgents/Theme/` | Shared kit | `Palette` + `PaletteCenter`, `Typography`, `Metrics`, `Radius`, `Icon`, `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`, `KbdView`. |
-| `Sources/SopranoAgents/Shell/`, `App/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
+| `Sources/SopranoAgents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
 | `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox, chat header + title-bar toggles. |
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
 | `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, draft hero + context strip. |
@@ -65,6 +65,13 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   of `AgentEngine.swift` and `AgentEngine+Turns.swift`.
 
 Engine behavior:
+- Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
+  `<data>/scratch/<id>` created; any other missing folder (deleted worktree, moved or removed
+  project) fails the turn with `EngineError.workspaceMissing` before anything spawns, and the
+  provider sessions refuse a missing cwd too. A new-worktree thread owns its planned worktree
+  path from launch, so during setup or after a failed setup nothing falls back to the project root.
+- A provider switch clears `providerThreadID` (no cross-provider resume). Turns recovered after a
+  crash cancel their pending approvals and questions.
 - One `ProviderSession` per thread, created lazily on first send (resumes `providerThreadID`
   after relaunch), closed on delete/shutdown. Provider events fold into the active turn:
   `itemUpdated` replaces by id, deltas append, approvals/user input become items, `turnCompleted`
@@ -123,7 +130,7 @@ Server requests: `item/commandExecution/requestApproval` and `item/fileChange/re
 `serverRequest/resolved` withdraws a pending request; `mcpServer/elicitation/request` is declined;
 anything else → JSON-RPC error -32601. Approval ids are `approval:<approvalId ?? itemId>` and
 `input:<itemId>` so they never collide with the item they gate. Every `turn/start` also sends
-`approvalsReviewer` (`"user"`, `"auto_review"` for Auto); fast mode is `serviceTier:"priority"`;
+`approvalsReviewer` (`"user"`, `"auto_review"` for Auto); fast mode is `serviceTier:"priority"` and Fast off sends `serviceTier:null` (the tier persists for later turns);
 attachment paths are appended to the text. Rollback: `thread/revert {threadId, beforeTurnId}`,
 finding the turn through `thread/turns/list` when its id is unknown. Notifications for other
 threads (subagents) are ignored. TypeScript bindings: `codex app-server generate-ts --out <dir>`.
@@ -142,7 +149,11 @@ host → CLI `{"type":"control_request","request_id","request":{"subtype":"initi
 "request_id","request":{"subtype":"can_use_tool","tool_name","input","permission_suggestions",
 "tool_use_id"}}` answered with `{"type":"control_response","response":{"subtype":"success",
 "request_id","response":{"behavior":"allow","updatedInput":{…}} | {"behavior":"deny","message":…}}}`.
-Steering = another user message with `"priority":"now"` while the turn runs. Permission mode map:
+Steering = another user message with `"priority":"now"` while the turn runs; Claude Code then ends
+the replaced request with a `result` whose `terminal_reason` is `aborted_tools`/`aborted_streaming`
+(subtype `success`, observed with 2.1.314), which the session swallows so the turn continues with
+the steered answer (an aborted result without a steer is an interrupt). A saved session id
+without a transcript under `~/.claude/projects` starts fresh with `--session-id`. Permission mode map:
 plan → `plan`; approval-required → `default`; auto-accept-edits → `acceptEdits`; auto → `auto`;
 full-access → `bypassPermissions`. Answers carry `toolUseID`; cancel denies with "User cancelled
 tool execution." and interrupts. `AskUserQuestion` arrives as `can_use_tool` and becomes a user
@@ -242,7 +253,7 @@ binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
 | `thread.jump.1`…`9` | Go to Thread N | global | `cmd+1`…`cmd+9` | Sidebar |
 | `thread.settle` | Settle Thread | not terminal | `cmd+shift+s` | Sidebar |
 | `thread.pin` | Pin Thread | not terminal | `cmd+shift+p` | Sidebar |
-| `thread.rename` | Rename Thread | — | — (F2 in the sidebar list, hard-coded: `KeyChord` has no function keys) | Sidebar |
+| `thread.rename` | Rename Thread | sidebar | — (F2 in the sidebar list, hard-coded: `KeyChord` has no function keys) | Sidebar |
 | `thread.archive` / `thread.delete` | Archive / Delete Thread | — | — | Sidebar |
 | `thread.copyReference` | Copy Thread Reference | not terminal | `cmd+shift+c` | Sidebar |
 | `sidebar.search` | Search Threads | global | — | Sidebar |
