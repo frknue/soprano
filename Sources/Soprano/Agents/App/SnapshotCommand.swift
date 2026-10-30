@@ -9,7 +9,8 @@ import SopranoAgentsCore
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
 /// opens the settings screen on a page, presents a sample dialog, types text into the first
-/// responder (of the topmost overlay when one shows), replays keys through the keyboard router, waits for async
+/// responder (of the topmost overlay when one shows), replays keys through the keyboard router,
+/// clicks controls (`--click`, in order, after the keys), sets a hover state, waits for async
 /// work, and writes a PNG of the window plus its child windows (palette, popovers, dialogs) rendered
 /// through Core Animation. Agents verify UI with it and read the PNG; they never launch the GUI.
 @MainActor
@@ -262,8 +263,9 @@ enum SnapshotCommand {
         }
     }
 
+    /// The first visible `InteractiveView` with that accessibility label or tooltip.
     private static func findInteractive(labeled label: String, in view: NSView?) -> InteractiveView? {
-        guard let view else { return nil }
+        guard let view, !view.isHidden else { return nil }
         if let interactive = view as? InteractiveView,
            interactive.accessibilityLabel() == label || interactive.toolTip == label {
             return interactive

@@ -55,3 +55,4 @@ All notable changes to Soprano Agents are documented here. The format follows
 ### Fixed
 
 - The composer's buttons (attach, model, reasoning/permissions, send) and its text area take clicks again; the composer's outline was swallowing them.
+- Clicking a composer chip whose picker is open now closes the picker instead of reopening it.
