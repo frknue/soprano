@@ -415,7 +415,6 @@ final class PaletteRowView: InteractiveView {
             let range = NSRange(location: utf16Offsets[position], length: characters[position].utf16.count)
             text.addAttributes([.font: Typography.ui(Typography.bodySize, weight: .semibold)], range: range)
         }
-        // Unmatched letters recede slightly so the match reads at a glance.
         return text
     }
 }

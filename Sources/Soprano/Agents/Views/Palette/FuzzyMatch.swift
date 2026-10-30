@@ -63,14 +63,16 @@ struct FuzzyMatch: Equatable {
             }
             if let previous {
                 if position == previous + 1 {
-                    score += 24
+                    score += 32
                 } else {
-                    score -= 3 + min(position - previous - 2, 12)
+                    score -= 8 + 2 * min(position - previous - 1, 12)
                 }
             }
             previous = position
         }
         score -= min(positions.first ?? 0, 12)
+        // One unbroken run (a plain substring) reads best.
+        if runs(positions) == 1 { score += 30 }
         return score
     }
 

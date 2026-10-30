@@ -95,8 +95,10 @@ enum PaletteSearch {
     }
 
     /// Entries matching `query`, best first (ties keep their order), with title highlights.
-    /// A title match beats one in the subtitle or search terms.
+    /// Titles match fuzzily; the subtitle and search terms (ids, branch, keywords) only by
+    /// substring, so a title match beats them and ids don't produce scattered noise.
     static func rank(_ entries: [PaletteEntry], query: String) -> [PaletteEntry] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         var scored: [(entry: PaletteEntry, score: Int, index: Int)] = []
         for (index, entry) in entries.enumerated() {
             var best: Int?
@@ -107,8 +109,9 @@ enum PaletteSearch {
                 highlighted.highlights = match.positions
             }
             for text in [entry.subtitle].compactMap({ $0 }) + entry.searchTerms {
-                guard let match = FuzzyMatch.match(query, in: text) else { continue }
-                best = max(best ?? .min, match.score)
+                guard !needle.isEmpty, let range = text.lowercased().range(of: needle) else { continue }
+                let offset = text.lowercased().distance(from: text.lowercased().startIndex, to: range.lowerBound)
+                best = max(best ?? .min, 500 - min(offset, 400))
             }
             if let best { scored.append((highlighted, best, index)) }
         }

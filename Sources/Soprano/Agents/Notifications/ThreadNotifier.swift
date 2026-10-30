@@ -68,7 +68,8 @@ final class ThreadNotifier {
         self.poster = poster
         self.setBadge = setBadge
         for thread in engine.threads where thread.archivedAt == nil {
-            alerts[thread.id] = ThreadAlert(ThreadStatus.of(thread))
+            // updateValue keeps threads without an alert as known (`nil` value, not a missing key).
+            alerts.updateValue(ThreadAlert(ThreadStatus.of(thread)), forKey: thread.id)
         }
         updateBadge()
         engine.addObserver(self) { [weak self] event in
@@ -86,7 +87,7 @@ final class ThreadNotifier {
         let active = isAppActive()
         for thread in engine.threads where thread.archivedAt == nil {
             let alert = ThreadAlert(ThreadStatus.of(thread))
-            current[thread.id] = alert
+            current.updateValue(alert, forKey: thread.id)
             guard let alert, let previous = alerts[thread.id], previous != alert else { continue }
             if !active, preferences.notificationsEnabled {
                 poster?.post(threadID: thread.id, alert: alert, body: thread.title, sound: preferences.notificationSound)
