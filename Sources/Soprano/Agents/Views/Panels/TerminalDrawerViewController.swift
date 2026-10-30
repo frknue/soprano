@@ -24,6 +24,31 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     private let emptyState = TerminalEmptyState()
     private var listWidth: NSLayoutConstraint?
 
+    /// Starts the shell in a new terminal view (`executable`, `cwd`). Tests replace it to record
+    /// launches instead of spawning shells.
+    var launchShell: (LocalProcessTerminalView, _ executable: String, _ cwd: String) -> Void = { terminal, shell, cwd in
+        terminal.startProcess(
+            executable: shell,
+            args: ["-l"],
+            environment: TerminalDrawerViewController.environment(),
+            execName: "-" + URL(fileURLWithPath: shell).lastPathComponent,
+            currentDirectory: cwd
+        )
+    }
+
+    /// Reports a thread whose workspace folder is gone (no terminal or script starts). Defaults to
+    /// an alert over the window; tests replace it.
+    lazy var reportMissingWorkspace: (_ path: String) -> Void = { [weak self] path in
+        let window = self?.view.window
+        Task { @MainActor in
+            await Dialogs.alert(
+                title: "Workspace not found",
+                message: "\(path) no longer exists, so no terminal or script was started. Restore the folder or start a new thread.",
+                in: window
+            )
+        }
+    }
+
     static let listWidth: CGFloat = 144
 
     init(engine: AgentEngine, state: WorkspaceState) {
@@ -144,10 +169,16 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         return nil
     }
 
-    /// Starts a terminal for `threadID` and makes it active. Returns its session id.
+    /// Starts a terminal for `threadID` in its working directory and makes it active. Returns its
+    /// session id, or nil (after reporting it) when that directory no longer exists: a terminal or
+    /// project script never falls back to another folder.
     @discardableResult
     private func createTerminal(in threadID: String) -> String? {
-        let cwd = workingDirectory(for: threadID) ?? NSHomeDirectory()
+        guard let thread = engine.thread(threadID) else { return nil }
+        guard let cwd = workingDirectory(for: threadID) else {
+            reportMissingWorkspace(engine.workingDirectory(for: thread))
+            return nil
+        }
         let session = sessions.add(to: threadID)
         let terminal = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
         terminal.processDelegate = self
@@ -156,13 +187,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         style(terminal, palette: PaletteCenter.shared.palette)
         terminals[session.id] = terminal
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
-        terminal.startProcess(
-            executable: shell,
-            args: ["-l"],
-            environment: Self.environment(),
-            execName: "-" + URL(fileURLWithPath: shell).lastPathComponent,
-            currentDirectory: cwd
-        )
+        launchShell(terminal, shell, cwd)
         return session.id
     }
 
@@ -180,7 +205,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     func newTerminal() {
         guard let threadID else { return }
         autoCreated.insert(threadID)
-        createTerminal(in: threadID)
+        guard createTerminal(in: threadID) != nil else { return }
         if !state.isTerminalVisible {
             state.setTerminalVisible(true)
         } else {
