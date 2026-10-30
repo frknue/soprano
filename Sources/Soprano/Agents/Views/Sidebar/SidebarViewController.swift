@@ -34,6 +34,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     nonisolated(unsafe) private var flagsMonitor: Any?
     nonisolated(unsafe) private var timer: Timer?
     private var timerInterval: TimeInterval = 0
+    private weak var observedWindow: NSWindow?
 
     init(engine: AgentEngine, state: WorkspaceState) {
         self.engine = engine
@@ -162,7 +163,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        if let window = view.window {
+        if let window = view.window, observedWindow !== window {
+            observedWindow = window
             NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.reload() }
             }
