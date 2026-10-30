@@ -1129,6 +1129,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let thread = currentThread
         let commands = thread.map { engine.commands(forThread: $0.id) }
             ?? engine.commands(forDraft: selection.provider, projectID: state.draftProjectID)
+        // Nothing known yet (no session this run): the provider is asked; `.commandsChanged`
+        // re-lists the open menu.
+        if commands.isEmpty {
+            if let thread { engine.loadCommands(forThread: thread.id) } else { engine.loadCommands(forDraft: selection.provider, projectID: state.draftProjectID) }
+        }
         let candidates = SlashCommandFilter.candidates(commands, includeCompact: thread.map { engine.canCompact($0.id) } ?? false)
         let matches = SlashCommandFilter.matching(candidates, query: token.query)
         let emptyText = SlashCommandFilter.emptyText(hasCandidates: !candidates.isEmpty, query: token.query)

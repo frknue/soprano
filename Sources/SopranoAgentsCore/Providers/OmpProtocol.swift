@@ -55,6 +55,10 @@ public enum OmpProtocol {
     /// --no-rules --no-lsp` (no UI requests, nothing persisted).
     public static let probeArguments = ["--mode", "rpc", "--no-session", "--no-extensions", "--no-skills", "--no-rules", "--no-lsp"]
 
+    /// Short-lived command-list process: `omp --mode rpc --no-session --no-lsp`, with extensions,
+    /// skills and rules on so `get_available_commands` lists what a session in that folder offers.
+    public static let commandListArguments = ["--mode", "rpc", "--no-session", "--no-lsp"]
+
     /// `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules --no-context-files
     /// --no-lsp [--model <provider/id>] --thinking low` (prompt on stdin, answer on stdout).
     public static func generationArguments(model: String) -> [String] {

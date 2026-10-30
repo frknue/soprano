@@ -108,6 +108,36 @@ public struct OmpDriver: ProviderDriver {
         return (provider, id)
     }
 
+    /// `get_available_commands` from a throwaway `omp --mode rpc --no-session --no-lsp` in
+    /// `directory` (`OmpProtocol.commandListArguments`; about half a second), 20 s budget.
+    public func commands(directory: String) async -> [ProviderCommand]? {
+        guard let executable = ExecutableLocator.locate("omp", explicitPath: executablePath()),
+              FileManager.default.fileExists(atPath: directory) else { return nil }
+        let adjustments = launchAdjustments()
+        let process = LineProcess(LineProcess.Configuration(
+            executable: executable,
+            arguments: adjustments.arguments(before: OmpProtocol.commandListArguments),
+            environment: OmpProtocol.environment(adjustments),
+            directory: directory
+        ))
+        do {
+            try process.start()
+        } catch {
+            return nil
+        }
+        defer { process.terminate() }
+        let client = OmpClient(transport: process)
+        let data = try? await withProviderTimeout(20, label: "omp command list") {
+            let ready = try await client.ready()
+            if ready["supportedProtocolVersions"]?.arrayValue?.contains(2) == true {
+                _ = try await client.request("negotiate_protocol", ["protocolVersion": 2])
+            }
+            return try await client.request("get_available_commands")
+        }
+        guard let list = data?["commands"], list.arrayValue != nil else { return nil }
+        return OmpProtocol.commands(list)
+    }
+
     /// `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules --no-context-files
     /// --no-lsp [--model <provider/id>] --thinking low` with the prompt (plus the schema and a
     /// JSON-only instruction) on stdin, in `cwd`, 180 s timeout. Returns the first JSON object

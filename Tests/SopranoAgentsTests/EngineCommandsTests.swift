@@ -92,4 +92,23 @@ struct EngineCommandsTests {
         #expect(await EngineHarness.eventually { engine.commands(forDraft: .omp, projectID: project.id) == [Self.review] })
         #expect(engine.commands(forThread: thread.id) == [Self.review])
     }
+
+    @Test func aThreadWithNothingListedAsksItsDriverOnceAndListsTheAnswer() async throws {
+        let driver = ScriptedDriver()
+        driver.listedCommands = [Self.tdd, Self.review]
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+        let recorder = Recorder()
+        engine.addObserver(recorder) { recorder.events.append($0) }
+
+        engine.loadCommands(forThread: threadID)
+        engine.loadCommands(forThread: threadID)
+
+        #expect(await EngineHarness.eventually { !engine.commands(forThread: threadID).isEmpty })
+        #expect(engine.commands(forThread: threadID) == [Self.review, Self.tdd])
+        #expect(recorder.commandChanges == 1)
+        engine.loadCommands(forThread: threadID)
+        let project = try #require(engine.project(engine.thread(threadID)?.projectID))
+        #expect(driver.commandDirectories == [project.path])
+    }
 }

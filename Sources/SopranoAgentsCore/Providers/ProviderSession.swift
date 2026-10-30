@@ -203,4 +203,14 @@ public protocol ProviderDriver: Sendable {
     /// One-shot structured text generation (titles, commit messages, branch names).
     /// Returns the JSON object the model produced for `schema` (a JSON Schema object).
     func generateJSON(prompt: String, schema: JSONValue, model: String, cwd: String) async throws -> JSONValue
+
+    /// The slash commands and skills the provider offers in `directory`, read without starting a
+    /// conversation (the composer's `/` menu before a thread has a live session). nil when the
+    /// provider can't list them that way or the listing failed.
+    func commands(directory: String) async -> [ProviderCommand]?
+}
+
+extension ProviderDriver {
+    /// Codex and Claude Code report their lists from a live session only.
+    public func commands(directory: String) async -> [ProviderCommand]? { nil }
 }

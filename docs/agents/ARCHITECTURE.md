@@ -66,7 +66,8 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
   `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
-  `rememberCommands`, `steerSubagent`, `cancelSubagent`. Reads: `subagent(_:_:)`,
+  `rememberCommands`, `loadCommands(forThread:)`, `loadCommands(forDraft:projectID:)`,
+  `steerSubagent`, `cancelSubagent`. Reads: `subagent(_:_:)`,
   `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
   `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL` (all by `WorkspaceRef`: `.thread(id)`
   or `.draft(projectID:)`, the project root a "Current checkout" thread will use; `key` is the
@@ -139,7 +140,10 @@ Engine behavior:
 - Commands: `ProviderEvent.commands([ProviderCommand])` lists are deduplicated by `insertText`,
   sorted (commands A–Z, then skills A–Z), kept per thread, and remembered per provider and
   workspace for drafts (a worktree thread's list also counts for its project; all scratch threads
-  share one). Text starting with `/` reaches the provider with its first characters intact.
+  share one). Text starting with `/` reaches the provider with its first characters intact. A
+  menu with nothing to list (no session this run) asks the provider driver
+  (`ProviderDriver.commands(directory:)`, one request per workspace at a time); omp answers from a
+  throwaway `omp --mode rpc --no-session --no-lsp` (`get_available_commands`, about 0.5 s).
 - Subagents: `ProviderEvent.subagent(id:, SubagentEvent)` folds into `AgentThread.subagents`
   (persisted, start order; `AgentEngine+Subagents.swift`): `.updated` merges reported facts
   (agent, assignment, model, latest intent, status; a status other than running ends its open
@@ -384,7 +388,9 @@ composer pass through) anchored above the composer at its width. It opens while 
 line-start token starting with `/` (`SlashToken`), lists
 `engine.commands(forThread:)` / `commands(forDraft:projectID:)` plus the app's `/compact` row when
 the thread can compact and the provider has none, filtered by `SlashCommandFilter` (name prefix,
-then name substring, then description substring), and re-lists on `.commandsChanged`. The editor
+then name substring, then description substring), and re-lists on `.commandsChanged`. An empty
+list calls `engine.loadCommands(…)` first, so a thread without a session this run (or a draft)
+fills in once the provider answers. The editor
 keeps focus and hands ↑/↓, Enter, Tab and Escape to the menu first (`menuKeyHandler`): Enter/Tab
 replace the token with `insertText` (keeping what follows), Escape hides the menu until the caret
 leaves the token, Enter never sends while it shows (with nothing to pick it closes the menu). It

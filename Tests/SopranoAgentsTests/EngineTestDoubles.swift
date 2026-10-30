@@ -95,6 +95,10 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     private var _sessions: [ScriptedSession] = []
     private var _prompts: [String] = []
     var generate: @Sendable (String) throws -> JSONValue = { _ in throw EngineError.message("no generation scripted") }
+    /// `commands(directory:)`'s answer; every call is recorded in `commandDirectories`.
+    var listedCommands: [ProviderCommand]?
+    private var _commandDirectories: [String] = []
+    var commandDirectories: [String] { lock.withLock { _commandDirectories } }
 
     init(kind: ProviderKind = .omp) {
         self.kind = kind
@@ -117,6 +121,11 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     func generateJSON(prompt: String, schema: JSONValue, model: String, cwd: String) async throws -> JSONValue {
         lock.withLock { _prompts.append(prompt) }
         return try generate(prompt)
+    }
+
+    func commands(directory: String) async -> [ProviderCommand]? {
+        lock.withLock { _commandDirectories.append(directory) }
+        return listedCommands
     }
 }
 
