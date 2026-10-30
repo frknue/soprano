@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// "+12 −3" in the diff colors, mono (T3 Code's `DiffStatLabel`).
-enum DiffStatText {
+enum TimelineDiffStat {
     static func make(additions: Int, deletions: Int, size: CGFloat, palette: Palette) -> NSAttributedString {
         let font = Typography.mono(size)
         let result = NSMutableAttributedString()
@@ -118,7 +118,7 @@ final class ChangedFilesCardView: PaletteView {
         layer?.backgroundColor = (palette.isDark ? palette.input.timelineAlpha(0.2) : palette.secondary).cgColor
         titleLabel.textColor = palette.foreground
         if let model {
-            statLabel.attributedStringValue = DiffStatText.make(additions: model.additions, deletions: model.deletions, size: Typography.smallSize, palette: palette)
+            statLabel.attributedStringValue = TimelineDiffStat.make(additions: model.additions, deletions: model.deletions, size: Typography.smallSize, palette: palette)
         }
     }
 }
@@ -191,7 +191,7 @@ final class ChangedFileRowView: InteractiveView {
         case let .directory(_, _, additions, deletions, _), let .file(_, _, additions, deletions):
             statLabel.attributedStringValue = additions == 0 && deletions == 0
                 ? NSAttributedString()
-                : DiffStatText.make(additions: additions, deletions: deletions, size: 10, palette: palette)
+                : TimelineDiffStat.make(additions: additions, deletions: deletions, size: 10, palette: palette)
         }
     }
 }
