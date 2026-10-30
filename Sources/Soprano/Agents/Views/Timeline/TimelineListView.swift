@@ -61,8 +61,16 @@ final class TimelineListView: NSView {
 
     private var clipView: NSClipView? { enclosingScrollView?.contentView }
 
-    /// Width of the chat lane: `--chat-content-max-width` with the page gutters.
-    var laneWidth: CGFloat { max(0, min(Metrics.chatMaxWidth, bounds.width - Metrics.gutter * 2)) }
+    /// Lane cap: `--chat-content-max-width` (`chat.width`: 736, 1152 or the full column).
+    var maxLaneWidth: CGFloat = Metrics.chatMaxWidth {
+        didSet {
+            guard maxLaneWidth != oldValue else { return }
+            relayoutIfLaneWidthChanged()
+        }
+    }
+
+    /// Width of the chat lane: the lane cap with the page gutters.
+    var laneWidth: CGFloat { max(0, min(maxLaneWidth, bounds.width - Metrics.gutter * 2)) }
     private var laneX: CGFloat { floor((bounds.width - laneWidth) / 2) }
 
     // MARK: Rows
@@ -202,16 +210,21 @@ final class TimelineListView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(newSize.width - frame.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged, abs(laneWidth - measuredWidth) > 0.5 {
-            let anchor = isPinnedToBottom ? nil : currentAnchor()
-            recomputeHeights()
-            if isPinnedToBottom {
-                scrollToEnd()
-            } else if let anchor, let index = rows.firstIndex(where: { $0.id == anchor.id }) {
-                scroll(toY: offsets[index] + anchor.delta)
-            }
-            tile()
+        if widthChanged { relayoutIfLaneWidthChanged() }
+    }
+
+    /// Re-measures every row when the lane width differs from the one they were measured at,
+    /// keeping the scroll anchor (or the bottom pin).
+    private func relayoutIfLaneWidthChanged() {
+        guard abs(laneWidth - measuredWidth) > 0.5 else { return }
+        let anchor = isPinnedToBottom ? nil : currentAnchor()
+        recomputeHeights()
+        if isPinnedToBottom {
+            scrollToEnd()
+        } else if let anchor, let index = rows.firstIndex(where: { $0.id == anchor.id }) {
+            scroll(toY: offsets[index] + anchor.delta)
         }
+        tile()
     }
 
     /// The clip view resized (window or composer change).

@@ -113,6 +113,10 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             // Rendered Markdown carries its colors: rebuild what is on screen.
             self?.list.reconfigureVisibleRows()
         }
+        list.maxLaneWidth = SettingsCenter.shared.settings.chatWidth.maxWidth
+        SettingsCenter.shared.addObserver(self) { [weak self] in
+            self?.list.maxLaneWidth = SettingsCenter.shared.settings.chatWidth.maxWidth
+        }
         reload(scrollToEnd: true)
     }
 

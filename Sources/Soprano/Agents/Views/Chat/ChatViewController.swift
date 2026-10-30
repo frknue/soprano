@@ -27,6 +27,8 @@ final class ChatViewController: NSViewController {
     /// Composer pinned above the drawer (threads) or vertically centered (draft hero).
     private var composerBottom: NSLayoutConstraint?
     private var composerCentered: NSLayoutConstraint?
+    /// Composer width: the `chat.width` lane cap, squeezed by the gutters in narrow columns.
+    private var composerWidth: NSLayoutConstraint?
     private var composerHeight: CGFloat = 120
 
     /// Height of the terminal drawer when open. The drawer's resize handle sets it.
@@ -69,8 +71,9 @@ final class ChatViewController: NSViewController {
         self.terminalHeight = terminalHeight
         // Centered and capped at the chat lane width, keeping the page gutter. Below the
         // window-size priority so a narrow column shrinks the composer instead of growing the window.
-        let composerWidth = composerView.widthAnchor.constraint(equalToConstant: Metrics.chatMaxWidth)
+        let composerWidth = composerView.widthAnchor.constraint(equalToConstant: Self.composerWidth())
         composerWidth.priority = .dragThatCannotResizeWindow
+        self.composerWidth = composerWidth
         let composerBottom = composerView.bottomAnchor.constraint(equalTo: terminalView.topAnchor, constant: -Metrics.gutter)
         let composerCentered = composerView.centerYAnchor.constraint(equalTo: timelineView.centerYAnchor)
         self.composerBottom = composerBottom
@@ -117,8 +120,16 @@ final class ChatViewController: NSViewController {
             case .filter, .composerRestore: break
             }
         }
+        SettingsCenter.shared.addObserver(self) { [weak self] in
+            self?.composerWidth?.constant = Self.composerWidth()
+        }
         updatePanels()
         updateComposerPlacement()
+    }
+
+    /// The lane cap from `chat.width`; "full" fills the column (the gutters cap it).
+    private static func composerWidth() -> CGFloat {
+        min(SettingsCenter.shared.settings.chatWidth.maxWidth, 100_000)
     }
 
     private func updateComposerPlacement() {
