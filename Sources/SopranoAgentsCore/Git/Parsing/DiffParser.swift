@@ -3,8 +3,12 @@ import Foundation
 /// Parses unified diffs from `git diff` (one `FileDiff` per "diff --git").
 /// Lines split on "\n" only, so a CRLF file's lines keep their "\r" and a
 /// hunk rebuilds byte-exact; text decodes as UTF-8, lossily.
-enum DiffParser {
-    static func parse(_ data: Data) -> [FileDiff] {
+public enum DiffParser {
+    public static func parse(_ patch: String) -> [FileDiff] {
+        parse(Data(patch.utf8))
+    }
+
+    public static func parse(_ data: Data) -> [FileDiff] {
         var lines = data.split(separator: 0x0A, omittingEmptySubsequences: false)
         if lines.last?.isEmpty == true { lines.removeLast() }
 
