@@ -1,5 +1,43 @@
 import AppKit
 
+/// Content that scrolls under a still pointer gets no `mouseExited`, so a view that shows hover
+/// re-checks the pointer whenever its enclosing clip view scrolls and drops a hover the pointer
+/// left. Entering stays with AppKit's next mouse move: keyboard navigation scrolls lists too, and
+/// a synthesized enter would move their highlight to whatever row sits under a resting pointer.
+/// Attach it from `viewDidMoveToWindow`.
+@MainActor
+final class ScrollHoverSync: NSObject {
+    private weak var view: NSView?
+    private weak var clip: NSClipView?
+    private let onPointerLeft: () -> Void
+
+    init(_ view: NSView, onPointerLeft: @escaping () -> Void) {
+        self.view = view
+        self.onPointerLeft = onPointerLeft
+    }
+
+    /// Follows the view's current enclosing clip view (none once it leaves the window).
+    func attach() {
+        let next = view?.window == nil ? nil : view?.enclosingScrollView?.contentView
+        guard next !== clip else { return }
+        if let clip { NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: clip) }
+        clip = next
+        guard let next else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification, object: next)
+    }
+
+    @objc private func scrolled() {
+        guard let view, let window = view.window else { return }
+        if !Self.contains(window.mouseLocationOutsideOfEventStream, in: view) { onPointerLeft() }
+    }
+
+    /// Whether a window point lies in the visible part of `view`.
+    static func contains(_ windowPoint: NSPoint, in view: NSView) -> Bool {
+        guard !view.isHiddenOrHasHiddenAncestor else { return false }
+        return view.visibleRect.contains(view.convert(windowPoint, from: nil))
+    }
+}
+
 /// Base for custom-drawn controls: tracks hover and press, re-colors from the palette.
 class InteractiveView: PaletteView {
     var onClick: (() -> Void)?
@@ -10,6 +48,7 @@ class InteractiveView: PaletteView {
     private(set) var isHovered = false
     private(set) var isPressed = false
     private var trackingArea: NSTrackingArea?
+    private lazy var scrollHover = ScrollHoverSync(self) { [weak self] in self?.pointerLeftByScrolling() }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -17,6 +56,25 @@ class InteractiveView: PaletteView {
         let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
         addTrackingArea(area)
         trackingArea = area
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scrollHover.attach()
+    }
+
+    /// The list scrolled this view out from under the pointer. Routed through `mouseExited`, so
+    /// subclasses' hover side effects run too.
+    func pointerLeftByScrolling() {
+        guard isHovered, let window,
+              let event = NSEvent.enterExitEvent(
+                  with: .mouseExited,
+                  location: window.mouseLocationOutsideOfEventStream,
+                  modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                  windowNumber: window.windowNumber, context: nil,
+                  eventNumber: 0, trackingNumber: 0, userData: nil
+              ) else { return }
+        mouseExited(with: event)
     }
 
     override func mouseEntered(with event: NSEvent) {

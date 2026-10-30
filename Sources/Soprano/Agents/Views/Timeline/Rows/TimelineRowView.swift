@@ -57,6 +57,7 @@ class TimelineRowView: PaletteView {
     private(set) var row: TimelineRow?
     private var trackingArea: NSTrackingArea?
     private(set) var isHovered = false
+    private lazy var scrollHover = ScrollHoverSync(self) { [weak self] in self?.setHovered(false) }
 
     /// Rows that reveal controls on hover (message footers, timestamps).
     var tracksHover: Bool { false }
@@ -93,6 +94,11 @@ class TimelineRowView: PaletteView {
         let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
         addTrackingArea(area)
         trackingArea = area
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scrollHover.attach()
     }
 
     override func mouseEntered(with event: NSEvent) { setHovered(true) }
