@@ -256,6 +256,21 @@ enum DemoFixtures {
                 turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: codex, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(300))]
             ))
         }
+
+        // 10. Archived (Settings › Archive).
+        let archived: [(String, String?, Double, Double)] = [
+            ("Prototype onboarding carousel", ID.app, 86400 * 2, 86400 * 12),
+            ("Try SwiftData for thread storage", ID.soprano, 86400 * 6, 86400 * 15),
+            ("Sketch a pricing page", nil, 86400 * 9, 86400 * 20),
+        ]
+        for (index, (title, projectID, archivedAgo, createdAgo)) in archived.enumerated() {
+            let created = ago(createdAgo)
+            result.append(AgentThread(
+                id: "thread-archived-\(index)", projectID: projectID, title: title, createdAt: created, updatedAt: created,
+                modelSelection: codex, archivedAt: ago(archivedAgo), lastVisitedAt: created.addingTimeInterval(600),
+                turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: codex, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(240))]
+            ))
+        }
         return result
     }
 

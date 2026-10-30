@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var windowController: MainWindowController?
     private(set) var engine: AgentEngine?
     private var menuController: MainMenuController?
+    private var notifier: ThreadNotifier?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.installApplicationIcon()
@@ -42,7 +43,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
+        let poster = UserNotificationPoster.make { [weak self] threadID in self?.openThread(threadID) }
+        notifier = ThreadNotifier(engine: engine, poster: poster)
+
         Task { await engine.refreshProviders() }
+    }
+
+    /// A notification was clicked: show the window on that thread.
+    private func openThread(_ threadID: String) {
+        guard let controller = windowController else { return }
+        controller.state.select(.thread(threadID))
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

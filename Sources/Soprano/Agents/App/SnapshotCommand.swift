@@ -4,11 +4,12 @@ import SopranoAgentsCore
 /// `SopranoAgents snapshot --out <png> [--fixture demo] [--size 1440x900] [--appearance light|dark]
 /// [--theme <id>] [--hide-sidebar] [--details] [--terminal] [--right-panel]
 /// [--diff thread|turn:<n>|uncommitted] [--perform <command id>]… [--type "<text>"] [--keys "<chord> …"]
-/// [--hover <accessibility label>] [--wait <seconds>]`
+/// [--hover <accessibility label>] [--settings <page>] [--dialog confirm|choose|prompt|alert] [--wait <seconds>]`
 ///
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
-/// types text into the first responder, replays keys through the keyboard router, waits for async
+/// opens the settings screen on a page, presents a sample dialog, types text into the first
+/// responder (of the topmost overlay when one shows), replays keys through the keyboard router, waits for async
 /// work, and writes a PNG of the window plus its child windows (palette, popovers, dialogs) rendered
 /// through Core Animation. Agents verify UI with it and read the PNG; they never launch the GUI.
 @MainActor
@@ -28,6 +29,8 @@ enum SnapshotCommand {
         var type: String?
         var keys: [String] = []
         var hover: String?
+        var settings: SettingsPage?
+        var dialog: String?
         var wait: Double = 0.4
     }
 
@@ -36,8 +39,12 @@ enum SnapshotCommand {
                                   [--size WxH] [--appearance light|dark] [--theme <id>]
                                   [--hide-sidebar] [--details] [--terminal] [--right-panel]
                                   [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
-                                  [--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--wait <seconds>]
+                                  [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
+                                  [--settings \(SettingsPage.allCases.map(\.rawValue).joined(separator: "|"))]
+                                  [--dialog \(dialogs.joined(separator: "|"))] [--wait <seconds>]
     """
+
+    nonisolated static let dialogs = ["confirm", "choose", "prompt", "alert"]
 
     struct CaptureError: Error, CustomStringConvertible {
         var description: String
@@ -74,6 +81,16 @@ enum SnapshotCommand {
             case "--type": options.type = try value(option)
             case "--keys": options.keys = try value(option).split(separator: " ").map(String.init)
             case "--hover": options.hover = try value(option)
+            case "--settings":
+                let raw = try value(option)
+                guard let page = SettingsPage(rawValue: raw) else {
+                    throw CaptureError(description: "--settings must be one of \(SettingsPage.allCases.map(\.rawValue).joined(separator: ", "))")
+                }
+                options.settings = page
+            case "--dialog":
+                let raw = try value(option)
+                guard dialogs.contains(raw) else { throw CaptureError(description: "--dialog must be one of \(dialogs.joined(separator: ", "))") }
+                options.dialog = raw
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             default: throw CaptureError(description: "unknown option \(option)")
             }
@@ -147,8 +164,17 @@ enum SnapshotCommand {
             controller.perform(id)
             await settle(0.2)
         }
+        if let page = options.settings {
+            SettingsController.present(page: page, engine: built.engine, over: window)
+            await settle(0.25)
+        }
+        if let dialog = options.dialog {
+            presentSampleDialog(dialog, in: window)
+            await settle(0.25)
+        }
         if let text = options.type {
-            guard let responder = window.firstResponder as? NSTextView else {
+            let target = OverlayWindow.topmost(over: window) ?? window
+            guard let responder = target.firstResponder as? NSTextView else {
                 throw CaptureError(description: "--type: the first responder is not a text view")
             }
             responder.insertText(text, replacementRange: responder.selectedRange())
@@ -170,6 +196,40 @@ enum SnapshotCommand {
 
         let image = try render(window: window)
         try writePNG(image, to: options.output!)
+    }
+
+    /// Presents one of the harness's sample dialogs without waiting for an answer.
+    static func presentSampleDialog(_ kind: String, in window: NSWindow) {
+        Task { @MainActor in
+            switch kind {
+            case "choose":
+                _ = await Dialogs.choose(
+                    title: "Uncommitted changes",
+                    message: "The worktree has changes that are not committed yet. Commit them before pushing, or push only what is committed.",
+                    buttons: [DialogButton("Cancel"), DialogButton("Push committed only"), DialogButton("Commit & push", style: .primary)],
+                    in: window
+                )
+            case "prompt":
+                _ = await Dialogs.prompt(
+                    title: "Rename thread",
+                    message: "Give the thread a short, descriptive title.",
+                    placeholder: "Thread title",
+                    initialValue: "Fix SSO login redirect loop",
+                    confirmTitle: "Rename",
+                    in: window
+                )
+            case "alert":
+                await Dialogs.alert(title: "Couldn’t start a new thread", message: "Codex is unavailable: `codex` was not found on PATH.", in: window)
+            default:
+                _ = await Dialogs.confirm(
+                    title: "Delete thread \"Fix SSO login redirect loop\"?",
+                    message: "This permanently clears conversation history for this thread.",
+                    confirmTitle: "Delete",
+                    isDestructive: true,
+                    in: window
+                )
+            }
+        }
     }
 
     static func diffScope(_ raw: String) throws -> WorkspaceState.DiffScope {

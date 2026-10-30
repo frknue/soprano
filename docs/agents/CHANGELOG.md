@@ -15,3 +15,8 @@ All notable changes to Soprano Agents are documented here. The format follows
   navigation with hints while ⌘ is held, ⇧⌘S settle, ⇧⌘P pin, ⇧⌘C copy thread reference.
 - Chat header with the project / thread breadcrumb and the thread details, terminal and right
   panel toggles.
+- Command palette (`⌘K`): actions with their shortcuts, recent threads, projects and settings pages, fuzzy search with highlighted matches, `>` for actions only, "New thread in..." per project, `⌘1`–`⌘9` to pick a row.
+- Settings screen (`⌘,`): General, Providers, Text generation, Worktrees, Notifications, Keybindings (record, turn off or reset any shortcut), Archive (unarchive or delete threads) and About; every change is written to `~/.config/soprano-agents/settings.json`.
+- Notifications when a thread completes, fails, or needs approval or input while the app is in the background (`notifications.enabled`, `notifications.sound`), and a Dock badge counting threads waiting for you.
+- T3 Code–style confirmation dialogs (Return confirms, Esc cancels).
+- App icon: a speech bubble with typing dots.
