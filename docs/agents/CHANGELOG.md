@@ -28,3 +28,7 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Thread details card (⇧⌘B): open the workspace in your editor (⌘O, `editor.app`), run project
   scripts in the terminal, copy the branch name, commit / push / create a PR with T3 Code's
   quick action and the "Commit changes" dialog, and open uncommitted changes.
+- Message timeline in T3 Code's style: user bubbles with "Edit from here", Markdown answers with
+  code blocks and tables, "Worked for …" folds over each turn's work log, live "Working for" row,
+  inline approvals, plan and task cards, changed-files cards that open the diff, and Find in Thread
+  (⌘F). ⌘↓ jumps to the latest message.
