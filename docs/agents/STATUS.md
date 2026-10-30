@@ -1,7 +1,7 @@
 # Status
 
 Goal: Soprano Agents, a native macOS app in the Soprano family for omp (default), Codex and Claude
-Code (`~/git/private/soprano-agents`, local only, no GitHub remote yet).
+Code (`~/git/private/soprano-agents`, public at https://github.com/frknue/soprano_agents).
 
 ## Done
 - All modules built and merged: providers (omp `--mode rpc-ui`, Codex app-server, Claude
@@ -28,4 +28,4 @@ Code (`~/git/private/soprano-agents`, local only, no GitHub remote yet).
   code blocks wrap instead of scrolling, Claude rollback cut only sticks after the next message).
 
 ## Open decisions
-- Publish to GitHub (`frknue/soprano_agents`) and add a release workflow like the siblings.
+- Add a release workflow like the siblings.
