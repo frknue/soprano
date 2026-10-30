@@ -18,6 +18,8 @@ public final class AgentEngine {
     public private(set) var providers: [ProviderKind: ProviderStatus] = [:]
 
     private var observers: [(owner: () -> AnyObject?, handler: @MainActor (EngineEvent) -> Void)] = []
+    /// Provider sessions, background work and git serialization (AgentEngine+Turns.swift).
+    let runtime = EngineRuntime()
 
     public init(environment: EngineEnvironment, settings: EngineSettings = EngineSettings()) {
         self.environment = environment
@@ -106,6 +108,28 @@ public final class AgentEngine {
     public func insertThread(_ thread: AgentThread) {
         threads.append(thread)
         environment.store.save(thread: thread)
+        emit(.threadListChanged)
+    }
+
+    /// Replaces a thread in place and persists it without announcing anything; the caller emits
+    /// the narrowest event (streaming deltas → `.itemChanged`). Returns the thread before and after.
+    @discardableResult
+    func mutateThreadQuietly(_ id: String, _ change: (inout AgentThread) -> Void) -> (before: AgentThread, after: AgentThread)? {
+        guard let index = threads.firstIndex(where: { $0.id == id }) else { return nil }
+        let before = threads[index]
+        var thread = before
+        change(&thread)
+        guard thread != before else { return nil }
+        threads[index] = thread
+        environment.store.save(thread: thread)
+        return (before, thread)
+    }
+
+    /// Removes a thread from memory and the store and emits `threadListChanged`.
+    func removeThreadRecord(_ id: String) {
+        guard threads.contains(where: { $0.id == id }) else { return }
+        threads.removeAll { $0.id == id }
+        environment.store.deleteThread(id: id)
         emit(.threadListChanged)
     }
 
