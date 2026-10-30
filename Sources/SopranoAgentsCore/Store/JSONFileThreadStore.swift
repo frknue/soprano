@@ -22,6 +22,9 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
     /// Projects as last saved, in creation order; nil until read from disk.
     private var projects: [Project]?
     private var projectsDirty = false
+    /// An existing projects.json could be neither read nor set aside: writing would destroy it,
+    /// so project changes stay in memory for this session.
+    private var projectsWritesBlocked = false
 
     private static let log = Logger(subsystem: "com.soprano.agents", category: "store")
 
@@ -96,20 +99,36 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
     /// Call with `lock` held.
     private func loadedProjects() -> [Project] {
         if let projects { return projects }
-        var loaded: [Project] = []
-        if let data = try? Data(contentsOf: projectsURL) {
-            do {
-                loaded = try JSONDecoder().decode([Project].self, from: data)
-            } catch {
-                // Keep the unreadable file beside the store so the next save cannot destroy it.
-                let stamp = Int(Date().timeIntervalSince1970)
-                let aside = directory.appendingPathComponent("projects.json.unreadable-\(stamp)")
-                try? FileManager.default.moveItem(at: projectsURL, to: aside)
-                Self.log.error("Moved unreadable projects.json to \(aside.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
-            }
+        projects = readProjects()
+        return projects ?? []
+    }
+
+    /// Call with `lock` held. A missing file is an empty list. An existing file that doesn't decode
+    /// is moved aside under a unique name; one that can't be read or moved blocks project writes.
+    private func readProjects() -> [Project] {
+        guard FileManager.default.fileExists(atPath: projectsURL.path) else { return [] }
+        let data: Data
+        do {
+            data = try Data(contentsOf: projectsURL)
+        } catch {
+            projectsWritesBlocked = true
+            Self.log.error("Cannot read projects.json; project changes will not be saved: \(String(describing: error), privacy: .public)")
+            return []
         }
-        projects = loaded
-        return loaded
+        do {
+            return try JSONDecoder().decode([Project].self, from: data)
+        } catch {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let aside = directory.appendingPathComponent("projects.json.unreadable-\(stamp)-\(UUID().uuidString.prefix(8))")
+            do {
+                try FileManager.default.moveItem(at: projectsURL, to: aside)
+                Self.log.error("Moved unreadable projects.json to \(aside.lastPathComponent, privacy: .public): \(String(describing: error), privacy: .public)")
+            } catch let moveError {
+                projectsWritesBlocked = true
+                Self.log.error("Cannot set aside unreadable projects.json; project changes will not be saved: \(String(describing: moveError), privacy: .public)")
+            }
+            return []
+        }
     }
 
     // MARK: Projects
@@ -141,7 +160,7 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
     /// Runs on `queue`.
     private func writeProjectsIfDirty() {
         let snapshot: [Project]? = lock.withLock {
-            guard projectsDirty else { return nil }
+            guard projectsDirty, !projectsWritesBlocked else { return nil }
             projectsDirty = false
             return projects
         }

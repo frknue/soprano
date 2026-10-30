@@ -140,4 +140,41 @@ struct StoreJSONFileTests {
         let original = try kept.first.map { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8) }
         #expect(original == "[{ truncated")
     }
+
+    @Test func twoUnreadableProjectsFilesInARowAreBothKept() throws {
+        let dir = directory()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let projectsURL = dir.appendingPathComponent("projects.json")
+        try Data("first broken".utf8).write(to: projectsURL)
+        _ = try JSONFileThreadStore(directory: dir).load()
+        try Data("second broken".utf8).write(to: projectsURL)
+        let store = JSONFileThreadStore(directory: dir)
+        _ = try store.load()
+
+        store.save(project: Project(id: "p2", title: "new", path: "/tmp/new"))
+        store.flush()
+
+        let kept = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("projects.json.unreadable") }
+            .map { try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8) }
+        #expect(Set(kept) == ["first broken", "second broken"])
+    }
+
+    @Test func aProjectsFileThatCannotBeReadIsNeverOverwritten() throws {
+        let dir = directory()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let projectsURL = dir.appendingPathComponent("projects.json")
+        let original = #"[{"id":"p1","title":"app","path":"/tmp/app","createdAt":0,"scripts":[]}]"#
+        try Data(original.utf8).write(to: projectsURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: projectsURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: projectsURL.path) }
+        let store = JSONFileThreadStore(directory: dir)
+        _ = try store.load()
+
+        store.save(project: Project(id: "p2", title: "new", path: "/tmp/new"))
+        store.flush()
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: projectsURL.path)
+        #expect(try String(contentsOf: projectsURL, encoding: .utf8) == original)
+    }
 }
