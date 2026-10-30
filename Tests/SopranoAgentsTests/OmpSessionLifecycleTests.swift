@@ -6,8 +6,9 @@ import Testing
 /// `ready`, responses echoing the command id, a session tree for `get_entries` / `fork` /
 /// `new_session` (user messages `u<n>`, answers `a<n>`), `prompt` acked then ended by
 /// `prompt_result`, a
-/// tool approval as an `extension_ui_request` `select`, and a prompt that yields with
-/// `sessionSettled:false` while a background job is still running.
+/// tool approval as an `extension_ui_request` `select`, a prompt that yields with
+/// `sessionSettled:false` while a background job is still running, and a builtin slash command
+/// (`/usage`) that writes `command_output` frames and acks with `agentInvoked:false`.
 @MainActor
 struct OmpSessionLifecycleTests {
     private static let fakeCLI = #"""
@@ -30,6 +31,7 @@ struct OmpSessionLifecycleTests {
     out({"type": "ready", "protocolVersion": 1, "supportedProtocolVersions": [1, 2], "maxFrameBytes": 1048576, "maxReassembledFrameBytes": 67108864})
     prompt = None
     slow = None
+    late = None
     busy = False
     entries = [{"type": "model_change", "id": "m0", "parentId": None}]
     leaf = "m0"
@@ -99,7 +101,20 @@ struct OmpSessionLifecycleTests {
                 user(msg["message"], steering=True)
                 busy = False
                 finish("completed")
+        elif kind == "prompt" and msg["message"].startswith("/usage"):
+            # Builtin slash command: output first, then the ack finishes the prompt locally.
+            out({"type": "command_output", "text": "Usage\n  \x1b[38;5;243mclaude\x1b[39m 12%"})
+            out({"type": "command_output", "text": "Dashboard ready"})
+            ok(msg, {"agentInvoked": False})
+        elif kind == "prompt" and msg["message"].startswith("/compact"):
+            # omp runs it in the background: the ack comes first, its output after it.
+            ok(msg, {"agentInvoked": False})
+            late = "Compaction complete. Tokens: 9000 -> 1200 (saved 7800)."
         elif kind == "prompt":
+            if late:
+                # The background command finishes while the next prompt is being admitted.
+                out({"type": "command_output", "text": late})
+                late = None
             prompt = msg["id"]
             ok(msg)
             user(msg["message"])
@@ -305,6 +320,43 @@ struct OmpSessionLifecycleTests {
             if case let .itemUpdated(item) = event { item.id == "msg-3:0" && item.kind == .assistantMessage(text: "all done", isFinal: true) } else { false }
         })
         #expect(events.contains(.turnCompleted(outcome: .completed, error: nil)))
+    }
+
+    @Test func aSlashCommandShowsItsOutputBeforeTheTurnEnds() async throws {
+        let fake = try makeFake()
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path))
+
+        _ = try await session.startTurn(input("/usage"))
+        let finished = await recorder.wait(until: Self.completed)
+        await session.close()
+
+        #expect(finished)
+        let events = recorder.events
+        let output = try #require(events.lastIndex { event in
+            if case let .itemUpdated(item) = event { item.kind == .assistantMessage(text: "```\nUsage\n  claude 12%\nDashboard ready\n```", isFinal: true) } else { false }
+        })
+        let completed = try #require(events.firstIndex(of: .turnCompleted(outcome: .completed, error: nil)))
+        #expect(output < completed)
+    }
+
+    @Test func outputOfABackgroundSlashCommandStaysOutOfTheNextTurn() async throws {
+        let fake = try makeFake()
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path))
+
+        _ = try await session.startTurn(input("/compact"))
+        _ = await recorder.wait(until: Self.completed)
+        _ = try await session.startTurn(input("hello"))
+        let finished = await recorder.wait { events in events.filter { if case .turnCompleted = $0 { true } else { false } }.count == 2 }
+        await session.close()
+
+        #expect(finished)
+        #expect(!recorder.events.contains { event in
+            if case let .itemUpdated(item) = event, case let .assistantMessage(text, _) = item.kind { text.contains("Compaction complete") } else { false }
+        })
     }
 
     @Test func answeringAnApprovalWritesTheExactOptionLabel() async throws {

@@ -307,6 +307,16 @@ struct OmpEventMapperTests {
         #expect(Self.latestItems(events).map(\.kind) == [.notice(text: "Context compacted"), .notice(text: "Retrying (attempt 2 of 3): overloaded")])
     }
 
+    @Test func slashCommandOutputKeepsMarkdownAndFencesAlignedText() {
+        let markdown = Self.map([["type": "command_output", "text": "## [18.13.2]\n\n- Added `ctx.sessionModes`\n"]])
+        let line = Self.map([["type": "command_output", "text": "Fast mode enabled."]])
+        let columns = Self.map([["type": "command_output", "text": "MCP\n  /mcp list    List servers"]])
+
+        #expect(Self.latestItems(markdown).map(\.kind) == [.assistantMessage(text: "## [18.13.2]\n\n- Added `ctx.sessionModes`", isFinal: true)])
+        #expect(Self.latestItems(line).map(\.kind) == [.assistantMessage(text: "Fast mode enabled.", isFinal: true)])
+        #expect(Self.latestItems(columns).map(\.kind) == [.assistantMessage(text: "```\nMCP\n  /mcp list    List servers\n```", isFinal: true)])
+    }
+
     @Test func ompDisplayDiffsBecomeUnifiedHunks() {
         #expect(OmpEventMapper.unifiedDiff(" 3|a\n-4|b\n+4|c\n 5|d\n...\n-9|x") == "@@ -3,3 +3,3 @@\n a\n-b\n+c\n d\n@@ -9,1 +8,0 @@\n-x")
     }

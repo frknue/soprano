@@ -3,7 +3,9 @@ import Foundation
 /// omp's RPC JSONL over a line transport: reassembles `rpc_chunk` sequences, remembers the
 /// `ready` frame, matches `{"type":"response","id",…}` frames to `request`s and hands every
 /// other frame (events, `prompt_result`, `extension_ui_request`, unmatched responses) to
-/// `incoming` in arrival order.
+/// `incoming` in arrival order. Successful `prompt` responses go to `incoming` as well, after
+/// resuming their request: a prompt omp finished locally (`agentInvoked:false`, slash commands)
+/// ends there, behind the `command_output` frames written before it.
 ///
 /// Requests suspend until their response; `success:false` throws `ProviderError.rpc(method:
 /// <type>, code: 0, message: <error>)`. When the transport closes, waiting requests fail with
@@ -124,6 +126,7 @@ public actor OmpClient {
                 entry.continuation.resume(throwing: ProviderError.rpc(method: entry.type, code: 0, message: message))
             } else {
                 entry.continuation.resume(returning: frame["data"] ?? .null)
+                if entry.type == "prompt" { incomingContinuation.yield(.frame(frame)) }
             }
         default:
             incomingContinuation.yield(.frame(frame))

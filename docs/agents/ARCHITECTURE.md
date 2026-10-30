@@ -138,7 +138,14 @@ fast-mode changes go to the live process (`set_model {provider, modelId}`, `set_
 streamingBehavior:"steer"}` (attachment paths listed in the text; "steer" only matters when a
 background job's run is live, where a plain `prompt` is refused); the turn ends at `prompt_result`
 with the same id (extension runs such as auto-double-check happen before it), `completed` /
-`aborted|interrupted|cancelled` → interrupted / else failed. When the turn ends the session reads
+`aborted|interrupted|cancelled` → interrupted / else failed, or at the prompt's own ack when it
+carries `agentInvoked:false` (a builtin slash command that ran locally; `OmpClient` also hands
+that ack to the frame stream, so it ends the turn behind the command's `command_output` frames,
+which become one final assistant message: Markdown kept, other multi-line text fenced, ANSI
+escapes dropped; output after a prompt's ack, from builtins omp runs in the background such as
+`/compact` and `/handoff`, is dropped while idle or during an agent turn, but frames carry no
+prompt id, so one that arrives while a later slash command awaits its ack joins that command's
+output). When the turn ends the session reads
 `get_entries` and reports, via `turnStarted`, the first entry on the current branch after the
 previous turn's tip (re-read at start and after a rewind) as the turn's `providerTurnID`: position,
 not text, since omp rewrites skill invocations, templates and `^model` mentions. A turn whose start

@@ -72,6 +72,8 @@ public struct OmpUIRequest: Sendable, Hashable {
 ///   compacted", the skip reason ("Already compacted"), "Compaction cancelled", or an error
 ///   item; remembered as `compactionEnd` for the session's compaction turn.
 /// - `available_commands_update` → `commands` (`OmpProtocol.commands`).
+/// - `command_output` (a builtin slash command's result, e.g. `/usage`, `/session`) → one final
+///   assistant message per turn, every output of the command appended (`commandOutputText`).
 /// - `prompt_result` → the last assistant text marked final, then `turnCompleted`
 ///   (`completed`; `aborted`/`interrupted`/`cancelled` → interrupted; else failed with
 ///   `error.message`). With `sessionSettled:false` background work (async bash/task/eval jobs)
@@ -101,6 +103,9 @@ public struct OmpEventMapper: Sendable {
     private var noticeCount = 0
     /// How the last manual compaction ended (`manual_compaction_end`); cleared per turn.
     public private(set) var compactionEnd: CompactionEnd?
+    private var commandOutputCount = 0
+    /// The turn's slash-command output so far: later `command_output` frames extend it.
+    private var commandOutput: (id: String, text: String)?
     /// The yielded prompt's outcome while omp waits out background work (`sessionSettled:false`).
     private var heldOutcome: (outcome: ProviderTurnOutcome, error: String?)?
 
@@ -158,6 +163,7 @@ public struct OmpEventMapper: Sendable {
         declinedTools.removeAll()
         heldOutcome = nil
         compactionEnd = nil
+        commandOutput = nil
     }
 
     public mutating func map(_ frame: JSONValue) -> [ProviderEvent] {
@@ -199,6 +205,8 @@ public struct OmpEventMapper: Sendable {
             }
             if let message = frame["errorMessage"]?.nonEmptyString { text += ": \(message)" }
             return [notice(text)]
+        case "command_output":
+            return mapCommandOutput(frame)
         case "prompt_result":
             return mapPromptResult(frame)
         case "session_settled":
@@ -288,6 +296,38 @@ public struct OmpEventMapper: Sendable {
     private mutating func notice(_ text: String, id: String? = nil) -> ProviderEvent {
         noticeCount += 1
         return .itemUpdated(TurnItem(id: id ?? "\(itemPrefix)notice:\(noticeCount)", kind: .notice(text: text), status: .completed))
+    }
+
+    private mutating func mapCommandOutput(_ frame: JSONValue) -> [ProviderEvent] {
+        guard let text = frame["text"]?.stringValue.map(Self.strippingTerminalEscapes),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let output: (id: String, text: String)
+        if let current = commandOutput {
+            output = (current.id, current.text + "\n" + text)
+        } else {
+            commandOutputCount += 1
+            output = ("\(itemPrefix)command-output:\(commandOutputCount)", text)
+        }
+        commandOutput = output
+        return [.itemUpdated(TurnItem(id: output.id, kind: .assistantMessage(text: Self.commandOutputText(output.text), isFinal: true), status: .completed))]
+    }
+
+    /// omp writes command output for a terminal: Markdown (`/changelog`, fenced `/usage`) or
+    /// column-aligned plain text (`/context`, `/tools`, `/mcp`). Markdown (a ``` fence or a `#`
+    /// heading) and single lines stay as they are; other multi-line text becomes a fenced block
+    /// so its line breaks and alignment survive.
+    static func commandOutputText(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .newlines)
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false)
+        let isMarkdown = trimmed.contains("```") || lines.contains { $0.hasPrefix("#") }
+        guard !isMarkdown, lines.count > 1 else { return trimmed }
+        return "```\n\(trimmed)\n```"
+    }
+
+    /// Drops ANSI CSI sequences (`ESC [ … final byte`, e.g. the colors in `/context`'s bars).
+    static func strippingTerminalEscapes(_ text: String) -> String {
+        guard text.contains("\u{1B}") else { return text }
+        return text.replacingOccurrences(of: "\u{1B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
     }
 
     // MARK: - Tools

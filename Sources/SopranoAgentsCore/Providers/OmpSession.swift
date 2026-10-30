@@ -15,7 +15,8 @@ import Foundation
 /// `set_thinking_level {level}`, `set_fast_mode {enabled}`); a runtime-mode change restarts the
 /// process with `--resume` and the new approval mode. `prompt {id, message, images?,
 /// streamingBehavior:"steer"}` is acked by a `response` and ended by `prompt_result` with the same
-/// id (or by an ack with `data.agentInvoked:false`). When the turn ends the session reads
+/// id, or by the ack itself when it carries `data.agentInvoked:false` (a builtin slash command
+/// that ran locally; its `command_output` frames come first). When the turn ends the session reads
 /// `get_entries` and reports the first entry the turn added after the previous turn's branch tip
 /// as the turn's native id (`turnStarted`, `OmpProtocol.turnAnchor`), which rollback cuts at; an
 /// unreadable anchor is reported as `OmpProtocol.unresolvedTurnID`. Steering is `steer
@@ -70,6 +71,12 @@ public actor OmpSession: ProviderSession {
     private var activePromptID: String?
     /// The running `compact` request's id (a compaction turn; no prompt is active meanwhile).
     private var compactionID: String?
+    /// The active prompt is a slash command omp has not acked yet: omp writes a command's
+    /// synchronous output before the ack, so only then is a `command_output` taken as this
+    /// prompt's. Output after an ack (backgrounded builtins such as `/compact`, `/handoff`) is
+    /// dropped, unless it arrives while a later slash command awaits its ack: frames carry no
+    /// prompt id, so it then joins that command's output.
+    private var acceptsCommandOutput = false
     /// The branch tip when the last turn ended (or at start / after a rewind): the next turn's
     /// entries come after it. Unknown when `get_entries` failed.
     private var branchTip: String?
@@ -139,17 +146,15 @@ public actor OmpSession: ProviderSession {
         mapper.resetTurn()
         interruptRequested = false
         activePromptID = id
-        let ack: JSONValue
+        acceptsCommandOutput = input.text.drop { $0.isWhitespace }.hasPrefix("/")
         do {
-            ack = try await live.request("prompt", OmpProtocol.promptFields(input), id: id)
+            _ = try await live.request("prompt", OmpProtocol.promptFields(input), id: id)
         } catch {
             if activePromptID == id { activePromptID = nil }
             throw error
         }
-        if ack["agentInvoked"]?.boolValue == false, activePromptID == id {
-            activePromptID = nil
-            for event in mapper.finishLocally() { continuation.yield(event) }
-        }
+        // A local finish (`agentInvoked:false`) arrives with the frames (`handle`), so the slash
+        // command's output lands in the turn before it ends.
         // The native turn id is where the turn starts in omp's session, reported when it ends.
         return nil
     }
@@ -434,6 +439,21 @@ public actor OmpSession: ProviderSession {
                 }
                 pending[request.id] = request
             }
+        case "response":
+            if let id = frame["id"]?.stringValue, id == compactionID {
+                await finishCompaction(id: id, response: frame)
+                return
+            }
+            // `OmpClient` forwards prompt acks. Command output after the ack is not this
+            // prompt's; `agentInvoked:false` = finished locally.
+            guard frame["command"]?.stringValue == "prompt", let id = frame["id"]?.stringValue, id == activePromptID else { return }
+            acceptsCommandOutput = false
+            guard frame["data"]?["agentInvoked"]?.boolValue == false else { return }
+            endPrompt()
+            for event in mapper.finishLocally() { continuation.yield(event) }
+            return
+        case "command_output":
+            guard acceptsCommandOutput, activePromptID != nil else { return }
         case "prompt_result":
             guard let id = frame["id"]?.stringValue, id == activePromptID else { return }
             // `sessionSettled:false`: background work can still wake the agent; the prompt
@@ -454,11 +474,6 @@ public actor OmpSession: ProviderSession {
             await reportContextUsage()
             guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
             endPrompt()
-        case "response":
-            if let id = frame["id"]?.stringValue, id == compactionID {
-                await finishCompaction(id: id, response: frame)
-                return
-            }
         default:
             break
         }
@@ -560,6 +575,7 @@ public actor OmpSession: ProviderSession {
     /// The prompt's turn is over: withdraw dialogs nobody can answer any more.
     private func endPrompt() {
         activePromptID = nil
+        acceptsCommandOutput = false
         for (id, _) in pending { continuation.yield(.requestResolved(id: id)) }
         pending.removeAll()
     }
