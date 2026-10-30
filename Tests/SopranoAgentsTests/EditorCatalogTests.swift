@@ -8,7 +8,7 @@ struct EditorCatalogTests {
         EditorCatalog.installed { bundleIDs.contains($0) ? URL(fileURLWithPath: "/Applications/\($0).app") : nil }
     }
 
-    @Test func installedEditorsKeepT3CodesOrderWithFinderLast() {
+    @Test func installedEditorsAreListedCursorVSCodeZedXcodeWithFinderLast() {
         let editors = installed(["com.apple.finder", "dev.zed.Zed", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.dt.Xcode"])
         #expect(editors.map(\.id) == ["cursor", "vscode", "zed", "xcode", "finder"])
     }

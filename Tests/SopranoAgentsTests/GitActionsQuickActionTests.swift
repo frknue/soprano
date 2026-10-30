@@ -70,7 +70,7 @@ struct GitActionsQuickActionTests {
             == "Push & create PR from default ref?")
     }
 
-    @Test func countsAndElapsedTimesReadLikeT3Code() {
+    @Test func countsReadCompactlyAndElapsedTimesInMinutesAndSeconds() {
         #expect(compactDiffCount(999) == "999")
         #expect(compactDiffCount(1_200) == "1.2k")
         #expect(compactDiffCount(12_345) == "12k")

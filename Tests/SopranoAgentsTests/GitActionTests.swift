@@ -122,7 +122,7 @@ struct GitActionTests {
         #expect(again.detail == "Branch is up to date. No action needed.")
     }
 
-    @Test func pushingWithoutARemoteFailsWithT3CodesMessage() async throws {
+    @Test func pushingWithoutARemoteFailsWithANoRemoteConfiguredMessage() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }
         let repo = try await sandbox.repository()

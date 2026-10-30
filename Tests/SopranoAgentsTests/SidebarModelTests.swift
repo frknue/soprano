@@ -145,7 +145,7 @@ struct SidebarModelTests {
         #expect(Self.build(threads, SidebarListOptions(searchText: "nothing like this")) == [.empty(.noResults)])
     }
 
-    @Test func statusPillsUseTheT3LabelsAndALiveDuration() {
+    @Test func statusPillsUseShortLabelsAndALiveWorkingDuration() {
         let started = Self.ago(75)
         let working = SidebarStatusPill.of(.working(since: started))
         #expect(working?.text(now: Self.now) == "Working 1m")
@@ -200,7 +200,7 @@ struct SidebarModelTests {
         #expect(row.map { DurationText.relative($0.timestamp, now: Self.now) } == "2d")
     }
 
-    @Test func projectMonogramsFollowT3Code() {
+    @Test func projectMonogramsTakeTwoLettersAndColorsIgnoreCase() {
         #expect(ProjectIdentity.monogram("app") == "AP")
         #expect(ProjectIdentity.monogram("soprano") == "SO")
         #expect(ProjectIdentity.monogram("s2agents") == "S2")
