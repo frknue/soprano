@@ -119,13 +119,22 @@ ignored, `agentMessage` (`phase:"final_answer"` = final), `reasoning`, `commandE
 `thread/tokenUsage/updated`, `error`, `turn/completed` (`completed|interrupted|failed`).
 Server requests: `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` →
 `{decision: "accept"|"acceptForSession"|"decline"|"cancel"}`; `item/permissions/requestApproval`;
-`item/tool/requestUserInput` → `{answers:{<qid>:{answers:[…]}}}`; anything else unsupported →
-JSON-RPC error. TypeScript bindings: `codex app-server generate-ts --out <dir>`. A real trace is in
-`Tests/SopranoAgentsTests/Fixtures/codex-turn.jsonl`.
+`item/tool/requestUserInput` → `{answers:{<qid>:{answers:[…]}}}` (empty answers = dismissed);
+`serverRequest/resolved` withdraws a pending request; `mcpServer/elicitation/request` is declined;
+anything else → JSON-RPC error -32601. Approval ids are `approval:<approvalId ?? itemId>` and
+`input:<itemId>` so they never collide with the item they gate. Every `turn/start` also sends
+`approvalsReviewer` (`"user"`, `"auto_review"` for Auto); fast mode is `serviceTier:"priority"`;
+attachment paths are appended to the text. Rollback: `thread/revert {threadId, beforeTurnId}`,
+finding the turn through `thread/turns/list` when its id is unknown. Notifications for other
+threads (subagents) are ignored. TypeScript bindings: `codex app-server generate-ts --out <dir>`.
+A real trace is in `Tests/SopranoAgentsTests/Fixtures/codex-turn.jsonl`.
 
 **Claude Code** — `claude -p --input-format stream-json --output-format stream-json --verbose
---include-partial-messages --permission-prompt-tool stdio --permission-mode <mode> --model <id>
-[--effort <e>] [--resume <session> | --session-id <uuid>] [--add-dir …]`. One long-lived process per
+--include-partial-messages --permission-prompt-tool stdio --permission-mode <mode>
+--allow-dangerously-skip-permissions --thinking-display summarized --model <id> [--effort <e>]
+[--fast-mode on] [--resume <session> [--resume-session-at <assistant uuid>] | --session-id <uuid>]
+[--add-dir …]`, started without `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_PORT`.
+One long-lived process per
 thread; each turn writes `{"type":"user","message":{"role":"user","content":[…image blocks…,
 {"type":"text","text":…}]},"parent_tool_use_id":null}`. Control protocol on the same pipes:
 host → CLI `{"type":"control_request","request_id","request":{"subtype":"initialize"|"interrupt"|
@@ -135,18 +144,25 @@ host → CLI `{"type":"control_request","request_id","request":{"subtype":"initi
 "request_id","response":{"behavior":"allow","updatedInput":{…}} | {"behavior":"deny","message":…}}}`.
 Steering = another user message with `"priority":"now"` while the turn runs. Permission mode map:
 plan → `plan`; approval-required → `default`; auto-accept-edits → `acceptEdits`; auto → `auto`;
-full-access → `bypassPermissions`. `AskUserQuestion` arrives as `can_use_tool` and becomes a user
-input request (allow with `updatedInput {questions, answers}`); `ExitPlanMode` becomes a plan item
-and is denied with T3 Code's message. Messages: `system/init` (session id), `stream_event`
-(`text_delta`, `thinking_delta`), `assistant` (text, thinking, tool_use), `user` (tool_result),
-`result` (turn end). Tool → item: Bash → command, Edit/MultiEdit/Write/NotebookEdit → fileChange,
-Read/Glob/Grep/LS → toolCall read/search, WebFetch/WebSearch → webSearch, TodoWrite → todoList,
-others → toolCall. Traces: `Tests/SopranoAgentsTests/Fixtures/claude-*.jsonl`.
+full-access → `bypassPermissions`. Answers carry `toolUseID`; cancel denies with "User cancelled
+tool execution." and interrupts. `AskUserQuestion` arrives as `can_use_tool` and becomes a user
+input request (allow with `updatedInput {questions, answers}`; empty answers deny as dismissed);
+`ExitPlanMode` becomes a plan item and is denied with T3 Code's message. Messages: `system/init`
+(session id; sent after every user message), `stream_event` (`text_delta`, `thinking_delta`),
+`assistant` (text, thinking, tool_use), `user` (tool_result), `result` (turn end). Tool → item:
+Bash → command, Edit/MultiEdit/Write/NotebookEdit → fileChange, Read/Glob/Grep/LS → toolCall
+read/search, WebFetch/WebSearch → webSearch, TodoWrite → todoList, others → toolCall. Effort
+changes restart the process with `--resume`; `ultrathink` is a prompt prefix, not `--effort`.
+Rollback: each turn's user message carries a `uuid`; rolling back before turn N resumes with
+`--resume-session-at <last assistant uuid of turn N-1>` (read back from
+`~/.claude/projects/*/<session>.jsonl` after relaunch); before turn 1 starts a fresh session. Probe:
+`claude --version` and `claude auth status --json`. Traces: `Tests/SopranoAgentsTests/Fixtures/claude-*.jsonl`.
 
 Text generation: Codex `codex exec --ephemeral --skip-git-repo-check -s read-only --model <m>
 --config model_reasoning_effort="low" --output-schema <file> --output-last-message <file> -`
 (prompt on stdin); Claude `claude -p --output-format json --json-schema <schema> --model <m>
---tools "" --disable-slash-commands --permission-mode dontAsk` (prompt on stdin). 180 s timeout.
+--tools "" --disable-slash-commands --no-session-persistence --permission-mode dontAsk` (prompt on
+stdin). 180 s timeout.
 
 ### Git (Core/Git)
 `LiveGitService: GitService`. All git through `GitRunner` (`git --no-pager -c core.quotepath=false

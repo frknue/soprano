@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.addObserver(self) { [weak self] in
             let current = SettingsCenter.shared.settings
             PaletteCenter.shared.apply(setting: current.theme)
+            EngineFactory.executablePaths.update(codex: current.codexPath, claude: current.claudePath)
             self?.engine?.settings = current.engineSettings
             self?.menuController?.install()
         }

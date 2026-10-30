@@ -15,10 +15,44 @@ enum AppPaths {
     }
 }
 
+/// Executable overrides from settings.json, readable from the drivers' background tasks.
+final class ExecutablePaths: @unchecked Sendable {
+    private let lock = NSLock()
+    private var codex: String?
+    private var claude: String?
+
+    func update(codex: String?, claude: String?) {
+        lock.withLock {
+            self.codex = codex
+            self.claude = claude
+        }
+    }
+
+    func path(for kind: ProviderKind) -> String? {
+        lock.withLock { kind == .codex ? codex : claude }
+    }
+}
+
 /// Builds the engine the app runs with: JSON-file store, git CLI, Codex and Claude drivers.
 @MainActor
 enum EngineFactory {
+    /// Executable overrides the drivers read on every spawn; the app delegate keeps them current.
+    static let executablePaths = ExecutablePaths()
+
     static func live(settings: EngineSettings) -> AgentEngine {
-        preconditionFailure("ENGINE-SLICE: EngineFactory.live")
+        let dataDirectory = AppPaths.dataDirectory()
+        try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
+        executablePaths.update(codex: settings.codexPath, claude: settings.claudePath)
+        let paths = executablePaths
+        let environment = EngineEnvironment(
+            drivers: [
+                .codex: CodexDriver(executablePath: { paths.path(for: .codex) }),
+                .claude: ClaudeDriver(executablePath: { paths.path(for: .claude) }),
+            ],
+            git: LiveGitService(),
+            store: JSONFileThreadStore(directory: dataDirectory),
+            dataDirectory: dataDirectory
+        )
+        return AgentEngine(environment: environment, settings: settings)
     }
 }
