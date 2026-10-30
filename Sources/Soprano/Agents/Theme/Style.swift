@@ -99,7 +99,7 @@ enum Icon {
     static let panelBottom = "rectangle.bottomthird.inset.filled" // Toggle terminal drawer
     static let panelRight = "sidebar.right"                       // Toggle right panel
     static let circleDashed = "circle.dashed"                      // Working
-    static let shieldQuestion = "questionmark.shield"              // Approval
+    static let shieldQuestion = "exclamationmark.shield"           // Approval (macOS has no questionmark.shield)
     static let messageQuestion = "questionmark.bubble"             // Input
     static let circleAlert = "exclamationmark.circle"              // Failed
     static let circleCheck = "checkmark.circle"                    // Done

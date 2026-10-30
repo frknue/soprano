@@ -8,27 +8,40 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Added
 
-- Thread inbox sidebar: search (titles, branches, messages), project filter (Shift-click picks
-  several), Add project, New thread (⌘N, ⇧⌘N, ⌃⌘N), Pinned and Active cards with live status
-  pills, Working and Settled shelves, inline rename (double-click or F2), thread menu (pin,
-  settle, rename, regenerate title, mark unread, copy, archive, delete), ⇧⌘[ / ⇧⌘] and ⌘1–⌘9
-  navigation with hints while ⌘ is held, ⇧⌘S settle, ⇧⌘P pin, ⇧⌘C copy thread reference.
-- Chat header with the project / thread breadcrumb and the thread details, terminal and right
-  panel toggles.
-- Command palette (`⌘K`): actions with their shortcuts, recent threads, projects and settings pages, fuzzy search with highlighted matches, `>` for actions only, "New thread in..." per project, `⌘1`–`⌘9` to pick a row.
-- Settings screen (`⌘,`): General, Providers, Text generation, Worktrees, Notifications, Keybindings (record, turn off or reset any shortcut), Archive (unarchive or delete threads) and About; every change is written to `~/.config/soprano-agents/settings.json`.
-- Notifications when a thread completes, fails, or needs approval or input while the app is in the background (`notifications.enabled`, `notifications.sound`), and a Dock badge counting threads waiting for you.
-- T3 Code–style confirmation dialogs (Return confirms, Esc cancels).
-- App icon: a speech bubble with typing dots.
-- Right panel Diff (⌘D): review the whole thread, the latest turn, any turn or uncommitted
-  changes, stacked or split, with line wrapping, whitespace toggle, collapsible files, a file
-  tree and Maximize panel.
-- Terminal drawer (⌘J): login-shell terminals per thread in the thread's working directory;
-  ⌘N adds one, ⌘W closes one, drag the top edge to resize.
+- Codex (`codex app-server`) and Claude Code (`claude -p` stream-json) threads in one app, with
+  T3 Code's look in light and dark (`theme`: `t3`, `t3-light`, `t3-dark`, or a Soprano theme).
+- Thread inbox sidebar: search (titles, branches, messages), project filter, Add project, New
+  thread (⌘N, ⇧⌘N, ⌃⌘N), Pinned and Active cards with live status pills (Working, Approval,
+  Input, Failed, Done), Working and Settled shelves, inline rename (double-click or F2), thread
+  menu (pin, settle, rename, regenerate title, mark unread, copy, archive, delete), ⇧⌘[ / ⇧⌘]
+  and ⌘1–⌘9 navigation with hints while ⌘ is held, ⇧⌘S settle, ⇧⌘P pin, ⇧⌘C copy reference.
+- Message timeline: user bubbles with "Edit from here" (rewind the thread, optionally the files),
+  Markdown answers with code blocks and tables, "Worked for …" folds over each turn's work log, a
+  live "Working for" row, inline approvals, plan and task cards, changed-files cards that open
+  the diff, queued messages, and Find in Thread (⌘F). ⌘↓ jumps to the latest message.
+- Composer: attachments (paperclip, paste, drop), model picker (⇧⌘M), reasoning effort and Fast
+  Mode (⇧⌘E), permissions Supervised / Auto-accept edits / Auto / Full access (⇧⌘A), Build/Plan
+  (⇧⇥), steer or queue while the agent works (⌘↩ does the other one, `chat.followUp`), Stop,
+  approval and question answering, and prompt history with ↑.
+- New threads start in the current checkout or a new git worktree (⇧⌘X) from a chosen branch
+  (⇧⌘G); worktree branches get a generated name and threads a generated title
+  (`textGeneration`, `worktrees.directory`, `worktrees.branchPrefix`).
+- Every turn is checkpointed in hidden git refs, so each turn's diff and the whole thread's diff
+  are available without touching your index or commits.
+- Right panel Diff (⌘D): the whole thread, the latest turn, any turn or uncommitted changes,
+  stacked or split, with line wrapping, whitespace toggle, collapsible files, a file tree and
+  Maximize panel.
+- Terminal drawer (⌘J): login-shell terminals per thread in the thread's working directory; ⌘N
+  adds one, ⌘W closes one, drag the top edge to resize.
 - Thread details card (⇧⌘B): open the workspace in your editor (⌘O, `editor.app`), run project
-  scripts in the terminal, copy the branch name, commit / push / create a PR with T3 Code's
-  quick action and the "Commit changes" dialog, and open uncommitted changes.
-- Message timeline in T3 Code's style: user bubbles with "Edit from here", Markdown answers with
-  code blocks and tables, "Worked for …" folds over each turn's work log, live "Working for" row,
-  inline approvals, plan and task cards, changed-files cards that open the diff, and Find in Thread
-  (⌘F). ⌘↓ jumps to the latest message.
+  scripts in the terminal, copy the branch name, commit / push / create a PR with generated
+  messages and the "Commit changes" dialog, and open uncommitted changes.
+- Command palette (⌘K): actions with their shortcuts, recent threads, projects and settings
+  pages, fuzzy search, `>` for actions only, "New thread in..." per project.
+- Settings screen (⌘,): General, Providers, Text generation, Worktrees, Notifications,
+  Keybindings (record, turn off or reset any shortcut), Archive and About; every change is
+  written to `~/.config/soprano-agents/settings.json`.
+- Notifications when a thread completes, fails, or needs approval or input while the app is in
+  the background (`notifications.enabled`, `notifications.sound`), and a Dock badge counting
+  threads waiting for you.
+- App icon: a speech bubble with typing dots.

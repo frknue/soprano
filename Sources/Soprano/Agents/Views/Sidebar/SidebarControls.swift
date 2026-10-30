@@ -18,8 +18,6 @@ enum SidebarSymbol {
     static let messageSquare = "message"
     static let textSearch = "text.magnifyingglass"
     static let undo2 = "arrow.uturn.backward"
-    /// ShieldQuestion (Approval pill); `Icon.shieldQuestion` names a symbol macOS lacks.
-    static let shieldQuestion = "exclamationmark.shield"
 }
 
 /// `SidebarMenuButton size="icon"`: a square icon button with the sidebar's row-hover fill

@@ -242,10 +242,11 @@ binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
 | `thread.jump.1`…`9` | Go to Thread N | global | `cmd+1`…`cmd+9` | Sidebar |
 | `thread.settle` | Settle Thread | not terminal | `cmd+shift+s` | Sidebar |
 | `thread.pin` | Pin Thread | not terminal | `cmd+shift+p` | Sidebar |
-| `thread.rename` | Rename Thread | sidebar | `f2` | Sidebar |
+| `thread.rename` | Rename Thread | — | — (F2 in the sidebar list, hard-coded: `KeyChord` has no function keys) | Sidebar |
 | `thread.archive` / `thread.delete` | Archive / Delete Thread | — | — | Sidebar |
 | `thread.copyReference` | Copy Thread Reference | not terminal | `cmd+shift+c` | Sidebar |
 | `sidebar.search` | Search Threads | global | — | Sidebar |
+| `sidebar.filterProjects` | Filter Threads by Project | global | — | Sidebar |
 | `chat.find` | Find in Thread | not terminal | `cmd+f` | Timeline |
 | `timeline.jumpToLatest` | Jump to Latest | timeline | `cmd+down` | Timeline |
 | `timeline.expandAll` / `timeline.collapseAll` | Expand / Collapse All Work | — | — | Timeline |

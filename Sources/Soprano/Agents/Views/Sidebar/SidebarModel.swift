@@ -94,7 +94,7 @@ struct SidebarStatusPill: Equatable {
     static func of(_ status: ThreadStatus) -> SidebarStatusPill? {
         switch status {
         case let .working(since): SidebarStatusPill(label: "Working", symbol: Icon.circleDashed, tone: .working, since: since)
-        case .approval: SidebarStatusPill(label: "Approval", symbol: SidebarSymbol.shieldQuestion, tone: .approval, since: nil)
+        case .approval: SidebarStatusPill(label: "Approval", symbol: Icon.shieldQuestion, tone: .approval, since: nil)
         case .input: SidebarStatusPill(label: "Input", symbol: Icon.messageQuestion, tone: .input, since: nil)
         case .failed: SidebarStatusPill(label: "Failed", symbol: Icon.circleAlert, tone: .failed, since: nil)
         case .done: SidebarStatusPill(label: "Done", symbol: Icon.circleCheck, tone: .done, since: nil)
