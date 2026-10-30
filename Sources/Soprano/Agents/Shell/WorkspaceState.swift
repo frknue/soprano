@@ -58,6 +58,8 @@ final class WorkspaceState {
 
     /// Message waiting for the composer to take back (text and attachments).
     private(set) var pendingComposerRestore: UserMessage?
+    /// The right panel fills the chat column's space (T3 Code's "Maximize panel").
+    private(set) var isRightPanelMaximized = false
 
     private let observers = ObserverList<Change>()
 
@@ -108,6 +110,14 @@ final class WorkspaceState {
     func setRightPanelVisible(_ visible: Bool) {
         guard visible != isRightPanelVisible else { return }
         isRightPanelVisible = visible
+        if !visible { isRightPanelMaximized = false }
+        observers.notify(.panels)
+    }
+
+    /// Maximizes the open right panel over the chat column, or restores its width.
+    func setRightPanelMaximized(_ maximized: Bool) {
+        guard maximized != isRightPanelMaximized else { return }
+        isRightPanelMaximized = maximized
         observers.notify(.panels)
     }
 

@@ -58,6 +58,9 @@ final class WorkspaceViewController: NSViewController {
         self.sidebarWidth = sidebarWidth
         self.rightPanelWidth = rightPanelWidth
 
+        let chatMinWidth = chatView.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.rightPanelMinWidth)
+        let chatTrailing = chatView.trailingAnchor.constraint(equalTo: panelEdge.leadingAnchor)
+
         NSLayoutConstraint.activate([
             sidebarView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebarView.topAnchor.constraint(equalTo: root.topAnchor),
@@ -72,7 +75,7 @@ final class WorkspaceViewController: NSViewController {
             chatView.leadingAnchor.constraint(equalTo: sidebarEdge.trailingAnchor),
             chatView.topAnchor.constraint(equalTo: root.topAnchor),
             chatView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            chatView.trailingAnchor.constraint(equalTo: panelEdge.leadingAnchor),
+            chatTrailing,
 
             panelEdge.topAnchor.constraint(equalTo: root.topAnchor),
             panelEdge.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -94,8 +97,13 @@ final class WorkspaceViewController: NSViewController {
             panelRail.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             panelRail.widthAnchor.constraint(equalToConstant: 8),
 
-            chatView.widthAnchor.constraint(greaterThanOrEqualToConstant: Metrics.rightPanelMinWidth),
+            chatMinWidth,
         ])
+        self.chatMinWidth = chatMinWidth
+        self.chatTrailing = chatTrailing
+        maximizedPanelLeading = panelView.leadingAnchor.constraint(equalTo: sidebarEdge.trailingAnchor, constant: 1)
+        // The hidden chat column keeps a sane width under the maximized panel.
+        maximizedChatWidth = chatView.widthAnchor.constraint(equalToConstant: Metrics.mainMinWidth)
 
         sidebarRail.onDrag = { [weak self] delta in self?.resizeSidebar(by: delta) }
         sidebarRail.onDoubleClick = { [weak self] in self?.setSidebarWidth(Metrics.sidebarWidth) }
@@ -118,6 +126,12 @@ final class WorkspaceViewController: NSViewController {
     private weak var panelRailView: NSView?
     private var storedSidebarWidth: CGFloat?
     private var storedPanelWidth: CGFloat?
+    /// Maximized right panel: it pins its leading edge next to the sidebar and the hidden chat
+    /// column detaches from it, keeping a fixed width underneath.
+    private var chatMinWidth: NSLayoutConstraint?
+    private var chatTrailing: NSLayoutConstraint?
+    private var maximizedPanelLeading: NSLayoutConstraint?
+    private var maximizedChatWidth: NSLayoutConstraint?
 
     private func updateVisibility() {
         let showSidebar = state.isSidebarVisible
@@ -142,7 +156,17 @@ final class WorkspaceViewController: NSViewController {
         }
         rightPanel.view.isHidden = !showPanel
         panelEdgeView?.isHidden = !showPanel
-        panelRailView?.isHidden = !showPanel
+
+        let maximized = showPanel && state.isRightPanelMaximized
+        if maximized {
+            NSLayoutConstraint.deactivate([chatMinWidth, chatTrailing, rightPanelWidth].compactMap { $0 })
+            NSLayoutConstraint.activate([maximizedPanelLeading, maximizedChatWidth].compactMap { $0 })
+        } else {
+            NSLayoutConstraint.deactivate([maximizedPanelLeading, maximizedChatWidth].compactMap { $0 })
+            NSLayoutConstraint.activate([chatMinWidth, chatTrailing, rightPanelWidth].compactMap { $0 })
+        }
+        chat.view.isHidden = maximized
+        panelRailView?.isHidden = !showPanel || maximized
     }
 
     private func resizeSidebar(by delta: CGFloat) {
