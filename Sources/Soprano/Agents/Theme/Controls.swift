@@ -196,7 +196,7 @@ final class TextButton: InteractiveView {
             fill = isHovered ? palette.primary.mixed(with: palette.background, fraction: 0.1) : palette.primary
             text = palette.primaryForeground
         case .outline:
-            fill = isHovered ? palette.accent : (palette.isDark ? palette.input.withAlphaComponent(0.32) : palette.popover)
+            fill = isHovered ? palette.accent : (palette.isDark ? palette.input.withAlphaComponent(palette.input.alphaComponent * 0.32) : palette.popover)
             border = palette.input
         case .ghost:
             fill = isHovered ? palette.accent : .clear

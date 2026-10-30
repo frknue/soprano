@@ -7,6 +7,25 @@ enum ShellCommands {
     static var all: [AppCommand] {
         [
             AppCommand(
+                id: "palette.open",
+                title: "Command Palette",
+                category: .app,
+                defaultKeys: ["cmd+k"],
+                icon: Icon.search,
+                inPalette: false
+            ) { context in
+                CommandPaletteController.toggle(in: context)
+            },
+            AppCommand(
+                id: "settings.open",
+                title: "Settings",
+                category: .app,
+                defaultKeys: ["cmd+,"],
+                icon: Icon.settings
+            ) { context in
+                SettingsController.toggle(in: context)
+            },
+            AppCommand(
                 id: "view.toggleSidebar",
                 title: "Toggle Sidebar",
                 category: .view,
