@@ -52,6 +52,7 @@ struct WorkLogTests {
 
     @Test func entriesUseTheWorkLogWording() {
         #expect(command("c", "rg -n foo\n  Sources").label == "Ran command")
+        #expect(command("c", status: .running).label == "Running command")
         #expect(command("c", "rg -n foo\n  Sources").detail == "rg -n foo Sources")
         #expect(edit("e", ["Sources/App.swift"]).label == "Changed Sources/App.swift")
         #expect(edit("e", ["A.swift", "B.swift"]).label == "Changed 2 files")

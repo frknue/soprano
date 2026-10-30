@@ -138,7 +138,7 @@ enum WorkLog {
             let output = command.output.trimmingCharacters(in: .newlines)
             if !output.isEmpty { body += "\n\(output)" }
             if let exit = command.exitCode, exit != 0 { body += "\n\nExit code \(exit)" }
-            return make(.command, label: "Ran command", detail: singleLine(command.command), detailIsCode: true, body: body, icon: TimelineIcon.workCommand)
+            return make(.command, label: item.status.isActive ? "Running command" : "Ran command", detail: singleLine(command.command), detailIsCode: true, body: body, icon: TimelineIcon.workCommand)
         case let .fileChange(changes):
             let paths = changes.map { $0.movePath ?? $0.path }
             let label = changes.count == 1 ? "Changed \(paths[0])" : "Changed \(changes.count) files"

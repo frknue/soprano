@@ -225,6 +225,7 @@ binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
 | `sidebar.search` | Search Threads | global | — | Sidebar |
 | `chat.find` | Find in Thread | not terminal | `cmd+f` | Timeline |
 | `timeline.jumpToLatest` | Jump to Latest | timeline | `cmd+down` | Timeline |
+| `timeline.expandAll` / `timeline.collapseAll` | Expand / Collapse All Work | — | — | Timeline |
 | `composer.focus` | Focus Composer | global | `cmd+l` | Composer |
 | `modelPicker.toggle` | Model Picker | not terminal | `cmd+shift+m` | Composer |
 | `composer.effort` | Reasoning Effort | not terminal | `cmd+shift+e` | Composer |

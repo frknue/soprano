@@ -412,7 +412,8 @@ final class WorkEntryRowView: ClickableRowView {
         self.model = model
         let entry = model.entry
         line.icon.setSymbol(entry.icon, size: 13)
-        line.detail.stringValue = entry.detail ?? ""
+        // An open thought shows its full text below; the line then just says "Thought".
+        line.detail.stringValue = entry.kind == .reasoning && model.expanded ? "" : (entry.detail ?? "")
         line.detail.font = entry.detailIsCode ? Typography.mono(Typography.smallSize) : Typography.ui(Typography.bodySize)
         line.note.stringValue = entry.note ?? ""
         line.failMark.isHidden = true

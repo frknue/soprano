@@ -110,7 +110,8 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             }
         }
         PaletteCenter.shared.addObserver(self) { [weak self] _ in
-            self?.reload()
+            // Rendered Markdown carries its colors: rebuild what is on screen.
+            self?.list.reconfigureVisibleRows()
         }
         reload(scrollToEnd: true)
     }

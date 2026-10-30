@@ -85,6 +85,12 @@ final class TimelineListView: NSView {
         tile()
     }
 
+    /// Re-configures every visible row (colors baked into rendered text changed).
+    func reconfigureVisibleRows() {
+        configuredRows.removeAll()
+        tile()
+    }
+
     func index(ofRow id: String) -> Int? {
         rows.firstIndex { $0.id == id }
     }
