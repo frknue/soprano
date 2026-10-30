@@ -99,6 +99,43 @@ Engine behavior:
 probes the CLI (`probe()` → version, account, models), and runs one-shot `generateJSON`.
 `ProviderKind` declaration order (omp, Codex, Claude Code) is display order everywhere.
 
+**omp** (oh-my-pi, the default provider) — `omp --mode rpc-ui --cwd <cwd> --approval-mode <mode>
+[--model <provider/id>] [--thinking <level>] [--resume <session file>]`, one process per thread
+(path from `EngineSettings.ompPath` or PATH; never `--no-ui`, which makes approvals fail closed).
+omp's RPC (docs: `omp://rpc.md`) is JSONL, not JSON-RPC: commands `{id?, type, …}`, responses
+`{type:"response", id, command, success, data|error}`, events in between. Handshake: wait for
+`ready`, `negotiate_protocol {protocolVersion:2}` (large frames then arrive as base64
+`rpc_chunk` sequences, reassembled by `OmpFrameDecoder`), `set_ask_dialog {enabled:true}`,
+`set_event_filter {messageUpdates:"delta"}`, `get_state` (its `sessionFile` is the thread's
+`providerThreadID`; a saved file that no longer exists starts fresh). Model slugs are
+`provider/id`; `default` (`ModelSelection.ompDefaultModel`) means omp's configured model (no
+`--model`). Model, thinking and fast-mode changes go to the live process (`set_model {provider,
+modelId}`, `set_thinking_level`, `set_fast_mode`); a runtime-mode change relaunches with
+`--resume`. Runtime mode → approval mode: approval-required → `always-ask`, auto-accept-edits →
+`write`, auto → `always-ask-cached`, full-access → `yolo`. Turns: `prompt {message, images?}`
+(attachment paths listed in the text) with the command id as provider turn id; the turn ends at
+`prompt_result` with the same id (extension runs such as auto-double-check happen before it),
+`completed` / `aborted|interrupted|cancelled` → interrupted / else failed. Steer = `steer`,
+interrupt = `abort`. Host UI arrives as `extension_ui_request`: a `select` titled `Allow tool:
+<tool>\n<details>` is an approval (accept → `Approve Once` or `Approve`, acceptForSession → the
+`… for this session` label or `Approve File`, decline → `Deny`, cancel → `cancelled:true`, all
+answered as `extension_ui_response {id, value}`); other `select`, `confirm`, `input`, `editor` and
+`ask` become user-input requests (answers `value`, `confirmed`, `answers[{id, selectedOptions,
+customInput?}]`, dismissed → `cancelled:true`); `cancel {targetId}` withdraws one; `notify` is a
+notice; dialogs arriving after the turn ended are cancelled. Events (`OmpEventMapper`):
+`message_update` text/thinking deltas (item ids `<messageId>:<contentIndex>`, prefixed after a
+relaunch), `tool_execution_start|update|end` → bash → command, write/edit/ast_edit → fileChange
+(edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
+→ webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
+`intent`; assistant `usage` → token usage; compaction/retry → notices. Rollback before turn N:
+`get_entries`, then `navigate_tree {entryId}` to the Nth user-authored, non-steering user message on
+the current branch. No Plan mode (no RPC switch), so the composer hides Build/Plan for omp. Probe:
+`omp --version` plus a short-lived `omp --mode rpc --no-session --no-extensions --no-skills
+--no-rules --no-lsp` for `get_state` and `get_available_models` (≈730 models: first `default`
+named "<model> · configured", then "<name> · <provider>", effort = "off" + `thinking.efforts`).
+The composer's model list shows the first 80 matches of a multi-word search plus a "N more" row.
+Trace: `Tests/SopranoAgentsTests/Fixtures/omp-ask-write-edit-bash.jsonl`.
+
 **Codex** — `codex app-server` (path from `EngineSettings.codexPath` or PATH; GUI apps get a
 minimal PATH, so search `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin`,
 `~/.cargo/bin` too). Env `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Soprano Agents`. Newline-delimited
@@ -170,7 +207,9 @@ Rollback: each turn's user message carries a `uuid`; rolling back before turn N 
 `~/.claude/projects/*/<session>.jsonl` after relaunch); before turn 1 starts a fresh session. Probe:
 `claude --version` and `claude auth status --json`. Traces: `Tests/SopranoAgentsTests/Fixtures/claude-*.jsonl`.
 
-Text generation: Codex `codex exec --ephemeral --skip-git-repo-check -s read-only --model <m>
+Text generation: omp `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules
+--no-context-files --no-lsp [--model <provider/id>] --thinking low` (prompt plus schema on stdin,
+first JSON object of stdout); Codex `codex exec --ephemeral --skip-git-repo-check -s read-only --model <m>
 --config model_reasoning_effort="low" --output-schema <file> --output-last-message <file> -`
 (prompt on stdin); Claude `claude -p --output-format json --json-schema <schema> --model <m>
 --tools "" --disable-slash-commands --no-session-persistence --permission-mode dontAsk` (prompt on

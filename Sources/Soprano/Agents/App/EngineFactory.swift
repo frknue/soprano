@@ -34,7 +34,7 @@ final class ExecutablePaths: @unchecked Sendable {
     }
 }
 
-/// Builds the engine the app runs with: JSON-file store, git CLI, Codex and Claude drivers.
+/// Builds the engine the app runs with: JSON-file store, git CLI, omp, Codex and Claude drivers.
 @MainActor
 enum EngineFactory {
     /// Executable overrides the drivers read on every spawn; the app delegate keeps them current.
@@ -47,6 +47,7 @@ enum EngineFactory {
         let paths = executablePaths
         let environment = EngineEnvironment(
             drivers: [
+                .omp: OmpDriver(executablePath: { paths.path(for: .omp) }),
                 .codex: CodexDriver(executablePath: { paths.path(for: .codex) }),
                 .claude: ClaudeDriver(executablePath: { paths.path(for: .claude) }),
             ],
