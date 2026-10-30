@@ -156,8 +156,14 @@ user's index or HEAD: temp index `GIT_INDEX_FILE=<git-common-dir>/soprano-agents
 <ref> <commit>`, committer/author "Soprano Agents" <soprano-agents@users.noreply.github.com>.
 Diffs: `git diff --no-color --no-ext-diff --no-textconv -M [--ignore-all-space] <a>^{commit}
 <b>^{commit}` (numstat for `changedFiles`). Restore: `git restore --source <commit> --worktree
---staged -- .`, `git clean -fd -- .`, `git reset --quiet -- .`. Commit/push/PR follows T3 Code's
-stacked action flow; PRs via `gh pr create`; open PR lookup via `gh pr view --json`.
+--staged -- .`, `git clean -fd -- .`, `git reset --quiet -- .`. `status` (changed files with line
+counts) and `workingTreeDiff` stage into the same kind of scratch index, so untracked files count
+and `.gitignore` is respected. `DiffParser.parse(_:)` turns a patch into `FileDiff`s for the right
+panel. Worktrees live at `<dir>/<repo>/<branch with / → ->` (names over 40 characters: 23 + `-` +
+16 hex of SHA-256), branched `--no-track` from the base, which is recorded as
+`branch.<b>.soprano-agents-merge-base` (the PR base). Commit/push/PR follows T3 Code's stacked
+action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config); PRs via
+`gh pr create`; open PR lookup via `gh pr view --json` (4 s deadline, failures ignored).
 
 ### `WorkspaceState` (Shell)
 UI state: `selection` (`.draft(projectID:)` or `.thread(id)`), panel visibility (sidebar, thread

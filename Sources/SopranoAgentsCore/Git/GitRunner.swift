@@ -13,63 +13,45 @@ public struct GitResult: Sendable, Hashable {
     }
 
     public var stdoutString: String { String(decoding: stdout, as: UTF8.self) }
+    /// stdout without surrounding whitespace and newlines.
+    public var trimmed: String { stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
 /// Runs the git CLI. The one place that builds git command lines, process
 /// environments and pipes; everything else goes through `run` or `stream`.
 ///
-/// Interface contract (implemented in Wave A, see docs/ARCHITECTURE.md):
 /// - Every invocation is `git --no-pager -c core.quotepath=false -c color.ui=never
 ///   -c log.showSignature=false -c diff.noprefix=false -c diff.mnemonicPrefix=false
 ///   -C <directory> <arguments…>`; reads (`isRead: true`) add `--no-optional-locks`
 ///   and `GIT_OPTIONAL_LOCKS=0` so a refresh never contends with the user's own git.
-/// - The environment is the app's environment plus `environmentOverrides`, plus
-///   `GIT_TERMINAL_PROMPT=0` (never wait on a TTY), `GIT_EDITOR=true` (no editor
-///   prompts; message-taking commands pass messages explicitly), and the askpass
-///   variables from `askpassExecutable` when set (`GIT_ASKPASS`, `SSH_ASKPASS`,
-///   `SSH_ASKPASS_REQUIRE=force`, `SOPRANO_AGENTS_ASKPASS=1`).
-/// - `PATH` = `extraPath` + Homebrew/user tool directories + the inherited PATH, so
-///   hooks find node, bun, etc. even though GUI apps start with a minimal PATH.
+/// - The environment is the app's environment without repository-location
+///   variables, plus `environmentOverrides`, plus the call's `environment`, plus
+///   `GIT_TERMINAL_PROMPT=0` (never wait on a TTY) and `GIT_EDITOR=true` (no editor
+///   prompts; message-taking commands pass messages explicitly).
+/// - `PATH` = Homebrew/user tool directories + the inherited PATH, so hooks find
+///   node, bun, etc. even though GUI apps start with a minimal PATH.
 /// - stdout and stderr are drained concurrently (no pipe-buffer deadlock on large
 ///   output); cancellation of the calling Task terminates the process.
 /// - Exit codes outside `acceptedExitCodes` throw `GitError` with both streams.
 public struct GitRunner: Sendable {
     public var executable: URL
+    /// Applied to every invocation (tests isolate HOME and the git config here).
     public var environmentOverrides: [String: String]
-    public var extraPath: [String]
-    /// Executable git calls back for passwords/passphrases (the app binary in
-    /// askpass mode). nil disables askpass (tests).
-    public var askpassExecutable: URL?
 
-    public init(
-        executable: URL,
-        environmentOverrides: [String: String] = [:],
-        extraPath: [String] = [],
-        askpassExecutable: URL? = nil
-    ) {
+    public init(executable: URL, environmentOverrides: [String: String] = [:]) {
         self.executable = executable
         self.environmentOverrides = environmentOverrides
-        self.extraPath = extraPath
-        self.askpassExecutable = askpassExecutable
     }
 
-    /// `preferredPath` (settings `git.path`) if executable, else
-    /// /opt/homebrew/bin/git, /usr/local/bin/git, then /usr/bin/git only when the
-    /// Command Line Tools or Xcode provide a real git (avoids the install-dialog shim).
-    public static func resolveExecutable(preferredPath: String?) -> URL? {
+    /// Homebrew's git (/opt/homebrew, /usr/local), then /usr/bin/git when the
+    /// Command Line Tools or Xcode provide a real git behind the shim (otherwise it
+    /// pops an install dialog).
+    public static func resolveExecutable() -> URL? {
         let fileManager = FileManager.default
-        if let preferredPath, !preferredPath.isEmpty {
-            let path = (preferredPath as NSString).expandingTildeInPath
-            if fileManager.isExecutableFile(atPath: path) {
-                return URL(fileURLWithPath: path)
-            }
-        }
         for path in ["/opt/homebrew/bin/git", "/usr/local/bin/git"]
             where fileManager.isExecutableFile(atPath: path) {
             return URL(fileURLWithPath: path)
         }
-        // /usr/bin/git is a shim that pops an install dialog unless the
-        // developer tools it forwards to exist.
         let developerToolGits = [
             "/Library/Developer/CommandLineTools/usr/bin/git",
             "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
@@ -86,26 +68,28 @@ public struct GitRunner: Sendable {
         _ arguments: [String],
         in directory: URL,
         stdin: Data? = nil,
+        environment: [String: String] = [:],
         isRead: Bool = false,
         acceptedExitCodes: Set<Int32> = [0]
     ) async throws -> GitResult {
         try await execute(
-            arguments, in: directory, stdin: stdin, isRead: isRead,
+            arguments, in: directory, stdin: stdin, environment: environment, isRead: isRead,
             acceptedExitCodes: acceptedExitCodes, onProgress: nil
         )
     }
 
-    /// Like `run`, reporting each stderr progress line as it arrives (git's
-    /// `--progress` output splits on both "\r" and "\n"). For fetch/pull/push/clone.
+    /// Like `run`, reporting each stderr line as it arrives (git's `--progress`
+    /// output and hook output split on both "\r" and "\n"). For commit and push.
     @discardableResult
     public func stream(
         _ arguments: [String],
         in directory: URL,
+        environment: [String: String] = [:],
         acceptedExitCodes: Set<Int32> = [0],
         onProgress: @escaping @Sendable (String) -> Void
     ) async throws -> GitResult {
         try await execute(
-            arguments, in: directory, stdin: nil, isRead: false,
+            arguments, in: directory, stdin: nil, environment: environment, isRead: false,
             acceptedExitCodes: acceptedExitCodes, onProgress: onProgress
         )
     }
@@ -126,13 +110,22 @@ public struct GitRunner: Sendable {
     /// node, bun, cargo-installed tools, etc.
     static func toolDirectories(home: String) -> [String] {
         [
+            "\(home)/.local/bin",
             "/opt/homebrew/bin",
             "/opt/homebrew/sbin",
             "/usr/local/bin",
-            "\(home)/.local/bin",
             "\(home)/.bun/bin",
             "\(home)/.cargo/bin",
         ]
+    }
+
+    /// `toolDirectories` followed by `inheritedPath`, without duplicates.
+    static func searchPath(inheritedPath: String?, home: String) -> [String] {
+        let inherited = (inheritedPath ?? "").split(separator: ":").map(String.init)
+        var seen = Set<String>()
+        return (toolDirectories(home: home) + inherited).filter { entry in
+            !entry.isEmpty && seen.insert(entry).inserted
+        }
     }
 
     /// Variables that would point git at another repository than `-C`'s.
@@ -150,6 +143,7 @@ public struct GitRunner: Sendable {
     }
 
     func environment(
+        call: [String: String] = [:],
         isRead: Bool,
         inherited: [String: String] = ProcessInfo.processInfo.environment,
         home: String = FileManager.default.homeDirectoryForCurrentUser.path
@@ -157,21 +151,11 @@ public struct GitRunner: Sendable {
         var environment = inherited
         for key in Self.repositoryLocationVariables { environment[key] = nil }
         environment.merge(environmentOverrides) { _, override in override }
+        environment.merge(call) { _, override in override }
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["GIT_EDITOR"] = "true"
         if isRead { environment["GIT_OPTIONAL_LOCKS"] = "0" }
-        if let askpassExecutable {
-            environment["GIT_ASKPASS"] = askpassExecutable.path
-            environment["SSH_ASKPASS"] = askpassExecutable.path
-            environment["SSH_ASKPASS_REQUIRE"] = "force"
-            environment["SOPRANO_AGENTS_ASKPASS"] = "1"
-        }
-        let inheritedPath = (environment["PATH"] ?? "").split(separator: ":").map(String.init)
-        var seen = Set<String>()
-        let path = (extraPath + Self.toolDirectories(home: home) + inheritedPath).filter { entry in
-            !entry.isEmpty && seen.insert(entry).inserted
-        }
-        environment["PATH"] = path.joined(separator: ":")
+        environment["PATH"] = Self.searchPath(inheritedPath: environment["PATH"], home: home).joined(separator: ":")
         return environment
     }
 
@@ -179,6 +163,7 @@ public struct GitRunner: Sendable {
         _ arguments: [String],
         in directory: URL,
         stdin: Data?,
+        environment callEnvironment: [String: String],
         isRead: Bool,
         acceptedExitCodes: Set<Int32>,
         onProgress: (@Sendable (String) -> Void)?
@@ -187,7 +172,7 @@ public struct GitRunner: Sendable {
         let process = GitProcess(
             executable: executable,
             arguments: commandLine(arguments, in: directory, isRead: isRead),
-            environment: environment(isRead: isRead),
+            environment: environment(call: callEnvironment, isRead: isRead),
             directory: nil,
             input: stdin,
             onStderrLine: onProgress
