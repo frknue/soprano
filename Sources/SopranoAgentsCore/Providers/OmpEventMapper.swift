@@ -77,8 +77,11 @@ public struct OmpUIRequest: Sendable, Hashable {
 /// - `prompt_result` → the last assistant text marked final, then `turnCompleted`
 ///   (`completed`; `aborted`/`interrupted`/`cancelled` → interrupted; else failed with
 ///   `error.message`). With `sessionSettled:false` background work (async bash/task/eval jobs)
-///   can still wake the agent, so a completed or failed outcome is held and the turn completes
-///   at the following `session_settled`; runs in between stream into the same turn. An aborted
+///   can still wake the agent, so a completed or failed outcome is held: `turnYielded` now,
+///   `turnCompleted` at the following `session_settled` (or `releaseAwaitingSettlement`). A run
+///   that work wakes (`agent_start`, `turn_start`, streamed text) first reports `turnResumed`
+///   and streams into the same turn; its terminal `agent_end` yields again. An async job's own
+///   `tool_execution_update`s (progress on the call that started it) do not resume. An aborted
 ///   prompt completes at once.
 public struct OmpEventMapper: Sendable {
     private struct Tool: Sendable {
@@ -108,6 +111,12 @@ public struct OmpEventMapper: Sendable {
     private var commandOutput: (id: String, text: String)?
     /// The yielded prompt's outcome while omp waits out background work (`sessionSettled:false`).
     private var heldOutcome: (outcome: ProviderTurnOutcome, error: String?)?
+    /// A run woken by background work streams while the outcome is held.
+    private var isBackgroundRunActive = false
+
+    /// Frames that only arrive while the agent runs: after a yield they mean background work
+    /// woke it. (Not tool updates: an async job reports progress on its call while nothing runs.)
+    private static let runFrames: Set<String> = ["agent_start", "turn_start", "message_update"]
 
     /// The end of a manual compaction.
     public enum CompactionEnd: Sendable, Hashable {
@@ -143,6 +152,13 @@ public struct OmpEventMapper: Sendable {
         return complete(.interrupted, error: nil)
     }
 
+    /// The user moved on from the yielded turn: it ends now with its held outcome (the
+    /// background work keeps running; a later `session_settled` is ignored).
+    public mutating func releaseAwaitingSettlement() -> [ProviderEvent] {
+        guard let held = heldOutcome else { return [] }
+        return complete(held.outcome, error: held.error)
+    }
+
     public init(cwd: String? = nil, contextWindow: Int? = nil, itemPrefix: String = "") {
         self.cwd = cwd
         self.contextWindow = contextWindow
@@ -162,11 +178,21 @@ public struct OmpEventMapper: Sendable {
         approvalTools.removeAll()
         declinedTools.removeAll()
         heldOutcome = nil
+        isBackgroundRunActive = false
         compactionEnd = nil
         commandOutput = nil
     }
 
     public mutating func map(_ frame: JSONValue) -> [ProviderEvent] {
+        guard heldOutcome != nil, !isBackgroundRunActive, let type = frame["type"]?.stringValue, Self.runFrames.contains(type) else {
+            return mapFrame(frame)
+        }
+        // Background work woke the agent after the yield: the turn works again.
+        isBackgroundRunActive = true
+        return [.turnResumed] + mapFrame(frame)
+    }
+
+    private mutating func mapFrame(_ frame: JSONValue) -> [ProviderEvent] {
         switch frame["type"]?.stringValue {
         case "message_update":
             return mapMessageUpdate(frame)
@@ -198,6 +224,11 @@ public struct OmpEventMapper: Sendable {
             }
         case "available_commands_update":
             return [.commands(OmpProtocol.commands(frame["commands"]))]
+        case "agent_end":
+            // A woken run yielded: done again while omp waits out the rest of the work.
+            guard let held = heldOutcome, isBackgroundRunActive, frame["isTerminal"]?.boolValue != false else { return [] }
+            isBackgroundRunActive = false
+            return [.turnYielded(outcome: held.outcome, error: held.error)]
         case "auto_retry_start":
             var text = "Retrying"
             if let attempt = frame["attempt"]?.intValue {
@@ -210,8 +241,7 @@ public struct OmpEventMapper: Sendable {
         case "prompt_result":
             return mapPromptResult(frame)
         case "session_settled":
-            guard let held = heldOutcome else { return [] }
-            return complete(held.outcome, error: held.error)
+            return releaseAwaitingSettlement()
         default:
             return []
         }
@@ -278,7 +308,8 @@ public struct OmpEventMapper: Sendable {
         // An aborted prompt is over for the user even while background jobs keep omp busy.
         if frame["sessionSettled"]?.boolValue == false, outcome != .interrupted {
             heldOutcome = (outcome, error)
-            return []
+            isBackgroundRunActive = false
+            return [.turnYielded(outcome: outcome, error: error)]
         }
         return complete(outcome, error: error)
     }

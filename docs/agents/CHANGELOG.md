@@ -83,3 +83,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Terminals render Nerd Font icons and powerline separators (Powerlevel10k, Starship, eza): they
   use an installed "… Nerd Font Mono" family (JetBrains Mono first) or Powerlevel10k's MesloLGS
   NF instead of SF Mono, or fall back to Symbols Nerd Font Mono.
+- omp threads no longer keep showing Working after the answer while a background job (an async
+  bash/task, an advisor review) still runs: the turn shows as done with a muted "Background work
+  still running…" note, the composer offers Send instead of Stop, and a job that wakes the agent
+  shows Working again and adds to that turn. A message you send meanwhile starts a new turn
+  instead of interrupting the finished one.

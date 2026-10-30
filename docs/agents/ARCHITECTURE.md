@@ -75,9 +75,24 @@ Engine behavior:
 - A provider switch clears `providerThreadID` (no cross-provider resume). Turns recovered after a
   crash cancel their pending approvals and questions.
 - One `ProviderSession` per thread, created lazily on first send (resumes `providerThreadID`
-  after relaunch), closed on delete/shutdown. Provider events fold into the active turn:
-  `itemUpdated` replaces by id, deltas append, approvals/user input become items, `turnCompleted`
-  finishes the turn and starts the next queued message.
+  after relaunch), closed on delete/shutdown. Provider events fold into the open turn
+  (`AgentThread.openTurn`, the last turn while `.running`): `itemUpdated` replaces by id, deltas
+  append, approvals/user input become items, `turnCompleted` finishes the turn and starts the
+  next queued message.
+- Yielded turns: `turnYielded(outcome, error)` (omp only, see below) sets `Turn.yieldedAt`
+  (persisted; a failed yield also sets `failureMessage`): the answer is final, so
+  `AgentThread.activeTurn`/`isRunning` skip the turn (no Working pill, Stop, "Working for" row,
+  steering or approval bar; Edit from here and archive allowed), its live items settle, its
+  checkpoint is captured, and a queued message starts after a completed yield. The turn stays
+  open: `turnResumed` (background work woke the agent) clears `yieldedAt` and the run streams
+  into it; `turnCompleted` ends it at `completedAt = yieldedAt` (or now after a resumed run).
+  Anything that starts new work first ends the yielded turn (`releaseYieldedTurn`): `send`,
+  `sendQueuedNow`, the queue, `compact`, `revert` call `ProviderSession.releaseYieldedTurn()`
+  (default no-op), wait up to `EngineRuntime.yieldReleaseTimeout` (5 s) for its
+  `turnCompleted`, else end it locally with its yielded outcome (`Turn.yieldedStatus`); then the
+  message starts a new turn (never a steer, never interrupted). Session end, app quit and crash
+  recovery also end a yielded turn with its yielded outcome. The timeline shows a yielded turn
+  as finished plus a muted "Background work still running…" row (`.backgroundWork`).
 - Checkpoints: before turn N, if `CheckpointRef.ref(thread, N-1)` is missing, capture it; after
   turn N ends (completed or interrupted), capture `ref(thread, N)` and store
   `TurnCheckpoint(files:)` from `changedFiles(ref(N-1), ref(N))`. Not a repo → status `.missing`.
@@ -151,11 +166,18 @@ previous turn's tip (re-read at start and after a rewind) as the turn's `provide
 not text, since omp rewrites skill invocations, templates and `^model` mentions. A turn whose start
 cannot be located (entries unreadable, tip off the branch) gets `omp-unresolved`, which rollback
 refuses instead of guessing; a turn that added nothing (local command) gets no id. A completed or failed `prompt_result`
-with `sessionSettled:false` (async bash/task/eval jobs still running) holds that outcome: the
-turn, its dialogs, steer and interrupt stay live and the runs those jobs wake stream into it
-until `session_settled`, so the checkpoint and the queue wait for them. Stop ends the turn at
-once: an aborted `prompt_result`, any `prompt_result` after Stop was pressed, or Stop while only
-background work is left (`abort` does not stop background jobs). Steer = `steer`,
+with `sessionSettled:false` (async bash/task/eval jobs still running) yields the turn
+(`turnYielded`, then `get_state` for the context fill) and holds the prompt: its dialogs and
+interrupt stay live, a run those jobs wake (`agent_start`, `turn_start` or streamed text; not
+the job's own `tool_execution_update`s on its call) reports `turnResumed` and streams into the
+turn, and that run's terminal `agent_end` yields again. `session_settled` ends the held prompt
+with its outcome (anchor, context fill, `turnCompleted`). `releaseYieldedTurn()` does the same
+right away without sending anything to omp (the jobs keep running; a later `session_settled`
+finds no held prompt and is ignored; runs they wake after that stream into whatever turn is
+open, or are dropped). Settlement, Stop and release share one guarded ending, so a late anchor
+never lands on the next turn. Stop ends the turn at once: an aborted `prompt_result`, any
+`prompt_result` after Stop was pressed, or Stop while only background work is left (`abort`
+does not stop background jobs). Steer = `steer`,
 interrupt = `abort`. Host UI arrives as `extension_ui_request`: a `select` titled `Allow tool:
 <tool>\n<details>` is an approval (accept → `Approve Once` or `Approve`, acceptForSession → the
 `… for this session` label or `Approve File`, decline → `Deny`, cancel → `cancelled:true`, all
@@ -177,7 +199,8 @@ the old tip. No Plan mode (no RPC switch), so the composer hides Build/Plan for 
 --no-rules --no-lsp` for `get_state` and `get_available_models` (≈730 models: first `default`
 named "<model> · configured", then "<name> · <provider>", effort = "off" + `thinking.efforts`).
 The composer's model list shows the first 80 matches of a multi-word search plus a "N more" row.
-Trace: `Tests/SopranoAgentsTests/Fixtures/omp-ask-write-edit-bash.jsonl`.
+Traces: `Tests/SopranoAgentsTests/Fixtures/omp-ask-write-edit-bash.jsonl`, `omp-builtin-yield.jsonl`
+(`/context`, then an async bash job that yields, wakes the agent and settles).
 
 **Codex** — `codex app-server` (path from `EngineSettings.codexPath` or PATH; GUI apps get a
 minimal PATH, so search `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin`,
@@ -487,7 +510,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|background|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -508,7 +531,9 @@ UI with it and `read` the PNG; they do not launch the GUI.
 The demo fixture's thread reports 124k of 200k context tokens and the engine remembers an omp
 command list for it and the `app` project: `--perform composer.focus --type "/re"` opens the
 filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context card, and
-`--fixture failed --perform composer.focus --type "/"` the empty state. `--accounts` installs an
+`--fixture failed --perform composer.focus --type "/"` the empty state. `--fixture background`
+adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
+"Background work still running…" row, Send instead of Stop). `--accounts` installs an
 `AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
 has two Claude logins in omp, Claude Code's own login and one Codex CLI login with 5h/7d windows
 at 9 %, 72 %/93 % and 75 %; `pending` adds a waiting omp sign-in and a failed Claude Code action.

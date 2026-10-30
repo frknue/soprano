@@ -10,6 +10,8 @@ final class EngineRuntime {
     private var background: [UUID: Task<Void, Never>] = [:]
     /// Delay before the first retry of a failed initial title generation (doubles per retry).
     var titleRetryDelay: Duration = .seconds(2)
+    /// How long ending a yielded turn waits for the session's report before ending it locally.
+    var yieldReleaseTimeout: Duration = .seconds(5)
     /// The last command list each provider reported per workspace (this run only), for drafts
     /// and threads without a live session (AgentEngine+Commands.swift).
     var rememberedCommands: [CommandScope: [ProviderCommand]] = [:]

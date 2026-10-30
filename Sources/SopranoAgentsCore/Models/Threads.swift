@@ -182,11 +182,20 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         self.contextUsage = contextUsage
     }
 
-    public var activeTurn: Turn? {
+    /// The last turn while it has not ended, working or yielded (`Turn.isYielded`): provider
+    /// events fold into it.
+    public var openTurn: Turn? {
         guard let last = turns.last, last.status == .running else { return nil }
         return last
     }
 
+    /// The turn the agent is working on: the open turn unless it yielded.
+    public var activeTurn: Turn? {
+        guard let turn = openTurn, turn.yieldedAt == nil else { return nil }
+        return turn
+    }
+
+    /// The agent is working (a yielded turn does not count: its answer is final).
     public var isRunning: Bool { activeTurn != nil }
 
     /// Timestamp the sidebar shows: the latest user message, else the last update.
@@ -257,6 +266,12 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
     public var checkpoint: TurnCheckpoint?
     public var providerTurnID: String?
     public var tokenUsage: TokenUsage?
+    /// When the provider's prompt yielded while background work it started still runs (omp
+    /// `sessionSettled:false`): the answer is final and the thread is idle, but the turn stays
+    /// open (status `.running`) so the runs that work wakes stream into it. A run clears it, the
+    /// run's end sets it again. Held outcome: failed when `failureMessage` is set, else
+    /// completed. Older files lack it.
+    public var yieldedAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -271,7 +286,8 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         steers: [UserMessage] = [],
         checkpoint: TurnCheckpoint? = nil,
         providerTurnID: String? = nil,
-        tokenUsage: TokenUsage? = nil
+        tokenUsage: TokenUsage? = nil,
+        yieldedAt: Date? = nil
     ) {
         self.id = id
         self.ordinal = ordinal
@@ -286,11 +302,21 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         self.checkpoint = checkpoint
         self.providerTurnID = providerTurnID
         self.tokenUsage = tokenUsage
+        self.yieldedAt = yieldedAt
     }
+
+    /// Open but yielded (`yieldedAt`): done for the user while background work runs.
+    public var isYielded: Bool { status == .running && yieldedAt != nil }
+
+    /// The status a yielded turn ends with when it is settled, released or recovered.
+    public var yieldedStatus: TurnStatus { failureMessage == nil ? .completed : .failed }
+
+    /// When the work ended: the completion, or the yield of a yielded turn; nil while working.
+    public var endedAt: Date? { completedAt ?? (isYielded ? yieldedAt : nil) }
 
     /// Wall time of the turn ("Worked for 3m 12s").
     public func duration(now: Date = Date()) -> TimeInterval {
-        (completedAt ?? now).timeIntervalSince(startedAt)
+        (endedAt ?? now).timeIntervalSince(startedAt)
     }
 
     public var pendingApproval: ApprovalRequest? {

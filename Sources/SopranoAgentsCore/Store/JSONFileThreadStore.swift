@@ -66,16 +66,19 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
         return StoreSnapshot(projects: projects, threads: threads)
     }
 
-    /// A thread as it was persisted mid-turn: the running turn (and its live items) become interrupted.
+    /// A thread as it was persisted mid-turn: the running turn (and its live items) become
+    /// interrupted; a yielded turn ends with its yielded outcome at its yield.
     static func recovered(_ thread: AgentThread) -> AgentThread {
         var thread = thread
         thread.isGeneratingTitle = false
         for index in thread.turns.indices where thread.turns[index].status == .running {
             var turn = thread.turns[index]
-            turn.status = .interrupted
-            turn.completedAt = turn.completedAt ?? turn.items.compactMap { $0.completedAt ?? $0.startedAt }.max() ?? turn.startedAt
+            let yielded = turn.isYielded
+            turn.status = yielded ? turn.yieldedStatus : .interrupted
+            turn.completedAt = turn.completedAt ?? turn.yieldedAt ?? turn.items.compactMap { $0.completedAt ?? $0.startedAt }.max() ?? turn.startedAt
+            turn.yieldedAt = nil
             for item in turn.items.indices where turn.items[item].status.isActive {
-                turn.items[item].status = .interrupted
+                turn.items[item].status = yielded ? .completed : .interrupted
             }
             // The provider that asked is gone: answering now would reach nobody.
             for item in turn.items.indices {

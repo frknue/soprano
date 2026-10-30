@@ -80,6 +80,14 @@ public enum ProviderEvent: Sendable, Hashable {
     /// The provider's slash commands and skills (the complete list; replaces the previous one).
     case commands([ProviderCommand])
     case turnCompleted(outcome: ProviderTurnOutcome, error: String?)
+    /// The prompt yielded (`completed` or `failed`) while background work it started can still
+    /// wake the agent (omp `sessionSettled:false`): the answer is final and the thread idle, but
+    /// the turn stays open until `turnCompleted` (with this outcome) or `releaseYieldedTurn()`.
+    /// A woken run's end yields again.
+    case turnYielded(outcome: ProviderTurnOutcome, error: String?)
+    /// Background work woke the agent after `turnYielded`: the turn works again, its events fold
+    /// into it.
+    case turnResumed
     /// The process exited or the session broke; a running turn fails with `error`.
     case sessionEnded(error: String?)
 }
@@ -103,6 +111,12 @@ public protocol ProviderSession: AnyObject, Sendable {
 
     func interrupt() async
 
+    /// The user moved on from a yielded turn (`turnYielded`): end it now, reported like its
+    /// settlement (`turnStarted` with its native id, context usage, `turnCompleted` with the
+    /// yielded outcome), and forget the held prompt without stopping the background work.
+    /// Nothing happens when no turn is yielded.
+    func releaseYieldedTurn() async
+
     func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async
 
     func answer(userInput id: String, answers: [String: [String]]) async
@@ -119,6 +133,11 @@ public protocol ProviderSession: AnyObject, Sendable {
 
     /// Terminates the process. Safe to call twice.
     func close() async
+}
+
+extension ProviderSession {
+    /// Providers that never yield an unsettled turn have nothing to release.
+    public func releaseYieldedTurn() async {}
 }
 
 /// Creates sessions and probes the installed CLI for one provider.

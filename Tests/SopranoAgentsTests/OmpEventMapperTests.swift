@@ -320,4 +320,69 @@ struct OmpEventMapperTests {
     @Test func ompDisplayDiffsBecomeUnifiedHunks() {
         #expect(OmpEventMapper.unifiedDiff(" 3|a\n-4|b\n+4|c\n 5|d\n...\n-9|x") == "@@ -3,3 +3,3 @@\n a\n-b\n+c\n d\n@@ -9,1 +8,0 @@\n-x")
     }
+
+    @Test func anUnsettledYieldIsResumedByAWokenRunAndYieldsAgainAtItsEnd() {
+        var mapper = OmpEventMapper()
+        let delta: JSONValue = ["type": "message_update", "messageId": "msg-9", "message": ["role": "assistant"],
+                                "assistantMessageEvent": ["type": "text_delta", "contentIndex": 0, "delta": "done"]]
+
+        #expect(mapper.map(["type": "prompt_result", "status": "completed", "sessionSettled": false]) == [.turnYielded(outcome: .completed, error: nil)])
+        #expect(mapper.map(["type": "agent_start"]) == [.turnResumed])
+        #expect(mapper.map(delta) == [.assistantDelta(itemID: "msg-9:0", delta: "done", isFinal: false)])
+        #expect(mapper.map(["type": "agent_end", "isTerminal": false]).isEmpty)
+        #expect(mapper.map(["type": "agent_end", "isTerminal": true]) == [.turnYielded(outcome: .completed, error: nil)])
+        // A woken run that announces itself only by streaming resumes the turn as well.
+        #expect(mapper.map(delta).first == .turnResumed)
+        #expect(mapper.map(["type": "session_settled"]).last == .turnCompleted(outcome: .completed, error: nil))
+        #expect(!mapper.isAwaitingSettlement)
+    }
+
+    @Test func aReleasedYieldCompletesWithItsHeldOutcomeAndIgnoresTheLaterSettlement() {
+        var mapper = OmpEventMapper()
+        _ = mapper.map(["type": "prompt_result", "status": "error", "error": ["message": "rate limited"], "sessionSettled": false])
+
+        #expect(mapper.releaseAwaitingSettlement() == [.turnCompleted(outcome: .failed, error: "rate limited")])
+        #expect(mapper.map(["type": "session_settled"]).isEmpty)
+        #expect(mapper.map(["type": "agent_start"]).isEmpty)
+    }
+
+    /// A live omp 18.14 trace (`omp-builtin-yield.jsonl`, claude-haiku-5-5, setWidget/notice and
+    /// command-list frames left out): `/context` (a local built-in), then a prompt that starts
+    /// `sleep 8` as an async bash job and yields; the job's progress arrives on its tool call,
+    /// its result wakes the agent, and `session_settled` follows that run.
+    @Test func aRecordedBuiltInAndAnAsyncJobYieldResumeAndSettleInTheirTurns() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/omp-builtin-yield.jsonl")
+        let frames = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try JSONValue.parse(String($0)) }
+        var mapper = OmpEventMapper(cwd: "/tmp/soprano-omp-smoke")
+        var events: [ProviderEvent] = []
+        var lifecycle: [(event: ProviderEvent, frame: String)] = []
+        for frame in frames {
+            var produced = mapper.map(frame)
+            // The session ends a local built-in at its `agentInvoked:false` ack.
+            if frame["type"] == "response", frame["data"]?["agentInvoked"] == false { produced += mapper.finishLocally() }
+            for event in produced {
+                switch event {
+                case .turnYielded, .turnResumed, .turnCompleted: lifecycle.append((event, frame["type"]?.stringValue ?? ""))
+                default: break
+                }
+            }
+            events += produced
+        }
+
+        #expect(lifecycle.map(\.event) == [
+            .turnCompleted(outcome: .completed, error: nil),
+            .turnYielded(outcome: .completed, error: nil),
+            .turnResumed,
+            .turnYielded(outcome: .completed, error: nil),
+            .turnCompleted(outcome: .completed, error: nil),
+        ])
+        #expect(lifecycle.map(\.frame) == ["response", "prompt_result", "agent_start", "agent_end", "session_settled"])
+        let output = Self.latestItems(events).first { $0.id.hasPrefix("command-output:") }
+        guard case let .assistantMessage(text, true)? = output?.kind else {
+            Issue.record("expected /context's report as the first turn's answer")
+            return
+        }
+        #expect(text.hasPrefix("```\nContext window: 100000 tokens (27% used)\n  System prompt    [█░"))
+        #expect(!text.contains("\u{1B}"))
+    }
 }

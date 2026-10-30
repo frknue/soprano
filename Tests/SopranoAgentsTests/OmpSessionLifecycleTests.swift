@@ -8,12 +8,14 @@ import Testing
 /// `prompt_result`, a
 /// tool approval as an `extension_ui_request` `select`, a prompt that yields with
 /// `sessionSettled:false` while a background job is still running, and a builtin slash command
-/// (`/usage`) that writes `command_output` frames and acks with `agentInvoked:false`.
+/// (`/usage`) that writes `command_output` frames and acks with `agentInvoked:false`. Frames a
+/// test writes to `emit-<n>.jsonl` in the fake's folder (`Fake.emit`) are sent as they appear:
+/// background runs, `session_settled`.
 @MainActor
 struct OmpSessionLifecycleTests {
     private static let fakeCLI = #"""
     #!/usr/bin/env python3
-    import json, os, sys
+    import json, os, sys, threading, time
     args = sys.argv[1:]
     log = os.environ["FAKE_OMP_LOG"]
     def record(o):
@@ -21,8 +23,21 @@ struct OmpSessionLifecycleTests {
             f.write(json.dumps(o) + "\n")
     record({"cwd": os.getcwd(), "args": args})
     session = args[args.index("--resume") + 1] if "--resume" in args else os.path.join(os.getcwd(), "fake-session.jsonl")
+    writing = threading.Lock()
     def out(o):
-        sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+        with writing:
+            sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+    def emitted():
+        # Frames the test scripts (background runs, settlement), in file order.
+        while True:
+            for name in sorted(n for n in os.listdir(os.getcwd()) if n.startswith("emit-") and n.endswith(".jsonl")):
+                path = os.path.join(os.getcwd(), name)
+                with open(path) as f:
+                    lines = [l for l in f.read().split("\n") if l]
+                os.remove(path)
+                for l in lines: out(json.loads(l))
+            time.sleep(0.01)
+    threading.Thread(target=emitted, daemon=True).start()
     def ok(msg, data=None):
         o = {"type": "response", "command": msg["type"], "success": True}
         if "id" in msg: o["id"] = msg["id"]
@@ -118,7 +133,15 @@ struct OmpSessionLifecycleTests {
             prompt = msg["id"]
             ok(msg)
             user(msg["message"])
-            if "slow" in msg["message"]:
+            if "yield" in msg["message"]:
+                # Answers, then yields while a background job runs; the test emits what follows.
+                add({"type": "message", "id": "a%d" % turns, "message": {"role": "assistant", "content": [{"type": "text", "text": "answer"}]}})
+                out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "answer"}})
+                out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_end", "contentIndex": 0, "content": "answer"}})
+                out({"type": "agent_end", "messages": [], "isTerminal": True, "yielded": True})
+                out({"type": "prompt_result", "id": prompt, "agentInvoked": True, "status": "completed", "sessionSettled": False})
+                prompt = None
+            elif "slow" in msg["message"]:
                 # Still running when Stop arrives; a background job is pending.
                 out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "job started"}})
                 slow = "aborted" if "aborted" in msg["message"] else "completed"
@@ -185,6 +208,12 @@ struct OmpSessionLifecycleTests {
 
         func received(_ type: String) -> [JSONValue] {
             records().compactMap { $0["recv"] }.filter { $0["type"]?.stringValue == type }
+        }
+
+        /// Makes the fake send `frames` now (step `n` orders writes that are still pending).
+        func emit(_ step: Int, _ frames: [JSONValue]) throws {
+            let file = directory.appendingPathComponent(String(format: "emit-%04d.jsonl", step))
+            try frames.map { $0.jsonString() }.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
         }
     }
 
@@ -641,5 +670,147 @@ struct OmpSessionLifecycleTests {
         #expect(launches.count == 2)
         #expect(launches.last?.contains("yolo") == true)
         #expect(launches.last?.suffix(2) == ["--resume", file])
+    }
+
+    // MARK: - Engine over the fake
+
+    /// An engine whose omp driver runs the fake, with a project in the fake's folder.
+    private func makeEngine(_ fake: Fake) -> (AgentEngine, Project) {
+        let engine = AgentEngine(environment: EngineEnvironment(
+            drivers: [.omp: OmpDriver(executablePath: { fake.executable })],
+            git: RecordingGit(),
+            store: InMemoryThreadStore(),
+            dataDirectory: EngineHarness.temporaryDirectory()
+        ), settings: EngineSettings(generateTitles: false))
+        return (engine, engine.addProject(path: fake.directory.path))
+    }
+
+    private func launch(_ engine: AgentEngine, _ project: Project, _ text: String) async throws -> String {
+        try await engine.launchThread(ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp)), text: text, attachments: [])
+    }
+
+    /// Polls `condition` until it holds or `seconds` pass.
+    private func until(_ seconds: Double = 10, _ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !condition() {
+            if ContinuousClock.now > deadline { return false }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
+
+    /// The last turn is still open, but the thread no longer works on it.
+    private static func isYielded(_ thread: AgentThread?) -> Bool {
+        guard let thread else { return false }
+        return !thread.isRunning && thread.turns.last?.status == .running
+    }
+
+    private static func texts(_ turn: Turn?) -> [String] {
+        turn?.items.compactMap { if case let .assistantMessage(text, _) = $0.kind { text } else { nil } } ?? []
+    }
+
+    private static func textDelta(_ messageID: String, _ delta: String) -> JSONValue {
+        ["type": "message_update", "messageId": .string(messageID), "message": ["role": "assistant"],
+         "assistantMessageEvent": ["type": "text_delta", "contentIndex": 0, "delta": .string(delta)]]
+    }
+
+    private static func textEnd(_ messageID: String, _ content: String) -> JSONValue {
+        ["type": "message_update", "messageId": .string(messageID), "message": ["role": "assistant"],
+         "assistantMessageEvent": ["type": "text_end", "contentIndex": 0, "content": .string(content)]]
+    }
+
+    @Test func aYieldWithBackgroundWorkPendingStopsWorkingUntilOmpSettles() async throws {
+        let fake = try makeFake()
+        let (engine, project) = makeEngine(fake)
+
+        let id = try await launch(engine, project, "answer, then yield to a background job")
+        let yielded = await until { Self.isYielded(engine.thread(id)) }
+        let atYield = engine.thread(id)
+        try fake.emit(1, [["type": "session_settled"]])
+        let settled = await until { engine.thread(id)?.turns.last?.status == .completed }
+        await engine.shutdown()
+
+        // The answer is final: no Working pill, Stop or "Working for" while the job runs, yet
+        // the turn stays open until omp settles.
+        #expect(yielded)
+        #expect(atYield?.turns.last?.isYielded == true)
+        #expect(atYield.map { ThreadStatus.of($0).isWorking } == false)
+        #expect(Self.texts(atYield?.turns.last) == ["answer"])
+        #expect(settled)
+        #expect(engine.thread(id)?.turns.count == 1)
+        #expect(engine.thread(id)?.turns.last?.providerTurnID == "u1")
+    }
+
+    @Test func aBackgroundRunAfterTheYieldWorksInTheSameTurn() async throws {
+        let fake = try makeFake()
+        let (engine, project) = makeEngine(fake)
+
+        let id = try await launch(engine, project, "answer, then yield to a background job")
+        let yielded = await until { Self.isYielded(engine.thread(id)) }
+        try fake.emit(1, [["type": "agent_start"], Self.textDelta("msg-9", "background result")])
+        let resumed = await until {
+            engine.thread(id)?.isRunning == true && Self.texts(engine.thread(id)?.turns.last).contains("background result")
+        }
+        try fake.emit(2, [Self.textEnd("msg-9", "background result"), ["type": "agent_end", "messages": [], "isTerminal": true, "yielded": true]])
+        let yieldedAgain = await until { Self.isYielded(engine.thread(id)) }
+        try fake.emit(3, [["type": "session_settled"]])
+        let settled = await until { engine.thread(id)?.turns.last?.status == .completed }
+        await engine.shutdown()
+
+        #expect(yielded && resumed && yieldedAgain && settled)
+        let thread = try #require(engine.thread(id))
+        #expect(thread.turns.count == 1)
+        #expect(Self.texts(thread.turns.last) == ["answer", "background result"])
+    }
+
+    @Test func aMessageAfterTheYieldCompletesThatTurnAndStartsANewPrompt() async throws {
+        let fake = try makeFake()
+        let (engine, project) = makeEngine(fake)
+        let id = try await launch(engine, project, "answer, then yield to a background job")
+        let yielded = await until { Self.isYielded(engine.thread(id)) }
+
+        try await engine.send(id, text: "approve the next step", attachments: [])
+        let asked = await until { engine.thread(id)?.turns.last?.pendingApproval != nil }
+        let whileAsking = engine.thread(id)
+        // The old stretch settles while the new prompt still waits on its approval.
+        try fake.emit(1, [["type": "session_settled"]])
+        try await Task.sleep(for: .milliseconds(300))
+        let afterStaleSettle = engine.thread(id)?.turns.last?.status
+        await engine.respond(id, approvalID: "ui-1", decision: .accept)
+        let finished = await until { engine.thread(id)?.turns.last?.status == .completed }
+        await engine.shutdown()
+
+        #expect(yielded && asked)
+        #expect(whileAsking?.turns.map(\.status) == [.completed, .running])
+        #expect(whileAsking?.turns.last?.steers.isEmpty == true)
+        #expect(fake.received("abort").isEmpty)
+        #expect(fake.received("steer").isEmpty)
+        #expect(fake.received("prompt").map { $0["message"]?.stringValue } == ["answer, then yield to a background job", "approve the next step"])
+        #expect(afterStaleSettle == .running)
+        #expect(finished)
+        let thread = try #require(engine.thread(id))
+        #expect(thread.turns.map(\.status) == [.completed, .completed])
+        #expect(thread.turns.map(\.providerTurnID) == ["u1", "u2"])
+    }
+
+    @Test func aSlashCommandAfterTheYieldEndsThatTurnAndShowsItsOutputInItsOwn() async throws {
+        let fake = try makeFake()
+        let (engine, project) = makeEngine(fake)
+        let id = try await launch(engine, project, "answer, then yield to a background job")
+        let yielded = await until { Self.isYielded(engine.thread(id)) }
+
+        try await engine.send(id, text: "/usage", attachments: [])
+        let finished = await until { engine.thread(id)?.turns.count == 2 && engine.thread(id)?.openTurn == nil }
+        // The old stretch settles after the local command ended: nothing changes.
+        try fake.emit(1, [["type": "session_settled"]])
+        try await Task.sleep(for: .milliseconds(300))
+        let thread = try #require(engine.thread(id))
+        await engine.shutdown()
+
+        #expect(yielded && finished)
+        #expect(thread.turns.map(\.status) == [.completed, .completed])
+        #expect(Self.texts(thread.turns.first) == ["answer"])
+        #expect(Self.texts(thread.turns.last) == ["```\nUsage\n  claude 12%\nDashboard ready\n```"])
+        #expect(fake.received("abort").isEmpty && fake.received("steer").isEmpty)
     }
 }

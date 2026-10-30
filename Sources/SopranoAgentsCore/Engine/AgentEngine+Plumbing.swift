@@ -110,6 +110,7 @@ extension AgentEngine {
 
     /// Ends a running turn: settles its live items and unanswered requests, then captures the
     /// turn's checkpoint (completed/interrupted) and starts the next queued message (completed).
+    /// A yielded turn's work ended at its yield.
     func finishTurn(_ threadID: String, _ turnID: String, status: TurnStatus, error: String?) {
         guard isTurnRunning(threadID, turnID) else { return }
         let now = environment.now()
@@ -117,8 +118,9 @@ extension AgentEngine {
             thread.updatedAt = now
             guard let index = thread.turns.lastIndex(where: { $0.id == turnID }) else { return }
             var turn = thread.turns[index]
+            turn.completedAt = turn.isYielded ? turn.yieldedAt ?? now : now
+            turn.yieldedAt = nil
             turn.status = status
-            turn.completedAt = now
             if status == .failed {
                 turn.failureMessage = error ?? turn.failureMessage ?? "The turn failed."
             }
@@ -155,12 +157,60 @@ extension AgentEngine {
         }
     }
 
-    /// Starts the first queued message when the thread is idle.
+    /// Starts the first queued message when the thread is idle (a yielded turn ends first).
     func drainQueue(_ threadID: String) async {
-        guard let thread = thread(threadID), !thread.isRunning, let next = thread.queue.first else { return }
+        guard let thread = thread(threadID), !thread.isRunning, !thread.queue.isEmpty else { return }
+        await releaseYieldedTurn(threadID)
+        guard let thread = self.thread(threadID), thread.openTurn == nil, let next = thread.queue.first else { return }
         updateThread(threadID) { $0.queue.removeAll { $0.id == next.id } }
         guard let turnID = beginTurn(threadID, message: next.message, selection: next.modelSelection) else { return }
         await runTurn(threadID, turnID)
+    }
+
+    /// The provider's prompt yielded with background work pending (`turnYielded`): the answer
+    /// is final and the thread idle, but the turn stays open for the runs that work wakes. Its
+    /// live items settle, its checkpoint is captured (the changed-files card; again when it
+    /// ends), and after a completed yield a queued message starts (which ends the turn first).
+    func yieldTurn(_ threadID: String, outcome: ProviderTurnOutcome, error: String?) {
+        guard let thread = thread(threadID), let turnID = thread.openTurn?.id else { return }
+        let now = environment.now()
+        mutateTurn(threadID, turnID) { turn in
+            turn.yieldedAt = now
+            turn.failureMessage = outcome == .failed ? error ?? "The turn failed." : nil
+            for index in turn.items.indices where turn.items[index].status.isActive {
+                switch turn.items[index].kind {
+                case .approval, .userInput:
+                    continue
+                default:
+                    turn.items[index].status = .completed
+                    turn.items[index].completedAt = turn.items[index].completedAt ?? now
+                }
+            }
+        }
+        let drain = outcome == .completed && !runtime.thread(threadID).holdQueue && !thread.queue.isEmpty
+        runtime.track { [self] in
+            await captureTurnCheckpoint(threadID, turnID)
+            if drain { await drainQueue(threadID) }
+        }
+    }
+
+    /// Ends the thread's yielded turn before anything else starts (a new message, a queued one,
+    /// a compaction, a rewind): the session reports it like its settlement (native id, context
+    /// fill, `turnCompleted` with the yielded outcome, never interrupted) and forgets the held
+    /// prompt without stopping the background work. Without a live session, or when that report
+    /// does not arrive in time, the turn ends here with its yielded outcome.
+    func releaseYieldedTurn(_ threadID: String) async {
+        guard let turn = thread(threadID)?.openTurn, turn.isYielded else { return }
+        let rt = runtime.thread(threadID)
+        if let session = rt.session, rt.starting == nil, rt.liveTurnID == turn.id {
+            await session.releaseYieldedTurn()
+            let deadline = ContinuousClock.now + runtime.yieldReleaseTimeout
+            while isTurnRunning(threadID, turn.id), ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        guard let open = thread(threadID)?.openTurn, open.id == turn.id else { return }
+        finishTurn(threadID, open.id, status: open.isYielded ? open.yieldedStatus : .completed, error: open.failureMessage)
     }
 
     /// Delivers `message` into the running turn, or queues it when the provider turn is not live
@@ -260,14 +310,19 @@ extension AgentEngine {
         }
     }
 
-    /// The session broke: a running turn fails and the next send starts a new session (resuming).
+    /// The session broke: a running turn fails (a yielded one ends with its yielded outcome: its
+    /// answer stands) and the next send starts a new session (resuming).
     func sessionEnded(_ threadID: String, error: String?) {
         let rt = runtime.thread(threadID)
         let session = rt.session
         rt.dropSession()
         rt.liveTurnID = nil
-        if let turn = thread(threadID)?.activeTurn {
-            finishTurn(threadID, turn.id, status: .failed, error: error ?? "The provider session ended unexpectedly.")
+        if let turn = thread(threadID)?.openTurn {
+            if turn.isYielded {
+                finishTurn(threadID, turn.id, status: turn.yieldedStatus, error: turn.failureMessage)
+            } else {
+                finishTurn(threadID, turn.id, status: .failed, error: error ?? "The provider session ended unexpectedly.")
+            }
         }
         if let session {
             Task { await session.close() }
@@ -281,7 +336,7 @@ extension AgentEngine {
         case let .conversationID(id):
             updateThread(threadID) { $0.providerThreadID = id }
         case let .turnStarted(providerTurnID):
-            guard let turnID = thread(threadID)?.activeTurn?.id else { return }
+            guard let turnID = thread(threadID)?.openTurn?.id else { return }
             runtime.thread(threadID).liveTurnID = turnID
             if let providerTurnID {
                 mutateTurn(threadID, turnID) { turn in
@@ -327,13 +382,18 @@ extension AgentEngine {
         case let .commands(commands):
             receiveCommands(commands, threadID: threadID)
         case let .turnCompleted(outcome, error):
-            guard let turnID = thread(threadID)?.activeTurn?.id else { return }
+            guard let turnID = thread(threadID)?.openTurn?.id else { return }
             let status: TurnStatus = switch outcome {
             case .completed: .completed
             case .interrupted: .interrupted
             case .failed: .failed
             }
             finishTurn(threadID, turnID, status: status, error: error)
+        case let .turnYielded(outcome, error):
+            yieldTurn(threadID, outcome: outcome, error: error)
+        case .turnResumed:
+            guard let turn = thread(threadID)?.openTurn, turn.yieldedAt != nil else { return }
+            mutateTurn(threadID, turn.id) { $0.yieldedAt = nil }
         case let .sessionEnded(error):
             sessionEnded(threadID, error: error)
         }
@@ -341,7 +401,7 @@ extension AgentEngine {
 
     /// Inserts or replaces an item of the running turn (keeping its original start time).
     private func upsertItem(_ threadID: String, _ item: TurnItem) {
-        guard let turnID = thread(threadID)?.activeTurn?.id else { return }
+        guard let turnID = thread(threadID)?.openTurn?.id else { return }
         let now = environment.now()
         var created = false
         var item = item
@@ -367,7 +427,7 @@ extension AgentEngine {
         create: () -> TurnItemKind?,
         update: (TurnItemKind) -> TurnItemKind?
     ) {
-        guard let turnID = thread(threadID)?.activeTurn?.id else { return }
+        guard let turnID = thread(threadID)?.openTurn?.id else { return }
         let now = environment.now()
         var created = false
         guard let change = mutateThreadQuietly(threadID, { thread in

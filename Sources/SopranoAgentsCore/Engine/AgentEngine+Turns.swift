@@ -116,8 +116,10 @@ extension AgentEngine {
     }
 
     /// Sends a message on an existing thread. Idle → starts a turn. Running → steers (`.automatic`,
-    /// `.steer`) or queues (`.queue`). Captures the pre-turn checkpoint when missing. Exactly
-    /// `/compact` compacts the conversation instead (see `compact`).
+    /// `.steer`) or queues (`.queue`). A yielded turn (its answer final, background work still
+    /// running) is ended first with its yielded outcome and the message starts a new turn.
+    /// Captures the pre-turn checkpoint when missing. Exactly `/compact` compacts the
+    /// conversation instead (see `compact`).
     public func send(_ threadID: String, text: String, attachments: [Attachment], mode: SendMode = .automatic) async throws {
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -132,6 +134,10 @@ extension AgentEngine {
                 try await steer(threadID, message: message)
             }
             return
+        }
+        if thread.openTurn != nil {
+            await releaseYieldedTurn(threadID)
+            return try await send(threadID, text: text, attachments: attachments, mode: mode)
         }
         guard let turnID = beginTurn(threadID, message: message, selection: thread.modelSelection) else { return }
         await runTurn(threadID, turnID)
@@ -185,12 +191,16 @@ extension AgentEngine {
         await runtime.existingThread(threadID)?.session?.answer(userInput: requestID, answers: [:])
     }
 
-    /// Starts the first queued message now (as a steer when a turn runs), or removes it. Nothing
-    /// steers into or out of a compaction: a queued `/compact`, or any message while a compaction
-    /// runs, stays queued until the running turn ends.
+    /// Starts the first queued message now (as a steer when a turn runs; after ending a yielded
+    /// turn), or removes it. Nothing steers into or out of a compaction: a queued `/compact`, or
+    /// any message while a compaction runs, stays queued until the running turn ends.
     public func sendQueuedNow(_ threadID: String, messageID: String) async {
         guard let thread = thread(threadID), let queued = thread.queue.first(where: { $0.id == messageID }) else { return }
         if let active = thread.activeTurn, Self.isCompaction(queued.message) || Self.isCompaction(active.userMessage) { return }
+        if !thread.isRunning, thread.openTurn != nil {
+            await releaseYieldedTurn(threadID)
+            return await sendQueuedNow(threadID, messageID: messageID)
+        }
         updateThread(threadID) { $0.queue.removeAll { $0.id == messageID } }
         if thread.isRunning {
             do {
@@ -211,11 +221,16 @@ extension AgentEngine {
 
     /// "Edit from here": rewinds the conversation to before turn `turnID` (provider rollback),
     /// optionally restores files to that turn's starting checkpoint, deletes later checkpoints,
-    /// and returns the turn's user message so the composer can take it back.
+    /// and returns the turn's user message so the composer can take it back. A yielded turn is
+    /// ended first.
     public func revert(_ threadID: String, toBeforeTurn turnID: String, restoreFiles: Bool) async throws -> UserMessage {
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         guard let turn = thread.turns.first(where: { $0.id == turnID }) else { throw EngineError.nothingToRevert }
         guard !thread.isRunning else { throw EngineError.turnRunning }
+        if thread.openTurn != nil {
+            await releaseYieldedTurn(threadID)
+            return try await revert(threadID, toBeforeTurn: turnID, restoreFiles: restoreFiles)
+        }
         let git = environment.git
         let cwd = workingDirectory(for: thread)
         let baseline = CheckpointRef.ref(threadID: threadID, ordinal: turn.ordinal - 1)
@@ -371,28 +386,34 @@ extension AgentEngine {
         return try await environment.git.runAction(request, writer: writer, progress: progress)
     }
 
-    /// Ends every provider session (app quit). Running turns are interrupted.
+    /// Ends every provider session (app quit). Running turns are interrupted; yielded ones end
+    /// with their yielded outcome.
     public func shutdown() async {
         for (threadID, rt) in runtime.allThreads {
             rt.launch?.cancel()
             let session = rt.session
             let live = rt.liveTurnID != nil
             rt.dropSession()
-            if let turn = thread(threadID)?.activeTurn {
-                if live { await session?.interrupt() }
-                finishTurn(threadID, turn.id, status: .interrupted, error: nil)
+            if let turn = thread(threadID)?.openTurn {
+                if live, !turn.isYielded { await session?.interrupt() }
+                endAtShutdown(threadID, turn)
             }
             await session?.close()
         }
         for thread in threads {
-            if let turn = thread.activeTurn {
-                finishTurn(thread.id, turn.id, status: .interrupted, error: nil)
+            if let turn = thread.openTurn {
+                endAtShutdown(thread.id, turn)
             }
         }
         environment.store.flush()
     }
 
     // MARK: Private
+
+    /// App quit: a running turn is interrupted, a yielded one keeps its yielded outcome.
+    private func endAtShutdown(_ threadID: String, _ turn: Turn) {
+        finishTurn(threadID, turn.id, status: turn.isYielded ? turn.yieldedStatus : .interrupted, error: turn.failureMessage)
+    }
 
     /// Records answers (or a dismissal when nil) on a pending user-input item.
     private func settleUserInput(_ threadID: String, requestID: String, answers: [String: [String]]?) -> Bool {

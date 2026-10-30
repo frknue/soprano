@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "approval", "input", "plan", "failed", "draft", "empty"]
+    static let scenarios = ["demo", "running", "approval", "input", "plan", "failed", "background", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -17,7 +17,8 @@ enum DemoFixtures {
         guard scenarios.contains(scenario) else {
             throw FixtureError(message: "Unknown fixture \"\(scenario)\". Known: \(scenarios.joined(separator: ", ")).")
         }
-        let snapshot = scenario == "empty" ? StoreSnapshot() : StoreSnapshot(projects: projects(now), threads: threads(now))
+        let sample = threads(now) + (scenario == "background" ? [backgroundThread(now)] : [])
+        let snapshot = scenario == "empty" ? StoreSnapshot() : StoreSnapshot(projects: projects(now), threads: sample)
         let dataDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("soprano-agents-fixture", isDirectory: true)
         let environment = EngineEnvironment(
             drivers: [:],
@@ -57,6 +58,7 @@ enum DemoFixtures {
         case "input": .thread(ID.input)
         case "plan": .thread(ID.plan)
         case "failed": .thread(ID.failed)
+        case "background": .thread(ID.background)
         case "draft": .draft(projectID: ID.app)
         case "empty": .draft(projectID: nil)
         default: .thread(ID.demo)
@@ -95,6 +97,7 @@ enum DemoFixtures {
         static let failed = "thread-renderer"
         static let pinned = "thread-release"
         static let scratch = "thread-scratch"
+        static let background = "thread-background"
     }
 
     static func projects(_ now: Date) -> [Project] {
@@ -319,6 +322,27 @@ enum DemoFixtures {
             ))
         }
         return result
+    }
+
+    /// An omp turn that yielded while a background job it started still runs ("background"
+    /// scenario only): its answer is final, a muted note says the job is still running.
+    static func backgroundThread(_ now: Date) -> AgentThread {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        return AgentThread(
+            id: ID.background, projectID: ID.app, title: "Run the test suite in the background", createdAt: ago(400), updatedAt: ago(60),
+            modelSelection: omp, branch: "main", lastVisitedAt: ago(30),
+            turns: [Turn(
+                id: "turn-background-1", ordinal: 1,
+                userMessage: UserMessage(text: "Start the full test suite as a background job, then tighten the retry delay in UploadClient.", createdAt: ago(300)),
+                modelSelection: omp, status: .running, startedAt: ago(300),
+                items: [
+                    TurnItem(id: "bg1", kind: .command(CommandExecution(command: "swift test", cwd: "/Users/demo/code/app", output: "Started background job bg-1\n", exitCode: 0, durationMs: 140)), status: .completed, startedAt: ago(280), completedAt: ago(279)),
+                    TurnItem(id: "bg2", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update)]), status: .completed, startedAt: ago(250), completedAt: ago(249)),
+                    TurnItem(id: "bg3", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s. The full test suite is still running in the background; I'll report back when it finishes.", isFinal: false), status: .completed, startedAt: ago(240), completedAt: ago(232)),
+                ],
+                yieldedAt: ago(232)
+            )]
+        )
     }
 
     nonisolated static let loginAnswer = """

@@ -22,9 +22,11 @@ public enum ThreadStatus: Sendable, Hashable {
             return .working(since: turn.startedAt)
         }
         guard let last = thread.turns.last else { return .idle }
-        let finishedAt = last.completedAt ?? last.startedAt
+        // A yielded turn is done for the user while background work runs.
+        let finishedAt = last.endedAt ?? last.startedAt
         let unseen = (thread.lastVisitedAt ?? .distantPast) < finishedAt
-        switch last.status {
+        let status = last.isYielded ? last.yieldedStatus : last.status
+        switch status {
         case .failed: return unseen ? .failed : .idle
         case .completed: return unseen ? .done : .idle
         case .interrupted, .running: return .idle

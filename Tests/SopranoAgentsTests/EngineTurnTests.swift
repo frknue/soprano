@@ -285,4 +285,64 @@ struct EngineTurnTests {
 
         #expect(git.checkpointCalls(threadID: threadID).filter { $0.hasPrefix("diff") } == ["diff 1..2", "diff 0..2"])
     }
+
+    @Test func aYieldedTurnIsIdleUntilABackgroundRunResumesIt() async throws {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "start the job", attachments: [])
+        let session = try #require(driver.session)
+
+        session.emit(.assistantDelta(itemID: "a", delta: "Started.", isFinal: false))
+        session.emit(.turnYielded(outcome: .completed, error: nil))
+        let yielded = await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.isYielded == true }
+        let idle = try #require(engine.thread(threadID))
+        session.emit(.turnResumed)
+        let resumed = await EngineHarness.eventually { engine.thread(threadID)?.isRunning == true }
+        session.emit(.turnYielded(outcome: .completed, error: nil))
+        let yieldedAgain = await EngineHarness.eventually { engine.thread(threadID)?.isRunning == false }
+
+        #expect(yielded && resumed && yieldedAgain)
+        #expect(idle.activeTurn == nil)
+        #expect(idle.openTurn?.status == .running)
+        #expect(ThreadStatus.of(idle) == .done)
+        // The answer's live item settled at the yield.
+        #expect(idle.turns.last?.items.first?.status == .completed)
+    }
+
+    @Test func aMessageToAYieldedThreadEndsThatTurnAndStartsANewOne() async throws {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "one", attachments: [])
+        let session = try #require(driver.session)
+        session.emit(.turnYielded(outcome: .completed, error: nil))
+        #expect(await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.isYielded == true })
+        let yieldedAt = engine.thread(threadID)?.turns.last?.yieldedAt
+
+        try await engine.send(threadID, text: "two", attachments: [])
+
+        let thread = try #require(engine.thread(threadID))
+        #expect(thread.turns.map(\.status) == [.completed, .running])
+        #expect(thread.turns.first?.completedAt == yieldedAt)
+        #expect(session.turns.map(\.text) == ["one", "two"])
+        #expect(session.steers.isEmpty)
+        #expect(session.interrupts == 0)
+    }
+
+    @Test func aQueuedMessageStartsOnceTheTurnYields() async throws {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "one", attachments: [])
+        try await engine.send(threadID, text: "two", attachments: [], mode: .queue)
+
+        driver.session?.emit(.turnYielded(outcome: .completed, error: nil))
+
+        #expect(await EngineHarness.eventually { driver.session?.turns.count == 2 })
+        let thread = try #require(engine.thread(threadID))
+        #expect(thread.turns.map(\.status) == [.completed, .running])
+        #expect(thread.queue.isEmpty)
+        #expect(driver.session?.turns.map(\.text) == ["one", "two"])
+    }
 }

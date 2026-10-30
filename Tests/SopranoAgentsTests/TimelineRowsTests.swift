@@ -195,4 +195,18 @@ struct TimelineRowsTests {
         #expect(ids(TimelineBuilder.rows(for: thread([]))) == ["empty"])
         #expect(TimelineBuilder.rows(for: nil).isEmpty)
     }
+
+    @Test func aYieldedTurnShowsFinishedWithABackgroundNoteUntilItEnds() {
+        var yielded = workedTurn
+        yielded.status = .running
+        yielded.completedAt = nil
+        yielded.yieldedAt = at(60)
+        let rows = TimelineBuilder.rows(for: thread([yielded]))
+
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a2", "background:t1"])
+        guard case let .fold(fold) = rows[1].content, case let .user(user) = rows[0].content else { return }
+        #expect(fold.label == "Worked for 1m")
+        #expect(user.canEdit)
+        #expect(rows[3].content == .backgroundWork)
+    }
 }

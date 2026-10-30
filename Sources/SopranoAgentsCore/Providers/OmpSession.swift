@@ -19,7 +19,10 @@ import Foundation
 /// that ran locally; its `command_output` frames come first). When the turn ends the session reads
 /// `get_entries` and reports the first entry the turn added after the previous turn's branch tip
 /// as the turn's native id (`turnStarted`, `OmpProtocol.turnAnchor`), which rollback cuts at; an
-/// unreadable anchor is reported as `OmpProtocol.unresolvedTurnID`. Steering is `steer
+/// unreadable anchor is reported as `OmpProtocol.unresolvedTurnID`. A `prompt_result` with
+/// `sessionSettled:false` yields the turn (`turnYielded`) and holds the prompt until
+/// `session_settled`, Stop, or `releaseYieldedTurn()` (the user moved on: reported like a
+/// settlement, no `abort`). Steering is `steer
 /// {message, images?}`, interrupt `abort`. Dialogs are answered with `extension_ui_response`
 /// (approvals with the exact option label, see `OmpProtocol.approvalLabel`); dialogs arriving
 /// while no prompt runs are cancelled at once.
@@ -83,6 +86,8 @@ public actor OmpSession: ProviderSession {
     private var branchTipKnown = false
     /// Stop was pressed for the active prompt: its yield ends the turn even if omp is unsettled.
     private var interruptRequested = false
+    /// Settlement, Stop or a release is ending the held prompt (`endHeldPrompt`).
+    private var isEndingHeldPrompt = false
     private var nextPrompt = 1
     private var isClosing = false
     private var hasEnded = false
@@ -180,13 +185,11 @@ public actor OmpSession: ProviderSession {
         _ = try? await client.request("abort")
         // Yielded but unsettled: nothing of the prompt is left to stop, so end the turn here
         // instead of waiting for background jobs to finish.
-        if mapper.isAwaitingSettlement, activePromptID != nil {
-            await reportTurnAnchor()
-            await reportContextUsage()
-            guard mapper.isAwaitingSettlement, activePromptID != nil else { return }
-            endPrompt()
-            for event in mapper.interruptAwaitingSettlement() { continuation.yield(event) }
-        }
+        await endHeldPrompt { $0.interruptAwaitingSettlement() }
+    }
+
+    public func releaseYieldedTurn() async {
+        await endHeldPrompt { $0.releaseAwaitingSettlement() }
     }
 
     public func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async {
@@ -456,24 +459,24 @@ public actor OmpSession: ProviderSession {
             guard acceptsCommandOutput, activePromptID != nil else { return }
         case "prompt_result":
             guard let id = frame["id"]?.stringValue, id == activePromptID else { return }
-            // `sessionSettled:false`: background work can still wake the agent; the prompt
-            // (dialogs, steer, interrupt) stays live until `session_settled`, unless the user
-            // already pressed Stop (the yield may have raced the abort and report "completed").
+            // `sessionSettled:false`: background work can still wake the agent; the turn yields
+            // but the prompt (dialogs, steer, interrupt) stays held until `session_settled`,
+            // unless the user already pressed Stop (the yield may have raced the abort and
+            // report "completed").
             var events = mapper.map(frame)
-            if mapper.isAwaitingSettlement, interruptRequested { events += mapper.interruptAwaitingSettlement() }
-            if !mapper.isAwaitingSettlement {
+            if mapper.isAwaitingSettlement, interruptRequested { events = mapper.interruptAwaitingSettlement() }
+            let yielded = mapper.isAwaitingSettlement
+            if !yielded {
                 await reportTurnAnchor()
                 await reportContextUsage()
                 endPrompt()
             }
             for event in events { continuation.yield(event) }
+            if yielded { await reportContextUsage() }
             return
         case "session_settled":
-            guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
-            await reportTurnAnchor()
-            await reportContextUsage()
-            guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
-            endPrompt()
+            await endHeldPrompt { $0.releaseAwaitingSettlement() }
+            return
         default:
             break
         }
@@ -570,6 +573,21 @@ public actor OmpSession: ProviderSession {
         mapper.resetTurn()
         for event in events { continuation.yield(event) }
         continuation.yield(.turnCompleted(outcome: outcome, error: failure))
+    }
+
+    /// Ends the held (yielded, unsettled) prompt: its native id and context fill first, then
+    /// `end`'s events (the held outcome, or interrupted). Settlement, Stop and a release can
+    /// race; the first one ends it and the others do nothing, so no anchor is reported after
+    /// the turn completed (it would land on the next turn).
+    private func endHeldPrompt(_ end: (inout OmpEventMapper) -> [ProviderEvent]) async {
+        guard let id = activePromptID, mapper.isAwaitingSettlement, !isEndingHeldPrompt else { return }
+        isEndingHeldPrompt = true
+        defer { isEndingHeldPrompt = false }
+        await reportTurnAnchor()
+        await reportContextUsage()
+        guard activePromptID == id, mapper.isAwaitingSettlement else { return }
+        endPrompt()
+        for event in end(&mapper) { continuation.yield(event) }
     }
 
     /// The prompt's turn is over: withdraw dialogs nobody can answer any more.

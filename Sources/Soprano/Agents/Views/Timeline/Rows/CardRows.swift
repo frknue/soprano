@@ -453,3 +453,28 @@ final class NoticeRowView: TimelineRowView {
         label.textColor = palette.mutedForeground
     }
 }
+
+/// "Background work still running…" under a yielded turn: its answer is final while jobs the
+/// agent started still run (and may wake it). One muted line.
+final class BackgroundWorkRowView: TimelineRowView {
+    private let icon = TimelineIconView(symbol: Icon.circleDashed, size: 11)
+    private let label = NSTextField.timelineLabel("Background work still running…", size: Typography.smallSize)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        addSubview(icon)
+        addSubview(label)
+        applyPalette(palette)
+    }
+
+    override func layoutRow(width: CGFloat) -> CGFloat {
+        icon.frame = NSRect(x: 4, y: 6, width: 12, height: 12)
+        label.frame = NSRect(x: 22, y: 4, width: max(0, min(label.textFitWidth, width - 26)), height: 16)
+        return 24
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        icon.contentTintColor = palette.mutedForeground
+        label.textColor = palette.mutedForeground
+    }
+}

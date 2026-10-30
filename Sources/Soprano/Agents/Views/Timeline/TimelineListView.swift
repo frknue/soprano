@@ -133,6 +133,7 @@ final class TimelineListView: NSView {
         case .todo: "todo"
         case .error: "error"
         case .notice: "notice"
+        case .backgroundWork: "backgroundWork"
         case .changedFiles: "changedFiles"
         case .queued: "queued"
         case .empty: "empty"
@@ -153,6 +154,7 @@ final class TimelineListView: NSView {
         case .todo: TodoRowView(frame: .zero)
         case .error: ErrorRowView(frame: .zero)
         case .notice: NoticeRowView(frame: .zero)
+        case .backgroundWork: BackgroundWorkRowView(frame: .zero)
         case .changedFiles: ChangedFilesRowView(frame: .zero)
         case .queued: QueuedMessageRowView(frame: .zero)
         case .empty: EmptyRowView(frame: .zero)

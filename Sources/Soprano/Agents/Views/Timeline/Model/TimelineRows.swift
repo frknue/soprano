@@ -115,6 +115,8 @@ enum TimelineRowContent: Hashable, Sendable {
     case todo(TodoRowModel)
     case error(message: String, date: Date)
     case notice(text: String)
+    /// "Background work still running…" under a yielded turn.
+    case backgroundWork
     case changedFiles(ChangedFilesModel)
     case queued(UserMessage)
     case empty
@@ -139,7 +141,9 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 /// Thread → timeline rows (from this app's turn model):
 ///
 /// - Each turn: the user message, then "Working for" while it runs, or a "Worked for …" fold when
-///   it finished (closed by default; it hides everything but the answer and the cards).
+///   it finished (closed by default; it hides everything but the answer and the cards). A yielded
+///   turn (answer final, background work still running) shows as finished, with a
+///   "Background work still running…" note at its end.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
 ///   or a single entry row when the group holds one tool call.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
@@ -164,7 +168,7 @@ enum TimelineBuilder {
 
     /// Fold label: "Worked for 3m 12s", "You stopped after 12s".
     static func foldLabel(for turn: Turn) -> String {
-        let duration = DurationText.turn(turn.duration(now: turn.completedAt ?? turn.startedAt))
+        let duration = DurationText.turn(turn.duration(now: turn.startedAt))
         return turn.status == .interrupted ? "You stopped after \(duration)" : "Worked for \(duration)"
     }
 
@@ -176,7 +180,8 @@ enum TimelineBuilder {
     }
 
     private static func appendTurn(_ turn: Turn, of thread: AgentThread, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
-        let isRunning = turn.status == .running
+        let isRunning = turn.status == .running && !turn.isYielded
+        let status = turn.isYielded ? turn.yieldedStatus : turn.status
         rows.append(TimelineRow(id: "user:\(turn.userMessage.id)", content: .user(UserRowModel(
             message: turn.userMessage,
             turnID: turn.id,
@@ -189,7 +194,7 @@ enum TimelineBuilder {
 
         // Which items the closed fold hides.
         var hidden: Set<String> = []
-        if !isRunning, turn.status != .failed {
+        if !isRunning, status != .failed {
             for (index, item) in turn.items.enumerated() where hidesInFold(item, index: index, terminalIndex: terminalIndex, terminalID: terminalID) {
                 hidden.insert(item.id)
             }
@@ -312,15 +317,18 @@ enum TimelineBuilder {
         }
         flushGroup(trailing: true)
 
-        if turn.status == .failed, let failure = turn.failureMessage,
+        if status == .failed, let failure = turn.failureMessage,
            !turn.items.contains(where: { if case .error = $0.kind { return true } else { return false } }) {
-            rows.append(TimelineRow(id: "failure:\(turn.id)", content: .error(message: failure, date: turn.completedAt ?? turn.startedAt)))
+            rows.append(TimelineRow(id: "failure:\(turn.id)", content: .error(message: failure, date: turn.endedAt ?? turn.startedAt)))
         }
         if let changedFiles, !placedChangedFiles, !isRunning {
             rows.append(TimelineRow(id: "files:\(turn.id)", content: .changedFiles(changedFiles)))
         }
         if isRunning, !hasLiveActivity, !waitsOnUser {
             rows.append(TimelineRow(id: "thinking:\(turn.id)", content: .thinking))
+        }
+        if turn.isYielded {
+            rows.append(TimelineRow(id: "background:\(turn.id)", content: .backgroundWork))
         }
     }
 
@@ -383,6 +391,7 @@ enum TimelineBuilder {
                 if continues { 0 } else { model.grouped ? 4 : 8 }
             case .thinking, .approval: continues ? 0 : 8
             case .error, .notice, .queued: 8
+            case .backgroundWork: 16
             case .empty: 0
             }
             rows[index].bottomSpacing = spacing

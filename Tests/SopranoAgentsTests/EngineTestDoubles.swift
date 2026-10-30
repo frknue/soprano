@@ -219,6 +219,8 @@ enum EngineHarness {
         )
         let engine = AgentEngine(environment: environment, settings: settings)
         engine.runtime.titleRetryDelay = .zero
+        // Scripted sessions never report a released yield: end it at once.
+        engine.runtime.yieldReleaseTimeout = .zero
         return engine
     }
 

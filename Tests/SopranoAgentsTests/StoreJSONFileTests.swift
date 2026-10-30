@@ -83,6 +83,27 @@ struct StoreJSONFileTests {
         #expect(loaded.isGeneratingTitle == false)
     }
 
+    @Test func aTurnThatHadYieldedAtQuitComesBackWithItsAnswerCompletedAtTheYield() throws {
+        let dir = directory()
+        let store = JSONFileThreadStore(directory: dir)
+        let yielded = Turn(
+            ordinal: 1,
+            userMessage: UserMessage(text: "start the job"),
+            modelSelection: .default(for: .omp),
+            startedAt: Date(timeIntervalSince1970: 1000),
+            items: [TurnItem(id: "a", kind: .assistantMessage(text: "Started.", isFinal: false), status: .completed, startedAt: Date(timeIntervalSince1970: 1005))],
+            yieldedAt: Date(timeIntervalSince1970: 1006)
+        )
+        store.save(thread: thread(title: "Yielded", turns: [yielded]))
+        store.flush()
+
+        let loaded = try #require(try JSONFileThreadStore(directory: dir).load().threads.first)
+
+        #expect(loaded.turns.first?.status == .completed)
+        #expect(loaded.turns.first?.completedAt == Date(timeIntervalSince1970: 1006))
+        #expect(loaded.turns.first?.yieldedAt == nil)
+    }
+
     @Test func anUnreadableThreadFileIsSkippedAndTheRestStillLoads() throws {
         let dir = directory()
         let store = JSONFileThreadStore(directory: dir)
