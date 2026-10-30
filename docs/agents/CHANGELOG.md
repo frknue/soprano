@@ -67,5 +67,5 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Scrolling a list (model picker, menus, palette, timeline) with the pointer resting on it no
   longer leaves rows highlighted after they scroll away from the pointer.
 - Terminals render Nerd Font icons and powerline separators (Powerlevel10k, Starship, eza): they
-  use an installed "… Nerd Font Mono" family (JetBrains Mono first) instead of SF Mono, or fall
-  back to Symbols Nerd Font Mono.
+  use an installed "… Nerd Font Mono" family (JetBrains Mono first) or Powerlevel10k's MesloLGS
+  NF instead of SF Mono, or fall back to Symbols Nerd Font Mono.

@@ -53,11 +53,14 @@ enum Typography {
     /// face, as in Soprano's terminal), else the first other one alphabetically. Only "Nerd Font
     /// Mono" families with letters qualify: their icons are one cell wide (the plain and "Propo"
     /// variants' icons overflow the cell grid), and Symbols Nerd Font Mono has only the icons.
+    /// Without one, Powerlevel10k's own "MesloLGS NF", whose icons are one cell wide as well.
     static func terminalFontFamily(among families: [String]) -> String? {
         let candidates = families.filter { $0.hasSuffix(" Nerd Font Mono") && $0 != symbolsFamily }
         if candidates.contains("JetBrainsMono Nerd Font Mono") { return "JetBrainsMono Nerd Font Mono" }
-        return candidates.sorted().first
+        return candidates.sorted().first ?? (families.contains(powerlevel10kFamily) ? powerlevel10kFamily : nil)
     }
+
+    private static let powerlevel10kFamily = "MesloLGS NF"
 }
 
 /// Geometry tokens, expressed in Tailwind/CSS terms. Points equal CSS px at the

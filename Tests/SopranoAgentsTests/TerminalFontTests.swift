@@ -13,6 +13,11 @@ struct TerminalFontTests {
         #expect(Typography.terminalFontFamily(among: families) == "FiraCode Nerd Font Mono")
     }
 
+    @Test func powerlevel10kMesloIsUsedWhenNoMonoFamilyIsInstalled() {
+        #expect(Typography.terminalFontFamily(among: ["Menlo", "MesloLGS NF", "Hack Nerd Font"]) == "MesloLGS NF")
+        #expect(Typography.terminalFontFamily(among: ["MesloLGS NF", "Hack Nerd Font Mono"]) == "Hack Nerd Font Mono")
+    }
+
     @Test func noNerdFontLeavesTheSystemMonospace() {
         #expect(Typography.terminalFontFamily(among: ["Symbols Nerd Font Mono", "Menlo", "Hack Nerd Font"]) == nil)
     }

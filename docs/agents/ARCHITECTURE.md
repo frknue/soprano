@@ -383,8 +383,9 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   `applyPalette(_:)`.
 - Fonts from `Typography`: system font (14 body, 13 detail rows, 12 meta/pills, 11 kbd), SF Mono
   13 for code, diffs and command output. The terminal is 12 pt in an installed "… Nerd Font Mono"
-  family (JetBrains Mono first) so prompt icons and powerline separators render; without one, SF
-  Mono with Symbols Nerd Font Mono as fallback. Icons are SF Symbols (`Icon` names
+  family (JetBrains Mono first), else Powerlevel10k's "MesloLGS NF", so prompt icons and powerline
+  separators render; without either, SF Mono with Symbols Nerd Font Mono as fallback when
+  installed (regular cells only: SwiftTerm derives bold/italic without it). Icons are SF Symbols (`Icon` names
   them by role), 16 pt in 28 pt ghost buttons.
 - Radii from `Radius`: composer, bubbles, dialogs, plan cards, details card 16; buttons, menus,
   popovers, code blocks, changed-files card 8; sidebar cards 6.
