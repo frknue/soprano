@@ -10,25 +10,7 @@ enum GitOutput {
         return fields
     }
 
-    /// Non-empty records separated by NUL, each without leading newlines
-    /// (for-each-ref ends records with "\0\n").
-    static func records(_ data: Data) -> [Data.SubSequence] {
-        data.split(separator: 0).compactMap { record in
-            let trimmed = record.drop(while: { $0 == 0x0A })
-            return trimmed.isEmpty ? nil : trimmed
-        }
-    }
-
-    /// Splits `bytes` on `separator` into at most `count` fields (the last
-    /// keeps further separators); nil when there are fewer. Works on bytes so
-    /// a separator followed by a combining mark still splits.
-    static func fields(_ bytes: Data.SubSequence, separator: UInt8 = 0x1F, count: Int) -> [String]? {
-        let parts = bytes.split(separator: separator, maxSplits: count - 1, omittingEmptySubsequences: false)
-        guard parts.count == count else { return nil }
-        return parts.map { String(decoding: $0, as: UTF8.self) }
-    }
-
-    /// Text output without its final newline(s).
+    /// Text output split into non-empty lines.
     static func trimmedLines(_ data: Data) -> [String] {
         String(decoding: data, as: UTF8.self)
             .split(separator: "\n", omittingEmptySubsequences: true)
@@ -39,13 +21,10 @@ enum GitOutput {
         trimmedLines(data).first ?? ""
     }
 
-    static func date(_ seconds: String) -> Date {
-        Date(timeIntervalSince1970: TimeInterval(Int64(seconds) ?? 0))
-    }
-
-    /// A pathspec matching exactly `path` (no glob or magic interpretation).
-    static func literal(_ path: String) -> String {
-        ":(literal)" + path
+    /// A pathspec matching exactly `path` relative to the repository root
+    /// (no glob or magic interpretation, independent of `-C`).
+    static func topLiteral(_ path: String) -> String {
+        ":(top,literal)" + path
     }
 
     /// Undoes git's C-style quoting (`"a\tb"`, octal escapes) of a path in
