@@ -84,7 +84,8 @@ Engine behavior:
   `<data>/threads/`, projects in `<data>/projects.json`, atomic, coalesced writes). Streaming
   deltas are not written on every token; the store coalesces.
 - Data root: `AppPaths.dataDirectory()` = `~/Library/Application Support/<bundle name>`
-  (`SOPRANO_AGENTS_DATA_DIR` overrides). Attachments in `<data>/attachments/<thread>/`.
+  (`SOPRANO_AGENTS_DATA_DIR` overrides). Attachments in `<data>/attachments/<uuid>/<name>`
+  (passed to sessions as an additional directory); scratch threads work in `<data>/scratch/<thread>`.
 
 ### Providers (Core/Providers)
 `ProviderDriver` per kind (`CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s, probes the

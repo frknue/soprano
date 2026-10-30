@@ -1,17 +1,40 @@
 import Foundation
+import UniformTypeIdentifiers
 
 // Provider-backed engine API. The signatures and doc comments here are the contract the UI
-// codes against; the engine slice implements the bodies (every `ENGINE-SLICE` marker goes).
+// codes against; the plumbing behind them lives in AgentEngine+Plumbing.swift.
 
 extension AgentEngine {
     /// Probes every provider CLI (version, auth, models) and emits `providersChanged`.
     public func refreshProviders() async {
-        preconditionFailure("ENGINE-SLICE: refreshProviders")
+        let drivers = Array(environment.drivers.values)
+        await withTaskGroup(of: ProviderStatus.self) { group in
+            for driver in drivers {
+                group.addTask { await driver.probe() }
+            }
+            for await status in group {
+                setProviderStatus(status)
+            }
+        }
     }
 
     /// Copies a file the user attached into app storage. Images get `.image`, everything else `.file`.
     public func importAttachment(from url: URL) throws -> Attachment {
-        preconditionFailure("ENGINE-SLICE: importAttachment")
+        let fileManager = FileManager.default
+        let directory = attachmentsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let name = url.lastPathComponent
+        let destination = directory.appendingPathComponent(name)
+        try fileManager.copyItem(at: url, to: destination)
+        let type = UTType(filenameExtension: url.pathExtension)
+        let size = (try? fileManager.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.intValue ?? 0
+        return Attachment(
+            kind: type?.conforms(to: .image) == true ? .image : .file,
+            name: name,
+            path: destination.path,
+            mimeType: type?.preferredMIMEType ?? "application/octet-stream",
+            byteSize: size
+        )
     }
 
     /// Creates a thread from a draft (new worktree if asked), sends `text` as its first message,
@@ -19,70 +42,282 @@ extension AgentEngine {
     /// worktree setup and the provider start continue in the background (the thread shows
     /// "Setting up worktree…" / Working meanwhile; failures land as a failed turn).
     public func launchThread(_ draft: ThreadDraft, text: String, attachments: [Attachment]) async throws -> String {
-        preconditionFailure("ENGINE-SLICE: launchThread")
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !attachments.isEmpty else { throw EngineError.emptyMessage }
+        let project = project(draft.projectID)
+        if let projectID = draft.projectID, project == nil { throw EngineError.unknownProject(projectID) }
+
+        let now = environment.now()
+        var thread = AgentThread(
+            projectID: project?.id,
+            title: TextGeneration.titleSeed(text: text, attachments: attachments),
+            createdAt: now,
+            modelSelection: draft.modelSelection,
+            runtimeMode: draft.runtimeMode,
+            interactionMode: draft.interactionMode,
+            isGeneratingTitle: settings.generateTitles
+        )
+        var worktree: (project: Project, baseBranch: String, branch: String)?
+        switch draft.workspace {
+        case .projectRoot:
+            if let project {
+                thread.branch = (try? await environment.git.status(cwd: project.path))?.branch
+            }
+        case let .newWorktree(baseBranch):
+            guard let project else { throw EngineError.message("A new worktree needs a project.") }
+            let branch = TextGeneration.temporaryBranchName(prefix: settings.branchPrefix)
+            thread.branch = branch
+            worktree = (project, baseBranch, branch)
+        case let .existingWorktree(path, branch):
+            thread.worktreePath = path
+            thread.branch = branch
+        }
+        if project == nil {
+            try FileManager.default.createDirectory(atPath: workingDirectory(for: thread), withIntermediateDirectories: true)
+        }
+
+        let message = UserMessage(text: text, attachments: attachments, createdAt: now)
+        let turn = Turn(ordinal: 1, userMessage: message, modelSelection: draft.modelSelection, startedAt: now)
+        thread.turns = [turn]
+        insertThread(thread)
+        let threadID = thread.id
+
+        if settings.generateTitles {
+            runtime.track { [self] in await generateTitle(threadID, regenerate: false) }
+        }
+        runtime.thread(threadID).launch = runtime.track { [self] in
+            guard isTurnRunning(threadID, turn.id) else { return }
+            if let worktree {
+                let path: String
+                do {
+                    path = try await environment.git.createWorktree(
+                        projectRoot: worktree.project.path,
+                        baseBranch: worktree.baseBranch,
+                        newBranch: worktree.branch,
+                        directory: settings.worktreesDirectory
+                    )
+                } catch {
+                    finishTurn(threadID, turn.id, status: .failed, error: Self.describe(error))
+                    return
+                }
+                updateThread(threadID) { $0.worktreePath = path }
+                runtime.track { [self] in
+                    await renameTemporaryBranch(worktree.branch, worktreePath: path, message: message)
+                }
+                guard isTurnRunning(threadID, turn.id) else { return }
+            }
+            await runTurn(threadID, turn.id)
+        }
+        return threadID
     }
 
     /// Sends a message on an existing thread. Idle → starts a turn. Running → steers (`.automatic`,
     /// `.steer`) or queues (`.queue`). Captures the pre-turn checkpoint when missing.
     public func send(_ threadID: String, text: String, attachments: [Attachment], mode: SendMode = .automatic) async throws {
-        preconditionFailure("ENGINE-SLICE: send")
+        guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !attachments.isEmpty else { throw EngineError.emptyMessage }
+        let message = UserMessage(text: text, attachments: attachments, createdAt: environment.now())
+        if thread.isRunning {
+            switch mode {
+            case .queue:
+                enqueue(threadID, message: message, selection: thread.modelSelection)
+            case .automatic, .steer:
+                try await steer(threadID, message: message)
+            }
+            return
+        }
+        guard let turnID = beginTurn(threadID, message: message, selection: thread.modelSelection) else { return }
+        await runTurn(threadID, turnID)
     }
 
     /// Stops the running turn (and holds the queue).
     public func interrupt(_ threadID: String) async {
-        preconditionFailure("ENGINE-SLICE: interrupt")
+        guard let turn = thread(threadID)?.activeTurn else { return }
+        let rt = runtime.thread(threadID)
+        rt.holdQueue = true
+        if let session = rt.session, rt.starting == nil, rt.liveTurnID == turn.id {
+            await session.interrupt()
+            return
+        }
+        // No live provider turn yet (worktree setup, session start): stop it here.
+        rt.launch?.cancel()
+        finishTurn(threadID, turn.id, status: .interrupted, error: nil)
     }
 
     /// Answers a pending approval. `feedback` accompanies a decline when the provider supports it.
     public func respond(_ threadID: String, approvalID: String, decision: ApprovalDecision, feedback: String? = nil) async {
-        preconditionFailure("ENGINE-SLICE: respond")
+        guard let turn = thread(threadID)?.turns.last(where: { turn in
+            turn.items.contains { item in
+                if case let .approval(request) = item.kind { return request.id == approvalID && request.decision == nil }
+                return false
+            }
+        }) else { return }
+        let now = environment.now()
+        mutateTurn(threadID, turn.id) { turn in
+            guard let index = turn.items.firstIndex(where: { $0.id == approvalID }),
+                  case var .approval(request) = turn.items[index].kind else { return }
+            request.decision = decision
+            request.feedback = feedback
+            turn.items[index].kind = .approval(request)
+            turn.items[index].status = decision == .accept || decision == .acceptForSession ? .completed : .declined
+            turn.items[index].completedAt = now
+        }
+        await runtime.existingThread(threadID)?.session?.respond(toApproval: approvalID, decision: decision, feedback: feedback)
     }
 
     /// Answers pending agent questions: question id → selected option labels or free text.
     public func answer(_ threadID: String, requestID: String, answers: [String: [String]]) async {
-        preconditionFailure("ENGINE-SLICE: answer")
+        guard settleUserInput(threadID, requestID: requestID, answers: answers) else { return }
+        await runtime.existingThread(threadID)?.session?.answer(userInput: requestID, answers: answers)
     }
 
     /// Dismisses agent questions without answering.
     public func dismissUserInput(_ threadID: String, requestID: String) async {
-        preconditionFailure("ENGINE-SLICE: dismissUserInput")
+        guard settleUserInput(threadID, requestID: requestID, answers: nil) else { return }
+        // Providers get an empty answer set: the agent continues without answers.
+        await runtime.existingThread(threadID)?.session?.answer(userInput: requestID, answers: [:])
     }
 
     /// Starts the first queued message now (as a steer when a turn runs), or removes it.
     public func sendQueuedNow(_ threadID: String, messageID: String) async {
-        preconditionFailure("ENGINE-SLICE: sendQueuedNow")
+        guard let thread = thread(threadID), let queued = thread.queue.first(where: { $0.id == messageID }) else { return }
+        updateThread(threadID) { $0.queue.removeAll { $0.id == messageID } }
+        if thread.isRunning {
+            do {
+                try await steer(threadID, message: queued.message)
+            } catch {
+                Self.log.error("Steering a queued message failed: \(Self.describe(error), privacy: .public)")
+                enqueue(threadID, message: queued.message, selection: queued.modelSelection)
+            }
+            return
+        }
+        guard let turnID = beginTurn(threadID, message: queued.message, selection: queued.modelSelection) else { return }
+        await runTurn(threadID, turnID)
     }
 
     public func cancelQueued(_ threadID: String, messageID: String) {
-        preconditionFailure("ENGINE-SLICE: cancelQueued")
+        updateThread(threadID) { $0.queue.removeAll { $0.id == messageID } }
     }
 
     /// "Edit from here": rewinds the conversation to before turn `turnID` (provider rollback),
     /// optionally restores files to that turn's starting checkpoint, deletes later checkpoints,
     /// and returns the turn's user message so the composer can take it back.
     public func revert(_ threadID: String, toBeforeTurn turnID: String, restoreFiles: Bool) async throws -> UserMessage {
-        preconditionFailure("ENGINE-SLICE: revert")
+        guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
+        guard let turn = thread.turns.first(where: { $0.id == turnID }) else { throw EngineError.nothingToRevert }
+        guard !thread.isRunning else { throw EngineError.turnRunning }
+        let git = environment.git
+        let cwd = workingDirectory(for: thread)
+        let baseline = CheckpointRef.ref(threadID: threadID, ordinal: turn.ordinal - 1)
+
+        if restoreFiles {
+            guard isIsolatedWorkspace(thread) else {
+                throw EngineError.message("File restore requires an isolated worktree. This workspace may contain changes from another thread. Rewind the conversation without restoring files instead.")
+            }
+            guard await git.checkpointExists(cwd: cwd, ref: baseline) else { throw EngineError.nothingToRevert }
+        }
+
+        if thread.providerThreadID != nil {
+            let session: any ProviderSession
+            do {
+                session = try await ensureSession(threadID)
+            } catch {
+                throw EngineError.message("Reconnect \(thread.modelSelection.provider.displayName) before reverting checkpoints.")
+            }
+            do {
+                try await session.rollback(beforeTurn: turn.ordinal, providerTurnID: turn.providerTurnID)
+            } catch {
+                throw EngineError.message("The provider could not roll back this conversation. Try again; if it keeps failing, check the provider and server logs.")
+            }
+        }
+
+        if restoreFiles {
+            try await runtime.git.run(cwd) { try await git.restoreCheckpoint(cwd: cwd, ref: baseline) }
+        }
+
+        let lastOrdinal = thread.turns.map(\.ordinal).max() ?? turn.ordinal
+        let stale = (turn.ordinal...max(turn.ordinal, lastOrdinal)).map { CheckpointRef.ref(threadID: threadID, ordinal: $0) }
+        do {
+            try await runtime.git.run(cwd) {
+                guard await git.isRepository(cwd) else { return }
+                try await git.deleteRefs(cwd: cwd, refs: stale)
+            }
+        } catch {
+            Self.log.error("Deleting stale checkpoints failed: \(Self.describe(error), privacy: .public)")
+        }
+
+        let now = environment.now()
+        updateThread(threadID) { thread in
+            thread.turns.removeAll { $0.ordinal >= turn.ordinal }
+            thread.updatedAt = now
+        }
+        return turn.userMessage
     }
 
     /// Unified diff of one turn (`turnOrdinal`), or of the whole thread so far (nil).
     public func turnDiff(_ threadID: String, turnOrdinal: Int?, ignoreWhitespace: Bool = true) async throws -> String {
-        preconditionFailure("ENGINE-SLICE: turnDiff")
+        guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
+        let fromOrdinal: Int
+        let toOrdinal: Int
+        if let turnOrdinal {
+            guard let turn = thread.turns.first(where: { $0.ordinal == turnOrdinal }), turn.checkpoint?.status == .ready else {
+                throw EngineError.message("No checkpoint is available for turn \(turnOrdinal).")
+            }
+            fromOrdinal = turn.ordinal - 1
+            toOrdinal = turn.ordinal
+        } else {
+            guard let last = thread.turns.last(where: { $0.checkpoint?.status == .ready }) else { return "" }
+            fromOrdinal = 0
+            toOrdinal = last.ordinal
+        }
+        let git = environment.git
+        let cwd = workingDirectory(for: thread)
+        let from = CheckpointRef.ref(threadID: threadID, ordinal: fromOrdinal)
+        let to = CheckpointRef.ref(threadID: threadID, ordinal: toOrdinal)
+        return try await runtime.git.run(cwd) {
+            try await git.diff(cwd: cwd, fromRef: from, toRef: to, ignoreWhitespace: ignoreWhitespace)
+        }
     }
 
     /// Asks the text-generation model for a better title.
     public func regenerateTitle(_ threadID: String) async {
-        preconditionFailure("ENGINE-SLICE: regenerateTitle")
+        await generateTitle(threadID, regenerate: true)
     }
 
     /// Closes the provider session and deletes the thread and its checkpoint refs.
     /// A worktree the thread created is kept (it may hold work).
     public func deleteThread(_ threadID: String) async {
-        preconditionFailure("ENGINE-SLICE: deleteThread")
+        guard let thread = thread(threadID) else { return }
+        let cwd = workingDirectory(for: thread)
+        if let rt = runtime.removeThread(threadID) {
+            rt.launch?.cancel()
+            let session = rt.session
+            rt.dropSession()
+            if let session {
+                if thread.isRunning { await session.interrupt() }
+                await session.close()
+            }
+        }
+        removeThreadRecord(threadID)
+
+        let git = environment.git
+        let lastOrdinal = thread.turns.map(\.ordinal).max() ?? 0
+        let refs = (0...lastOrdinal).map { CheckpointRef.ref(threadID: threadID, ordinal: $0) }
+        do {
+            try await runtime.git.run(cwd) {
+                guard await git.isRepository(cwd) else { return }
+                try await git.deleteRefs(cwd: cwd, refs: refs)
+            }
+        } catch {
+            Self.log.error("Deleting checkpoints of a deleted thread failed: \(Self.describe(error), privacy: .public)")
+        }
     }
 
     /// Git status of the thread's working directory (worktree or project root).
     public func gitStatus(_ threadID: String) async -> GitStatusSummary {
-        preconditionFailure("ENGINE-SLICE: gitStatus")
+        guard let thread = thread(threadID) else { return .notARepository }
+        return (try? await environment.git.status(cwd: workingDirectory(for: thread))) ?? .notARepository
     }
 
     /// Runs commit / push / PR for the thread's working directory. Commit messages and PR text
@@ -95,11 +330,78 @@ extension AgentEngine {
         featureBranch: Bool,
         progress: @escaping @Sendable (GitActionProgress) -> Void
     ) async throws -> GitActionResult {
-        preconditionFailure("ENGINE-SLICE: runGitAction")
+        guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
+        let cwd = workingDirectory(for: thread)
+        let selection = settings.textGenerationModel
+        let writer = ProviderSourceControlWriter(driver: environment.drivers[selection.provider], selection: selection, cwd: cwd)
+        let trimmedMessage = commitMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = GitActionRequest(
+            action: action,
+            cwd: cwd,
+            commitMessage: trimmedMessage?.isEmpty == false ? trimmedMessage : nil,
+            filePaths: filePaths,
+            featureBranch: featureBranch
+        )
+        return try await environment.git.runAction(request, writer: writer, progress: progress)
     }
 
     /// Ends every provider session (app quit). Running turns are interrupted.
     public func shutdown() async {
-        preconditionFailure("ENGINE-SLICE: shutdown")
+        for (threadID, rt) in runtime.allThreads {
+            rt.launch?.cancel()
+            let session = rt.session
+            let live = rt.liveTurnID != nil
+            rt.dropSession()
+            if let turn = thread(threadID)?.activeTurn {
+                if live { await session?.interrupt() }
+                finishTurn(threadID, turn.id, status: .interrupted, error: nil)
+            }
+            await session?.close()
+        }
+        for thread in threads {
+            if let turn = thread.activeTurn {
+                finishTurn(thread.id, turn.id, status: .interrupted, error: nil)
+            }
+        }
+        environment.store.flush()
+    }
+
+    // MARK: Private
+
+    /// Records answers (or a dismissal when nil) on a pending user-input item.
+    private func settleUserInput(_ threadID: String, requestID: String, answers: [String: [String]]?) -> Bool {
+        guard let turn = thread(threadID)?.turns.last(where: { turn in
+            turn.items.contains { item in
+                if case let .userInput(request) = item.kind { return request.id == requestID && request.answers == nil && !request.dismissed }
+                return false
+            }
+        }) else { return false }
+        let now = environment.now()
+        mutateTurn(threadID, turn.id) { turn in
+            guard let index = turn.items.firstIndex(where: { $0.id == requestID }),
+                  case var .userInput(request) = turn.items[index].kind else { return }
+            if let answers {
+                request.answers = answers
+                turn.items[index].status = .completed
+            } else {
+                request.dismissed = true
+                turn.items[index].status = .declined
+            }
+            turn.items[index].kind = .userInput(request)
+            turn.items[index].completedAt = now
+        }
+        return true
+    }
+
+    /// The thread has its own worktree that no other thread or project root shares or nests.
+    private func isIsolatedWorkspace(_ thread: AgentThread) -> Bool {
+        guard let worktree = thread.worktreePath else { return false }
+        func overlaps(_ lhs: String, _ rhs: String) -> Bool {
+            let a = URL(fileURLWithPath: lhs).standardizedFileURL.path
+            let b = URL(fileURLWithPath: rhs).standardizedFileURL.path
+            return a == b || a.hasPrefix(b + "/") || b.hasPrefix(a + "/")
+        }
+        if projects.contains(where: { overlaps($0.path, worktree) }) { return false }
+        return !threads.contains { $0.id != thread.id && overlaps(workingDirectory(for: $0), worktree) }
     }
 }
