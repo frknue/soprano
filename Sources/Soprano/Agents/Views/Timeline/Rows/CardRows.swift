@@ -281,7 +281,7 @@ final class BadgeView: PaletteView {
     }
 
     override func applyPalette(_ palette: Palette) {
-        layer?.backgroundColor = (palette.isDark ? NSColor.white.timelineAlpha(0.08) : palette.accent).cgColor
+        layer?.backgroundColor = (palette.isDark ? palette.foreground.timelineAlpha(0.08) : palette.accent).cgColor
         label.textColor = palette.foreground
     }
 }

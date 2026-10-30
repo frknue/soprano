@@ -279,7 +279,7 @@ private final class DialogFooterView: PaletteView {
     }
 
     override func applyPalette(_ palette: Palette) {
-        layer?.backgroundColor = (palette.isDark ? NSColor.white.withAlphaComponent(0.03) : palette.foreground.withAlphaComponent(0.025)).cgColor
+        layer?.backgroundColor = palette.foreground.withAlphaComponent(palette.isDark ? 0.03 : 0.025).cgColor
         rule.backgroundColor = palette.border.cgColor
     }
 }

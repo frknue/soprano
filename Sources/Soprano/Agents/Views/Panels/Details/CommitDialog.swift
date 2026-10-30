@@ -154,8 +154,8 @@ final class CommitDialog: NSObject, NSTextViewDelegate {
             scroll.autohidesScrollers = true
             let listBox = Self.box(
                 scroll,
-                fill: palette.isDark ? NSColor.white.withAlphaComponent(0.025) : palette.card,
-                border: palette.isDark ? NSColor.white.withAlphaComponent(0.05) : NSColor.black.withAlphaComponent(0.05)
+                fill: palette.isDark ? palette.foreground.withAlphaComponent(0.025) : palette.card,
+                border: palette.foreground.withAlphaComponent(0.05)
             )
             NSLayoutConstraint.activate([
                 listBox.heightAnchor.constraint(equalToConstant: 176),
@@ -176,9 +176,9 @@ final class CommitDialog: NSObject, NSTextViewDelegate {
         let info = NSView()
         info.wantsLayer = true
         info.layer?.cornerRadius = Radius.xl
-        info.layer?.backgroundColor = (palette.isDark ? NSColor.white.withAlphaComponent(0.035) : palette.background).cgColor
+        info.layer?.backgroundColor = (palette.isDark ? palette.foreground.withAlphaComponent(0.035) : palette.background).cgColor
         info.layer?.borderWidth = 1
-        info.layer?.borderColor = (palette.isDark ? NSColor.white.withAlphaComponent(0.05) : NSColor.black.withAlphaComponent(0.05)).cgColor
+        info.layer?.borderColor = palette.foreground.withAlphaComponent(0.05).cgColor
         infoStack.translatesAutoresizingMaskIntoConstraints = false
         info.addSubview(infoStack)
         NSLayoutConstraint.activate([

@@ -179,16 +179,12 @@ extension Palette {
 
 /// The live palette. Views read `PaletteCenter.shared.palette` when they build and re-color
 /// in their observer. It follows `ThemeCenter` (the `theme` setting, Soprano's own theme for
-/// "soprano") and the snapshot harness's forced appearance.
+/// "soprano", and the snapshot harness's forced appearance).
 @MainActor
 final class PaletteCenter {
     static let shared = PaletteCenter()
 
     private(set) var palette = Palette(soprano: ThemeCenter.shared.theme)
-    /// Forced appearance (snapshot `--appearance`); wins over macOS and Soprano.
-    var forcedDark: Bool? {
-        didSet { resolve() }
-    }
 
     private let observers = ObserverList<Palette>()
 
@@ -209,12 +205,6 @@ final class PaletteCenter {
     }
 
     private func resolve() {
-        if let forcedDark {
-            // Folio has a light and a dark palette; every other theme has one appearance.
-            let current = ThemeCenter.shared.theme.id
-            let isFolio = current == AppTheme.folioPaper.id || current == AppTheme.folioInk.id
-            ThemeCenter.shared.forcedThemeID = isFolio ? (forcedDark ? AppTheme.folioInk : AppTheme.folioPaper).id : current
-        }
         let next = Palette(soprano: ThemeCenter.shared.theme)
         guard next != palette else { return }
         palette = next

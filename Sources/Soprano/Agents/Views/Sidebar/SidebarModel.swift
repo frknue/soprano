@@ -301,8 +301,8 @@ enum ProjectIdentity {
         return String(String([first, second]).uppercased().prefix(2))
     }
 
-    /// Index into `Palette.projectIconColors` (`(index * 31 + codePoint) % 18` over the lowercased name).
-    static func colorIndex(_ name: String, count: Int = 18) -> Int {
+    /// Index into `Palette.projectIconColors` (`(index * 31 + codePoint) % count` over the lowercased name).
+    static func colorIndex(_ name: String, count: Int) -> Int {
         let normalized = name.precomposedStringWithCompatibilityMapping.trimmingCharacters(in: .whitespacesAndNewlines)
         let seed = normalized.isEmpty ? "project" : normalized.lowercased()
         var index = 0

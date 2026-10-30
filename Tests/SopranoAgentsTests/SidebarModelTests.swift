@@ -206,7 +206,7 @@ struct SidebarModelTests {
         #expect(ProjectIdentity.monogram("s2agents") == "S2")
         #expect(ProjectIdentity.monogram("my project") == "MP")
         #expect(ProjectIdentity.monogram("  ") == "PR")
-        #expect(ProjectIdentity.colorIndex("app") == ProjectIdentity.colorIndex("APP"))
-        #expect((0..<18).contains(ProjectIdentity.colorIndex("soprano-agents")))
+        #expect(ProjectIdentity.colorIndex("app", count: 7) == ProjectIdentity.colorIndex("APP", count: 7))
+        #expect((0..<7).contains(ProjectIdentity.colorIndex("soprano-agents", count: 7)))
     }
 }

@@ -1,7 +1,7 @@
 # Status
 
-Goal: Soprano Agents, a native macOS app in the Soprano family for omp (default), Codex and Claude Code
-in the Soprano family (`~/git/private/soprano-agents`, local only, no GitHub remote yet).
+Goal: Soprano Agents, a native macOS app in the Soprano family for omp (default), Codex and Claude
+Code (`~/git/private/soprano-agents`, local only, no GitHub remote yet).
 
 ## Done
 - All modules built and merged: providers (omp `--mode rpc-ui`, Codex app-server, Claude
@@ -10,7 +10,7 @@ in the Soprano family (`~/git/private/soprano-agents`, local only, no GitHub rem
   status, commit/push/PR via gh), sidebar, chat header, timeline, composer, right-panel diff,
   terminal drawer (SwiftTerm), thread details card, palette, settings screen, dialogs,
   notifications, icon.
-- `swift test`: 394 tests. Offscreen snapshots of every fixture in light and dark.
+- `swift test`: 395 tests. Offscreen snapshots of every fixture in light and dark.
 - Live end-to-end smoke (real CLIs, throwaway repos): Codex thread in a new worktree with an
   approval, checkpoint, turn diff, generated title and branch rename, revert with file restore;
   Claude thread in the project root with a file-change approval, a second turn, and reload from

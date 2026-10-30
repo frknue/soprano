@@ -127,7 +127,7 @@ enum SnapshotCommand {
     static func capture(_ options: Options) async throws {
         let settings = SettingsCenter.shared
         settings.start(createIfMissing: false, watching: false)
-        PaletteCenter.shared.forcedDark = options.dark
+        ThemeCenter.shared.forcedAppearance = options.dark ? .dark : .light
         PaletteCenter.shared.apply(setting: options.theme ?? AppTheme.folioId)
         NSApp.appearance = PaletteCenter.shared.palette.appearance
         if CommandRegistry.shared.commands.isEmpty {

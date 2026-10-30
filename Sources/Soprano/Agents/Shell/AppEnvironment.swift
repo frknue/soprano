@@ -109,8 +109,9 @@ final class ThemeCenter {
     let sopranoSettingsURL: URL
     /// The `theme` setting currently applied ("soprano" or a theme id).
     private(set) var setting = "soprano"
-    /// Forced theme id (snapshot `--theme`); wins over settings.
-    var forcedThemeID: String? {
+    /// Forced appearance (snapshot `--appearance`); wins over macOS and Soprano's `appearance`.
+    /// Folio then resolves to Paper or Ink; single-appearance themes keep their palette.
+    var forcedAppearance: AppTheme.Appearance? {
         didSet { applyResolvedTheme() }
     }
 
@@ -189,14 +190,14 @@ final class ThemeCenter {
     /// Hands the resolved source to the manager, which notifies observers
     /// (through `onThemeChanged`) only when the concrete palette changes.
     private func applyResolvedTheme() {
-        let source: (themeId: String, appearance: AppearancePreference)
-        if let forcedThemeID {
-            source = (AppTheme.isKnownId(forcedThemeID) ? forcedThemeID : AppTheme.folioId, .system)
-        } else {
-            let text = setting == "soprano" ? (try? SettingsFile.read(at: sopranoSettingsURL)) ?? nil : nil
-            source = Self.themeSource(setting: setting, sopranoSettingsText: text)
+        let text = setting == "soprano" ? (try? SettingsFile.read(at: sopranoSettingsURL)) ?? nil : nil
+        let source = Self.themeSource(setting: setting, sopranoSettingsText: text)
+        let appearance: AppearancePreference = switch forcedAppearance {
+        case .light: .light
+        case .dark: .dark
+        case nil: source.appearance
         }
-        manager.update(themeId: source.themeId, appearance: source.appearance)
+        manager.update(themeId: source.themeId, appearance: appearance)
     }
 
     private func updateSopranoWatcher() {

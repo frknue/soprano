@@ -248,6 +248,23 @@ struct SettingsTests {
         }
     }
 
+    @Test func aForcedAppearancePicksFolioPaperOrInkButNeverReplacesAnotherTheme() throws {
+        let center = ThemeCenter(sopranoSettingsURL: try temporaryDirectory().appendingPathComponent("missing.json"))
+        center.forcedAppearance = .light
+        center.apply(setting: "nord", watch: false)
+        #expect(center.theme.id == "nord")
+        center.forcedAppearance = .dark
+        #expect(center.theme.id == "nord")
+
+        center.apply(setting: "folio", watch: false)
+        #expect(center.theme.id == "folio-ink")
+        center.forcedAppearance = .light
+        #expect(center.theme.id == "folio-paper")
+        // "soprano" without Soprano's settings file follows Folio too.
+        center.apply(setting: "soprano", watch: false)
+        #expect(center.theme.id == "folio-paper")
+    }
+
     @Test func followingSopranoResolvesItsThemeAndAppearanceWithFolioFallbacks() {
         func resolve(_ text: String?, _ system: AppTheme.Appearance) -> String {
             ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: text, systemAppearance: system)

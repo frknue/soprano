@@ -178,7 +178,7 @@ final class OverlayCardView: PaletteView {
         let fill = surface == .popover ? palette.popover : palette.background
         layer?.backgroundColor = fill.cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = (palette.isDark ? NSColor.white.withAlphaComponent(0.08) : palette.foreground.withAlphaComponent(0.1)).cgColor
+        layer?.borderColor = palette.foreground.withAlphaComponent(palette.isDark ? 0.08 : 0.1).cgColor
     }
 }
 

@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DetailsSurface {
     static func hover(_ palette: Palette) -> NSColor {
-        palette.isDark ? NSColor.white.withAlphaComponent(0.08) : NSColor.black.withAlphaComponent(0.035)
+        palette.foreground.withAlphaComponent(palette.isDark ? 0.08 : 0.035)
     }
 
     /// Label color of rows: `text-foreground/80`.

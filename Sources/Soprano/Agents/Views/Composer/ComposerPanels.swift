@@ -57,7 +57,7 @@ final class ComposerSurfaceView: PaletteView {
         tint.layer?.backgroundColor = (isDragHighlighted ? highlighted : palette.card).withAlphaComponent(0.8).cgColor
         ring.layer?.borderColor = (isDragHighlighted
             ? palette.primary.withAlphaComponent(0.7)
-            : (palette.isDark ? NSColor.white.withAlphaComponent(0.05) : NSColor.black.withAlphaComponent(0.08))).cgColor
+            : palette.foreground.withAlphaComponent(palette.isDark ? 0.05 : 0.08)).cgColor
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = palette.isDark ? 0 : 0.05
         layer?.shadowRadius = 1
