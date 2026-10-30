@@ -281,12 +281,20 @@ T3 Code's look, from its CSS (see `docs/t3code-spec.md` §2–3):
 `SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
-[--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--wait <seconds>]` builds the real
-window offscreen on a `DemoFixtures` scenario and writes a PNG of it and its child windows.
-`--perform` runs any registered command (open the palette, the model picker, …); `--type` inserts
-text into the first responder; `--keys` replays chords through the router; `--hover` sets the
-hover state of the `InteractiveView` with that accessibility label or tooltip. Agents verify UI
-with it and `read` the PNG; they do not launch the GUI.
+[--settings general|providers|text-generation|worktrees|notifications|keybindings|archive|about]
+[--dialog confirm|choose|prompt|alert] [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
+[--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
+of it and its child windows. `--perform` runs any registered command (open the palette, the model
+picker, …); `--settings` opens the settings screen on a page; `--dialog` presents a sample
+`Dialogs` dialog; `--type` inserts text into the first responder (of the topmost overlay when one
+shows); `--keys` replays chords through the router (or into the topmost overlay); `--hover` sets
+the hover state of the `InteractiveView` with that accessibility label or tooltip. Agents verify
+UI with it and `read` the PNG; they do not launch the GUI.
+
+Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless
+child windows covering the main window with T3 Code's dimmed backdrop and one card. Their keys
+go to the overlay's `keyHandler` before menus and fields; while the settings screen records a
+shortcut it routes every key through `KeyboardRouter.capture`.
 
 ## Tests
 
