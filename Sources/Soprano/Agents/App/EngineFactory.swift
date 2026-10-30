@@ -34,6 +34,23 @@ final class ExecutablePaths: @unchecked Sendable {
     }
 }
 
+/// The account each new Codex and omp process starts with, read from the vendored
+/// `AccountLaunchState` that `AccountsController` publishes into: the chosen Codex account's
+/// `CODEX_HOME` (linking whatever `~/.codex` gained since), and omp's `--config` overlay with
+/// the preferred accounts. Claude Code switches its login for the whole Mac, so it gets nothing.
+enum AccountLaunchBridge {
+    static func adjustments(for kind: ProviderKind, state: AccountLaunchState = .shared) -> ProviderLaunchAdjustments {
+        let profile: String
+        switch kind {
+        case .codex: profile = "codex"
+        case .omp: profile = "omp"
+        case .claude: return .none
+        }
+        let adjustments = state.adjustments(forProfile: profile)
+        return ProviderLaunchAdjustments(environment: adjustments.environment, arguments: adjustments.arguments)
+    }
+}
+
 /// Builds the engine the app runs with: JSON-file store, git CLI, omp, Codex and Claude drivers.
 @MainActor
 enum EngineFactory {
@@ -47,8 +64,14 @@ enum EngineFactory {
         let paths = executablePaths
         let environment = EngineEnvironment(
             drivers: [
-                .omp: OmpDriver(executablePath: { paths.path(for: .omp) }),
-                .codex: CodexDriver(executablePath: { paths.path(for: .codex) }),
+                .omp: OmpDriver(
+                    executablePath: { paths.path(for: .omp) },
+                    launchAdjustments: { AccountLaunchBridge.adjustments(for: .omp) }
+                ),
+                .codex: CodexDriver(
+                    executablePath: { paths.path(for: .codex) },
+                    launchAdjustments: { AccountLaunchBridge.adjustments(for: .codex) }
+                ),
                 .claude: ClaudeDriver(executablePath: { paths.path(for: .claude) }),
             ],
             git: LiveGitService(),

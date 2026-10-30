@@ -4,7 +4,8 @@ import SopranoAgentsCore
 /// `SopranoAgents snapshot --out <png> [--fixture demo] [--size 1440x900] [--appearance light|dark]
 /// [--theme <id>] [--hide-sidebar] [--details] [--terminal] [--right-panel]
 /// [--diff thread|turn:<n>|uncommitted] [--perform <command id>]… [--type "<text>"] [--keys "<chord> …"]
-/// [--hover <accessibility label>] [--click <accessibility label>]… [--settings <page>] [--dialog confirm|choose|prompt|alert] [--wait <seconds>]`
+/// [--hover <accessibility label>] [--click <accessibility label>]… [--settings <page>] [--dialog confirm|choose|prompt|alert]
+/// [--accounts none|demo|empty|pending] [--wait <seconds>]`
 ///
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
@@ -34,6 +35,8 @@ enum SnapshotCommand {
         var clicks: [String] = []
         var settings: SettingsPage?
         var dialog: String?
+        /// The `AccountFixtures` snapshot the usage indicator, usage card and Settings → Accounts show.
+        var accounts = "none"
         var wait: Double = 0.4
     }
 
@@ -44,7 +47,8 @@ enum SnapshotCommand {
                                   [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
                                   [--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--click <label>]…
                                   [--settings \(SettingsPage.allCases.map(\.rawValue).joined(separator: "|"))]
-                                  [--dialog \(dialogs.joined(separator: "|"))] [--wait <seconds>]
+                                  [--dialog \(dialogs.joined(separator: "|"))] [--accounts \(AccountFixtures.scenarios.joined(separator: "|"))]
+                                  [--wait <seconds>]
     """
 
     nonisolated static let dialogs = ["confirm", "choose", "prompt", "alert"]
@@ -96,6 +100,12 @@ enum SnapshotCommand {
                 let raw = try value(option)
                 guard dialogs.contains(raw) else { throw CaptureError(description: "--dialog must be one of \(dialogs.joined(separator: ", "))") }
                 options.dialog = raw
+            case "--accounts":
+                let raw = try value(option)
+                guard AccountFixtures.scenarios.contains(raw) else {
+                    throw CaptureError(description: "--accounts must be one of \(AccountFixtures.scenarios.joined(separator: ", "))")
+                }
+                options.accounts = raw
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             default: throw CaptureError(description: "unknown option \(option)")
             }
@@ -139,6 +149,8 @@ enum SnapshotCommand {
             AllCommands.registerAll()
         }
         settings.reloadKeymap()
+        // Before the window is built: its views read the accounts source when they load.
+        AccountsCenter.source = FixtureAccountsSource(snapshot: try AccountFixtures.snapshot(options.accounts))
 
         let built = try DemoFixtures.build(options.fixture)
         let state = WorkspaceState()

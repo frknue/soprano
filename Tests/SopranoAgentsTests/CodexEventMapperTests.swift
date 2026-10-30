@@ -84,6 +84,23 @@ struct CodexEventMapperTests {
         #expect(events.last == .turnCompleted(outcome: .completed, error: nil))
     }
 
+    /// `codex-skills-compact.jsonl`: after `thread/compact/start`, Codex 0.166 runs the
+    /// compaction as a turn of its own.
+    @Test func aCompactionRunsAsATurnWithANoticeAndTheNewContextFill() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/codex-skills-compact.jsonl")
+        var mapper = CodexEventMapper()
+        let events = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try JSONValue.parse(String($0)) }.flatMap { message -> [ProviderEvent] in
+            guard let method = message["method"]?.stringValue, message["id"] == nil else { return [] }
+            return mapper.map(method: method, params: message["params"] ?? .null)
+        }
+
+        #expect(events.count == 4)
+        #expect(events.first == .turnStarted(providerTurnID: "01a18ef4-ecfb-72b0-8bc7-2e5915d39ffa"))
+        #expect(Self.latestItems(events).map(\.kind) == [.notice(text: "Context compacted")])
+        #expect(events.contains(.tokenUsage(TokenUsage(usedTokens: 29_619, contextWindow: 475_000))))
+        #expect(events.last == .turnCompleted(outcome: .completed, error: nil))
+    }
+
     @Test func commandOutputStreamedBeforeACompletionWithoutAggregatedOutputIsKept() {
         var mapper = CodexEventMapper()
         _ = mapper.map(method: "item/commandExecution/outputDelta", params: ["itemId": "c1", "delta": "line 1\n"])

@@ -246,6 +246,21 @@ struct OmpSessionLifecycleTests {
         #expect(fake.received("set_event_filter").first?["messageUpdates"] == "delta")
     }
 
+    @Test func aSessionStartsWithTheAccountOverlayItIsHanded() async throws {
+        let fake = try makeFake()
+        let overlay = fake.directory.appendingPathComponent("omp-accounts.yml").path
+        let session = OmpSession(
+            executablePath: { fake.executable },
+            launchAdjustments: { ProviderLaunchAdjustments(arguments: ["--config", overlay]) }
+        )
+
+        _ = try await session.start(config(cwd: fake.directory.path))
+        await session.close()
+
+        let args = try #require(fake.launches().first)
+        #expect(args == ["--config", overlay, "--mode", "rpc-ui", "--cwd", fake.directory.path, "--approval-mode", "always-ask"])
+    }
+
     @Test func aSavedSessionIsResumedOnlyWhenItsFileExists() async throws {
         let fake = try makeFake()
         let gone = fake.directory.appendingPathComponent("gone.jsonl").path

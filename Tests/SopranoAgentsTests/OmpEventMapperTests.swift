@@ -130,6 +130,63 @@ struct OmpEventMapperTests {
         #expect(item?.kind == .notice(text: "auto-double-check: second pass before finishing"))
     }
 
+    // MARK: - Recorded commands and compaction (omp 18.14, claude-haiku-5-5)
+
+    /// `omp-commands-compact.jsonl`: the `get_available_commands` response, the
+    /// `available_commands_update` pushed once the MCP prompts loaded (one command per source),
+    /// `get_state` after a turn, then `compact` twice: committed (then `get_state`), then skipped
+    /// ("Already compacted", answered with a failure).
+    private static func commandsTrace() throws -> [JSONValue] {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/omp-commands-compact.jsonl")
+        return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try JSONValue.parse(String($0)) }
+    }
+
+    @Test func pushedCommandUpdatesListEveryCommandWithItsKindHintAndBadge() throws {
+        var mapper = OmpEventMapper(cwd: "/tmp/demo")
+        let events = try Self.commandsTrace().prefix(2).flatMap { mapper.map($0) }
+
+        guard case let .commands(commands)? = events.first, events.count == 1 else {
+            Issue.record("expected one commands event, got \(events)")
+            return
+        }
+        #expect(commands.map(\.insertText) == ["/compact ", "/model ", "/context ", "/skill:diagnosing-bugs ", "/skill:tdd ", "/review-with ", "/green ", "/init ", "/demo:trace_crash "])
+        #expect(commands.map(\.source) == ["Built-in", "Built-in", "Built-in", "Skill", "Skill", "Extension", "Custom", "Custom", "MCP"])
+        #expect(commands.filter { $0.kind == .skill }.map(\.name) == ["skill:diagnosing-bugs", "skill:tdd"])
+        #expect(commands[0] == ProviderCommand(
+            name: "compact", kind: .command, description: "Compact the conversation",
+            argumentHint: "[soft|remote|snapcompact] [focus]", source: "Built-in", insertText: "/compact "
+        ))
+        #expect(commands[1].argumentHint == nil)
+    }
+
+    @Test func manualCompactionsBecomeNoticesAndRememberHowTheyEnded() throws {
+        var mapper = OmpEventMapper(cwd: "/tmp/demo")
+        var ends: [OmpEventMapper.CompactionEnd?] = []
+        var events: [ProviderEvent] = []
+        for frame in try Self.commandsTrace() {
+            events += mapper.map(frame)
+            if frame["type"] == "manual_compaction_end" { ends.append(mapper.compactionEnd) }
+        }
+
+        let notices = Self.latestItems(events).map(\.kind)
+        #expect(notices == [.notice(text: "Context compacted"), .notice(text: "Already compacted")])
+        #expect(ends == [.compacted, .skipped("Already compacted")])
+    }
+
+    @Test func cancelledAndFailedCompactionsAreShownAsSuch() {
+        var mapper = OmpEventMapper(cwd: "/repo")
+        let cancelled = mapper.map(["type": "manual_compaction_end", "aborted": true, "errorMessage": "Compaction cancelled"])
+        let cancelEnd = mapper.compactionEnd
+        _ = mapper.map(["type": "manual_compaction_start"])
+        let cleared = mapper.compactionEnd
+        let failed = mapper.map(["type": "manual_compaction_end", "aborted": false, "errorMessage": "context too large to summarize"])
+
+        #expect(Self.latestItems(cancelled).map(\.kind) == [.notice(text: "Compaction cancelled")])
+        #expect(cancelEnd == .cancelled && cleared == nil)
+        #expect(Self.latestItems(failed).map(\.kind) == [.error(message: "Compaction failed: context too large to summarize")])
+        #expect(mapper.compactionEnd == .failed("context too large to summarize"))
+    }
+
     // MARK: - Synthetic frames
 
     private static func map(_ frames: [JSONValue]) -> [ProviderEvent] {

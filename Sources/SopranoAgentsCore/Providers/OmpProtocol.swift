@@ -75,9 +75,9 @@ public enum OmpProtocol {
         """
     }
 
-    /// Environment for omp processes: the extended PATH.
-    static func environment() -> [String: String] {
-        ExecutableLocator.childEnvironment()
+    /// Environment for omp processes: the extended PATH plus the launch adjustments.
+    static func environment(_ adjustments: ProviderLaunchAdjustments = .none) -> [String: String] {
+        ExecutableLocator.childEnvironment(overrides: adjustments.environment)
     }
 
     /// `omp --version` output ("omp/18.14.0") → "18.14.0".
@@ -197,6 +197,34 @@ public enum OmpProtocol {
             if !custom.isEmpty { answer["customInput"] = .string(custom.joined(separator: "\n")) }
             return .object(answer)
         }
+    }
+
+    // MARK: - Commands and context
+
+    /// `get_available_commands` / `available_commands_update` `commands` (`{name, source,
+    /// aliases?, description?, input?{hint}, subcommands?}`) → menu entries inserting
+    /// `/<name> `: skills (source `skill`) are named `skill:<name>` and become `.skill`; the
+    /// source becomes the badge (`ProviderCommand.badge`), `input.hint` the argument hint.
+    public static func commands(_ list: JSONValue?) -> [ProviderCommand] {
+        (list?.arrayValue ?? []).compactMap { entry in
+            guard let name = entry["name"]?.nonEmptyString else { return nil }
+            let source = entry["source"]?.stringValue
+            return ProviderCommand(
+                name: name,
+                kind: source == "skill" ? .skill : .command,
+                description: entry["description"]?.nonEmptyString,
+                argumentHint: entry["input"]?["hint"]?.nonEmptyString,
+                source: ProviderCommand.badge(forSource: source),
+                insertText: "/\(name) "
+            )
+        }
+    }
+
+    /// `get_state`'s `contextUsage {tokens, contextWindow, percent}`; nil when omp leaves it
+    /// out (unknown, e.g. right after a compaction before the next response).
+    public static func contextUsage(fromState state: JSONValue) -> TokenUsage? {
+        guard let usage = state["contextUsage"], let tokens = usage["tokens"]?.intValue else { return nil }
+        return TokenUsage(usedTokens: tokens, contextWindow: usage["contextWindow"]?.intValue)
     }
 
     // MARK: - Rollback

@@ -1,7 +1,8 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Composer module: model picker, effort, permissions, workspace, branch, send alternate, stop.
+/// Composer module: model picker, effort, permissions, workspace, branch, send alternate, stop,
+/// compaction.
 @MainActor
 enum ComposerCommands {
     /// `!terminalFocus`.
@@ -108,6 +109,15 @@ enum ComposerCommands {
                 isEnabled: { composer($0)?.canStop ?? false }
             ) { context in
                 composer(context)?.stop()
+            },
+            AppCommand(
+                id: "thread.compact",
+                title: "Compact Conversation",
+                category: .thread,
+                icon: "arrow.down.right.and.arrow.up.left",
+                isEnabled: { composer($0)?.canCompact ?? false }
+            ) { context in
+                composer(context)?.compactConversation()
             },
         ]
     }

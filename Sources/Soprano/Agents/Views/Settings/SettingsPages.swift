@@ -8,6 +8,7 @@ extension SettingsController {
         switch page {
         case .general: generalPage(form)
         case .providers: providersPage(form)
+        case .accounts: accountsPage(form)
         case .textGeneration: textGenerationPage(form)
         case .worktrees: worktreesPage(form)
         case .notifications: notificationsPage(form)

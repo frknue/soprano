@@ -20,6 +20,10 @@ import Foundation
 /// new branch. Before turn N the process restarts at the last assistant message before turn
 /// N's prompt (remembered per prompt, or read from `~/.claude/projects/*/<session>.jsonl`
 /// after a relaunch). Rolling back to before the first turn starts a fresh session id.
+///
+/// Commands come with the `initialize` response and `system/commands_changed`. When a turn
+/// ends (`result`), `get_context_usage {detail:"summary"}` reports the exact context fill.
+/// Compaction is the `/compact` message, a turn of its own (`system/compact_boundary` → notice).
 public actor ClaudeSession: ProviderSession {
     public nonisolated let kind = ProviderKind.claude
     public nonisolated let events: AsyncStream<ProviderEvent>
@@ -114,13 +118,29 @@ public actor ClaudeSession: ProviderSession {
             self.options = options
         }
 
+        return try writePrompt { ClaudeProtocol.userMessage(input, uuid: $0) }
+    }
+
+    /// `/compact` as a user message; its uuid is reported as the turn's native id.
+    public func compact() async throws {
+        guard process != nil else { throw ProviderError.notStarted }
+        guard !isTurnRunning else {
+            throw ProviderError.message("Claude Code is still working; compact the conversation once the turn has ended.")
+        }
+        let uuid = try writePrompt { ClaudeProtocol.textMessage(AgentEngine.compactCommand, uuid: $0) }
+        continuation.yield(.turnStarted(providerTurnID: uuid))
+    }
+
+    /// Writes a turn's user message built around a fresh uuid (the turn's native id) and
+    /// remembers where the conversation stood before it, for rollback.
+    private func writePrompt(_ message: (String) -> JSONValue) throws -> String {
         let uuid = UUID().uuidString.lowercased()
         if let last = mapper.lastAssistantUUID {
             anchors[uuid] = .message(last)
         } else if !hasConversation {
             anchors[uuid] = .start
         }
-        try write(ClaudeProtocol.userMessage(input, uuid: uuid))
+        try write(message(uuid))
         hasConversation = true
         resumeAt = nil
         isTurnRunning = true
@@ -233,7 +253,8 @@ public actor ClaudeSession: ProviderSession {
         let current = generation
         self.process = process
         Task { await self.consume(process.events, generation: current) }
-        _ = try await control(["subtype": "initialize"])
+        let initialized = try await control(["subtype": "initialize"])
+        for event in mapper.receiveCommands(initialized["commands"]) { continuation.yield(event) }
     }
 
     /// Stops the current process without ending the session (its exit is ignored).
@@ -269,7 +290,7 @@ public actor ClaudeSession: ProviderSession {
         try process.send(message.jsonString())
     }
 
-    /// Sends a control request and waits for its `control_response`.
+    /// Sends a control request and waits for its `control_response` (its `response`).
     private func control(_ request: JSONValue) async throws -> JSONValue {
         let id = "soprano_\(nextControlID)"
         nextControlID += 1
@@ -341,6 +362,7 @@ public actor ClaudeSession: ProviderSession {
                 }
                 isTurnRunning = false
                 steerPending = false
+                Task { await self.reportContextUsage() }
                 if interruptRequested {
                     interruptRequested = false
                     events = events.map { event in
@@ -351,6 +373,15 @@ public actor ClaudeSession: ProviderSession {
             }
             for event in events { continuation.yield(event) }
         }
+    }
+
+    /// After a turn: `get_context_usage {detail:"summary"}` → `tokenUsage` (`totalTokens` of
+    /// `maxTokens`). A build without it, or any failure, leaves the last reading.
+    private func reportContextUsage() async {
+        guard process != nil,
+              let response = try? await control(["subtype": "get_context_usage", "detail": "summary"]),
+              let usage = ClaudeProtocol.contextUsage(from: response) else { return }
+        continuation.yield(.tokenUsage(usage))
     }
 
     private func handleControlRequest(_ message: JSONValue) {

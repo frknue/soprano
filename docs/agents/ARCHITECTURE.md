@@ -33,10 +33,11 @@ swift test
 | `Sources/SopranoAgents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
 | `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox, chat header + title-bar toggles. |
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
-| `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, draft hero + context strip. |
+| `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
+| `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar usage indicator, usage card, Settings → Accounts, account fixtures. |
 | `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
-| `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`. **Never edit.** |
+| `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController`, the omp, Claude Code and Codex managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
 
 Modules talk only through the contracts: views read `AgentEngine` state and call its methods;
 UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never talks to
@@ -53,14 +54,17 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
 
 - `.projectsChanged`, `.threadListChanged` (add/remove, title, section, status pill, branch),
   `.threadChanged(threadID:)` (turns/queue/settings), `.itemChanged(threadID:turnID:itemID:)`
-  (streaming deltas: re-render just that row), `.providersChanged`.
+  (streaming deltas: re-render just that row), `.providersChanged`, `.commandsChanged` (re-read
+  the command lists).
 - Mutations: `addProject`, `removeProject`, `rename`, `setPinned`, `setSettled`, `setArchived`,
   `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`, `setInteractionMode`,
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
-  `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`. Reads: `workspaceFiles`,
-  `readWorkspaceFile`, `workspaceFileURL`. Contracts in the doc comments of `AgentEngine.swift`,
-  `AgentEngine+Turns.swift` and `AgentEngine+Files.swift`.
+  `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
+  `rememberCommands`. Reads: `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL`,
+  `commands(forThread:)`, `commands(forDraft:projectID:)`. Contracts in the doc comments of
+  `AgentEngine.swift`, `AgentEngine+Turns.swift`, `AgentEngine+Files.swift` and
+  `AgentEngine+Commands.swift`.
 
 Engine behavior:
 - Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
@@ -99,6 +103,16 @@ Engine behavior:
   dropped); elsewhere a walk skipping `.git`, `node_modules`, `.build`, `DerivedData` (≤ 20 000
   files). Reads resolve symlinks and refuse anything outside the working directory; text up to
   2 MiB, images by extension up to 20 MiB, NUL or invalid UTF-8 = binary.
+- Context: every `tokenUsage` event sets the latest turn's usage and `AgentThread.contextUsage`
+  (persisted; `TokenUsage.fraction` = used / window). A provider switch clears it; an "Edit from
+  here" rewind sets it to the last kept turn's usage.
+- Compaction: text that is exactly `/compact` (no attachments) runs as a compaction turn via
+  `ProviderSession.compact()`. It needs a conversation and an idle thread, or `.queue`; messages
+  sent during it are queued. The provider's notice (or error) lands in that turn.
+- Commands: `ProviderEvent.commands([ProviderCommand])` lists are deduplicated by `insertText`,
+  sorted (commands A–Z, then skills A–Z), kept per thread, and remembered per provider and
+  workspace for drafts (a worktree thread's list also counts for its project; all scratch threads
+  share one). Text starting with `/` reaches the provider with its first characters intact.
 
 ### Providers (Core/Providers)
 `ProviderDriver` per kind (`OmpDriver`, `CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s,
@@ -230,6 +244,29 @@ Rollback: each turn's user message carries a `uuid`; rolling back before turn N 
 `~/.claude/projects/*/<session>.jsonl` after relaunch); before turn 1 starts a fresh session. Probe:
 `claude --version` and `claude auth status --json`. Traces: `Tests/SopranoAgentsTests/Fixtures/claude-*.jsonl`.
 
+Context, compaction and commands per provider:
+- omp: `get_available_commands` after the handshake, then `available_commands_update`
+  (`{name, source, aliases?, description?, input?{hint}, subcommands?}`); skills are
+  `skill:<name>`; badges builtin → Built-in, skill → Skill, extension → Extension, mcp_prompt →
+  MCP, custom/file → Custom. After each turn `get_state` → `contextUsage {tokens, contextWindow}`.
+  `compact` is sent without a waiter (its response then arrives after `manual_compaction_end`),
+  which gives the notice (committed / skip reason / cancelled) or an error; then `get_state` and
+  `get_entries` (the compaction entry becomes the turn id). A skip ("Already compacted") is a
+  failed response but the turn completes.
+- Codex: `skills/list {cwds:[cwd]}` after `thread/start`/`thread/resume` and again with
+  `forceReload` on `skills/changed`; enabled skills become `$name ` commands, and a message
+  mentioning `$name` adds `{type:"skill", name, path}` to `turn/start`/`turn/steer` input.
+  `thread/compact/start {threadId}` runs as its own turn (`turn/started`, `contextCompaction` item,
+  `thread/tokenUsage/updated`, `turn/completed`).
+- Claude Code: commands from the `initialize` response and `system/commands_changed`; a command
+  whose name or alias is in `system/init` `skills` is a skill; MCP prompts insert
+  `/server:prompt (MCP) `. After every `result`, `get_context_usage {detail:"summary"}` reports
+  `totalTokens` of `maxTokens` (the auto-compact window). `/compact` is a user turn:
+  `system/compact_boundary` gives the notice, and the kept messages Claude re-sends afterwards
+  (same uuid) are ignored. Slash text gets no `ultrathink` prefix; attachment notes follow it.
+- Traces: `omp-commands-compact.jsonl`, `codex-skills-compact.jsonl`,
+  `claude-commands-compact.jsonl`, `claude-context-compact-replay.jsonl`.
+
 Text generation: omp `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules
 --no-context-files --no-lsp [--model <provider/id>] --thinking low` (prompt plus schema on stdin,
 first JSON object of stdout); Codex `codex exec --ephemeral --skip-git-repo-check -s read-only --model <m>
@@ -237,6 +274,22 @@ first JSON object of stdout); Codex `codex exec --ephemeral --skip-git-repo-chec
 (prompt on stdin); Claude `claude -p --output-format json --json-schema <schema> --model <m>
 --tools "" --disable-slash-commands --no-session-persistence --permission-mode dontAsk` (prompt on
 stdin). 180 s timeout.
+
+### Accounts (`Vendored/Accounts`, `Views/Accounts`)
+Soprano's accounts layer is vendored unchanged. `AccountsController.shared.start()` runs only in
+`AppDelegate`, before the engine is built: it writes omp's preference overlay and publishes the
+chosen Codex home into `AccountLaunchState`. Views read and act only through
+`AccountsCenter.source` (`AccountsSource`: snapshot, observers, refresh, add, reauthenticate,
+cancel, select, remove, dismiss); the app installs the controller, tests and the snapshot harness
+use `FixtureAccountsSource`, so no account CLI, Keychain read or usage request runs there.
+Launch seam: drivers and sessions take `launchAdjustments: @Sendable () ->
+ProviderLaunchAdjustments` (environment over the app's, arguments before the provider's) and read
+it on every spawn (sessions, probes, text generation). `EngineFactory` injects
+`AccountLaunchBridge.adjustments(for:)`: Codex gets `CODEX_HOME=<managed home>` (the home linker
+runs first), omp gets `--config <Application Support>/<bundle id>/omp-accounts.yml` once a
+preference exists, Claude Code gets nothing (its login switches Mac-wide). The account list is in
+UserDefaults `soprano-accounts` (separate from Soprano's); Keychain items, omp's logins and
+`~/.claude.json` are shared with Soprano.
 
 ### Git (Core/Git)
 `LiveGitService: GitService`. All git through `GitRunner` (`git --no-pager -c core.quotepath=false
@@ -285,10 +338,34 @@ container relies on: `TimelineViewController.bottomInset` (space the composer co
 `ComposerViewController.onHeightChange` and `focusEditor()`, `ChatViewController.terminalDrawerHeight`.
 Region controllers that take keyboard focus adopt `FocusRegionController`.
 
+The composer footer shows a context meter (`ContextMeterView`, 16 pt ring left of send/stop) for
+`thread.contextUsage`: a muted full track under a foreground arc below 70%, `warning` from 70%, `error` from 90%, hidden for drafts and
+unknown usage, tooltip `Context: 62.4k / 200k tokens (31%)`. Clicking it opens a child-window card
+(`ContextMeterCardContent`) with the usage bar, `62.4k of 200k tokens used · 31%` and "Compact
+conversation" (`engine.compact`, enabled by `engine.canCompact`; failures are alerts). The `/`
+command menu (`SlashCommandMenuContent`) is a passive `ComposerPopover` (never key; clicks on the
+composer pass through) anchored above the composer at its width. It opens while the caret is in a
+line-start token starting with `/` (or `$` for Codex skills; `SlashToken`), lists
+`engine.commands(forThread:)` / `commands(forDraft:projectID:)` plus the app's `/compact` row when
+the thread can compact and the provider has none, filtered by `SlashCommandFilter` (name prefix,
+then name substring, then description substring), and re-lists on `.commandsChanged`. The editor
+keeps focus and hands ↑/↓, Enter, Tab and Escape to the menu first (`menuKeyHandler`): Enter/Tab
+replace the token with `insertText` (keeping what follows), Escape hides the menu until the caret
+leaves the token, Enter never sends while it shows (with nothing to pick it closes the menu). It
+closes on send, focus loss, thread switch and when another of the app's windows becomes key
+(palette, dialog, settings); app deactivation keeps it. Text the composer sets itself never opens
+it; the editor has inline predictions and text completion off.
+
+The sidebar footer shows account usage next to the gear (`UsageIndicatorView`: `Claude 9% · Codex
+75%`, each provider's headline account's tightest window; muted below 70%, `warning` from 70%,
+`error` from 90%; hidden without usage). Clicking it or `usage.open` toggles the usage card
+(child window): per provider, per account list, each login with its 5h/7d bars, percent and
+reset, plus Refresh and "Manage Accounts…" (Settings → Accounts).
+
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's
 `…Commands.all` (`ShellCommands`, `SidebarCommands`, `TimelineCommands`, `ComposerCommands`,
-`PanelCommands`). Commands are the single source for key bindings, the palette, menus and
+`PanelCommands`, `AccountCommands`). Commands are the single source for key bindings, the palette, menus and
 buttons, and the snapshot harness runs them with `--perform <id>`. `CommandContext` carries
 `engine`, `state`, `workspace`, `window`, `focus`, `isTextInput`, and `thread` (selected).
 
@@ -344,6 +421,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `composer.togglePlan` | Toggle Plan Mode | composer | `shift+tab` | Composer |
 | `composer.sendAlternate` | Steer or Queue (opposite) | composer | `cmd+enter` | Composer |
 | `thread.stop` | Interrupt | global | — | Composer |
+| `thread.compact` | Compact Conversation | — | — | Composer |
 | `diff.toggle` | Toggle Diff | not terminal | `cmd+d` | Panels |
 | `files.toggle` | Toggle Files | not terminal | `cmd+shift+f` | Panels |
 | `files.search` | Search Files | — | — | Panels |
@@ -356,6 +434,9 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `git.commit` / `git.push` / `git.createPR` | Commit / Push / Create PR | — | — | Panels |
 | `diff.toggleLayout` / `diff.toggleFileTree` | Toggle Split Diff View / Diff File Tree | — | — | Panels |
 | `rightPanel.toggleMaximized` | Maximize Right Panel | — | — | Panels |
+| `usage.open` | Show Usage | global | `cmd+u` | Accounts |
+| `accounts.manage` | Manage Accounts… | global | — | Accounts |
+| `usage.refresh` | Refresh Usage | global | — | Accounts |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
 router as global). A right-panel terminal tab is focus region `terminal`, like the drawer.
@@ -372,7 +453,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 │ …                  │   assistant markdown 14/1.625                      │                             │
 │ Working 1 ›        │   N changed files card                             │                             │
 │ Settled 43 ›       │   ┌ composer r16, glass ┐                          │                             │
-│ [⚙]                │ terminal drawer 280 (180…75%)                      │                             │
+│ [⚙] Claude 9% ·…   │ terminal drawer 280 (180…75%)                      │                             │
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
@@ -394,7 +475,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 - Motion: opacity/scale fades ≤ 200 ms, none under Reduce Motion; streaming text appears without
   animation.
 - Floating surfaces that must appear in snapshots (palette, model picker, menus of the composer,
-  branch picker, thread details popovers) are child windows of the main window
+  branch picker, thread details popovers, context card, `/` command menu, usage card) are child windows of the main window
   (`window.addChildWindow(_:ordered:)`), not `NSPopover`. Context menus are native `NSMenu`.
 
 ## Verification harness
@@ -402,7 +483,8 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 `SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
-[--settings general|providers|text-generation|worktrees|notifications|keybindings|archive|about]
+[--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
+[--accounts none|demo|empty|pending]
 [--dialog confirm|choose|prompt|alert] [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
 [--click <label>]… [--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
 of it and its child windows. `--perform` runs any registered command (open the palette, the model
@@ -415,6 +497,15 @@ a real mouse down/up at its center through the window, so whatever the window hi
 (including a view drawn over the control) gets the click, as it would live. Clicks in the
 titlebar strip start a window drag offscreen instead; use them below the header. Agents verify
 UI with it and `read` the PNG; they do not launch the GUI.
+
+The demo fixture's thread reports 124k of 200k context tokens and the engine remembers an omp
+command list for it and the `app` project: `--perform composer.focus --type "/re"` opens the
+filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context card, and
+`--fixture failed --perform composer.focus --type "/"` the empty state. `--accounts` installs an
+`AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
+has two Claude logins in omp, Claude Code's own login and one Codex CLI login with 5h/7d windows
+at 9 %, 72 %/93 % and 75 %; `pending` adds a waiting omp sign-in and a failed Claude Code action.
+`--perform usage.open` opens the usage card; `--click "Account usage"` clicks the indicator.
 
 Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless
 child windows covering the main window with a dimmed backdrop and one card. Their keys

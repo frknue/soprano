@@ -17,6 +17,9 @@ final class SettingsController: NSObject {
 
     let engine: AgentEngine
     let center: SettingsCenter
+    /// The Accounts page reads and acts through it.
+    let accounts: any AccountsSource
+    private let accountsObserverID = "SettingsController-\(UUID().uuidString)"
     private weak var parent: NSWindow?
     private weak var router: KeyboardRouter?
 
@@ -35,9 +38,10 @@ final class SettingsController: NSObject {
     private var recorder: ShortcutRecorder?
     private var renderScheduled = false
 
-    init(engine: AgentEngine, center: SettingsCenter = .shared, parent: NSWindow, router: KeyboardRouter?) {
+    init(engine: AgentEngine, center: SettingsCenter = .shared, accounts: (any AccountsSource)? = nil, parent: NSWindow, router: KeyboardRouter?) {
         self.engine = engine
         self.center = center
+        self.accounts = accounts ?? AccountsCenter.source
         self.parent = parent
         self.router = router
         super.init()
@@ -92,8 +96,17 @@ final class SettingsController: NSObject {
         }
         window.backdrop.onClick = { [weak self] in self?.close() }
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
-        window.onClose = { [weak self] in self?.stopRecording(rerender: false) }
+        accounts.addObserver(id: accountsObserverID) { [weak self] _ in
+            guard let self, page == .accounts else { return }
+            scheduleRender()
+        }
+        window.onClose = { [weak self] in
+            guard let self else { return }
+            accounts.removeObserver(id: accountsObserverID)
+            stopRecording(rerender: false)
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(overlayResized), name: NSWindow.didResizeNotification, object: window)
+        if page == .accounts { accounts.refresh(force: false) }
         render(resetScroll: true)
         window.present(over: parent, focus: document)
     }
@@ -167,6 +180,8 @@ final class SettingsController: NSObject {
         guard page != self.page else { return }
         stopRecording(rerender: false)
         self.page = page
+        // Opening the page re-reads accounts unless they were read in the last 30 s.
+        if page == .accounts { accounts.refresh(force: false) }
         render(resetScroll: true)
     }
 

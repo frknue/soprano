@@ -4,6 +4,7 @@ import AppKit
 enum SettingsPage: String, CaseIterable, Sendable {
     case general
     case providers
+    case accounts
     case textGeneration = "text-generation"
     case worktrees
     case notifications
@@ -15,6 +16,7 @@ enum SettingsPage: String, CaseIterable, Sendable {
         switch self {
         case .general: "General"
         case .providers: "Providers"
+        case .accounts: "Accounts"
         case .textGeneration: "Text generation"
         case .worktrees: "Worktrees"
         case .notifications: "Notifications"
@@ -29,6 +31,7 @@ enum SettingsPage: String, CaseIterable, Sendable {
         switch self {
         case .general: "gearshape"
         case .providers: "cpu"
+        case .accounts: "person.2"
         case .textGeneration: "text.bubble"
         case .worktrees: Icon.gitBranch
         case .notifications: "bell"
@@ -48,6 +51,9 @@ enum SettingsPage: String, CaseIterable, Sendable {
         case .providers:
             [("Codex", "provider cli version account path executable"), ("Claude Code", "provider cli version account path executable"),
              ("Default provider", "new thread"), ("Default model", "new thread provider reasoning"), ("Permissions", "runtime mode approval full access supervised")]
+        case .accounts:
+            [("Claude accounts", "account usage limits login sign in omp claude code switch"),
+             ("Codex accounts", "account usage limits login sign in omp codex cli switch")]
         case .textGeneration:
             [("Text generation model", "thread titles commit messages branch names"), ("Generate thread titles", "title")]
         case .worktrees:

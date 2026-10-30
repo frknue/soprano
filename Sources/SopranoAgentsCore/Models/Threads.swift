@@ -136,6 +136,9 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
     public var queue: [QueuedMessage]
     /// Background title generation is running.
     public var isGeneratingTitle: Bool
+    /// Latest known context fill of the thread's provider conversation (every token update,
+    /// the exact reading after a turn or compaction); nil = unknown. Older files lack it.
+    public var contextUsage: TokenUsage?
 
     public init(
         id: String = UUID().uuidString,
@@ -155,7 +158,8 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         providerThreadID: String? = nil,
         turns: [Turn] = [],
         queue: [QueuedMessage] = [],
-        isGeneratingTitle: Bool = false
+        isGeneratingTitle: Bool = false,
+        contextUsage: TokenUsage? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -175,6 +179,7 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         self.turns = turns
         self.queue = queue
         self.isGeneratingTitle = isGeneratingTitle
+        self.contextUsage = contextUsage
     }
 
     public var activeTurn: Turn? {
@@ -310,5 +315,12 @@ public struct TokenUsage: Codable, Sendable, Hashable {
     public init(usedTokens: Int, contextWindow: Int?) {
         self.usedTokens = usedTokens
         self.contextWindow = contextWindow
+    }
+
+    /// `usedTokens / contextWindow` (not clamped; a provider may report more than its
+    /// window); nil without a positive window.
+    public var fraction: Double? {
+        guard let contextWindow, contextWindow > 0 else { return nil }
+        return Double(usedTokens) / Double(contextWindow)
     }
 }

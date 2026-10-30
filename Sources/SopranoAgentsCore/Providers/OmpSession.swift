@@ -28,6 +28,12 @@ import Foundation
 /// before; the new session file becomes the conversation id. (`navigate_tree` would only move
 /// the leaf in memory, which the next `--resume` undoes.)
 ///
+/// Commands: `get_available_commands` after the handshake, then every pushed
+/// `available_commands_update` (`commands` events). Context: when a turn ends, `get_state`'s
+/// `contextUsage` is reported as `tokenUsage`. Compaction (`compact()`): the `compact` command,
+/// answered once it has ended (`manual_compaction_start|end` in between), reported as a turn:
+/// its notice, the new `contextUsage`, the compaction entry as the turn's id, `turnCompleted`.
+///
 /// Not supported: plan mode (omp has no host-driven plan mode over RPC; turns run as Build) and
 /// decline feedback (omp's approval select has no text field).
 public actor OmpSession: ProviderSession {
@@ -44,6 +50,7 @@ public actor OmpSession: ProviderSession {
 
     private let continuation: AsyncStream<ProviderEvent>.Continuation
     private let executablePath: @Sendable () -> String?
+    private let launchAdjustments: @Sendable () -> ProviderLaunchAdjustments
     private var config: SessionConfig?
     private var executable = ""
     private var process: LineProcess?
@@ -61,6 +68,8 @@ public actor OmpSession: ProviderSession {
     private var approvalMode = ""
     private var pending: [String: OmpUIRequest] = [:]
     private var activePromptID: String?
+    /// The running `compact` request's id (a compaction turn; no prompt is active meanwhile).
+    private var compactionID: String?
     /// The branch tip when the last turn ended (or at start / after a rewind): the next turn's
     /// entries come after it. Unknown when `get_entries` failed.
     private var branchTip: String?
@@ -71,8 +80,12 @@ public actor OmpSession: ProviderSession {
     private var isClosing = false
     private var hasEnded = false
 
-    public init(executablePath: @escaping @Sendable () -> String? = { nil }) {
+    public init(
+        executablePath: @escaping @Sendable () -> String? = { nil },
+        launchAdjustments: @escaping @Sendable () -> ProviderLaunchAdjustments = { .none }
+    ) {
         self.executablePath = executablePath
+        self.launchAdjustments = launchAdjustments
         (events, continuation) = AsyncStream.makeStream(of: ProviderEvent.self, bufferingPolicy: .unbounded)
     }
 
@@ -92,6 +105,7 @@ public actor OmpSession: ProviderSession {
             try await spawn(resume: resume, selection: config.modelSelection, runtime: config.runtimeMode)
             try await apply(config.modelSelection)
             await refreshBranchTip()
+            await fetchCommands()
         } catch {
             isClosing = true
             retire()
@@ -147,13 +161,23 @@ public actor OmpSession: ProviderSession {
     }
 
     public func interrupt() async {
-        guard let client, activePromptID != nil else { return }
+        guard let client else { return }
+        if compactionID != nil {
+            // A cancelled compaction ends with `manual_compaction_end {aborted:true}`. omp 18.14
+            // answers commands in order, so its `abort` only runs once the compaction is over
+            // (and then stops nothing): don't wait for it.
+            interruptRequested = true
+            Task { _ = try? await client.request("abort") }
+            return
+        }
+        guard activePromptID != nil else { return }
         interruptRequested = true
         _ = try? await client.request("abort")
         // Yielded but unsettled: nothing of the prompt is left to stop, so end the turn here
         // instead of waiting for background jobs to finish.
         if mapper.isAwaitingSettlement, activePromptID != nil {
             await reportTurnAnchor()
+            await reportContextUsage()
             guard mapper.isAwaitingSettlement, activePromptID != nil else { return }
             endPrompt()
             for event in mapper.interruptAwaitingSettlement() { continuation.yield(event) }
@@ -188,6 +212,27 @@ public actor OmpSession: ProviderSession {
             return OmpProtocol.uiResponse(id: request.id, ["confirmed": .bool(values[0].caseInsensitiveCompare("Yes") == .orderedSame)])
         case .input, .editor:
             return OmpProtocol.uiResponse(id: request.id, ["value": .string(values.joined(separator: "\n"))])
+        }
+    }
+
+    /// `compact`, answered only once the compaction has ended. It is sent without a waiter, so
+    /// its response reaches `handle` in order, after the `manual_compaction_end` before it (see
+    /// `finishCompaction`).
+    public func compact() async throws {
+        guard let client, process != nil else { throw ProviderError.notStarted }
+        guard activePromptID == nil, compactionID == nil else {
+            throw ProviderError.message("omp is still working; compact the conversation once the turn has ended.")
+        }
+        let id = "compact-\(nextPrompt)"
+        nextPrompt += 1
+        mapper.resetTurn()
+        interruptRequested = false
+        compactionID = id
+        do {
+            try await client.send(OmpProtocol.command("compact", id: id))
+        } catch {
+            compactionID = nil
+            throw error
         }
     }
 
@@ -242,10 +287,11 @@ public actor OmpSession: ProviderSession {
         let mode = OmpProtocol.approvalMode(runtime)
         let model = OmpProtocol.modelSpec(selection.model) != nil ? selection.model : nil
         let arguments = OmpProtocol.sessionArguments(cwd: config.cwd, approvalMode: mode, model: model, thinking: selection.effort, resume: resume)
+        let adjustments = launchAdjustments()
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
-            arguments: arguments,
-            environment: OmpProtocol.environment(),
+            arguments: adjustments.arguments(before: arguments),
+            environment: OmpProtocol.environment(adjustments),
             directory: config.cwd
         ))
         do {
@@ -296,7 +342,7 @@ public actor OmpSession: ProviderSession {
             if let spec = OmpProtocol.modelSpec(selection.model) {
                 target = ModelID(provider: spec.provider, id: spec.id)
             } else {
-                if configuredModel == nil, let model = try await OmpDriver.configuredModel(executable: executable, directory: config?.cwd) {
+                if configuredModel == nil, let model = try await OmpDriver.configuredModel(executable: executable, directory: config?.cwd, adjustments: launchAdjustments()) {
                     configuredModel = ModelID(provider: model.provider, id: model.id)
                 }
                 target = configuredModel
@@ -332,6 +378,7 @@ public actor OmpSession: ProviderSession {
         }
         process = nil
         activePromptID = nil
+        compactionID = nil
         pending.removeAll()
     }
 
@@ -396,6 +443,7 @@ public actor OmpSession: ProviderSession {
             if mapper.isAwaitingSettlement, interruptRequested { events += mapper.interruptAwaitingSettlement() }
             if !mapper.isAwaitingSettlement {
                 await reportTurnAnchor()
+                await reportContextUsage()
                 endPrompt()
             }
             for event in events { continuation.yield(event) }
@@ -403,8 +451,14 @@ public actor OmpSession: ProviderSession {
         case "session_settled":
             guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
             await reportTurnAnchor()
+            await reportContextUsage()
             guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
             endPrompt()
+        case "response":
+            if let id = frame["id"]?.stringValue, id == compactionID {
+                await finishCompaction(id: id, response: frame)
+                return
+            }
         default:
             break
         }
@@ -445,6 +499,64 @@ public actor OmpSession: ProviderSession {
         }
     }
 
+    /// After a turn or a compaction: `get_state`'s exact context fill as `tokenUsage` (nothing
+    /// when omp leaves it out or the request fails; the last reading stands).
+    private func reportContextUsage() async {
+        guard let client,
+              let state = try? await withProviderTimeout(Self.requestTimeout, label: "omp get_state", { try await client.request("get_state") }),
+              let usage = OmpProtocol.contextUsage(fromState: state) else { return }
+        continuation.yield(.tokenUsage(usage))
+    }
+
+    /// `get_available_commands` once started (omp also pushes `available_commands_update` at
+    /// startup and whenever the list changes; the mapper reports those).
+    private func fetchCommands() async {
+        guard let client,
+              let data = try? await withProviderTimeout(Self.requestTimeout, label: "omp get_available_commands", { try await client.request("get_available_commands") }),
+              data["commands"]?.arrayValue != nil else { return }
+        continuation.yield(.commands(OmpProtocol.commands(data["commands"])))
+    }
+
+    /// `compact`'s response ends the compaction's turn. The progress events before it already
+    /// showed the result (the mapper's notice or error item, kept as `mapper.compactionEnd`):
+    /// compacted or skipped ("Already compacted", answered with a failure) → completed, cancelled
+    /// → interrupted, failed → failed. Builds without progress events only answer the command;
+    /// a success then gets its notice here. The new context fill and the turn's anchor (its
+    /// compaction entry) are reported first.
+    private func finishCompaction(id: String, response: JSONValue) async {
+        var events: [ProviderEvent] = []
+        var outcome = ProviderTurnOutcome.completed
+        var failure: String?
+        if response["success"]?.boolValue == false {
+            switch mapper.compactionEnd {
+            case .compacted?, .skipped?:
+                break
+            case .cancelled?:
+                outcome = .interrupted
+            case let .failed(message)?:
+                outcome = .failed
+                failure = "Compaction failed: \(message)"
+            case nil:
+                if interruptRequested {
+                    outcome = .interrupted
+                } else {
+                    outcome = .failed
+                    let message = response["error"]?.nonEmptyString ?? response["error"]?["message"]?.nonEmptyString ?? "omp rejected compact."
+                    failure = "Compaction failed: \(message)"
+                }
+            }
+        } else if mapper.compactionEnd == nil {
+            events.append(.itemUpdated(TurnItem(id: "\(mapper.itemPrefix)\(id)", kind: .notice(text: "Context compacted"), status: .completed)))
+        }
+        await reportContextUsage()
+        await reportTurnAnchor()
+        guard compactionID == id else { return }
+        compactionID = nil
+        mapper.resetTurn()
+        for event in events { continuation.yield(event) }
+        continuation.yield(.turnCompleted(outcome: outcome, error: failure))
+    }
+
     /// The prompt's turn is over: withdraw dialogs nobody can answer any more.
     private func endPrompt() {
         activePromptID = nil
@@ -456,6 +568,7 @@ public actor OmpSession: ProviderSession {
         guard !hasEnded else { return }
         hasEnded = true
         activePromptID = nil
+        compactionID = nil
         continuation.yield(.sessionEnded(error: error))
         continuation.finish()
     }

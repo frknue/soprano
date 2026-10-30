@@ -9,7 +9,8 @@ struct SettingsForm {
     /// Width of the page column the rows fill.
     let width: CGFloat
 
-    func section(_ title: String?, _ rows: [NSView]) -> NSView {
+    /// A titled group of rows; `note` is a muted line between the title and the group.
+    func section(_ title: String?, note: String? = nil, _ rows: [NSView]) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -27,6 +28,22 @@ struct SettingsForm {
                 titleRow.widthAnchor.constraint(equalToConstant: width),
             ])
             stack.addArrangedSubview(titleRow)
+        }
+        if let note {
+            let label = ThemedLabel(note, size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+            label.preferredMaxLayoutWidth = width - 32
+            let noteRow = NSView()
+            label.translatesAutoresizingMaskIntoConstraints = false
+            noteRow.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: noteRow.leadingAnchor, constant: 16),
+                label.trailingAnchor.constraint(equalTo: noteRow.trailingAnchor, constant: -16),
+                label.topAnchor.constraint(equalTo: noteRow.topAnchor),
+                label.bottomAnchor.constraint(equalTo: noteRow.bottomAnchor),
+                noteRow.widthAnchor.constraint(equalToConstant: width),
+            ])
+            stack.addArrangedSubview(noteRow)
+            if let previous = stack.arrangedSubviews.dropLast().last { stack.setCustomSpacing(2, after: previous) }
         }
         let group = SettingsGroupView(rows: rows)
         group.translatesAutoresizingMaskIntoConstraints = false

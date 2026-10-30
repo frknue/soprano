@@ -20,6 +20,9 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private let scrollView = NSScrollView()
     let tableView = SidebarTableView()
     private let settingsButton = SidebarIconButton(symbol: Icon.settings, size: 32, symbolSize: 15, label: "Settings")
+    /// Account usage next to Settings; hidden while no provider has usage.
+    let usageIndicator = UsageIndicatorView()
+    private let usageCard = UsageCardPresenter()
     private lazy var filterPopup = ProjectFilterPopup(engine: engine, state: state)
 
     /// The rows on screen, top to bottom.
@@ -75,6 +78,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             self?.perform(shift ? "chat.newLocal" : "chat.new")
         }
         settingsButton.onClick = { [weak self] in self?.perform("settings.open") }
+        usageIndicator.onClick = { [weak self] in self?.perform("usage.open") }
+        usageCard.onManageAccounts = { [weak self] in self?.perform("accounts.manage") }
 
         searchField.text = state.searchText
         searchField.onChange = { [weak self] text in self?.state.setSearchText(text) }
@@ -90,7 +95,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             subview.translatesAutoresizingMaskIntoConstraints = false
             searchRow.addSubview(subview)
         }
-        for subview in [toggleButton, brandLabel, searchRow, scrollView, settingsButton] as [NSView] {
+        for subview in [toggleButton, brandLabel, searchRow, scrollView, settingsButton, usageIndicator] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -127,13 +132,16 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
             settingsButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             settingsButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
+            usageIndicator.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 2),
+            usageIndicator.centerYAnchor.constraint(equalTo: settingsButton.centerYAnchor),
+            usageIndicator.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -inset),
         ])
 
         engine.addObserver(self) { [weak self] event in
             switch event {
             case .projectsChanged, .threadListChanged: self?.reload()
             case let .threadChanged(threadID): self?.refreshRow(of: threadID)
-            case .itemChanged, .providersChanged: break
+            case .itemChanged, .providersChanged, .commandsChanged: break
             }
         }
         state.addObserver(self) { [weak self] change in
@@ -466,6 +474,15 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             filterPopup.show(below: searchRow)
         }
     }
+
+    /// `usage.open`: the usage card above the usage indicator, or above Settings while no
+    /// provider has usage yet.
+    func toggleUsageCard() {
+        view.layoutSubtreeIfNeeded()
+        usageCard.toggle(anchoredTo: usageIndicator.isHidden ? settingsButton : usageIndicator)
+    }
+
+    var isUsageCardShown: Bool { usageCard.isShown }
 
     private func toggleShelf(_ section: InboxSection) {
         if expandedShelves.contains(section) {

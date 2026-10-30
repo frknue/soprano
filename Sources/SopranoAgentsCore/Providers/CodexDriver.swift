@@ -8,15 +8,21 @@ public struct CodexDriver: ProviderDriver {
     static let generationTimeout: TimeInterval = 180
 
     private let executablePath: @Sendable () -> String?
+    private let launchAdjustments: @Sendable () -> ProviderLaunchAdjustments
 
     /// `executablePath` returns the settings override (`providers.codexPath`), read on every
     /// use so settings changes apply to the next session; nil = search PATH.
-    public init(executablePath: @escaping @Sendable () -> String? = { nil }) {
+    /// `launchAdjustments` (the chosen account's `CODEX_HOME`) is read on every spawn too.
+    public init(
+        executablePath: @escaping @Sendable () -> String? = { nil },
+        launchAdjustments: @escaping @Sendable () -> ProviderLaunchAdjustments = { .none }
+    ) {
         self.executablePath = executablePath
+        self.launchAdjustments = launchAdjustments
     }
 
     public func makeSession() -> any ProviderSession {
-        CodexSession(executablePath: executablePath)
+        CodexSession(executablePath: executablePath, launchAdjustments: launchAdjustments)
     }
 
     /// `codex app-server`: `initialize` (version from `userAgent`), `account/read`
@@ -31,7 +37,7 @@ public struct CodexDriver: ProviderDriver {
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
             arguments: ["app-server"],
-            environment: ExecutableLocator.childEnvironment(overrides: CodexProtocol.originatorEnvironment),
+            environment: CodexProtocol.environment(launchAdjustments()),
             directory: NSHomeDirectory()
         ))
         do {
@@ -95,7 +101,7 @@ public struct CodexDriver: ProviderDriver {
             LineProcess.Configuration(
                 executable: executable,
                 arguments: arguments,
-                environment: ExecutableLocator.childEnvironment(overrides: CodexProtocol.originatorEnvironment),
+                environment: CodexProtocol.environment(launchAdjustments()),
                 directory: fileManager.fileExists(atPath: cwd) ? cwd : directory.path
             ),
             input: prompt,

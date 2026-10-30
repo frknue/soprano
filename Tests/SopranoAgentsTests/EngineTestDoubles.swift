@@ -16,6 +16,7 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     private var _responses: [(id: String, decision: ApprovalDecision, feedback: String?)] = []
     private var _answers: [(id: String, answers: [String: [String]])] = []
     private var _rollbacks: [(ordinal: Int, providerTurnID: String?)] = []
+    private var _compactions = 0
     private var _closed = false
     var conversationID = "conv-1"
     var startTurnError: (any Error)?
@@ -34,6 +35,7 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     var responses: [(id: String, decision: ApprovalDecision, feedback: String?)] { lock.withLock { _responses } }
     var answers: [(id: String, answers: [String: [String]])] { lock.withLock { _answers } }
     var rollbacks: [(ordinal: Int, providerTurnID: String?)] { lock.withLock { _rollbacks } }
+    var compactions: Int { lock.withLock { _compactions } }
     var closed: Bool { lock.withLock { _closed } }
 
     func start(_ config: SessionConfig) async throws -> String {
@@ -58,6 +60,10 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
 
     func answer(userInput id: String, answers: [String: [String]]) async {
         lock.withLock { _answers.append((id, answers)) }
+    }
+
+    func compact() async throws {
+        lock.withLock { _compactions += 1 }
     }
 
     func rollback(beforeTurn ordinal: Int, providerTurnID: String?) async throws {

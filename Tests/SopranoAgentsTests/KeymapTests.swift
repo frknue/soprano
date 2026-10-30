@@ -64,6 +64,9 @@ struct KeymapTests {
             ("git.commit", [], []),
             ("git.push", [], []),
             ("git.createPR", [], []),
+            ("usage.open", [], ["cmd+u"]),
+            ("accounts.manage", [], []),
+            ("usage.refresh", [], []),
         ]
         for index in 1...9 {
             table.append(("thread.jump.\(index)", [], ["cmd+\(index)"]))
@@ -94,6 +97,16 @@ struct KeymapTests {
         ]
         let actual = Dictionary(uniqueKeysWithValues: ShellCommands.all.map { ($0.id, $0.defaultKeys) })
         #expect(actual == expected)
+    }
+
+    @Test func accountCommandsCarryTheDocumentedDefaultKeysAndScopes() {
+        let documented = Self.otherModulesDefaults.filter { $0.id.hasPrefix("usage.") || $0.id.hasPrefix("accounts.") }
+        let actual = AccountCommands.all.map { ($0.id, $0.scopes, $0.defaultKeys) }
+        #expect(actual.map(\.0) == documented.map(\.id))
+        for (command, row) in zip(actual, documented) {
+            #expect(command.1 == row.scopes, "\(row.id)")
+            #expect(command.2 == row.keys, "\(row.id)")
+        }
     }
 
     @Test func defaultsComeFromTheRegisteredCommands() {

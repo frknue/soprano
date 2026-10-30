@@ -1,16 +1,18 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Composer slice: the floating composer (editor, attachments, model/effort/permissions chips, send/stop) and the draft context strip.
+/// Composer slice: the floating composer (editor, attachments, model/effort/permissions chips,
+/// context meter, send/stop), the `/` command menu and the draft context strip.
 ///
 /// ```
 /// [draft hero: What should we build in <project>? / or start without a project]
+/// [/ menu: passive list above the composer while the caret is in a line-start /command token]
 /// ┌ surface r16 glass ──────────────────────────────────────────────────────┐
 /// │ [approval: Command approval · detail        Decline  Approve  …]         │
 /// │ [question: header chip · question · options]                             │
 /// │ [attachment shelf]                                                       │
 /// │ Ask anything                                                             │
-/// │ 📎                       ⊙ GPT-6.1 Sol High  🔒 Supervised  Build   (↑)  │
+/// │ 📎                    ⊙ GPT-6.1 Sol High  🔒 Supervised  Build  ◔  (↑)  │
 /// └──────────────────────────────────────────────────────────────────────────┘
 /// [draft context strip: Current checkout                         ⎇ main]
 /// ```
@@ -39,6 +41,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     private let previousButton = TextButton("Previous", variant: .outline, size: .sm)
     private let answerButton = ComposerPillButton("Submit answer")
     private let primaryButton = ComposerPrimaryButton()
+    private let contextMeter = ContextMeterView()
     private let contextStrip = DraftContextStrip()
 
     // MARK: State
@@ -79,7 +82,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     }
 
     private enum PopoverKind {
-        case model, traits, permissions, workspace, branch, project
+        case model, traits, permissions, workspace, branch, project, context
     }
 
     private var target: Target = .draft(nil)
@@ -101,6 +104,16 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     private var stashedText: String?
     private var lastHeight: CGFloat = 0
     private var autoAdvance: Task<Void, Never>?
+    private weak var contextCard: ContextMeterCardContent?
+    /// Threads whose compaction this composer started and that has not finished yet.
+    private var compacting: Set<String> = []
+    /// The `/` command menu, while it shows.
+    private var slashMenu: ComposerPopover?
+    private weak var slashContent: SlashCommandMenuContent?
+    private var slashToken: SlashToken?
+    /// Escape (or a programmatic text change) hid the menu until the caret leaves the token.
+    private var slashDismissed = false
+    private var slashKeyObserver: NSObjectProtocol?
 
     init(engine: AgentEngine, state: WorkspaceState) {
         self.engine = engine
@@ -154,7 +167,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let chips = NSStackView(views: [modelGroup, permissionsChip, modeChip])
         chips.orientation = .horizontal
         chips.spacing = 2
-        let actions = NSStackView(views: [previousButton, answerButton, primaryButton])
+        let actions = NSStackView(views: [previousButton, answerButton, contextMeter, primaryButton])
         actions.orientation = .horizontal
         actions.spacing = 8
         let spacer = composerSpacer()
@@ -195,6 +208,10 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        if let slashMenu, let slashContent {
+            slashContent.setWidth(surface.frame.width)
+            slashMenu.reposition()
+        }
         let height = view.frame.height
         guard abs(height - lastHeight) > 0.5 else { return }
         lastHeight = height
@@ -211,6 +228,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         textView.onFiles = { [weak self] urls in self?.importFiles(urls) }
         textView.onImageData = { [weak self] data in self?.importImageData(data) }
         textView.onDragHighlight = { [weak self] on in self?.surface.isDragHighlighted = on }
+        textView.menuKeyHandler = { [weak self] event in self?.handleSlashKey(event) ?? false }
+        textView.onResignFocus = { [weak self] in self?.closeSlashMenu() }
+        contextMeter.onClick = { [weak self] in self?.toggleContextCard() }
         surface.onFiles = { [weak self] urls in self?.importFiles(urls) }
         surface.onImageData = { [weak self] data in self?.importImageData(data) }
         editor.onHeightChange = { [weak self] in self?.view.needsLayout = true }
@@ -249,6 +269,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
                     history = ComposerHistory(entries: ComposerHistory.entries(of: currentThread))
                 }
                 refresh()
+                if slashMenu != nil { showSlashMenu() }
+            case .commandsChanged:
+                if slashMenu != nil { showSlashMenu() }
             case .providersChanged, .projectsChanged, .threadListChanged:
                 refresh()
             case .threadChanged, .itemChanged:
@@ -315,6 +338,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     private func selectionChanged() {
         closePopoverIfOpen()
+        closeSlashMenu()
         saveCurrent()
         target = switch state.selection {
         case let .thread(id): .thread(id)
@@ -401,6 +425,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         refreshContextStrip()
         editor.textView.placeholder = placeholder
         updatePrimary()
+        refreshMeter()
     }
 
     private func refreshHero() {
@@ -524,6 +549,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             answers[requestID] = draft
         }
         updatePrimary()
+        syncSlashMenu()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        syncSlashMenu()
     }
 
     private func recallHistory(up: Bool) -> Bool {
@@ -963,6 +993,167 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         (view.window?.windowController as? MainWindowController)?.perform(commandID)
     }
 
+    // MARK: Context meter and compaction
+
+    private var contextReading: ContextMeterReading? {
+        guard !state.isDraft else { return nil }
+        return ContextMeterReading(currentThread?.contextUsage)
+    }
+
+    private func refreshMeter() {
+        let isCompacting = currentThread.map { compacting.contains($0.id) } ?? false
+        let reading = contextReading
+        contextMeter.isCompacting = isCompacting
+        contextMeter.update(reading)
+        contextCard?.update(reading, canCompact: canCompact, isCompacting: isCompacting)
+    }
+
+    /// The selected thread can compact now (and no compaction this composer started is running).
+    var canCompact: Bool {
+        guard let thread = currentThread, !compacting.contains(thread.id) else { return false }
+        return engine.canCompact(thread.id)
+    }
+
+    /// The meter's card: usage, what compacting does, "Compact conversation".
+    func toggleContextCard() {
+        guard popoverKind != .context else { return closePopover() }
+        guard !contextMeter.isHiddenOrHasHiddenAncestor else { return }
+        let content = ContextMeterCardContent { [weak self] in self?.compactConversation() }
+        content.update(contextReading, canCompact: canCompact, isCompacting: contextMeter.isCompacting)
+        contextCard = content
+        present(.context, content: content, anchor: contextMeter, side: .above, alignment: .trailing) { [weak self] open in
+            self?.contextMeter.isOpen = open
+        }
+    }
+
+    /// `thread.compact` and the card's button: the provider summarizes the conversation.
+    func compactConversation() {
+        guard let thread = currentThread, canCompact else { return }
+        let threadID = thread.id
+        compacting.insert(threadID)
+        refreshMeter()
+        Task { [weak self] in
+            do {
+                try await self?.engine.compact(threadID)
+            } catch {
+                await Dialogs.alert(title: "Couldn’t compact the conversation", message: error.localizedDescription, in: self?.view.window)
+            }
+            self?.compacting.remove(threadID)
+            self?.refreshMeter()
+        }
+    }
+
+    // MARK: Slash commands
+
+    /// `$` lists Codex skills; every provider's commands start with `/`.
+    private var slashSigils: Set<Character> {
+        selection.provider == .codex ? ["/", "$"] : ["/"]
+    }
+
+    /// Opens, filters or closes the `/` menu for the token at the caret.
+    private func syncSlashMenu() {
+        let textView = editor.textView
+        let caret = textView.selectedRange()
+        let token = questionRequestID == nil && pendingApproval == nil && caret.length == 0
+            ? SlashToken.at(textView.string, caret: caret.location, sigils: slashSigils)
+            : nil
+        guard let token else {
+            slashDismissed = false
+            closeSlashMenu()
+            return
+        }
+        // Text the composer put there (thread switch, history, restore) never opens the menu.
+        if textView.isSettingText { slashDismissed = true }
+        guard !slashDismissed, view.window?.firstResponder === textView else {
+            closeSlashMenu()
+            return
+        }
+        guard token != slashToken || slashMenu == nil else { return }
+        slashToken = token
+        showSlashMenu()
+    }
+
+    /// Shows the menu for `slashToken`, or re-lists it in place when it already shows.
+    private func showSlashMenu() {
+        guard let token = slashToken else { return }
+        let provider = selection.provider
+        let thread = currentThread
+        let commands = thread.map { engine.commands(forThread: $0.id) }
+            ?? engine.commands(forDraft: provider, projectID: state.draftProjectID)
+        let candidates = SlashCommandFilter.candidates(commands, sigil: token.sigil, includeCompact: thread.map { engine.canCompact($0.id) } ?? false)
+        let matches = SlashCommandFilter.matching(candidates, query: token.query)
+        let emptyText = SlashCommandFilter.emptyText(provider: provider, sigil: token.sigil, hasCandidates: !candidates.isEmpty, query: token.query)
+        if slashMenu != nil, let slashContent {
+            slashContent.show(matches, emptyText: emptyText)
+            return
+        }
+        guard let window = surface.window else { return }
+        closePopover()
+        let content = SlashCommandMenuContent(width: surface.frame.width) { [weak self] command in self?.insertCommand(command) }
+        content.show(matches, emptyText: emptyText)
+        let menu = ComposerPopover(content: content, passive: true)
+        menu.onClose = { [weak self, weak menu] in
+            guard let self, let menu, slashMenu === menu else { return }
+            slashMenu = nil
+            slashToken = nil
+            if let slashKeyObserver { NotificationCenter.default.removeObserver(slashKeyObserver) }
+            slashKeyObserver = nil
+        }
+        slashMenu = menu
+        slashContent = content
+        // Another of the app's windows taking the keyboard (palette, dialog, settings) closes the
+        // menu. The main window resigning key alone does not: that also happens when the app is
+        // deactivated (or never was, offscreen), and the editor keeps its focus then.
+        slashKeyObserver = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self, weak window, weak menu] note in
+            nonisolated(unsafe) let keyWindow = note.object as? NSWindow
+            MainActor.assumeIsolated {
+                guard SlashMenuFocus.closes(whenKey: keyWindow, main: window, menu: menu?.window) else { return }
+                self?.closeSlashMenu()
+            }
+        }
+        menu.show(anchoredTo: surface, side: .above, alignment: .leading)
+    }
+
+    private func closeSlashMenu() {
+        slashToken = nil
+        slashMenu?.close()
+    }
+
+    /// Escape, or Enter/Tab with nothing to pick: hide the menu until the caret leaves the token.
+    private func dismissSlashMenu() {
+        slashDismissed = true
+        closeSlashMenu()
+    }
+
+    /// ↑/↓ move, Enter/Tab insert, Escape closes; anything else (⇧⇥, ⇧↩, typing) goes to the editor.
+    private func handleSlashKey(_ event: NSEvent) -> Bool {
+        guard slashMenu != nil, let content = slashContent else { return false }
+        guard event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return false }
+        switch event.keyCode {
+        case 125:
+            content.moveHighlight(by: 1)
+        case 126:
+            content.moveHighlight(by: -1)
+        case 36, 76, 48:
+            if !content.chooseHighlighted() { dismissSlashMenu() }
+        case 53:
+            dismissSlashMenu()
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Replaces the typed token with the command's text, keeping what follows it.
+    private func insertCommand(_ command: ProviderCommand) {
+        guard let token = slashToken else { return }
+        let textView = editor.textView
+        let edit = token.replacement(inserting: command.insertText, in: textView.string)
+        closeSlashMenu()
+        textView.insertText(edit.text, replacementRange: edit.range)
+        focusEditor()
+    }
+
     // MARK: Popovers
 
     private func present(
@@ -974,6 +1165,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         marking: @escaping (Bool) -> Void
     ) {
         closePopover()
+        closeSlashMenu()
         guard anchor.window != nil, !anchor.isHiddenOrHasHiddenAncestor else { return }
         let popover = ComposerPopover(content: content)
         popover.onClose = { [weak self, weak popover] in

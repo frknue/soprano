@@ -79,6 +79,62 @@ struct CodexProtocolTests {
         #expect(params["input"]?.arrayValue?.first?["text"] == "also tests")
     }
 
+    // MARK: - Skills
+
+    /// `codex-skills-compact.jsonl` line 1: a recorded `skills/list` response (Codex 0.166).
+    private static func skillsList() throws -> JSONValue {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/codex-skills-compact.jsonl")
+        let first = try #require(try String(contentsOf: url, encoding: .utf8).split(separator: "\n").first)
+        return try JSONValue.parse(String(first))["result"] ?? .null
+    }
+
+    @Test func enabledSkillsBecomeDollarCommandsWithTheirSkillFiles() throws {
+        let skills = CodexProtocol.skills(fromSkillsList: try Self.skillsList())
+
+        #expect(skills.map(\.command.insertText) == ["$ask-matt ", "$code-review ", "$skill-creator ", "$documents:documents ", "$tdd "])
+        #expect(skills.allSatisfy { $0.command.kind == .skill && $0.command.source == "Skill" && $0.path.hasSuffix("/SKILL.md") })
+        // The short description (interface first) when the skill has one.
+        #expect(skills[0].command.description == "Find the right skill or workflow")
+        #expect(skills[2].command.description == "Create or update a skill")
+        #expect(skills[3].command.description == "Create and edit Word and Google Docs files")
+        #expect(skills[4].command.description == "Test-driven red-green-refactor")
+        #expect(skills[4].path == "/tmp/demo/home/.agents/skills/tdd/SKILL.md")
+    }
+
+    @Test func disabledAndNamelessSkillsAreLeftOutAndTheFirstOfANameWins() {
+        let list: JSONValue = ["data": [
+            ["cwd": "/repo", "errors": [], "skills": [
+                ["name": "on", "description": "d", "path": "/s/on/SKILL.md", "scope": "user", "enabled": true],
+                ["name": "off", "description": "d", "path": "/s/off/SKILL.md", "scope": "user", "enabled": false],
+                ["name": "", "description": "d", "path": "/s/x/SKILL.md", "scope": "user", "enabled": true],
+            ]],
+            ["cwd": "/repo/sub", "errors": [], "skills": [
+                ["name": "on", "description": "again", "path": "/s/on2/SKILL.md", "scope": "repo", "enabled": true],
+            ]],
+        ]]
+
+        let skills = CodexProtocol.skills(fromSkillsList: list)
+        #expect(skills.map(\.command.name) == ["on"])
+        #expect(skills.first?.path == "/s/on/SKILL.md")
+        #expect(skills.first?.command.description == "d")
+    }
+
+    @Test func aMessageMentioningKnownSkillsCarriesTheirSkillItems() {
+        let skills = ["tdd": "/s/tdd/SKILL.md", "documents:documents": "/s/documents/SKILL.md", "tdd-extra": "/s/tdd-extra/SKILL.md"]
+        let text = "$documents:documents first, then $tdd. Again $tdd, not $unknown or $TDD; $tdd-extra too"
+        let params = CodexProtocol.turnStartParams(threadID: "th", cwd: "/repo", input: Self.input(text), skills: skills)
+        let items = params["input"]?.arrayValue ?? []
+
+        #expect(items.first?["text"] == .string(text))
+        #expect(Array(items.dropFirst()) == [
+            ["type": "skill", "name": "documents:documents", "path": "/s/documents/SKILL.md"],
+            ["type": "skill", "name": "tdd", "path": "/s/tdd/SKILL.md"],
+            ["type": "skill", "name": "tdd-extra", "path": "/s/tdd-extra/SKILL.md"],
+        ])
+        #expect(CodexProtocol.userInput(Self.input("no skills here $"), skills: skills).arrayValue?.count == 1)
+        #expect(CodexProtocol.turnSteerParams(threadID: "th", turnID: "t", input: Self.input("$tdd now"), skills: skills)["input"]?.arrayValue?.count == 2)
+    }
+
     @Test func modelListEntriesBecomeModelsWithEffortAndFastModeOptions() throws {
         let models = CodexProtocol.models(fromModelList: try Self.traceMessage(id: 3)["result"] ?? .null)
         let sol = try #require(models.first)

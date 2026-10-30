@@ -11,6 +11,12 @@ import Foundation
 /// beforeTurnId}`. Approvals and questions are server requests answered with the same JSON-RPC
 /// id; `serverRequest/resolved` withdraws them. Notifications of other threads (subagents) are
 /// ignored.
+///
+/// Skills: `skills/list {cwds:[cwd]}` once the thread runs and again on `skills/changed`
+/// (`forceReload`); the enabled ones are the `/` menu's commands (`$name `), and a message
+/// mentioning `$name` carries the skill's `skill` input item. Compaction: `thread/compact/start
+/// {threadId}`, which Codex runs as a turn of its own (`turn/started`, a `contextCompaction`
+/// item, `thread/tokenUsage/updated`, `turn/completed`).
 public actor CodexSession: ProviderSession {
     public nonisolated let kind = ProviderKind.codex
     public nonisolated let events: AsyncStream<ProviderEvent>
@@ -24,6 +30,7 @@ public actor CodexSession: ProviderSession {
 
     private let continuation: AsyncStream<ProviderEvent>.Continuation
     private let executablePath: @Sendable () -> String?
+    private let launchAdjustments: @Sendable () -> ProviderLaunchAdjustments
     private var process: LineProcess?
     private var client: CodexAppServerClient?
     private var threadID: String?
@@ -32,11 +39,17 @@ public actor CodexSession: ProviderSession {
     private var mapper = CodexEventMapper()
     private var pending: [String: PendingRequest] = [:]
     private var requestIDs: [JSONRPCID: String] = [:]
+    /// Enabled skills by name → SKILL.md path, for `skill` input items.
+    private var skillPaths: [String: String] = [:]
     private var isClosing = false
     private var hasEnded = false
 
-    public init(executablePath: @escaping @Sendable () -> String? = { nil }) {
+    public init(
+        executablePath: @escaping @Sendable () -> String? = { nil },
+        launchAdjustments: @escaping @Sendable () -> ProviderLaunchAdjustments = { .none }
+    ) {
         self.executablePath = executablePath
+        self.launchAdjustments = launchAdjustments
         (events, continuation) = AsyncStream.makeStream(of: ProviderEvent.self, bufferingPolicy: .unbounded)
     }
 
@@ -51,7 +64,7 @@ public actor CodexSession: ProviderSession {
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
             arguments: ["app-server"],
-            environment: ExecutableLocator.childEnvironment(overrides: CodexProtocol.originatorEnvironment),
+            environment: CodexProtocol.environment(launchAdjustments()),
             directory: config.cwd
         ))
         do {
@@ -85,6 +98,7 @@ public actor CodexSession: ProviderSession {
             }
             threadID = id
             continuation.yield(.conversationID(id))
+            Task { await self.refreshSkills(forceReload: false) }
             return id
         } catch {
             isClosing = true
@@ -95,7 +109,7 @@ public actor CodexSession: ProviderSession {
 
     public func startTurn(_ input: TurnInput) async throws -> String? {
         guard let client, let threadID else { throw ProviderError.notStarted }
-        let result = try await client.request("turn/start", params: CodexProtocol.turnStartParams(threadID: threadID, cwd: cwd, input: input))
+        let result = try await client.request("turn/start", params: CodexProtocol.turnStartParams(threadID: threadID, cwd: cwd, input: input, skills: skillPaths))
         let turnID = result["turn"]?["id"]?.stringValue
         if let turnID { activeTurnID = turnID }
         return turnID
@@ -104,7 +118,13 @@ public actor CodexSession: ProviderSession {
     public func steer(_ input: TurnInput) async throws {
         guard let client, let threadID else { throw ProviderError.notStarted }
         guard let activeTurnID else { throw ProviderError.noActiveTurn }
-        _ = try await client.request("turn/steer", params: CodexProtocol.turnSteerParams(threadID: threadID, turnID: activeTurnID, input: input))
+        _ = try await client.request("turn/steer", params: CodexProtocol.turnSteerParams(threadID: threadID, turnID: activeTurnID, input: input, skills: skillPaths))
+    }
+
+    /// `thread/compact/start {threadId}`; the compaction turn's notifications follow.
+    public func compact() async throws {
+        guard let client, let threadID else { throw ProviderError.notStarted }
+        _ = try await client.request("thread/compact/start", params: ["threadId": .string(threadID)])
     }
 
     public func interrupt() async {
@@ -169,6 +189,9 @@ public actor CodexSession: ProviderSession {
                 continuation.yield(.requestResolved(id: id))
             }
             return
+        case "skills/changed":
+            Task { await self.refreshSkills(forceReload: true) }
+            return
         case "turn/started":
             activeTurnID = params["turn"]?["id"]?.stringValue ?? activeTurnID
         case "turn/completed":
@@ -208,6 +231,17 @@ public actor CodexSession: ProviderSession {
         guard let request = pending.removeValue(forKey: id) else { return nil }
         requestIDs[request.rpcID] = nil
         return request
+    }
+
+    /// `skills/list` for the thread's folder → `commands` (failures keep the last list).
+    private func refreshSkills(forceReload: Bool) async {
+        guard let client else { return }
+        var params: [String: JSONValue] = ["cwds": [.string(cwd)]]
+        if forceReload { params["forceReload"] = true }
+        guard let result = try? await client.request("skills/list", params: .object(params)) else { return }
+        let skills = CodexProtocol.skills(fromSkillsList: result)
+        skillPaths = Dictionary(skills.map { ($0.command.name, $0.path) }, uniquingKeysWith: { first, _ in first })
+        continuation.yield(.commands(skills.map(\.command)))
     }
 
     private func turnID(atOrdinal ordinal: Int, client: CodexAppServerClient, threadID: String) async throws -> String? {

@@ -3,7 +3,8 @@ import AppKit
 /// The prompt editor: plain text at 14 pt with relaxed leading (1.625), at least two
 /// lines + 8 pt, growing to 208 pt and then scrolling. Enter sends, Shift+Enter adds a newline,
 /// Up/Down in an empty editor walk the message history, Shift+Tab toggles plan mode, Escape
-/// closes open pickers. Pasted or dropped files and images become attachments.
+/// closes open pickers. While the `/` command menu shows, `menuKeyHandler` takes its keys
+/// first. Pasted or dropped files and images become attachments.
 final class ComposerTextView: NSTextView {
     static let font = Typography.ui(Typography.bodySize)
     static let lineHeight: CGFloat = (Typography.bodySize * 1.625).rounded()
@@ -28,6 +29,12 @@ final class ComposerTextView: NSTextView {
     var onFiles: (([URL]) -> Void)?
     var onImageData: ((Data) -> Void)?
     var onDragHighlight: ((Bool) -> Void)?
+    /// Keys an open passive menu (the `/` command menu) takes before the editor. Returns true when handled.
+    var menuKeyHandler: ((NSEvent) -> Bool)?
+    /// The editor stopped being the first responder.
+    var onResignFocus: (() -> Void)?
+    /// True while `setText` replaces the text: a programmatic change, not typing.
+    private(set) var isSettingText = false
 
     static var paragraphStyle: NSParagraphStyle {
         let style = NSMutableParagraphStyle()
@@ -72,6 +79,10 @@ final class ComposerTextView: NSTextView {
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextReplacementEnabled = false
         isContinuousSpellCheckingEnabled = false
+        // No system completions or inline predictive text: their ghost text lands in the message
+        // ("/reThe") and Tab would accept them instead of picking from the `/` menu.
+        isAutomaticTextCompletionEnabled = false
+        inlinePredictionType = .no
         textContainerInset = .zero
         font = Self.font
         defaultParagraphStyle = Self.paragraphStyle
@@ -86,6 +97,8 @@ final class ComposerTextView: NSTextView {
 
     /// Replaces the text, keeping the editor's attributes.
     func setText(_ text: String) {
+        isSettingText = true
+        defer { isSettingText = false }
         var attributes = Self.textAttributes
         attributes[.foregroundColor] = textColor ?? NSColor.textColor
         textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
@@ -107,6 +120,7 @@ final class ComposerTextView: NSTextView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
+        if menuKeyHandler?(event) == true { return }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // ⌘↩ is `composer.sendAlternate`, which the keyboard router runs before this view sees the
         // key; unbound, it is just a newline-free no-op here like any other ⌘ chord.
@@ -119,6 +133,12 @@ final class ComposerTextView: NSTextView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onResignFocus?() }
+        return resigned
     }
 
     /// The router never runs chords without ⌘/⌃ in text input, so the editor handles

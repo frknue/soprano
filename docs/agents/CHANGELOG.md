@@ -45,6 +45,18 @@ All notable changes to Soprano Agents are documented here. The format follows
   tab, `⌘F` in the panel opens a file tab's find bar or the Files search (Find in Thread
   elsewhere), tabs that don't fit scroll sideways, and with every tab closed "Open a surface"
   offers Terminal (`T`), Files (`F`) and Diff (`D`).
+- A context meter next to Send shows how full the thread's context window is, read exactly from
+  omp, Codex and Claude Code after every turn; click it for the token count and "Compact
+  conversation" (also Compact Conversation in the command palette, or send `/compact`). The
+  provider's result appears as a notice in the timeline.
+- Typing `/` at the start of a line in the composer lists the provider's commands and skills (omp
+  commands and `/skill:` skills, Claude Code commands and skills, Codex `$` skills): ↑/↓ choose,
+  Enter or Tab insert, Esc closes. A `$skill` mention sends that skill to Codex.
+- Accounts, as in Soprano: sign in to several Claude and Codex accounts in Settings → Accounts
+  (omp prefers or balances, Claude Code and the Codex CLI switch to the chosen one); new Codex and
+  omp threads start with the chosen account.
+- Usage at the bottom of the sidebar (`Claude 9% · Codex 75%`, warning from 70 %, red from 90 %);
+  click it or press ⌘U for each account's 5-hour and weekly limits and their resets.
 - Terminal drawer (⌘J): login-shell terminals per thread in the thread's working directory; ⌘N
   adds one, ⌘W closes one, drag the top edge to resize.
 - Thread details card (⇧⌘B): open the workspace in your editor (⌘O, `editor.app`), run project

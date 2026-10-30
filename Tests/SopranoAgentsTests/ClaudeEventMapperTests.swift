@@ -28,7 +28,8 @@ struct ClaudeEventMapperTests {
         return messages.flatMap { mapper.map($0) }
     }
 
-    private static func assistant(_ id: String, _ blocks: [JSONValue], uuid: String = "a-uuid") -> JSONValue {
+    /// Every real `assistant` line has its own uuid (a repeated one is a re-sent kept message).
+    private static func assistant(_ id: String, _ blocks: [JSONValue], uuid: String = UUID().uuidString) -> JSONValue {
         ["type": "assistant", "parent_tool_use_id": nil, "uuid": .string(uuid), "message": ["id": .string(id), "content": .array(blocks)]]
     }
 
@@ -98,6 +99,69 @@ struct ClaudeEventMapperTests {
         }
         // Last assistant message: 2 input + 8603 cache creation + 36988 cache read + 2 output.
         #expect(usage.first?.usedTokens == 45595)
+    }
+
+    /// `claude-commands-compact.jsonl` (Claude Code 2.1.314, haiku): the `initialize` response's
+    /// commands, a turn's `system/init` with its skills, `get_context_usage`, then `/compact`:
+    /// `system/status`, `system/commands_changed` (an MCP prompt appeared), the
+    /// `compact_boundary`, its `result`, and `get_context_usage` again.
+    private static func commands(in events: [ProviderEvent]) -> [[ProviderCommand]] {
+        events.compactMap { if case let .commands(list) = $0 { list } else { nil } }
+    }
+
+    @Test func initializeCommandsAreReclassifiedOnceTheSkillsAreKnown() throws {
+        let trace = try Self.trace("claude-commands-compact")
+        var mapper = ClaudeEventMapper(cwd: "/tmp/demo", sessionID: "c8c6ab91-e08d-4ae5-80ec-3eb6cd2c3f72")
+        let initialized = mapper.receiveCommands(trace[0]["response"]?["response"]?["commands"])
+        let afterInit = mapper.map(trace[1])
+
+        let first = try #require(Self.commands(in: initialized).first)
+        #expect(first.map(\.insertText) == ["/compact ", "/context ", "/model ", "/diagnosing-bugs ", "/tdd ", "/codex:review ", "/codex:setup ", "/import-memory "])
+        #expect(first.map(\.source) == ["Built-in", "Built-in", "Built-in", "Custom", "Custom", "Custom", "Custom", "Custom"])
+        #expect(first[0] == ProviderCommand(
+            name: "compact", kind: .command, description: "Free up context by summarizing the conversation so far",
+            argumentHint: "<optional custom summarization instructions>", source: "Built-in", insertText: "/compact "
+        ))
+        #expect(first[1].argumentHint == nil)
+        // `system/init` names the skills (`import-memory` through its alias); no second id.
+        let reclassified = try #require(Self.commands(in: afterInit).first)
+        #expect(afterInit.count == 1)
+        #expect(reclassified.filter { $0.kind == .skill }.map(\.name) == ["diagnosing-bugs", "tdd", "codex:review", "import-memory"])
+        #expect(reclassified.filter { $0.kind == .skill }.allSatisfy { $0.source == "Skill" })
+        #expect(reclassified.first { $0.name == "codex:setup" }?.source == "Custom")
+    }
+
+    @Test func compactingShowsANoticeAndAnnouncesTheChangedCommands() throws {
+        let trace = try Self.trace("claude-commands-compact")
+        var mapper = ClaudeEventMapper(cwd: "/tmp/demo", sessionID: "c8c6ab91-e08d-4ae5-80ec-3eb6cd2c3f72")
+        _ = mapper.receiveCommands(trace[0]["response"]?["response"]?["commands"])
+        let events = trace.dropFirst().flatMap { mapper.map($0) }
+
+        let changed = try #require(Self.commands(in: events).last)
+        let prompt = try #require(changed.first { $0.source == "MCP" })
+        #expect(prompt.name == "demo:trace_crash")
+        #expect(prompt.insertText == "/demo:trace_crash (MCP) ")
+        #expect(Self.latestItems(events).map(\.kind) == [.notice(text: "Context compacted")])
+        #expect(Self.latestItems(events).first?.id == "9583fe09-faeb-4682-9d04-807906dfc6e6")
+        // `/compact` runs no model turn: no usage of its own; the session reads the new fill.
+        #expect(!events.contains { if case .tokenUsage = $0 { true } else { false } })
+        #expect(events.last == .turnCompleted(outcome: .completed, error: nil))
+    }
+
+    /// `claude-context-compact-replay.jsonl`: `/context` (its output is a `<synthetic>` assistant
+    /// message), then `/compact`, after whose boundary Claude Code re-sends the kept `/context`
+    /// message (same uuid, new message id).
+    @Test func messagesACompactionKeptAreNotShownAgain() throws {
+        let trace = try Self.trace("claude-context-compact-replay")
+        var mapper = ClaudeEventMapper(cwd: "/tmp/demo", sessionID: "58b42388-838e-4f98-b4d9-b6bf22bc806f")
+        let split = try #require(trace.firstIndex { $0["type"] == "result" })
+        let context = trace[...split].flatMap { mapper.map($0) }
+        let compaction = trace[(split + 1)...].flatMap { mapper.map($0) }
+
+        #expect(Self.latestItems(context).map(\.kind) == [.assistantMessage(text: "## Context Usage\n\n**Model:** claude-haiku-5-5  \n**Tokens:** 36.9k / 1m (4%)", isFinal: true)])
+        #expect(Self.latestItems(compaction).map(\.kind) == [.notice(text: "Context compacted")])
+        #expect(compaction.last == .turnCompleted(outcome: .completed, error: nil))
+        #expect(mapper.lastAssistantUUID == "1981503f-8ddb-4b59-bdea-898372e26f28")
     }
 
     // MARK: - Synthetic messages

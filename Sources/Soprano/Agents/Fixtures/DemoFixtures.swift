@@ -47,6 +47,10 @@ enum DemoFixtures {
                 models: kind == .omp ? ompModels : ProviderCatalog.fallback(kind)
             ))
         }
+        // The `/` menu's list for omp in the demo thread's worktree and in the app project (drafts).
+        for directory in [demoWorktree, "/Users/demo/code/app"] {
+            engine.rememberCommands(ompCommands, provider: .omp, workingDirectory: directory)
+        }
         let selection: WorkspaceState.Selection = switch scenario {
         case "running": .thread(ID.running)
         case "approval": .thread(ID.approval)
@@ -59,6 +63,20 @@ enum DemoFixtures {
         }
         return Built(engine: engine, selection: selection)
     }
+
+    static let demoWorktree = "/Users/demo/.soprano-agents/worktrees/app/soprano-fix-login-redirect"
+
+    /// A slice of omp's `get_available_commands`: built-ins, an extension command and skills.
+    static let ompCommands: [ProviderCommand] = [
+        ProviderCommand(name: "compact", kind: .command, description: "Summarize earlier messages to free context", argumentHint: "[focus]", source: "Built-in", insertText: "/compact "),
+        ProviderCommand(name: "double-check", kind: .command, description: "Re-check the last answer with a second model", source: "Extension", insertText: "/double-check "),
+        ProviderCommand(name: "handoff", kind: .command, description: "Write a handoff note and start a fresh session", argumentHint: "[goal]", source: "Built-in", insertText: "/handoff "),
+        ProviderCommand(name: "model", kind: .command, description: "Switch the model for this session", argumentHint: "<provider/id>", source: "Built-in", insertText: "/model "),
+        ProviderCommand(name: "plan", kind: .command, description: "Plan before making changes", source: "Built-in", insertText: "/plan "),
+        ProviderCommand(name: "review", kind: .command, description: "Review the working tree changes", argumentHint: "[path]", source: "Built-in", insertText: "/review "),
+        ProviderCommand(name: "skill:pr", kind: .skill, description: "Write pull request descriptions and commit messages", source: "Skill", insertText: "/skill:pr "),
+        ProviderCommand(name: "skill:refactor", kind: .skill, description: "Restructure code without changing behavior, one safe step at a time", source: "Skill", insertText: "/skill:refactor "),
+    ]
 
     struct FixtureError: Error, CustomStringConvertible {
         let message: String
@@ -159,11 +177,13 @@ enum DemoFixtures {
                 ChangedFileStat(path: "Sources/Auth/LoginController.swift", additions: 2, deletions: 0),
             ])
         )
-        result.append(AgentThread(
+        var login = AgentThread(
             id: ID.demo, projectID: ID.app, title: "Fix SSO login redirect loop", createdAt: ago(1500), updatedAt: ago(548),
-            modelSelection: omp, branch: "soprano/fix-login-redirect", worktreePath: "/Users/demo/.soprano-agents/worktrees/app/soprano-fix-login-redirect",
+            modelSelection: omp, branch: "soprano/fix-login-redirect", worktreePath: demoWorktree,
             lastVisitedAt: ago(30), providerThreadID: "01a18ca6-e395-70f2-aa8c-32a625c98cc3", turns: [loginTurn1, loginTurn2]
-        ))
+        )
+        login.contextUsage = TokenUsage(usedTokens: 124_000, contextWindow: 200_000)
+        result.append(login)
 
         // 2. Running thread with a live command (Working).
         result.append(AgentThread(

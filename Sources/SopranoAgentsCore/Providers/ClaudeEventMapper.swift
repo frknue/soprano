@@ -17,6 +17,9 @@ public enum ClaudePermissionPrompt: Sendable, Hashable {
 /// turn's last text block (marked final when `result` arrives) and the turn's todo item.
 ///
 /// - `system/init` → `conversationID` (when it changes); `system/compact_boundary` → notice.
+/// - Commands: the `initialize` response's list (`receiveCommands`) and every
+///   `system/commands_changed` → `commands`, classified by `system/init`'s `skills` (re-sent
+///   when they change; `ClaudeProtocol.commands`).
 /// - `stream_event` `text_delta` / `thinking_delta` → deltas on item `<message id>:<index>`.
 /// - `assistant` text / thinking / `tool_use` blocks → items (same ids as the deltas; tool
 ///   items use the `tool_use` id). Bash → command; Edit/MultiEdit/Write/NotebookEdit → file
@@ -28,7 +31,8 @@ public enum ClaudePermissionPrompt: Sendable, Hashable {
 /// - `result` → token usage, the last text marked final, `turnCompleted` (`success` →
 ///   completed, otherwise failed with the result text).
 /// - Messages of subagents (`parent_tool_use_id` set), `rate_limit_event` and control
-///   messages produce nothing.
+///   messages produce nothing. Neither do the messages a compaction kept, which Claude Code
+///   sends again (same `uuid`, original timestamp) after a manual `compact_boundary`.
 public struct ClaudeEventMapper: Sendable {
     private struct ToolUse: Sendable {
         var name: String
@@ -47,6 +51,13 @@ public struct ClaudeEventMapper: Sendable {
     private var lastText: TurnItem?
     private var todoItemID: String?
     private var lastUsage: JSONValue?
+    /// The CLI's latest command list and skill names (`system/init` `skills`).
+    private var commandList: JSONValue?
+    private var skillNames: Set<String> = []
+    /// `uuid`s of the `assistant` lines seen (Claude Code re-sends kept ones after a compaction).
+    private var seenAssistantUUIDs: Set<String> = []
+    /// A manual `/compact` ran in this turn: what follows until `result` are re-sent messages.
+    private var afterManualCompaction = false
 
     /// `sessionID`: the id the session already announced (no second `conversationID`).
     public init(cwd: String? = nil, sessionID: String? = nil) {
@@ -57,6 +68,13 @@ public struct ClaudeEventMapper: Sendable {
     /// The user denied this tool; its error result becomes `declined`.
     public mutating func markDeclined(toolUseID: String) {
         declinedTools.insert(toolUseID)
+    }
+
+    /// The `initialize` response's `commands`.
+    public mutating func receiveCommands(_ list: JSONValue?) -> [ProviderEvent] {
+        guard list?.arrayValue != nil else { return [] }
+        commandList = list
+        return [.commands(ClaudeProtocol.commands(list, skills: skillNames))]
     }
 
     /// After a rollback: the conversation now ends at `assistantUUID`.
@@ -91,10 +109,21 @@ public struct ClaudeEventMapper: Sendable {
         switch message["subtype"]?.stringValue {
         case "init":
             if let cwd = message["cwd"]?.nonEmptyString { self.cwd = cwd }
-            guard let id = message["session_id"]?.nonEmptyString, id != sessionID else { return [] }
+            var events: [ProviderEvent] = []
+            if let skills = message["skills"]?.arrayValue {
+                let names = Set(skills.compactMap(\.stringValue))
+                if names != skillNames {
+                    skillNames = names
+                    if commandList != nil { events.append(.commands(ClaudeProtocol.commands(commandList, skills: names))) }
+                }
+            }
+            guard let id = message["session_id"]?.nonEmptyString, id != sessionID else { return events }
             sessionID = id
-            return [.conversationID(id)]
+            return [.conversationID(id)] + events
+        case "commands_changed":
+            return receiveCommands(message["commands"])
         case "compact_boundary":
+            if message["compact_metadata"]?["trigger"]?.stringValue == "manual" { afterManualCompaction = true }
             let id = message["uuid"]?.stringValue ?? "compact:\(UUID().uuidString)"
             return [.itemUpdated(TurnItem(id: id, kind: .notice(text: "Context compacted"), status: .completed, completedAt: Date()))]
         default:
@@ -125,8 +154,11 @@ public struct ClaudeEventMapper: Sendable {
     }
 
     private mutating func mapAssistant(_ message: JSONValue) -> [ProviderEvent] {
-        guard let body = message["message"], let messageID = body["id"]?.stringValue else { return [] }
-        if let uuid = message["uuid"]?.stringValue { lastAssistantUUID = uuid }
+        guard let body = message["message"], let messageID = body["id"]?.stringValue, !afterManualCompaction else { return [] }
+        if let uuid = message["uuid"]?.stringValue {
+            guard seenAssistantUUIDs.insert(uuid).inserted else { return [] }
+            lastAssistantUUID = uuid
+        }
         if let usage = body["usage"], !usage.isNull { lastUsage = usage }
         var events: [ProviderEvent] = []
         for block in body["content"]?.arrayValue ?? [] {
@@ -214,6 +246,7 @@ public struct ClaudeEventMapper: Sendable {
         blockCounts.removeAll()
         tools.removeAll()
         declinedTools.removeAll()
+        afterManualCompaction = false
     }
 
     // MARK: - Tools

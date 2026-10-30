@@ -26,6 +26,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         appMenu.addItem(.separator())
         appMenu.addItem(commandItem("settings.open", title: "Settings…"))
         appMenu.addItem(commandItem("settings.openFile"))
+        appMenu.addItem(commandItem("accounts.manage"))
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Soprano Agents", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -76,6 +77,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         viewMenu.addItem(commandItem("composer.focus", title: "Focus Composer"))
         viewMenu.addItem(commandItem("timeline.jumpToLatest", title: "Jump to Latest"))
         viewMenu.addItem(commandItem("sidebar.search", title: "Search Threads"))
+        viewMenu.addItem(commandItem("usage.open"))
         viewMenu.addItem(.separator())
         let fullScreen = viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

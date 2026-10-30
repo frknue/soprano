@@ -299,4 +299,37 @@ struct OmpProtocolTests {
         #expect(models[2].option(ModelOptionID.effort)?.defaultValue == "minimal")
         #expect(models[3].options.isEmpty)
     }
+
+    // MARK: - Commands and context
+
+    private static func commandsTrace() throws -> [JSONValue] {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/omp-commands-compact.jsonl")
+        return try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try JSONValue.parse(String($0)) }
+    }
+
+    @Test func getStateReportsTheExactContextFillBeforeAndAfterACompaction() throws {
+        let states = try Self.commandsTrace().filter { $0["command"] == "get_state" }.compactMap { $0["data"] }
+
+        #expect(states.map(OmpProtocol.contextUsage(fromState:)) == [
+            TokenUsage(usedTokens: 52_318, contextWindow: 100_000),
+            TokenUsage(usedTokens: 50_863, contextWindow: 100_000),
+        ])
+        #expect(OmpProtocol.contextUsage(fromState: ["model": ["id": "x"]]) == nil)
+    }
+
+    @Test func theRequestedListIsThePushedOneUntilMCPPromptsLoad() throws {
+        let frames = try Self.commandsTrace()
+        let requested = try #require(frames.first { $0["command"] == "get_available_commands" }?["data"])
+        let pushed = try #require(frames.first { $0["type"] == "available_commands_update" })
+
+        // The update omp pushed once its MCP servers answered adds their prompts.
+        let later = OmpProtocol.commands(pushed["commands"])
+        #expect(OmpProtocol.commands(requested["commands"]) == Array(later.dropLast()))
+        #expect(later.last == ProviderCommand(
+            name: "demo:trace_crash", kind: .command,
+            description: "Correlate a crash symptom with static call and reference evidence plus optional process capture observations.",
+            argumentHint: "arguments", source: "MCP", insertText: "/demo:trace_crash "
+        ))
+        #expect(OmpProtocol.commands(nil).isEmpty)
+    }
 }

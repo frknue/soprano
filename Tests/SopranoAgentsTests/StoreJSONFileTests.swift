@@ -95,6 +95,29 @@ struct StoreJSONFileTests {
         #expect(loaded.threads.map(\.title) == ["Good"])
     }
 
+    @Test func aThreadsContextFillSurvivesARoundTripAndOlderFilesLoadWithoutOne() throws {
+        let dir = directory()
+        let store = JSONFileThreadStore(directory: dir)
+        var saved = thread(title: "Measured")
+        saved.contextUsage = TokenUsage(usedTokens: 52_318, contextWindow: 100_000)
+        store.save(thread: saved)
+        store.flush()
+        // A file written before threads had a context fill.
+        let file = dir.appendingPathComponent("threads/thread-1.json")
+        var older = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        #expect(older["contextUsage"] != nil)
+        older["contextUsage"] = nil
+        older["id"] = "thread-0"
+        try JSONSerialization.data(withJSONObject: older).write(to: dir.appendingPathComponent("threads/thread-0.json"))
+
+        let loaded = try JSONFileThreadStore(directory: dir).load().threads
+
+        #expect(loaded.first { $0.id == "thread-1" }?.contextUsage == TokenUsage(usedTokens: 52_318, contextWindow: 100_000))
+        let legacy = try #require(loaded.first { $0.id == "thread-0" })
+        #expect(legacy.contextUsage == nil)
+        #expect(legacy.title == "Measured")
+    }
+
     @Test func approvalsAndQuestionsPendingAtACrashComeBackAnsweredAsCancelled() throws {
         let dir = directory()
         let store = JSONFileThreadStore(directory: dir)

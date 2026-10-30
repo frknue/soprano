@@ -116,12 +116,14 @@ extension AgentEngine {
     }
 
     /// Sends a message on an existing thread. Idle → starts a turn. Running → steers (`.automatic`,
-    /// `.steer`) or queues (`.queue`). Captures the pre-turn checkpoint when missing.
+    /// `.steer`) or queues (`.queue`). Captures the pre-turn checkpoint when missing. Exactly
+    /// `/compact` compacts the conversation instead (see `compact`).
     public func send(_ threadID: String, text: String, attachments: [Attachment], mode: SendMode = .automatic) async throws {
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { throw EngineError.emptyMessage }
         let message = UserMessage(text: text, attachments: attachments, createdAt: environment.now())
+        if Self.isCompaction(message) { try checkCompaction(thread, mode: mode) }
         if thread.isRunning {
             switch mode {
             case .queue:
@@ -183,9 +185,12 @@ extension AgentEngine {
         await runtime.existingThread(threadID)?.session?.answer(userInput: requestID, answers: [:])
     }
 
-    /// Starts the first queued message now (as a steer when a turn runs), or removes it.
+    /// Starts the first queued message now (as a steer when a turn runs), or removes it. Nothing
+    /// steers into or out of a compaction: a queued `/compact`, or any message while a compaction
+    /// runs, stays queued until the running turn ends.
     public func sendQueuedNow(_ threadID: String, messageID: String) async {
         guard let thread = thread(threadID), let queued = thread.queue.first(where: { $0.id == messageID }) else { return }
+        if let active = thread.activeTurn, Self.isCompaction(queued.message) || Self.isCompaction(active.userMessage) { return }
         updateThread(threadID) { $0.queue.removeAll { $0.id == messageID } }
         if thread.isRunning {
             do {
@@ -267,6 +272,8 @@ extension AgentEngine {
         updateThread(threadID) { thread in
             thread.turns.removeAll { $0.ordinal >= turn.ordinal }
             thread.updatedAt = now
+            // The conversation now ends where the kept turns ended.
+            thread.contextUsage = thread.turns.last?.tokenUsage
         }
         if let restoreFailure {
             throw EngineError.filesNotRestored(message: turn.userMessage, reason: restoreFailure)

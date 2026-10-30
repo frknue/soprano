@@ -10,6 +10,9 @@ public enum EngineEvent: Sendable, Hashable {
     /// Streaming update of one item (text delta, command output). Cheap path for the timeline.
     case itemChanged(threadID: String, turnID: String, itemID: String)
     case providersChanged
+    /// A thread's (or a workspace's remembered) provider commands and skills changed:
+    /// re-read `commands(forThread:)` / `commands(forDraft:projectID:)`.
+    case commandsChanged
 }
 
 /// Where a new thread works.

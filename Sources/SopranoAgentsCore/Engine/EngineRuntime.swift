@@ -10,6 +10,9 @@ final class EngineRuntime {
     private var background: [UUID: Task<Void, Never>] = [:]
     /// Delay before the first retry of a failed initial title generation (doubles per retry).
     var titleRetryDelay: Duration = .seconds(2)
+    /// The last command list each provider reported per workspace (this run only), for drafts
+    /// and threads without a live session (AgentEngine+Commands.swift).
+    var rememberedCommands: [CommandScope: [ProviderCommand]] = [:]
 
     func thread(_ id: String) -> ThreadRuntime {
         if let existing = threads[id] { return existing }
@@ -66,6 +69,8 @@ final class ThreadRuntime {
     var holdQueue = false
     /// Latest title request; older ones finishing later are ignored.
     var titleRequest: UUID?
+    /// The live session's command list and the provider that reported it.
+    var commands: (provider: ProviderKind, list: [ProviderCommand])?
 
     func dropSession() {
         consumer?.cancel()

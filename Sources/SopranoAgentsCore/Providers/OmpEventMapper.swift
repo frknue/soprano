@@ -68,6 +68,10 @@ public struct OmpUIRequest: Sendable, Hashable {
 ///   selects, `confirm`, `input`, `editor`, `ask` → `userInputRequested`; `cancel` →
 ///   `requestResolved(targetId)`; `notify` → notice. Status/widget/title/editor-text are ignored.
 /// - `auto_compaction_end` → "Context compacted"; `auto_retry_start` → retry notice.
+/// - `manual_compaction_end` (the `compact` command or a `/compact …` prompt) → "Context
+///   compacted", the skip reason ("Already compacted"), "Compaction cancelled", or an error
+///   item; remembered as `compactionEnd` for the session's compaction turn.
+/// - `available_commands_update` → `commands` (`OmpProtocol.commands`).
 /// - `prompt_result` → the last assistant text marked final, then `turnCompleted`
 ///   (`completed`; `aborted`/`interrupted`/`cancelled` → interrupted; else failed with
 ///   `error.message`). With `sessionSettled:false` background work (async bash/task/eval jobs)
@@ -95,8 +99,34 @@ public struct OmpEventMapper: Sendable {
     private var approvalTools: [String: String] = [:]
     private var declinedTools: Set<String> = []
     private var noticeCount = 0
+    /// How the last manual compaction ended (`manual_compaction_end`); cleared per turn.
+    public private(set) var compactionEnd: CompactionEnd?
     /// The yielded prompt's outcome while omp waits out background work (`sessionSettled:false`).
     private var heldOutcome: (outcome: ProviderTurnOutcome, error: String?)?
+
+    /// The end of a manual compaction.
+    public enum CompactionEnd: Sendable, Hashable {
+        /// `result` committed.
+        case compacted
+        /// `skipped:true`: nothing to compact (`errorMessage`, e.g. "Already compacted").
+        case skipped(String)
+        /// `aborted:true`.
+        case cancelled
+        /// Failed with `errorMessage`.
+        case failed(String)
+
+        init(_ frame: JSONValue) {
+            if frame["aborted"]?.boolValue == true {
+                self = .cancelled
+            } else if frame["skipped"]?.boolValue == true {
+                self = .skipped(frame["errorMessage"]?.nonEmptyString ?? "Nothing to compact")
+            } else if frame["result"]?.objectValue != nil {
+                self = .compacted
+            } else {
+                self = .failed(frame["errorMessage"]?.nonEmptyString ?? "omp did not compact the conversation.")
+            }
+        }
+    }
 
     /// The prompt yielded but the session has not settled: the turn is still open.
     public var isAwaitingSettlement: Bool { heldOutcome != nil }
@@ -127,6 +157,7 @@ public struct OmpEventMapper: Sendable {
         approvalTools.removeAll()
         declinedTools.removeAll()
         heldOutcome = nil
+        compactionEnd = nil
     }
 
     public mutating func map(_ frame: JSONValue) -> [ProviderEvent] {
@@ -145,6 +176,22 @@ public struct OmpEventMapper: Sendable {
             return mapUIRequest(frame)
         case "auto_compaction_end":
             return [notice("Context compacted")]
+        case "manual_compaction_start":
+            compactionEnd = nil
+            return []
+        case "manual_compaction_end":
+            let end = CompactionEnd(frame)
+            compactionEnd = end
+            switch end {
+            case .compacted: return [notice("Context compacted")]
+            case let .skipped(reason): return [notice(reason)]
+            case .cancelled: return [notice("Compaction cancelled")]
+            case let .failed(message):
+                noticeCount += 1
+                return [.itemUpdated(TurnItem(id: "\(itemPrefix)compaction-error:\(noticeCount)", kind: .error(message: "Compaction failed: \(message)"), status: .failed))]
+            }
+        case "available_commands_update":
+            return [.commands(OmpProtocol.commands(frame["commands"]))]
         case "auto_retry_start":
             var text = "Retrying"
             if let attempt = frame["attempt"]?.intValue {

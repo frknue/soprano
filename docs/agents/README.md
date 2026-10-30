@@ -55,6 +55,12 @@ The installer never restarts a running Soprano Agents; the update applies on the
    search the thread's workspace; ignored files stay out) with a read-only, syntax-colored tab per
    opened file, and terminals (`⇧⌘J`) next to the bottom drawer's. `+` adds a surface; with every
    tab closed, "Open a surface" offers Terminal (`T`), Files (`F`) and Diff (`D`).
+7. The ring next to Send shows how full the context window is; click it to compact the
+   conversation (or send `/compact`). Type `/` at the start of a line for the provider's commands
+   and skills (`$` for Codex skills): ↑/↓ choose, Enter or Tab insert, Esc closes.
+8. Several Claude and Codex accounts, as in Soprano: usage at the bottom of the sidebar (`⌘U` for
+   details) and **Settings › Accounts** to add, switch or prefer logins for omp, Claude Code and
+   the Codex CLI.
 
 `⌘K` opens the command palette: every action, recent threads, projects and settings pages, with
 fuzzy search; `>` lists actions only. When the app is in the background, finished, failed and
@@ -101,10 +107,12 @@ right-panel tab) has focus.
 | New Terminal | `⌘N` | terminal (drawer or right-panel tab) |
 | Close Terminal | `⌘W` | terminal (drawer or right-panel tab) |
 | Open in Editor | `⌘O` | everywhere |
+| Show Usage | `⌘U` | everywhere |
 
 Unbound by default (bind them in Settings): Open settings.json, Add Project, Archive / Delete
 Thread, Search Threads, Filter Threads by Project, Expand / Collapse All Work, Interrupt, Commit,
-Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel, Search Files.
+Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel, Search Files,
+Compact Conversation, Manage Accounts, Refresh Usage.
 
 `⌃A` starts a prefix chord (`prefix+p` = `⌃A`, then `P`); the prefix key and its timeout are
 settings. Chords with `⌥` are left alone so they keep typing characters on layouts that need

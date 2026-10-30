@@ -74,7 +74,11 @@ public enum ProviderEvent: Sendable, Hashable {
     case userInputRequested(UserInputRequest)
     /// The provider resolved or withdrew a pending request on its own.
     case requestResolved(id: String)
+    /// The conversation's context fill: per-turn usage, and (omp `get_state`, Claude
+    /// `get_context_usage`) the exact fill read after a turn or a compaction.
     case tokenUsage(TokenUsage)
+    /// The provider's slash commands and skills (the complete list; replaces the previous one).
+    case commands([ProviderCommand])
     case turnCompleted(outcome: ProviderTurnOutcome, error: String?)
     /// The process exited or the session broke; a running turn fails with `error`.
     case sessionEnded(error: String?)
@@ -102,6 +106,12 @@ public protocol ProviderSession: AnyObject, Sendable {
     func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async
 
     func answer(userInput id: String, answers: [String: [String]]) async
+
+    /// Compacts the conversation as a turn of its own (the engine runs it for a `/compact`
+    /// message): returns once the provider accepted it. Its progress arrives as events like a
+    /// turn's (`turnStarted`, a notice or error item, `tokenUsage` with the new fill) and it
+    /// ends with `turnCompleted`; `interrupt()` cancels it where the provider can.
+    func compact() async throws
 
     /// Truncates the native conversation to before turn `ordinal` (1-based, as the engine counts).
     /// `providerTurnID` is that turn's native id when known.

@@ -7,14 +7,21 @@ public struct OmpDriver: ProviderDriver {
     static let generationTimeout: TimeInterval = 180
 
     private let executablePath: @Sendable () -> String?
+    private let launchAdjustments: @Sendable () -> ProviderLaunchAdjustments
 
     /// `executablePath` returns the settings override, read on every use; nil = search PATH.
-    public init(executablePath: @escaping @Sendable () -> String? = { nil }) {
+    /// `launchAdjustments` (`--config <overlay>` with the preferred accounts) is read on every
+    /// spawn too.
+    public init(
+        executablePath: @escaping @Sendable () -> String? = { nil },
+        launchAdjustments: @escaping @Sendable () -> ProviderLaunchAdjustments = { .none }
+    ) {
         self.executablePath = executablePath
+        self.launchAdjustments = launchAdjustments
     }
 
     public func makeSession() -> any ProviderSession {
-        OmpSession(executablePath: executablePath)
+        OmpSession(executablePath: executablePath, launchAdjustments: launchAdjustments)
     }
 
     /// `omp --version` ("omp/18.14.0"), then a short-lived `omp --mode rpc --no-session
@@ -28,9 +35,15 @@ public struct OmpDriver: ProviderDriver {
             return ProviderStatus(kind: .omp, health: .notInstalled, models: fallback, message: ProviderError.notInstalled(.omp, path: explicit).localizedDescription)
         }
         let version: String?
+        let adjustments = launchAdjustments()
         do {
             let output = try await LineProcess.run(
-                LineProcess.Configuration(executable: executable, arguments: ["--version"], environment: OmpProtocol.environment(), directory: NSHomeDirectory()),
+                LineProcess.Configuration(
+                    executable: executable,
+                    arguments: adjustments.arguments(before: ["--version"]),
+                    environment: OmpProtocol.environment(adjustments),
+                    directory: NSHomeDirectory()
+                ),
                 timeout: Self.probeTimeout,
                 label: "omp status check"
             )
@@ -42,7 +55,7 @@ public struct OmpDriver: ProviderDriver {
             return ProviderStatus(kind: .omp, health: .error, models: fallback, message: error.localizedDescription)
         }
         do {
-            let (state, available) = try await Self.catalog(executable: executable, includeModels: true)
+            let (state, available) = try await Self.catalog(executable: executable, includeModels: true, adjustments: adjustments)
             let models = OmpProtocol.models(available: available, state: state)
             guard models.count > 1 else {
                 return ProviderStatus(kind: .omp, health: .unauthenticated, version: version, models: models, message: "omp has no usable models. Run `omp` and sign in with /login.")
@@ -56,12 +69,17 @@ public struct OmpDriver: ProviderDriver {
     /// `get_state` (and `get_available_models` when `includeModels`) from a throwaway
     /// `omp --mode rpc --no-session …` process in `directory` (default: home), so a project's own
     /// omp settings count.
-    static func catalog(executable: String, includeModels: Bool, directory: String? = nil) async throws -> (state: JSONValue, models: JSONValue) {
+    static func catalog(
+        executable: String,
+        includeModels: Bool,
+        directory: String? = nil,
+        adjustments: ProviderLaunchAdjustments
+    ) async throws -> (state: JSONValue, models: JSONValue) {
         let directory = directory.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } ?? NSHomeDirectory()
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
-            arguments: OmpProtocol.probeArguments,
-            environment: OmpProtocol.environment(),
+            arguments: adjustments.arguments(before: OmpProtocol.probeArguments),
+            environment: OmpProtocol.environment(adjustments),
             directory: directory
         ))
         do {
@@ -84,8 +102,8 @@ public struct OmpDriver: ProviderDriver {
 
     /// omp's configured default model (`provider`, `id`) as a fresh process in `directory`
     /// reports it.
-    static func configuredModel(executable: String, directory: String?) async throws -> (provider: String, id: String)? {
-        let state = try await catalog(executable: executable, includeModels: false, directory: directory).state
+    static func configuredModel(executable: String, directory: String?, adjustments: ProviderLaunchAdjustments) async throws -> (provider: String, id: String)? {
+        let state = try await catalog(executable: executable, includeModels: false, directory: directory, adjustments: adjustments).state
         guard let provider = state["model"]?["provider"]?.stringValue, let id = state["model"]?["id"]?.stringValue else { return nil }
         return (provider, id)
     }
@@ -99,11 +117,12 @@ public struct OmpDriver: ProviderDriver {
         guard let executable = ExecutableLocator.locate("omp", explicitPath: explicit) else {
             throw ProviderError.notInstalled(.omp, path: explicit)
         }
+        let adjustments = launchAdjustments()
         let output = try await LineProcess.run(
             LineProcess.Configuration(
                 executable: executable,
-                arguments: OmpProtocol.generationArguments(model: model),
-                environment: OmpProtocol.environment(),
+                arguments: adjustments.arguments(before: OmpProtocol.generationArguments(model: model)),
+                environment: OmpProtocol.environment(adjustments),
                 directory: FileManager.default.fileExists(atPath: cwd) ? cwd : NSTemporaryDirectory()
             ),
             input: OmpProtocol.generationPrompt(prompt, schema: schema),

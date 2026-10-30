@@ -101,8 +101,9 @@ public enum ClaudeProtocol {
 
     /// `{"type":"user","message":{"role":"user","content":[…image blocks…, {"type":"text",…}]},
     /// "parent_tool_use_id":null, "uuid":…, "priority":"now"?}`. Images (png/jpeg/gif/webp) are
-    /// inlined as base64 blocks before the text; every attachment's path is listed in the text.
-    /// `ultrathink` effort is a prompt prefix.
+    /// inlined as base64 blocks before the text; every attachment's path is listed after the
+    /// text. `ultrathink` effort is a prompt prefix, except before a slash command: Claude Code
+    /// runs `/name args` only when the last text block starts with the `/`.
     public static func userMessage(_ input: TurnInput, uuid: String?, steer: Bool = false) -> JSONValue {
         var content: [JSONValue] = []
         for attachment in input.attachments where attachment.kind == .image {
@@ -114,7 +115,7 @@ public enum ClaudeProtocol {
             ])
         }
         var text = ProviderPrompt.text(input.text, attachments: input.attachments)
-        if input.modelSelection.effort == "ultrathink" { text = "ultrathink\n\n" + text }
+        if input.modelSelection.effort == "ultrathink", !input.text.hasPrefix("/") { text = "ultrathink\n\n" + text }
         content.append(["type": "text", "text": .string(text)])
         var message: [String: JSONValue] = [
             "type": "user",
@@ -124,6 +125,51 @@ public enum ClaudeProtocol {
         if let uuid { message["uuid"] = .string(uuid) }
         if steer { message["priority"] = "now" }
         return .object(message)
+    }
+
+    /// A plain one-text-block user message (`/compact`).
+    public static func textMessage(_ text: String, uuid: String) -> JSONValue {
+        [
+            "type": "user",
+            "message": ["role": "user", "content": [["type": "text", "text": .string(text)]]],
+            "parent_tool_use_id": .null,
+            "uuid": .string(uuid),
+        ]
+    }
+
+    // MARK: - Commands and context
+
+    /// The `initialize` response's / `system/commands_changed`'s `commands` (`{name,
+    /// description, argumentHint, aliases?, builtin?}`) → menu entries inserting `/<name> `.
+    /// `builtin:true` → "Built-in"; a name (or alias) in `system/init`'s `skills` → `.skill`
+    /// "Skill"; an MCP prompt (`server:prompt (MCP)`) shows without the suffix as "MCP" but
+    /// inserts it (Claude Code parses `/server:prompt (MCP) args`); everything else (user,
+    /// project and plugin commands) is "Custom".
+    public static func commands(_ list: JSONValue?, skills: Set<String>) -> [ProviderCommand] {
+        let mcpSuffix = " (MCP)"
+        return (list?.arrayValue ?? []).compactMap { entry in
+            guard let name = entry["name"]?.nonEmptyString else { return nil }
+            let isMCP = name.hasSuffix(mcpSuffix)
+            let isBuiltin = entry["builtin"]?.boolValue == true
+            let names = [name] + (entry["aliases"]?.arrayValue ?? []).compactMap(\.stringValue)
+            let isSkill = !isMCP && !isBuiltin && names.contains(where: skills.contains)
+            let badge = if isMCP { "MCP" } else if isBuiltin { "Built-in" } else if isSkill { "Skill" } else { "Custom" }
+            return ProviderCommand(
+                name: isMCP ? String(name.dropLast(mcpSuffix.count)) : name,
+                kind: isSkill ? .skill : .command,
+                description: entry["description"]?.nonEmptyString,
+                argumentHint: entry["argumentHint"]?.nonEmptyString,
+                source: badge,
+                insertText: "/\(name) "
+            )
+        }
+    }
+
+    /// `get_context_usage {detail:"summary"}` → `totalTokens` of `maxTokens` (the window
+    /// auto-compaction works against).
+    public static func contextUsage(from response: JSONValue) -> TokenUsage? {
+        guard let total = response["totalTokens"]?.intValue else { return nil }
+        return TokenUsage(usedTokens: total, contextWindow: response["maxTokens"]?.intValue ?? response["rawMaxTokens"]?.intValue)
     }
 
     /// Host → CLI `{"type":"control_request","request_id":…,"request":{"subtype":…}}`.

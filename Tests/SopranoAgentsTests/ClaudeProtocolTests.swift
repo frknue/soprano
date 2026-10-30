@@ -38,6 +38,43 @@ struct ClaudeProtocolTests {
         #expect(message["message"]?["content"]?.arrayValue?.last?["text"] == "ultrathink\n\nDesign it")
     }
 
+    @Test func aSlashCommandStaysTheFirstCharactersOfItsTextBlock() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("claude-protocol-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imagePath = directory.appendingPathComponent("dot.png").path
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: URL(fileURLWithPath: imagePath))
+        let ultrathink = ModelSelection(provider: .claude, model: "claude-opus-5-5", options: ["effort": "ultrathink"])
+        let input = TurnInput(
+            text: "/review the parser",
+            attachments: [SopranoAgentsCore.Attachment(kind: .image, name: "dot.png", path: imagePath, mimeType: "image/png", byteSize: 4)],
+            modelSelection: ultrathink, runtimeMode: .fullAccess, interactionMode: .build
+        )
+
+        // Claude Code runs `/name args` from the last text block; the images stay before it.
+        let content = ClaudeProtocol.userMessage(input, uuid: "u1")["message"]?["content"]?.arrayValue ?? []
+        #expect(content.first?["type"] == "image")
+        #expect(content.last?["text"] == .string("/review the parser\n\n[Attached image \"dot.png\" is saved at: \(imagePath)]"))
+        #expect(ClaudeProtocol.textMessage("/compact", uuid: "u2") == [
+            "type": "user", "message": ["role": "user", "content": [["type": "text", "text": "/compact"]]],
+            "parent_tool_use_id": .null, "uuid": "u2",
+        ])
+    }
+
+    @Test func contextUsageIsTheTotalAgainstTheAutoCompactWindow() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/claude-commands-compact.jsonl")
+        let responses = try String(contentsOf: url, encoding: .utf8).split(separator: "\n").map { try JSONValue.parse(String($0)) }
+            .filter { ($0["response"]?["request_id"]?.stringValue ?? "").hasPrefix("ctx") }
+            .compactMap { $0["response"]?["response"] }
+
+        // Before and after `/compact` (the summary of a tiny chat is longer than the chat).
+        #expect(responses.map(ClaudeProtocol.contextUsage(from:)) == [
+            TokenUsage(usedTokens: 37_543, contextWindow: 1_000_000),
+            TokenUsage(usedTokens: 45_200, contextWindow: 1_000_000),
+        ])
+        #expect(ClaudeProtocol.contextUsage(from: [:]) == nil)
+    }
+
     @Test func userMessagesInlineImagesBeforeTheTextAndSteeringIsPriorityNow() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("claude-protocol-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

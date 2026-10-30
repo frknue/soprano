@@ -6,6 +6,12 @@ public enum CodexProtocol {
     /// Env set on every Codex process so the app-server tailors its catalog refresh to us.
     public static let originatorEnvironment = ["CODEX_INTERNAL_ORIGINATOR_OVERRIDE": "Soprano Agents"]
 
+    /// Environment for a Codex process: the extended PATH, the originator, then the launch
+    /// adjustments (`CODEX_HOME` of the chosen account).
+    public static func environment(_ adjustments: ProviderLaunchAdjustments = .none) -> [String: String] {
+        ExecutableLocator.childEnvironment(overrides: adjustments.environment(over: originatorEnvironment))
+    }
+
     /// `initialize` params. Probes send only `experimentalApi`.
     public static func initializeParams(version: String, forProbe: Bool = false) -> JSONValue {
         var capabilities: [String: JSONValue] = ["experimentalApi": true]
@@ -65,9 +71,11 @@ public enum CodexProtocol {
 
     // MARK: - Turns
 
-    /// `[{type:"text", text, text_elements:[]}, {type:"localImage", path}…]`; attachment paths
-    /// are appended to the text (`ProviderPrompt.text`).
-    public static func userInput(_ input: TurnInput) -> JSONValue {
+    /// `[{type:"text", text, text_elements:[]}, {type:"localImage", path}…, {type:"skill", name,
+    /// path}…]`; attachment paths are appended to the text (`ProviderPrompt.text`), and every
+    /// known skill the text mentions as `$name` adds its `skill` item (`skills`: name → SKILL.md
+    /// path), as Codex's own composer does.
+    public static func userInput(_ input: TurnInput, skills: [String: String] = [:]) -> JSONValue {
         var items: [JSONValue] = [[
             "type": "text",
             "text": .string(ProviderPrompt.text(input.text, attachments: input.attachments)),
@@ -76,7 +84,55 @@ public enum CodexProtocol {
         for attachment in input.attachments where attachment.kind == .image {
             items.append(["type": "localImage", "path": .string(attachment.path)])
         }
+        for name in skillMentions(in: input.text, known: skills) {
+            if let path = skills[name] { items.append(["type": "skill", "name": .string(name), "path": .string(path)]) }
+        }
         return .array(items)
+    }
+
+    /// The known skills `text` mentions as `$name` (the name ends at the text's end or at a
+    /// character other than a letter, digit, `-`, `_` or `:`), in order of first mention.
+    static func skillMentions(in text: String, known skills: [String: String]) -> [String] {
+        guard !skills.isEmpty else { return [] }
+        var names: [String] = []
+        var cursor = text.startIndex
+        while let dollar = text[cursor...].firstIndex(of: "$") {
+            let start = text.index(after: dollar)
+            let end = text[start...].firstIndex { !($0.isLetter || $0.isNumber || "-_:".contains($0)) } ?? text.endIndex
+            let name = String(text[start..<end])
+            if skills[name] != nil, !names.contains(name) { names.append(name) }
+            cursor = start
+        }
+        return names
+    }
+
+    /// An enabled `skills/list` skill: its `/` menu entry (inserting `$name `) and its SKILL.md
+    /// path (the `skill` input item's `path`).
+    public struct Skill: Sendable, Hashable {
+        public var command: ProviderCommand
+        public var path: String
+    }
+
+    /// `skills/list` `{data:[{cwd, skills:[{name, description, shortDescription?,
+    /// interface?{shortDescription?}, path, scope, enabled}], errors}]}` → the enabled skills
+    /// (the first per name), described by their short description when they have one.
+    public static func skills(fromSkillsList result: JSONValue) -> [Skill] {
+        var seen = Set<String>()
+        var skills: [Skill] = []
+        for entry in result["data"]?.arrayValue ?? [] {
+            for skill in entry["skills"]?.arrayValue ?? [] {
+                guard skill["enabled"]?.boolValue != false,
+                      let name = skill["name"]?.nonEmptyString,
+                      let path = skill["path"]?.nonEmptyString,
+                      seen.insert(name).inserted else { continue }
+                let description = skill["interface"]?["shortDescription"]?.nonEmptyString
+                    ?? skill["shortDescription"]?.nonEmptyString
+                    ?? skill["description"]?.nonEmptyString
+                let command = ProviderCommand(name: name, kind: .skill, description: description, source: "Skill", insertText: "$\(name) ")
+                skills.append(Skill(command: command, path: path))
+            }
+        }
+        return skills
     }
 
     /// `turn/start` params:
@@ -85,12 +141,12 @@ public enum CodexProtocol {
     /// "plan"|"default", settings:{model, reasoning_effort?}}}`. `collaborationMode` is sent in
     /// both modes so leaving Plan clears it; `serviceTier` persists for later turns, so Fast off
     /// sends an explicit null to clear it.
-    public static func turnStartParams(threadID: String, cwd: String, input: TurnInput) -> JSONValue {
+    public static func turnStartParams(threadID: String, cwd: String, input: TurnInput, skills: [String: String] = [:]) -> JSONValue {
         let model = input.modelSelection.model
         var settings: [String: JSONValue] = ["model": .string(model)]
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": userInput(input),
+            "input": userInput(input, skills: skills),
             "cwd": .string(cwd),
             "model": .string(model),
             "summary": "detailed",
@@ -108,8 +164,8 @@ public enum CodexProtocol {
     }
 
     /// `turn/steer {threadId, expectedTurnId, input}`.
-    public static func turnSteerParams(threadID: String, turnID: String, input: TurnInput) -> JSONValue {
-        ["threadId": .string(threadID), "expectedTurnId": .string(turnID), "input": userInput(input)]
+    public static func turnSteerParams(threadID: String, turnID: String, input: TurnInput, skills: [String: String] = [:]) -> JSONValue {
+        ["threadId": .string(threadID), "expectedTurnId": .string(turnID), "input": userInput(input, skills: skills)]
     }
 
     // MARK: - Approvals

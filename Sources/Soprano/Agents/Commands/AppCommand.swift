@@ -146,5 +146,6 @@ enum AllCommands {
         registry.register(TimelineCommands.all)
         registry.register(ComposerCommands.all)
         registry.register(PanelCommands.all)
+        registry.register(AccountCommands.all)
     }
 }

@@ -25,7 +25,9 @@ class ComposerPopoverContent: PaletteView {
 
 /// A floating surface of the composer: a borderless child window of the main window holding a
 /// glass dropdown card (r8, popover fill, 10% outline, menu shadow). It closes on
-/// Escape, on a click elsewhere, and when the composer closes it.
+/// Escape, on a click elsewhere, and when the composer closes it. A passive popover (the `/`
+/// command menu) never takes key focus, so the editor keeps typing, and clicks on its anchor
+/// pass through without closing it.
 @MainActor
 final class ComposerPopover {
     enum Side {
@@ -44,7 +46,8 @@ final class ComposerPopover {
     static let gap: CGFloat = 6
 
     let content: ComposerPopoverContent
-    private let window: ComposerPopoverWindow
+    /// The child window holding the card.
+    let window: ComposerPopoverWindow
     private let card: ComposerPopoverCard
     private weak var anchor: NSView?
     private weak var parent: NSWindow?
@@ -58,8 +61,11 @@ final class ComposerPopover {
 
     var isShown: Bool { window.isVisible }
 
-    init(content: ComposerPopoverContent) {
+    let isPassive: Bool
+
+    init(content: ComposerPopoverContent, passive: Bool = false) {
         self.content = content
+        isPassive = passive
         card = ComposerPopoverCard(content: content)
         window = ComposerPopoverWindow(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
@@ -72,6 +78,7 @@ final class ComposerPopover {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
+        window.acceptsKey = !passive
         let root = ComposerPopoverShadow(frame: window.contentLayoutRect)
         root.addSubview(card)
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -97,12 +104,15 @@ final class ComposerPopover {
         reposition()
         parent.addChildWindow(window, ordered: .above)
         window.orderFront(nil)
-        window.makeKey()
-        if let focus = content.initialFocus {
-            window.makeFirstResponder(focus)
+        if !isPassive {
+            window.makeKey()
+            if let focus = content.initialFocus {
+                window.makeFirstResponder(focus)
+            }
         }
         // An outside click closes the popover. A click on the control that opened it is consumed
         // too, so that control toggles the popover closed instead of reopening it on mouse up.
+        // A passive popover lets clicks on its anchor through and stays open for them.
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             nonisolated(unsafe) let incoming = event
             let consumed = MainActor.assumeIsolated { () -> Bool in
@@ -110,8 +120,9 @@ final class ComposerPopover {
                 let onAnchor = self.anchor.map { anchor in
                     incoming.window === anchor.window && anchor.bounds.contains(anchor.convert(incoming.locationInWindow, from: nil))
                 } ?? false
+                if self.isPassive, onAnchor { return false }
                 self.close()
-                return onAnchor && incoming.type == .leftMouseDown
+                return !self.isPassive && onAnchor && incoming.type == .leftMouseDown
             }
             return consumed ? nil : incoming
         }
@@ -147,17 +158,20 @@ final class ComposerPopover {
         let parent = window.parent ?? self.parent
         parent?.removeChildWindow(window)
         window.orderOut(nil)
-        parent?.makeKey()
+        // A passive popover never took the keyboard, so it gives nothing back: making the parent
+        // key here would steal focus from the window that just closed it (the command palette).
+        if !isPassive { parent?.makeKey() }
         onClose?()
         onClose = nil
     }
 }
 
-/// Borderless child window that can take keys; keys reach the popover content first.
+/// Borderless child window that can take keys (unless passive); keys reach the popover content first.
 final class ComposerPopoverWindow: NSWindow {
     var keyHandler: ((NSEvent) -> Bool)?
+    var acceptsKey = true
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { acceptsKey }
     override var canBecomeMain: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
@@ -301,6 +315,8 @@ final class ComposerListRow: InteractiveView {
     struct Model {
         var title: String
         var subtitle: String?
+        /// Muted text right after the title (a command's argument hint).
+        var titleNote: String?
         var image: NSImage?
         var tintsImage = true
         /// Small muted text at the end (branch badges).
@@ -314,6 +330,8 @@ final class ComposerListRow: InteractiveView {
         var isDisabled = false
         var toolTip: String?
         var titleFont: NSFont = Typography.ui(Typography.bodySize)
+        /// Lines the subtitle may wrap to before it truncates.
+        var subtitleLines = 3
     }
 
     private(set) var model: Model
@@ -321,6 +339,7 @@ final class ComposerListRow: InteractiveView {
     private let titleLabel = NSTextField.label()
     private let subtitleLabel = ComposerWrappingLabel.make(size: Typography.smallSize, maximumLines: 3)
     private let noteLabel = NSTextField.label("", size: 10)
+    private let titleNoteLabel = NSTextField.label("", size: Typography.rowSize)
     private let checkView = NSImageView()
     private var badgeView: ComposerBadge?
     private var kbdView: KbdView?
@@ -345,6 +364,13 @@ final class ComposerListRow: InteractiveView {
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subtitleLabel.stringValue = model.subtitle ?? ""
         subtitleLabel.isHidden = model.subtitle == nil
+        if model.subtitleLines != 3 {
+            subtitleLabel.maximumNumberOfLines = model.subtitleLines
+            if model.subtitleLines == 1 { subtitleLabel.lineBreakMode = .byTruncatingTail }
+        }
+        titleNoteLabel.stringValue = model.titleNote ?? ""
+        titleNoteLabel.lineBreakMode = .byTruncatingTail
+        titleNoteLabel.setContentCompressionResistancePriority(.init(2), for: .horizontal)
         noteLabel.stringValue = model.trailingNote ?? ""
         noteLabel.isHidden = model.trailingNote == nil
         checkView.image = NSImage.symbol(Icon.check, size: 12, weight: .medium)
@@ -357,6 +383,9 @@ final class ComposerListRow: InteractiveView {
         titleRow.alignment = .centerY
         titleRow.spacing = 4
         titleRow.addArrangedSubview(titleLabel)
+        if model.titleNote != nil {
+            titleRow.addArrangedSubview(titleNoteLabel)
+        }
         if let badge = model.badge {
             let badgeView = ComposerBadge(badge)
             titleRow.addArrangedSubview(badgeView)
@@ -419,6 +448,7 @@ final class ComposerListRow: InteractiveView {
         alphaValue = isEnabled ? 1 : 0.64
         titleLabel.textColor = palette.foreground
         subtitleLabel.textColor = palette.mutedForeground.withAlphaComponent(0.8)
+        titleNoteLabel.textColor = palette.mutedForeground
         noteLabel.textColor = palette.mutedForeground.withAlphaComponent(0.45)
         imageView.contentTintColor = model.tintsImage ? palette.mutedForeground : nil
         checkView.contentTintColor = palette.foreground

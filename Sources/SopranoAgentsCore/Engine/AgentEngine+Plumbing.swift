@@ -61,7 +61,8 @@ extension AgentEngine {
     }
 
     /// Captures the turn's baseline checkpoint when missing, starts the provider session if needed,
-    /// and starts the provider turn. Failures finish the turn as failed.
+    /// and starts the provider turn (a `/compact` turn: the provider's compaction). Failures finish
+    /// the turn as failed.
     func runTurn(_ threadID: String, _ turnID: String) async {
         guard let snapshot = thread(threadID), let turn = snapshot.turns.last(where: { $0.id == turnID }) else { return }
         do {
@@ -75,14 +76,20 @@ extension AgentEngine {
         do {
             let session = try await ensureSession(threadID)
             guard isTurnRunning(threadID, turnID), let current = self.thread(threadID) else { return }
-            let input = TurnInput(
-                text: turn.userMessage.text,
-                attachments: turn.userMessage.attachments,
-                modelSelection: turn.modelSelection,
-                runtimeMode: current.runtimeMode,
-                interactionMode: current.interactionMode
-            )
-            let providerTurnID = try await session.startTurn(input)
+            let providerTurnID: String?
+            if Self.isCompaction(turn.userMessage) {
+                try await session.compact()
+                providerTurnID = nil
+            } else {
+                let input = TurnInput(
+                    text: turn.userMessage.text,
+                    attachments: turn.userMessage.attachments,
+                    modelSelection: turn.modelSelection,
+                    runtimeMode: current.runtimeMode,
+                    interactionMode: current.interactionMode
+                )
+                providerTurnID = try await session.startTurn(input)
+            }
             guard isTurnRunning(threadID, turnID) else {
                 // Interrupted (or failed) while the provider was starting the turn: stop it there too.
                 if thread(threadID)?.turns.last(where: { $0.id == turnID })?.status == .interrupted {
@@ -156,11 +163,12 @@ extension AgentEngine {
         await runTurn(threadID, turnID)
     }
 
-    /// Delivers `message` into the running turn, or queues it when the provider turn is not live yet.
+    /// Delivers `message` into the running turn, or queues it when the provider turn is not live
+    /// yet or is a compaction (nothing to steer).
     func steer(_ threadID: String, message: UserMessage) async throws {
         guard let thread = thread(threadID), let turn = thread.activeTurn else { return }
         let rt = runtime.thread(threadID)
-        guard let session = rt.session, rt.starting == nil, rt.liveTurnID == turn.id else {
+        guard let session = rt.session, rt.starting == nil, rt.liveTurnID == turn.id, !Self.isCompaction(turn.userMessage) else {
             enqueue(threadID, message: message, selection: thread.modelSelection)
             return
         }
@@ -310,8 +318,14 @@ extension AgentEngine {
         case let .requestResolved(id):
             resolveRequest(threadID, id)
         case let .tokenUsage(usage):
-            guard let turnID = thread(threadID)?.turns.last?.id else { return }
-            mutateTurn(threadID, turnID) { $0.tokenUsage = usage }
+            // The latest turn's usage, and the thread's context fill (also when a reading
+            // arrives after the turn ended).
+            mutateThread(threadID) { thread in
+                thread.contextUsage = usage
+                if !thread.turns.isEmpty { thread.turns[thread.turns.count - 1].tokenUsage = usage }
+            }
+        case let .commands(commands):
+            receiveCommands(commands, threadID: threadID)
         case let .turnCompleted(outcome, error):
             guard let turnID = thread(threadID)?.activeTurn?.id else { return }
             let status: TurnStatus = switch outcome {
