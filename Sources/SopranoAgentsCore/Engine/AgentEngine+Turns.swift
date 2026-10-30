@@ -222,7 +222,12 @@ extension AgentEngine {
             guard await git.checkpointExists(cwd: cwd, ref: baseline) else { throw EngineError.nothingToRevert }
         }
 
-        if thread.providerThreadID != nil {
+        // Rewind the provider to before the earliest turn from here on that it actually received
+        // (a turn stopped during startup, failed before sending, or run on another provider has
+        // no native id). When none of them reached it, its conversation already ends here.
+        let provider = thread.modelSelection.provider
+        let anchor = thread.turns.first { $0.ordinal >= turn.ordinal && $0.providerTurnID != nil && $0.modelSelection.provider == provider }
+        if thread.providerThreadID != nil, let anchor {
             let session: any ProviderSession
             do {
                 session = try await ensureSession(threadID)
@@ -230,7 +235,7 @@ extension AgentEngine {
                 throw EngineError.message("Reconnect \(thread.modelSelection.provider.displayName) before reverting checkpoints.")
             }
             do {
-                try await session.rollback(beforeTurn: turn.ordinal, providerTurnID: turn.providerTurnID)
+                try await session.rollback(beforeTurn: anchor.ordinal, providerTurnID: anchor.providerTurnID)
             } catch {
                 throw EngineError.message("The provider could not roll back this conversation. Try again; if it keeps failing, check the provider and server logs.")
             }

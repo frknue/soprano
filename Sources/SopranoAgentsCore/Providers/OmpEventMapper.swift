@@ -71,8 +71,9 @@ public struct OmpUIRequest: Sendable, Hashable {
 /// - `prompt_result` → the last assistant text marked final, then `turnCompleted`
 ///   (`completed`; `aborted`/`interrupted`/`cancelled` → interrupted; else failed with
 ///   `error.message`). With `sessionSettled:false` background work (async bash/task/eval jobs)
-///   can still wake the agent, so the outcome is held and the turn completes at the following
-///   `session_settled`; runs in between stream into the same turn.
+///   can still wake the agent, so a completed or failed outcome is held and the turn completes
+///   at the following `session_settled`; runs in between stream into the same turn. An aborted
+///   prompt completes at once.
 public struct OmpEventMapper: Sendable {
     private struct Tool: Sendable {
         var name: String
@@ -219,7 +220,8 @@ public struct OmpEventMapper: Sendable {
             let message = frame["error"]?["message"]?.nonEmptyString ?? frame["error"]?.nonEmptyString
             error = message ?? "omp ended the turn with \(frame["status"]?.stringValue ?? "an error")."
         }
-        if frame["sessionSettled"]?.boolValue == false {
+        // An aborted prompt is over for the user even while background jobs keep omp busy.
+        if frame["sessionSettled"]?.boolValue == false, outcome != .interrupted {
             heldOutcome = (outcome, error)
             return []
         }

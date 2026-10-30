@@ -68,4 +68,38 @@ struct EngineRevertTests {
         }
         #expect(EngineError.turnRunning.errorDescription == "Interrupt the current turn before reverting checkpoints.")
     }
+
+    /// A thread whose turns carry the given native ids (nil = the provider never received it).
+    private func threadWithRecordedTurns(_ turns: [(String?, ProviderKind)]) -> (AgentEngine, AgentThread, ScriptedDriver) {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
+        var thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), providerThreadID: "conv-1")
+        thread.turns = turns.enumerated().map { index, entry in
+            Turn(ordinal: index + 1, userMessage: UserMessage(text: "t\(index + 1)"), modelSelection: .default(for: entry.1), status: .completed, providerTurnID: entry.0)
+        }
+        engine.insertThread(thread)
+        return (engine, thread, driver)
+    }
+
+    @Test func revertingRewindsTheProviderToBeforeTheEarliestLaterTurnItReceived() async throws {
+        let (engine, thread, driver) = threadWithRecordedTurns([("p1", .codex), (nil, .codex), ("c3", .claude), ("p4", .codex), (nil, .codex)])
+
+        _ = try await engine.revert(thread.id, toBeforeTurn: thread.turns[1].id, restoreFiles: false)
+
+        // Turn 2 never reached Codex and turn 3 ran on Claude: Codex rewinds to before turn 4.
+        #expect(driver.session?.rollbacks.map(\.ordinal) == [4])
+        #expect(driver.session?.rollbacks.map(\.providerTurnID) == ["p4"])
+        #expect(engine.thread(thread.id)?.turns.map(\.userMessage.text) == ["t1"])
+    }
+
+    @Test func revertingOnlyTurnsTheProviderNeverReceivedLeavesItsConversationAlone() async throws {
+        let (engine, thread, driver) = threadWithRecordedTurns([("p1", .codex), (nil, .codex)])
+
+        let message = try await engine.revert(thread.id, toBeforeTurn: thread.turns[1].id, restoreFiles: false)
+
+        #expect(message.text == "t2")
+        #expect(driver.sessions.isEmpty)
+        #expect(engine.thread(thread.id)?.turns.map(\.userMessage.text) == ["t1"])
+    }
 }

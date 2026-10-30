@@ -54,13 +54,15 @@ public struct OmpDriver: ProviderDriver {
     }
 
     /// `get_state` (and `get_available_models` when `includeModels`) from a throwaway
-    /// `omp --mode rpc --no-session …` process.
-    static func catalog(executable: String, includeModels: Bool) async throws -> (state: JSONValue, models: JSONValue) {
+    /// `omp --mode rpc --no-session …` process in `directory` (default: home), so a project's own
+    /// omp settings count.
+    static func catalog(executable: String, includeModels: Bool, directory: String? = nil) async throws -> (state: JSONValue, models: JSONValue) {
+        let directory = directory.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil } ?? NSHomeDirectory()
         let process = LineProcess(LineProcess.Configuration(
             executable: executable,
             arguments: OmpProtocol.probeArguments,
             environment: OmpProtocol.environment(),
-            directory: NSHomeDirectory()
+            directory: directory
         ))
         do {
             try process.start()
@@ -80,9 +82,10 @@ public struct OmpDriver: ProviderDriver {
         }
     }
 
-    /// omp's configured default model (`provider`, `id`) as a fresh process reports it.
-    static func configuredModel(executable: String) async throws -> (provider: String, id: String)? {
-        let state = try await catalog(executable: executable, includeModels: false).state
+    /// omp's configured default model (`provider`, `id`) as a fresh process in `directory`
+    /// reports it.
+    static func configuredModel(executable: String, directory: String?) async throws -> (provider: String, id: String)? {
+        let state = try await catalog(executable: executable, includeModels: false, directory: directory).state
         guard let provider = state["model"]?["provider"]?.stringValue, let id = state["model"]?["id"]?.stringValue else { return nil }
         return (provider, id)
     }

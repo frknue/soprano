@@ -3,7 +3,9 @@ import Testing
 @testable import SopranoAgentsCore
 
 /// `OmpSession` against a fake `omp --mode rpc-ui` that answers like omp 18.14 (recorded live):
-/// `ready`, responses echoing the command id, `prompt` acked then ended by `prompt_result`, a
+/// `ready`, responses echoing the command id, a session tree for `get_entries` / `fork` /
+/// `new_session` (user messages `u<n>`, answers `a<n>`), `prompt` acked then ended by
+/// `prompt_result`, a
 /// tool approval as an `extension_ui_request` `select`, and a prompt that yields with
 /// `sessionSettled:false` while a background job is still running.
 @MainActor
@@ -27,8 +29,27 @@ struct OmpSessionLifecycleTests {
         out(o)
     out({"type": "ready", "protocolVersion": 1, "supportedProtocolVersions": [1, 2], "maxFrameBytes": 1048576, "maxReassembledFrameBytes": 67108864})
     prompt = None
+    slow = None
+    busy = False
+    entries = [{"type": "model_change", "id": "m0", "parentId": None}]
+    leaf = "m0"
+    turns = 0
+    sessions = 0
+    def add(entry):
+        global leaf
+        entry["parentId"] = leaf
+        entries.append(entry)
+        leaf = entry["id"]
+    def user(text, steering=False):
+        global turns
+        turns += 1
+        message = {"role": "user", "attribution": "user", "content": [{"type": "text", "text": text}]}
+        if steering: message["steering"] = True
+        add({"type": "message", "id": "u%d" % turns, "message": message})
+        add({"type": "custom", "id": "c%d" % turns})
     def finish(status):
         global prompt
+        add({"type": "message", "id": "a%d" % turns, "message": {"role": "assistant", "content": [{"type": "text", "text": "all done"}]}})
         out({"type": "message_update", "messageId": "msg-3", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "all done"}})
         out({"type": "message_update", "messageId": "msg-3", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_end", "contentIndex": 0, "content": "all done"}})
         out({"type": "prompt_result", "id": prompt, "agentInvoked": True, "status": status, "sessionSettled": True})
@@ -38,12 +59,46 @@ struct OmpSessionLifecycleTests {
         record({"recv": msg})
         kind = msg.get("type")
         if kind == "get_state":
-            ok(msg, {"model": {"provider": "anthropic", "id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "contextWindow": 100000},
+            # omp's configured model is opus; a resumed session runs the model saved in it.
+            model = "claude-haiku-5-5" if "--resume" in args else "claude-opus-5-5"
+            ok(msg, {"model": {"provider": "anthropic", "id": model, "name": model, "contextWindow": 100000},
                      "thinkingLevel": "low", "sessionFile": session, "sessionId": "s1", "fastModeEnabled": False})
+        elif kind == "set_ask_dialog" and os.environ.get("FAKE_REJECT_ASK"):
+            out({"type": "response", "id": msg.get("id"), "command": kind, "success": False, "error": "Unknown command: set_ask_dialog"})
+        elif kind == "get_entries":
+            ok(msg, {"entries": entries, "leafId": leaf})
+        elif kind == "fork":
+            keep, cursor = [], msg["entryId"]
+            byid = {e["id"]: e for e in entries}
+            while cursor:
+                keep.append(byid[cursor]); cursor = byid[cursor]["parentId"]
+            entries = list(reversed(keep)); leaf = msg["entryId"]
+            sessions += 1; session = os.path.join(os.getcwd(), "fork-%d.jsonl" % sessions)
+            ok(msg, {"cancelled": False})
+        elif kind == "new_session":
+            entries = []; leaf = None
+            sessions += 1; session = os.path.join(os.getcwd(), "new-%d.jsonl" % sessions)
+            ok(msg, {"cancelled": False})
+        elif kind == "prompt" and busy:
+            # A woken background run is streaming: omp refuses a plain prompt.
+            if "streamingBehavior" not in msg:
+                out({"type": "response", "id": msg["id"], "command": "prompt", "success": False,
+                     "error": "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion."})
+            else:
+                prompt = msg["id"]
+                ok(msg)
+                user(msg["message"], steering=True)
+                busy = False
+                finish("completed")
         elif kind == "prompt":
             prompt = msg["id"]
             ok(msg)
-            if "background" in msg["message"]:
+            user(msg["message"])
+            if "slow" in msg["message"]:
+                # Still running when Stop arrives; a background job is pending.
+                out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "job started"}})
+                slow = "aborted" if "aborted" in msg["message"] else "completed"
+            elif "background" in msg["message"]:
                 # Yield with a background job pending, as omp does after an async bash/task.
                 out({"type": "message_update", "messageId": "msg-1", "message": {"role": "assistant"}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "job started"}})
                 out({"type": "agent_end", "messages": [], "isTerminal": True, "yielded": True})
@@ -72,6 +127,17 @@ struct OmpSessionLifecycleTests {
             out({"type": "tool_execution_end", "toolCallId": "t1", "toolName": "bash", "isError": False,
                  "result": {"content": [{"type": "text", "text": "a.txt\n"}], "details": {}}})
             finish("completed")
+        elif kind == "abort" and slow:
+            # omp yields after the abort; the background job keeps the session unsettled and
+            # no `session_settled` follows for a long time.
+            ok(msg)
+            out({"type": "agent_end", "messages": [], "isTerminal": False, "yielded": True})
+            out({"type": "prompt_result", "id": prompt, "agentInvoked": True, "status": slow, "sessionSettled": False})
+            prompt = None
+            slow = None
+            # The background job finishes and wakes the agent anyway.
+            out({"type": "agent_start"})
+            busy = True
         elif kind == "abort":
             ok(msg)
             if prompt: finish("aborted")
@@ -98,13 +164,14 @@ struct OmpSessionLifecycleTests {
         }
     }
 
-    private func makeFake() throws -> Fake {
+    private func makeFake(rejectAskDialog: Bool = false) throws -> Fake {
         let directory = EngineHarness.temporaryDirectory()
         let script = directory.appendingPathComponent("fakeomp.py")
         let log = directory.appendingPathComponent("launches.log").path
         try Self.fakeCLI.write(to: script, atomically: true, encoding: .utf8)
         let wrapper = directory.appendingPathComponent("omp")
-        try "#!/bin/sh\nFAKE_OMP_LOG='\(log)' exec /usr/bin/env python3 '\(script.path)' \"$@\"\n".write(to: wrapper, atomically: true, encoding: .utf8)
+        let reject = rejectAskDialog ? "FAKE_REJECT_ASK=1 " : ""
+        try "#!/bin/sh\n\(reject)FAKE_OMP_LOG='\(log)' exec /usr/bin/env python3 '\(script.path)' \"$@\"\n".write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
         return Fake(executable: wrapper.path, log: log, directory: directory)
     }
@@ -183,7 +250,7 @@ struct OmpSessionLifecycleTests {
         let resumed = try await second.start(config(cwd: fake.directory.path, resumeID: saved))
         await second.close()
 
-        let launches = fake.launches()
+        let launches = fake.launches().filter { $0.contains("rpc-ui") }
         #expect(launches.count == 2)
         #expect(!launches[0].contains("--resume"))
         #expect(launches[1].suffix(2) == ["--resume", saved])
@@ -201,10 +268,14 @@ struct OmpSessionLifecycleTests {
         await session.close()
 
         let prompt = try #require(fake.received("prompt").first)
-        #expect(prompt["id"]?.stringValue == turnID)
         #expect(prompt["message"] == "hello")
         #expect(finished)
         let events = recorder.events
+        // The native turn id is the prompt's session entry, reported before the turn ends.
+        #expect(turnID == nil)
+        let started = try #require(events.firstIndex(of: .turnStarted(providerTurnID: "u1")))
+        let completed = try #require(events.firstIndex(of: .turnCompleted(outcome: .completed, error: nil)))
+        #expect(started < completed)
         #expect(events.contains(.assistantDelta(itemID: "msg-3:0", delta: "all done", isFinal: false)))
         #expect(events.contains { event in
             if case let .itemUpdated(item) = event { item.id == "msg-3:0" && item.kind == .assistantMessage(text: "all done", isFinal: true) } else { false }
@@ -298,6 +369,122 @@ struct OmpSessionLifecycleTests {
         #expect(finished)
         #expect(fake.received("abort").count == 1)
         #expect(recorder.events.contains(.turnCompleted(outcome: .interrupted, error: nil)))
+    }
+
+    @Test(arguments: ["aborted", "completed"])
+    func stoppingBeforeTheYieldEndsTheTurnWithoutWaitingForBackgroundJobs(status: String) async throws {
+        let fake = try makeFake()
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path))
+
+        // "completed": the yield raced the abort and omp reports the prompt as completed.
+        _ = try await session.startTurn(input("slow background job \(status == "aborted" ? "aborted" : "")"))
+        _ = await recorder.wait { $0.contains(.assistantDelta(itemID: "msg-1:0", delta: "job started", isFinal: false)) }
+        await session.interrupt()
+        let finished = await recorder.wait(3, until: Self.completed)
+        // The job then wakes omp; the next message must still go through.
+        let before = recorder.events.count
+        _ = try await session.startTurn(input("hello after stop"))
+        let next = await recorder.wait(3) { Self.completed(Array($0.dropFirst(before))) }
+        await session.close()
+
+        #expect(finished)
+        #expect(recorder.events.contains(.turnCompleted(outcome: .interrupted, error: nil)))
+        #expect(next)
+        #expect(fake.received("prompt").last?["streamingBehavior"] == "steer")
+    }
+
+    @Test func aFailedStartShowsOmpsOwnErrorOnTheTurn() async throws {
+        let directory = EngineHarness.temporaryDirectory()
+        let broken = directory.appendingPathComponent("omp")
+        try "#!/bin/sh\necho 'omp: no credentials for anthropic' >&2\nexit 3\n".write(to: broken, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: broken.path)
+        let engine = AgentEngine(environment: EngineEnvironment(
+            drivers: [.omp: OmpDriver(executablePath: { broken.path })],
+            git: RecordingGit(),
+            store: InMemoryThreadStore(),
+            dataDirectory: EngineHarness.temporaryDirectory()
+        ), settings: EngineSettings(generateTitles: false))
+        let project = engine.addProject(path: directory.path)
+
+        let id = try await engine.launchThread(ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp)), text: "hi", attachments: [])
+        let deadline = ContinuousClock.now + .seconds(10)
+        while engine.thread(id)?.turns.last?.status == .running, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let turn = try #require(engine.thread(id)?.turns.last)
+        #expect(turn.status == .failed)
+        #expect(turn.failureMessage?.contains("no credentials for anthropic") == true)
+    }
+
+    /// Runs `texts` as completed turns and returns the session (left open).
+    private func sessionWithTurns(_ fake: Fake, _ texts: [String], resumeID: String? = nil) async throws -> (OmpSession, Recorder) {
+        let session = OmpSession(executablePath: { fake.executable })
+        let recorder = Recorder(session)
+        _ = try await session.start(config(cwd: fake.directory.path, resumeID: resumeID))
+        for text in texts {
+            let before = recorder.events.count
+            _ = try await session.startTurn(input(text))
+            _ = await recorder.wait { Self.completed(Array($0.dropFirst(before))) }
+        }
+        return (session, recorder)
+    }
+
+    @Test func rewindingForksANewSessionFileThatEndsBeforeTheTurn() async throws {
+        let fake = try makeFake()
+        let (session, recorder) = try await sessionWithTurns(fake, ["one", "two", "three"])
+
+        try await session.rollback(beforeTurn: 2, providerTurnID: "u2")
+        try await session.rollback(beforeTurn: 1, providerTurnID: "u1")
+        await session.close()
+
+        // `fork` (unlike `navigate_tree`) writes a session file of its own, so the next
+        // `--resume` cannot bring the dropped turns back. It keeps everything up to turn 1's
+        // answer; before turn 1 nothing is worth keeping.
+        #expect(fake.received("fork").map { $0["entryId"]?.stringValue } == ["a1"])
+        #expect(fake.received("new_session").count == 1)
+        #expect(fake.received("navigate_tree").isEmpty)
+        let files = recorder.events.compactMap { if case let .conversationID(id) = $0 { URL(fileURLWithPath: id).lastPathComponent } else { nil } }
+        #expect(files == ["fake-session.jsonl", "fork-1.jsonl", "new-2.jsonl"])
+    }
+
+    @Test func turnsWithoutAnEntryIdFallBackToCountingUserMessages() async throws {
+        let fake = try makeFake()
+        let (session, _) = try await sessionWithTurns(fake, ["one", "two"])
+
+        try await session.rollback(beforeTurn: 2, providerTurnID: "prompt-2")
+        await #expect(throws: ProviderError.message("omp's session has no record of turn 3, so the conversation cannot be rewound.")) {
+            try await session.rollback(beforeTurn: 3, providerTurnID: nil)
+        }
+        await session.close()
+
+        #expect(fake.received("fork").map { $0["entryId"]?.stringValue } == ["a1"])
+    }
+
+    @Test func aResumedSessionOnDefaultSwitchesToOmpsConfiguredModel() async throws {
+        let fake = try makeFake()
+        let saved = fake.directory.appendingPathComponent("saved.jsonl").path
+        try "{}\n".write(toFile: saved, atomically: true, encoding: .utf8)
+
+        let (session, _) = try await sessionWithTurns(fake, ["hello"], resumeID: saved)
+        await session.close()
+
+        // The saved session ran haiku; "default" means omp's configured model (opus), asked
+        // from a throwaway process in the thread's folder.
+        let switches = fake.received("set_model")
+        #expect(switches.map { "\($0["provider"]?.stringValue ?? "")/\($0["modelId"]?.stringValue ?? "")" } == ["anthropic/claude-opus-5-5"])
+        #expect(fake.launches().contains { $0.contains("--no-session") })
+    }
+
+    @Test func aBuildWithoutTheAskDialogStillStartsAndKeepsTheSelectFallback() async throws {
+        let fake = try makeFake(rejectAskDialog: true)
+        let (session, recorder) = try await sessionWithTurns(fake, ["hello"])
+        await session.close()
+
+        #expect(fake.received("set_ask_dialog").count == 1)
+        #expect(recorder.events.contains(.turnCompleted(outcome: .completed, error: nil)))
     }
 
     @Test func changingTheRuntimeModeRestartsOnTheSameSessionFile() async throws {

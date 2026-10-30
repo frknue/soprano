@@ -114,6 +114,16 @@ public enum OmpProtocol {
         return fields
     }
 
+    /// Fields of `prompt`: `messageFields` plus `streamingBehavior:"steer"`. omp ignores it while
+    /// idle; while a run is live (a background job woke the agent after the user pressed Stop)
+    /// a plain `prompt` is refused ("Agent is already processing"), and "steer" delivers the
+    /// message into that run instead, still answered by this prompt's own `prompt_result`.
+    public static func promptFields(_ input: TurnInput) -> [String: JSONValue] {
+        var fields = messageFields(input)
+        fields["streamingBehavior"] = "steer"
+        return fields
+    }
+
     /// `{"type":"extension_ui_response","id",<payload>}` with `value`, `confirmed`, `answers` or
     /// `cancelled:true`.
     public static func uiResponse(id: String, _ payload: [String: JSONValue]) -> JSONValue {
@@ -191,37 +201,79 @@ public enum OmpProtocol {
 
     // MARK: - Rollback
 
-    /// The entry to `navigate_tree` to so the conversation ends before turn `ordinal` (1-based):
-    /// the `ordinal`-th user-authored user message (`type:"message"`, `message.role:"user"`,
-    /// `message.attribution` not `"agent"`, not a `steering` message) on the current branch,
-    /// i.e. the path from `leafId` to the root of `get_entries`' `data`. omp moves the leaf to
-    /// that message's parent. Without `leafId` every entry counts, in file order.
+    /// `get_entries`' `data.entries` on the current branch, root first: the path from `leafId`
+    /// to the root (every entry in file order when there is no `leafId`).
+    static func branch(entries data: JSONValue) -> [JSONValue] {
+        let entries = data["entries"]?.arrayValue ?? []
+        guard let leaf = data["leafId"]?.stringValue else { return entries }
+        var byID: [String: JSONValue] = [:]
+        for entry in entries {
+            if let id = entry["id"]?.stringValue { byID[id] = entry }
+        }
+        var path: [JSONValue] = []
+        var cursor: String? = leaf
+        var visited = Set<String>()
+        while let id = cursor, visited.insert(id).inserted, let entry = byID[id] {
+            path.append(entry)
+            cursor = entry["parentId"]?.stringValue
+        }
+        return path.reversed()
+    }
+
+    /// A user-authored user message: `type:"message"`, `message.role:"user"`, attribution not
+    /// `"agent"`, not synthetic.
+    private static func isUserMessage(_ entry: JSONValue) -> Bool {
+        guard entry["type"]?.stringValue == "message", let message = entry["message"] else { return false }
+        return message["role"]?.stringValue == "user"
+            && message["attribution"]?.stringValue != "agent"
+            && message["synthetic"]?.boolValue != true
+    }
+
+    /// A message's text: `content` as a string, or its `text` blocks joined.
+    private static func text(of message: JSONValue?) -> String {
+        if let text = message?["content"]?.stringValue { return text }
+        return (message?["content"]?.arrayValue ?? []).compactMap { block in
+            block["type"]?.stringValue == "text" ? block["text"]?.stringValue : nil
+        }.joined()
+    }
+
+    /// The entry id omp recorded for a prompt: the newest user message on the current branch
+    /// whose text is `text` (the `message` the prompt sent). Steering-delivered prompts count.
+    /// This id is the turn's `providerTurnID`, so rewinds never depend on turn positions.
+    public static func promptEntryID(entries data: JSONValue, text: String) -> String? {
+        let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return branch(entries: data).last { entry in
+            isUserMessage(entry) && Self.text(of: entry["message"]).trimmingCharacters(in: .whitespacesAndNewlines) == wanted
+        }?["id"]?.stringValue
+    }
+
+    /// The `ordinal`-th user-authored, non-steering user message on the current branch. Only for
+    /// turns recorded before turns carried omp entry ids (`providerTurnID` "prompt-N").
     public static func rollbackEntryID(entries data: JSONValue, beforeTurn ordinal: Int) -> String? {
-        guard ordinal >= 1, let entries = data["entries"]?.arrayValue else { return nil }
-        var branch = entries
-        if let leaf = data["leafId"]?.stringValue {
-            var byID: [String: JSONValue] = [:]
-            for entry in entries {
-                if let id = entry["id"]?.stringValue { byID[id] = entry }
-            }
-            var path: [JSONValue] = []
-            var cursor: String? = leaf
-            var visited = Set<String>()
-            while let id = cursor, visited.insert(id).inserted, let entry = byID[id] {
-                path.append(entry)
-                cursor = entry["parentId"]?.stringValue
-            }
-            branch = path.reversed()
-        }
-        let prompts = branch.filter { entry in
-            guard entry["type"]?.stringValue == "message", let message = entry["message"] else { return false }
-            return message["role"]?.stringValue == "user"
-                && message["attribution"]?.stringValue != "agent"
-                && message["synthetic"]?.boolValue != true
-                && message["steering"]?.boolValue != true
-        }
+        guard ordinal >= 1 else { return nil }
+        let prompts = branch(entries: data).filter { isUserMessage($0) && $0["message"]?["steering"]?.boolValue != true }
         guard ordinal <= prompts.count else { return nil }
         return prompts[ordinal - 1]["id"]?.stringValue
+    }
+
+    /// How to end the conversation just before entry `entryID`, durably. `navigate_tree` only
+    /// moves the leaf in memory (a `--resume` reloads the old tip), so a rewind forks a new
+    /// session file instead.
+    public enum Rewind: Equatable, Sendable {
+        /// `fork {entryId}`: a new session file holding root…`entryId` (the last `message`
+        /// entry before the cut; `fork` accepts only message entries).
+        case fork(entryID: String)
+        /// `new_session`: nothing worth keeping comes before the cut.
+        case fresh
+    }
+
+    /// nil when `entryID` is not on the current branch.
+    public static func rewind(entries data: JSONValue, before entryID: String) -> Rewind? {
+        let path = branch(entries: data)
+        guard let index = path.firstIndex(where: { $0["id"]?.stringValue == entryID }) else { return nil }
+        guard let keep = path[..<index].last(where: { $0["type"]?.stringValue == "message" }),
+              let keepID = keep["id"]?.stringValue else { return .fresh }
+        return .fork(entryID: keepID)
     }
 
     // MARK: - Models

@@ -6,21 +6,26 @@ import Foundation
 /// `--model` unless "default", `--thinking` for an explicit effort, `--resume <session file>`
 /// when the saved file still exists), extended PATH, cwd = the thread's workspace. Handshake:
 /// wait for `ready`, `negotiate_protocol {protocolVersion:2}`, `set_ask_dialog {enabled:true}`
-/// (the `ask` tool arrives as one `extension_ui_request` `ask`), `set_event_filter
+/// (the `ask` tool arrives as one `extension_ui_request` `ask`; builds without the command keep
+/// the `select`/`editor` fallback, which the mapper handles), `set_event_filter
 /// {events:null, messageUpdates:"delta"}`, then `get_state`, whose `sessionFile` (absolute
 /// `.jsonl` path) is the conversation id.
 ///
 /// Turns: model/effort/fast changes apply in place (`set_model {provider, modelId}`,
 /// `set_thinking_level {level}`, `set_fast_mode {enabled}`); a runtime-mode change restarts the
-/// process with `--resume` and the new approval mode. `prompt {id, message, images?}` is acked by
-/// a `response` and ended by `prompt_result` with the same id (or by an ack with
-/// `data.agentInvoked:false`); the prompt id is the turn's native id. Steering is `steer
+/// process with `--resume` and the new approval mode. `prompt {id, message, images?,
+/// streamingBehavior:"steer"}` is acked by a `response` and ended by `prompt_result` with the same
+/// id (or by an ack with `data.agentInvoked:false`). At its `prompt_result` the session reads
+/// `get_entries` and reports the user message's entry id as the turn's native id
+/// (`turnStarted`), which rollback uses. Steering is `steer
 /// {message, images?}`, interrupt `abort`. Dialogs are answered with `extension_ui_response`
 /// (approvals with the exact option label, see `OmpProtocol.approvalLabel`); dialogs arriving
 /// while no prompt runs are cancelled at once.
 ///
-/// Rollback: `get_entries` → the n-th user-authored user message on the current branch →
-/// `navigate_tree {entryId}` (omp moves the leaf to that message's parent).
+/// Rollback before a turn: its entry id (or, for turns without one, the n-th user message) →
+/// `fork {entryId}` of the last message entry before it, or `new_session` when nothing comes
+/// before; the new session file becomes the conversation id. (`navigate_tree` would only move
+/// the leaf in memory, which the next `--resume` undoes.)
 ///
 /// Not supported: plan mode (omp has no host-driven plan mode over RPC; turns run as Build) and
 /// decline feedback (omp's approval select has no text field).
@@ -55,6 +60,10 @@ public actor OmpSession: ProviderSession {
     private var approvalMode = ""
     private var pending: [String: OmpUIRequest] = [:]
     private var activePromptID: String?
+    /// The `message` text the active prompt sent, to find its entry in `get_entries`.
+    private var activePromptText: String?
+    /// Stop was pressed for the active prompt: its yield ends the turn even if omp is unsettled.
+    private var interruptRequested = false
     private var nextPrompt = 1
     private var isClosing = false
     private var hasEnded = false
@@ -110,10 +119,13 @@ public actor OmpSession: ProviderSession {
         let id = "prompt-\(nextPrompt)"
         nextPrompt += 1
         mapper.resetTurn()
+        interruptRequested = false
         activePromptID = id
+        let fields = OmpProtocol.promptFields(input)
+        activePromptText = fields["message"]?.stringValue
         let ack: JSONValue
         do {
-            ack = try await live.request("prompt", OmpProtocol.messageFields(input), id: id)
+            ack = try await live.request("prompt", fields, id: id)
         } catch {
             if activePromptID == id { activePromptID = nil }
             throw error
@@ -122,7 +134,8 @@ public actor OmpSession: ProviderSession {
             activePromptID = nil
             for event in mapper.finishLocally() { continuation.yield(event) }
         }
-        return id
+        // The native turn id is the prompt's session entry, reported at its `prompt_result`.
+        return nil
     }
 
     public func steer(_ input: TurnInput) async throws {
@@ -133,6 +146,7 @@ public actor OmpSession: ProviderSession {
 
     public func interrupt() async {
         guard let client, activePromptID != nil else { return }
+        interruptRequested = true
         _ = try? await client.request("abort")
         // Yielded but unsettled: nothing of the prompt is left to stop, so end the turn here
         // instead of waiting for background jobs to finish.
@@ -178,15 +192,29 @@ public actor OmpSession: ProviderSession {
         let entries = try await withProviderTimeout(Self.requestTimeout, label: "omp get_entries") {
             try await client.request("get_entries")
         }
-        guard let entryID = OmpProtocol.rollbackEntryID(entries: entries, beforeTurn: ordinal) else {
+        // Turns recorded before entry ids ("prompt-N") fall back to counting user messages.
+        let target = providerTurnID.flatMap { $0.hasPrefix("prompt-") ? nil : $0 }
+            ?? OmpProtocol.rollbackEntryID(entries: entries, beforeTurn: ordinal)
+        guard let target, let rewind = OmpProtocol.rewind(entries: entries, before: target) else {
             throw ProviderError.message("omp's session has no record of turn \(ordinal), so the conversation cannot be rewound.")
         }
-        let result = try await withProviderTimeout(Self.requestTimeout, label: "omp navigate_tree") {
-            try await client.request("navigate_tree", ["entryId": .string(entryID)])
+        let result = try await withProviderTimeout(Self.requestTimeout, label: "omp rewind") {
+            switch rewind {
+            case let .fork(entryID): try await client.request("fork", ["entryId": .string(entryID)])
+            case .fresh: try await client.request("new_session")
+            }
         }
         if result["cancelled"]?.boolValue == true {
             throw ProviderError.message("omp refused to rewind the conversation.")
         }
+        let state = try await withProviderTimeout(Self.requestTimeout, label: "omp get_state") {
+            try await client.request("get_state")
+        }
+        guard let file = state["sessionFile"]?.nonEmptyString else {
+            throw ProviderError.invalidOutput("omp did not report the rewound session file.")
+        }
+        sessionFile = file
+        continuation.yield(.conversationID(file))
         mapper.resetTurn()
     }
 
@@ -231,12 +259,16 @@ public actor OmpSession: ProviderSession {
             if ready["supportedProtocolVersions"]?.arrayValue?.contains(2) == true {
                 _ = try await client.request("negotiate_protocol", ["protocolVersion": 2])
             }
-            _ = try await client.request("set_ask_dialog", ["enabled": true])
+            // Builds without `set_ask_dialog` answer with a failure; `ask` then arrives as
+            // `select`/`editor` dialogs, which the mapper handles.
+            _ = try? await client.request("set_ask_dialog", ["enabled": true])
             _ = try await client.request("set_event_filter", ["events": .null, "messageUpdates": "delta"])
             return try await client.request("get_state")
         }
         sessionFile = state["sessionFile"]?.nonEmptyString ?? sessionFile
-        appliedModel = selection.model
+        // A resumed session runs the model saved in it, whatever was asked for; `apply`
+        // reconciles that against the selection (including "default").
+        appliedModel = resume == nil ? selection.model : nil
         if let provider = state["model"]?["provider"]?.stringValue, let id = state["model"]?["id"]?.stringValue {
             currentModel = ModelID(provider: provider, id: id)
             if model == nil, resume == nil, configuredModel == nil { configuredModel = currentModel }
@@ -256,7 +288,7 @@ public actor OmpSession: ProviderSession {
             if let spec = OmpProtocol.modelSpec(selection.model) {
                 target = ModelID(provider: spec.provider, id: spec.id)
             } else {
-                if configuredModel == nil, let model = try await OmpDriver.configuredModel(executable: executable) {
+                if configuredModel == nil, let model = try await OmpDriver.configuredModel(executable: executable, directory: config?.cwd) {
                     configuredModel = ModelID(provider: model.provider, id: model.id)
                 }
                 target = configuredModel
@@ -349,9 +381,16 @@ public actor OmpSession: ProviderSession {
             }
         case "prompt_result":
             guard let id = frame["id"]?.stringValue, id == activePromptID else { return }
+            await reportPromptEntry()
+            guard id == activePromptID else { return }
             // `sessionSettled:false`: background work can still wake the agent; the prompt
-            // (dialogs, steer, interrupt) stays live until `session_settled`.
-            if frame["sessionSettled"]?.boolValue != false { endPrompt() }
+            // (dialogs, steer, interrupt) stays live until `session_settled`, unless the user
+            // already pressed Stop (the yield may have raced the abort and report "completed").
+            var events = mapper.map(frame)
+            if mapper.isAwaitingSettlement, interruptRequested { events += mapper.interruptAwaitingSettlement() }
+            if !mapper.isAwaitingSettlement { endPrompt() }
+            for event in events { continuation.yield(event) }
+            return
         case "session_settled":
             guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
             endPrompt()
@@ -359,6 +398,17 @@ public actor OmpSession: ProviderSession {
             break
         }
         for event in mapper.map(frame) { continuation.yield(event) }
+    }
+
+    /// Reports the active prompt's session entry as the turn's native id (`turnStarted`), so a
+    /// later rollback cuts at exactly this turn. Best effort: no entry, no id.
+    private func reportPromptEntry() async {
+        guard let client, let text = activePromptText else { return }
+        let fetched = try? await withProviderTimeout(Self.requestTimeout, label: "omp get_entries") {
+            try await client.request("get_entries")
+        }
+        guard let entries = fetched, let entryID = OmpProtocol.promptEntryID(entries: entries, text: text) else { return }
+        continuation.yield(.turnStarted(providerTurnID: entryID))
     }
 
     /// The prompt's turn is over: withdraw dialogs nobody can answer any more.

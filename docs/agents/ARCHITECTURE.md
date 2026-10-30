@@ -80,7 +80,9 @@ Engine behavior:
   turn N ends (completed or interrupted), capture `ref(thread, N)` and store
   `TurnCheckpoint(files:)` from `changedFiles(ref(N-1), ref(N))`. Not a repo → status `.missing`.
 - Turn diff N = `diff(ref(N-1), ref(N))`; thread diff = `diff(ref(0), ref(last))`.
-- Revert to before turn N: interrupt guard, provider `rollback(beforeTurn:)`, optional
+- Revert to before turn N: interrupt guard, provider `rollback(beforeTurn:providerTurnID:)` for
+  the earliest turn ≥ N that the thread's current provider received (has a `providerTurnID` and
+  ran on that provider; none → no provider call, its conversation already ends there), optional
   `restoreCheckpoint(ref(N-1))`, delete refs ≥ N, drop turns ≥ N, return turn N's user message.
 - Titles: first message → title seed (first 50 chars + "...") immediately, then
   `textGenerationModel` via `ProviderDriver.generateJSON` with T3 Code's title prompt.
@@ -105,21 +107,27 @@ probes the CLI (`probe()` → version, account, models), and runs one-shot `gene
 omp's RPC (docs: `omp://rpc.md`) is JSONL, not JSON-RPC: commands `{id?, type, …}`, responses
 `{type:"response", id, command, success, data|error}`, events in between. Handshake: wait for
 `ready`, `negotiate_protocol {protocolVersion:2}` (large frames then arrive as base64
-`rpc_chunk` sequences, reassembled by `OmpFrameDecoder`), `set_ask_dialog {enabled:true}`,
+`rpc_chunk` sequences, reassembled by `OmpFrameDecoder`), `set_ask_dialog {enabled:true}` (a
+build that rejects it keeps the `select`/`editor` fallback),
 `set_event_filter {messageUpdates:"delta"}`, `get_state` (its `sessionFile` is the thread's
 `providerThreadID`; a saved file that no longer exists starts fresh). Model slugs are
 `provider/id`; `default` (`ModelSelection.ompDefaultModel`) means omp's configured model (no
-`--model`). Model, thinking and fast-mode changes go to the live process (`set_model {provider,
-modelId}`, `set_thinking_level`, `set_fast_mode`); a runtime-mode change relaunches with
-`--resume`. Runtime mode → approval mode: approval-required → `always-ask`, auto-accept-edits →
-`write`, auto → `always-ask-cached`, full-access → `yolo`. Turns: `prompt {message, images?}`
-(attachment paths listed in the text) with the command id as provider turn id; the turn ends at
-`prompt_result` with the same id (extension runs such as auto-double-check happen before it),
-`completed` / `aborted|interrupted|cancelled` → interrupted / else failed. A `prompt_result` with
-`sessionSettled:false` (async bash/task/eval jobs still running) holds that outcome: the turn,
-its dialogs, steer and interrupt stay live and the runs those jobs wake stream into it until
-`session_settled`, so the checkpoint and the queue wait for them; Stop in that phase sends `abort`
-and ends the turn at once. Steer = `steer`,
+`--model`; after a `--resume`, which restores the session's saved model, `set_model` to the model
+a throwaway `omp --mode rpc --no-session` in the thread's folder reports). Model, thinking and
+fast-mode changes go to the live process (`set_model {provider, modelId}`, `set_thinking_level`,
+`set_fast_mode`); a runtime-mode change relaunches with `--resume`. Runtime mode → approval mode: approval-required → `always-ask`, auto-accept-edits →
+`write`, auto → `always-ask-cached`, full-access → `yolo`. Turns: `prompt {message, images?,
+streamingBehavior:"steer"}` (attachment paths listed in the text; "steer" only matters when a
+background job's run is live, where a plain `prompt` is refused); the turn ends at `prompt_result`
+with the same id (extension runs such as auto-double-check happen before it), `completed` /
+`aborted|interrupted|cancelled` → interrupted / else failed. At that `prompt_result` the session
+reads `get_entries` and reports the prompt's user-message entry id (matched by text on the current
+branch) as the turn's `providerTurnID` via `turnStarted`. A completed or failed `prompt_result`
+with `sessionSettled:false` (async bash/task/eval jobs still running) holds that outcome: the
+turn, its dialogs, steer and interrupt stay live and the runs those jobs wake stream into it
+until `session_settled`, so the checkpoint and the queue wait for them. Stop ends the turn at
+once: an aborted `prompt_result`, any `prompt_result` after Stop was pressed, or Stop while only
+background work is left (`abort` does not stop background jobs). Steer = `steer`,
 interrupt = `abort`. Host UI arrives as `extension_ui_request`: a `select` titled `Allow tool:
 <tool>\n<details>` is an approval (accept → `Approve Once` or `Approve`, acceptForSession → the
 `… for this session` label or `Approve File`, decline → `Deny`, cancel → `cancelled:true`, all
@@ -131,9 +139,12 @@ notice; dialogs arriving after the turn ended are cancelled. Events (`OmpEventMa
 relaunch), `tool_execution_start|update|end` → bash → command, write/edit/ast_edit → fileChange
 (edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
-`intent`; assistant `usage` → token usage; compaction/retry → notices. Rollback before turn N:
-`get_entries`, then `navigate_tree {entryId}` to the Nth user-authored, non-steering user message on
-the current branch. No Plan mode (no RPC switch), so the composer hides Build/Plan for omp. Probe:
+`intent`; assistant `usage` → token usage; compaction/retry → notices. Rollback before a turn: `get_entries`, the
+turn's entry (its `providerTurnID`; turns recorded as `prompt-N` count user-authored, non-steering
+user messages), then `fork {entryId}` of the last `message` entry before it on the current
+branch, or `new_session` when none; the new `sessionFile` becomes the conversation id.
+`navigate_tree` is not used: it only moves the leaf in memory and the next `--resume` restores
+the old tip. No Plan mode (no RPC switch), so the composer hides Build/Plan for omp. Probe:
 `omp --version` plus a short-lived `omp --mode rpc --no-session --no-extensions --no-skills
 --no-rules --no-lsp` for `get_state` and `get_available_models` (≈730 models: first `default`
 named "<model> · configured", then "<name> · <provider>", effort = "off" + `thinking.efforts`).
