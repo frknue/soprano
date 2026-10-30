@@ -108,6 +108,26 @@ private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
 private func white(_ alpha: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: alpha) }
 
 extension Palette {
+    /// Claude's mark (`fill-[#d97757]` in T3 Code's `ClaudeAI` icon), same in light and dark.
+    var claudeBrand: NSColor { hex(0xd97757) }
+
+    /// T3 Code's project monogram colors (`projectIconColors.ts`: `text-<color>-600 dark:text-<color>-400`),
+    /// in its order: gray, red, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue,
+    /// indigo, violet, purple, fuchsia, pink, rose.
+    var projectIconColors: [NSColor] {
+        let light: [UInt32] = [
+            0x4b5563, 0xdc2626, 0xea580c, 0xd97706, 0xca8a04, 0x65a30d, 0x16a34a, 0x059669, 0x0d9488,
+            0x0891b2, 0x0284c7, 0x2563eb, 0x4f46e5, 0x7c3aed, 0x9333ea, 0xc026d3, 0xdb2777, 0xe11d48,
+        ]
+        let dark: [UInt32] = [
+            0x9ca3af, 0xf87171, 0xfb923c, 0xfbbf24, 0xfacc15, 0xa3e635, 0x4ade80, 0x34d399, 0x2dd4bf,
+            0x22d3ee, 0x38bdf8, 0x60a5fa, 0x818cf8, 0xa78bfa, 0xc084fc, 0xe879f9, 0xf472b6, 0xfb7185,
+        ]
+        return (isDark ? dark : light).map { hex($0) }
+    }
+}
+
+extension Palette {
     /// T3 Code light (`:root`). Tailwind v4 oklch values converted to sRGB.
     static let t3Light = Palette(
         isDark: false,
