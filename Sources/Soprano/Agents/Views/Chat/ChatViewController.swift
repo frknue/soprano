@@ -113,7 +113,7 @@ final class ChatViewController: NSViewController {
             switch change {
             case .panels: self?.updatePanels()
             case .selection: self?.updateComposerPlacement()
-            case .filter: break
+            case .filter, .composerRestore: break
             }
         }
         updatePanels()

@@ -42,8 +42,10 @@ swift test
 | `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`. **Never edit.** |
 
 Modules talk only through the contracts: views read `AgentEngine` state and call its methods;
-UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never spawns
-a process, never runs git, never talks to a provider.
+UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never talks to
+a provider and never spawns git: read-only git queries (status, branches) go through
+`engine.environment.git`, every write through an engine method. The only processes the UI layer
+starts itself are terminal-drawer shells (SwiftTerm) and `NSWorkspace` opens (editor, Finder, URLs).
 
 ## Seams
 
@@ -160,7 +162,9 @@ stacked action flow; PRs via `gh pr create`; open PR lookup via `gh pr view --js
 ### `WorkspaceState` (Shell)
 UI state: `selection` (`.draft(projectID:)` or `.thread(id)`), panel visibility (sidebar, thread
 details card, terminal drawer, right panel), right-panel surface + diff scope + focused path,
-sidebar project filter and search text. Observe `Change` (`.selection`, `.panels`, `.filter`).
+sidebar project filter and search text, and `restoreComposer(with:)` / `takeComposerRestore()`
+("Edit from here" hands the user message back to the composer). Observe `Change` (`.selection`,
+`.panels`, `.filter`, `.composerRestore`).
 
 ### Regions (view controllers)
 `WorkspaceViewController` lays out sidebar | chat column | right panel (resizable rails, widths

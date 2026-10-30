@@ -11,6 +11,8 @@ final class WorkspaceState {
         case panels
         /// Sidebar project filter or search.
         case filter
+        /// Someone handed the composer a message to take back ("Edit from here").
+        case composerRestore
     }
 
     /// What the chat column shows.
@@ -53,6 +55,9 @@ final class WorkspaceState {
     /// Empty = all projects.
     private(set) var projectFilter: Set<String> = []
     private(set) var searchText = ""
+
+    /// Message waiting for the composer to take back (text and attachments).
+    private(set) var pendingComposerRestore: UserMessage?
 
     private let observers = ObserverList<Change>()
 
@@ -121,6 +126,18 @@ final class WorkspaceState {
         rightPanelSurface = .diff
         isRightPanelVisible = true
         observers.notify(.panels)
+    }
+
+    /// Puts `message` back into the composer of the selected thread (appended to any draft).
+    func restoreComposer(with message: UserMessage) {
+        pendingComposerRestore = message
+        observers.notify(.composerRestore)
+    }
+
+    /// The composer takes the pending message (once).
+    func takeComposerRestore() -> UserMessage? {
+        defer { pendingComposerRestore = nil }
+        return pendingComposerRestore
     }
 
     func setProjectFilter(_ filter: Set<String>) {
