@@ -378,12 +378,15 @@ router as global).
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
 [--settings general|providers|text-generation|worktrees|notifications|keybindings|archive|about]
 [--dialog confirm|choose|prompt|alert] [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
-[--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
+[--click <label>]… [--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
 of it and its child windows. `--perform` runs any registered command (open the palette, the model
 picker, …); `--settings` opens the settings screen on a page; `--dialog` presents a sample
 `Dialogs` dialog; `--type` inserts text into the first responder (of the topmost overlay when one
 shows); `--keys` replays chords through the router (or into the topmost overlay); `--hover` sets
-the hover state of the `InteractiveView` with that accessibility label or tooltip. Agents verify
+the hover state of the `InteractiveView` with that accessibility label or tooltip; `--click` sends
+a real mouse down/up at its center through the window, so whatever the window hit-tests there
+(including a view drawn over the control) gets the click, as it would live. Clicks in the
+titlebar strip start a window drag offscreen instead; use them below the header. Agents verify
 UI with it and `read` the PNG; they do not launch the GUI.
 
 Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless

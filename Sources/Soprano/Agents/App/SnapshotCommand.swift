@@ -4,7 +4,7 @@ import SopranoAgentsCore
 /// `SopranoAgents snapshot --out <png> [--fixture demo] [--size 1440x900] [--appearance light|dark]
 /// [--theme <id>] [--hide-sidebar] [--details] [--terminal] [--right-panel]
 /// [--diff thread|turn:<n>|uncommitted] [--perform <command id>]… [--type "<text>"] [--keys "<chord> …"]
-/// [--hover <accessibility label>] [--settings <page>] [--dialog confirm|choose|prompt|alert] [--wait <seconds>]`
+/// [--hover <accessibility label>] [--click <accessibility label>]… [--settings <page>] [--dialog confirm|choose|prompt|alert] [--wait <seconds>]`
 ///
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
@@ -29,6 +29,7 @@ enum SnapshotCommand {
         var type: String?
         var keys: [String] = []
         var hover: String?
+        var clicks: [String] = []
         var settings: SettingsPage?
         var dialog: String?
         var wait: Double = 0.4
@@ -39,7 +40,7 @@ enum SnapshotCommand {
                                   [--size WxH] [--appearance light|dark] [--theme <id>]
                                   [--hide-sidebar] [--details] [--terminal] [--right-panel]
                                   [--diff thread|turn:<n>|uncommitted] [--perform <command id>]…
-                                  [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
+                                  [--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--click <label>]…
                                   [--settings \(SettingsPage.allCases.map(\.rawValue).joined(separator: "|"))]
                                   [--dialog \(dialogs.joined(separator: "|"))] [--wait <seconds>]
     """
@@ -81,6 +82,7 @@ enum SnapshotCommand {
             case "--type": options.type = try value(option)
             case "--keys": options.keys = try value(option).split(separator: " ").map(String.init)
             case "--hover": options.hover = try value(option)
+            case "--click": options.clicks.append(try value(option))
             case "--settings":
                 let raw = try value(option)
                 guard let page = SettingsPage(rawValue: raw) else {
@@ -186,6 +188,13 @@ enum SnapshotCommand {
                 await settle(0.12)
             }
         }
+        for label in options.clicks {
+            guard let view = findInteractive(labeled: label, in: window.contentView) else {
+                throw CaptureError(description: "--click: no control labeled \"\(label)\"")
+            }
+            click(view, in: window)
+            await settle(0.25)
+        }
         if let label = options.hover {
             guard let view = findInteractive(labeled: label, in: window.contentView) else {
                 throw CaptureError(description: "--hover: no control labeled \"\(label)\"")
@@ -237,6 +246,20 @@ enum SnapshotCommand {
         if raw == "uncommitted" { return .uncommitted }
         if raw.hasPrefix("turn:"), let ordinal = Int(raw.dropFirst(5)) { return .turn(ordinal) }
         throw CaptureError(description: "--diff must be thread, uncommitted or turn:<n>")
+    }
+
+    /// A left click at the view's center, sent through `NSApp` like a real one: local event
+    /// monitors (open popovers closing on outside clicks) see it first, then the window
+    /// hit-tests the point, so a view covering the control swallows the click as it would live.
+    private static func click(_ view: NSView, in window: NSWindow) {
+        let center = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: center, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            ) else { continue }
+            NSApp.sendEvent(event)
+        }
     }
 
     private static func findInteractive(labeled label: String, in view: NSView?) -> InteractiveView? {

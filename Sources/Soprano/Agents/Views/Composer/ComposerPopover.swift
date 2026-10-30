@@ -101,13 +101,19 @@ final class ComposerPopover {
         if let focus = content.initialFocus {
             window.makeFirstResponder(focus)
         }
+        // An outside click closes the popover. A click on the control that opened it is consumed
+        // too, so that control toggles the popover closed instead of reopening it on mouse up.
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             nonisolated(unsafe) let incoming = event
-            MainActor.assumeIsolated {
-                guard let self, incoming.window !== self.window else { return }
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, incoming.window !== self.window else { return false }
+                let onAnchor = self.anchor.map { anchor in
+                    incoming.window === anchor.window && anchor.bounds.contains(anchor.convert(incoming.locationInWindow, from: nil))
+                } ?? false
                 self.close()
+                return onAnchor && incoming.type == .leftMouseDown
             }
-            return incoming
+            return consumed ? nil : incoming
         }
     }
 

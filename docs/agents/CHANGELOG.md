@@ -51,3 +51,7 @@ All notable changes to Soprano Agents are documented here. The format follows
   the background (`notifications.enabled`, `notifications.sound`), and a Dock badge counting
   threads waiting for you.
 - App icon: a speech bubble with typing dots.
+
+### Fixed
+
+- The composer's buttons (attach, model, reasoning/permissions, send) and its text area take clicks again; the composer's outline was swallowing them.

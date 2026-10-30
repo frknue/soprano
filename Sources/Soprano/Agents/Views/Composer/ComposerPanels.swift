@@ -9,7 +9,8 @@ import SopranoAgentsCore
 final class ComposerSurfaceView: PaletteView {
     private let blur = NSVisualEffectView()
     private let tint = PaletteView()
-    private let ring = PaletteView()
+    /// Drawn over the content, so it must never take a click (`ComposerOutlineView`).
+    private let ring = ComposerOutlineView()
     let content = ComposerColumn()
 
     var onFiles: (([URL]) -> Void)?
@@ -43,11 +44,6 @@ final class ComposerSurfaceView: PaletteView {
         }
         registerForDraggedTypes([.fileURL, .png, .tiff])
         applyPalette(palette)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let hit = super.hitTest(point)
-        return hit === ring ? self : hit
     }
 
     override func applyPalette(_ palette: Palette) {
@@ -87,6 +83,12 @@ final class ComposerSurfaceView: PaletteView {
         }
         return false
     }
+}
+
+/// The composer's outline: a full-size layer on top of the content that only draws. It is
+/// transparent to the mouse, so clicks reach the editor, chips and buttons underneath.
+private final class ComposerOutlineView: PaletteView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - Attachments
