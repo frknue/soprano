@@ -23,8 +23,8 @@ final class ComposerTextView: NSTextView {
     /// Up (true) / Down (false). Returns true when it recalled history.
     var onHistory: ((_ up: Bool) -> Bool)?
     var onTogglePlan: (() -> Void)?
-    /// Returns true when Escape closed something.
-    var onEscape: (() -> Bool)?
+    /// Escape: closes an open picker.
+    var onEscape: (() -> Void)?
     var onFiles: (([URL]) -> Void)?
     var onImageData: ((Data) -> Void)?
     var onDragHighlight: ((Bool) -> Void)?
@@ -112,6 +112,11 @@ final class ComposerTextView: NSTextView {
             onSubmit?(true)
             return
         }
+        // Shift+Tab arrives as backtab from the keyboard but as a shifted tab from synthesized events.
+        if event.keyCode == 48, flags == .shift {
+            onTogglePlan?()
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -130,7 +135,8 @@ final class ComposerTextView: NSTextView {
         case #selector(insertBacktab(_:)):
             onTogglePlan?()
         case #selector(cancelOperation(_:)):
-            if onEscape?() != true { super.doCommand(by: selector) }
+            // Escape closes an open picker; it never opens NSTextView's completion list.
+            onEscape?()
         default:
             super.doCommand(by: selector)
         }

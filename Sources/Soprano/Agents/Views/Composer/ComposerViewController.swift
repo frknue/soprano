@@ -207,7 +207,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         textView.onSubmit = { [weak self] alternate in self?.submit(alternate: alternate) }
         textView.onHistory = { [weak self] up in self?.recallHistory(up: up) ?? false }
         textView.onTogglePlan = { [weak self] in self?.togglePlanMode() }
-        textView.onEscape = { [weak self] in self?.closePopoverIfOpen() ?? false }
+        textView.onEscape = { [weak self] in self?.closePopoverIfOpen() }
         textView.onFiles = { [weak self] urls in self?.importFiles(urls) }
         textView.onImageData = { [weak self] data in self?.importImageData(data) }
         textView.onDragHighlight = { [weak self] on in self?.surface.isDragHighlighted = on }
