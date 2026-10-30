@@ -1,6 +1,6 @@
 import AppKit
 
-/// A button of a `Dialogs.choose` dialog, styled like T3 Code's AlertDialog buttons.
+/// A button of a `Dialogs.choose` dialog, styled as alert-dialog buttons.
 struct DialogButton: Equatable {
     enum Style: Equatable {
         case primary
@@ -18,7 +18,7 @@ struct DialogButton: Equatable {
     }
 }
 
-/// The only modal UI. Every call presents T3 Code's AlertDialog over `window` (a child window
+/// The only modal UI. Every call presents an alert dialog over `window` (a child window
 /// with a dimmed backdrop and a centered card) and resolves when the user answers. Return picks
 /// the last button, Escape or a click outside cancels. Without a window it falls back to the
 /// app's main window, then to a plain `NSAlert`. Shell owns the presentation; other modules call these.
@@ -130,7 +130,7 @@ struct DialogResult {
     var text: String = ""
 }
 
-/// T3 Code's AlertDialog: `max-w-lg` card centered over the backdrop; header `p-6 gap-2`
+/// The alert dialog: `max-w-lg` card centered over the backdrop; header `p-6 gap-2`
 /// (title, muted description, optional input), footer `border-t bg-muted/72 px-6 py-4` with the
 /// buttons right-aligned. Return = last button, Escape = cancel.
 @MainActor

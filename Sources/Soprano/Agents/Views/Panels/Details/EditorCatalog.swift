@@ -1,6 +1,6 @@
 import AppKit
 
-/// An "Open in …" target (T3 Code's `packages/contracts/src/editor.ts` list plus Xcode), found
+/// An "Open in …" target (common editors plus Xcode), found
 /// on this Mac by bundle identifier.
 struct EditorTarget: Equatable, Sendable {
     /// Settings id (`editor.app`): `cursor`, `vscode`, `zed`, `xcode`, `finder`, …
@@ -20,7 +20,7 @@ struct InstalledEditor: Equatable {
 }
 
 enum EditorCatalog {
-    /// T3 Code's order; Finder (the file manager) is always last.
+    /// Display order; Finder (the file manager) is always last.
     static let all: [EditorTarget] = [
         EditorTarget(id: "cursor", label: "Cursor", bundleIDs: ["com.todesktop.230313mzl4w4u92"]),
         EditorTarget(id: "trae", label: "Trae", bundleIDs: ["com.trae.app"]),

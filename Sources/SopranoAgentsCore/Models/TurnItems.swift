@@ -158,7 +158,7 @@ public enum ApprovalKind: String, Codable, Sendable, Hashable {
     }
 }
 
-/// Answers to an approval. Same vocabulary as T3 Code and the Codex app-server.
+/// Answers to an approval. Same vocabulary as the Codex app-server.
 public enum ApprovalDecision: String, Codable, Sendable, Hashable, CaseIterable {
     case accept
     case acceptForSession

@@ -9,7 +9,7 @@ struct FindHighlight: Hashable {
 }
 
 extension Palette {
-    /// Find matches (T3 Code's `::highlight(t3-thread-find)`), from the amber warning token.
+    /// Find matches, from the amber warning token.
     var findMatchBackground: NSColor { warning.timelineAlpha(isDark ? 0.42 : 0.32) }
     var findActiveBackground: NSColor { warning.timelineAlpha(isDark ? 0.85 : 0.75) }
 }
@@ -210,7 +210,7 @@ final class MarkdownTextView: NSTextView {
 
 // MARK: - Code block
 
-/// T3 Code's `MarkdownCodeBlock`: rounded 8, `bg-secondary` (dark `input/32`), header with the
+/// A Markdown code block: rounded 8, `bg-secondary` (dark `input/32`), header with the
 /// language in mono 11 and a Copy button, code in SF Mono 13 with syntax colors.
 final class CodeBlockView: PaletteView {
     static let headerHeight: CGFloat = 30
@@ -281,7 +281,7 @@ final class CodeBlockView: PaletteView {
 
 // MARK: - Table
 
-/// GFM table with row separators only (T3 Code's diagnostics-style tables), cells wrap.
+/// GFM table with row separators only (diagnostics-style), cells wrap.
 final class MarkdownTableView: PaletteView {
     private var table = MarkdownTableRendering(alignments: [], header: [], rows: [])
     private var cellViews: [MarkdownTextView] = []

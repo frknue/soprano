@@ -10,7 +10,7 @@ struct CommitDialogResult: Equatable {
     var featureBranch: Bool
 }
 
-/// T3 Code's "Commit changes" dialog (`GitActionsControl.tsx`), shown as a child window over the
+/// The "Commit changes" dialog, shown as a child window over the
 /// main window with a dimmed backdrop: Branch, Files (Edit toggles checkboxes), "Commit message
 /// (optional)", and Cancel / Commit on new branch / Commit.
 @MainActor

@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The sidebar's project filter (T3 Code's project scope combobox): a child window under the
+/// The sidebar's project filter (a project scope combobox): a child window under the
 /// search row with "Search projects...", "All projects" and one row per project. Click selects
 /// one project and closes; Shift-click toggles a project and stays open. Right-click a project
 /// for "Remove project".

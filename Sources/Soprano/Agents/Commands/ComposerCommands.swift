@@ -4,7 +4,7 @@ import SopranoAgentsCore
 /// Composer module: model picker, effort, permissions, workspace, branch, send alternate, stop.
 @MainActor
 enum ComposerCommands {
-    /// T3 Code's `!terminalFocus`.
+    /// `!terminalFocus`.
     private static let notTerminal = FocusRegion.outsideTerminal
 
     private static func composer(_ context: CommandContext) -> ComposerViewController? {

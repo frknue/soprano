@@ -15,7 +15,7 @@ struct SettingsTests {
         let resolved = try SettingsResolver.resolve(text: """
         // comment
         {
-          "theme": "t3-dark",
+          "theme": "folio-ink",
           "agents": { "defaultProvider": "claude", "defaultModel": "claude-sonnet-5", "defaultRuntimeMode": "approval-required" },
           "providers": { "ompPath": "~/.bun/bin/omp", "codexPath": "/opt/homebrew/bin/codex", "claudePath": "~/bin/claude" },
           "textGeneration": { "provider": "claude", "model": "claude-haiku-5-5", "titles": false },
@@ -28,7 +28,7 @@ struct SettingsTests {
         """)
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var expected = AppSettings()
-        expected.theme = "t3-dark"
+        expected.theme = "folio-ink"
         expected.defaultProvider = .claude
         expected.defaultModel = "claude-sonnet-5"
         expected.defaultRuntimeMode = .approvalRequired
@@ -233,16 +233,19 @@ struct SettingsTests {
         #expect(center.issues.first?.message.hasPrefix("Could not update") == true)
     }
 
-    @Test func theThemeSettingAcceptsT3SopranoAndSopranoThemeIdsAndWarnsOnOthers() throws {
-        for id in ["t3", "t3-light", "t3-dark", "soprano", "folio"] + AppTheme.options.map(\.id) {
+    @Test func theThemeSettingAcceptsSopranoAndSopranoThemeIdsAndWarnsOnOthers() throws {
+        for id in ["soprano", "folio"] + AppTheme.options.map(\.id) {
             let resolved = try SettingsResolver.resolve(text: #"{ "theme": "\#(id)" }"#)
             #expect(resolved.issues.isEmpty, "\(id)")
             #expect(resolved.settings.theme == id)
         }
-        let unknown = try SettingsResolver.resolve(text: #"{ "theme": "mission-control" }"#)
-        #expect(unknown.settings.theme == "t3")
-        #expect(unknown.issues.count == 1)
-        #expect(unknown.issues.first?.message.contains("t3, t3-light, t3-dark, soprano") == true)
+        // Unknown ids fall back to following Soprano, with a warning.
+        for id in ["mission-control", "vaporwave"] {
+            let unknown = try SettingsResolver.resolve(text: #"{ "theme": "\#(id)" }"#)
+            #expect(unknown.settings.theme == "soprano")
+            #expect(unknown.issues.count == 1)
+            #expect(unknown.issues.first?.message.contains("Known themes: soprano, folio, folio-paper") == true)
+        }
     }
 
     @Test func followingSopranoResolvesItsThemeAndAppearanceWithFolioFallbacks() {
@@ -258,10 +261,10 @@ struct SettingsTests {
 
     @Test func theSettingsScreenOffersEveryAcceptedThemeId() throws {
         let values = SettingsController.themeOptions().map(\.value)
-        #expect(values.prefix(4) == ["t3", "t3-light", "t3-dark", "soprano"])
+        #expect(values.prefix(2) == ["soprano", "folio"])
         for value in values {
             #expect(try SettingsResolver.resolve(text: #"{ "theme": "\#(value)" }"#).issues.isEmpty, "\(value)")
         }
-        #expect(Set(values) == Set(PaletteCenter.t3ThemeIDs + ["soprano"] + AppTheme.options.map(\.id)))
+        #expect(Set(values) == Set(["soprano"] + AppTheme.options.map(\.id)))
     }
 }

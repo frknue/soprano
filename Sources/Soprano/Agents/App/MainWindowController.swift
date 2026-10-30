@@ -1,8 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The app window: hidden-inset title bar (traffic lights over the sidebar like T3 Code's
-/// desktop shell), full-size content, the workspace as content.
+/// The app window: hidden-inset title bar (traffic lights over the sidebar), full-size content, the workspace as content.
 final class MainWindow: NSWindow {
     /// Draw as key even when offscreen (snapshot harness) so focus marks render.
     var rendersAsKey = false

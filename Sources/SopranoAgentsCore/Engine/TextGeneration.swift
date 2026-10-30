@@ -1,7 +1,7 @@
 import Foundation
 
-/// T3 Code's text-generation prompts (titles, branch names, commit messages, PR text) and the
-/// sanitizers applied to what the model returns (`docs/t3code-spec.md` §8.6, §9).
+/// Text-generation prompts (titles, branch names, commit messages, PR text) and the
+/// sanitizers applied to what the model returns.
 enum TextGeneration {
     // MARK: Shared helpers
 

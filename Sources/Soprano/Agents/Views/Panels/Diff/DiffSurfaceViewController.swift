@@ -14,8 +14,8 @@ enum DiffSurfaceMessage: Equatable {
     }
 }
 
-/// View options of the diff surface (T3 Code's defaults: stacked, wrapped, whitespace ignored,
-/// file tree closed). App-wide for the session, like T3 Code's client settings.
+/// View options of the diff surface (defaults: stacked, wrapped, whitespace ignored,
+/// file tree closed). App-wide for the session.
 @MainActor
 struct DiffViewOptions {
     var layout: DiffLayout = .unified
@@ -26,7 +26,7 @@ struct DiffViewOptions {
     static var current = DiffViewOptions()
 }
 
-/// The Diff surface of the right panel (`DiffPanel.tsx`): scope menu and toolbar on top, the
+/// The Diff surface of the right panel: scope menu and toolbar on top, the
 /// files as collapsible sections with sticky headers in a virtualized list, the file tree on
 /// the right.
 @MainActor
@@ -844,7 +844,7 @@ final class DiffTableView: NSTableView {
     }
 }
 
-/// T3 Code's `Button size="xs" variant="secondary"` scope trigger: label and a chevron.
+/// The small secondary scope trigger: label and a chevron.
 final class DiffScopeButton: InteractiveView {
     private let label = NSTextField.label(size: Typography.smallSize, weight: .medium)
     private let chevron = NSImageView()
@@ -888,14 +888,14 @@ final class DiffScopeButton: InteractiveView {
 
     override func mouseDown(with event: NSEvent) {
         super.mouseDown(with: event)
-        // Menus open on press, like T3 Code's dropdown triggers.
+        // Menus open on press, like dropdown triggers.
         onClick?()
     }
 
     override func mouseUp(with event: NSEvent) {}
 }
 
-/// T3 Code's segmented "Diff layout" toggle group: Stacked | Split.
+/// The segmented "Diff layout" toggle group: Stacked | Split.
 final class DiffLayoutToggle: PaletteView {
     var onChange: ((DiffLayout) -> Void)?
     var layout: DiffLayout = .unified {

@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Row geometry of the sidebar list (`Sidebar.tsx` / `SidebarThreadRow.tsx`): cards are
+/// Row geometry of the sidebar list: cards are
 /// `li py-0.5` around a 78 pt surface, slim rows 36 pt, shelf headers 32 pt, all `gap-px`.
 enum SidebarLayout {
     /// `--sidebar-content-inset`: list padding left and right.

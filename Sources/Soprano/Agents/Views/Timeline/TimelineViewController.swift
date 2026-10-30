@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// Timeline slice: the selected thread's messages, work groups and cards in the centered chat
-/// lane (T3 Code's `MessagesTimeline`). Owns what is expanded, find in thread, and the
+/// lane. Owns what is expanded, find in thread, and the
 /// "Working for" clock; rows ask it for every action through `TimelineRowDelegate`.
 @MainActor
 final class TimelineViewController: NSViewController, FocusRegionController, TimelineRowDelegate {
@@ -171,7 +171,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
         let bounds = view.bounds
         let pillSize = jumpPill.pillSize
         jumpPill.frame = NSRect(x: floor((bounds.width - pillSize.width) / 2), y: bounds.height - bottomInset - pillSize.height + 6, width: pillSize.width, height: pillSize.height)
-        // Top right like T3 Code; left of the Thread details card when it shows.
+        // Top right; left of the Thread details card when it shows.
         let detailsOffset: CGFloat = state.isThreadDetailsVisible ? Metrics.threadDetailsWidth + 12 : 0
         let width = min(ThreadFindBar.width, bounds.width - 24)
         findBar.frame = NSRect(x: bounds.width - 12 - detailsOffset - width, y: 12, width: width, height: ThreadFindBar.height)

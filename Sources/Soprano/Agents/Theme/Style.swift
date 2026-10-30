@@ -1,6 +1,6 @@
 import AppKit
 
-/// Fonts by T3 Code's Tailwind size scale. The UI font is the system font (T3 Code's
+/// Fonts by a Tailwind-style size scale. The UI font is the system font (the
 /// `-apple-system` stack); code is SF Mono.
 enum Typography {
     /// `text-sm` 14 pt: titles, body, assistant prose.
@@ -29,7 +29,7 @@ enum Typography {
     }
 }
 
-/// Geometry from T3 Code (`index.css` tokens, component classes). Points equal CSS px at the
+/// Geometry tokens, expressed in Tailwind/CSS terms. Points equal CSS px at the
 /// default 16 px root.
 enum Metrics {
     static let topbarHeight: CGFloat = 52
@@ -73,7 +73,7 @@ enum Radius {
     static let xxl: CGFloat = 16
 }
 
-/// Motion: T3 Code's popups fade/scale in 150–200 ms; panel width animation is off by default.
+/// Motion: popups fade/scale in 150–200 ms; panel width animation is off by default.
 enum Motion {
     static let fade: TimeInterval = 0.15
 
@@ -82,7 +82,7 @@ enum Motion {
     }
 }
 
-/// SF Symbols standing in for T3 Code's lucide icons, named by the lucide original.
+/// SF Symbols for the app's icons, named after the matching lucide icon.
 enum Icon {
     static let squarePen = "square.and.pencil"           // New thread
     static let folderPlus = "folder.badge.plus"          // Add project

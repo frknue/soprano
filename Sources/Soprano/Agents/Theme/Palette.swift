@@ -1,11 +1,9 @@
 import AppKit
 
-/// Color tokens of the app, named after T3 Code's CSS variables (`apps/web/src/index.css`).
-/// Every view colors itself only from the current `Palette`.
-///
-/// The default theme `t3` is T3 Code's own zinc/black palette with its blue primary, following
-/// macOS light/dark. Any Soprano theme id (`soprano`, `folio`, …) maps Soprano's `ThemeColors`
-/// onto the same tokens, so the layout stays T3 Code while the colors join the Soprano family.
+/// Color tokens of the app. Every view colors itself only from the current `Palette`, which is
+/// always derived from a Soprano theme (`Palette(soprano:)`): `theme: "soprano"` follows
+/// Soprano's own theme and appearance, any other value is a Soprano theme id (`folio` follows
+/// macOS light/dark, `folio-paper`, `folio-ink`, `nord`, …).
 struct Palette: Equatable {
     var isDark: Bool
 
@@ -37,7 +35,7 @@ struct Palette: Equatable {
     var messageSurface: NSColor
     var messageForeground: NSColor
 
-    // Sidebar (T3 Code's `[data-app-sidebar]` overrides)
+    // Sidebar
     var sidebar: NSColor
     var sidebarForeground: NSColor
     var sidebarMutedForeground: NSColor
@@ -74,6 +72,11 @@ struct Palette: Equatable {
     var terminalForeground: NSColor
     var terminalCursor: NSColor
     var terminalSelection: NSColor
+    /// The 16 ANSI colors (black … bright white) of the Soprano theme's terminal palette.
+    var terminalANSI: [NSColor]
+
+    /// Project monogram tints, picked per project name (`ProjectIdentity.colorIndex`).
+    var projectIconColors: [NSColor]
 
     var appearance: NSAppearance {
         NSAppearance(named: isDark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
@@ -105,132 +108,17 @@ private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
     )
 }
 
-private func white(_ alpha: CGFloat) -> NSColor { NSColor(srgbRed: 1, green: 1, blue: 1, alpha: alpha) }
 
 extension Palette {
-    /// Claude's mark (`fill-[#d97757]` in T3 Code's `ClaudeAI` icon), same in light and dark.
+    /// Claude's brand orange for its provider mark, same in light and dark.
     var claudeBrand: NSColor { hex(0xd97757) }
-
-    /// T3 Code's project monogram colors (`projectIconColors.ts`: `text-<color>-600 dark:text-<color>-400`),
-    /// in its order: gray, red, orange, amber, yellow, lime, green, emerald, teal, cyan, sky, blue,
-    /// indigo, violet, purple, fuchsia, pink, rose.
-    var projectIconColors: [NSColor] {
-        let light: [UInt32] = [
-            0x4b5563, 0xdc2626, 0xea580c, 0xd97706, 0xca8a04, 0x65a30d, 0x16a34a, 0x059669, 0x0d9488,
-            0x0891b2, 0x0284c7, 0x2563eb, 0x4f46e5, 0x7c3aed, 0x9333ea, 0xc026d3, 0xdb2777, 0xe11d48,
-        ]
-        let dark: [UInt32] = [
-            0x9ca3af, 0xf87171, 0xfb923c, 0xfbbf24, 0xfacc15, 0xa3e635, 0x4ade80, 0x34d399, 0x2dd4bf,
-            0x22d3ee, 0x38bdf8, 0x60a5fa, 0x818cf8, 0xa78bfa, 0xc084fc, 0xe879f9, 0xf472b6, 0xfb7185,
-        ]
-        return (isDark ? dark : light).map { hex($0) }
-    }
 }
 
 extension Palette {
-    /// T3 Code light (`:root`). Tailwind v4 oklch values converted to sRGB.
-    static let t3Light = Palette(
-        isDark: false,
-        background: hex(0xfcfcfc),            // zinc-25
-        foreground: hex(0x18181b),            // zinc-900
-        card: hex(0xffffff),
-        popover: hex(0xffffff),
-        secondary: hex(0xfafafa),             // zinc-50
-        muted: hex(0xfafafa),
-        accent: hex(0xf4f4f5),                // zinc-100
-        border: hex(0xe4e4e7),                // zinc-200
-        input: hex(0xd4d4d8),                 // zinc-300
-        mutedForeground: hex(0x71717b),       // zinc-500
-        secondaryLabel: hex(0x71717b),
-        placeholder: hex(0x71717b),
-        primary: hex(0x1b4ed8),               // oklch(0.488 0.217 264)
-        primaryForeground: hex(0xffffff),
-        messageSurface: hex(0xebebed),        // zinc-200 55% + zinc-100
-        messageForeground: hex(0x18181b),
-        sidebar: hex(0xfafafa),
-        sidebarForeground: hex(0x18181b),
-        sidebarMutedForeground: hex(0x71717b),
-        sidebarRowHover: hex(0xfcfcfc),
-        sidebarRowActive: hex(0xffffff),
-        sidebarRowSelected: hex(0xffffff),
-        sidebarBorder: hex(0xe4e4e7),
-        error: hex(0xfb2c36),                 // red-500
-        errorForeground: hex(0xc10007),       // red-700
-        warning: hex(0xfe9a00),               // amber-500
-        warningForeground: hex(0xbb4d00),     // amber-700
-        success: hex(0x00bc7d),               // emerald-500
-        successForeground: hex(0x007a55),     // emerald-700
-        info: hex(0x2b7fff),                  // blue-500
-        infoForeground: hex(0x1447e6),        // blue-700
-        inputForeground: hex(0x4f39f6),       // indigo-600
-        mergedForeground: hex(0x7f22fe),      // violet-600
-        diffAdditionForeground: hex(0x007a55),
-        diffDeletionForeground: hex(0xc10007),
-        diffAdditionBackground: hex(0x00bc7d, 0.10),
-        diffDeletionBackground: hex(0xfb2c36, 0.08),
-        diffAdditionWord: hex(0x00bc7d, 0.25),
-        diffDeletionWord: hex(0xfb2c36, 0.20),
-        codeBackground: hex(0xfefefe),
-        terminalBackground: hex(0xfcfcfc),
-        terminalForeground: hex(0x18181b),
-        terminalCursor: hex(0x26384e),
-        terminalSelection: hex(0x253f63, 0.20)
-    )
-
-    /// T3 Code dark (`@variant dark`): pure black canvas, neutral-950 cards.
-    static let t3Dark = Palette(
-        isDark: true,
-        background: hex(0x000000),
-        foreground: hex(0xf5f5f5),            // neutral-100
-        card: hex(0x111111),                  // neutral-950 97% + white
-        popover: hex(0x111111),
-        secondary: white(0.03),
-        muted: white(0.03),
-        accent: white(0.04),
-        border: white(0.08),
-        input: white(0.11),
-        mutedForeground: hex(0xa1a1a1),       // neutral-400
-        secondaryLabel: hex(0x8f8f8f),
-        placeholder: hex(0xa1a1a1),
-        primary: hex(0x346bf1),               // oklch(0.571 0.21 264)
-        primaryForeground: hex(0xffffff),
-        messageSurface: hex(0x1e1e1e),        // neutral-950 92% + white
-        messageForeground: hex(0xf5f5f5),
-        sidebar: hex(0x000000),
-        sidebarForeground: hex(0xf1f3f7),
-        sidebarMutedForeground: hex(0xa3a3a3),
-        sidebarRowHover: hex(0xf1f3f7, 0.08),
-        sidebarRowActive: hex(0xf1f3f7, 0.11),
-        sidebarRowSelected: hex(0xf1f3f7, 0.07),
-        sidebarBorder: white(0.08),
-        error: hex(0xfb414a),                 // red-500 90% + white
-        errorForeground: hex(0xff6467),       // red-400
-        warning: hex(0xfe9a00),
-        warningForeground: hex(0xffb900),     // amber-400
-        success: hex(0x00bc7d),
-        successForeground: hex(0x00d492),     // emerald-400
-        info: hex(0x2b7fff),
-        infoForeground: hex(0x51a2ff),        // blue-400
-        inputForeground: hex(0xa3b3ff),       // indigo-300
-        mergedForeground: hex(0xc4b4ff),      // violet-300
-        diffAdditionForeground: hex(0x00d492),
-        diffDeletionForeground: hex(0xff6467),
-        diffAdditionBackground: hex(0x00bc7d, 0.12),
-        diffDeletionBackground: hex(0xfb2c36, 0.12),
-        diffAdditionWord: hex(0x00bc7d, 0.28),
-        diffDeletionWord: hex(0xfb2c36, 0.28),
-        codeBackground: hex(0x0f0f0f),
-        terminalBackground: hex(0x000000),
-        terminalForeground: hex(0xf5f5f5),
-        terminalCursor: hex(0xb4cbff),
-        terminalSelection: hex(0xb4cbff, 0.25)
-    )
-
-    static func t3(dark: Bool) -> Palette { dark ? .t3Dark : .t3Light }
-
-    /// Maps a Soprano theme onto the T3 Code tokens.
+    /// Maps a Soprano theme onto the app's tokens.
     init(soprano theme: AppTheme) {
         let colors = theme.colors
+        let terminal = theme.terminalColors
         let dark = theme.appearance == .dark
         self.init(
             isDark: dark,
@@ -274,32 +162,35 @@ extension Palette {
             diffAdditionWord: colors.diffAddWord,
             diffDeletionWord: colors.diffDeleteWord,
             codeBackground: colors.bgPanel,
-            terminalBackground: colors.bgBase,
-            terminalForeground: colors.textPrimary,
-            terminalCursor: colors.accent,
-            terminalSelection: colors.selection
+            terminalBackground: terminal.background,
+            terminalForeground: terminal.foreground,
+            terminalCursor: terminal.cursor,
+            terminalSelection: terminal.selectionBackground,
+            terminalANSI: [
+                terminal.black, terminal.red, terminal.green, terminal.yellow,
+                terminal.blue, terminal.magenta, terminal.cyan, terminal.white,
+                terminal.brightBlack, terminal.brightRed, terminal.brightGreen, terminal.brightYellow,
+                terminal.brightBlue, terminal.brightMagenta, terminal.brightCyan, terminal.brightWhite,
+            ],
+            projectIconColors: [colors.blue, colors.success, colors.yellow, colors.cyan, colors.accent, colors.danger, colors.gray]
         )
     }
 }
 
 /// The live palette. Views read `PaletteCenter.shared.palette` when they build and re-color
-/// in their observer.
+/// in their observer. It follows `ThemeCenter` (the `theme` setting, Soprano's own theme for
+/// "soprano") and the snapshot harness's forced appearance.
 @MainActor
 final class PaletteCenter {
     static let shared = PaletteCenter()
 
-    /// Theme ids that select T3 Code's own palette.
-    nonisolated static let t3ThemeIDs = ["t3", "t3-light", "t3-dark"]
-
-    private(set) var palette: Palette = .t3Light
-    private(set) var setting = "t3"
-    /// Forced appearance (snapshot `--appearance`); wins over macOS.
+    private(set) var palette = Palette(soprano: ThemeCenter.shared.theme)
+    /// Forced appearance (snapshot `--appearance`); wins over macOS and Soprano.
     var forcedDark: Bool? {
         didSet { resolve() }
     }
 
     private let observers = ObserverList<Palette>()
-    private var appearanceObservation: NSKeyValueObservation?
 
     init() {
         ThemeCenter.shared.addObserver(self) { [weak self] _ in
@@ -311,39 +202,20 @@ final class PaletteCenter {
         observers.add(owner, handler)
     }
 
-    /// Applies the `theme` setting: a T3 id, "soprano", or any Soprano theme id.
+    /// Applies the `theme` setting: "soprano" or a Soprano theme id.
     func apply(setting: String) {
-        self.setting = setting
-        if !Self.t3ThemeIDs.contains(setting) {
-            ThemeCenter.shared.apply(setting: setting)
-        }
+        ThemeCenter.shared.apply(setting: setting)
         resolve()
     }
 
-    /// Follows macOS light/dark changes. Called once at launch; snapshots and tests never do.
-    func startFollowingSystemAppearance() {
-        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
-            Task { @MainActor [weak self] in self?.resolve() }
-        }
-    }
-
-    private func systemIsDark() -> Bool {
-        let appearance = NSApp?.effectiveAppearance ?? NSAppearance.currentDrawing()
-        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    }
-
     private func resolve() {
-        let next: Palette
-        switch setting {
-        case "t3-light": next = .t3Light
-        case "t3-dark": next = .t3Dark
-        case "t3": next = .t3(dark: forcedDark ?? systemIsDark())
-        default:
-            if let forcedDark {
-                ThemeCenter.shared.forcedThemeID = AppTheme.theme(for: ThemeCenter.shared.theme.id, appearance: forcedDark ? .dark : .light).id
-            }
-            next = Palette(soprano: ThemeCenter.shared.theme)
+        if let forcedDark {
+            // Folio has a light and a dark palette; every other theme has one appearance.
+            let current = ThemeCenter.shared.theme.id
+            let isFolio = current == AppTheme.folioPaper.id || current == AppTheme.folioInk.id
+            ThemeCenter.shared.forcedThemeID = isFolio ? (forcedDark ? AppTheme.folioInk : AppTheme.folioPaper).id : current
         }
+        let next = Palette(soprano: ThemeCenter.shared.theme)
         guard next != palette else { return }
         palette = next
         observers.notify(next)

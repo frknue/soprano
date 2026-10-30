@@ -3,7 +3,7 @@ import SopranoAgentsCore
 
 // MARK: - Shimmer
 
-/// T3 Code's `live-tool-shine`: the label in `secondary-label` with a 4.5rem window of
+/// Live tool shine: the label in `secondary-label` with a 4.5rem window of
 /// `foreground` text sweeping across it every 2.2 s. The window's resting frame covers the whole
 /// label, so without the animation (Reduce Motion, offscreen renders) the label simply shows in
 /// the highlight color.
@@ -95,7 +95,7 @@ final class ShimmerLabel: NSView {
 
 // MARK: - Work log line
 
-/// T3 Code's `WorkLogLine`: a 24 pt line with a 16 pt icon in a 24 pt column, the label
+/// A work-log line: a 24 pt line with a 16 pt icon in a 24 pt column, the label
 /// (`secondary-label`, truncating), an optional detail, then trailing note / failure mark /
 /// hover timestamp / chevron.
 final class WorkLogLineView: NSView {
@@ -303,7 +303,7 @@ final class WorkingRowView: TimelineRowView {
         label.stringValue = "Working for \(Self.elapsed(since: startedAt, now: now))"
     }
 
-    /// "12s" under a minute, else "1m 12s" (T3 Code's `formatWorkingTimerNow`).
+    /// "12s" under a minute, else "1m 12s".
     static func elapsed(since start: Date, now: Date) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         return seconds < 60 ? "\(seconds)s" : DurationText.turn(Double(seconds))

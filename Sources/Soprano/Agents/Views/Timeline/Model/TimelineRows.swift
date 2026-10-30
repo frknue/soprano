@@ -91,7 +91,7 @@ struct PlanRowModel: Hashable, Sendable {
     var expanded: Bool
 
     var title: String { MarkdownDocument.firstHeading(in: markdown) ?? "Proposed plan" }
-    /// T3 Code collapses plans over 900 characters or 20 lines.
+    /// Plans collapse when over 900 characters or 20 lines.
     var canCollapse: Bool { markdown.count > 900 || markdown.split(separator: "\n", omittingEmptySubsequences: false).count > 20 }
 }
 
@@ -119,7 +119,7 @@ enum TimelineRowContent: Hashable, Sendable {
     case queued(UserMessage)
     case empty
 
-    /// Rows of the work log (T3 Code's `WorkLogBlock`): adjacent ones sit flush.
+    /// Rows of the work log: adjacent ones sit flush.
     var isWorkLog: Bool {
         switch self {
         case .workGroup, .workEntry, .liveWork, .thinking, .approval: true
@@ -132,11 +132,11 @@ enum TimelineRowContent: Hashable, Sendable {
 struct TimelineRow: Hashable, Identifiable, Sendable {
     var id: String
     var content: TimelineRowContent
-    /// Space under the row (T3 Code's per-kind `pb-*`).
+    /// Space under the row, per row kind.
     var bottomSpacing: CGFloat = 0
 }
 
-/// Thread → timeline rows (T3 Code's `deriveMessagesTimelineRows`, reduced to this app's turn model):
+/// Thread → timeline rows (from this app's turn model):
 ///
 /// - Each turn: the user message, then "Working for" while it runs, or a "Worked for …" fold when
 ///   it finished (closed by default; it hides everything but the answer and the cards).
@@ -366,7 +366,7 @@ enum TimelineBuilder {
 
     // MARK: - Spacing
 
-    /// T3 Code's row padding: user messages and cards 16, assistant prose 8 (16 under its meta
+    /// Row padding: user messages and cards 16, assistant prose 8 (16 under its meta
     /// row), folds 6, work-log rows 8 unless the next row continues the log (then flush; an
     /// expanded group's entries end with 4).
     private static func applySpacing(_ rows: inout [TimelineRow]) {

@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The diff's file tree (`DiffFileTree.tsx`): a "Files" header with the count, then directories
+/// The diff's file tree: a "Files" header with the count, then directories
 /// and files indented by depth; clicking a file reveals it in the diff.
 final class DiffFileTreeView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onSelectFile: ((Int) -> Void)?

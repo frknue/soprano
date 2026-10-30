@@ -203,7 +203,7 @@ struct SidebarModelTests {
     @Test func projectMonogramsFollowT3Code() {
         #expect(ProjectIdentity.monogram("app") == "AP")
         #expect(ProjectIdentity.monogram("soprano") == "SO")
-        #expect(ProjectIdentity.monogram("t3code") == "T3")
+        #expect(ProjectIdentity.monogram("s2agents") == "S2")
         #expect(ProjectIdentity.monogram("my project") == "MP")
         #expect(ProjectIdentity.monogram("  ") == "PR")
         #expect(ProjectIdentity.colorIndex("app") == ProjectIdentity.colorIndex("APP"))

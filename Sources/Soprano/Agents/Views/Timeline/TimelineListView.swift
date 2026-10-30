@@ -405,8 +405,7 @@ struct TimelineFindMatch: Hashable {
     var range: NSRange
 }
 
-/// Find in thread: searches the rendered text of messages and plans (what T3 Code marks
-/// `data-thread-find-text`), case- and diacritic-insensitive.
+/// Find in thread: searches the rendered text of messages and plans, case- and diacritic-insensitive.
 enum TimelineFind {
     /// Searchable units of a row, in order (one per rendered Markdown segment).
     @MainActor
@@ -439,7 +438,7 @@ enum TimelineFind {
         return result
     }
 
-    /// "2/5", "0/0" (T3 Code's `formatThreadFindCount`).
+    /// "2/5", "0/0".
     static func countLabel(index: Int, total: Int) -> String {
         total <= 0 ? "0/0" : "\(min(max(index, 0), total - 1) + 1)/\(total)"
     }

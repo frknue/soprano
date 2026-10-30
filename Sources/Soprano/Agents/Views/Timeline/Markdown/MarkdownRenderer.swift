@@ -12,7 +12,7 @@ extension NSAttributedString.Key {
 struct MarkdownStyle: Hashable {
     var fontSize: CGFloat = Typography.bodySize
     var lineHeightMultiple: CGFloat = 1.625
-    /// Text color as a fraction of `foreground` (T3 Code's `text-foreground/90`).
+    /// Text color as a fraction of `foreground`.
     var foregroundAlpha: CGFloat = 0.9
     /// User bubbles use `messageForeground`.
     var usesMessageForeground = false
@@ -72,7 +72,7 @@ final class MarkdownRendering {
     var plainText: String { pieces.map(\.segment.searchableText).filter { !$0.isEmpty }.joined(separator: "\n\n") }
 }
 
-/// Block model → attributed segments, colored from the palette (T3 Code's `.chat-markdown` CSS).
+/// Block model → attributed segments, colored from the palette.
 /// Results are cached per text and style; the cache empties when the palette changes.
 @MainActor
 enum MarkdownRenderer {

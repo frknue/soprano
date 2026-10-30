@@ -1,6 +1,6 @@
 import AppKit
 
-/// T3 Code's `ThreadFindBar`: a floating search field at the top right of the chat ("Find in
+/// The thread find bar: a floating search field at the top right of the chat ("Find in
 /// thread"), the match count, Previous match / Next match / Close find. Enter = next,
 /// Shift+Enter = previous, Esc closes.
 final class ThreadFindBar: PaletteView, NSTextFieldDelegate {
@@ -106,7 +106,7 @@ final class ThreadFindBar: PaletteView, NSTextFieldDelegate {
     }
 }
 
-/// T3 Code's `ScrollToEndButton`: a glass pill "⌄ Scroll to end" over the composer.
+/// The scroll-to-end button: a glass pill "⌄ Scroll to end" over the composer.
 final class JumpToLatestPill: InteractiveView {
     private let icon = TimelineIconView(symbol: Icon.chevronDown, size: 11)
     private let label = NSTextField.timelineLabel("Scroll to end", size: Typography.smallSize, weight: .medium)

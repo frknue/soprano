@@ -1,7 +1,7 @@
 import Foundation
 import Markdown
 
-/// Inline Markdown, reduced to what the chat renders (T3 Code's `ChatMarkdown`).
+/// Inline Markdown, reduced to what the chat renders.
 indirect enum MarkdownInline: Hashable, Sendable {
     case text(String)
     case emphasis([MarkdownInline])
@@ -50,8 +50,7 @@ indirect enum MarkdownBlock: Hashable, Sendable {
 /// Markdown text → block model, through swift-markdown (CommonMark + GFM tables, task lists,
 /// strikethrough). Pure; the renderer turns the model into attributed text and views.
 enum MarkdownDocument {
-    /// `lineBreaks` turns soft line breaks into hard ones (user messages keep their lines, like
-    /// T3 Code's `lineBreaks` prop).
+    /// `lineBreaks` turns soft line breaks into hard ones (user messages keep their lines).
     static func parse(_ text: String, lineBreaks: Bool = false) -> [MarkdownBlock] {
         let document = Document(parsing: text)
         return blocks(of: document.children, lineBreaks: lineBreaks)
@@ -73,7 +72,7 @@ enum MarkdownDocument {
         return result
     }
 
-    /// The first heading's text, else nil (T3 Code's `proposedPlanTitle`).
+    /// The first heading's text, else nil.
     static func firstHeading(in markdown: String) -> String? {
         for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.drop { $0 == " " }
@@ -89,7 +88,7 @@ enum MarkdownDocument {
     }
 
     /// The plan body without its leading title heading (and a "Summary" heading right after it),
-    /// like T3 Code's `stripDisplayedPlanMarkdown`.
+    ///.
     static func strippingTitle(_ markdown: String) -> String {
         var lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }

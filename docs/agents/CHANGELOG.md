@@ -13,8 +13,9 @@ All notable changes to Soprano Agents are documented here. The format follows
   inline; every model omp knows is in the model picker (search with several words, e.g.
   `opus openrouter`), with omp's thinking levels as Reasoning. Set `providers.ompPath` if `omp`
   is not on `PATH`.
-- Codex (`codex app-server`) and Claude Code (`claude -p` stream-json) threads in one app, with
-  T3 Code's look in light and dark (`theme`: `t3`, `t3-light`, `t3-dark`, `soprano` to follow Soprano, or a Soprano theme).
+- Codex (`codex app-server`) and Claude Code (`claude -p` stream-json) threads in one app, colored
+  by Soprano's themes in light and dark (`theme`: `soprano` to follow Soprano, or a Soprano theme
+  id; `folio` follows macOS). The terminal drawer uses the theme's terminal colors.
 - Thread inbox sidebar: search (titles, branches, messages), project filter, Add project, New
   thread (⌘N, ⇧⌘N, ⌃⌘N), Pinned and Active cards with live status pills (Working, Approval,
   Input, Failed, Done), Working and Settled shelves, inline rename (double-click or F2), thread

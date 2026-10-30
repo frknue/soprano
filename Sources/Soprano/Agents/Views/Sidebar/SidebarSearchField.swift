@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The sidebar's search field (`SidebarThreadHeader.tsx`): `h-8 rounded-md px-2 text-sm
+/// The sidebar's search field: `h-8 rounded-md px-2 text-sm
 /// font-medium`, search icon, placeholder "Search", clear button "Clear thread search".
 /// Hover and focus fill it with the row-hover color; focus adds an inset ring.
 final class SidebarSearchField: InteractiveView, NSTextFieldDelegate {

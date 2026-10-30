@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Composer symbols for T3 Code's lucide icons (kept with the composer; `Icon` holds the shared ones).
+/// Composer symbols (kept with the composer; `Icon` holds the shared ones).
 extension Icon {
     static let bot = "cpu"                                   // Build mode
     static let pencilRuler = "pencil.and.ruler"              // Plan mode
@@ -18,7 +18,7 @@ extension Icon {
     static let plus = "plus"
 }
 
-/// T3 Code's `ComposerControl`: a borderless chip in the composer footer (`sm`, h28, 14 medium,
+/// A borderless chip in the composer footer (`sm`, h28, 14 medium,
 /// foreground 80%, muted 16 pt icons) or the context strip (`xs`, h24, 12 regular).
 final class ComposerChip: InteractiveView {
     enum Size {
@@ -140,7 +140,7 @@ final class ComposerChip: InteractiveView {
     }
 }
 
-/// The round primary button: send (arrow up), steer, queue, or stop (T3 Code's `ComposerPrimaryActions`).
+/// The round primary button: send (arrow up), steer, queue, or stop.
 final class ComposerPrimaryButton: InteractiveView {
     private(set) var action: ComposerPrimaryAction = .sendDisabled
     private let symbolView = NSImageView()
@@ -275,7 +275,7 @@ final class ComposerPillButton: InteractiveView {
     }
 }
 
-/// A small switch (T3 Code's menu checkbox `variant="switch"`): primary track when on.
+/// A small switch for menus: primary track when on.
 final class ComposerSwitch: PaletteView {
     var isOn = false {
         didSet { applyPalette(palette) }
@@ -340,7 +340,7 @@ final class ComposerRadioMark: PaletteView {
     }
 }
 
-/// T3 Code's `Badge variant="outline" size="sm"` ("Default").
+/// A small outlined badge ("Default").
 final class ComposerBadge: PaletteView {
     private let label = NSTextField.label("", size: 10, weight: .medium)
 

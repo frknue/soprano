@@ -1,6 +1,6 @@
 import AppKit
 
-/// T3 Code's `Input`: a single-line field in a rounded `border-input` box (`bg-background`,
+/// Input: a single-line field in a rounded `border-input` box (`bg-background`,
 /// dark `bg-input/32`). `onCommit` runs on Return and when editing ends with a changed value.
 final class InputField: PaletteView, NSTextFieldDelegate {
     let field = NSTextField()
@@ -93,7 +93,7 @@ final class InputField: PaletteView, NSTextFieldDelegate {
     }
 }
 
-/// T3 Code's `Switch`: 30×18 track (`bg-primary` on, `bg-input` off) with a 14 pt thumb.
+/// Switch: 30×18 track (`bg-primary` on, `bg-input` off) with a 14 pt thumb.
 final class SwitchControl: InteractiveView {
     private let thumb = CALayer()
     var onToggle: ((Bool) -> Void)?
@@ -149,7 +149,7 @@ struct SelectOption: Equatable {
     var separatorBefore = false
 }
 
-/// T3 Code's `Select` trigger (`size="sm"`, outline look): the selected label and an up/down
+/// Select trigger (`size="sm"`, outline look): the selected label and an up/down
 /// chevron; a click opens a native menu with the options, the selected one checked.
 final class SelectButton: InteractiveView {
     private let label = NSTextField.label("", size: Typography.bodySize)

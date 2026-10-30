@@ -3,7 +3,7 @@ import Foundation
 /// Command lines and stdin messages for Claude Code's stream-json mode (Claude Code 2.1.314).
 /// Pure functions, so the wire format is testable without a process.
 public enum ClaudeProtocol {
-    /// Denial text for `ExitPlanMode` (T3 Code's): the plan is shown as a plan item instead.
+    /// Denial text for `ExitPlanMode`: the plan is shown as a plan item instead.
     public static let exitPlanModeDenial = "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn."
     /// Effort values `--effort` accepts; `ultrathink` is a prompt prefix instead.
     static let cliEfforts: Set<String> = ["low", "medium", "high", "xhigh", "max"]
@@ -198,7 +198,7 @@ public enum ClaudeProtocol {
     // MARK: - Account
 
     /// `claude auth status` JSON → (signed in, label). "max" → "Claude Max Subscription",
-    /// API keys → "Claude API Key" (T3 Code's labels).
+    /// API keys → "Claude API Key".
     public static func account(fromAuthStatus status: JSONValue) -> (authenticated: Bool, label: String?) {
         guard status["loggedIn"]?.boolValue != false else { return (false, nil) }
         let method = status["authMethod"]?.stringValue?.lowercased().filter { $0.isLetter } ?? ""

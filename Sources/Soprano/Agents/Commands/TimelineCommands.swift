@@ -4,7 +4,7 @@ import SopranoAgentsCore
 /// Timeline module: find in thread, jump to latest, expand/collapse the work log.
 @MainActor
 enum TimelineCommands {
-    /// T3 Code's `!terminalFocus`.
+    /// `!terminalFocus`.
     private static let notTerminal = FocusRegion.outsideTerminal
 
     static var all: [AppCommand] {

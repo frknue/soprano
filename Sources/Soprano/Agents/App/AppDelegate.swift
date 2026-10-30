@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = SettingsCenter.shared
         settings.start()
         PaletteCenter.shared.apply(setting: settings.settings.theme)
-        PaletteCenter.shared.startFollowingSystemAppearance()
+        ThemeCenter.shared.startDrivingApplicationAppearance()
 
         AllCommands.registerAll()
         settings.reloadKeymap()

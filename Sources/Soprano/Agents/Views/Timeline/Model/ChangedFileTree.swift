@@ -1,7 +1,7 @@
 import Foundation
 import SopranoAgentsCore
 
-/// Folder/file tree of a turn's changed files (T3 Code's `buildTurnDiffTree`): folders first,
+/// Folder/file tree of a turn's changed files: folders first,
 /// then files, each sorted by name (numeric-aware, case-insensitive); single-child folder chains
 /// collapse into one row ("Sources/Auth"); folders carry the summed stats of their files.
 indirect enum ChangedFileNode: Hashable, Sendable {

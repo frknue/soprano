@@ -2,7 +2,7 @@ import Foundation
 
 /// Built-in model catalogs. Codex reports its live catalog through `model/list`; these lists are
 /// the fallback before the first probe and for Claude, whose CLI has no model listing. Ids and
-/// option sets follow T3 Code's bundled manifest (2026-10-28) and the Codex 0.166 catalog.
+/// option sets follow the Claude Code options as of 2026-10-28 and the Codex 0.166 catalog.
 public enum ProviderCatalog {
     public static func fallback(_ kind: ProviderKind) -> [ProviderModel] {
         switch kind {
@@ -12,7 +12,7 @@ public enum ProviderCatalog {
         }
     }
 
-    /// Effort labels shared by both providers (T3 Code's `CodexProvider.ts` labels).
+    /// Effort labels shared by both providers.
     public static func effortLabel(_ id: String) -> String {
         switch id {
         case "none": "None"
@@ -40,7 +40,7 @@ public enum ProviderCatalog {
 
     public static let fastModeOption = ModelOption(id: ModelOptionID.fastMode, label: "Fast Mode", kind: .boolean, defaultValue: "false")
 
-    /// "gpt-6.1-sol" → "GPT-6.1 Sol" (T3 Code's `formatCodexModelName`: uppercase a leading `gpt`,
+    /// "gpt-6.1-sol" → "GPT-6.1 Sol" (uppercase a leading `gpt`,
     /// capitalize each word after a dash, keep the version glued to the prefix).
     public static func codexDisplayName(_ slug: String) -> String {
         var parts = slug.split(separator: "-").map(String.init)

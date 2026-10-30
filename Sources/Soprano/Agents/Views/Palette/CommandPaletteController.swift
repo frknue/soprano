@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// T3 Code's command palette (⌘K): a 576 pt glass card near the top of the window over a dimmed
+/// The command palette (⌘K): a 576 pt glass card near the top of the window over a dimmed
 /// backdrop, a search field ("Search commands, projects, and threads..."), grouped results and a
 /// key-hint footer. ↑↓ move, ↩ runs, Esc closes (or leaves a submenu), ⌘1–9 pick a visible row.
 @MainActor
@@ -143,7 +143,7 @@ final class CommandPaletteController: NSObject, NSTextFieldDelegate {
             footer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
             footer.heightAnchor.constraint(equalToConstant: Self.footerHeight),
         ])
-        // T3 Code's viewport: `sm:py-[10vh]`.
+        // Top inset: 10% of the window height.
         maxTop.constant = max(16, (parent?.frame.height ?? 800) * 0.1)
         topConstraint = maxTop
     }

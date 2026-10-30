@@ -3,7 +3,7 @@ import Foundation
 /// Codex CLI driver: sessions on `codex app-server`, probing, and `codex exec` text generation.
 public struct CodexDriver: ProviderDriver {
     public let kind = ProviderKind.codex
-    /// Probe budget (T3 Code's `CODEX_AUTH_PROBE_TIMEOUT_MS`).
+    /// Auth probe budget.
     static let probeTimeout: TimeInterval = 20
     static let generationTimeout: TimeInterval = 180
 

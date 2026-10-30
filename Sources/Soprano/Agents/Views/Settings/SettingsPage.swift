@@ -24,7 +24,7 @@ enum SettingsPage: String, CaseIterable, Sendable {
         }
     }
 
-    /// SF Symbol for the navigation and the command palette (T3 Code's lucide icons).
+    /// SF Symbol for the navigation and the command palette.
     var icon: String {
         switch self {
         case .general: "gearshape"

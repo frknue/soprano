@@ -122,7 +122,7 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
     /// Own git worktree; nil = works in the project root.
     public var worktreePath: String?
 
-    // Inbox lifecycle (T3 Code's Pinned / Active / Settled / Archive).
+    // Inbox lifecycle (Pinned / Active / Settled / Archive).
     public var pinnedAt: Date?
     public var settledAt: Date?
     public var archivedAt: Date?

@@ -1,7 +1,7 @@
 import Foundation
 import SopranoAgentsCore
 
-/// SF Symbols of the timeline, named by T3 Code's lucide originals. Kept apart from the shared
+/// SF Symbols of the timeline. Kept apart from the shared
 /// `Icon` so the timeline's additions never collide with other regions'.
 enum TimelineIcon {
     static let workRead = "eye"
@@ -32,8 +32,7 @@ enum TimelineIcon {
     static let unfoldAll = "chevron.up.chevron.down"
 }
 
-/// One row of the work log, derived from a `TurnItem` (T3 Code's `WorkLogEntry` +
-/// `projectedWorkEntry`). Pure data; the timeline renders it.
+/// One row of the work log, derived from a `TurnItem`. Pure data; the timeline renders it.
 struct WorkLogEntry: Hashable, Identifiable, Sendable {
     enum Kind: Hashable, Sendable {
         case reasoning
@@ -92,14 +91,13 @@ struct WorkLogEntry: Hashable, Identifiable, Sendable {
         }
     }
 
-    /// Reasoning without text never shows (T3 Code's `workEntryIsVisibleInGroup`).
+    /// Reasoning without text never shows.
     var isVisible: Bool {
         kind != .reasoning || !(body ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 }
 
-/// Work-log presentation: entry labels, group summaries, live labels, thought lines
-/// (T3 Code's `work-log/presentation.ts`, `toolActivity.ts`, `session-logic.ts`).
+/// Work-log presentation: entry labels, group summaries, live labels, thought lines.
 enum WorkLog {
     /// The work-log entry for an item, nil for items the timeline shows as their own rows
     /// (assistant messages, plans, task lists, errors, notices).
@@ -195,7 +193,7 @@ enum WorkLog {
 
     // MARK: Summaries
 
-    /// "Read 3 files and ran 2 commands", "Thought", "Thought (×3)" (T3 Code's `summarizeToolGroup`).
+    /// "Read 3 files and ran 2 commands", "Thought", "Thought (×3)".
     static func summary(_ entries: [WorkLogEntry]) -> String {
         let tools = entries.filter(\.isToolLike)
         if !entries.isEmpty, tools.isEmpty {
@@ -264,7 +262,7 @@ enum WorkLog {
     }
 
     /// First sentence (or bold heading) of a reasoning summary, Markdown stripped, one line
-    /// (T3 Code's `liveThoughtLine`).
+    ///.
     static func thoughtLine(_ markdown: String) -> String {
         let trimmedStart = markdown.drop { $0 == " " || $0 == "\t" || $0 == "\n" }
         var heading: String?

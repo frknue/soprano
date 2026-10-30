@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Provider marks as T3 Code draws them (`components/Icons.tsx`: `OpenAI`, `ClaudeAI`), rendered
+/// Provider marks (OpenAI, Claude), rendered
 /// from the original SVG path data, plus omp's "π". Codex and omp are template images (tint with
 /// `contentTintColor`); Claude keeps its brand orange (`Palette.claudeBrand`).
 @MainActor

@@ -90,10 +90,9 @@ enum SettingsFile {
         // Soprano Agents settings. JSON with comments; saved changes apply immediately.
         // Unknown keys and bad values are ignored with a warning, never a crash.
         {
-          // "t3" is T3 Code's palette, following the macOS appearance ("t3-light" / "t3-dark" pin one).
           // "soprano" follows the theme and appearance of Soprano (~/.config/soprano/settings.json).
-          // Or pick a Soprano theme: \(themes)
-          "theme": "t3",
+          // Or pick a Soprano theme ("folio" follows the macOS appearance): \(themes)
+          "theme": "soprano",
 
           "agents": {
             // Provider new threads start with: "omp", "codex" or "claude".

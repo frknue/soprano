@@ -1,7 +1,7 @@
 import AppKit
 
-/// A modal surface over the main window, like T3 Code's dialogs, command palette and settings
-/// route modal: a borderless child window covering the parent with a dimmed backdrop
+/// A modal surface over the main window for dialogs, the command palette and settings
+/// modal: a borderless child window covering the parent with a dimmed backdrop
 /// (`dialog-backdrop`) and one card on it. Child windows (not sheets or `NSPopover`) so the
 /// snapshot harness renders them with the window.
 ///
@@ -100,7 +100,7 @@ final class OverlayWindow: NSWindow {
     }
 }
 
-/// T3 Code's `dialog-backdrop`: the window dimmed with the background at 60 % (dark 64 %).
+/// The dialog backdrop: the window dimmed with the background at 60 % (dark 64 %).
 /// Clicks outside the card land here.
 final class OverlayBackdropView: PaletteView {
     var onClick: (() -> Void)?

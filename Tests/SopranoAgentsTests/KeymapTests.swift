@@ -34,7 +34,7 @@ struct KeymapTests {
             ("thread.next", [], ["cmd+shift+]"]),
             ("thread.settle", notTerminal, ["cmd+shift+s"]),
             ("thread.pin", notTerminal, ["cmd+shift+p"]),
-            // F2 is no KeyChord (no function keys); the sidebar handles it directly, like T3 Code's
+            // F2 is no KeyChord (no function keys); the sidebar handles it directly with its
             // hard-coded F2 rename.
             ("thread.rename", [.sidebar], []),
             ("thread.archive", [], []),

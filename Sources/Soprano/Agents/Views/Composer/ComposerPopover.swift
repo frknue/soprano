@@ -24,7 +24,7 @@ class ComposerPopoverContent: PaletteView {
 }
 
 /// A floating surface of the composer: a borderless child window of the main window holding a
-/// T3 Code `dropdown-glass` card (r8, popover fill, 10% outline, menu shadow). It closes on
+/// glass dropdown card (r8, popover fill, 10% outline, menu shadow). It closes on
 /// Escape, on a click elsewhere, and when the composer closes it.
 @MainActor
 final class ComposerPopover {
@@ -232,7 +232,7 @@ private final class ComposerPopoverShadow: PaletteView {
     }
 }
 
-/// T3 Code's `ComboboxSearchInput`: magnifier, borderless 14 pt field, `border/70` underline.
+/// A combobox search input: magnifier, borderless 14 pt field, `border/70` underline.
 final class ComposerSearchField: PaletteView, NSTextFieldDelegate {
     let field = NSTextField()
     private let icon = NSImageView()

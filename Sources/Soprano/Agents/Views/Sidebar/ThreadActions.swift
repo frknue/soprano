@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// Thread actions shared by the sidebar, the chat header and the commands: selection, the
-/// thread action menu (T3 Code's `threadActionMenu.logic.ts`), delete and archive flows, copy.
+/// thread action menu, delete and archive flows, copy.
 @MainActor
 enum ThreadActions {
     /// Opens a thread. The sidebar marks every newly selected thread visited (clearing its
@@ -50,7 +50,7 @@ enum ThreadActions {
         leave(thread, state: state)
     }
 
-    /// Confirms (T3 Code's wording), then deletes.
+    /// Confirms, then deletes.
     static func delete(_ threadID: String, engine: AgentEngine, state: WorkspaceState, window: NSWindow?) {
         guard let thread = engine.thread(threadID) else { return }
         Task { @MainActor in
@@ -88,7 +88,7 @@ enum ThreadActions {
         pasteboard.setString(text, forType: .string)
     }
 
-    /// The thread action menu in T3 Code's order. `rename` starts the inline rename of whichever
+    /// The thread action menu, in display order. `rename` starts the inline rename of whichever
     /// surface opened the menu.
     static func menu(
         for threadID: String,

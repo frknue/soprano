@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// What the composer's round primary button does (T3 Code's `ComposerPrimaryActions`).
+/// What the composer's round primary button does.
 enum ComposerPrimaryAction: Equatable {
     /// Idle with text or attachments: start a turn (or decline a pending approval with feedback).
     case send
@@ -42,7 +42,7 @@ enum ComposerPrimaryAction: Equatable {
         }
     }
 
-    /// Tooltip and accessibility label (T3 Code's wording).
+    /// Tooltip and accessibility label.
     func tooltip(followUp: AppSettings.FollowUp) -> String {
         switch self {
         case .send, .sendDisabled: "Submit message"
@@ -178,7 +178,7 @@ struct ComposerHistory: Equatable {
     }
 }
 
-/// Branch picker trigger label (T3 Code's `BranchToolbar.logic.ts`).
+/// Branch picker trigger label.
 enum BranchLabel {
     static func trigger(branch: String?, newWorktree: Bool, isRemote: Bool = false) -> String {
         guard let branch, !branch.isEmpty else { return "Select ref" }
@@ -186,7 +186,7 @@ enum BranchLabel {
         return isRemote ? "From \(branch) (remote)" : "From \(branch)"
     }
 
-    /// Row badge, in T3 Code's priority: current → worktree → remote → default.
+    /// Row badge, by priority: current → worktree → remote → default.
     static func badge(for ref: GitBranchRef, projectPath: String?) -> String? {
         if ref.isCurrent { return "current" }
         if let worktree = ref.worktreePath, worktree != projectPath { return "worktree" }

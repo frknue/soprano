@@ -106,7 +106,7 @@ final class RowActionButton: InteractiveView {
     }
 }
 
-/// The project favicon stand-in: T3 Code's `ProjectMonogram` (two glyphs on a 14 % tint of the
+/// The project favicon stand-in: a project monogram (two glyphs on a 14 % tint of the
 /// project color, `rounded-[25%]`, mono 8.25 bold in a 16 pt tile).
 final class ProjectMonogramView: PaletteView {
     private var name: String?

@@ -70,10 +70,10 @@ enum SettingsResolver {
         }
 
         if let value = root["theme"] {
-            if let theme = value as? String, PaletteCenter.t3ThemeIDs.contains(theme) || theme == "soprano" || AppTheme.isKnownId(theme) {
+            if let theme = value as? String, theme == "soprano" || AppTheme.isKnownId(theme) {
                 result.settings.theme = theme
             } else {
-                let known = (PaletteCenter.t3ThemeIDs + ["soprano"] + AppTheme.options.map(\.id)).joined(separator: ", ")
+                let known = (["soprano"] + AppTheme.options.map(\.id)).joined(separator: ", ")
                 warn("Unknown theme \(describe(value)). Known themes: \(known).")
             }
         }

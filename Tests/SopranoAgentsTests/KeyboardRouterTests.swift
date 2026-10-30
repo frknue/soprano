@@ -49,7 +49,7 @@ struct KeyboardRouterTests {
         #expect(log.ran == ["timeline.next", "global.j"])
     }
 
-    /// T3 Code's `!terminalFocus`: with no region focused (after Esc in a search field, a click on
+    /// `!terminalFocus`: with no region focused (after Esc in a search field, a click on
     /// the window background) the shortcut still fires; only the terminal keeps it.
     @Test func aNotTerminalBindingFiresWithNoRegionFocusedButNotInTheTerminal() {
         let log = Log()

@@ -5,7 +5,7 @@ import SopranoAgentsCore
 /// delete, copy reference, add project, search, project filter.
 @MainActor
 enum SidebarCommands {
-    /// T3 Code's `!terminalFocus`.
+    /// `!terminalFocus`.
     private static let notTerminal = FocusRegion.outsideTerminal
 
     static var all: [AppCommand] {

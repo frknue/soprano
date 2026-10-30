@@ -1,6 +1,6 @@
 import AppKit
 
-/// The prompt editor: plain text at 14 pt with T3 Code's relaxed leading (1.625), at least two
+/// The prompt editor: plain text at 14 pt with relaxed leading (1.625), at least two
 /// lines + 8 pt, growing to 208 pt and then scrolling. Enter sends, Shift+Enter adds a newline,
 /// Up/Down in an empty editor walk the message history, Shift+Tab toggles plan mode, Escape
 /// closes open pickers. Pasted or dropped files and images become attachments.

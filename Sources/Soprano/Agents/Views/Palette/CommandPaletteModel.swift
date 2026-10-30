@@ -62,7 +62,7 @@ struct PaletteSource: Equatable {
     var settings: [PaletteEntry]
 }
 
-/// T3 Code's `CommandPalette.logic.ts`, reduced to this app's sources: empty query → Actions +
+/// Palette results over this app's sources: empty query → Actions +
 /// Recent Threads; a query → ranked Actions, Threads, Projects, Settings; `>` → actions only;
 /// the "New thread in..." submenu lists projects.
 enum PaletteSearch {
@@ -206,7 +206,7 @@ extension PaletteSource {
         return PaletteSource(actions: actions, threads: threads, projects: projects, settings: settings)
     }
 
-    /// Used recently: written in or opened, whichever is later (T3 Code's `threadRecentUse`).
+    /// Used recently: written in or opened, whichever is later.
     static func lastUse(_ thread: AgentThread) -> Date {
         max(thread.activityDate, thread.lastVisitedAt ?? .distantPast)
     }

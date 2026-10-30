@@ -161,7 +161,7 @@ public enum CodexProtocol {
         }
     }
 
-    /// T3 Code's `codexPlanLabel`.
+    /// Display label for a Codex plan type.
     public static func planLabel(_ planType: String?) -> String? {
         switch planType {
         case "free": "ChatGPT Free Subscription"

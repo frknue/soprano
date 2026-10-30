@@ -3,7 +3,7 @@ import SopranoAgentsCore
 
 // MARK: - Model picker
 
-/// T3 Code's model picker (`ModelPickerContent`): a 44 pt provider column and a searchable model
+/// The model picker: a 44 pt provider column and a searchable model
 /// list with the current model checked, the default badged, ⌘1–9 jumps and Enter to pick.
 final class ModelPickerContent: ComposerPopoverContent {
     private let selection: ModelSelection
@@ -279,7 +279,7 @@ private final class ProviderTile: InteractiveView {
 
 // MARK: - Traits menu
 
-/// T3 Code's traits menu: "Reasoning" radio list, a Fast Mode switch, and the Permissions
+/// The traits menu: "Reasoning" radio list, a Fast Mode switch, and the Permissions
 /// section (4-segment icon radio with the mode's name and description). The permissions chip
 /// opens the Permissions section alone.
 final class TraitsMenuContent: ComposerPopoverContent {
@@ -577,7 +577,7 @@ private final class PermissionSegment: InteractiveView {
 
 // MARK: - Branch picker
 
-/// T3 Code's `BranchPicker`: "Search refs...", refs with current/worktree/remote/default badges,
+/// The branch picker: "Search refs...", refs with current/worktree/remote/default badges,
 /// "No refs found.", and `Create new ref "<name>"` (shown disabled: drafts never create refs).
 final class BranchPickerContent: ComposerPopoverContent {
     private var branches: [GitBranchRef]?

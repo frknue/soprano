@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 import UserNotifications
 
-/// Why a thread wants the user (T3 Code's `threadNotifications.ts`).
+/// Why a thread wants the user.
 enum ThreadAlert: String, Equatable, Sendable {
     case completed
     case failed
@@ -36,7 +36,7 @@ protocol ThreadNotificationPosting: AnyObject {
     func post(threadID: String, alert: ThreadAlert, body: String, sound: Bool)
 }
 
-/// Posts T3 Code's thread notifications and keeps the Dock badge:
+/// Posts thread notifications and keeps the Dock badge:
 ///
 /// - When a thread's status turns into Done, Failed, Approval or Input while the app is not
 ///   active, it posts "Thread completed" / "Thread failed" / "Approval needed" / "Input needed"

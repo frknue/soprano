@@ -28,12 +28,7 @@ extension SettingsController {
     // MARK: General
 
     static func themeOptions() -> [SelectOption] {
-        var options = [
-            SelectOption(title: "T3", value: "t3"),
-            SelectOption(title: "T3 Light", value: "t3-light"),
-            SelectOption(title: "T3 Dark", value: "t3-dark"),
-            SelectOption(title: "Follow Soprano", value: "soprano"),
-        ]
+        var options = [SelectOption(title: "Follow Soprano", value: "soprano")]
         for (index, theme) in AppTheme.options.enumerated() {
             options.append(SelectOption(title: theme.name, value: theme.id, separatorBefore: index == 0))
         }
@@ -68,7 +63,7 @@ extension SettingsController {
         sections.append(form.section("Appearance", [
             form.row(
                 "Theme",
-                description: "T3 follows the macOS appearance; T3 Light and T3 Dark pin one. Follow Soprano uses Soprano's theme and appearance.",
+                description: "Follow Soprano uses Soprano's theme and appearance. Folio follows the macOS appearance; the other themes pin one.",
                 reset: reset(["theme"], isDefault: settings.theme == defaults.theme),
                 control: theme
             ),

@@ -1,14 +1,10 @@
 # Soprano Agents architecture
 
-Soprano Agents is a native macOS GUI for coding agents (Codex, Claude Code) in the Soprano
-family. It copies the feel and look of [T3 Code](https://github.com/pingdotgg/t3code): a thread
-inbox on the left, a centered chat lane with a floating composer, collapsible work logs, per-turn
-diffs from hidden git checkpoints, a terminal drawer and a right panel. Swift 6 + programmatic
-AppKit (no SwiftUI, no storyboards), SPM, macOS 14+. The app talks to the agent CLIs directly;
-there is no server process.
-
-The T3 Code reference spec (layout, tokens, strings, protocols) this app follows lives in
-`docs/t3code-spec.md`. When this document and the spec disagree, this document wins.
+Soprano Agents is a native macOS GUI for coding agents (omp, Codex, Claude Code) in the Soprano
+family, colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a
+floating composer, collapsible work logs, per-turn diffs from hidden git checkpoints, a terminal
+drawer and a right panel. Swift 6 + programmatic AppKit (no SwiftUI, no storyboards), SPM, macOS
+14+. The app talks to the agent CLIs directly; there is no server process.
 
 ## Toolchain
 
@@ -85,7 +81,8 @@ Engine behavior:
   ran on that provider; none → no provider call, its conversation already ends there), optional
   `restoreCheckpoint(ref(N-1))`, delete refs ≥ N, drop turns ≥ N, return turn N's user message.
 - Titles: first message → title seed (first 50 chars + "...") immediately, then
-  `textGenerationModel` via `ProviderDriver.generateJSON` with T3 Code's title prompt.
+  `textGenerationModel` via `ProviderDriver.generateJSON` with the title prompt in
+  `TextGeneration`.
 - New worktree: branch `<branchPrefix>/<8 hex>` from the base branch at
   `<worktreesDirectory>/<repo>/<branch with / → ->`, renamed in the background to a generated name
   (`<branchPrefix>/<fragment>`).
@@ -214,7 +211,8 @@ plan → `plan`; approval-required → `default`; auto-accept-edits → `acceptE
 full-access → `bypassPermissions`. Answers carry `toolUseID`; cancel denies with "User cancelled
 tool execution." and interrupts. `AskUserQuestion` arrives as `can_use_tool` and becomes a user
 input request (allow with `updatedInput {questions, answers}`; empty answers deny as dismissed);
-`ExitPlanMode` becomes a plan item and is denied with T3 Code's message. Messages: `system/init`
+`ExitPlanMode` becomes a plan item and is denied with a message telling Claude to wait for the
+user's decision. Messages: `system/init`
 (session id; sent after every user message), `stream_event` (`text_delta`, `thinking_delta`),
 `assistant` (text, thinking, tool_use), `user` (tool_result), `result` (turn end). Tool → item:
 Bash → command, Edit/MultiEdit/Write/NotebookEdit → fileChange, Read/Glob/Grep/LS → toolCall
@@ -247,7 +245,7 @@ counts) and `workingTreeDiff` stage into the same kind of scratch index, so untr
 and `.gitignore` is respected. `DiffParser.parse(_:)` turns a patch into `FileDiff`s for the right
 panel. Worktrees live at `<dir>/<repo>/<branch with / → ->` (names over 40 characters: 23 + `-` +
 16 hex of SHA-256), branched `--no-track` from the base, which is recorded as
-`branch.<b>.soprano-agents-merge-base` (the PR base). Commit/push/PR follows T3 Code's stacked
+`branch.<b>.soprano-agents-merge-base` (the PR base). Commit/push/PR is a stacked
 action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config); PRs via
 `gh pr create`; open PR lookup via `gh pr view --json` (4 s deadline, failures ignored).
 
@@ -290,7 +288,7 @@ widths and per-thread UI state stay in `UserDefaults`.
 The router is an `NSEvent` local monitor (Soprano's model): ⌃A prefix mode, scopes by
 `FocusRegion` (`sidebar`, `timeline`, `composer`, `terminal`, `rightPanel`, `settings`), chords
 without ⌘/⌃ never fire in text input, ⌥ chords pass through (German layouts), a region-scoped
-binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
+binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 
 ### Default bindings
 
@@ -337,15 +335,14 @@ binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
 | `rightPanel.toggleMaximized` | Maximize Right Panel | — | — | Panels |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
-router as global) — T3 Code's `!terminalFocus`.
+router as global).
 
 ## Layout and visual design
 
-T3 Code's look, from its CSS (see `docs/t3code-spec.md` §2–3):
 
 ```
 ┌ sidebar 256 (208…) ┬ chat column (≥ 640) ──────────────────────────────┬ right panel 540 (360…70%) ┐
-│ [traffic] T3-style │ header 52: favicon project / Title ⌄   [▤][▭][◫]   │ tabs + diff surface         │
+│ [traffic lights]   │ header 52: favicon project / Title ⌄   [▤][▭][◫]   │ tabs + diff surface         │
 │ Search  [⫶][📁][✎] │   lane ≤ 736 centered                ┌ details ┐   │                             │
 │ Pinned / Active    │   user bubble right (≤ 80%, r16)    │ card 280 │   │                             │
 │ cards (78)         │   Worked for 3m 12s ›               └──────────┘   │                             │
@@ -356,12 +353,14 @@ T3 Code's look, from its CSS (see `docs/t3code-spec.md` §2–3):
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
-- Colors only from `PaletteCenter.shared.palette` (T3 Code tokens; default theme `t3` follows
-  macOS light/dark; Soprano themes map onto the same tokens). Views subclass `PaletteView` and
-  re-color in `applyPalette(_:)`.
+- Colors only from `PaletteCenter.shared.palette`, which `Palette(soprano:)` derives from the
+  Soprano theme in force (`theme: "soprano"` by default, following Soprano's own theme and
+  appearance; `folio` follows macOS light/dark). The terminal drawer uses the theme's terminal
+  palette, project monograms its accent hues. Views subclass `PaletteView` and re-color in
+  `applyPalette(_:)`.
 - Fonts from `Typography`: system font (14 body, 13 detail rows, 12 meta/pills, 11 kbd), SF Mono
-  13 for code, diffs and command output, 12 in the terminal. Icons are SF Symbols (`Icon` maps
-  T3 Code's lucide names), 16 pt in 28 pt ghost buttons.
+  13 for code, diffs and command output, 12 in the terminal. Icons are SF Symbols (`Icon` names
+  them by role), 16 pt in 28 pt ghost buttons.
 - Radii from `Radius`: composer, bubbles, dialogs, plan cards, details card 16; buttons, menus,
   popovers, code blocks, changed-files card 8; sidebar cards 6.
 - Status pills (sidebar): Working (info, `circle.dashed`, live duration), Approval (warning),
@@ -388,7 +387,7 @@ the hover state of the `InteractiveView` with that accessibility label or toolti
 UI with it and `read` the PNG; they do not launch the GUI.
 
 Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless
-child windows covering the main window with T3 Code's dimmed backdrop and one card. Their keys
+child windows covering the main window with a dimmed backdrop and one card. Their keys
 go to the overlay's `keyHandler` before menus and fields; while the settings screen records a
 shortcut it routes every key through `KeyboardRouter.capture`.
 

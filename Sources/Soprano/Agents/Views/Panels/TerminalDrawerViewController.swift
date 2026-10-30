@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 import SwiftTerm
 
-/// The bottom terminal drawer of the chat column (`ThreadTerminalDrawer.tsx`): SwiftTerm
+/// The bottom terminal drawer of the chat column: SwiftTerm
 /// terminals running the user's login shell in the thread's working directory. Each thread keeps
 /// its terminals while the user switches threads; processes end when their thread is deleted or
 /// the app quits. A 6 pt handle on the top edge resizes the drawer; with several terminals a
@@ -233,7 +233,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         focusActiveTerminal()
     }
 
-    /// "Close Terminal" (⌘W in the drawer), confirming first like T3 Code.
+    /// "Close Terminal" (⌘W in the drawer), confirming first.
     func closeActiveTerminal() {
         guard let threadID, let active = sessions.activeSession(for: threadID) else { return }
         Task { @MainActor in
@@ -318,7 +318,14 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         terminal.nativeForegroundColor = palette.terminalForeground
         terminal.caretColor = palette.terminalCursor
         terminal.selectedTextBackgroundColor = palette.terminalSelection
-        terminal.installColors(TerminalANSIColors.colors(dark: palette.isDark))
+        terminal.installColors(palette.terminalANSI.map(Self.terminalColor))
+    }
+
+    /// SwiftTerm's 16-bit-per-channel color for an sRGB `NSColor`.
+    private static func terminalColor(_ color: NSColor) -> SwiftTerm.Color {
+        let srgb = color.usingColorSpace(.sRGB) ?? color
+        func channel(_ value: CGFloat) -> UInt16 { UInt16((max(0, min(1, value)) * 65535).rounded()) }
+        return SwiftTerm.Color(red: channel(srgb.redComponent), green: channel(srgb.greenComponent), blue: channel(srgb.blueComponent))
     }
 
     // MARK: - LocalProcessTerminalViewDelegate
@@ -329,7 +336,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
 
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
-    /// The shell exited: its session closes (T3 Code closes exited terminals).
+    /// The shell exited: its session closes (exited terminals close).
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         let identifier = ObjectIdentifier(source)
         Task { @MainActor [weak self] in
@@ -548,18 +555,3 @@ final class TerminalListRow: InteractiveView {
     }
 }
 
-/// The 16 ANSI colors for light and dark terminals (VS Code's default terminal palettes, which
-/// sit well on T3 Code's zinc and black canvases).
-enum TerminalANSIColors {
-    static func colors(dark: Bool) -> [SwiftTerm.Color] {
-        let hexes: [UInt32] = dark
-            ? [0x000000, 0xcd3131, 0x0dbc79, 0xe5e510, 0x2472c8, 0xbc3fbc, 0x11a8cd, 0xe5e5e5,
-               0x666666, 0xf14c4c, 0x23d18b, 0xf5f543, 0x3b8eea, 0xd670d6, 0x29b8db, 0xe5e5e5]
-            : [0x000000, 0xcd3131, 0x00bc00, 0x949800, 0x0451a5, 0xbc05bc, 0x0598bc, 0x555555,
-               0x666666, 0xcd3131, 0x14ce14, 0xb5ba00, 0x0451a5, 0xbc05bc, 0x0598bc, 0xa5a5a5]
-        return hexes.map { value in
-            func channel(_ shift: UInt32) -> UInt16 { UInt16((value >> shift) & 0xff) * 257 }
-            return SwiftTerm.Color(red: channel(16), green: channel(8), blue: channel(0))
-        }
-    }
-}

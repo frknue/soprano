@@ -20,7 +20,7 @@ struct SidebarThreadRow: Equatable {
     let isPinned: Bool
     let isSettled: Bool
     let isSelected: Bool
-    /// Read and idle (or working in the background): drawn muted like T3 Code's receded rows.
+    /// Read and idle (or working in the background): drawn muted as a receded row.
     let recedes: Bool
     let isGeneratingTitle: Bool
 
@@ -83,7 +83,7 @@ enum SidebarEmptyState: Equatable {
     }
 }
 
-/// Status slot of a row: T3 Code's status pill (`SidebarThreadRow.tsx` `topStatus`).
+/// Status slot of a row: a status pill.
 struct SidebarStatusPill: Equatable {
     let label: String
     let symbol: String
@@ -120,7 +120,7 @@ struct SidebarListOptions: Equatable {
     var settledLimit = SidebarListModel.settledInitialCount
 }
 
-/// Builds the sidebar rows (T3 Code's `Sidebar.tsx` list): Pinned and Active cards, then the
+/// Builds the sidebar rows: Pinned and Active cards, then the
 /// Working and Settled shelves pushed to the bottom. Searching replaces the list with matches.
 enum SidebarListModel {
     static let settledInitialCount = 10
@@ -234,7 +234,7 @@ enum SidebarListModel {
         )
     }
 
-    /// T3 Code's `shouldRecedeSidebarThread`: read rows that need nothing step back.
+    /// Read rows that need nothing step back.
     static func recedes(status: ThreadStatus, selected: Bool) -> Bool {
         if selected { return false }
         switch status {
@@ -278,7 +278,7 @@ enum SidebarListModel {
     }
 }
 
-/// Diff counts like T3 Code's `formatDiffCount`: exact under 1000, then "1.2k".
+/// Diff counts: exact under 1000, then "1.2k".
 enum DiffCountText {
     static func format(_ count: Int) -> String {
         guard count >= 1000 else { return "\(count)" }
@@ -287,7 +287,7 @@ enum DiffCountText {
     }
 }
 
-/// T3 Code's project monogram (`projectIdentity.ts`): two glyphs and a color derived from the name.
+/// The project monogram: two glyphs and a color derived from the name.
 enum ProjectIdentity {
     static func monogram(_ name: String) -> String {
         let normalized = name.precomposedStringWithCompatibilityMapping.trimmingCharacters(in: .whitespacesAndNewlines)

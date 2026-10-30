@@ -50,7 +50,7 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
     }
 }
 
-/// How much the agent may do without asking. Same four modes and labels as T3 Code.
+/// How much the agent may do without asking. Four modes with fixed labels.
 public enum RuntimeMode: String, Codable, Sendable, CaseIterable, Hashable {
     case approvalRequired = "approval-required"
     case autoAcceptEdits = "auto-accept-edits"

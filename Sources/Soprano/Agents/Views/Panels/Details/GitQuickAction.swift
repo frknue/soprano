@@ -1,8 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The primary button of the Git actions row: T3 Code's `resolveQuickAction`
-/// (`GitActionsControl.logic.ts`) over this app's `GitStatusSummary`. Hosts are
+/// The primary button of the Git actions row, derived from this app's `GitStatusSummary`. Hosts are
 /// GitHub-style, so the change request is a "PR" / "pull request".
 struct GitQuickAction: Equatable {
     enum Kind: Equatable {
@@ -77,7 +76,7 @@ struct GitQuickAction: Equatable {
             }
             return GitQuickAction(label: "Push & create PR", isDisabled: false, kind: .run(.createPullRequest))
         }
-        // Up to date with the upstream. (T3 Code's "Create PR" for a branch ahead of the default
+        // Up to date with the upstream. ("Create PR" for a branch ahead of the default
         // one needs `ahead > 0`, which returned above: the status has no separate default delta.)
         return hint("Commit", "Branch is up to date. No action needed.")
     }
@@ -96,7 +95,7 @@ struct GitQuickAction: Equatable {
         var action: Action
     }
 
-    /// T3 Code's `buildMenuItems`: Commit, Push, Create PR (only Commit without a remote, no
+    /// Menu items: Commit, Push, Create PR (only Commit without a remote, no
     /// Create PR while a PR is open). Empty while the status is unknown.
     static func menuItems(_ status: GitStatusSummary?, isBusy: Bool) -> [MenuItem] {
         guard let status, status.isRepository else { return [] }
@@ -132,7 +131,7 @@ struct GitQuickAction: Equatable {
         var continueTitle: String
     }
 
-    /// T3 Code's `resolveDefaultBranchActionDialogCopy`.
+    /// Confirmation copy for acting on the default branch.
     static func defaultBranchCopy(_ action: GitStackedAction, branch: String, includesCommit: Bool) -> DefaultBranchCopy {
         let suffix = " on \"\(branch)\". You can continue on this ref or create a feature ref and run the same action there."
         switch action {
@@ -181,7 +180,7 @@ func gitActionElapsedText(_ seconds: TimeInterval) -> String {
     return "\(whole / 60)m \(whole % 60)s"
 }
 
-/// Diff counts like T3 Code's `formatCompactDiffCount`: 999, 1.2k, 12k, 1.5m.
+/// Diff counts: 999, 1.2k, 12k, 1.5m.
 func compactDiffCount(_ value: Int) -> String {
     func scaled(_ amount: Double, _ suffix: String) -> String {
         if amount < 10 {

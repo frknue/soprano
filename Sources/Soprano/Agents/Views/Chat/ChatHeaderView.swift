@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Sidebar slice: the 52 pt chat header (`ChatHeader.tsx`): breadcrumb project / thread title
+/// Sidebar slice: the 52 pt chat header: breadcrumb project / thread title
 /// (title click opens the thread action menu, double-click renames inline, right-click anywhere
 /// opens the menu) plus the fixed title-bar toggles (thread details, terminal, right panel).
 /// With the sidebar hidden, the breadcrumb clears the traffic lights and a sidebar toggle appears.

@@ -47,7 +47,7 @@ public struct ThreadDraft: Sendable, Hashable {
 
 /// How a message sent while a turn runs is delivered.
 public enum SendMode: Sendable, Hashable {
-    /// Start a turn, or steer the running one (T3 Code's default follow-up behavior).
+    /// Start a turn, or steer the running one (the default follow-up behavior).
     case automatic
     case steer
     /// Wait until the running turn ends.

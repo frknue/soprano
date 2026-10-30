@@ -3,7 +3,7 @@ import SopranoAgentsCore
 
 // MARK: - Approval
 
-/// T3 Code's `TimelinePendingApprovalRow`: kind icon and title, the command or path in mono,
+/// A pending approval row: kind icon and title, the command or path in mono,
 /// the reason, then "Waiting for approval · Decline Approve More".
 final class ApprovalRowView: TimelineRowView {
     private let line = WorkLogLineView()
@@ -158,7 +158,7 @@ final class ApprovalRowView: TimelineRowView {
 
 // MARK: - Plan
 
-/// T3 Code's `ProposedPlanCard`: rounded 16 card, "Plan" badge, title from the first heading,
+/// The proposed plan card: rounded 16 card, "Plan" badge, title from the first heading,
 /// "Plan actions" menu (Copy to clipboard), Markdown body folded at 416 pt with a fade and
 /// "Expand plan" / "Collapse plan".
 final class PlanRowView: TimelineRowView {
@@ -261,7 +261,7 @@ final class PlanRowView: TimelineRowView {
     }
 }
 
-/// T3 Code's `Badge variant="secondary"`: small rounded label.
+/// A secondary badge: small rounded label.
 final class BadgeView: PaletteView {
     private let label = NSTextField.timelineLabel("", size: Typography.smallSize, weight: .medium)
 
@@ -376,7 +376,7 @@ final class TodoRowView: TimelineRowView {
 
 // MARK: - Error / notice
 
-/// A failure in the error color with its time (T3 Code's error work row).
+/// A failure in the error color with its time.
 final class ErrorRowView: TimelineRowView {
     private let icon = TimelineIconView(symbol: Icon.circleAlert, size: 13)
     private let messageLabel = NSTextField(wrappingLabelWithString: "")

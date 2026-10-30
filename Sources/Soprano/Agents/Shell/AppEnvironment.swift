@@ -10,7 +10,7 @@ struct AppSettings: Equatable, Sendable {
         case queue
     }
 
-    /// T3 Code's `data-chat-width`: 46rem lane, 72rem, or the full column.
+    /// Chat lane width: the 46rem lane, 72rem, or the full column.
     enum ChatWidth: String, Equatable, Sendable, CaseIterable {
         case normal
         case wide
@@ -25,9 +25,8 @@ struct AppSettings: Equatable, Sendable {
         }
     }
 
-    /// "t3" (T3 Code's palette, follows macOS light/dark), "t3-light", "t3-dark", "soprano"
-    /// (follow Soprano's own theme), or an id from `AppTheme.options`.
-    var theme: String = "t3"
+    /// "soprano" (follow Soprano's own theme and appearance) or an id from `AppTheme.options`.
+    var theme: String = "soprano"
 
     var defaultProvider: ProviderKind = .omp
     /// nil = the provider's default model.

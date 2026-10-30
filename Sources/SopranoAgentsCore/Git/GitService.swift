@@ -82,7 +82,7 @@ public struct GitBranchRef: Sendable, Hashable, Identifiable {
     }
 }
 
-/// The stacked git actions of the thread details card (T3 Code's `git.runStackedAction`).
+/// The stacked git actions of the thread details card.
 public enum GitStackedAction: String, Sendable, Hashable, CaseIterable {
     case commit
     case push

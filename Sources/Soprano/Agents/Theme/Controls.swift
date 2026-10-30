@@ -54,7 +54,7 @@ class InteractiveView: PaletteView {
     }
 }
 
-/// T3 Code's `Button variant="ghost" size="icon-*"` / `Toggle variant="ghost"`: a square SF Symbol
+/// Ghost icon button / ghost toggle: a square SF Symbol
 /// button with an accent hover fill. `isOn` shows the pressed toggle state.
 final class GhostIconButton: InteractiveView {
     private let imageView = NSImageView()
@@ -103,7 +103,7 @@ final class GhostIconButton: InteractiveView {
     }
 }
 
-/// T3 Code's `Button`: variants and sizes from `components/ui/button.tsx`.
+/// Text button with variants and sizes.
 final class TextButton: InteractiveView {
     enum Variant {
         case primary
@@ -220,7 +220,7 @@ final class TextButton: InteractiveView {
     }
 }
 
-/// T3 Code's `Kbd`: `h-5 min-w-5 rounded bg-foreground/[0.07] px-1 text-xs`.
+/// Keyboard hint: `h-5 min-w-5 rounded bg-foreground/[0.07] px-1 text-xs`.
 final class KbdView: PaletteView {
     private let label = NSTextField(labelWithString: "")
 

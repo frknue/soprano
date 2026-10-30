@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// "+12 −3" in the diff colors, mono (T3 Code's `DiffStatLabel`).
+/// "+12 −3" in the diff colors, mono.
 enum TimelineDiffStat {
     static func make(additions: Int, deletions: Int, size: CGFloat, palette: Palette) -> NSAttributedString {
         let font = Typography.mono(size)
@@ -12,7 +12,7 @@ enum TimelineDiffStat {
     }
 }
 
-/// T3 Code's changed-files card (`ChangedFilesTree.tsx`): `rounded-lg bg-secondary`, header
+/// The changed-files card: `rounded-lg bg-secondary`, header
 /// "N changed files +A −D" with "Expand/Collapse all folders" and "Open diff", then the folder tree
 /// with per-file stats. Clicking a file opens the turn diff at that file.
 final class ChangedFilesCardView: PaletteView {

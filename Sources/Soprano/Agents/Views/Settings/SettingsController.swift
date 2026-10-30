@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The settings screen, T3 Code's settings route modal (`AppRouteModal`): a child window over
+/// The settings screen as a route modal: a child window over
 /// the main window with a dimmed backdrop and a centered card (max 1280×960, r16, border,
 /// shadow); a 240 pt navigation (`bg-sidebar border-e`) on the left; a breadcrumb header and the
 /// page on the right.

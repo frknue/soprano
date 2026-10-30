@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// Keyboard focus areas. Single-key bindings fire only while their area has focus, and chords
-/// without ⌘/⌃ never fire while a text field is editing. T3 Code's `when` clauses
+/// without ⌘/⌃ never fire while a text field is editing. Keybinding `when` clauses
 /// (`terminalFocus`, `composerFocus`, `!terminalFocus`) become scopes.
 enum FocusRegion: String, CaseIterable, Sendable {
     case sidebar
@@ -12,7 +12,7 @@ enum FocusRegion: String, CaseIterable, Sendable {
     case rightPanel
     case settings
 
-    /// T3 Code's `!terminalFocus`: everywhere except the terminal drawer (and settings).
+    /// `!terminalFocus`: everywhere except the terminal drawer (and settings).
     static let outsideTerminal: Set<FocusRegion> = [.sidebar, .timeline, .composer, .rightPanel]
 }
 

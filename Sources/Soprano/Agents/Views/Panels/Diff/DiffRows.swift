@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Fonts, metrics and colors every diff row draws with (T3 Code's `@pierre/diffs` look): SF Mono
+/// Fonts, metrics and colors every diff row draws with: SF Mono
 /// 13 on a 20 pt line, one line-number column per side in SF Mono 12, a 3 pt change bar on the
 /// left edge, additions and deletions tinted, changed words on a stronger tint. Rebuilt when
 /// the palette changes so rows never build fonts per draw.
@@ -159,7 +159,7 @@ enum DiffLineDrawing {
         if let tint = style.tint(for: side.kind) {
             tint.setFill()
             NSRect(x: minX, y: 0, width: maxX - minX, height: height).fill(using: .sourceOver)
-            // The number column carries the tint twice, like pierre's gutter.
+            // The number column carries the tint twice, as a tinted gutter.
             NSRect(x: minX, y: 0, width: numberWidth, height: height).fill(using: .sourceOver)
         }
         if let bar = style.bar(for: side.kind) {
@@ -485,7 +485,7 @@ final class DiffFileHeaderView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        // Clicking the header's empty space toggles it, like pierre's header.
+        // Clicking the header's empty space toggles it.
         if event.clickCount == 1, bounds.contains(convert(event.locationInWindow, from: nil)) {
             onToggle?()
         }
@@ -518,7 +518,7 @@ final class DiffTableRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
 }
 
-/// "+N −N" in the diff colors (T3 Code's `DiffStatLabel`), mono.
+/// "+N −N" in the diff colors, mono.
 @MainActor
 enum DiffStatText {
     static func make(additions: Int, deletions: Int, palette: Palette, size: CGFloat, muteZero: Bool = false) -> NSAttributedString {

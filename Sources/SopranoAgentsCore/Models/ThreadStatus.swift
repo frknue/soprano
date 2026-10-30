@@ -1,6 +1,6 @@
 import Foundation
 
-/// The status pill a thread shows in the sidebar, in T3 Code's priority order.
+/// The status pill a thread shows in the sidebar, in priority order.
 public enum ThreadStatus: Sendable, Hashable {
     /// Waiting on an approval decision.
     case approval
@@ -53,7 +53,7 @@ public enum ThreadStatus: Sendable, Hashable {
     }
 }
 
-/// The sidebar sections of T3 Code's thread inbox.
+/// The sidebar sections of the thread inbox.
 public enum InboxSection: String, Sendable, Hashable, CaseIterable {
     case pinned
     case active

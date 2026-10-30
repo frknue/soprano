@@ -2,9 +2,9 @@
 
 **A native macOS app for coding agents, in the Soprano family.**
 
-Soprano Agents gives the `omp`, `codex` and `claude` CLIs the look and feel of
-[T3 Code](https://github.com/pingdotgg/t3code): a thread inbox on the left, a centered chat lane
-with a floating composer, collapsible work logs, approvals and questions inline, per-turn diffs
+Soprano Agents gives the `omp`, `codex` and `claude` CLIs a native home in the Soprano family,
+colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a floating
+composer, collapsible work logs, approvals and questions inline, per-turn diffs
 from hidden git checkpoints, worktrees, a terminal drawer and a diff panel on the right. It is a
 Swift 6 / AppKit app, not a web view, and it talks to the agent CLIs directly: there is no server.
 
@@ -111,7 +111,7 @@ keeping your comments.
 
 | Key | Default | |
 |---|---|---|
-| `theme` | `"t3"` | `t3` (follows macOS), `t3-light`, `t3-dark`, `soprano` (follow Soprano), or a Soprano theme id |
+| `theme` | `"soprano"` | `soprano` (follow Soprano's theme and appearance) or a Soprano theme id (`folio` follows macOS, `folio-paper`, `folio-ink`, `nord`, …) |
 | `agents.defaultProvider` | `"omp"` | `omp`, `codex` or `claude` |
 | `agents.defaultModel` | provider default | model id (`provider/id` for omp, e.g. `anthropic/claude-opus-5-5`) |
 | `agents.defaultRuntimeMode` | `"full-access"` | `approval-required`, `auto-accept-edits`, `auto`, `full-access` |

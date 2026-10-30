@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The thread inbox (T3 Code's `Sidebar.tsx`): 52 pt header with the brand, the search row with
+/// The thread inbox: 52 pt header with the brand, the search row with
 /// the project filter / add project / new thread buttons, the list (Pinned and Active cards,
 /// then the Working and Settled shelves pushed to the bottom) and the footer with Settings.
 /// The list is an `NSTableView` of reused cells, so hundreds of threads stay cheap.

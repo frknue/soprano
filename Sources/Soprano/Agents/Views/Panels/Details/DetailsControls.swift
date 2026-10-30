@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Row surfaces of the Thread details card (`threadDetailsPanelStyles.ts`): transparent at rest,
+/// Row surfaces of the Thread details card: transparent at rest,
 /// `black/3.5%` (light) or `white/8%` (dark) on hover or while their menu is open.
 @MainActor
 enum DetailsSurface {

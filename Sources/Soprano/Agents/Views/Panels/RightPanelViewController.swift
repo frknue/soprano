@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The right panel (`RightPanelTabs.tsx`): a 52 pt tab strip level with the chat header (the
+/// The right panel: a 52 pt tab strip level with the chat header (the
 /// "Diff" tab, Maximize/Restore panel, Close panel) over the active surface. Diff is the only
 /// surface this app has.
 @MainActor

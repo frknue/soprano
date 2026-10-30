@@ -19,7 +19,7 @@ protocol TimelineRowDelegate: AnyObject {
     func timelineCopy(_ text: String)
 }
 
-/// Day-aware timestamps (T3 Code's `formatDayAwareTimestamp`): "3:42 PM", "yesterday at 3:42 PM",
+/// Day-aware timestamps: "3:42 PM", "yesterday at 3:42 PM",
 /// "3/14 3:42 PM", with the year when it differs.
 enum TimelineFormat {
     static func timestamp(_ date: Date, now: Date = Date(), calendar: Calendar = .current, locale: Locale = .current) -> String {
@@ -101,14 +101,14 @@ class TimelineRowView: PaletteView {
 
 // MARK: - Controls
 
-/// The timeline's small buttons, after T3 Code's `Button` variants that `TextButton` lacks:
+/// The timeline's small button variants that `TextButton` lacks:
 /// `ghost-muted` (muted text, accent hover), `inline` (text link, underline on hover) and icon-only.
 final class TimelineButton: InteractiveView {
     enum Variant {
         case ghostMuted
         case ghost
         case outline
-        /// T3 Code's `InlineButton`: no fill, medium weight, underline on hover.
+        /// Inline: no fill, medium weight, underline on hover.
         case inline(muted: Bool)
     }
 
@@ -266,7 +266,7 @@ extension NSTextField {
     }
 }
 
-/// SF Symbol image view at 16 pt (T3 Code's `size-4` icons) with a palette tint.
+/// SF Symbol image view at 16 pt with a palette tint.
 final class TimelineIconView: NSImageView {
     init(symbol: String = "", size: CGFloat = 14) {
         super.init(frame: .zero)

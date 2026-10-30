@@ -15,7 +15,7 @@ private func naturalWidth(of rendering: MarkdownRendering, limit: CGFloat) -> CG
 
 // MARK: - User message
 
-/// T3 Code's `TimelineUserMessageRow`: right-aligned bubble (`max-w-[80%] rounded-2xl p-3
+/// A user message row: right-aligned bubble (`max-w-[80%] rounded-2xl p-3
 /// bg-message`), attachments above the text, long text folded at 176 pt with "Show full message",
 /// "↪ Steer" marker, hover footer with timestamp, "Edit from here" and "Copy message".
 final class UserMessageRowView: TimelineRowView {
@@ -249,7 +249,7 @@ final class AttachmentChipView: PaletteView {
 
 // MARK: - Assistant message
 
-/// T3 Code's `AssistantTimelineRow`: no bubble, Markdown at 14/1.625 `foreground/90`, the
+/// An assistant row: no bubble, Markdown at 14/1.625 `foreground/90`, the
 /// changed-files card under the turn's answer, and a hover meta row (Copy message, timestamp).
 final class AssistantRowView: TimelineRowView {
     private let markdown = MarkdownView(frame: .zero)

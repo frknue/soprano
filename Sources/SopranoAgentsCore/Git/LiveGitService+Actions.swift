@@ -1,6 +1,6 @@
 import Foundation
 
-/// T3 Code's stacked git action: [feature branch] → commit → push → pull request.
+/// The stacked git action: [feature branch] → commit → push → pull request.
 extension LiveGitService {
     static let noRemoteMessage = "Cannot push because no git remote is configured for this repository."
     static let detachedMessage = "Detached HEAD: create and check out a branch to enable push and pull request actions."

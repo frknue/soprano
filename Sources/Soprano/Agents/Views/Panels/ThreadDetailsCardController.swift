@@ -1,10 +1,10 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The floating Thread details card (`ThreadDetailsPanel.tsx`): 280 pt, top-right of the chat
+/// The floating Thread details card: 280 pt, top-right of the chat
 /// column. Workspace section (workspace row with Reveal in Finder, "Open in <Editor>" split row,
 /// project scripts split row), then Version Control (branch + PR badge, git actions split row with
-/// T3 Code's quick action, Changes `+N −N`). Git status refreshes when the card opens, when a turn
+/// the quick action, Changes `+N −N`). Git status refreshes when the card opens, when a turn
 /// finishes and every 30 s while it is visible.
 @MainActor
 final class ThreadDetailsCardController: NSViewController {
@@ -481,7 +481,7 @@ final class ThreadDetailsCardController: NSViewController {
     // MARK: - Git actions
 
     private func showGitMenu() {
-        // Re-read the status so the menu reflects the tree right now (T3 Code refreshes on open).
+        // Re-read the status so the menu reflects the tree right now.
         refreshStatus()
         let menu = NSMenu()
         menu.autoenablesItems = false

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Building blocks of the settings pages, after T3 Code's `settingsLayout.tsx`:
+/// Building blocks of the settings pages:
 /// `SettingsSection` (title `text-base font-semibold`, then a grouped card `rounded-xl border
 /// border-border/60 bg-card/40` with dividers) and `SettingsRow` (title `text-sm font-medium`,
 /// reset button, description `text-xs text-muted-foreground`, control on the right).

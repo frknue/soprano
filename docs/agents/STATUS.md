@@ -1,6 +1,6 @@
 # Status
 
-Goal: Soprano Agents, a native macOS T3 Code look-alike for omp (default), Codex and Claude Code
+Goal: Soprano Agents, a native macOS app in the Soprano family for omp (default), Codex and Claude Code
 in the Soprano family (`~/git/private/soprano-agents`, local only, no GitHub remote yet).
 
 ## Done

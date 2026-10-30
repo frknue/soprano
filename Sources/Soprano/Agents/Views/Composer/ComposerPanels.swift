@@ -3,7 +3,7 @@ import SopranoAgentsCore
 
 // MARK: - Surface
 
-/// T3 Code's `ComposerSurface`: r16 glass card (card / raised surface at 80% over a blur), a 1 pt
+/// The composer surface: r16 glass card (card / raised surface at 80% over a blur), a 1 pt
 /// outline (black 8% light, white 5% dark), the composer shadow in light mode. Dragging files
 /// over it fills it with `accent/45` and rings it with `primary/70`.
 final class ComposerSurfaceView: PaletteView {
@@ -433,7 +433,7 @@ private final class QuestionOptionRow: InteractiveView {
 
 // MARK: - Draft hero
 
-/// T3 Code's inline link-like button (`InlineButton`): medium weight, underline on hover.
+/// An inline link-like button: medium weight, underline on hover.
 final class ComposerInlineButton: InteractiveView {
     enum Tone {
         case muted
