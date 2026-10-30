@@ -6,6 +6,7 @@ import Foundation
 public enum ProviderCatalog {
     public static func fallback(_ kind: ProviderKind) -> [ProviderModel] {
         switch kind {
+        case .omp: ompModels
         case .codex: codexModels
         case .claude: claudeModels
         }
@@ -74,11 +75,21 @@ public enum ProviderCatalog {
         ProviderModel(slug: "claude-haiku-5-5", name: "Claude Haiku 5.5", options: [effortOption(claudeEfforts, default: "medium")]),
     ]
 
+    /// Before the first probe omp offers only "its configured default"; the probe replaces this
+    /// with omp's live catalog (`get_available_models`).
+    static let ompModels: [ProviderModel] = [
+        ProviderModel(slug: ModelSelection.ompDefaultModel, name: "omp default", isDefault: true),
+    ]
+
     /// Display name for a selection, falling back to the slug.
     public static func displayName(for selection: ModelSelection, in status: ProviderStatus?) -> String {
         if let model = (status?.models ?? fallback(selection.provider)).first(where: { $0.slug == selection.model }) {
             return model.name
         }
-        return selection.provider == .codex ? codexDisplayName(selection.model) : selection.model
+        switch selection.provider {
+        case .codex: return codexDisplayName(selection.model)
+        case .omp: return selection.model == ModelSelection.ompDefaultModel ? "omp default" : selection.model
+        case .claude: return selection.model
+        }
     }
 }

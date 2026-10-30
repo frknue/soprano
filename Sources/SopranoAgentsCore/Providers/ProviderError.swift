@@ -21,7 +21,7 @@ public enum ProviderError: Error, LocalizedError, Sendable, Hashable {
         switch self {
         case let .notInstalled(kind, path):
             if let path { return "\(kind.displayName) CLI not found at \(path)." }
-            let binary = kind == .codex ? "codex" : "claude"
+            let binary = kind.executableName
             return "\(kind.displayName) CLI (`\(binary)`) not found on PATH."
         case let .spawnFailed(reason): return "Could not start the agent CLI: \(reason)"
         case let .processExited(kind, status, stderr):

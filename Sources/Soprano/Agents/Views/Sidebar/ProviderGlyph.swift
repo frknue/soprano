@@ -2,8 +2,8 @@ import AppKit
 import SopranoAgentsCore
 
 /// Provider marks as T3 Code draws them (`components/Icons.tsx`: `OpenAI`, `ClaudeAI`), rendered
-/// from the original SVG path data. Codex is a template image (tint with `contentTintColor`);
-/// Claude keeps its brand orange (`Palette.claudeBrand`).
+/// from the original SVG path data, plus omp's "π". Codex and omp are template images (tint with
+/// `contentTintColor`); Claude keeps its brand orange (`Palette.claudeBrand`).
 @MainActor
 enum ProviderGlyph {
     /// The mark at `size` points.
@@ -12,6 +12,9 @@ enum ProviderGlyph {
         if let cached = cache[key] { return cached }
         let image: NSImage
         switch kind {
+        case .omp:
+            image = renderPi(size: size)
+            image.isTemplate = true
         case .codex:
             image = render(openAIPath, viewBox: CGRect(x: 100, y: 100, width: 411, height: 411), evenOdd: true, size: size, color: .black)
             image.isTemplate = true
@@ -24,6 +27,17 @@ enum ProviderGlyph {
     }
 
     private static var cache: [String: NSImage] = [:]
+
+    /// omp (oh-my-pi) has no vector mark: a bold "π" set in the system font, template-rendered.
+    private static func renderPi(size: CGFloat) -> NSImage {
+        NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let font = NSFont.systemFont(ofSize: size * 1.05, weight: .heavy)
+            let text = NSAttributedString(string: "π", attributes: [.font: font, .foregroundColor: NSColor.black])
+            let bounds = text.boundingRect(with: rect.size, options: [.usesLineFragmentOrigin, .usesFontLeading])
+            text.draw(at: NSPoint(x: (rect.width - bounds.width) / 2, y: (rect.height - bounds.height) / 2 - size * 0.06))
+            return true
+        }
+    }
 
     private static func render(_ pathData: String, viewBox: CGRect, evenOdd: Bool, size: CGFloat, color: NSColor) -> NSImage {
         let path = SVGPath.parse(pathData)

@@ -1,7 +1,10 @@
 import Foundation
 
 /// The agent CLIs Soprano Agents drives. One thread talks to exactly one provider.
+/// Declaration order is display order (pickers, settings): omp first.
 public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
+    /// `omp --mode rpc-ui` (oh-my-pi's JSONL RPC with host-rendered tool UI: approvals, `ask`).
+    case omp
     /// `codex app-server` (JSON-RPC over stdio).
     case codex
     /// `claude -p --input-format stream-json --output-format stream-json` with the stdio control protocol.
@@ -9,14 +12,26 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
 
     public var displayName: String {
         switch self {
+        case .omp: "omp"
         case .codex: "Codex"
         case .claude: "Claude Code"
         }
     }
 
-    /// Default chat model when the provider's live catalog is not known yet.
+    /// The CLI's executable name.
+    public var executableName: String {
+        switch self {
+        case .omp: "omp"
+        case .codex: "codex"
+        case .claude: "claude"
+        }
+    }
+
+    /// Default chat model when the provider's live catalog is not known yet. For omp this is
+    /// `ModelSelection.ompDefaultModel`: whatever omp itself is configured to use.
     public var defaultModel: String {
         switch self {
+        case .omp: ModelSelection.ompDefaultModel
         case .codex: "gpt-6.1-sol"
         case .claude: "claude-opus-5-5"
         }
@@ -25,6 +40,7 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
     /// Default model for background text generation (titles, commit messages, branch names).
     public var textGenerationModel: String {
         switch self {
+        case .omp: ModelSelection.ompDefaultModel
         case .codex: "gpt-6-luna"
         case .claude: "claude-haiku-5-5"
         }
@@ -207,6 +223,12 @@ public struct ModelSelection: Codable, Sendable, Hashable {
         get { options[ModelOptionID.fastMode] == "true" }
         set { options[ModelOptionID.fastMode] = newValue ? "true" : nil }
     }
+}
+
+extension ModelSelection {
+    /// omp model id meaning "omp's own configured default" (no `--model`, no `set_model`).
+    /// Real omp models are `provider/id` (`anthropic/claude-opus-5-5`).
+    public static let ompDefaultModel = "default"
 }
 
 public enum ModelOptionID {
