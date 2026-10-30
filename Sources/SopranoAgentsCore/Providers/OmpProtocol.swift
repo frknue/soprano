@@ -229,22 +229,35 @@ public enum OmpProtocol {
             && message["synthetic"]?.boolValue != true
     }
 
-    /// A message's text: `content` as a string, or its `text` blocks joined.
-    private static func text(of message: JSONValue?) -> String {
-        if let text = message?["content"]?.stringValue { return text }
-        return (message?["content"]?.arrayValue ?? []).compactMap { block in
-            block["type"]?.stringValue == "text" ? block["text"]?.stringValue : nil
-        }.joined()
+    /// The `providerTurnID` of a turn omp received but whose start could not be located (the
+    /// entries could not be read, or the previous tip left the branch). Rollback refuses it
+    /// rather than guessing, so the app and omp never silently disagree.
+    public static let unresolvedTurnID = "omp-unresolved"
+
+    /// Where a turn starts in omp's session, independent of its text (omp rewrites skill
+    /// invocations, templates and `^model` mentions before recording them).
+    public enum TurnAnchor: Equatable, Sendable {
+        /// The first entry the turn added: its user message, a hidden companion before it, a
+        /// `model_change` from switching models, or what a background run added after the
+        /// previous turn ended. Rewinding to before it drops the turn and nothing earlier.
+        case entry(String)
+        /// The turn added nothing (a local command): there is nothing to rewind.
+        case nothing
+        /// `tip` is not on the current branch.
+        case unresolved
     }
 
-    /// The entry id omp recorded for a prompt: the newest user message on the current branch
-    /// whose text is `text` (the `message` the prompt sent). Steering-delivered prompts count.
-    /// This id is the turn's `providerTurnID`, so rewinds never depend on turn positions.
-    public static func promptEntryID(entries data: JSONValue, text: String) -> String? {
-        let wanted = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return branch(entries: data).last { entry in
-            isUserMessage(entry) && Self.text(of: entry["message"]).trimmingCharacters(in: .whitespacesAndNewlines) == wanted
-        }?["id"]?.stringValue
+    /// The first entry on the current branch after `tip`, the branch tip when the previous turn
+    /// ended (nil = the branch was empty then).
+    public static func turnAnchor(entries data: JSONValue, after tip: String?) -> TurnAnchor {
+        let path = branch(entries: data)
+        var start = 0
+        if let tip {
+            guard let index = path.firstIndex(where: { $0["id"]?.stringValue == tip }) else { return .unresolved }
+            start = index + 1
+        }
+        guard start < path.count, let id = path[start]["id"]?.stringValue else { return .nothing }
+        return .entry(id)
     }
 
     /// The `ordinal`-th user-authored, non-steering user message on the current branch. Only for

@@ -15,9 +15,10 @@ import Foundation
 /// `set_thinking_level {level}`, `set_fast_mode {enabled}`); a runtime-mode change restarts the
 /// process with `--resume` and the new approval mode. `prompt {id, message, images?,
 /// streamingBehavior:"steer"}` is acked by a `response` and ended by `prompt_result` with the same
-/// id (or by an ack with `data.agentInvoked:false`). At its `prompt_result` the session reads
-/// `get_entries` and reports the user message's entry id as the turn's native id
-/// (`turnStarted`), which rollback uses. Steering is `steer
+/// id (or by an ack with `data.agentInvoked:false`). When the turn ends the session reads
+/// `get_entries` and reports the first entry the turn added after the previous turn's branch tip
+/// as the turn's native id (`turnStarted`, `OmpProtocol.turnAnchor`), which rollback cuts at; an
+/// unreadable anchor is reported as `OmpProtocol.unresolvedTurnID`. Steering is `steer
 /// {message, images?}`, interrupt `abort`. Dialogs are answered with `extension_ui_response`
 /// (approvals with the exact option label, see `OmpProtocol.approvalLabel`); dialogs arriving
 /// while no prompt runs are cancelled at once.
@@ -60,8 +61,10 @@ public actor OmpSession: ProviderSession {
     private var approvalMode = ""
     private var pending: [String: OmpUIRequest] = [:]
     private var activePromptID: String?
-    /// The `message` text the active prompt sent, to find its entry in `get_entries`.
-    private var activePromptText: String?
+    /// The branch tip when the last turn ended (or at start / after a rewind): the next turn's
+    /// entries come after it. Unknown when `get_entries` failed.
+    private var branchTip: String?
+    private var branchTipKnown = false
     /// Stop was pressed for the active prompt: its yield ends the turn even if omp is unsettled.
     private var interruptRequested = false
     private var nextPrompt = 1
@@ -88,6 +91,7 @@ public actor OmpSession: ProviderSession {
         do {
             try await spawn(resume: resume, selection: config.modelSelection, runtime: config.runtimeMode)
             try await apply(config.modelSelection)
+            await refreshBranchTip()
         } catch {
             isClosing = true
             retire()
@@ -121,11 +125,9 @@ public actor OmpSession: ProviderSession {
         mapper.resetTurn()
         interruptRequested = false
         activePromptID = id
-        let fields = OmpProtocol.promptFields(input)
-        activePromptText = fields["message"]?.stringValue
         let ack: JSONValue
         do {
-            ack = try await live.request("prompt", fields, id: id)
+            ack = try await live.request("prompt", OmpProtocol.promptFields(input), id: id)
         } catch {
             if activePromptID == id { activePromptID = nil }
             throw error
@@ -134,7 +136,7 @@ public actor OmpSession: ProviderSession {
             activePromptID = nil
             for event in mapper.finishLocally() { continuation.yield(event) }
         }
-        // The native turn id is the prompt's session entry, reported at its `prompt_result`.
+        // The native turn id is where the turn starts in omp's session, reported when it ends.
         return nil
     }
 
@@ -151,6 +153,8 @@ public actor OmpSession: ProviderSession {
         // Yielded but unsettled: nothing of the prompt is left to stop, so end the turn here
         // instead of waiting for background jobs to finish.
         if mapper.isAwaitingSettlement, activePromptID != nil {
+            await reportTurnAnchor()
+            guard mapper.isAwaitingSettlement, activePromptID != nil else { return }
             endPrompt()
             for event in mapper.interruptAwaitingSettlement() { continuation.yield(event) }
         }
@@ -192,6 +196,9 @@ public actor OmpSession: ProviderSession {
         let entries = try await withProviderTimeout(Self.requestTimeout, label: "omp get_entries") {
             try await client.request("get_entries")
         }
+        if providerTurnID == OmpProtocol.unresolvedTurnID {
+            throw ProviderError.message("omp could not tell where turn \(ordinal) starts, so the conversation cannot be rewound safely.")
+        }
         // Turns recorded before entry ids ("prompt-N") fall back to counting user messages.
         let target = providerTurnID.flatMap { $0.hasPrefix("prompt-") ? nil : $0 }
             ?? OmpProtocol.rollbackEntryID(entries: entries, beforeTurn: ordinal)
@@ -216,6 +223,7 @@ public actor OmpSession: ProviderSession {
         sessionFile = file
         continuation.yield(.conversationID(file))
         mapper.resetTurn()
+        await refreshBranchTip()
     }
 
     public func close() async {
@@ -381,17 +389,20 @@ public actor OmpSession: ProviderSession {
             }
         case "prompt_result":
             guard let id = frame["id"]?.stringValue, id == activePromptID else { return }
-            await reportPromptEntry()
-            guard id == activePromptID else { return }
             // `sessionSettled:false`: background work can still wake the agent; the prompt
             // (dialogs, steer, interrupt) stays live until `session_settled`, unless the user
             // already pressed Stop (the yield may have raced the abort and report "completed").
             var events = mapper.map(frame)
             if mapper.isAwaitingSettlement, interruptRequested { events += mapper.interruptAwaitingSettlement() }
-            if !mapper.isAwaitingSettlement { endPrompt() }
+            if !mapper.isAwaitingSettlement {
+                await reportTurnAnchor()
+                endPrompt()
+            }
             for event in events { continuation.yield(event) }
             return
         case "session_settled":
+            guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
+            await reportTurnAnchor()
             guard activePromptID != nil, mapper.isAwaitingSettlement else { return }
             endPrompt()
         default:
@@ -400,15 +411,38 @@ public actor OmpSession: ProviderSession {
         for event in mapper.map(frame) { continuation.yield(event) }
     }
 
-    /// Reports the active prompt's session entry as the turn's native id (`turnStarted`), so a
-    /// later rollback cuts at exactly this turn. Best effort: no entry, no id.
-    private func reportPromptEntry() async {
-        guard let client, let text = activePromptText else { return }
-        let fetched = try? await withProviderTimeout(Self.requestTimeout, label: "omp get_entries") {
+    /// Reports where the ending turn starts in omp's session as its native id (`turnStarted`,
+    /// before `turnCompleted`), then remembers the new tip for the next turn. A turn whose start
+    /// cannot be located gets `OmpProtocol.unresolvedTurnID`, so a rewind refuses instead of
+    /// treating it as never sent.
+    private func reportTurnAnchor() async {
+        guard let entries = await fetchEntries() else {
+            branchTipKnown = false
+            continuation.yield(.turnStarted(providerTurnID: OmpProtocol.unresolvedTurnID))
+            return
+        }
+        let anchor = branchTipKnown ? OmpProtocol.turnAnchor(entries: entries, after: branchTip) : .unresolved
+        switch anchor {
+        case let .entry(id): continuation.yield(.turnStarted(providerTurnID: id))
+        case .nothing: break
+        case .unresolved: continuation.yield(.turnStarted(providerTurnID: OmpProtocol.unresolvedTurnID))
+        }
+        branchTip = entries["leafId"]?.stringValue
+        branchTipKnown = true
+    }
+
+    /// Re-reads the branch tip (start, rewind).
+    private func refreshBranchTip() async {
+        let entries = await fetchEntries()
+        branchTip = entries?["leafId"]?.stringValue
+        branchTipKnown = entries != nil
+    }
+
+    private func fetchEntries() async -> JSONValue? {
+        guard let client else { return nil }
+        return try? await withProviderTimeout(Self.requestTimeout, label: "omp get_entries") {
             try await client.request("get_entries")
         }
-        guard let entries = fetched, let entryID = OmpProtocol.promptEntryID(entries: entries, text: text) else { return }
-        continuation.yield(.turnStarted(providerTurnID: entryID))
     }
 
     /// The prompt's turn is over: withdraw dialogs nobody can answer any more.

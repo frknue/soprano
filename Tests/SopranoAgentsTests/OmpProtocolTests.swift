@@ -246,6 +246,23 @@ struct OmpProtocolTests {
         #expect(OmpProtocol.rollbackEntryID(entries: entries, beforeTurn: 2) == nil)
     }
 
+    @Test func aTurnStartsAtTheFirstEntryAfterThePreviousTipWhateverItsText() {
+        // Position on the current branch only: no text matching, abandoned branches ("old")
+        // never count, and a tip that left the branch is unresolved rather than guessed.
+        #expect(OmpProtocol.turnAnchor(entries: Self.entries, after: "a1") == .entry("s1"))
+        #expect(OmpProtocol.turnAnchor(entries: Self.entries, after: "a2") == .entry("u3"))
+        #expect(OmpProtocol.turnAnchor(entries: Self.entries, after: nil) == .entry("m"))
+        #expect(OmpProtocol.turnAnchor(entries: Self.entries, after: "a3") == .nothing)
+        #expect(OmpProtocol.turnAnchor(entries: Self.entries, after: "old") == .unresolved)
+    }
+
+    @Test func aRewindForksAtTheLastMessageBeforeTheCutOrStartsOver() {
+        #expect(OmpProtocol.rewind(entries: Self.entries, before: "u3") == .fork(entryID: "a2"))
+        #expect(OmpProtocol.rewind(entries: Self.entries, before: "u1") == .fresh)
+        #expect(OmpProtocol.rewind(entries: Self.entries, before: "m") == .fresh)
+        #expect(OmpProtocol.rewind(entries: Self.entries, before: "old") == nil)
+    }
+
     // MARK: - Models
 
     private static let state: JSONValue = [

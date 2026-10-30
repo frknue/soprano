@@ -40,9 +40,13 @@ struct OmpSessionLifecycleTests {
         entry["parentId"] = leaf
         entries.append(entry)
         leaf = entry["id"]
+    steers = 0
     def user(text, steering=False):
         global turns
         turns += 1
+        if text.startswith("/skill:"):
+            # omp records a skill invocation as its expanded body, not the submitted text.
+            text = "Skill instructions for " + text[len("/skill:"):]
         message = {"role": "user", "attribution": "user", "content": [{"type": "text", "text": text}]}
         if steering: message["steering"] = True
         add({"type": "message", "id": "u%d" % turns, "message": message})
@@ -75,6 +79,11 @@ struct OmpSessionLifecycleTests {
             entries = list(reversed(keep)); leaf = msg["entryId"]
             sessions += 1; session = os.path.join(os.getcwd(), "fork-%d.jsonl" % sessions)
             ok(msg, {"cancelled": False})
+        elif kind == "steer":
+            steers += 1
+            add({"type": "message", "id": "s%d" % steers, "message": {"role": "user", "attribution": "user", "steering": True,
+                 "content": [{"type": "text", "text": msg["message"]}]}})
+            ok(msg)
         elif kind == "new_session":
             entries = []; leaf = None
             sessions += 1; session = os.path.join(os.getcwd(), "new-%d.jsonl" % sessions)
@@ -485,6 +494,67 @@ struct OmpSessionLifecycleTests {
 
         #expect(fake.received("set_ask_dialog").count == 1)
         #expect(recorder.events.contains(.turnCompleted(outcome: .completed, error: nil)))
+    }
+
+    @Test func editingFromARewrittenPromptRewindsOmpToJustBeforeIt() async throws {
+        let fake = try makeFake()
+        let engine = AgentEngine(environment: EngineEnvironment(
+            drivers: [.omp: OmpDriver(executablePath: { fake.executable })],
+            git: RecordingGit(),
+            store: InMemoryThreadStore(),
+            dataDirectory: EngineHarness.temporaryDirectory()
+        ), settings: EngineSettings(generateTitles: false))
+        let project = engine.addProject(path: fake.directory.path)
+        func waitForTurn(_ id: String, _ ordinal: Int) async {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while ContinuousClock.now < deadline {
+                if let turn = engine.thread(id)?.turns.last, turn.ordinal == ordinal, turn.status != .running { return }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
+        let id = try await engine.launchThread(ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp)), text: "one", attachments: [])
+        await waitForTurn(id, 1)
+        // omp stores a skill invocation as its expanded body, so its text never matches.
+        try await engine.send(id, text: "/skill:review two", attachments: [])
+        await waitForTurn(id, 2)
+        try await engine.send(id, text: "three", attachments: [])
+        await waitForTurn(id, 3)
+        let thread = try #require(engine.thread(id))
+        let message = try await engine.revert(id, toBeforeTurn: thread.turns[1].id, restoreFiles: false)
+
+        #expect(message.text == "/skill:review two")
+        #expect(engine.thread(id)?.turns.count == 1)
+        // omp keeps turn 1 (up to its answer a1) and loses the skill turn and everything after.
+        #expect(fake.received("fork").map { $0["entryId"]?.stringValue } == ["a1"])
+        await engine.shutdown()
+    }
+
+    @Test func aSteerWithThePromptsOwnTextDoesNotMoveTheTurnsAnchor() async throws {
+        let fake = try makeFake()
+        let (session, recorder) = try await sessionWithTurns(fake, ["one"])
+
+        _ = try await session.startTurn(input("approve again"))
+        _ = await recorder.wait { $0.contains { if case .approvalRequested = $0 { true } else { false } } }
+        try await session.steer(input("approve again"))
+        await session.respond(toApproval: "ui-1", decision: .accept, feedback: nil)
+        _ = await recorder.wait { $0.filter { if case .turnCompleted = $0 { true } else { false } }.count == 2 }
+        await session.close()
+
+        let anchors = recorder.events.compactMap { if case let .turnStarted(id) = $0 { id } else { nil } }
+        #expect(anchors == ["u1", "u2"])
+    }
+
+    @Test func aTurnWhoseStartIsUnknownIsNeverRewoundByGuessing() async throws {
+        let fake = try makeFake()
+        let (session, _) = try await sessionWithTurns(fake, ["one", "two"])
+
+        await #expect(throws: ProviderError.message("omp could not tell where turn 2 starts, so the conversation cannot be rewound safely.")) {
+            try await session.rollback(beforeTurn: 2, providerTurnID: OmpProtocol.unresolvedTurnID)
+        }
+        await session.close()
+
+        #expect(fake.received("fork").isEmpty && fake.received("new_session").isEmpty)
     }
 
     @Test func changingTheRuntimeModeRestartsOnTheSameSessionFile() async throws {

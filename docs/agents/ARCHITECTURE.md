@@ -120,9 +120,12 @@ fast-mode changes go to the live process (`set_model {provider, modelId}`, `set_
 streamingBehavior:"steer"}` (attachment paths listed in the text; "steer" only matters when a
 background job's run is live, where a plain `prompt` is refused); the turn ends at `prompt_result`
 with the same id (extension runs such as auto-double-check happen before it), `completed` /
-`aborted|interrupted|cancelled` → interrupted / else failed. At that `prompt_result` the session
-reads `get_entries` and reports the prompt's user-message entry id (matched by text on the current
-branch) as the turn's `providerTurnID` via `turnStarted`. A completed or failed `prompt_result`
+`aborted|interrupted|cancelled` → interrupted / else failed. When the turn ends the session reads
+`get_entries` and reports, via `turnStarted`, the first entry on the current branch after the
+previous turn's tip (re-read at start and after a rewind) as the turn's `providerTurnID`: position,
+not text, since omp rewrites skill invocations, templates and `^model` mentions. A turn whose start
+cannot be located (entries unreadable, tip off the branch) gets `omp-unresolved`, which rollback
+refuses instead of guessing; a turn that added nothing (local command) gets no id. A completed or failed `prompt_result`
 with `sessionSettled:false` (async bash/task/eval jobs still running) holds that outcome: the
 turn, its dialogs, steer and interrupt stay live and the runs those jobs wake stream into it
 until `session_settled`, so the checkpoint and the queue wait for them. Stop ends the turn at
