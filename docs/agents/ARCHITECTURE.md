@@ -239,6 +239,8 @@ binding beats a global one. T3 Code's ⌥ shortcuts move to ⌃⌘.
 | `terminal.close` | Close Terminal | terminal | `cmd+w` | Panels |
 | `editor.openFavorite` | Open in Editor | global | `cmd+o` | Panels |
 | `git.commit` / `git.push` / `git.createPR` | Commit / Push / Create PR | — | — | Panels |
+| `diff.toggleLayout` / `diff.toggleFileTree` | Toggle Split Diff View / Diff File Tree | — | — | Panels |
+| `rightPanel.toggleMaximized` | Maximize Right Panel | — | — | Panels |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
 router as global) — T3 Code's `!terminalFocus`.
