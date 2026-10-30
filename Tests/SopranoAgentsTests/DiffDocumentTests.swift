@@ -54,4 +54,97 @@ struct DiffDocumentTests {
         let document = DiffDocument.build(files: [other, file(kind: .renamed)], title: "b.txt")
         #expect(document.file?.newPath == "b.txt")
     }
+
+    /// `git diff -M` output: a rename with edits, a binary file, a file without a trailing
+    /// newline on both sides, and a pure rename.
+    private static let realWorldPatch = """
+    diff --git a/old/name.txt b/new/name.txt
+    similarity index 80%
+    rename from old/name.txt
+    rename to new/name.txt
+    index 1111111..2222222 100644
+    --- a/old/name.txt
+    +++ b/new/name.txt
+    @@ -1,4 +1,4 @@
+     keep
+    -let value = 1
+    -gone
+    +let value = 2
+    +added
+     tail
+    diff --git a/logo.png b/logo.png
+    index 3333333..4444444 100644
+    Binary files a/logo.png and b/logo.png differ
+    diff --git a/end.txt b/end.txt
+    index 5555555..6666666 100644
+    --- a/end.txt
+    +++ b/end.txt
+    @@ -1,2 +1,2 @@
+     first
+    -last
+    \\ No newline at end of file
+    +last line
+    \\ No newline at end of file
+    diff --git a/moved.txt b/renamed.txt
+    similarity index 100%
+    rename from moved.txt
+    rename to renamed.txt
+
+    """
+
+    @Test func aRenameWithEditsPairsChangeBlocksSideBySide() {
+        let entries = DiffFileEntry.prepare(patch: Self.realWorldPatch)
+        #expect(entries.map(\.path) == ["new/name.txt", "logo.png", "end.txt", "renamed.txt"])
+        let rename = entries[0].document
+        #expect(rename.file?.kind == .renamed)
+        #expect(rename.file?.oldPath == "old/name.txt")
+        #expect(rename.splitRows == [
+            .hunk(0), .pair(hunk: 0, old: 0, new: 0), .pair(hunk: 0, old: 1, new: 3), .pair(hunk: 0, old: 2, new: 4),
+            .pair(hunk: 0, old: 5, new: 5),
+        ])
+        #expect(rename.additions == 2)
+        #expect(rename.deletions == 2)
+    }
+
+    @Test func onlyTheChangedWordsOfASimilarPairAreEmphasized() {
+        let rename = DiffFileEntry.prepare(patch: Self.realWorldPatch)[0]
+        #expect(rename.document.changedRange(hunk: 0, line: 1) == NSRange(location: 12, length: 1))
+        #expect(rename.document.changedRange(hunk: 0, line: 3) == NSRange(location: 12, length: 1))
+        // "gone" and "added" share nothing: no emphasis on either.
+        #expect(rename.document.changedRange(hunk: 0, line: 2) == nil)
+        #expect(DiffSurfaceViewController.emphasis(in: rename, hunk: 0, line: 1) == NSRange(location: 12, length: 1))
+    }
+
+    @Test func linesThatShareOnlyIndentationAreNotEmphasized() {
+        let patch = """
+        diff --git a/a.swift b/a.swift
+        --- a/a.swift
+        +++ b/a.swift
+        @@ -1,1 +1,1 @@
+        -        router.replace(with: target)
+        +        await sessionStore.persist(session)
+
+        """
+        let entry = DiffFileEntry.prepare(patch: patch)[0]
+        #expect(entry.document.changedRange(hunk: 0, line: 0) != nil)
+        #expect(DiffSurfaceViewController.emphasis(in: entry, hunk: 0, line: 0) == nil)
+        #expect(DiffSurfaceViewController.emphasis(in: entry, hunk: 0, line: 1) == nil)
+    }
+
+    @Test func binaryFilesAndPureRenamesExplainThemselves() {
+        let entries = DiffFileEntry.prepare(patch: Self.realWorldPatch)
+        #expect(entries[1].document.notice == "Binary file. There is no text diff to show.")
+        #expect(entries[3].document.notice == "Renamed without content changes: moved.txt → renamed.txt.")
+        #expect(entries[1].highlights.isEmpty)
+    }
+
+    @Test func aMissingNewlineMarkerStaysBesideTheLineItFollows() {
+        let end = DiffFileEntry.prepare(patch: Self.realWorldPatch)[2].document
+        let kinds = end.file?.hunks[0].lines.map(\.kind)
+        #expect(kinds == [.context, .removed, .noNewlineMarker, .added, .noNewlineMarker])
+        #expect(end.splitRows == [
+            .hunk(0), .pair(hunk: 0, old: 0, new: 0), .pair(hunk: 0, old: 1, new: 3), .pair(hunk: 0, old: 2, new: 4),
+        ])
+        #expect(end.rows.count == 6)
+    }
 }
