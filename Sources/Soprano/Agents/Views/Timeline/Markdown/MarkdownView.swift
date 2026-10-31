@@ -277,9 +277,7 @@ final class CodeBlockView: PaletteView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.copyButton.setSymbol(Icon.copy, size: 12)
             self?.copyButton.restingTint = nil
-            self?.copyButton.applyPalette(PaletteCenter.shared.palette)
         }
-        copyButton.applyPalette(palette)
     }
 
     override func applyPalette(_ palette: Palette) {

@@ -174,7 +174,7 @@ private final class AttachmentThumbnail: PaletteView {
         layer?.borderColor = palette.border.composerFaded(0.8).cgColor
         layer?.backgroundColor = palette.muted.cgColor
         remove.restingTint = palette.foreground
-        remove.layer?.backgroundColor = palette.background.withAlphaComponent(0.85).cgColor
+        remove.restingFill = palette.background.withAlphaComponent(0.85)
     }
 }
 

@@ -123,7 +123,19 @@ final class GhostIconButton: InteractiveView {
     }
 
     /// Tint at rest; nil = muted foreground.
-    var restingTint: NSColor?
+    var restingTint: NSColor? {
+        didSet { applyPalette(palette) }
+    }
+
+    /// Fill at rest; nil = none. Owners set fills here, never on the layer: hover repaints it.
+    var restingFill: NSColor? {
+        didSet { applyPalette(palette) }
+    }
+
+    /// Fill while `isOn` (hovered or not); nil = accent.
+    var onFill: NSColor? {
+        didSet { applyPalette(palette) }
+    }
 
     init(symbol: String, size: CGFloat = Metrics.titlebarControlSize, symbolSize: CGFloat = 15, toolTip: String? = nil) {
         side = size
@@ -153,7 +165,8 @@ final class GhostIconButton: InteractiveView {
 
     override func applyPalette(_ palette: Palette) {
         let active = isOn || isHovered
-        layer?.backgroundColor = (isOn ? palette.accent : isHovered ? palette.accent : .clear).cgColor
+        let fill = isOn ? (onFill ?? palette.accent) : isHovered ? palette.accent : (restingFill ?? .clear)
+        layer?.backgroundColor = fill.cgColor
         imageView.contentTintColor = !isEnabled
             ? palette.mutedForeground.withAlphaComponent(0.5)
             : active ? palette.foreground : (restingTint ?? palette.mutedForeground)

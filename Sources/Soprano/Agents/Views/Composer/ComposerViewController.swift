@@ -161,10 +161,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let modelGroup = NSStackView(views: [modelChip, traitsChip])
         modelGroup.orientation = .horizontal
         modelGroup.spacing = 0
-        modelChip.setPadding(leading: 8, trailing: 4)
-        traitsChip.setPadding(leading: 0, trailing: 8)
+        // Each chip keeps room on both sides of its content for its own hover fill; the model
+        // chip's leading inset is 2 pt smaller to offset its glyph's built-in side bearing.
+        modelChip.setPadding(leading: 6, trailing: 8)
+        traitsChip.setPadding(leading: 7, trailing: 7)
         traitsChip.mutesTitle = true
-        permissionsChip.setPadding(leading: 6, trailing: 8)
         let chips = NSStackView(views: [modelGroup, permissionsChip])
         chips.orientation = .horizontal
         chips.spacing = 2
@@ -462,10 +463,8 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let fastImage = fast ? NSImage.symbol(Icon.zap, size: 10) : nil
         if let effort {
             traitsChip.configure(title: ProviderCatalog.effortLabel(effort), image: nil, trailing: fastImage)
-            traitsChip.setPadding(leading: 0, trailing: 8)
         } else {
             traitsChip.configure(title: nil, image: NSImage.symbol(Icon.gauge, size: 14), trailing: fastImage)
-            traitsChip.setPadding(leading: 4, trailing: 8)
         }
         let traitParts = [effort.map { "Effort: \(ProviderCatalog.effortLabel($0))" }, fast ? "Fast" : nil].compactMap { $0 }
         traitsChip.toolTip = traitParts.isEmpty ? "Traits" : traitParts.joined(separator: " · ")

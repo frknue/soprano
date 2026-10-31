@@ -936,7 +936,7 @@ final class DiffLayoutToggle: PaletteView {
         stacked.isOn = layout == .unified
         split.isOn = layout == .split
         for button in [stacked, split] {
-            button.layer?.backgroundColor = (button.isOn ? palette.popover : .clear).cgColor
+            button.onFill = palette.popover
             button.layer?.cornerRadius = Radius.md
         }
     }

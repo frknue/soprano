@@ -96,6 +96,10 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Fixed
 
+- Hover fills sit evenly around their content: the composer's effort chip ("High") no longer
+  starts flush at its text, and the model and permissions chips have even space on both sides.
+  The remove ✕ on image attachments keeps its backdrop after a hover, and the selected
+  Stacked/Split diff toggle keeps its look while hovered.
 - Clicking empty space inside Settings (or a dialog) no longer closes it; only a click on the
   dimmed backdrop outside the card does.
 - Once the agent has answered, the timeline no longer shows "Thinking" under the answer while
