@@ -572,8 +572,10 @@ final class StatisticsDocumentView: NSView {
         stack.spacing = 20
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        // Below the window's own size priorities, so the capped column never limits how wide the
+        // window can grow (zoom, resize); above the stack's hugging, so it still fills up to the cap.
         let fill = stack.widthAnchor.constraint(equalTo: widthAnchor, constant: -48)
-        fill.priority = .defaultHigh
+        fill.priority = .dragThatCannotResizeWindow
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: topAnchor, constant: 24),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -32),

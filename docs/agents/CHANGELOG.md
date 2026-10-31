@@ -114,6 +114,8 @@ All notable changes to Soprano Agents are documented here. The format follows
   Stacked/Split diff toggle keeps its look while hovered.
 - The window's traffic lights sit on the same line as the sidebar toggle and the "Soprano
   Agents" title instead of above them.
+- Double-clicking the title bar (or Window ▸ Zoom) fills the screen again; the statistics board
+  had capped how wide the window could grow.
 - Clicking empty space inside Settings (or a dialog) no longer closes it; only a click on the
   dimmed backdrop outside the card does.
 - Once the agent has answered, the timeline no longer shows "Thinking" under the answer while
