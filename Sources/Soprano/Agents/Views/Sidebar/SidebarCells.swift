@@ -66,7 +66,7 @@ class SidebarThreadCell: InteractiveView {
         setAccessibilityRole(.row)
     }
 
-    /// The jump hint ("⌘3") while ⌘ is held; nil hides it.
+    /// The jump hint ("⌃3") while ⌃ is held; nil hides it.
     var jumpHint: String? {
         didSet {
             jumpBadge.text = jumpHint ?? ""

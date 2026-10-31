@@ -443,7 +443,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `chat.newWithoutProject` | New Thread Without a Project | not terminal | `cmd+ctrl+n` | Sidebar |
 | `project.add` | Add Project… | global | — | Sidebar |
 | `thread.previous` / `thread.next` | Previous / Next Thread | global | `cmd+shift+[` / `cmd+shift+]` | Sidebar |
-| `thread.jump.1`…`9` | Go to Thread N | global | `cmd+1`…`cmd+9` | Sidebar |
+| `thread.jump.1`…`9` | Go to Thread N | global | `ctrl+1`…`ctrl+9` | Sidebar |
 | `thread.settle` | Settle Thread | not terminal | `cmd+shift+s` | Sidebar |
 | `thread.pin` | Pin Thread | not terminal | `cmd+shift+p` | Sidebar |
 | `thread.rename` | Rename Thread | sidebar | — (F2 in the sidebar list, hard-coded: `KeyChord` has no function keys) | Sidebar |

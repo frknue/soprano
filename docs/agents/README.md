@@ -84,7 +84,7 @@ right-panel tab) has focus.
 | New Thread in Current Project | `⇧⌘N` | not terminal |
 | New Thread Without a Project | `⌃⌘N` | not terminal |
 | Previous / Next Thread | `⇧⌘[` / `⇧⌘]` | everywhere |
-| Go to Thread 1–9 | `⌘1` … `⌘9` | everywhere |
+| Go to Thread 1–9 | `⌃1` … `⌃9` | everywhere |
 | Settle Thread | `⇧⌘S` | not terminal |
 | Pin Thread | `⇧⌘P` | not terminal |
 | Rename Thread | `F2` | sidebar |

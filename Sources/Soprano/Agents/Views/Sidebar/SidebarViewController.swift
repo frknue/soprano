@@ -429,7 +429,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         scrollToThread(order[next])
     }
 
-    /// ⌘1…⌘9: the Nth thread in list order.
+    /// ⌃1…⌃9: the Nth thread in list order.
     func jump(to position: Int) {
         let order = threadOrder
         guard position >= 1, position <= order.count else { return }
@@ -552,15 +552,15 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
     private func jumpHint(for threadID: String, order: [String]) -> String? {
         guard showsJumpHints, let index = order.firstIndex(of: threadID), index < 9 else { return nil }
-        return "⌘\(index + 1)"
+        return "⌃\(index + 1)"
     }
 
-    /// Holding ⌘ alone for 200 ms shows ⌘1…⌘9 on the first nine rows.
+    /// Holding ⌃ alone for 200 ms shows ⌃1…⌃9 on the first nine rows.
     private func handleFlags(_ event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .function, .numericPad])
         jumpHintWork?.cancel()
         jumpHintWork = nil
-        guard flags == .command, event.window === view.window, !view.isHiddenOrHasHiddenAncestor else {
+        guard flags == .control, event.window === view.window, !view.isHiddenOrHasHiddenAncestor else {
             setJumpHints(false)
             return
         }

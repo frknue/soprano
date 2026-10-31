@@ -201,7 +201,7 @@ enum SidebarListModel {
         return items
     }
 
-    /// Thread ids in list order (previous/next and ⌘1…⌘9 follow it).
+    /// Thread ids in list order (previous/next and ⌃1…⌃9 follow it).
     static func threadOrder(_ items: [SidebarItem]) -> [String] {
         items.compactMap { $0.thread?.threadID }
     }

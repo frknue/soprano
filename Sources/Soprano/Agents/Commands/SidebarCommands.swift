@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Sidebar module: new thread, thread navigation (⇧⌘[ ⇧⌘] ⌘1–9), settle, pin, rename, archive,
+/// Sidebar module: new thread, thread navigation (⇧⌘[ ⇧⌘] ⌃1–9), settle, pin, rename, archive,
 /// delete, copy reference, add project, search, project filter.
 @MainActor
 enum SidebarCommands {
@@ -173,7 +173,7 @@ enum SidebarCommands {
                 id: "thread.jump.\(position)",
                 title: "Go to Thread \(position)",
                 category: .navigation,
-                defaultKeys: ["cmd+\(position)"],
+                defaultKeys: ["ctrl+\(position)"],
                 icon: "number",
                 inPalette: false,
                 isEnabled: { threadOrder($0).count >= position }

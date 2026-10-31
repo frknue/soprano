@@ -69,7 +69,7 @@ struct KeymapTests {
             ("usage.refresh", [], []),
         ]
         for index in 1...9 {
-            table.append(("thread.jump.\(index)", [], ["cmd+\(index)"]))
+            table.append(("thread.jump.\(index)", [], ["ctrl+\(index)"]))
         }
         return table
     }
