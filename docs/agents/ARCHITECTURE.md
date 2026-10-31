@@ -345,10 +345,10 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `palette.open` | Command Palette | global | `cmd+k` | Shell |
 | `settings.open` | Settings | global | `cmd+,` | Shell |
 | `settings.openFile` | Open settings.json | global | — | Shell |
-| `view.toggleSidebar` | Toggle Sidebar | global | `cmd+b` | Shell |
+| `view.toggleSidebar` | Toggle Sidebar | global | `cmd+e` | Shell |
 | `view.toggleThreadDetails` | Toggle Thread Details | not terminal | `cmd+shift+b` | Shell |
 | `view.toggleTerminal` | Toggle Terminal Drawer | global | `cmd+j` | Shell |
-| `view.toggleRightPanel` | Toggle Right Panel | global | `cmd+ctrl+b` | Shell |
+| `view.toggleRightPanel` | Toggle Right Panel | global | `cmd+l` | Shell |
 | `chat.new` | New Thread | not terminal | `cmd+n`, `cmd+shift+o` | Sidebar |
 | `chat.newLocal` | New Thread in Current Project | not terminal | `cmd+shift+n` | Sidebar |
 | `chat.newWithoutProject` | New Thread Without a Project | not terminal | `cmd+ctrl+n` | Sidebar |
@@ -365,7 +365,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `chat.find` | Find in Thread | sidebar, timeline, composer | `cmd+f` | Timeline |
 | `timeline.jumpToLatest` | Jump to Latest | timeline | `cmd+down` | Timeline |
 | `timeline.expandAll` / `timeline.collapseAll` | Expand / Collapse All Work | — | — | Timeline |
-| `composer.focus` | Focus Composer | global | `cmd+l` | Composer |
+| `composer.focus` | Focus Composer | global | `cmd+shift+l` | Composer |
 | `modelPicker.toggle` | Model Picker | not terminal | `cmd+shift+m` | Composer |
 | `composer.effort` | Reasoning Effort | not terminal | `cmd+shift+e` | Composer |
 | `composer.mode` | Permissions | not terminal | `cmd+shift+a` | Composer |

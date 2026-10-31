@@ -11,7 +11,7 @@ final class ChatHeaderView: PaletteView {
     let engine: AgentEngine
     let state: WorkspaceState
 
-    private let sidebarButton = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘B)")
+    private let sidebarButton = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘E)")
     private let projectButton = BreadcrumbProjectButton()
     private let separator = NSTextField.label("/", size: Typography.bodySize, weight: .medium)
     private let titleButton = HeaderTitleButton()
@@ -21,7 +21,7 @@ final class ChatHeaderView: PaletteView {
     private var locationGeneration = 0
     private let detailsButton = GhostIconButton(symbol: Icon.squareMenu, symbolSize: 14, toolTip: "Toggle thread details (⇧⌘B)")
     private let terminalButton = GhostIconButton(symbol: Icon.panelBottom, symbolSize: 14, toolTip: "Toggle terminal drawer (⌘J)")
-    private let rightPanelButton = GhostIconButton(symbol: Icon.panelRight, symbolSize: 14, toolTip: "Toggle right panel (⌃⌘B)")
+    private let rightPanelButton = GhostIconButton(symbol: Icon.panelRight, symbolSize: 14, toolTip: "Toggle right panel (⌘L)")
     private var renameField: InlineRenameField?
     private var pendingMenu: DispatchWorkItem?
 

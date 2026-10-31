@@ -47,7 +47,7 @@ The installer never restarts a running Soprano Agents; the update applies on the
    composer.
 5. Open a turn's diff from its changed-files card, or the whole thread's with `⌘D`. "Edit from
    here" rewinds the thread (and optionally the files) to before that turn.
-6. The right panel (`⌃⌘B`) keeps tabs per thread, as in T3 Code: Diff, Files (`⇧⌘F`: browse and
+6. The right panel (`⌘L`) keeps tabs per thread, as in T3 Code: Diff, Files (`⇧⌘F`: browse and
    search the thread's workspace; ignored files stay out) with a read-only, syntax-colored tab per
    opened file, and terminals (`⇧⌘J`) next to the bottom drawer's. `+` adds a surface; with every
    tab closed, "Open a surface" offers Terminal (`T`), Files (`F`) and Diff (`D`).
@@ -72,10 +72,10 @@ right-panel tab) has focus.
 |---|---|---|
 | Command Palette | `⌘K` | everywhere |
 | Settings | `⌘,` | everywhere |
-| Toggle Sidebar | `⌘B` | everywhere |
+| Toggle Sidebar | `⌘E` | everywhere |
 | Toggle Thread Details | `⇧⌘B` | not terminal |
 | Toggle Terminal Drawer | `⌘J` | everywhere |
-| Toggle Right Panel | `⌃⌘B` | everywhere |
+| Toggle Right Panel | `⌘L` | everywhere |
 | New Thread | `⌘N`, `⇧⌘O` | not terminal |
 | New Thread in Current Project | `⇧⌘N` | not terminal |
 | New Thread Without a Project | `⌃⌘N` | not terminal |
@@ -87,7 +87,7 @@ right-panel tab) has focus.
 | Copy Thread Reference | `⇧⌘C` | not terminal |
 | Find in Thread | `⌘F` | sidebar, timeline, composer |
 | Jump to Latest | `⌘↓` | timeline |
-| Focus Composer | `⌘L` | everywhere |
+| Focus Composer | `⇧⌘L` | everywhere |
 | Model Picker | `⇧⌘M` | not terminal |
 | Reasoning Effort | `⇧⌘E` | not terminal |
 | Permissions | `⇧⌘A` | not terminal |

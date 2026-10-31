@@ -18,7 +18,7 @@ enum ComposerCommands {
                 id: "composer.focus",
                 title: "Focus Composer",
                 category: .composer,
-                defaultKeys: ["cmd+l"],
+                defaultKeys: ["cmd+shift+l"],
                 icon: "text.cursor",
                 isEnabled: { composer($0) != nil }
             ) { context in

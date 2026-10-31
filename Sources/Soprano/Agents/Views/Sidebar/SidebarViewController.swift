@@ -10,7 +10,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     let engine: AgentEngine
     let state: WorkspaceState
 
-    private let toggleButton = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘B)")
+    private let toggleButton = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘E)")
     private let brandLabel = NSTextField.label("", size: Typography.bodySize, weight: .medium)
     let searchField = SidebarSearchField()
     private let searchRow = NSView()

@@ -74,6 +74,11 @@ All notable changes to Soprano Agents are documented here. The format follows
   outside git, a worktree under its repository's name) and the branch; hover for the full path,
   click to toggle the thread details (⇧⌘B).
 
+### Changed
+
+- ⌘E shows or hides the left sidebar and ⌘L the right panel (were ⌘B and ⌃⌘B); Focus Composer
+  moves from ⌘L to ⇧⌘L.
+
 ### Removed
 
 - Codex and Claude Code as agents: omp is the only agent. Plan mode (⇧⇥) and the settings keys

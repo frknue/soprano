@@ -43,7 +43,7 @@ struct KeymapTests {
             ("sidebar.search", [], []),
             ("chat.find", [.sidebar, .timeline, .composer], ["cmd+f"]),
             ("timeline.jumpToLatest", [.timeline], ["cmd+down"]),
-            ("composer.focus", [], ["cmd+l"]),
+            ("composer.focus", [], ["cmd+shift+l"]),
             ("modelPicker.toggle", notTerminal, ["cmd+shift+m"]),
             ("composer.effort", notTerminal, ["cmd+shift+e"]),
             ("composer.mode", notTerminal, ["cmd+shift+a"]),
@@ -81,7 +81,7 @@ struct KeymapTests {
         #expect(keymap.conflictingIDs.isEmpty)
         #expect(keymap.chords(for: "palette.open").map(\.canonicalString) == ["cmd+k"])
         #expect(keymap.chords(for: "settings.open").first?.keycaps(prefixKey: "a") == ["⌘,"])
-        #expect(keymap.chords(for: "view.toggleRightPanel").first?.keycaps(prefixKey: "a") == ["⌃⌘B"])
+        #expect(keymap.chords(for: "view.toggleRightPanel").first?.keycaps(prefixKey: "a") == ["⌘L"])
     }
 
     @Test func shellCommandsCarryTheDocumentedDefaultKeys() {
@@ -89,10 +89,10 @@ struct KeymapTests {
             "palette.open": ["cmd+k"],
             "settings.open": ["cmd+,"],
             "settings.openFile": [],
-            "view.toggleSidebar": ["cmd+b"],
+            "view.toggleSidebar": ["cmd+e"],
             "view.toggleThreadDetails": ["cmd+shift+b"],
             "view.toggleTerminal": ["cmd+j"],
-            "view.toggleRightPanel": ["cmd+ctrl+b"],
+            "view.toggleRightPanel": ["cmd+l"],
         ]
         let actual = Dictionary(uniqueKeysWithValues: ShellCommands.all.map { ($0.id, $0.defaultKeys) })
         #expect(actual == expected)

@@ -29,7 +29,7 @@ enum ShellCommands {
                 id: "view.toggleSidebar",
                 title: "Toggle Sidebar",
                 category: .view,
-                defaultKeys: ["cmd+b"],
+                defaultKeys: ["cmd+e"],
                 icon: "sidebar.left"
             ) { context in
                 guard let state = context.state else { return }
@@ -61,7 +61,7 @@ enum ShellCommands {
                 id: "view.toggleRightPanel",
                 title: "Toggle Right Panel",
                 category: .view,
-                defaultKeys: ["cmd+ctrl+b"],
+                defaultKeys: ["cmd+l"],
                 icon: Icon.panelRight
             ) { context in
                 guard let state = context.state else { return }
