@@ -43,6 +43,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         fileMenu.addItem(.separator())
         fileMenu.addItem(commandItem("project.open", title: "Open Project…"))
         fileMenu.addItem(commandItem("editor.openFavorite", title: "Open in Editor"))
+        fileMenu.addItem(commandItem("git.openInSopranoGit", title: "Open in Soprano Git"))
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "")
         add(fileMenu, to: main)

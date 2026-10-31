@@ -177,6 +177,21 @@ enum PanelCommands {
                 context.workspace?.chat.details.openInEditor()
             },
             AppCommand(
+                id: "git.openInSopranoGit",
+                title: "Open in Soprano Git",
+                description: "Open the workspace's Git repository in Soprano Git",
+                category: .project,
+                defaultKeys: ["prefix+g"],
+                icon: "arrow.triangle.branch",
+                isEnabled: { context in
+                    context.state?.workspace.flatMap { context.engine?.workingDirectory(of: $0) } != nil
+                }
+            ) { context in
+                guard let engine = context.engine, let ref = context.state?.workspace else { return }
+                let window = context.window
+                Task { await SopranoGitLauncher.open(ref, engine: engine, window: window) }
+            },
+            AppCommand(
                 id: "git.commit",
                 title: "Commit",
                 description: "Commit the thread's changes",

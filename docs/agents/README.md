@@ -105,6 +105,7 @@ right-panel tab) has focus.
 | New Terminal | `⌘N` | terminal (drawer or right-panel tab) |
 | Close Terminal | `⌘W` | terminal (drawer or right-panel tab) |
 | Open in Editor | `⌘O` | everywhere |
+| Open in Soprano Git | `⌃A` → `G` | everywhere |
 | Show Usage | `⌘U` | everywhere |
 
 Unbound by default (bind them in Settings): Open settings.json, Archive / Delete

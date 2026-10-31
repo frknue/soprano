@@ -60,6 +60,7 @@ struct KeymapTests {
             ("terminal.new", [.terminal], ["cmd+n"]),
             ("terminal.close", [.terminal], ["cmd+w"]),
             ("editor.openFavorite", [], ["cmd+o"]),
+            ("git.openInSopranoGit", [], ["prefix+g"]),
             ("git.commit", [], []),
             ("git.push", [], []),
             ("git.createPR", [], []),

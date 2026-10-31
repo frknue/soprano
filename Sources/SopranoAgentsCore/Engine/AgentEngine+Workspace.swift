@@ -17,6 +17,13 @@ extension AgentEngine {
         Set(threads.map(\.id)).union(projects.map { WorkspaceRef.draft(projectID: $0.id).key })
     }
 
+    /// Top level of the repository `ref` works in (a linked worktree is its own); nil for an
+    /// unknown thread or project, or a folder outside git.
+    public func repositoryRoot(of ref: WorkspaceRef) async -> String? {
+        guard let path = workingDirectory(of: ref) else { return nil }
+        return await environment.git.repositoryRoot(path)
+    }
+
     /// Where `ref` works: path, repository name and the path inside it, branch. nil for an
     /// unknown thread or project. Runs only cheap git reads (top level, `HEAD`) off the main actor.
     public func workspaceLocation(_ ref: WorkspaceRef) async -> WorkspaceLocation? {

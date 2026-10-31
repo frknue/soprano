@@ -77,6 +77,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 - The chat header shows where the thread or new thread works: `repo/sub/folder` (the `~` path
   outside git, a worktree under its repository's name) and the branch; hover for the full path,
   click to toggle the thread details (⇧⌘B).
+- Open in Soprano Git (⌃A then G, as in Soprano; also File menu and palette): opens the thread's
+  or new thread's repository in Soprano Git, or selects its tab there if already open.
 
 ### Changed
 
