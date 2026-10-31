@@ -101,7 +101,8 @@ final class OverlayWindow: NSWindow {
 }
 
 /// The dialog backdrop: the window dimmed with the background at 60 % (dark 64 %).
-/// Clicks outside the card land here.
+/// Clicks outside the card land here; clicks on card space no control handles travel up the
+/// responder chain to here too and are ignored.
 final class OverlayBackdropView: PaletteView {
     var onClick: (() -> Void)?
 
@@ -115,6 +116,8 @@ final class OverlayBackdropView: PaletteView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        let point = superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
+        guard hitTest(point) === self else { return }
         onClick?()
     }
 

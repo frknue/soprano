@@ -88,6 +88,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Fixed
 
+- Clicking empty space inside Settings (or a dialog) no longer closes it; only a click on the
+  dimmed backdrop outside the card does.
 - Selecting text in a chat message highlights exactly the selected lines; a selection over
   several lines no longer draws bands between them or skips lines.
 - omp slash commands typed in the composer (`/usage`, `/session`, `/context`, `/tools`, …) now show
