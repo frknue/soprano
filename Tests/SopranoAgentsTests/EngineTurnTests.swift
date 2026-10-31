@@ -215,12 +215,15 @@ struct EngineTurnTests {
 
         await engine.interrupt(threadID)
         #expect(session.interrupts == 1)
+        // Until the provider ends the turn, it is stopping.
+        #expect(engine.thread(threadID)?.activeTurn?.stopRequestedAt != nil)
         session.emit(.turnCompleted(outcome: .interrupted, error: nil))
 
         #expect(await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.status == .interrupted })
         await engine.runtime.waitForBackgroundWork()
         let thread = try #require(engine.thread(threadID))
         #expect(thread.turns.last?.items.first?.status == .interrupted)
+        #expect(thread.turns.last?.stopRequestedAt == nil)
         #expect(thread.queue.map(\.message.text) == ["later"])
         #expect(session.turns.count == 1)
     }

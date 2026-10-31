@@ -78,6 +78,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 - ⌘E shows or hides the left sidebar and ⌘L the right panel (were ⌘B and ⌃⌘B); Focus Composer
   moves from ⌘L to ⇧⌘L.
+- After Stop, the turn reads "Stopping…" and the Stop button dims until omp has actually
+  stopped.
 
 ### Removed
 
@@ -90,6 +92,13 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 - Clicking empty space inside Settings (or a dialog) no longer closes it; only a click on the
   dimmed backdrop outside the card does.
+- Once the agent has answered, the timeline no longer shows "Thinking" under the answer while
+  omp wraps up the turn (advisor review, stop hooks); it returns if the agent works again.
+- omp threads whose conversation holds a cut-off emoji or icon glyph no longer stall for a
+  minute at the end of every turn: Stop ends the turn right away again, and replies to
+  messages sent during that minute no longer go missing.
+- A message sent just as the agent finishes starts a new turn instead of steering into the
+  ending one, where its answer went missing.
 - Selecting text in a chat message highlights exactly the selected lines; a selection over
   several lines no longer draws bands between them or skips lines.
 - omp slash commands typed in the composer (`/usage`, `/session`, `/context`, `/tools`, …) now show

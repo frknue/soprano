@@ -56,7 +56,9 @@ public struct OmpUIRequest: Sendable, Hashable {
 /// - `message_update` `text_delta` → `assistantDelta`; `thinking_delta` → `reasoningDelta`;
 ///   `text_end` / `thinking_end` → the completed item with omp's full `content`.
 /// - `message_end` of an assistant message with `usage` → `tokenUsage` (input + output +
-///   cacheRead + cacheWrite).
+///   cacheRead + cacheWrite). One with `stopReason:"stop"` (no tool call) also marks its text
+///   final: the run answered, though omp may still wrap up (advisor review, stop hooks) or run
+///   again before `prompt_result`.
 /// - `tool_execution_start|update|end {toolCallId, toolName, args, intent, partialResult,
 ///   result{content, details}, isError}` → items: bash → command (cumulative output, exit code
 ///   from `details.exitCode`, else 0 on success), write/edit/ast_edit → file change (edit
@@ -187,9 +189,14 @@ public struct OmpEventMapper: Sendable {
         guard heldOutcome != nil, !isBackgroundRunActive, let type = frame["type"]?.stringValue, Self.runFrames.contains(type) else {
             return mapFrame(frame)
         }
-        // Background work woke the agent after the yield: the turn works again.
+        // Background work woke the agent after the yield: the turn works again, and its answer
+        // so far is no longer the last word (the end marks the last text final again).
         isBackgroundRunActive = true
-        return [.turnResumed] + mapFrame(frame)
+        var events: [ProviderEvent] = [.turnResumed]
+        if let last = lastText {
+            events.append(.itemUpdated(TurnItem(id: last.id, kind: .assistantMessage(text: last.text, isFinal: false), status: .completed)))
+        }
+        return events + mapFrame(frame)
     }
 
     private mutating func mapFrame(_ frame: JSONValue) -> [ProviderEvent] {
@@ -285,11 +292,17 @@ public struct OmpEventMapper: Sendable {
     }
 
     private func mapMessageEnd(_ frame: JSONValue) -> [ProviderEvent] {
-        guard let message = frame["message"], message["role"]?.stringValue == "assistant",
-              let usage = message["usage"], usage.objectValue != nil else { return [] }
-        let used = ["input", "output", "cacheRead", "cacheWrite"].compactMap { usage[$0]?.intValue }.reduce(0, +)
-        guard used > 0 else { return [] }
-        return [.tokenUsage(TokenUsage(usedTokens: used, contextWindow: contextWindow))]
+        guard let message = frame["message"], message["role"]?.stringValue == "assistant" else { return [] }
+        var events: [ProviderEvent] = []
+        if message["stopReason"]?.stringValue == "stop", let messageID = frame["messageId"]?.stringValue,
+           let last = lastText, last.id.hasPrefix("\(itemPrefix)\(messageID):") {
+            events.append(.itemUpdated(TurnItem(id: last.id, kind: .assistantMessage(text: last.text, isFinal: true), status: .completed)))
+        }
+        if let usage = message["usage"], usage.objectValue != nil {
+            let used = ["input", "output", "cacheRead", "cacheWrite"].compactMap { usage[$0]?.intValue }.reduce(0, +)
+            if used > 0 { events.append(.tokenUsage(TokenUsage(usedTokens: used, contextWindow: contextWindow))) }
+        }
+        return events
     }
 
     private mutating func mapPromptResult(_ frame: JSONValue) -> [ProviderEvent] {

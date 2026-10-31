@@ -142,12 +142,17 @@ extension AgentEngine {
         await runTurn(threadID, turnID)
     }
 
-    /// Stops the running turn (and holds the queue).
+    /// Stops the running turn (and holds the queue). The turn shows "Stopping…"
+    /// (`stopRequestedAt`) until the provider ends it.
     public func interrupt(_ threadID: String) async {
         guard let turn = thread(threadID)?.activeTurn else { return }
         let rt = runtime.thread(threadID)
         rt.holdQueue = true
         if let session = rt.session, rt.starting == nil, rt.liveTurnID == turn.id {
+            if turn.stopRequestedAt == nil {
+                let now = environment.now()
+                mutateTurn(threadID, turn.id) { $0.stopRequestedAt = now }
+            }
             await session.interrupt()
             return
         }

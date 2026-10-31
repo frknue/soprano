@@ -505,7 +505,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             answerButton.title = !isLast ? "Next question" : (draft.index > 0 ? "Submit answers" : "Submit answer")
             answerButton.isEnabled = isLast ? isComplete(draft, input) : !answer(for: draft.index, draft, input).isEmpty
             primaryButton.isHidden = !(thread?.isRunning ?? false)
-            primaryButton.update(.stop, tooltip: ComposerPrimaryAction.stop.tooltip(followUp: followUp))
+            primaryButton.update(.stop, tooltip: ComposerPrimaryAction.stop.tooltip(followUp: followUp), stopping: isStopping)
             return
         }
         previousButton.isHidden = true
@@ -518,7 +518,12 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             followUp: followUp,
             alternate: isAlternateHeld
         )
-        primaryButton.update(action, tooltip: action.tooltip(followUp: followUp))
+        primaryButton.update(action, tooltip: action.tooltip(followUp: followUp), stopping: action == .stop && isStopping)
+    }
+
+    /// Stop was pressed and the provider has not ended the turn yet.
+    private var isStopping: Bool {
+        currentThread?.activeTurn?.stopRequestedAt != nil
     }
 
     private func setAlternateHeld(_ held: Bool) {

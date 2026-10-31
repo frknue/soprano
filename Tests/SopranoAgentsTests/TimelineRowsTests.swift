@@ -115,7 +115,7 @@ struct TimelineRowsTests {
         ])
         let rows = TimelineBuilder.rows(for: thread([running]))
         #expect(ids(rows) == ["user:m-t1", "working:t1", "live:t1"])
-        #expect(rows[1].content == .working(startedAt: start))
+        #expect(rows[1].content == .working(startedAt: start, stopping: false))
         guard case let .liveWork(live) = rows[2].content else {
             Issue.record("expected a live row, got \(rows)")
             return
@@ -134,6 +134,26 @@ struct TimelineRowsTests {
         guard case let .assistant(message) = rows[2].content else { return }
         #expect(message.isStreaming)
         #expect(!message.showMeta)
+    }
+
+    @Test func nobodyIsThinkingAfterTheAnswerUntilTheAgentWorksAgain() {
+        let answered = turn(status: .running, items: [item("a1", .assistantMessage(text: "Done.", isFinal: true))])
+        #expect(ids(TimelineBuilder.rows(for: thread([answered]))) == ["user:m-t1", "working:t1", "assistant:a1"])
+
+        let secondPass = turn(status: .running, items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([secondPass]))).last == "thinking:t1")
+    }
+
+    @Test func aStoppingTurnSaysSoInsteadOfThinking() {
+        var stopping = turn(status: .running, items: [item("a1", .assistantMessage(text: "On it.", isFinal: false))])
+        stopping.stopRequestedAt = at(5)
+        let rows = TimelineBuilder.rows(for: thread([stopping]))
+
+        #expect(ids(rows) == ["user:m-t1", "working:t1", "assistant:a1"])
+        #expect(rows[1].content == .working(startedAt: start, stopping: true))
     }
 
     @Test func aPendingApprovalStandsAloneAndNobodyIsThinking() {

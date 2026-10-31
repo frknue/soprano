@@ -86,7 +86,7 @@ struct ApprovalRowModel: Hashable, Sendable {
 enum TimelineRowContent: Hashable, Sendable {
     case user(UserRowModel)
     case fold(FoldRowModel)
-    case working(startedAt: Date)
+    case working(startedAt: Date, stopping: Bool)
     case assistant(AssistantRowModel)
     case workGroup(WorkGroupRowModel)
     case workEntry(WorkEntryRowModel)
@@ -120,14 +120,16 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 
 /// Thread → timeline rows (from this app's turn model):
 ///
-/// - Each turn: the user message, then "Working for" while it runs, or a "Worked for …" fold when
+/// - Each turn: the user message, then "Working for" while it runs ("Stopping…" once Stop was
+///   pressed, without "Thinking"), or a "Worked for …" fold when
 ///   it finished (closed by default; it hides everything but the answer and the cards). A yielded
 ///   turn (answer final, background work still running) shows as finished, with a
 ///   "Background work still running…" note at its end.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
 ///   or a single entry row when the group holds one tool call.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
-///   shows no live tool and waits on nobody.
+///   shows no live tool, waits on nobody and has not just answered (omp wraps up after the
+///   final answer before it ends the turn).
 /// - Steers sit at the time they were sent; queued messages close the thread.
 enum TimelineBuilder {
     static func rows(for thread: AgentThread?, expansion: TimelineExpansion = TimelineExpansion()) -> [TimelineRow] {
@@ -181,7 +183,7 @@ enum TimelineBuilder {
         }
         let foldOpen = expansion.turns.contains(turn.id)
         if isRunning {
-            rows.append(TimelineRow(id: "working:\(turn.id)", content: .working(startedAt: turn.startedAt)))
+            rows.append(TimelineRow(id: "working:\(turn.id)", content: .working(startedAt: turn.startedAt, stopping: turn.stopRequestedAt != nil)))
         } else if !hidden.isEmpty {
             rows.append(TimelineRow(id: "fold:\(turn.id)", content: .fold(FoldRowModel(
                 turnID: turn.id, label: foldLabel(for: turn), date: turn.startedAt, expanded: foldOpen
@@ -198,6 +200,7 @@ enum TimelineBuilder {
         var group: [WorkLogEntry] = []
         var hasLiveActivity = false
         var waitsOnUser = false
+        var answered = false
 
         func flushGroup(trailing: Bool) {
             guard !group.isEmpty else { return }
@@ -241,13 +244,16 @@ enum TimelineBuilder {
             switch piece {
             case let .steer(message):
                 flushGroup(trailing: false)
+                answered = false
                 rows.append(TimelineRow(id: "user:\(message.id)", content: .user(UserRowModel(
                     message: message, turnID: nil, canEdit: false, expanded: expansion.messages.contains(message.id)
                 ))))
             case let .item(item):
+                answered = false
                 switch item.kind {
-                case let .assistantMessage(text, _):
+                case let .assistantMessage(text, isFinal):
                     flushGroup(trailing: false)
+                    answered = isFinal
                     let isTerminal = item.id == terminalID && !isRunning
                     var files: ChangedFilesModel?
                     if isTerminal, let changedFiles {
@@ -296,7 +302,7 @@ enum TimelineBuilder {
         if let changedFiles, !placedChangedFiles, !isRunning {
             rows.append(TimelineRow(id: "files:\(turn.id)", content: .changedFiles(changedFiles)))
         }
-        if isRunning, !hasLiveActivity, !waitsOnUser {
+        if isRunning, !hasLiveActivity, !waitsOnUser, !answered, turn.stopRequestedAt == nil {
             rows.append(TimelineRow(id: "thinking:\(turn.id)", content: .thinking))
         }
         if turn.isYielded {

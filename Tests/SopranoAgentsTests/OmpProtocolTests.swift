@@ -6,7 +6,11 @@ struct OmpProtocolTests {
     // MARK: - Chunk reassembly
 
     private static func chunks(_ object: JSONValue, id: String = "rpc-1", pieces: Int = 3, byteLength: Int? = nil) -> [String] {
-        let bytes = Data(object.jsonString().utf8)
+        chunks(text: object.jsonString(), id: id, pieces: pieces, byteLength: byteLength)
+    }
+
+    private static func chunks(text: String, id: String = "rpc-1", pieces: Int = 3, byteLength: Int? = nil) -> [String] {
+        let bytes = Data(text.utf8)
         let size = (bytes.count + pieces - 1) / pieces
         return (0..<pieces).map { index in
             let slice = bytes.subdata(in: min(index * size, bytes.count)..<min((index + 1) * size, bytes.count))
@@ -33,6 +37,17 @@ struct OmpProtocolTests {
 
         #expect(decoder.decode(#"{"type":"agent_start"}"#) == [.frame(["type": "agent_start"])])
         #expect(decoder.decode("not json").isEmpty)
+    }
+
+    @Test func loneSurrogateEscapesBecomeReplacementCharactersInsteadOfLosingTheFrame() {
+        // omp cuts tool intents inside a surrogate pair; JSONDecoder rejects the whole answer.
+        let entries = #"{"type":"response","id":"e","command":"get_entries","success":true,"data":{"cut":"a\udbc4…","pair":"\ud83d\ude00","path":"C:\\udbc4"}}"#
+        var decoder = OmpFrameDecoder()
+        let outputs = Self.chunks(text: entries).flatMap { decoder.decode($0) }
+
+        #expect(outputs == [.frame(["type": "response", "id": "e", "command": "get_entries", "success": true,
+                                    "data": ["cut": "a\u{FFFD}…", "pair": "😀", "path": #"C:\udbc4"#]])])
+        #expect(decoder.decode(#"{"type":"agent_start","x":"\udc00"}"#) == [.frame(["type": "agent_start", "x": "\u{FFFD}"])])
     }
 
     @Test func anInterleavedSequenceIsRejected() {

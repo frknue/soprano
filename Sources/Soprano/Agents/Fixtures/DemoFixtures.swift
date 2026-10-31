@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "approval", "input", "failed", "background", "draft", "empty"]
+    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -17,7 +17,15 @@ enum DemoFixtures {
         guard scenarios.contains(scenario) else {
             throw FixtureError(message: "Unknown fixture \"\(scenario)\". Known: \(scenarios.joined(separator: ", ")).")
         }
-        let sample = threads(now) + (scenario == "background" ? [backgroundThread(now)] : [])
+        let extra: [AgentThread] = switch scenario {
+        case "background": [backgroundThread(now)]
+        case "answered": [answeredThread(now)]
+        default: []
+        }
+        var sample = threads(now) + extra
+        if scenario == "stopping", let index = sample.firstIndex(where: { $0.id == ID.running }) {
+            sample[index].turns[sample[index].turns.count - 1].stopRequestedAt = now.addingTimeInterval(-2)
+        }
         let snapshot = scenario == "empty" ? StoreSnapshot() : StoreSnapshot(projects: projects(now), threads: sample)
         let dataDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("soprano-agents-fixture", isDirectory: true)
         let environment = EngineEnvironment(
@@ -35,11 +43,12 @@ enum DemoFixtures {
             engine.rememberCommands(ompCommands, provider: .omp, workingDirectory: directory)
         }
         let selection: WorkspaceState.Selection = switch scenario {
-        case "running": .thread(ID.running)
+        case "running", "stopping": .thread(ID.running)
         case "approval": .thread(ID.approval)
         case "input": .thread(ID.input)
         case "failed": .thread(ID.failed)
         case "background": .thread(ID.background)
+        case "answered": .thread(ID.answered)
         case "draft": .draft(projectID: ID.app)
         case "empty": .draft(projectID: nil)
         default: .thread(ID.demo)
@@ -78,6 +87,7 @@ enum DemoFixtures {
         static let pinned = "thread-release"
         static let scratch = "thread-scratch"
         static let background = "thread-background"
+        static let answered = "thread-answered"
     }
 
     static func projects(_ now: Date) -> [Project] {
@@ -301,6 +311,25 @@ enum DemoFixtures {
                     TurnItem(id: "bg3", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s. The full test suite is still running in the background; I'll report back when it finishes.", isFinal: false), status: .completed, startedAt: ago(240), completedAt: ago(232)),
                 ],
                 yieldedAt: ago(232)
+            )]
+        )
+    }
+
+    /// An omp turn whose final answer arrived while omp still wraps up (advisor review, stop
+    /// hooks) before `prompt_result` ("answered" scenario only): still running, no "Thinking".
+    static func answeredThread(_ now: Date) -> AgentThread {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        return AgentThread(
+            id: ID.answered, projectID: ID.app, title: "Tighten the upload retry delay", createdAt: ago(200), updatedAt: ago(5),
+            modelSelection: omp, branch: "main", lastVisitedAt: ago(5),
+            turns: [Turn(
+                id: "turn-answered-1", ordinal: 1,
+                userMessage: UserMessage(text: "Tighten the retry delay in UploadClient.", createdAt: ago(60)),
+                modelSelection: omp, status: .running, startedAt: ago(60),
+                items: [
+                    TurnItem(id: "an1", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update)]), status: .completed, startedAt: ago(40), completedAt: ago(39)),
+                    TurnItem(id: "an2", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s.", isFinal: true), status: .completed, startedAt: ago(10), completedAt: ago(8)),
+                ]
             )]
         )
     }

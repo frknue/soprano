@@ -119,6 +119,7 @@ extension AgentEngine {
             var turn = thread.turns[index]
             turn.completedAt = turn.isYielded ? turn.yieldedAt ?? now : now
             turn.yieldedAt = nil
+            turn.stopRequestedAt = nil
             turn.status = status
             if status == .failed {
                 turn.failureMessage = error ?? turn.failureMessage ?? "The turn failed."
@@ -213,7 +214,9 @@ extension AgentEngine {
     }
 
     /// Delivers `message` into the running turn, or queues it when the provider turn is not live
-    /// yet or is a compaction (nothing to steer).
+    /// yet, is a compaction (nothing to steer) or is already ending (`noActiveTurn`: omp answered
+    /// the prompt; its end is on its way). A queued message starts the next turn once this one
+    /// completes.
     func steer(_ threadID: String, message: UserMessage) async throws {
         guard let thread = thread(threadID), let turn = thread.activeTurn else { return }
         let rt = runtime.thread(threadID)
@@ -221,12 +224,21 @@ extension AgentEngine {
             enqueue(threadID, message: message, selection: thread.modelSelection)
             return
         }
-        try await session.steer(TurnInput(
-            text: message.text,
-            attachments: message.attachments,
-            modelSelection: thread.modelSelection,
-            runtimeMode: thread.runtimeMode
-        ))
+        do {
+            try await session.steer(TurnInput(
+                text: message.text,
+                attachments: message.attachments,
+                modelSelection: thread.modelSelection,
+                runtimeMode: thread.runtimeMode
+            ))
+        } catch ProviderError.noActiveTurn {
+            enqueue(threadID, message: message, selection: thread.modelSelection)
+            // The turn may have completed (and drained the queue) while the steer was refused.
+            if let now = self.thread(threadID), !now.isRunning, now.turns.last?.status == .completed, !rt.holdQueue {
+                await drainQueue(threadID)
+            }
+            return
+        }
         var steered = message
         steered.isSteer = true
         mutateTurn(threadID, turn.id) { $0.steers.append(steered) }

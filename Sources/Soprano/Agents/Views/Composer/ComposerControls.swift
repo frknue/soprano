@@ -121,7 +121,7 @@ final class ComposerChip: InteractiveView {
     }
 }
 
-/// The round primary button: send (arrow up), steer, queue, or stop.
+/// The round primary button: send (arrow up), steer, queue, or stop (dimmed while stopping).
 final class ComposerPrimaryButton: InteractiveView {
     private(set) var action: ComposerPrimaryAction = .sendDisabled
     private let symbolView = NSImageView()
@@ -146,11 +146,11 @@ final class ComposerPrimaryButton: InteractiveView {
         update(.sendDisabled, tooltip: "Submit message")
     }
 
-    func update(_ action: ComposerPrimaryAction, tooltip: String) {
+    func update(_ action: ComposerPrimaryAction, tooltip: String, stopping: Bool = false) {
         self.action = action
-        isEnabled = action != .sendDisabled
-        toolTip = tooltip
-        setAccessibilityLabel(action == .stop ? "Stop generation" : tooltip)
+        isEnabled = action != .sendDisabled && !stopping
+        toolTip = stopping ? "Stopping…" : tooltip
+        setAccessibilityLabel(action == .stop ? (stopping ? "Stopping" : "Stop generation") : tooltip)
         switch action {
         case .steer: symbolView.image = NSImage.symbol(Icon.cornerUpRight, size: 14, weight: .semibold)
         case .queue: symbolView.image = NSImage.symbol(Icon.listPlus, size: 14, weight: .semibold)
@@ -198,7 +198,7 @@ final class ComposerPrimaryButton: InteractiveView {
             layer?.backgroundColor = palette.foreground.withAlphaComponent(0.12).cgColor
             foreground = palette.mutedForeground
         case .stop:
-            layer?.backgroundColor = palette.error.withAlphaComponent(isHovered ? 1 : 0.9).cgColor
+            layer?.backgroundColor = palette.error.withAlphaComponent(!isEnabled ? 0.45 : isHovered ? 1 : 0.9).cgColor
             foreground = .white
         case .send, .steer, .queue:
             let fill = isHovered ? palette.primary.mixed(with: palette.background, fraction: 0.1) : palette.primary

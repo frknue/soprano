@@ -77,6 +77,7 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
             turn.status = yielded ? turn.yieldedStatus : .interrupted
             turn.completedAt = turn.completedAt ?? turn.yieldedAt ?? turn.items.compactMap { $0.completedAt ?? $0.startedAt }.max() ?? turn.startedAt
             turn.yieldedAt = nil
+            turn.stopRequestedAt = nil
             for item in turn.items.indices where turn.items[item].status.isActive {
                 turn.items[item].status = yielded ? .completed : .interrupted
             }

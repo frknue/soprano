@@ -270,6 +270,9 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
     /// run's end sets it again. Held outcome: failed when `failureMessage` is set, else
     /// completed. Older files lack it.
     public var yieldedAt: Date?
+    /// When the user pressed Stop on the running turn; the turn shows "Stopping…" until the
+    /// provider ends it. Cleared when it ends. Older files lack it.
+    public var stopRequestedAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -285,7 +288,8 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         checkpoint: TurnCheckpoint? = nil,
         providerTurnID: String? = nil,
         tokenUsage: TokenUsage? = nil,
-        yieldedAt: Date? = nil
+        yieldedAt: Date? = nil,
+        stopRequestedAt: Date? = nil
     ) {
         self.id = id
         self.ordinal = ordinal
@@ -301,6 +305,7 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         self.providerTurnID = providerTurnID
         self.tokenUsage = tokenUsage
         self.yieldedAt = yieldedAt
+        self.stopRequestedAt = stopRequestedAt
     }
 
     /// Open but yielded (`yieldedAt`): done for the user while background work runs.

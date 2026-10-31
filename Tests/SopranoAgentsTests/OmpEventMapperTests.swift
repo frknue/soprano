@@ -46,6 +46,17 @@ struct OmpEventMapperTests {
         #expect(events.filter { if case .turnCompleted = $0 { true } else { false } }.count == 1)
     }
 
+    @Test func anAnswerIsFinalOnceTheModelStopsBeforeOmpEndsTheTurn() throws {
+        var mapper = OmpEventMapper(cwd: "/tmp/demo", contextWindow: 100_000)
+        let frames = try Self.trace()
+        // Up to the "done" answer's `message_end`; the advisor and the second pass follow.
+        let answerEnd = try #require(frames.firstIndex { $0["type"]?.stringValue == "message_end" && $0["messageId"]?.stringValue == "msg-10" })
+        let events = frames[...answerEnd].flatMap { mapper.map($0) }
+
+        #expect(Self.item("msg-10:0", in: events)?.kind == .assistantMessage(text: "done", isFinal: true))
+        #expect(!events.contains { if case .turnCompleted = $0 { true } else { false } })
+    }
+
     @Test func assistantTextStreamsAsDeltasOnMessageAndContentIndex() throws {
         let events = try Self.replay()
         let deltas = events.compactMap { event -> String? in
@@ -367,6 +378,11 @@ struct OmpEventMapperTests {
                 }
             }
             events += produced
+            if produced.contains(.turnResumed) {
+                // The woken run may answer again: the yielded answer is no longer final.
+                let started = Self.latestItems(events).last { if case .assistantMessage("started", _) = $0.kind { true } else { false } }
+                #expect(started?.kind == .assistantMessage(text: "started", isFinal: false))
+            }
         }
 
         #expect(lifecycle.map(\.event) == [

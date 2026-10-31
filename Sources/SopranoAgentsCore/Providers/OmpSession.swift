@@ -463,9 +463,12 @@ public actor OmpSession: ProviderSession {
             if mapper.isAwaitingSettlement, interruptRequested { events = mapper.interruptAwaitingSettlement() }
             let yielded = mapper.isAwaitingSettlement
             if !yielded {
+                // Over before its anchor and context fill are read: a message sent meanwhile is
+                // refused (`noActiveTurn`) and starts the next turn instead of steering into
+                // one that is ending.
+                endPrompt()
                 await reportTurnAnchor()
                 await reportContextUsage()
-                endPrompt()
             }
             for event in events { continuation.yield(event) }
             if yielded { await reportContextUsage() }

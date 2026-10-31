@@ -275,11 +275,13 @@ final class FoldRowView: ClickableRowView {
     }
 }
 
-/// "Working for 12s" while a turn runs; the timeline ticks it every second.
+/// "Working for 12s" while a turn runs ("Stopping… 12s" once Stop was pressed); the timeline
+/// ticks it every second.
 final class WorkingRowView: TimelineRowView {
     private let label = NSTextField.timelineLabel("", size: Typography.bodySize)
     private let rule = NSView()
     private var startedAt: Date?
+    private var stopping = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -292,15 +294,17 @@ final class WorkingRowView: TimelineRowView {
 
     override func configure(_ row: TimelineRow) {
         super.configure(row)
-        guard case let .working(startedAt) = row.content else { return }
+        guard case let .working(startedAt, stopping) = row.content else { return }
         self.startedAt = startedAt
+        self.stopping = stopping
         tick()
     }
 
     /// Re-reads the clock.
     func tick(now: Date = Date()) {
         guard let startedAt else { return }
-        label.stringValue = "Working for \(Self.elapsed(since: startedAt, now: now))"
+        let elapsed = Self.elapsed(since: startedAt, now: now)
+        label.stringValue = stopping ? "Stopping… \(elapsed)" : "Working for \(elapsed)"
     }
 
     /// "12s" under a minute, else "1m 12s".

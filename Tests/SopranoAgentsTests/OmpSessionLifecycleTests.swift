@@ -48,6 +48,7 @@ struct OmpSessionLifecycleTests {
     slow = None
     late = None
     busy = False
+    slow_entries = False
     entries = [{"type": "model_change", "id": "m0", "parentId": None}]
     leaf = "m0"
     turns = 0
@@ -87,6 +88,10 @@ struct OmpSessionLifecycleTests {
         elif kind == "set_ask_dialog" and os.environ.get("FAKE_REJECT_ASK"):
             out({"type": "response", "id": msg.get("id"), "command": kind, "success": False, "error": "Unknown command: set_ask_dialog"})
         elif kind == "get_entries":
+            if slow_entries:
+                # Reading a long session: the turn's end waits for it.
+                time.sleep(1.0)
+                slow_entries = False
             ok(msg, {"entries": entries, "leafId": leaf})
         elif kind == "fork":
             keep, cursor = [], msg["entryId"]
@@ -133,6 +138,8 @@ struct OmpSessionLifecycleTests {
             prompt = msg["id"]
             ok(msg)
             user(msg["message"])
+            if "lingers" in msg["message"]:
+                slow_entries = True
             if "yield" in msg["message"]:
                 # Answers, then yields while a background job runs; the test emits what follows.
                 add({"type": "message", "id": "a%d" % turns, "message": {"role": "assistant", "content": [{"type": "text", "text": "answer"}]}})
@@ -717,6 +724,29 @@ struct OmpSessionLifecycleTests {
     private static func textEnd(_ messageID: String, _ content: String) -> JSONValue {
         ["type": "message_update", "messageId": .string(messageID), "message": ["role": "assistant"],
          "assistantMessageEvent": ["type": "text_end", "contentIndex": 0, "content": .string(content)]]
+    }
+
+    @Test func aMessageSentWhileTheTurnEndsStartsTheNextTurnAndGetsItsAnswer() async throws {
+        let fake = try makeFake()
+        let (engine, project) = makeEngine(fake)
+
+        // omp answered; the session is still reading the turn's anchor (a slow `get_entries`).
+        let id = try await launch(engine, project, "answer, then the end lingers")
+        let ending = await until { fake.received("get_entries").count >= 2 }
+        #expect(ending)
+        #expect(engine.thread(id)?.isRunning == true)
+        try await engine.send(id, text: "and one more thing", attachments: [])
+        let answered = await until { engine.thread(id)?.turns.count == 2 && engine.thread(id)?.isRunning == false }
+        let thread = engine.thread(id)
+        await engine.shutdown()
+
+        #expect(answered)
+        #expect(fake.received("steer").isEmpty)
+        #expect(thread?.turns.first?.steers.isEmpty == true)
+        #expect(thread?.turns.last?.userMessage.text == "and one more thing")
+        #expect(thread?.turns.last?.status == .completed)
+        #expect(Self.texts(thread?.turns.last) == ["all done"])
+        #expect(thread?.queue.isEmpty == true)
     }
 
     @Test func aYieldWithBackgroundWorkPendingStopsWorkingUntilOmpSettles() async throws {

@@ -178,8 +178,12 @@ finds no held prompt and is ignored; runs they wake after that stream into whate
 open, or are dropped). Settlement, Stop and release share one guarded ending, so a late anchor
 never lands on the next turn. Stop ends the turn at once: an aborted `prompt_result`, any
 `prompt_result` after Stop was pressed, or Stop while only background work is left (`abort`
-does not stop background jobs). Steer = `steer`,
-interrupt = `abort`. Host UI arrives as `extension_ui_request`: a `select` titled `Allow tool:
+does not stop background jobs). Steer = `steer`; from a non-yielded `prompt_result` on (while
+the anchor and context fill are read) the session refuses steers (`noActiveTurn`) and the engine
+queues the message, which starts the next turn once this one completes. Stop marks the turn
+`stopRequestedAt` ("Stopping…") until it ends. Frames are parsed like `JSON.parse`: lone
+surrogate escapes become U+FFFD instead of dropping the frame. Interrupt = `abort`. Host UI
+arrives as `extension_ui_request`: a `select` titled `Allow tool:
 <tool>\n<details>` is an approval (accept → `Approve Once` or `Approve`, acceptForSession → the
 `… for this session` label or `Approve File`, decline → `Deny`, cancel → `cancelled:true`, all
 answered as `extension_ui_response {id, value}`); other `select`, `confirm`, `input`, `editor` and
@@ -190,7 +194,9 @@ notice; dialogs arriving after the turn ended are cancelled. Events (`OmpEventMa
 relaunch), `tool_execution_start|update|end` → bash → command, write/edit/ast_edit → fileChange
 (edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
-`intent`; assistant `usage` → token usage; compaction/retry → notices. Rollback before a turn: `get_entries`, the
+`intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
+marks its text final (the timeline drops "Thinking" under it; a resumed yield un-marks it);
+compaction/retry → notices. Rollback before a turn: `get_entries`, the
 turn's entry (its `providerTurnID`; turns recorded as `prompt-N` count user-authored, non-steering
 user messages), then `fork {entryId}` of the last `message` entry before it on the current
 branch, or `new_session` when none; the new `sessionFile` becomes the conversation id.
@@ -432,7 +438,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|failed|background|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -455,7 +461,10 @@ command list for it and the `app` project: `--perform composer.focus --type "/re
 filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context card, and
 `--fixture failed --perform composer.focus --type "/"` the empty state. `--fixture background`
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
-"Background work still running…" row, Send instead of Stop). `--accounts` installs an
+"Background work still running…" row, Send instead of Stop); `--fixture answered` one whose
+final answer arrived while omp still wraps up the turn (Working, Stop, no "Thinking" row);
+`--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
+`--accounts` installs an
 `AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
 has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %/93 % and
 75 %/38 %; `pending` adds a waiting omp Claude sign-in and a failed action on the Codex list.
