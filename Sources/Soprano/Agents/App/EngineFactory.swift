@@ -39,7 +39,8 @@ enum AccountLaunchBridge {
     }
 }
 
-/// Builds the engine the app runs with: JSON-file store, git CLI and the omp driver.
+/// Builds the engine the app runs with: JSON-file store, git CLI, the omp driver and omp's usage
+/// statistics.
 @MainActor
 enum EngineFactory {
     /// The executable override the driver reads on every spawn; the app delegate keeps it current.
@@ -59,7 +60,8 @@ enum EngineFactory {
             ],
             git: LiveGitService(),
             store: JSONFileThreadStore(directory: dataDirectory),
-            dataDirectory: dataDirectory
+            dataDirectory: dataDirectory,
+            usage: OmpUsageStatistics(executablePath: { paths.omp })
         )
         return AgentEngine(environment: environment, settings: settings)
     }

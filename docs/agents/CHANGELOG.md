@@ -56,6 +56,11 @@ All notable changes to Soprano Agents are documented here. The format follows
   account.
 - Usage at the bottom of the sidebar (`Claude 9% · Codex 75%`, warning from 70 %, red from 90 %);
   click it or press ⌘U for each account's 5-hour and weekly limits and their resets.
+- Statistics (⇧⌘U, or the chart button next to Settings in the sidebar), like T3 Code's Usage
+  page: omp's requests, tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all
+  time, as Cost or Tokens, with cache savings, a stacked chart per hour, day, week or month (hover a bar
+  for its numbers) and breakdowns by model, project and agent; click a model to filter the board.
+  Inside it, Esc closes, C / T switch Cost / Tokens and 1–5 pick the period.
 - Terminal drawer (⌘J): login-shell terminals per thread in the thread's working directory, in
   the theme's terminal colors; ⌘N adds one, ⌘W closes one, drag the top edge to resize.
 - Thread details card (⇧⌘B): open the workspace in your editor (⌘O, `editor.app`), run project

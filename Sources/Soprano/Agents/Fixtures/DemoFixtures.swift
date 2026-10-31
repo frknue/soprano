@@ -34,6 +34,7 @@ enum DemoFixtures {
             store: InMemoryThreadStore(snapshot),
             dataDirectory: dataDirectory,
             files: FixtureWorkspaceFiles(),
+            usage: FixtureUsageStatistics(now: now),
             now: { now }
         )
         let engine = AgentEngine(environment: environment)

@@ -19,7 +19,7 @@ enum PanelCommands {
                 icon: Icon.fileDiff
             ) { context in
                 guard let state = context.state else { return }
-                if state.isRightPanelVisible && state.rightPanelSurface == .diff {
+                if !state.isStatisticsVisible && state.isRightPanelVisible && state.rightPanelSurface == .diff {
                     state.setRightPanelVisible(false)
                 } else {
                     state.showRightPanel(.diff)
@@ -58,7 +58,7 @@ enum PanelCommands {
                 isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let state = context.state else { return }
-                if state.isRightPanelVisible && state.rightPanelSurface == .files {
+                if !state.isStatisticsVisible && state.isRightPanelVisible && state.rightPanelSurface == .files {
                     state.setRightPanelVisible(false)
                 } else {
                     context.workspace?.rightPanel.open(.files)
@@ -129,7 +129,13 @@ enum PanelCommands {
                 isEnabled: { $0.state?.isRightPanelVisible == true }
             ) { context in
                 guard let state = context.state else { return }
-                state.setRightPanelMaximized(!state.isRightPanelMaximized)
+                if state.isStatisticsVisible {
+                    // Under the board: show the panel maximized.
+                    state.setRightPanelVisible(true)
+                    state.setRightPanelMaximized(true)
+                } else {
+                    state.setRightPanelMaximized(!state.isRightPanelMaximized)
+                }
             },
             AppCommand(
                 id: "terminal.new",

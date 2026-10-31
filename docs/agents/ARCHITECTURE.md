@@ -24,8 +24,10 @@ swift test
 | `Sources/SopranoAgentsCore/Models/` | Contract | Domain types: `Project`, `AgentThread`, `Turn`, `TurnItem(Kind)`, approvals, user input, `ModelSelection`, `ProviderStatus`, `ThreadStatus`/`InboxSection`, `DurationText`, `JSONValue`. Foundation only. |
 | `Sources/SopranoAgentsCore/Providers/ProviderSession.swift` | Contract | `ProviderDriver`, `ProviderSession`, `ProviderEvent`, `SessionConfig`, `TurnInput`. |
 | `Sources/SopranoAgentsCore/Providers/` (rest) | Providers | `LineProcess` (stdio JSON-lines transport), the omp driver, session, RPC client and event mapper, model catalog, `generateJSON`. |
-| `Sources/SopranoAgentsCore/Engine/` | Engine | `AgentEngine` (state owner, observers, inbox lifecycle), `AgentEngine+Turns.swift` (sessions, sending, steering, queue, approvals, checkpoints, revert, diffs, titles, git actions) and `AgentEngine+Files.swift` (workspace files). `EngineTypes.swift` is contract. |
+| `Sources/SopranoAgentsCore/Engine/` | Engine | `AgentEngine` (state owner, observers, inbox lifecycle), `AgentEngine+Turns.swift` (sessions, sending, steering, queue, approvals, checkpoints, revert, diffs, titles, git actions), `AgentEngine+Files.swift` (workspace files) and `AgentEngine+Usage.swift` (usage history for the statistics board). `EngineTypes.swift` is contract. |
 | `Sources/SopranoAgentsCore/Files/` | Files | `WorkspaceFileService` (contract), `WorkspaceFileContent`, `WorkspaceFilePath` (the one escape check), `LiveWorkspaceFileService`. |
+| `Sources/SopranoAgentsCore/Usage/UsageStatistics.swift` | Contract | `UsageStatisticsService`, `UsagePeriod` (buckets), `UsageGroup`, `UsageTotals`, metric/part enums. |
+| `Sources/SopranoAgentsCore/Usage/` (rest) | Usage | `UsageHistory` / `UsageSummary` (bucketing, model filter, breakdowns), `UsageFolderName` (omp's session folder names), `OmpUsageStatistics` (`omp stats` sync + read-only `stats.db` query). |
 | `Sources/SopranoAgentsCore/Store/` | Engine | `JSONFileThreadStore`. |
 | `Sources/SopranoAgentsCore/Git/GitService.swift` | Contract | `GitService`, `SourceControlWriter`, status/branch/action value types. |
 | `Sources/SopranoAgentsCore/Git/` (rest) | Git | `GitRunner` (the only place that spawns git), `LiveGitService` (checkpoints, diffs, status, branches, worktrees, commit/push/PR via `gh`), parsers. |
@@ -36,6 +38,7 @@ swift test
 | `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
 | `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar usage indicator, usage card, Settings → Accounts, account fixtures. |
+| `Sources/SopranoAgents/Views/Statistics/`, `Commands/StatisticsCommands.swift`, `Fixtures/FixtureUsageStatistics.swift` | Statistics | Statistics board (header, periods, Cost/Tokens, tiles, stacked chart, model/project/agent breakdowns), `StatisticsFormat`, fixture usage history. |
 | `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
 | `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController` and its account managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
 
@@ -64,9 +67,11 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   `rememberCommands`. Reads: `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
   `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL` (all by `WorkspaceRef`: `.thread(id)`
   or `.draft(projectID:)`, the project root a "Current checkout" thread will use; `key` is the
-  UI's per-workspace dictionary key), `commands(forThread:)`, `commands(forDraft:projectID:)`.
+  UI's per-workspace dictionary key), `commands(forThread:)`, `commands(forDraft:projectID:)`,
+  `usageHistory(_:sync:)`, `usageFolderTitles()`.
   Contracts in the doc comments of `AgentEngine.swift`, `AgentEngine+Turns.swift`,
-  `AgentEngine+Files.swift`, `AgentEngine+Workspace.swift` and `AgentEngine+Commands.swift`.
+  `AgentEngine+Files.swift`, `AgentEngine+Workspace.swift`, `AgentEngine+Commands.swift` and
+  `AgentEngine+Usage.swift`.
 
 Engine behavior:
 - Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
@@ -240,6 +245,30 @@ id>/omp-accounts.yml` once a preference exists. The account list is in UserDefau
 `soprano-accounts` (separate from Soprano's); Keychain items and omp's logins are shared with
 Soprano.
 
+### Usage statistics (Core/Usage)
+`EngineEnvironment.usage: UsageStatisticsService` reads the agent's recorded usage;
+`OmpUsageStatistics` is the live one. omp keeps one row per model request (tokens, API-equivalent
+cost per token kind, agent kind, session folder) in `~/.omp/stats.db` (`PI_CONFIG_DIR` moves
+`~/.omp` under home, joined as omp joins it), ingested from its session files by `omp stats`.
+`sync()` runs `omp stats --summary` (120 s timeout, output ignored); `groups(since:granularity:)`
+opens the database read-only and sums `messages` since the period's start per local hour (24h;
+keyed by the epoch second the local hour starts, so a clock change's repeated hour stays two) or
+local day, provider/model, `agent_type` and `folder` (`stop_reason = 'error'` = failed;
+unpriced as omp counts it: tokens, zero cost, `xai-oauth` or `cost_unpriced`; cache savings =
+`cost_no_cache_input` − the cached prompt cost of the rows that report it). No database = no
+history; a missing table or column is `UsageStatisticsError.database`.
+`engine.usageHistory(period, sync:)` reads even when the sync failed (`UsageHistory.syncError`)
+and returns a `UsageHistory` whose `summary(model:)` folds the groups into chart buckets
+(`UsagePeriod.buckets`: the last 24 hours as 25 hourly bars, the first holding the part of its hour inside the window; 7 / 30 / 90 calendar days ending today, All weekly from the first
+request, monthly beyond 26 weeks), totals and model / folder / agent breakdowns; the model filter
+narrows everything except the model list. `usageFolderTitles()` maps the stats folders of project
+roots and thread working directories to project titles. `UsageFolderName.encode` follows omp:
+the `realpath` of the directory (`/tmp` → `/private/tmp`), named `-tmp-<relative>` under the
+temporary directory, `-<relative>` under home, else `--<absolute>--` (`/ \ :` → `-`), which
+omp-stats stores with a leading `--` and every later `--` as `/` (`/private-tmp-x/`). The
+snapshot harness and tests use `FixtureUsageStatistics` / scratch databases; nothing reads the
+user's `stats.db` there.
+
 ### Git (Core/Git)
 `LiveGitService: GitService`. All git through `GitRunner` (`git --no-pager -c core.quotepath=false
 -c color.ui=never -C <cwd> …`, `GIT_TERMINAL_PROMPT=0`, extended PATH). Checkpoints never touch the
@@ -261,14 +290,24 @@ action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config
 ### `WorkspaceState` (Shell)
 UI state: `selection` (`.draft(projectID:)` or `.thread(id)`) and its `workspace` (`WorkspaceRef`;
 nil for a projectless draft, which has no folder), panel visibility (sidebar, thread details card,
-terminal drawer, right panel), the right-panel tabs per workspace key (`RightPanelSurface`:
+terminal drawer, right panel, statistics board), the right-panel tabs per workspace key (`RightPanelSurface`:
 `.diff`, `.files`, `.file(path)`, `.terminal(sessionID)`; `rightPanelSurfaces`, the active
 `rightPanelSurface` — nil = "Open a surface" launcher —, `showRightPanel(_:)`,
 `closeRightPanelTab(_:key:)`, `pruneRightPanelTabs(keeping:)`, `moveDraftTabs(projectID:to:)`),
 diff scope + focused path, sidebar project filter and search text, and `restoreComposer(with:)` /
 `takeComposerRestore()` ("Edit from here" hands the user message back to the composer). Observe
 `Change` (`.selection`, `.panels`, `.filter`, `.composerRestore`); a selection switch changes the
-active tab too.
+active tab too. `isStatisticsVisible` (`setStatisticsVisible`) closes on `select` (also of the
+selected thread; selections the app makes itself, a launched draft becoming its thread or a
+removed thread or project falling back to a draft, pass `closingStatistics: false`) and whenever
+the terminal, right panel, a diff or the thread details open. Toggle commands for a surface
+under the board (⌘J, ⌘L, ⇧⌘B, ⌘D, ⇧⌘F, Maximize) show it instead of hiding it
+(`toggledVisibility`). Composer and timeline commands that show or focus something in the chat
+column (Focus Composer, the pickers, Compact, Find in Thread, Jump to Latest, Expand / Collapse
+All) get it through `WorkspaceViewController.revealChat()`, which closes the board first. A board
+that had focus hands it to the composer, or to a maximized right panel, when it closes; while it
+shows, `ComposerViewController.focusEditor()` does nothing, so background selections keep the
+keyboard on the board.
 
 ### Regions (view controllers)
 `WorkspaceViewController` lays out sidebar | chat column | right panel (resizable rails, widths
@@ -315,16 +354,30 @@ closes on send, focus loss, thread switch and when another of the app's windows 
 (palette, dialog, settings); app deactivation keeps it. Text the composer sets itself never opens
 it; the editor has inline predictions and text completion off.
 
-The sidebar footer shows account usage next to the gear (`UsageIndicatorView`: `Claude 9% · Codex
+The sidebar footer shows account usage after the gear and the statistics button (`UsageIndicatorView`: `Claude 9% · Codex
 75%`, the headline Claude and Codex login's tightest window; muted below 70%, `warning` from 70%,
 `error` from 90%; hidden without usage). Clicking it or `usage.open` toggles the usage card
 (child window): per provider, per account list, each login with its 5h/7d bars, percent and
 reset, plus Refresh and "Manage Accounts…" (Settings → Accounts).
 
+The statistics board (`StatisticsViewController`, toggled by `statistics.toggle` and the chart
+button next to the sidebar's gear) covers the chat column and the right panel, which stay
+loaded underneath; it takes key focus (Esc closes, `C` / `T` Cost / Tokens, `1`–`5` the period)
+without being a focus region, so window shortcuts keep working. Header: "Statistics", period
+control (24h · 7d · 30d · 90d · All, default 7d), Refresh, Close; a sidebar toggle while the
+sidebar is hidden. Content (≤ 960 pt): Cost / Tokens, a model-filter chip, four tiles (Cost:
+estimated cost, cache savings, requests, per request; Tokens: total, input, output, cache read),
+the stacked chart (cache read, cache write, input, output; hover shows the bar in the title
+line), Models (share bar, requests, cache hit rate, value; click filters), Projects (top 8 plus
+"N more") and Agents, and a footnote. Opening and Refresh sync omp's history, a period switch
+only reads (or takes over a running sync). A failed read shows an error with Retry above the
+last data of the same period (another period's data is dropped); a failed sync shows a notice
+above what was recorded before it.
+
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's
 `…Commands.all` (`ShellCommands`, `SidebarCommands`, `TimelineCommands`, `ComposerCommands`,
-`PanelCommands`, `AccountCommands`). Commands are the single source for key bindings, the palette, menus and
+`PanelCommands`, `AccountCommands`, `StatisticsCommands`). Commands are the single source for key bindings, the palette, menus and
 buttons, and the snapshot harness runs them with `--perform <id>`. `CommandContext` carries
 `engine`, `state`, `workspace`, `window`, `focus`, `isTextInput`, and `thread` (selected).
 
@@ -396,6 +449,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `usage.open` | Show Usage | global | `cmd+u` | Accounts |
 | `accounts.manage` | Manage Accounts… | global | — | Accounts |
 | `usage.refresh` | Refresh Usage | global | — | Accounts |
+| `statistics.toggle` | Statistics | global | `cmd+shift+u` | Statistics |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
 router as global). A right-panel terminal tab is focus region `terminal`, like the drawer.
@@ -412,7 +466,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 │ …                  │   assistant markdown 14/1.625                      │                             │
 │ Working 1 ›        │   N changed files card                             │                             │
 │ Settled 43 ›       │   ┌ composer r16, glass ┐                          │                             │
-│ [⚙] Claude 9% ·…   │ terminal drawer 280 (180…75%)                      │                             │
+│ [⚙][▥] Claude 9%…  │ terminal drawer 280 (180…75%)                      │                             │
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
@@ -470,6 +524,11 @@ final answer arrived while omp still wraps up the turn (Working, Stop, no "Think
 has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %/93 % and
 75 %/38 %; `pending` adds a waiting omp Claude sign-in and a failed action on the Codex list.
 `--perform usage.open` opens the usage card; `--click "Account usage"` clicks the indicator.
+Every fixture engine reads `FixtureUsageStatistics` (≈ 120 days of working hours on the demo
+projects plus a `-Downloads-experiments` folder; Opus main and subagents, a Sonnet advisor,
+GPT-6.1 Sol and an unpriced OpenRouter model): `--perform statistics.toggle` opens the board on
+7d, then `--keys "t"` switches to Tokens, `--click "Period All"` (or `24h`, `30d`, …) picks a
+period and `--click "claude-opus-5-5"` filters to that model.
 
 Modal surfaces (settings screen, `Dialogs`) are `OverlayWindow`s: borderless
 child windows covering the main window with a dimmed backdrop and one card. Their keys

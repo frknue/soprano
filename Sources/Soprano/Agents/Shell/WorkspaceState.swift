@@ -77,6 +77,10 @@ final class WorkspaceState {
     private(set) var pendingComposerRestore: UserMessage?
     /// The right panel fills the chat column's space ("Maximize panel").
     private(set) var isRightPanelMaximized = false
+    /// The statistics board covers the chat column and the right panel. Choosing a thread or a
+    /// draft (even the selected one) and opening the terminal, right panel or thread details
+    /// close it.
+    private(set) var isStatisticsVisible = false
 
     private let observers = ObserverList<Change>()
 
@@ -108,10 +112,17 @@ final class WorkspaceState {
         }
     }
 
-    func select(_ selection: Selection) {
-        guard selection != self.selection else { return }
+    /// `closingStatistics` false: a selection the app makes on its own (a launched draft becoming
+    /// its thread, a deleted thread falling back to a draft) leaves the statistics board open.
+    func select(_ selection: Selection, closingStatistics: Bool = true) {
+        let closedStatistics = closingStatistics && closeStatistics()
+        guard selection != self.selection else {
+            if closedStatistics { observers.notify(.panels) }
+            return
+        }
         self.selection = selection
         diffFocusPath = nil
+        if closedStatistics { observers.notify(.panels) }
         observers.notify(.selection)
     }
 
@@ -122,22 +133,44 @@ final class WorkspaceState {
     }
 
     func setThreadDetailsVisible(_ visible: Bool) {
-        guard visible != isThreadDetailsVisible else { return }
+        let closedStatistics = visible && closeStatistics()
+        guard visible != isThreadDetailsVisible || closedStatistics else { return }
         isThreadDetailsVisible = visible
         observers.notify(.panels)
     }
 
     func setTerminalVisible(_ visible: Bool) {
-        guard visible != isTerminalVisible else { return }
+        let closedStatistics = visible && closeStatistics()
+        guard visible != isTerminalVisible || closedStatistics else { return }
         isTerminalVisible = visible
         observers.notify(.panels)
     }
 
     func setRightPanelVisible(_ visible: Bool) {
-        guard visible != isRightPanelVisible else { return }
+        let closedStatistics = visible && closeStatistics()
+        guard visible != isRightPanelVisible || closedStatistics else { return }
         isRightPanelVisible = visible
         if !visible { isRightPanelMaximized = false }
         observers.notify(.panels)
+    }
+
+    func setStatisticsVisible(_ visible: Bool) {
+        guard visible != isStatisticsVisible else { return }
+        isStatisticsVisible = visible
+        observers.notify(.panels)
+    }
+
+    /// Hides the statistics board; whether it was showing.
+    private func closeStatistics() -> Bool {
+        guard isStatisticsVisible else { return false }
+        isStatisticsVisible = false
+        return true
+    }
+
+    /// What a toggle command sets a surface to: shown while the statistics board covers it (the
+    /// board closes), else the opposite of `isVisible`.
+    func toggledVisibility(_ isVisible: Bool) -> Bool {
+        isStatisticsVisible || !isVisible
     }
 
     /// Maximizes the open right panel over the chat column, or restores its width.
@@ -177,7 +210,7 @@ final class WorkspaceState {
         tabs.active = surface
         panelTabs[panelKey] = tabs
         isRightPanelVisible = true
-        if changed { observers.notify(.panels) }
+        if closeStatistics() || changed { observers.notify(.panels) }
     }
 
     /// Removes a tab of the workspace `key` (default: the selected one). The neighbour that takes
@@ -216,6 +249,7 @@ final class WorkspaceState {
         tabs.active = .diff
         panelTabs[panelKey] = tabs
         isRightPanelVisible = true
+        _ = closeStatistics()
         observers.notify(.panels)
     }
 

@@ -3,7 +3,8 @@ import SopranoAgentsCore
 
 /// The thread inbox: 52 pt header with the brand, the search row with
 /// the project filter / add project / new thread buttons, the list (Pinned and Active cards,
-/// then the Working and Settled shelves pushed to the bottom) and the footer with Settings.
+/// then the Working and Settled shelves pushed to the bottom) and the footer with Settings, the
+/// Statistics board toggle and account usage.
 /// The list is an `NSTableView` of reused cells, so hundreds of threads stay cheap.
 @MainActor
 final class SidebarViewController: NSViewController, FocusRegionController, NSTableViewDataSource, NSTableViewDelegate {
@@ -20,6 +21,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private let scrollView = NSScrollView()
     let tableView = SidebarTableView()
     private let settingsButton = SidebarIconButton(symbol: Icon.settings, size: 32, symbolSize: 15, label: "Settings")
+    private let statisticsButton = SidebarIconButton(symbol: Icon.statistics, size: 32, symbolSize: 15, label: "Statistics (⇧⌘U)")
     /// Account usage next to Settings; hidden while no provider has usage.
     let usageIndicator = UsageIndicatorView()
     private let usageCard = UsageCardPresenter()
@@ -78,6 +80,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             self?.perform(shift ? "chat.newLocal" : "chat.new")
         }
         settingsButton.onClick = { [weak self] in self?.perform("settings.open") }
+        statisticsButton.onClick = { [weak self] in self?.perform("statistics.toggle") }
         usageIndicator.onClick = { [weak self] in self?.perform("usage.open") }
         usageCard.onManageAccounts = { [weak self] in self?.perform("accounts.manage") }
 
@@ -95,7 +98,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             subview.translatesAutoresizingMaskIntoConstraints = false
             searchRow.addSubview(subview)
         }
-        for subview in [toggleButton, brandLabel, searchRow, scrollView, settingsButton, usageIndicator] as [NSView] {
+        for subview in [toggleButton, brandLabel, searchRow, scrollView, settingsButton, statisticsButton, usageIndicator] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -132,7 +135,9 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
             settingsButton.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             settingsButton.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -4),
-            usageIndicator.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 2),
+            statisticsButton.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 2),
+            statisticsButton.centerYAnchor.constraint(equalTo: settingsButton.centerYAnchor),
+            usageIndicator.leadingAnchor.constraint(equalTo: statisticsButton.trailingAnchor, constant: 2),
             usageIndicator.centerYAnchor.constraint(equalTo: settingsButton.centerYAnchor),
             usageIndicator.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -inset),
         ])
@@ -153,7 +158,9 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             case .filter:
                 searchField.text = state.searchText
                 reload()
-            case .panels, .composerRestore:
+            case .panels:
+                statisticsButton.isOn = state.isStatisticsVisible
+            case .composerRestore:
                 break
             }
         }

@@ -229,6 +229,8 @@ public struct EngineEnvironment: Sendable {
     public var dataDirectory: URL
     /// Lists and reads working-directory files for the right panel.
     public var files: any WorkspaceFileService
+    /// The agent's recorded usage history for the statistics board.
+    public var usage: any UsageStatisticsService
     public var now: @Sendable () -> Date
 
     public init(
@@ -237,6 +239,7 @@ public struct EngineEnvironment: Sendable {
         store: any ThreadStore,
         dataDirectory: URL,
         files: any WorkspaceFileService = LiveWorkspaceFileService(),
+        usage: any UsageStatisticsService = OmpUsageStatistics(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.drivers = drivers
@@ -244,6 +247,7 @@ public struct EngineEnvironment: Sendable {
         self.store = store
         self.dataDirectory = dataDirectory
         self.files = files
+        self.usage = usage
         self.now = now
     }
 }

@@ -89,6 +89,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         viewMenu.addItem(commandItem("timeline.jumpToLatest", title: "Jump to Latest"))
         viewMenu.addItem(commandItem("sidebar.search", title: "Search Threads"))
         viewMenu.addItem(commandItem("usage.open"))
+        viewMenu.addItem(commandItem("statistics.toggle"))
         viewMenu.addItem(.separator())
         let fullScreen = viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]

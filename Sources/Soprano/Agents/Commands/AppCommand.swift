@@ -151,5 +151,6 @@ enum AllCommands {
         registry.register(ComposerCommands.all)
         registry.register(PanelCommands.all)
         registry.register(AccountCommands.all)
+        registry.register(StatisticsCommands.all)
     }
 }

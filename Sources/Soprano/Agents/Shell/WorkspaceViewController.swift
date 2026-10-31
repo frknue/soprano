@@ -3,6 +3,7 @@ import SopranoAgentsCore
 
 /// The window content: sidebar | chat column | right panel. The sidebar and the right panel are
 /// resizable by dragging their inner edge; double-clicking the sidebar rail resets its width.
+/// The statistics board, while open, covers the chat column and the right panel.
 @MainActor
 final class WorkspaceViewController: NSViewController {
     let engine: AgentEngine
@@ -11,6 +12,7 @@ final class WorkspaceViewController: NSViewController {
     let sidebar: SidebarViewController
     let chat: ChatViewController
     let rightPanel: RightPanelViewController
+    let statistics: StatisticsViewController
 
     private var sidebarWidth: NSLayoutConstraint?
     private var rightPanelWidth: NSLayoutConstraint?
@@ -27,7 +29,19 @@ final class WorkspaceViewController: NSViewController {
         chat = ChatViewController(engine: engine, state: state)
         // The panel's terminal tabs live in the drawer's store: one numbering, one set of shells.
         rightPanel = RightPanelViewController(engine: engine, state: state, terminals: chat.terminal.store)
+        statistics = StatisticsViewController(engine: engine, state: state)
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// The chat column for a command that acts in it (composer, pickers, find): closes the
+    /// statistics board first and lays out, so nothing lands in a hidden view.
+    @discardableResult
+    func revealChat() -> ChatViewController {
+        if state.isStatisticsVisible {
+            state.setStatisticsVisible(false)
+            view.layoutSubtreeIfNeeded()
+        }
+        return chat
     }
 
     @available(*, unavailable)
@@ -36,18 +50,19 @@ final class WorkspaceViewController: NSViewController {
     override func loadView() {
         let root = WorkspaceRootView(frame: NSRect(origin: .zero, size: Metrics.windowDefaultSize))
         view = root
-        for child in [sidebar, chat, rightPanel] as [NSViewController] {
+        for child in [sidebar, chat, rightPanel, statistics] as [NSViewController] {
             addChild(child)
         }
 
         let sidebarView = sidebar.view
         let chatView = chat.view
         let panelView = rightPanel.view
+        let statisticsView = statistics.view
         let sidebarRail = ResizeRail(axis: .vertical)
         let panelRail = ResizeRail(axis: .vertical)
         let sidebarEdge = HairlineView()
         let panelEdge = HairlineView()
-        for subview in [sidebarView, chatView, panelView, sidebarEdge, panelEdge, sidebarRail, panelRail] {
+        for subview in [sidebarView, chatView, panelView, sidebarEdge, panelEdge, statisticsView, sidebarRail, panelRail] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -99,6 +114,11 @@ final class WorkspaceViewController: NSViewController {
             panelRail.widthAnchor.constraint(equalToConstant: 8),
 
             chatMinWidth,
+
+            statisticsView.leadingAnchor.constraint(equalTo: sidebarEdge.trailingAnchor),
+            statisticsView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            statisticsView.topAnchor.constraint(equalTo: root.topAnchor),
+            statisticsView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         self.chatMinWidth = chatMinWidth
         self.chatTrailing = chatTrailing
@@ -168,6 +188,29 @@ final class WorkspaceViewController: NSViewController {
         }
         chat.view.isHidden = maximized
         panelRailView?.isHidden = !showPanel || maximized
+
+        let showStatistics = state.isStatisticsVisible
+        let wasShowingStatistics = !statistics.view.isHidden
+        // Before hiding it: a hidden first responder hands the keyboard to the window.
+        let statisticsHadFocus = statistics.hasFocus
+        statistics.view.isHidden = !showStatistics
+        if showStatistics {
+            chat.view.isHidden = true
+            rightPanel.view.isHidden = true
+            panelEdgeView?.isHidden = true
+            panelRailView?.isHidden = true
+        }
+        if showStatistics, !wasShowingStatistics {
+            statistics.didOpen()
+            statistics.takeFocus()
+        } else if !showStatistics, wasShowingStatistics, statisticsHadFocus {
+            // Focus goes where the user can see it: a maximized panel hides the composer.
+            if maximized {
+                rightPanel.takeFocus()
+            } else {
+                chat.composer.focusEditor()
+            }
+        }
     }
 
     private func resizeSidebar(by delta: CGFloat) {

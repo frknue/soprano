@@ -118,7 +118,7 @@ final class ProjectFilterPopup: NSPanel {
         state.setProjectFilter(filter)
         engine.removeProject(projectID)
         // Its new-thread draft has no folder anymore: fall back to the projectless draft.
-        if state.draftProjectID == projectID { state.select(.draft(projectID: nil)) }
+        if state.draftProjectID == projectID { state.select(.draft(projectID: nil), closingStatistics: false) }
         reload()
     }
 }

@@ -12,6 +12,12 @@ enum ComposerCommands {
         context.workspace?.chat.composer
     }
 
+    /// The composer for a command that shows or focuses something in it: the statistics board
+    /// closes first.
+    private static func revealedComposer(_ context: CommandContext) -> ComposerViewController? {
+        context.workspace?.revealChat().composer
+    }
+
     static var all: [AppCommand] {
         [
             AppCommand(
@@ -23,7 +29,7 @@ enum ComposerCommands {
                 icon: "text.cursor",
                 isEnabled: { composer($0) != nil }
             ) { context in
-                composer(context)?.focusEditor()
+                revealedComposer(context)?.focusEditor()
             },
             AppCommand(
                 id: "modelPicker.toggle",
@@ -35,7 +41,7 @@ enum ComposerCommands {
                 icon: "cpu",
                 isEnabled: { composer($0) != nil }
             ) { context in
-                composer(context)?.toggleModelPicker()
+                revealedComposer(context)?.toggleModelPicker()
             },
             AppCommand(
                 id: "composer.effort",
@@ -47,7 +53,7 @@ enum ComposerCommands {
                 icon: Icon.gauge,
                 isEnabled: { composer($0) != nil }
             ) { context in
-                composer(context)?.toggleTraits()
+                revealedComposer(context)?.toggleTraits()
             },
             AppCommand(
                 id: "composer.mode",
@@ -59,7 +65,7 @@ enum ComposerCommands {
                 icon: "lock",
                 isEnabled: { composer($0) != nil }
             ) { context in
-                composer(context)?.togglePermissions()
+                revealedComposer(context)?.togglePermissions()
             },
             AppCommand(
                 id: "composer.workspace",
@@ -71,7 +77,7 @@ enum ComposerCommands {
                 icon: Icon.folder,
                 isEnabled: { composer($0)?.hasDraftRepository ?? false }
             ) { context in
-                composer(context)?.toggleWorkspaceMenu()
+                revealedComposer(context)?.toggleWorkspaceMenu()
             },
             AppCommand(
                 id: "composer.branch",
@@ -83,7 +89,7 @@ enum ComposerCommands {
                 icon: Icon.gitBranch,
                 isEnabled: { composer($0)?.hasDraftRepository ?? false }
             ) { context in
-                composer(context)?.toggleBranchPicker()
+                revealedComposer(context)?.toggleBranchPicker()
             },
             AppCommand(
                 id: "composer.sendAlternate",
@@ -115,7 +121,7 @@ enum ComposerCommands {
                 icon: "arrow.down.right.and.arrow.up.left",
                 isEnabled: { composer($0)?.canCompact ?? false }
             ) { context in
-                composer(context)?.compactConversation()
+                revealedComposer(context)?.compactConversation()
             },
         ]
     }

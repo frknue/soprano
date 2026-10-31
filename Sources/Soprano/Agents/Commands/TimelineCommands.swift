@@ -53,8 +53,9 @@ enum TimelineCommands {
         ]
     }
 
+    /// The timeline, with the statistics board closed so its find bar and scrolling show.
     private static func timeline(in context: CommandContext) -> TimelineViewController? {
-        context.workspace?.chat.timeline
+        context.workspace?.revealChat().timeline
     }
 
     private static func hasThread(_ context: CommandContext) -> Bool {

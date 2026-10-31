@@ -6,13 +6,12 @@ import SopranoAgentsCore
 @MainActor
 enum ThreadActions {
     /// Opens a thread. The sidebar marks every newly selected thread visited (clearing its
-    /// Done / Failed pill); re-opening the open thread clears a pill it got meanwhile.
+    /// Done / Failed pill); re-opening the open thread clears a pill it got meanwhile. Either way
+    /// the statistics board closes (`WorkspaceState.select`).
     static func open(_ threadID: String, engine: AgentEngine, state: WorkspaceState) {
-        guard state.selectedThreadID == threadID else {
-            state.select(.thread(threadID))
-            return
-        }
-        guard let thread = engine.thread(threadID) else { return }
+        let wasSelected = state.selectedThreadID == threadID
+        state.select(.thread(threadID))
+        guard wasSelected, let thread = engine.thread(threadID) else { return }
         let status = ThreadStatus.of(thread)
         if status == .done || status == .failed { engine.markVisited(threadID) }
     }
@@ -38,10 +37,11 @@ enum ThreadActions {
         return recent?.projectID ?? engine.projects.first?.id
     }
 
-    /// After the open thread goes away, show a draft in its project.
+    /// After the open thread goes away, show a draft in its project (an open statistics board
+    /// stays).
     private static func leave(_ thread: AgentThread, state: WorkspaceState) {
         guard state.selectedThreadID == thread.id else { return }
-        state.select(.draft(projectID: thread.projectID))
+        state.select(.draft(projectID: thread.projectID), closingStatistics: false)
     }
 
     static func archive(_ threadID: String, engine: AgentEngine, state: WorkspaceState) {

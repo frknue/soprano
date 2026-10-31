@@ -152,6 +152,7 @@ enum Icon {
     static let globe = "globe"
     static let squarePenFile = "square.and.pencil"
     static let alarm = "alarm"
+    static let statistics = "chart.bar.xaxis"                      // Statistics board
 }
 
 extension NSImage {

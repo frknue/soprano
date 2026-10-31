@@ -67,6 +67,7 @@ struct KeymapTests {
             ("usage.open", [], ["cmd+u"]),
             ("accounts.manage", [], []),
             ("usage.refresh", [], []),
+            ("statistics.toggle", [], ["cmd+shift+u"]),
         ]
         for index in 1...9 {
             table.append(("thread.jump.\(index)", [], ["ctrl+\(index)"]))

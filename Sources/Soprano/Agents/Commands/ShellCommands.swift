@@ -48,7 +48,7 @@ enum ShellCommands {
                 icon: Icon.squareMenu
             ) { context in
                 guard let state = context.state else { return }
-                state.setThreadDetailsVisible(!state.isThreadDetailsVisible)
+                state.setThreadDetailsVisible(state.toggledVisibility(state.isThreadDetailsVisible))
             },
             AppCommand(
                 id: "view.toggleTerminal",
@@ -60,7 +60,7 @@ enum ShellCommands {
                 isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let state = context.state else { return }
-                state.setTerminalVisible(!state.isTerminalVisible)
+                state.setTerminalVisible(state.toggledVisibility(state.isTerminalVisible))
             },
             AppCommand(
                 id: "view.toggleRightPanel",
@@ -71,7 +71,7 @@ enum ShellCommands {
                 icon: Icon.panelRight
             ) { context in
                 guard let state = context.state else { return }
-                state.setRightPanelVisible(!state.isRightPanelVisible)
+                state.setRightPanelVisible(state.toggledVisibility(state.isRightPanelVisible))
             },
             AppCommand(
                 id: "settings.openFile",

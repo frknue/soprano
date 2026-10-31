@@ -59,6 +59,10 @@ The installer never restarts a running Soprano Agents; the update applies on the
 8. Several Claude and Codex accounts for omp, as in Soprano: usage at the bottom of the sidebar
    (`⌘U` for details) and **Settings › Accounts** to add logins and let omp prefer one or balance
    across them.
+9. Statistics (`⇧⌘U`, or the chart button next to Settings), as in T3 Code's Usage page: omp's
+   tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all time, with a chart per
+   hour, day, week or month and breakdowns by model (click one to filter), project and agent. It reads
+   omp's own usage records (`omp stats`), so every omp session on this Mac counts.
 
 `⌘K` (or `⌘P`) opens the command palette, Soprano's own: every action with its shortcut, threads,
 projects and settings pages. When the app is in the background, finished, failed and
@@ -107,6 +111,7 @@ right-panel tab) has focus.
 | Open in Editor | `⌘O` | everywhere |
 | Open in Soprano Git | `⌃A` → `G` | everywhere |
 | Show Usage | `⌘U` | everywhere |
+| Statistics | `⇧⌘U` | everywhere |
 
 Unbound by default (bind them in Settings): Open settings.json, Archive / Delete
 Thread, Search Threads, Filter Threads by Project, Expand / Collapse All Work, Interrupt, Commit,
