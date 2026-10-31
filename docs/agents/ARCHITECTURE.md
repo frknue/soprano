@@ -37,7 +37,7 @@ swift test
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
 | `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
-| `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar usage indicator, usage card, Settings → Accounts, account fixtures. |
+| `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar account button, usage card, Settings → Accounts, account fixtures. |
 | `Sources/SopranoAgents/Views/Statistics/`, `Commands/StatisticsCommands.swift`, `Fixtures/FixtureUsageStatistics.swift` | Statistics | Statistics board (header, periods, Cost/Tokens, tiles, stacked chart, model/project/agent breakdowns), `StatisticsFormat`, fixture usage history. |
 | `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
 | `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController` and its account managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
@@ -389,9 +389,10 @@ closes on send, focus loss, thread switch and when another of the app's windows 
 (palette, dialog, settings); app deactivation keeps it. Text the composer sets itself never opens
 it; the editor has inline predictions and text completion off.
 
-The sidebar footer shows account usage after the gear and the statistics button (`UsageIndicatorView`: `Claude 9% · Codex
-75%`, the headline Claude and Codex login's tightest window; muted below 70%, `warning` from 70%,
-`error` from 90%; hidden without usage). Clicking it or `usage.open` toggles the usage card
+The sidebar footer ends with the account button after the gear and the statistics button
+(`AccountButton`, `person.crop.circle`): muted while every headline Claude and Codex login's
+tightest window is below 70%, `warning` from 70%, `error` from 90%; its tooltip lists each
+headline login's windows and resets. Clicking it or `usage.open` toggles the usage card
 (child window): per provider, per account list, each login with its 5h/7d bars, percent and
 reset, plus Refresh and "Manage Accounts…" (Settings → Accounts).
 
@@ -501,7 +502,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 │ …                  │   assistant markdown 14/1.625                      │                             │
 │ Working 1 ›        │   N changed files card                             │                             │
 │ Settled 43 ›       │   ┌ composer r16, glass ┐                          │                             │
-│ [⚙][▥] Claude 9%…  │ terminal drawer 280 (180…75%)                      │                             │
+│ [⚙][▥][◎]          │ terminal drawer 280 (180…75%)                      │                             │
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
@@ -566,10 +567,10 @@ Stop, no "Thinking" row);
 (running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture
 subagent` selects Reader (its run with a steer, "Message Reader", Stop).
 `--accounts` installs an
-`AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
+`AccountFixtures` snapshot before the window is built (default `none`: no usage): `demo`
 has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %/93 % and
 75 %/38 %; `pending` adds a waiting omp Claude sign-in and a failed action on the Codex list.
-`--perform usage.open` opens the usage card; `--click "Account usage"` clicks the indicator.
+`--perform usage.open` opens the usage card; `--click "Accounts"` clicks the account button.
 Every fixture engine reads `FixtureUsageStatistics` (≈ 120 days of working hours on the demo
 projects plus a `-Downloads-experiments` folder; Opus main and subagents, a Sonnet advisor,
 GPT-6.1 Sol and an unpriced OpenRouter model): `--perform statistics.toggle` opens the board on

@@ -35,7 +35,7 @@ enum SnapshotCommand {
         var clicks: [String] = []
         var settings: SettingsPage?
         var dialog: String?
-        /// The `AccountFixtures` snapshot the usage indicator, usage card and Settings → Accounts show.
+        /// The `AccountFixtures` snapshot the account button, usage card and Settings → Accounts show.
         var accounts = "none"
         var wait: Double = 0.4
     }

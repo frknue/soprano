@@ -59,8 +59,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Accounts, as in Soprano: sign in to several Claude and Codex accounts for omp in Settings →
   Accounts, and let omp prefer one or balance across them; new threads start with the preferred
   account.
-- Usage at the bottom of the sidebar (`Claude 9% · Codex 75%`, warning from 70 %, red from 90 %);
-  click it or press ⌘U for each account's 5-hour and weekly limits and their resets.
+- Account button at the bottom of the sidebar, tinted from 70 % and red from 90 % of a limit;
+  hover it for usage, click it or press ⌘U for each account's 5-hour and weekly limits and their resets.
 - Statistics (⇧⌘U, or the chart button next to Settings in the sidebar), like T3 Code's Usage
   page: omp's requests, tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all
   time, as Cost or Tokens, with cache savings, a stacked chart per hour, day, week or month (hover a bar

@@ -56,9 +56,9 @@ The installer never restarts a running Soprano Agents; the update applies on the
 7. The ring next to Send shows how full the context window is; click it to compact the
    conversation (or send `/compact`). Type `/` at the start of a line for omp's commands and
    skills: ↑/↓ choose, Enter or Tab insert, Esc closes.
-8. Several Claude and Codex accounts for omp, as in Soprano: usage at the bottom of the sidebar
-   (`⌘U` for details) and **Settings › Accounts** to add logins and let omp prefer one or balance
-   across them.
+8. Several Claude and Codex accounts for omp, as in Soprano: the account button at the bottom of
+   the sidebar (tinted near a limit; `⌘U` for details) and **Settings › Accounts** to add logins
+   and let omp prefer one or balance across them.
 9. Statistics (`⇧⌘U`, or the chart button next to Settings), as in T3 Code's Usage page: omp's
    tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all time, with a chart per
    hour, day, week or month and breakdowns by model (click one to filter), project and agent. It reads

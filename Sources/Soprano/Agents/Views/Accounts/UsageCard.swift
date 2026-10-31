@@ -204,8 +204,8 @@ final class AccountsRule: PaletteView {
     }
 }
 
-/// Opens and closes the usage card next to its anchor (the sidebar's usage indicator, else the
-/// Settings button) and keeps it rendering the accounts source while it is open.
+/// Opens and closes the usage card above its anchor (the sidebar's account button) and keeps
+/// it rendering the accounts source while it is open.
 @MainActor
 final class UsageCardPresenter {
     private static let observerID = "UsageCard"

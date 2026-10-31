@@ -6,35 +6,38 @@ import Testing
 struct UsageTextTests {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
-    @Test func theIndicatorShowsEachProvidersTightestHeadlineWindow() {
+    @Test func eachProviderHeadlinesItsTightestWindowAndTheButtonTakesTheWorstSeverity() {
         let snapshot = AccountFixtures.demo(now: now)
         // Claude: omp is automatic, so the account with the most headroom (ada, 9%) leads;
         // Codex: omp's only Codex login (75%) does.
-        #expect(UsageText.indicator(snapshot) == "Claude 9% · Codex 75%")
+        #expect(headlineFigures(snapshot) == ["Claude 9%", "Codex 75%"])
         #expect(UsageText.headlines(snapshot).map(\.severity) == [.normal, .warning])
+        #expect(UsageText.severity(snapshot) == .warning)
     }
 
-    @Test func aPreferredOmpAccountLeadsTheIndicatorEvenWhenItIsTighter() {
+    @Test func aPreferredOmpAccountLeadsTheHeadlineEvenWhenItIsTighter() {
         var snapshot = AccountFixtures.demo(now: now)
         snapshot.lists[.ompClaude]?.selectedAccountId = "grace@example.com|org-grace"
-        #expect(UsageText.indicator(snapshot) == "Claude 93% · Codex 75%")
-        #expect(UsageText.headlines(snapshot).first?.severity == .critical)
+        #expect(headlineFigures(snapshot) == ["Claude 93%", "Codex 75%"])
+        #expect(UsageText.severity(snapshot) == .critical)
     }
 
-    @Test func theIndicatorHidesWithoutUsage() {
-        #expect(UsageText.indicator(AccountsSnapshot()) == nil)
-        #expect(UsageText.indicator(AccountFixtures.empty(now: now)) == nil)
+    @Test func withoutUsageTheButtonStaysNeutralAndHasNoUsageTooltip() {
+        #expect(UsageText.headlines(AccountsSnapshot()).isEmpty)
+        #expect(UsageText.headlines(AccountFixtures.empty(now: now)).isEmpty)
+        #expect(UsageText.severity(AccountsSnapshot()) == .normal)
         #expect(UsageText.tooltip(AccountsSnapshot(), now: now) == nil)
     }
 
-    @Test func theCLIListsTheVendoredControllerStillLoadsNeverReachTheIndicator() {
+    @Test func theCLIListsTheVendoredControllerStillLoadsNeverReachTheHeadlines() {
         var snapshot = AccountFixtures.empty(now: now)
-        let usage = AccountUsage(windows: [UsageWindow(label: "5h", usedFraction: 0.5, resetsAt: nil)], fetchedAt: now)
+        let usage = AccountUsage(windows: [UsageWindow(label: "5h", usedFraction: 0.95, resetsAt: nil)], fetchedAt: now)
         snapshot.lists[.codexCLI] = AccountList(
             id: .codexCLI,
             systemDefault: AccountRow(id: "system-default", identity: AccountIdentity(email: "ada@example.com"), usage: usage)
         )
-        #expect(UsageText.indicator(snapshot) == nil)
+        #expect(UsageText.headlines(snapshot).isEmpty)
+        #expect(UsageText.severity(snapshot) == .normal)
     }
 
     @Test func severityTurnsWarningAtSeventyAndCriticalAtNinetyPercent() {
@@ -90,5 +93,9 @@ struct UsageTextTests {
         ])
         let samePlan = AccountRow(id: "x", identity: AccountIdentity(email: "x@example.com"), organizationName: "Plus", plan: "plus")
         #expect(UsageText.detailParts(samePlan, now: now) == ["Plus", "No usage data"])
+    }
+
+    private func headlineFigures(_ snapshot: AccountsSnapshot) -> [String] {
+        UsageText.headlines(snapshot).map { "\($0.provider.displayName) \(UsageFormat.percent($0.window.usedFraction))" }
     }
 }

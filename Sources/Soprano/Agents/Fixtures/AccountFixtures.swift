@@ -6,7 +6,7 @@ import AppKit
 enum AccountFixtures {
     nonisolated static let scenarios = ["none", "demo", "empty", "pending"]
 
-    /// `none`: never loaded (the indicator hides, the page says "not loaded"); `demo`: two
+    /// `none`: never loaded (no usage, the page says "not loaded"); `demo`: two
     /// Claude logins and one Codex login in omp; `empty`: loaded, nobody signed in; `pending`:
     /// `demo` with an omp Claude sign-in waiting and a failed omp Codex action.
     static func snapshot(_ name: String, now: Date = Date()) throws -> AccountsSnapshot {
