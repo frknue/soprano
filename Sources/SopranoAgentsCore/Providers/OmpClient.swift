@@ -24,7 +24,8 @@ public actor OmpClient {
     private var nextID = 1
     private var pending: [String: (type: String, continuation: CheckedContinuation<JSONValue, Error>)] = [:]
     private var readyFrame: JSONValue?
-    private var readyWaiters: [CheckedContinuation<JSONValue, Error>] = []
+    private var readyWaiters: [Int: CheckedContinuation<JSONValue, Error>] = [:]
+    private var nextReadyWaiter = 0
     private var closedError: ProviderError?
 
     public init(transport: any JSONLineTransport) {
@@ -33,11 +34,24 @@ public actor OmpClient {
         Task { await self.readLoop() }
     }
 
-    /// The `ready` frame (waits for it). Throws when the process exits first.
+    /// The `ready` frame (waits for it). Throws when the process exits first, or
+    /// `CancellationError` when the waiting task is cancelled (a startup timeout).
     public func ready() async throws -> JSONValue {
         if let readyFrame { return readyFrame }
         if let closedError { throw closedError }
-        return try await withCheckedThrowingContinuation { readyWaiters.append($0) }
+        let waiter = nextReadyWaiter
+        nextReadyWaiter += 1
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<JSONValue, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                readyWaiters[waiter] = continuation
+            }
+        } onCancel: {
+            Task { await self.abandonReady(waiter) }
+        }
     }
 
     /// Sends `{"type": type, "id": id ?? "soprano-<n>", …fields}` and returns the response's
@@ -100,7 +114,7 @@ public actor OmpClient {
                 for entry in waiting { entry.continuation.resume(throwing: error) }
                 let readers = readyWaiters
                 readyWaiters.removeAll()
-                for waiter in readers { waiter.resume(throwing: error) }
+                for waiter in readers.values { waiter.resume(throwing: error) }
                 incomingContinuation.yield(.closed(status: status, stderr: stderr))
                 incomingContinuation.finish()
                 return
@@ -115,7 +129,7 @@ public actor OmpClient {
             if let limit = frame["maxReassembledFrameBytes"]?.intValue, limit > 0 { decoder.maxBytes = limit }
             let waiters = readyWaiters
             readyWaiters.removeAll()
-            for waiter in waiters { waiter.resume(returning: frame) }
+            for waiter in waiters.values { waiter.resume(returning: frame) }
         case "response":
             guard let id = frame["id"]?.stringValue, let entry = pending.removeValue(forKey: id) else {
                 incomingContinuation.yield(.frame(frame))
@@ -135,5 +149,9 @@ public actor OmpClient {
 
     private func abandon(_ id: String) {
         pending.removeValue(forKey: id)?.continuation.resume(throwing: CancellationError())
+    }
+
+    private func abandonReady(_ waiter: Int) {
+        readyWaiters.removeValue(forKey: waiter)?.resume(throwing: CancellationError())
     }
 }

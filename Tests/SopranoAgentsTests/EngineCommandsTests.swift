@@ -111,4 +111,33 @@ struct EngineCommandsTests {
         let project = try #require(engine.project(engine.thread(threadID)?.projectID))
         #expect(driver.commandDirectories == [project.path])
     }
+
+    @Test func aFailedListingIsNotRetriedOnEveryKeystroke() async throws {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+
+        engine.loadCommands(forThread: threadID)
+        #expect(await EngineHarness.eventually { driver.commandDirectories.count == 1 })
+        try await Task.sleep(for: .milliseconds(50))
+        engine.loadCommands(forThread: threadID)
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(driver.commandDirectories.count == 1)
+        #expect(engine.commands(forThread: threadID).isEmpty)
+    }
+
+    @Test func aProjectlessThreadIsListedFromTheScratchRootBeforeItsFolderExists() async throws {
+        let driver = ScriptedDriver()
+        driver.listedCommands = [Self.review]
+        let engine = EngineHarness.engine(driver: driver)
+        let thread = AgentThread(projectID: nil, modelSelection: .default(for: .omp))
+        engine.insertThread(thread)
+        let root = engine.environment.dataDirectory.appendingPathComponent("scratch").path
+
+        engine.loadCommands(forThread: thread.id)
+
+        #expect(await EngineHarness.eventually { engine.commands(forThread: thread.id) == [Self.review] })
+        #expect(driver.commandDirectories == [root])
+    }
 }

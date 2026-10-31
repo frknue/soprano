@@ -211,6 +211,6 @@ public protocol ProviderDriver: Sendable {
 }
 
 extension ProviderDriver {
-    /// Codex and Claude Code report their lists from a live session only.
+    /// Drivers that list only from a live session answer nil.
     public func commands(directory: String) async -> [ProviderCommand]? { nil }
 }

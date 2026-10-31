@@ -15,8 +15,8 @@ final class EngineRuntime {
     /// The last command list each provider reported per workspace (this run only), for drafts
     /// and threads without a live session (AgentEngine+Commands.swift).
     var rememberedCommands: [CommandScope: [ProviderCommand]] = [:]
-    /// Scopes whose list a driver is reading now (`loadCommands`).
-    var loadingCommands: Set<CommandScope> = []
+    /// Scopes a driver was asked for their list this run (`loadCommands`), answered or not.
+    var requestedCommands: Set<CommandScope> = []
 
     func thread(_ id: String) -> ThreadRuntime {
         if let existing = threads[id] { return existing }

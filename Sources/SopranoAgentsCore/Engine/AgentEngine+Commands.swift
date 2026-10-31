@@ -50,9 +50,10 @@ extension AgentEngine {
     }
 
     /// The `/` menu opened with nothing to list: asks the thread's provider driver for its list
-    /// in the thread's workspace (`ProviderDriver.commands(directory:)`), remembers the answer
-    /// there and emits `commandsChanged`. Nothing happens when a list is known, the thread has a
-    /// session (it reports its own list), or the same workspace is already being read.
+    /// in the thread's workspace (`ProviderDriver.commands(directory:)`; scratch threads: the
+    /// scratch root they share), remembers the answer there and emits `commandsChanged`. Each
+    /// provider and workspace is asked once per run, answered or not; nothing happens when a list
+    /// is known or the thread has a session (it reports its own list).
     public func loadCommands(forThread threadID: String) {
         guard let thread = thread(threadID), commands(forThread: threadID).isEmpty,
               runtime.existingThread(threadID)?.session == nil else { return }
@@ -67,7 +68,6 @@ extension AgentEngine {
             guard let project = project(projectID) else { return }
             readCommands(provider, directory: project.path)
         } else {
-            try? FileManager.default.createDirectory(at: scratchRoot, withIntermediateDirectories: true)
             readCommands(provider, directory: scratchRoot.path)
         }
     }
@@ -136,12 +136,16 @@ extension AgentEngine {
 
     private func readCommands(_ provider: ProviderKind, directory: String) {
         let scope = CommandScope(provider: provider, directory: scopeDirectory(directory))
-        guard let driver = environment.drivers[provider], runtime.loadingCommands.insert(scope).inserted else { return }
-        Task { @MainActor [weak self] in
-            let list = await driver.commands(directory: directory)
-            guard let self else { return }
-            runtime.loadingCommands.remove(scope)
-            if let list { rememberCommands(list, provider: provider, workingDirectory: directory) }
+        guard let driver = environment.drivers[provider], runtime.requestedCommands.insert(scope).inserted else { return }
+        // Scratch workspaces share the root's list, and a thread's own folder may not exist yet.
+        var directory = directory
+        if scope.directory == scratchRoot.standardizedFileURL.path {
+            try? FileManager.default.createDirectory(at: scratchRoot, withIntermediateDirectories: true)
+            directory = scratchRoot.path
+        }
+        Task { @MainActor [weak self, directory] in
+            guard let list = await driver.commands(directory: directory), let self else { return }
+            rememberCommands(list, provider: provider, workingDirectory: directory)
         }
     }
 

@@ -142,7 +142,8 @@ Engine behavior:
   workspace for drafts (a worktree thread's list also counts for its project; all scratch threads
   share one). Text starting with `/` reaches the provider with its first characters intact. A
   menu with nothing to list (no session this run) asks the provider driver
-  (`ProviderDriver.commands(directory:)`, one request per workspace at a time); omp answers from a
+  (`ProviderDriver.commands(directory:)`, each provider and workspace once per run, answered or
+  not; scratch threads read the shared scratch root); omp answers from a
   throwaway `omp --mode rpc --no-session --no-lsp` (`get_available_commands`, about 0.5 s).
 - Subagents: `ProviderEvent.subagent(id:, SubagentEvent)` folds into `AgentThread.subagents`
   (persisted, start order; `AgentEngine+Subagents.swift`): `.updated` merges reported facts
@@ -160,8 +161,9 @@ Engine behavior:
 
 ### Providers (Core/Providers)
 `ProviderDriver` creates `ProviderSession`s, probes the CLI (`probe()` → version, health,
-models), and runs one-shot `generateJSON`. `OmpDriver` is the only implementation and
-`ProviderKind` has the single case `.omp`; the seam keeps the engine testable against a fake driver.
+models), runs one-shot `generateJSON`, and lists commands without a conversation
+(`commands(directory:)`). `OmpDriver` is the only implementation and `ProviderKind` has the
+single case `.omp`; the seam keeps the engine testable against a fake driver.
 
 **omp** (oh-my-pi) — `omp --mode rpc-ui --cwd <cwd> --approval-mode <mode>
 [--model <provider/id>] [--thinking <level>] [--resume <session file>]`, one process per thread
