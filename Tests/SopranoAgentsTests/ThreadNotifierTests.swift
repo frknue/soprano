@@ -137,6 +137,44 @@ struct ThreadNotifierTests {
         #expect(badges == [1, 2, 1, 0])
     }
 
+    @Test func settledThreadsLeaveTheBadgeUntilUnsettled() {
+        var settledAtLaunch = runningThread("t1", title: "Settled earlier")
+        settledAtLaunch.turns[0].status = .completed
+        settledAtLaunch.turns[0].completedAt = now.addingTimeInterval(-60)
+        settledAtLaunch.settledAt = now.addingTimeInterval(-30)
+        let engine = engine([settledAtLaunch, runningThread("t2", title: "B")])
+        var badges: [Int] = []
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { badges.append($0) })
+
+        finish(engine, "t2", .completed)
+        engine.setSettled("t2", true)
+        engine.setSettled("t1", false)
+
+        #expect(notifier.badgeCount == 1)
+        #expect(badges == [1, 0, 1])
+    }
+
+    @Test func aSettledThreadWaitingOnApprovalStillCountsOnTheBadge() {
+        let engine = engine([runningThread("t1", title: "A")])
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { _ in })
+
+        engine.setSettled("t1", true)
+        requestApproval(engine, "t1")
+
+        #expect(notifier.badgeCount == 1)
+    }
+
+    @Test func aPinnedThreadCountsEvenWhenAlsoSettled() {
+        let engine = engine([runningThread("t1", title: "A")])
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { _ in })
+
+        finish(engine, "t1", .completed)
+        engine.setSettled("t1", true)
+        engine.setPinned("t1", true)
+
+        #expect(notifier.badgeCount == 1)
+    }
+
     @Test func theSameAlertIsNotPostedTwice() {
         let engine = engine([runningThread("t1", title: "A")])
         let recorder = Recorder()

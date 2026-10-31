@@ -106,6 +106,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Fixed
 
+- The Dock badge no longer counts unread Done or Failed threads you settled: they kept the badge
+  up with nothing to see in the inbox. A settled thread waiting on Approval or Input still counts.
 - Hover fills sit evenly around their content: the composer's effort chip ("High") no longer
   starts flush at its text, and the model and permissions chips have even space on both sides.
   The remove ✕ on image attachments keeps its backdrop after a hover, and the selected

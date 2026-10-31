@@ -43,7 +43,10 @@ protocol ThreadNotificationPosting: AnyObject {
 ///   with the thread title as body (one notification per thread, replacing the last), with
 ///   sound per `notifications.sound`, unless `notifications.enabled` is off. Threads seen for
 ///   the first time (launch) and archived threads never notify.
-/// - The Dock badge counts non-archived threads showing Done, Failed, Approval or Input.
+/// - The Dock badge counts non-archived threads showing Done, Failed, Approval or Input, except
+///   Done and Failed on the Settled shelf: the user filed those away, and the collapsed shelf
+///   hides their pills. A settled thread waiting on Approval or Input still counts, and so does a
+///   settled thread that is also pinned (it shows in Pinned).
 /// - Clicking a notification calls `onOpen` with the thread id.
 @MainActor
 final class ThreadNotifier {
@@ -98,7 +101,11 @@ final class ThreadNotifier {
     }
 
     private func updateBadge() {
-        let count = alerts.values.filter { $0 != nil }.count
+        let count = engine.threads.reduce(0) { count, thread in
+            guard let alert = alerts[thread.id] ?? nil else { return count }
+            let filedAway = InboxSection.of(thread) == .settled && (alert == .completed || alert == .failed)
+            return filedAway ? count : count + 1
+        }
         guard count != badgeCount else { return }
         badgeCount = count
         setBadge(count)
