@@ -50,7 +50,7 @@ struct TerminalSessionsTests {
         let closedOne = sessions.close(one.id, in: "a")
         #expect(closedOne)
         #expect(sessions.activeSession(for: "a") == nil)
-        #expect(!sessions.threadIDs.contains("a"))
+        #expect(!sessions.keys.contains("a"))
     }
 
     @Test func selectingAnotherThreadsTerminalIsIgnored() {
@@ -67,12 +67,12 @@ struct TerminalSessionsTests {
         let gone = [sessions.add(to: "b"), sessions.add(to: "b")]
         let removed = sessions.prune(keeping: ["a"])
         #expect(Set(removed.map(\.info.id)) == Set(gone.map(\.id)))
-        #expect(removed.allSatisfy { $0.threadID == "b" })
+        #expect(removed.allSatisfy { $0.key == "b" })
         #expect(sessions.sessions(for: "a") == [kept])
         #expect(sessions.sessions(for: "b").isEmpty)
         let all = sessions.removeAll()
         #expect(all.map(\.id) == [kept.id])
-        #expect(sessions.threadIDs.isEmpty)
+        #expect(sessions.keys.isEmpty)
     }
 
     @Test func numbersAreSharedAcrossPlacementsOfAThread() {

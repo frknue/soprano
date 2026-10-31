@@ -25,6 +25,61 @@ public enum WorkspaceChoice: Sendable, Hashable {
     case existingWorktree(path: String, branch: String)
 }
 
+/// Whose working directory a panel, terminal or file read uses: a thread's, or a project draft's
+/// (the project root, where a "Current checkout" thread will work). A projectless draft has none.
+public enum WorkspaceRef: Sendable, Hashable {
+    case thread(String)
+    case draft(projectID: String)
+
+    /// Stable string key for per-workspace UI state: the thread id, or `draft:<projectID>`.
+    public var key: String {
+        switch self {
+        case let .thread(id): id
+        case let .draft(projectID): "draft:\(projectID)"
+        }
+    }
+}
+
+/// Where a workspace is on disk, for the "where am I" display.
+public struct WorkspaceLocation: Sendable, Hashable {
+    public enum Kind: Sendable, Hashable {
+        /// The project folder as it is checked out.
+        case checkout
+        /// A git worktree the thread works in.
+        case worktree
+        /// A projectless thread's scratch directory.
+        case scratch
+    }
+
+    /// The working directory.
+    public var path: String
+    public var kind: Kind
+    /// Folder name of the repository (for a worktree: of the project's repository); nil outside git.
+    public var repositoryName: String?
+    /// `path` inside its repository's top level, "" at the top level.
+    public var pathInRepository: String
+    /// Checked-out branch; nil outside git or on a detached HEAD.
+    public var branch: String?
+
+    public init(path: String, kind: Kind, repositoryName: String? = nil, pathInRepository: String = "", branch: String? = nil) {
+        self.path = path
+        self.kind = kind
+        self.repositoryName = repositoryName
+        self.pathInRepository = pathInRepository
+        self.branch = branch
+    }
+
+    /// Short label: `repo/sub/folder` inside git, "Scratch" for scratch threads, else the
+    /// `~`-abbreviated path.
+    public var title: String {
+        if kind == .scratch { return "Scratch" }
+        if let repositoryName {
+            return pathInRepository.isEmpty ? repositoryName : "\(repositoryName)/\(pathInRepository)"
+        }
+        return (path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
 /// The composer's choices for a thread that has not been sent yet.
 public struct ThreadDraft: Sendable, Hashable {
     public var projectID: String?

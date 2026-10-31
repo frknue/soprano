@@ -134,6 +134,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func isRepository(_ cwd: String) async -> Bool { isRepo }
     func repositoryRoot(_ cwd: String) async -> String? { isRepo ? cwd : nil }
+    func checkedOutBranch(_ cwd: String) async -> String? { isRepo ? currentBranch : nil }
 
     func captureCheckpoint(cwd: String, ref: String) async throws {
         record("capture \(ref)")

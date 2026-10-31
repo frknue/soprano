@@ -37,8 +37,8 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
             }
         }
 
-        /// Terminal and Files need a thread's working directory.
-        var needsThread: Bool { self != .diff }
+        /// Terminal and Files need a folder: a thread's or a project draft's.
+        var needsWorkspace: Bool { self != .diff }
     }
 
     let engine: AgentEngine
@@ -54,7 +54,7 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
     private let surfaceHost = NSView()
     private let launcher = RightPanelLauncher()
 
-    /// Reports a thread whose workspace folder is gone (no terminal starts). Defaults to an alert
+    /// Reports a workspace whose folder is gone (no terminal starts). Defaults to an alert
     /// over the window; tests replace it.
     lazy var reportMissingWorkspace: (_ path: String) -> Void = { [weak self] path in
         let window = self?.view.window
@@ -131,12 +131,13 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         terminals.addObserver(self) { [weak self] change in
             guard let self else { return }
             switch change {
-            case let .sessions(threadID): closeEndedTerminalTabs(of: threadID)
+            case let .sessions(key): closeEndedTerminalTabs(of: key)
+            case .moved: update()
             }
         }
         engine.addObserver(self) { [weak self] event in
-            guard let self, event == .threadListChanged else { return }
-            state.pruneRightPanelTabs(keeping: Set(engine.threads.map(\.id)))
+            guard let self, event == .threadListChanged || event == .projectsChanged else { return }
+            state.pruneRightPanelTabs(keeping: engine.workspaceKeys)
         }
         update()
     }
@@ -161,7 +162,7 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         tabBar.update(
             items: state.rightPanelSurfaces.map { RightPanelTabBar.Item(surface: $0, title: title(for: $0), symbol: symbol(for: $0)) },
             active: active,
-            canUseWorkspace: state.selectedThreadID != nil
+            canUseWorkspace: state.workspace != nil
         )
         var terminalID: String?
         var showsFile = false
@@ -176,7 +177,7 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         terminal.view.isHidden = terminalID == nil
         terminal.show(sessionID: terminalID)
         launcher.isHidden = active != nil
-        launcher.canUseWorkspace = state.selectedThreadID != nil
+        launcher.canUseWorkspace = state.workspace != nil
     }
 
     private func title(for surface: WorkspaceState.RightPanelSurface) -> String {
@@ -195,10 +196,10 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         }
     }
 
-    /// A terminal that exited or was closed takes its tab with it, in whichever thread it ran.
-    private func closeEndedTerminalTabs(of threadID: String) {
-        for case let .terminal(id) in state.rightPanelSurfaces(for: threadID) where terminals.session(id) == nil {
-            state.closeRightPanelTab(.terminal(id), threadID: threadID)
+    /// A terminal that exited or was closed takes its tab with it, in whichever workspace it ran.
+    private func closeEndedTerminalTabs(of key: String) {
+        for case let .terminal(id) in state.rightPanelSurfaces(for: key) where terminals.session(id) == nil {
+            state.closeRightPanelTab(.terminal(id), key: key)
         }
         update()
     }
@@ -212,7 +213,7 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
             newTerminal()
             return
         case .files:
-            guard state.selectedThreadID != nil else { return }
+            guard state.workspace != nil else { return }
             state.showRightPanel(.files)
         case .diff:
             state.showRightPanel(.diff)
@@ -220,11 +221,11 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         takeFocus()
     }
 
-    /// Opens a new terminal tab of the selected thread in its working directory.
+    /// Opens a new terminal tab of the selected workspace in its working directory.
     func newTerminal() {
-        guard let threadID = state.selectedThreadID else { return }
-        guard let session = terminals.create(in: threadID, placement: .panel) else {
-            if let path = terminals.missingWorkspace(for: threadID) { reportMissingWorkspace(path) }
+        guard let workspace = state.workspace else { return }
+        guard let session = terminals.create(in: workspace, placement: .panel) else {
+            if let path = terminals.missingWorkspace(for: workspace) { reportMissingWorkspace(path) }
             return
         }
         state.showRightPanel(.terminal(session.id))
@@ -428,7 +429,8 @@ final class RightPanelTabBar: PaletteView {
             item.target = self
             item.image = NSImage.symbol(kind.symbol, size: 12)
             item.representedObject = kind.title
-            item.isEnabled = !kind.needsThread || canUseWorkspace
+            item.isEnabled = !kind.needsWorkspace || canUseWorkspace
+            item.toolTip = item.isEnabled ? nil : RightPanelLauncher.noWorkspaceHint
             menu.addItem(item)
         }
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: addButton.bounds.maxY + 4), in: addButton)
@@ -514,15 +516,18 @@ final class RightPanelTab: InteractiveView {
 final class RightPanelLauncher: PaletteView {
     var onChoose: ((RightPanelViewController.SurfaceKind) -> Void)?
 
-    /// Terminal and Files need a thread; in a draft their rows are disabled.
+    /// Terminal and Files need a folder; in a projectless draft their rows are disabled.
     var canUseWorkspace = true {
         didSet {
             for (kind, row) in rows {
-                row.isEnabled = !kind.needsThread || canUseWorkspace
-                row.toolTip = row.isEnabled ? nil : "Start the thread first"
+                row.isEnabled = !kind.needsWorkspace || canUseWorkspace
+                row.toolTip = row.isEnabled ? nil : Self.noWorkspaceHint
             }
         }
     }
+
+    /// Why Terminal and Files are off: a projectless draft has no folder until it starts.
+    static let noWorkspaceHint = "Choose a project or start the thread first"
 
     private let titleLabel = NSTextField.label("Open a surface", size: Typography.rowSize, weight: .medium)
     private var rows: [(RightPanelViewController.SurfaceKind, RightPanelLauncherRow)] = []

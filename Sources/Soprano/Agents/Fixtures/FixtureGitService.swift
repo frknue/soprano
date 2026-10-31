@@ -29,6 +29,7 @@ struct FixtureGitService: GitService {
 
     func isRepository(_ cwd: String) async -> Bool { true }
     func repositoryRoot(_ cwd: String) async -> String? { cwd }
+    func checkedOutBranch(_ cwd: String) async -> String? { statusSummary.branch }
     func captureCheckpoint(cwd: String, ref: String) async throws {}
     func checkpointExists(cwd: String, ref: String) async -> Bool { true }
 

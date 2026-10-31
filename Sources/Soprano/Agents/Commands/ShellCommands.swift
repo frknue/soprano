@@ -52,7 +52,7 @@ enum ShellCommands {
                 category: .view,
                 defaultKeys: ["cmd+j"],
                 icon: Icon.panelBottom,
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let state = context.state else { return }
                 state.setTerminalVisible(!state.isTerminalVisible)

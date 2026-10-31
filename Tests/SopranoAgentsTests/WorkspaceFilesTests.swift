@@ -124,16 +124,17 @@ struct WorkspaceFilesTests {
             files: LiveWorkspaceFileService(runner: nil)
         ))
         let threadID = EngineHarness.idleThread(in: engine)
+        let workspace = WorkspaceRef.thread(threadID)
         let root = try #require(engine.thread(threadID).map { engine.workingDirectory(for: $0) })
         try Data("hello".utf8).write(to: URL(fileURLWithPath: root).appendingPathComponent("hello.txt"))
 
-        #expect(engine.workspaceFileURL(threadID, path: "hello.txt")?.path == WorkspaceFilePath.canonical(root) + "/hello.txt")
-        #expect(engine.workspaceFileURL(threadID, path: "../hello.txt") == nil)
-        #expect(engine.workspaceFileURL("missing", path: "hello.txt") == nil)
-        #expect(try await engine.workspaceFiles(threadID) == ["hello.txt"])
-        #expect(try await engine.readWorkspaceFile(threadID, path: "hello.txt") == .text("hello"))
+        #expect(engine.workspaceFileURL(workspace, path: "hello.txt")?.path == WorkspaceFilePath.canonical(root) + "/hello.txt")
+        #expect(engine.workspaceFileURL(workspace, path: "../hello.txt") == nil)
+        #expect(engine.workspaceFileURL(.thread("missing"), path: "hello.txt") == nil)
+        #expect(try await engine.workspaceFiles(workspace) == ["hello.txt"])
+        #expect(try await engine.readWorkspaceFile(workspace, path: "hello.txt") == .text("hello"))
         await #expect(throws: EngineError.self) {
-            _ = try await engine.readWorkspaceFile(threadID, path: "../hello.txt")
+            _ = try await engine.readWorkspaceFile(workspace, path: "../hello.txt")
         }
     }
 }

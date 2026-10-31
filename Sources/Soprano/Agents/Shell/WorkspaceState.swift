@@ -22,7 +22,7 @@ final class WorkspaceState {
         case thread(String)
     }
 
-    /// One right-panel tab. Diff and Files exist at most once per thread; a file tab per
+    /// One right-panel tab. Diff and Files exist at most once per workspace; a file tab per
     /// workspace-relative path; a terminal tab per terminal session id.
     enum RightPanelSurface: Hashable {
         case diff
@@ -43,7 +43,7 @@ final class WorkspaceState {
         }
     }
 
-    /// The tabs of one thread's right panel; `active` nil shows the "Open a surface" launcher.
+    /// The tabs of one workspace's right panel; `active` nil shows the "Open a surface" launcher.
     private struct RightPanelTabs {
         var surfaces: [RightPanelSurface] = [.diff]
         var active: RightPanelSurface? = .diff
@@ -64,7 +64,7 @@ final class WorkspaceState {
     private(set) var isThreadDetailsVisible = false
     private(set) var isTerminalVisible = false
     private(set) var isRightPanelVisible = false
-    /// Right-panel tabs per thread id ("" for the draft).
+    /// Right-panel tabs per `WorkspaceRef.key` (`draftPanelKey` for a projectless draft).
     private var panelTabs: [String: RightPanelTabs] = [:]
     private(set) var diffScope: DiffScope = .thread
     /// File the diff surface scrolls to (from a changed-files card click).
@@ -97,6 +97,15 @@ final class WorkspaceState {
     var isDraft: Bool {
         if case .draft = selection { return true }
         return false
+    }
+
+    /// The selection's workspace: the thread, or the project draft; nil for a projectless draft,
+    /// which has no folder until its thread starts.
+    var workspace: WorkspaceRef? {
+        switch selection {
+        case let .thread(id): .thread(id)
+        case let .draft(projectID): projectID.map { .draft(projectID: $0) }
+        }
     }
 
     func select(_ selection: Selection) {
@@ -138,25 +147,29 @@ final class WorkspaceState {
         observers.notify(.panels)
     }
 
-    private var panelKey: String { selectedThreadID ?? "" }
+    /// Panel key of a projectless draft (never a thread id or a project draft's key).
+    static let draftPanelKey = "draft:"
 
-    /// The selected thread's right-panel tabs, in order.
+    private var panelKey: String { workspace?.key ?? Self.draftPanelKey }
+
+    /// The selected workspace's right-panel tabs, in order.
     var rightPanelSurfaces: [RightPanelSurface] {
         (panelTabs[panelKey] ?? RightPanelTabs()).surfaces
     }
 
-    /// The selected thread's active right-panel tab; nil when every tab is closed.
+    /// The selected workspace's active right-panel tab; nil when every tab is closed.
     var rightPanelSurface: RightPanelSurface? {
         (panelTabs[panelKey] ?? RightPanelTabs()).active
     }
 
-    /// The right-panel tabs of any thread (terminal tabs of background threads close too).
-    func rightPanelSurfaces(for threadID: String) -> [RightPanelSurface] {
-        (panelTabs[threadID] ?? RightPanelTabs()).surfaces
+    /// The right-panel tabs of any workspace by `WorkspaceRef.key` (terminal tabs of background
+    /// workspaces close too).
+    func rightPanelSurfaces(for key: String) -> [RightPanelSurface] {
+        (panelTabs[key] ?? RightPanelTabs()).surfaces
     }
 
-    /// Opens the right panel on `surface`, adding it as the last tab when the thread doesn't have
-    /// it yet.
+    /// Opens the right panel on `surface`, adding it as the last tab when the workspace doesn't
+    /// have it yet.
     func showRightPanel(_ surface: RightPanelSurface) {
         var tabs = panelTabs[panelKey] ?? RightPanelTabs()
         let changed = tabs.active != surface || !tabs.surfaces.contains(surface) || !isRightPanelVisible
@@ -167,10 +180,10 @@ final class WorkspaceState {
         if changed { observers.notify(.panels) }
     }
 
-    /// Removes a tab of `threadID` (default: the selected thread). The neighbour that takes its
-    /// place (or the one before it) becomes active; the last one leaves the launcher.
-    func closeRightPanelTab(_ surface: RightPanelSurface, threadID: String? = nil) {
-        let key = threadID ?? panelKey
+    /// Removes a tab of the workspace `key` (default: the selected one). The neighbour that takes
+    /// its place (or the one before it) becomes active; the last one leaves the launcher.
+    func closeRightPanelTab(_ surface: RightPanelSurface, key: String? = nil) {
+        let key = key ?? panelKey
         var tabs = panelTabs[key] ?? RightPanelTabs()
         guard let index = tabs.surfaces.firstIndex(of: surface) else { return }
         tabs.surfaces.remove(at: index)
@@ -181,9 +194,17 @@ final class WorkspaceState {
         observers.notify(.panels)
     }
 
-    /// Forgets the tabs of deleted threads.
-    func pruneRightPanelTabs(keeping threadIDs: Set<String>) {
-        panelTabs = panelTabs.filter { $0.key.isEmpty || threadIDs.contains($0.key) }
+    /// Forgets the tabs of deleted threads and projects (`keys`: the live `WorkspaceRef.key`s).
+    func pruneRightPanelTabs(keeping keys: Set<String>) {
+        panelTabs = panelTabs.filter { $0.key == Self.draftPanelKey || keys.contains($0.key) }
+    }
+
+    /// A project draft became thread `threadID` in the same folder: its tabs (terminals, open
+    /// files) move to the thread and the project's next draft starts fresh.
+    func moveDraftTabs(projectID: String, to threadID: String) {
+        let draftKey = WorkspaceRef.draft(projectID: projectID).key
+        guard let tabs = panelTabs.removeValue(forKey: draftKey) else { return }
+        panelTabs[threadID] = tabs
     }
 
     /// Opens the diff surface on `scope`, optionally scrolled to `path`.

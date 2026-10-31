@@ -77,7 +77,7 @@ struct RightPanelTabsTests {
         state.select(.thread("b"))
         state.showRightPanel(.files)
 
-        state.closeRightPanelTab(.terminal("t1"), threadID: "a")
+        state.closeRightPanelTab(.terminal("t1"), key: "a")
 
         #expect(state.rightPanelSurfaces(for: "a") == [.diff])
         #expect(state.rightPanelSurfaces == [.diff, .files])
@@ -95,5 +95,44 @@ struct RightPanelTabsTests {
 
         #expect(state.rightPanelSurfaces(for: "gone") == [.diff])
         #expect(state.rightPanelSurfaces(for: "kept") == [.diff, .files])
+    }
+
+    @Test func eachProjectDraftKeepsItsOwnTabsApartFromThreadsAndTheProjectlessDraft() {
+        let state = WorkspaceState()
+        state.select(.draft(projectID: "p"))
+        state.showRightPanel(.files)
+        state.select(.draft(projectID: "q"))
+        #expect(state.rightPanelSurfaces == [.diff])
+        state.select(.draft(projectID: nil))
+        #expect(state.workspace == nil)
+        #expect(state.rightPanelSurfaces == [.diff])
+
+        state.select(.draft(projectID: "p"))
+        #expect(state.rightPanelSurfaces == [.diff, .files])
+        #expect(state.rightPanelSurface == .files)
+    }
+
+    @Test func aLaunchedDraftHandsItsTabsToTheThreadAndTheNextDraftStartsFresh() {
+        let state = WorkspaceState()
+        state.select(.draft(projectID: "p"))
+        state.showRightPanel(.terminal("t1"))
+
+        state.moveDraftTabs(projectID: "p", to: "thread")
+
+        #expect(state.rightPanelSurfaces(for: "thread") == [.diff, .terminal("t1")])
+        #expect(state.rightPanelSurfaces == [.diff])
+    }
+
+    @Test func draftTabsOfDeletedProjectsArePruned() {
+        let state = WorkspaceState()
+        state.select(.draft(projectID: "gone"))
+        state.showRightPanel(.files)
+        state.select(.draft(projectID: "kept"))
+        state.showRightPanel(.files)
+
+        state.pruneRightPanelTabs(keeping: ["draft:kept"])
+
+        #expect(state.rightPanelSurfaces(for: "draft:gone") == [.diff])
+        #expect(state.rightPanelSurfaces(for: "draft:kept") == [.diff, .files])
     }
 }

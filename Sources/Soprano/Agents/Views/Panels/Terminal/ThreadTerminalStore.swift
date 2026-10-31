@@ -2,17 +2,20 @@ import AppKit
 import SopranoAgentsCore
 import SwiftTerm
 
-/// Owns every terminal of the window: sessions per thread with a placement (bottom drawer or
-/// right-panel tab), their SwiftTerm views and shell processes. Each thread keeps its terminals
-/// while the user switches threads; processes end when the shell exits, the thread is deleted or
-/// the app quits. Shows no dialogs: callers report a missing workspace.
+/// Owns every terminal of the window: sessions per workspace (`WorkspaceRef.key`: a thread or a
+/// project draft) with a placement (bottom drawer or right-panel tab), their SwiftTerm views and
+/// shell processes. Each workspace keeps its terminals while the user switches; processes end
+/// when the shell exits, the thread or project is deleted or the app quits. Shows no dialogs:
+/// callers report a missing workspace.
 @MainActor
 final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
     typealias Placement = TerminalSessions.Placement
 
     enum Change: Equatable {
-        /// A session of the thread was created, closed, exited or pruned.
-        case sessions(threadID: String)
+        /// A session of the workspace `key` was created, closed, exited or pruned.
+        case sessions(key: String)
+        /// Every session of the workspace `from` (a project draft) moved to `to` (its thread).
+        case moved(from: String, to: String)
     }
 
     let engine: AgentEngine
@@ -36,7 +39,7 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         self.engine = engine
         super.init()
         engine.addObserver(self) { [weak self] event in
-            if event == .threadListChanged || event == .projectsChanged { self?.pruneDeletedThreads() }
+            if event == .threadListChanged || event == .projectsChanged { self?.pruneDeletedWorkspaces() }
         }
         PaletteCenter.shared.addObserver(self) { [weak self] palette in self?.applyPalette(palette) }
         NotificationCenter.default.addObserver(
@@ -57,15 +60,16 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
 
     // MARK: - Queries
 
-    func sessions(for threadID: String, placement: Placement) -> [TerminalSessionInfo] {
-        sessions.sessions(for: threadID, placement: placement)
+    func sessions(for key: String, placement: Placement) -> [TerminalSessionInfo] {
+        sessions.sessions(for: key, placement: placement)
     }
 
-    func activeSession(for threadID: String, placement: Placement) -> TerminalSessionInfo? {
-        sessions.activeSession(for: threadID, placement: placement)
+    func activeSession(for key: String, placement: Placement) -> TerminalSessionInfo? {
+        sessions.activeSession(for: key, placement: placement)
     }
 
-    func session(_ sessionID: String) -> (threadID: String, info: TerminalSessionInfo, placement: Placement)? {
+    /// The session and the `WorkspaceRef.key` it belongs to.
+    func session(_ sessionID: String) -> (key: String, info: TerminalSessionInfo, placement: Placement)? {
         sessions.locate(sessionID)
     }
 
@@ -73,37 +77,38 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         terminals[sessionID]
     }
 
-    /// The directory a new terminal starts in: the thread's working directory (a scratch
-    /// directory is created on demand); nil when it does not exist.
-    func workingDirectory(for threadID: String) -> String? {
-        guard let thread = engine.thread(threadID) else { return nil }
-        let path = engine.workingDirectory(for: thread)
+    /// The directory a new terminal starts in: the workspace's working directory (a scratch
+    /// thread's directory is created on demand); nil when it does not exist.
+    func workingDirectory(for workspace: WorkspaceRef) -> String? {
+        guard let path = engine.workingDirectory(of: workspace) else { return nil }
         var isDirectory: ObjCBool = false
         if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
             return path
         }
-        if thread.projectID == nil && thread.worktreePath == nil {
+        if case let .thread(id) = workspace, let thread = engine.thread(id), thread.projectID == nil, thread.worktreePath == nil {
             try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
             return FileManager.default.fileExists(atPath: path) ? path : nil
         }
         return nil
     }
 
-    /// The thread's working directory when that folder is gone; nil when it exists or the thread is unknown.
-    func missingWorkspace(for threadID: String) -> String? {
-        guard let thread = engine.thread(threadID), workingDirectory(for: threadID) == nil else { return nil }
-        return engine.workingDirectory(for: thread)
+    /// The workspace's working directory when that folder is gone; nil when it exists or the
+    /// workspace is unknown.
+    func missingWorkspace(for workspace: WorkspaceRef) -> String? {
+        guard workingDirectory(for: workspace) == nil else { return nil }
+        return engine.workingDirectory(of: workspace)
     }
 
     // MARK: - Lifecycle
 
-    /// Starts a terminal for `threadID` in its working directory and makes it the placement's
-    /// active one. nil when the thread is unknown or its directory no longer exists (the caller
-    /// reports it): a terminal never falls back to another folder.
+    /// Starts a terminal for `workspace` in its working directory and makes it the placement's
+    /// active one. nil when the workspace is unknown or its directory no longer exists (the
+    /// caller reports it): a terminal never falls back to another folder.
     @discardableResult
-    func create(in threadID: String, placement: Placement) -> TerminalSessionInfo? {
-        guard engine.thread(threadID) != nil, let cwd = workingDirectory(for: threadID) else { return nil }
-        let session = sessions.add(to: threadID, placement: placement)
+    func create(in workspace: WorkspaceRef, placement: Placement) -> TerminalSessionInfo? {
+        guard let cwd = workingDirectory(for: workspace) else { return nil }
+        let key = workspace.key
+        let session = sessions.add(to: key, placement: placement)
         let terminal = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
         terminal.processDelegate = self
         terminal.optionAsMetaKey = false
@@ -112,20 +117,28 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         terminals[session.id] = terminal
         let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
         launchShell(terminal, shell, cwd)
-        notify(.sessions(threadID: threadID))
+        notify(.sessions(key: key))
         return session
     }
 
     func select(_ sessionID: String) {
-        guard let threadID = sessions.locate(sessionID)?.threadID else { return }
-        sessions.select(sessionID, in: threadID)
+        guard let key = sessions.locate(sessionID)?.key else { return }
+        sessions.select(sessionID, in: key)
     }
 
     /// Ends the session's process and forgets it.
     func close(_ sessionID: String) {
-        guard let threadID = sessions.locate(sessionID)?.threadID, sessions.close(sessionID, in: threadID) else { return }
+        guard let key = sessions.locate(sessionID)?.key, sessions.close(sessionID, in: key) else { return }
         end(sessionID)
-        notify(.sessions(threadID: threadID))
+        notify(.sessions(key: key))
+    }
+
+    /// A project draft became thread `threadID` in the same folder: its terminals (shells keep
+    /// running) move to the thread.
+    func moveDraftSessions(projectID: String, to threadID: String) {
+        let draftKey = WorkspaceRef.draft(projectID: projectID).key
+        guard sessions.move(from: draftKey, to: threadID) else { return }
+        notify(.moved(from: draftKey, to: threadID))
     }
 
     private func end(_ sessionID: String) {
@@ -137,10 +150,10 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         terminal.removeFromSuperview()
     }
 
-    private func pruneDeletedThreads() {
-        let removed = sessions.prune(keeping: Set(engine.threads.map(\.id)))
+    private func pruneDeletedWorkspaces() {
+        let removed = sessions.prune(keeping: engine.workspaceKeys)
         for session in removed { end(session.info.id) }
-        for threadID in Set(removed.map(\.threadID)) { notify(.sessions(threadID: threadID)) }
+        for key in Set(removed.map(\.key)) { notify(.sessions(key: key)) }
     }
 
     @objc private func applicationWillTerminate() {

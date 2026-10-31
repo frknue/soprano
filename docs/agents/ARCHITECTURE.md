@@ -61,10 +61,12 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
   `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
-  `rememberCommands`. Reads: `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL`,
-  `commands(forThread:)`, `commands(forDraft:projectID:)`. Contracts in the doc comments of
-  `AgentEngine.swift`, `AgentEngine+Turns.swift`, `AgentEngine+Files.swift` and
-  `AgentEngine+Commands.swift`.
+  `rememberCommands`. Reads: `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
+  `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL` (all by `WorkspaceRef`: `.thread(id)`
+  or `.draft(projectID:)`, the project root a "Current checkout" thread will use; `key` is the
+  UI's per-workspace dictionary key), `commands(forThread:)`, `commands(forDraft:projectID:)`.
+  Contracts in the doc comments of `AgentEngine.swift`, `AgentEngine+Turns.swift`,
+  `AgentEngine+Files.swift`, `AgentEngine+Workspace.swift` and `AgentEngine+Commands.swift`.
 
 Engine behavior:
 - Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
@@ -340,30 +342,40 @@ action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config
 `gh pr create`; open PR lookup via `gh pr view --json` (4 s deadline, failures ignored).
 
 ### `WorkspaceState` (Shell)
-UI state: `selection` (`.draft(projectID:)` or `.thread(id)`), panel visibility (sidebar, thread
-details card, terminal drawer, right panel), the right-panel tabs per thread (`RightPanelSurface`:
+UI state: `selection` (`.draft(projectID:)` or `.thread(id)`) and its `workspace` (`WorkspaceRef`;
+nil for a projectless draft, which has no folder), panel visibility (sidebar, thread details card,
+terminal drawer, right panel), the right-panel tabs per workspace key (`RightPanelSurface`:
 `.diff`, `.files`, `.file(path)`, `.terminal(sessionID)`; `rightPanelSurfaces`, the active
 `rightPanelSurface` — nil = "Open a surface" launcher —, `showRightPanel(_:)`,
-`closeRightPanelTab(_:threadID:)`, `pruneRightPanelTabs(keeping:)`), diff scope + focused path,
-sidebar project filter and search text, and `restoreComposer(with:)` / `takeComposerRestore()`
-("Edit from here" hands the user message back to the composer). Observe `Change` (`.selection`,
-`.panels`, `.filter`, `.composerRestore`); a thread switch changes the active tab too.
+`closeRightPanelTab(_:key:)`, `pruneRightPanelTabs(keeping:)`, `moveDraftTabs(projectID:to:)`),
+diff scope + focused path, sidebar project filter and search text, and `restoreComposer(with:)` /
+`takeComposerRestore()` ("Edit from here" hands the user message back to the composer). Observe
+`Change` (`.selection`, `.panels`, `.filter`, `.composerRestore`); a selection switch changes the
+active tab too.
 
 ### Regions (view controllers)
 `WorkspaceViewController` lays out sidebar | chat column | right panel (resizable rails, widths
 in an injectable `UserDefaults`). `ChatViewController` stacks header (52 pt), timeline, the
 floating composer (centered, ≤ 736 pt, 20 pt above the terminal drawer; vertically centered for
-drafts), the terminal drawer, and the Thread details card (top-right, 280 pt).
+drafts), the terminal drawer, and the Thread details card (top-right, 280 pt). The header's
+location chip (right-aligned before the title-bar toggles) shows `WorkspaceLocation.title`
+(`repo/sub/folder`, the `~` path outside git, "Scratch") and the branch, tooltip with kind and
+full path, click toggles the thread details; it reloads on workspace, folder, branch or running
+changes and app activation, squeezes to 160 pt before the breadcrumb, and hides below that.
 `RightPanelViewController` hosts the tab strip ("+" = native menu: Terminal, Files, Diff), the
-launcher (`T`/`F`/`D` while it has focus; Terminal and Files need a thread) and one controller per
-surface kind: `DiffSurfaceViewController`, `FilesSurfaceViewController` (explorer, search,
-context menu), `FileViewerViewController` (breadcrumbs, line numbers, syntax colors, images),
-`TerminalSurfaceViewController` (focus region `.terminal`).
+launcher (`T`/`F`/`D` while it has focus; Terminal and Files need a workspace, so only a
+projectless draft disables them) and one controller per surface kind: `DiffSurfaceViewController`
+(drafts always show Uncommitted), `FilesSurfaceViewController` (explorer, search, context menu),
+`FileViewerViewController` (breadcrumbs, line numbers, syntax colors, images),
+`TerminalSurfaceViewController` (focus region `.terminal`). Terminals, Files and the drawer work
+in a project draft (the project root); when the draft starts a "Current checkout" thread, its
+tabs and running terminals move to that thread (`ComposerViewController.onDraftLaunched`).
 
 Region controllers keep `init(engine:state:)`, except `RightPanelViewController`, which also takes
-the drawer's `ThreadTerminalStore`: one store owns every terminal of the window (sessions with a
-`.drawer`/`.panel` placement and shared "Terminal N" numbering, SwiftTerm views, shells), so a
-panel terminal's exit, a deleted thread and app quit end shells in one place. Contracts the
+the drawer's `ThreadTerminalStore`: one store owns every terminal of the window (sessions per
+workspace key with a `.drawer`/`.panel` placement and shared "Terminal N" numbering, SwiftTerm
+views, shells), so a panel terminal's exit, a deleted thread or project and app quit end shells
+in one place. Contracts the
 container relies on: `TimelineViewController.bottomInset` (space the composer covers),
 `ComposerViewController.onHeightChange` and `focusEditor()`, `ChatViewController.terminalDrawerHeight`.
 Region controllers that take keyboard focus adopt `FocusRegionController`.
@@ -476,7 +488,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ```
 ┌ sidebar 256 (208…) ┬ chat column (≥ 640) ──────────────────────────────┬ right panel 540 (360…70%) ┐
-│ [traffic lights]   │ header 52: favicon project / Title ⌄   [▤][▭][◫]   │ tabs [Diff][Files][x.swift]+│
+│ [traffic lights]   │ header 52: project / Title ⌄ ▢ repo ⑂ br [▤][▭][◫] │ tabs [Diff][Files][x.swift]+│
 │ Search  [⫶][📁][✎] │   lane ≤ 736 centered                ┌ details ┐   │                             │
 │ Pinned / Active    │   user bubble right (≤ 80%, r16)    │ card 280 │   │                             │
 │ cards (78)         │   Worked for 3m 12s ›               └──────────┘   │                             │

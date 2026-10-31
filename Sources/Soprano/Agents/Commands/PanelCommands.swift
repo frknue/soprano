@@ -51,7 +51,7 @@ enum PanelCommands {
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+f"],
                 icon: Icon.files,
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let state = context.state else { return }
                 if state.isRightPanelVisible && state.rightPanelSurface == .files {
@@ -65,7 +65,7 @@ enum PanelCommands {
                 title: "Search Files",
                 category: .view,
                 icon: "magnifyingglass",
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let panel = context.workspace?.rightPanel else { return }
                 panel.open(.files)
@@ -77,7 +77,7 @@ enum PanelCommands {
                 category: .terminal,
                 defaultKeys: ["cmd+shift+j"],
                 icon: Icon.terminal,
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 context.workspace?.rightPanel.newTerminal()
             },
@@ -99,7 +99,7 @@ enum PanelCommands {
                 scopes: [.rightPanel],
                 defaultKeys: ["cmd+f"],
                 icon: "magnifyingglass",
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 // The open file's find bar, the Files search field, else Find in Thread.
                 guard let workspace = context.workspace else { return }
@@ -129,7 +129,7 @@ enum PanelCommands {
                 scopes: [.terminal],
                 defaultKeys: ["cmd+n"],
                 icon: Icon.terminal,
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let workspace = context.workspace else { return }
                 if workspace.rightPanel.ownsFirstResponder {
@@ -145,7 +145,7 @@ enum PanelCommands {
                 scopes: [.terminal],
                 defaultKeys: ["cmd+w"],
                 icon: "trash",
-                isEnabled: { $0.state?.selectedThreadID != nil }
+                isEnabled: { $0.state?.workspace != nil }
             ) { context in
                 guard let workspace = context.workspace else { return }
                 if workspace.rightPanel.ownsFirstResponder {

@@ -2,10 +2,11 @@ import AppKit
 import SopranoAgentsCore
 import SwiftTerm
 
-/// The bottom terminal drawer of the chat column: the selected thread's `.drawer` terminals from
-/// the window's `ThreadTerminalStore` (SwiftTerm running the user's login shell in the thread's
-/// working directory). A 6 pt handle on the top edge resizes the drawer; with several terminals a
-/// 144 pt list sits on the right, a single one gets a floating New / Close toolbar.
+/// The bottom terminal drawer of the chat column: the selected workspace's (thread or project
+/// draft) `.drawer` terminals from the window's `ThreadTerminalStore` (SwiftTerm running the
+/// user's login shell in its working directory). A 6 pt handle on the top edge resizes the drawer;
+/// with several terminals a 144 pt list sits on the right, a single one gets a floating New / Close
+/// toolbar.
 @MainActor
 final class TerminalDrawerViewController: NSViewController, FocusRegionController {
     let engine: AgentEngine
@@ -13,7 +14,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     /// Every terminal of the window; the right panel's terminal tabs share it.
     let store: ThreadTerminalStore
 
-    /// Threads whose drawer already opened once (the first open creates a terminal).
+    /// Workspace keys whose drawer already opened once (the first open creates a terminal).
     private var autoCreated: Set<String> = []
 
     private let resizeHandle = ResizeRail(axis: .horizontal)
@@ -23,7 +24,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     let emptyState = TerminalEmptyState()
     private var listWidth: NSLayoutConstraint?
 
-    /// Reports a thread whose workspace folder is gone (no terminal or script starts). Defaults to
+    /// Reports a workspace whose folder is gone (no terminal or script starts). Defaults to
     /// an alert over the window; tests replace it.
     lazy var reportMissingWorkspace: (_ path: String) -> Void = { [weak self] path in
         let window = self?.view.window
@@ -96,11 +97,16 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
             }
         }
         store.addObserver(self) { [weak self] change in
+            guard let self else { return }
             switch change {
-            case .sessions(let threadID):
-                guard let self else { return }
-                if engine.thread(threadID) == nil { autoCreated.remove(threadID) }
-                if threadID == self.threadID { update() }
+            case .sessions(let key):
+                if !engine.workspaceKeys.contains(key) { autoCreated.remove(key) }
+                if key == workspace?.key { update() }
+            case let .moved(from, to):
+                // The thread inherits the draft's opened drawer; the project's next draft starts
+                // fresh. No re-render: the draft is still selected and would spawn a new shell at
+                // once; selecting the thread re-renders.
+                if autoCreated.remove(from) != nil { autoCreated.insert(to) }
             }
         }
         // A worktree that appears after launch (or a project that moves back) ends "Workspace
@@ -111,26 +117,30 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         update()
     }
 
-    // MARK: - Threads and sessions
+    // MARK: - Workspaces and sessions
 
-    private var threadID: String? { state.selectedThreadID }
+    /// The selected thread or project draft; nil for a projectless draft (no folder yet).
+    private var workspace: WorkspaceRef? { state.workspace }
 
-    /// Shows the selected thread's active drawer terminal (creating the first one when the drawer opens).
+    /// Shows the selected workspace's active drawer terminal (creating the first one when the
+    /// drawer opens).
     private func update() {
         guard isViewLoaded else { return }
-        // A thread whose folder is missing shows that instead of an empty drawer, and gets its
+        // A workspace whose folder is missing shows that instead of an empty drawer, and gets its
         // first terminal once the folder is back.
-        let missingWorkspace = threadID.flatMap { store.missingWorkspace(for: $0) }
-        if state.isTerminalVisible, let threadID, missingWorkspace == nil, !autoCreated.contains(threadID) {
-            autoCreated.insert(threadID)
-            if store.sessions(for: threadID, placement: .drawer).isEmpty {
+        let workspace = workspace
+        let key = workspace?.key
+        let missingWorkspace = workspace.flatMap { store.missingWorkspace(for: $0) }
+        if state.isTerminalVisible, let workspace, let key, missingWorkspace == nil, !autoCreated.contains(key) {
+            autoCreated.insert(key)
+            if store.sessions(for: key, placement: .drawer).isEmpty {
                 // Re-renders through the store observer.
-                if createTerminal(in: threadID) != nil { return }
+                if createTerminal(in: workspace) != nil { return }
             }
         }
         emptyState.missingWorkspace = missingWorkspace
-        let list = threadID.map { store.sessions(for: $0, placement: .drawer) } ?? []
-        let active = threadID.flatMap { store.activeSession(for: $0, placement: .drawer) }
+        let list = key.map { store.sessions(for: $0, placement: .drawer) } ?? []
+        let active = key.flatMap { store.activeSession(for: $0, placement: .drawer) }
         for subview in terminalHost.subviews where subview !== active.flatMap({ store.terminalView($0.id) }) {
             subview.removeFromSuperview()
         }
@@ -145,32 +155,32 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
                 terminal.bottomAnchor.constraint(equalTo: terminalHost.bottomAnchor),
             ])
         }
-        emptyState.isHidden = !list.isEmpty || threadID == nil
-        emptyState.isEnabled = threadID != nil
+        emptyState.isHidden = !list.isEmpty || workspace == nil
+        emptyState.isEnabled = workspace != nil
         toolbar.isHidden = list.count != 1
         listPanel.isHidden = list.count < 2
         listWidth?.constant = list.count < 2 ? 0 : Self.listWidth
         listPanel.update(sessions: list, activeID: active?.id)
     }
 
-    /// Starts a drawer terminal for `threadID` and makes it active. Returns its session id, or nil
-    /// (after reporting it) when the thread's directory no longer exists: a terminal or project
-    /// script never falls back to another folder.
+    /// Starts a drawer terminal for `workspace` and makes it active. Returns its session id, or
+    /// nil (after reporting it) when the workspace's directory no longer exists: a terminal or
+    /// project script never falls back to another folder.
     @discardableResult
-    private func createTerminal(in threadID: String) -> String? {
-        guard engine.thread(threadID) != nil else { return nil }
-        guard let session = store.create(in: threadID, placement: .drawer) else {
-            if let path = store.missingWorkspace(for: threadID) { reportMissingWorkspace(path) }
+    private func createTerminal(in workspace: WorkspaceRef) -> String? {
+        guard engine.workingDirectory(of: workspace) != nil else { return nil }
+        guard let session = store.create(in: workspace, placement: .drawer) else {
+            if let path = store.missingWorkspace(for: workspace) { reportMissingWorkspace(path) }
             return nil
         }
         return session.id
     }
 
-    /// "New Terminal" (⌘N in the drawer): opens the drawer and adds a terminal to the thread.
+    /// "New Terminal" (⌘N in the drawer): opens the drawer and adds a terminal to the workspace.
     func newTerminal() {
-        guard let threadID else { return }
-        autoCreated.insert(threadID)
-        guard createTerminal(in: threadID) != nil else { return }
+        guard let workspace else { return }
+        autoCreated.insert(workspace.key)
+        guard createTerminal(in: workspace) != nil else { return }
         if !state.isTerminalVisible {
             state.setTerminalVisible(true)
         } else {
@@ -179,12 +189,12 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         focusActiveTerminal()
     }
 
-    /// Opens the drawer on a new terminal of `threadID` and types `command` into it (project
+    /// Opens the drawer on a new terminal of `workspace` and types `command` into it (project
     /// scripts; the leading space keeps it out of shell history).
-    func run(command: String, in threadID: String) {
-        autoCreated.insert(threadID)
-        guard let sessionID = createTerminal(in: threadID), let terminal = store.terminalView(sessionID) else { return }
-        if state.selectedThreadID == threadID {
+    func run(command: String, in workspace: WorkspaceRef) {
+        autoCreated.insert(workspace.key)
+        guard let sessionID = createTerminal(in: workspace), let terminal = store.terminalView(sessionID) else { return }
+        if state.workspace == workspace {
             if !state.isTerminalVisible { state.setTerminalVisible(true) } else { update() }
         }
         terminal.send(txt: " \(command)\r")
@@ -193,7 +203,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
 
     /// "Close Terminal" (⌘W in the drawer), confirming first.
     func closeActiveTerminal() {
-        guard let threadID, let active = store.activeSession(for: threadID, placement: .drawer) else { return }
+        guard let key = workspace?.key, let active = store.activeSession(for: key, placement: .drawer) else { return }
         Task { @MainActor in
             let confirmed = await Dialogs.confirm(
                 title: "Close terminal \"\(active.title)\"?",
@@ -214,7 +224,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
     }
 
     private func focusActiveTerminal() {
-        guard let threadID, let active = store.activeSession(for: threadID, placement: .drawer),
+        guard let key = workspace?.key, let active = store.activeSession(for: key, placement: .drawer),
               let terminal = store.terminalView(active.id) else { return }
         view.window?.makeFirstResponder(terminal)
     }
@@ -258,14 +268,14 @@ final class TerminalDrawerRootView: PaletteView {
     }
 }
 
-/// "No terminal sessions for this thread yet." + "New Terminal".
+/// "No terminal sessions here yet." + "New Terminal".
 final class TerminalEmptyState: PaletteView {
     var onNewTerminal: (() -> Void)?
     var isEnabled = true {
         didSet { button.isEnabled = isEnabled }
     }
 
-    /// The thread's folder that doesn't exist; the empty state says so instead of offering a shell.
+    /// The workspace's folder that doesn't exist; the empty state says so instead of offering a shell.
     var missingWorkspace: String? {
         didSet {
             label.stringValue = missingWorkspace.map { "Workspace not found: \($0)" } ?? Self.emptyText
@@ -273,7 +283,7 @@ final class TerminalEmptyState: PaletteView {
         }
     }
 
-    private static let emptyText = "No terminal sessions for this thread yet."
+    private static let emptyText = "No terminal sessions here yet."
     private let label = NSTextField.label(TerminalEmptyState.emptyText, size: Typography.rowSize)
     private let button = TextButton("New Terminal", symbol: "plus", variant: .outline, size: .xs)
 

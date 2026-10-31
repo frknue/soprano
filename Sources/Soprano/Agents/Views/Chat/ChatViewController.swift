@@ -112,6 +112,12 @@ final class ChatViewController: NSViewController {
             timeline.bottomInset = height + Metrics.gutter * 2
         }
         timeline.bottomInset = composerHeight + Metrics.gutter * 2
+        composer.onDraftLaunched = { [weak self] draft, threadID in
+            // A "Current checkout" thread works in the draft's folder: its terminals and tabs come along.
+            guard let self, let projectID = draft.projectID, draft.workspace == .projectRoot else { return }
+            state.moveDraftTabs(projectID: projectID, to: threadID)
+            terminal.store.moveDraftSessions(projectID: projectID, to: threadID)
+        }
 
         state.addObserver(self) { [weak self] change in
             switch change {

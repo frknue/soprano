@@ -1,10 +1,10 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The Files surface of the right panel: a search field and Refresh over the selected thread's
-/// working directory as a folder tree (folders first, alphabetical). Clicking a file opens it as
-/// a file tab; typing in search shows the matching files as a flat list. Listings and folder
-/// expansion are kept per thread for the session.
+/// The Files surface of the right panel: a search field and Refresh over the selected workspace's
+/// (thread or project draft) working directory as a folder tree (folders first, alphabetical).
+/// Clicking a file opens it as a file tab; typing in search shows the matching files as a flat
+/// list. Listings and folder expansion are kept per workspace (`WorkspaceRef.key`) for the session.
 @MainActor
 final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
     let engine: AgentEngine
@@ -21,18 +21,19 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
         case failed(String)
     }
 
-    /// Listing per thread id.
+    /// Listing per workspace key.
     private var listings: [String: Listing] = [:]
-    /// Successful loads per thread, so the outline rebuilds only for a new listing.
+    /// Successful loads per workspace, so the outline rebuilds only for a new listing.
     private var versions: [String: Int] = [:]
-    /// Generation of the newest load per thread; older results are dropped.
+    /// Generation of the newest load per workspace; older results are dropped.
     private var pendingLoads: [String: Int] = [:]
     private var generation = 0
-    /// Threads whose listing is out of date (a turn ended while the surface was hidden).
+    /// Workspace keys whose listing is out of date: a thread whose turn ended while the surface
+    /// was hidden, a project draft re-entered (a thread may have changed its folder meanwhile).
     private var staleThreads: Set<String> = []
     /// Threads seen running, to notice when their turn ends.
     private var runningThreads: Set<String> = []
-    /// Expanded folder paths per thread.
+    /// Expanded folder paths per workspace.
     private var expanded: [String: Set<String>] = [:]
 
     /// The rows on screen: the tree's roots, or the search matches (flat).
@@ -40,7 +41,7 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
     private var isSearching = false
     /// Identity of what `rows` was built from, so unrelated state changes keep the outline.
     private var shownKey: String?
-    private var lastThreadID: String?
+    private var lastWorkspace: WorkspaceRef?
     private var isRestoringExpansion = false
 
     // Views
@@ -155,7 +156,7 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
             guard let self else { return }
             switch event {
             case let .threadChanged(threadID): threadChanged(threadID)
-            case .threadListChanged: pruneDeletedThreads()
+            case .threadListChanged, .projectsChanged: pruneDeletedWorkspaces()
             default: break
             }
         }
@@ -189,9 +190,12 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
 
     private func stateChanged() {
         guard isViewLoaded else { return }
-        if state.selectedThreadID != lastThreadID {
-            lastThreadID = state.selectedThreadID
+        if state.workspace != lastWorkspace {
+            lastWorkspace = state.workspace
             if !searchField.text.isEmpty { searchField.text = "" }
+            if case .draft = state.workspace, let key = state.workspace?.key, listings[key] != nil {
+                staleThreads.insert(key)
+            }
         }
         render()
     }
@@ -208,59 +212,60 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
         render()
     }
 
-    private func pruneDeletedThreads() {
-        let ids = Set(engine.threads.map(\.id))
-        for key in listings.keys where !ids.contains(key) {
+    private func pruneDeletedWorkspaces() {
+        let keys = engine.workspaceKeys
+        for key in listings.keys where !keys.contains(key) {
             listings[key] = nil
             versions[key] = nil
             pendingLoads[key] = nil
             expanded[key] = nil
             staleThreads.remove(key)
         }
-        runningThreads.formIntersection(ids)
+        runningThreads.formIntersection(keys)
     }
 
     private func refresh() {
-        guard let threadID = state.selectedThreadID, engine.thread(threadID) != nil else { return }
-        load(threadID)
+        guard let workspace = state.workspace, engine.workingDirectory(of: workspace) != nil else { return }
+        load(workspace)
     }
 
     // MARK: - Loading
 
-    private func load(_ threadID: String) {
+    private func load(_ workspace: WorkspaceRef) {
+        let key = workspace.key
         generation += 1
         let generation = generation
-        pendingLoads[threadID] = generation
-        staleThreads.remove(threadID)
-        if case .loaded = listings[threadID] {
+        pendingLoads[key] = generation
+        staleThreads.remove(key)
+        if case .loaded = listings[key] {
             // Keep the current tree on screen while it refreshes.
         } else {
-            listings[threadID] = .loading
+            listings[key] = .loading
         }
         let engine = engine
         Task { [weak self] in
             let listing: Listing
             do {
-                let paths = try await engine.workspaceFiles(threadID)
+                let paths = try await engine.workspaceFiles(workspace)
                 let tree = await Task.detached(priority: .userInitiated) { WorkspaceFileTree(paths: paths) }.value
                 listing = .loaded(tree)
             } catch {
                 listing = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
-            self?.finishLoad(threadID: threadID, generation: generation, listing: listing)
+            self?.finishLoad(key: key, generation: generation, listing: listing)
         }
         render()
     }
 
-    private func finishLoad(threadID: String, generation: Int, listing: Listing) {
-        guard pendingLoads[threadID] == generation else { return }
-        pendingLoads[threadID] = nil
-        listings[threadID] = listing
+    private func finishLoad(key: String, generation: Int, listing: Listing) {
+        guard pendingLoads[key] == generation else { return }
+        pendingLoads[key] = nil
+        listings[key] = listing
         if case let .loaded(tree) = listing {
-            versions[threadID, default: 0] += 1
-            if var folders = expanded[threadID] {
+            versions[key, default: 0] += 1
+            if var folders = expanded[key] {
                 folders.formIntersection(tree.directoryPaths)
-                expanded[threadID] = folders
+                expanded[key] = folders
             }
         }
         render()
@@ -270,16 +275,17 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
 
     private func render() {
         guard isViewLoaded, isShowing else { return }
-        guard let threadID = state.selectedThreadID, engine.thread(threadID) != nil else {
-            show(message: "Start the thread to browse its files.")
+        guard let workspace = state.workspace, engine.workingDirectory(of: workspace) != nil else {
+            show(message: "Choose a project or start the thread to browse files.")
             return
         }
-        guard let listing = listings[threadID] else {
-            load(threadID)
+        let key = workspace.key
+        guard let listing = listings[key] else {
+            load(workspace)
             return
         }
-        if staleThreads.contains(threadID), pendingLoads[threadID] == nil {
-            load(threadID)
+        if staleThreads.contains(key), pendingLoads[key] == nil {
+            load(workspace)
             return
         }
         switch listing {
@@ -288,7 +294,7 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
         case let .failed(text):
             show(message: text)
         case let .loaded(tree):
-            showTree(tree, threadID: threadID)
+            showTree(tree, key: key)
         }
     }
 
@@ -301,13 +307,13 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
         scrollView.isHidden = true
     }
 
-    private func showTree(_ tree: WorkspaceFileTree, threadID: String) {
+    private func showTree(_ tree: WorkspaceFileTree, key workspaceKey: String) {
         guard !tree.isEmpty else {
             show(message: "No files.")
             return
         }
         let query = searchField.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let key = "\(threadID)\u{0}\(versions[threadID] ?? 0)\u{0}\(query)"
+        let key = "\(workspaceKey)\u{0}\(versions[workspaceKey] ?? 0)\u{0}\(query)"
         if key != shownKey {
             shownKey = key
             isSearching = !query.isEmpty
@@ -323,7 +329,7 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
                 if !rows.isEmpty { outlineView.selectRowIndexes([0], byExtendingSelection: false) }
                 outlineView.scrollRowToVisible(0)
             } else {
-                restoreExpansion(rows, threadID: threadID)
+                restoreExpansion(rows, key: workspaceKey)
             }
         }
         if rows.isEmpty {
@@ -336,8 +342,8 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
         }
     }
 
-    private func restoreExpansion(_ nodes: [WorkspaceFileNode], threadID: String) {
-        guard let folders = expanded[threadID], !folders.isEmpty else { return }
+    private func restoreExpansion(_ nodes: [WorkspaceFileNode], key: String) {
+        guard let folders = expanded[key], !folders.isEmpty else { return }
         isRestoringExpansion = true
         defer { isRestoringExpansion = false }
         func walk(_ nodes: [WorkspaceFileNode]) {
@@ -414,8 +420,8 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
     }
 
     private func fileURL(_ sender: NSMenuItem) -> URL? {
-        guard let node = sender.representedObject as? WorkspaceFileNode, let threadID = state.selectedThreadID else { return nil }
-        return engine.workspaceFileURL(threadID, path: node.path)
+        guard let node = sender.representedObject as? WorkspaceFileNode, let workspace = state.workspace else { return nil }
+        return engine.workspaceFileURL(workspace, path: node.path)
     }
 
     @objc private func openFromMenu(_ sender: NSMenuItem) {
@@ -482,11 +488,11 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
 
     private func expansionChanged(_ notification: Notification, expanded isExpanded: Bool) {
         guard let node = notification.userInfo?["NSObject"] as? WorkspaceFileNode else { return }
-        if !isRestoringExpansion, !isSearching, let threadID = state.selectedThreadID {
+        if !isRestoringExpansion, !isSearching, let key = state.workspace?.key {
             if isExpanded {
-                expanded[threadID, default: []].insert(node.path)
+                expanded[key, default: []].insert(node.path)
             } else {
-                expanded[threadID]?.remove(node.path)
+                expanded[key]?.remove(node.path)
             }
         }
         let row = outlineView.row(forItem: node)

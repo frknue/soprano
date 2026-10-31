@@ -439,7 +439,7 @@ final class ThreadDetailsCardController: NSViewController {
     private func run(_ script: ProjectScript) {
         guard let thread, let project else { return }
         ScriptMemory.lastRun[project.id] = script.id
-        terminalDrawer?.run(command: script.command, in: thread.id)
+        terminalDrawer?.run(command: script.command, in: .thread(thread.id))
         render()
     }
 
@@ -533,7 +533,7 @@ final class ThreadDetailsCardController: NSViewController {
             run(action)
         case .pull:
             guard let thread else { return }
-            terminalDrawer?.run(command: "git pull", in: thread.id)
+            terminalDrawer?.run(command: "git pull", in: .thread(thread.id))
         case .publish:
             Task { @MainActor in
                 await Dialogs.alert(

@@ -71,6 +71,9 @@ All notable changes to Soprano Agents are documented here. The format follows
   the background (`notifications.enabled`, `notifications.sound`), and a Dock badge counting
   threads waiting for you.
 - App icon: a speech bubble with typing dots.
+- The chat header shows where the thread or new thread works: `repo/sub/folder` (the `~` path
+  outside git, a worktree under its repository's name) and the branch; hover for the full path,
+  click to toggle the thread details (⇧⌘B).
 
 ### Fixed
 
@@ -88,3 +91,7 @@ All notable changes to Soprano Agents are documented here. The format follows
   still running…" note, the composer offers Send instead of Stop, and a job that wakes the agent
   shows Working again and adds to that turn. A message you send meanwhile starts a new turn
   instead of interrupting the finished one.
+- A new thread in a project now has a Terminal (⇧⌘J, or "+" in the right panel), Files (⇧⌘F) and
+  the terminal drawer (⌘J) in the project folder, and its Diff shows the uncommitted changes
+  instead of "No patch available". Sending it as a "Current checkout" thread keeps those tabs and
+  running terminals; only a new thread without a project still needs one first.

@@ -141,6 +141,9 @@ public protocol GitService: Sendable {
     func isRepository(_ cwd: String) async -> Bool
     /// Top level of the repository containing `cwd`.
     func repositoryRoot(_ cwd: String) async -> String?
+    /// The branch checked out in `cwd` (`git symbolic-ref --short HEAD`, no index scan or network);
+    /// nil outside git or on a detached HEAD.
+    func checkedOutBranch(_ cwd: String) async -> String?
 
     // Checkpoints: hidden refs that never touch the user's index or HEAD.
     func captureCheckpoint(cwd: String, ref: String) async throws

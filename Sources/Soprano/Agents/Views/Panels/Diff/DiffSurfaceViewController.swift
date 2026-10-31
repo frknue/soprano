@@ -246,8 +246,14 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         (thread?.turns ?? []).filter { $0.checkpoint != nil }
     }
 
+    /// What the surface compares: a draft has no thread changes yet, so it shows the project's
+    /// uncommitted changes whatever scope threads use.
+    private var scope: WorkspaceState.DiffScope {
+        selectedThread == nil ? .uncommitted : state.diffScope
+    }
+
     func scopeLabel() -> String {
-        switch state.diffScope {
+        switch scope {
         case .thread: return "Changes"
         case .uncommitted: return "Uncommitted"
         case let .turn(ordinal):
@@ -271,9 +277,9 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
             menu.addItem(item)
         }
         let latest = turns.last?.ordinal
-        add("Changes", .thread, checked: state.diffScope == .thread, enabled: thread != nil)
-        add("Uncommitted", .uncommitted, checked: state.diffScope == .uncommitted)
-        add("Latest turn", .turn(latest ?? 0), checked: latest != nil && state.diffScope == .turn(latest ?? 0), enabled: latest != nil)
+        add("Changes", .thread, checked: scope == .thread, enabled: thread != nil)
+        add("Uncommitted", .uncommitted, checked: scope == .uncommitted)
+        add("Latest turn", .turn(latest ?? 0), checked: latest != nil && scope == .turn(latest ?? 0), enabled: latest != nil)
         let turnItem = NSMenuItem(title: "Turn", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         submenu.autoenablesItems = false
@@ -284,7 +290,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
             let item = NSMenuItem(title: "Turn \(turn.ordinal)", action: #selector(selectScope(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = DiffScopeBox(.turn(turn.ordinal))
-            item.state = state.diffScope == .turn(turn.ordinal) ? .on : .off
+            item.state = scope == .turn(turn.ordinal) ? .on : .off
             let time = formatter.string(from: turn.completedAt ?? turn.startedAt)
             let title = NSMutableAttributedString(string: "Turn \(turn.ordinal)\t", attributes: [.font: NSFont.menuFont(ofSize: 0)])
             title.append(NSAttributedString(string: time, attributes: [
@@ -338,15 +344,13 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         let thread = selectedThread
         let turns = checkpointTurns(thread)
         let signature = "\(turns.count)|\(turns.last?.checkpoint?.ref ?? "")|\(turns.last?.checkpoint?.status.rawValue ?? "")|\(thread?.isRunning == true)"
-        return DiffRequestKey(threadID: state.selectedThreadID, draftProjectID: state.draftProjectID, scope: state.diffScope,
+        return DiffRequestKey(threadID: state.selectedThreadID, draftProjectID: state.draftProjectID, scope: scope,
                               ignoreWhitespace: options.ignoreWhitespace, signature: signature)
     }
 
     /// The working directory the selection diffs in, nil when there is none.
     private func workingDirectory() -> String? {
-        if let thread = selectedThread { return engine.workingDirectory(for: thread) }
-        if let projectID = state.draftProjectID { return engine.project(projectID)?.path }
-        return nil
+        state.workspace.flatMap { engine.workingDirectory(of: $0) }
     }
 
     func reload(force: Bool) {
@@ -356,7 +360,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         let generation = generation
         let key = requestKey()
         loadedKey = key
-        let scope = state.diffScope
+        let scope = scope
         let thread = selectedThread
         let ignoreWhitespace = options.ignoreWhitespace
         guard let cwd = workingDirectory() else {
@@ -422,7 +426,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
             show(message: .error(text))
         case let .success(entries):
             if entries.isEmpty {
-                if case .turn = state.diffScope {
+                if case .turn = scope {
                     show(message: .empty("No changes in this turn."))
                 } else {
                     show(message: .empty("No net changes in this selection."))

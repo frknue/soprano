@@ -33,7 +33,7 @@ struct TerminalWorkspaceTests {
         let missing = "/tmp/soprano-agents-missing-\(UUID().uuidString)"
         let harness = try makeHarness(worktree: missing)
 
-        harness.drawer.run(command: "swift test", in: DemoFixtures.ID.demo)
+        harness.drawer.run(command: "swift test", in: .thread(DemoFixtures.ID.demo))
 
         #expect(harness.launches().isEmpty)
         #expect(harness.drawer.store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).isEmpty)
@@ -46,7 +46,7 @@ struct TerminalWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: worktree) }
         let harness = try makeHarness(worktree: worktree.path)
 
-        harness.drawer.run(command: "swift test", in: DemoFixtures.ID.demo)
+        harness.drawer.run(command: "swift test", in: .thread(DemoFixtures.ID.demo))
 
         #expect(harness.launches() == [worktree.path])
         #expect(harness.drawer.store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).count == 1)
@@ -100,8 +100,8 @@ struct TerminalWorkspaceTests {
         let harness = try makeHarness(worktree: worktree.path)
         let store = harness.drawer.store
 
-        let drawer = store.create(in: DemoFixtures.ID.demo, placement: .drawer)
-        let panel = store.create(in: DemoFixtures.ID.demo, placement: .panel)
+        let drawer = store.create(in: .thread(DemoFixtures.ID.demo), placement: .drawer)
+        let panel = store.create(in: .thread(DemoFixtures.ID.demo), placement: .panel)
 
         #expect(drawer?.title == "Terminal 1")
         #expect(panel?.title == "Terminal 2")
@@ -116,13 +116,13 @@ struct TerminalWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: worktree) }
         let harness = try makeHarness(worktree: worktree.path)
         let store = harness.drawer.store
-        let session = try #require(store.create(in: DemoFixtures.ID.demo, placement: .panel))
+        let session = try #require(store.create(in: .thread(DemoFixtures.ID.demo), placement: .panel))
         var changes: [ThreadTerminalStore.Change] = []
         store.addObserver(harness.state) { changes.append($0) }
 
         store.close(session.id)
 
-        #expect(changes == [.sessions(threadID: DemoFixtures.ID.demo)])
+        #expect(changes == [.sessions(key: DemoFixtures.ID.demo)])
         #expect(store.terminalView(session.id) == nil)
         #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .panel).isEmpty)
     }
@@ -132,8 +132,8 @@ struct TerminalWorkspaceTests {
         defer { try? FileManager.default.removeItem(at: worktree) }
         let harness = try makeHarness(worktree: worktree.path)
         let store = harness.drawer.store
-        let drawer = try #require(store.create(in: DemoFixtures.ID.demo, placement: .drawer))
-        let panel = try #require(store.create(in: DemoFixtures.ID.demo, placement: .panel))
+        let drawer = try #require(store.create(in: .thread(DemoFixtures.ID.demo), placement: .drawer))
+        let panel = try #require(store.create(in: .thread(DemoFixtures.ID.demo), placement: .panel))
         var changes: [ThreadTerminalStore.Change] = []
         store.addObserver(harness.state) { changes.append($0) }
 
@@ -143,6 +143,62 @@ struct TerminalWorkspaceTests {
         #expect(store.terminalView(panel.id) == nil)
         #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .drawer).isEmpty)
         #expect(store.sessions(for: DemoFixtures.ID.demo, placement: .panel).isEmpty)
-        #expect(changes.contains(.sessions(threadID: DemoFixtures.ID.demo)))
+        #expect(changes.contains(.sessions(key: DemoFixtures.ID.demo)))
+    }
+
+    @Test func aProjectDraftsTerminalStartsInTheProjectRootAndMovesToItsThreadWithItsShell() throws {
+        let folder = try makeWorktree()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let harness = try makeHarness(worktree: folder.path)
+        let project = harness.engine.addProject(path: folder.path)
+        harness.state.select(.draft(projectID: project.id))
+        let store = harness.drawer.store
+        let draft = WorkspaceRef.draft(projectID: project.id)
+
+        let session = try #require(store.create(in: draft, placement: .panel))
+        #expect(harness.launches() == [project.path])
+
+        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .codex))
+        harness.engine.insertThread(thread)
+        store.moveDraftSessions(projectID: project.id, to: thread.id)
+
+        #expect(store.sessions(for: thread.id, placement: .panel) == [session])
+        #expect(store.sessions(for: draft.key, placement: .panel).isEmpty)
+        #expect(store.terminalView(session.id) != nil)
+        #expect(store.create(in: draft, placement: .panel)?.title == "Terminal 1")
+    }
+
+    @Test func aProjectlessDraftHasNoTerminal() throws {
+        let harness = try makeHarness(worktree: "/tmp")
+        _ = harness.drawer.view
+        harness.state.select(.draft(projectID: nil))
+
+        harness.drawer.newTerminal()
+
+        #expect(harness.launches().isEmpty)
+        #expect(!harness.state.isTerminalVisible)
+    }
+
+    @Test func theNextDraftAfterALaunchOpensTheDrawerOnAFreshTerminal() throws {
+        let folder = try makeWorktree()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let harness = try makeHarness(worktree: folder.path)
+        let project = harness.engine.addProject(path: folder.path)
+        _ = harness.drawer.view
+        harness.state.select(.draft(projectID: project.id))
+        harness.state.setTerminalVisible(true)
+        #expect(harness.launches().count == 1)
+
+        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .codex))
+        harness.engine.insertThread(thread)
+        harness.drawer.store.moveDraftSessions(projectID: project.id, to: thread.id)
+        harness.state.select(.thread(thread.id))
+        // The thread shows the moved shell; nothing new started for it or the left draft.
+        #expect(harness.launches().count == 1)
+        #expect(harness.drawer.store.sessions(for: thread.id, placement: .drawer).count == 1)
+
+        harness.state.select(.draft(projectID: project.id))
+
+        #expect(harness.launches().count == 2)
     }
 }

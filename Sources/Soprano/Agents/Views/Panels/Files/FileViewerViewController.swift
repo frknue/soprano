@@ -1,10 +1,11 @@
 import AppKit
 import SopranoAgentsCore
 
-/// A file tab of the right panel: the active `.file(path)` of the selected thread, read-only.
-/// A breadcrumb header with Refresh, Copy contents, Open in Editor and Reveal in Finder over
-/// the text (SF Mono, line numbers, syntax colors, no wrapping), the image, or a note for
-/// binary and oversized files. Contents are cached per thread and path while the tab is open.
+/// A file tab of the right panel: the active `.file(path)` of the selected workspace (thread or
+/// project draft), read-only. A breadcrumb header with Refresh, Copy contents, Open in Editor and
+/// Reveal in Finder over the text (SF Mono, line numbers, syntax colors, no wrapping), the image,
+/// or a note for binary and oversized files. Contents are cached per workspace and path while the
+/// tab is open.
 @MainActor
 final class FileViewerViewController: NSViewController {
     let engine: AgentEngine
@@ -18,7 +19,7 @@ final class FileViewerViewController: NSViewController {
     private static let unbounded = CGFloat(Float.greatestFiniteMagnitude)
 
     private struct FileKey: Hashable {
-        var threadID: String
+        var workspace: WorkspaceRef
         var path: String
     }
 
@@ -33,8 +34,10 @@ final class FileViewerViewController: NSViewController {
     /// Generation of the newest load per file; older results are dropped.
     private var pending: [FileKey: Int] = [:]
     private var generation = 0
-    /// Files to reload next time they show (their thread finished a turn).
+    /// Files to reload next time they show (their thread finished a turn, or their project draft
+    /// was re-entered: a thread may have changed them meanwhile).
     private var stale: Set<FileKey> = []
+    private var lastWorkspace: WorkspaceRef?
     /// Threads seen running, to notice when their turn ends.
     private var runningThreads: Set<String> = []
     private var shown: (key: FileKey, version: Int)?
@@ -149,7 +152,7 @@ final class FileViewerViewController: NSViewController {
             guard let self else { return }
             switch event {
             case let .threadChanged(threadID): threadChanged(threadID)
-            case .threadListChanged: pruneDeletedThreads()
+            case .threadListChanged, .projectsChanged: pruneDeletedWorkspaces()
             default: break
             }
         }
@@ -264,26 +267,32 @@ final class FileViewerViewController: NSViewController {
         return true
     }
 
-    /// The selected thread's active file tab.
+    /// The selected workspace's active file tab.
     private var currentKey: FileKey? {
-        guard let threadID = state.selectedThreadID, case let .file(path) = state.rightPanelSurface else { return nil }
-        return FileKey(threadID: threadID, path: path)
+        guard let workspace = state.workspace, case let .file(path) = state.rightPanelSurface else { return nil }
+        return FileKey(workspace: workspace, path: path)
     }
 
     private func stateChanged() {
         guard isViewLoaded else { return }
+        if state.workspace != lastWorkspace {
+            lastWorkspace = state.workspace
+            if case .draft = state.workspace {
+                stale.formUnion(cache.keys.filter { $0.workspace == state.workspace })
+            }
+        }
         pruneClosedTabs()
         render()
     }
 
-    /// Forgets the contents of the selected thread's files whose tab closed.
+    /// Forgets the contents of the selected workspace's files whose tab closed.
     private func pruneClosedTabs() {
-        guard let threadID = state.selectedThreadID else { return }
+        guard let workspace = state.workspace else { return }
         var open: Set<String> = []
         for surface in state.rightPanelSurfaces {
             if case let .file(path) = surface { open.insert(path) }
         }
-        for key in cache.keys where key.threadID == threadID && !open.contains(key.path) {
+        for key in cache.keys where key.workspace == workspace && !open.contains(key.path) {
             forget(key)
         }
     }
@@ -303,18 +312,18 @@ final class FileViewerViewController: NSViewController {
             return
         }
         guard runningThreads.remove(threadID) != nil else { return }
-        let keys = cache.keys.filter { $0.threadID == threadID }
+        let keys = cache.keys.filter { $0.workspace == .thread(threadID) }
         guard !keys.isEmpty else { return }
         stale.formUnion(keys)
         render()
     }
 
-    private func pruneDeletedThreads() {
-        let ids = Set(engine.threads.map(\.id))
-        for key in cache.keys where !ids.contains(key.threadID) {
+    private func pruneDeletedWorkspaces() {
+        let keys = engine.workspaceKeys
+        for key in cache.keys where !keys.contains(key.workspace.key) {
             forget(key)
         }
-        runningThreads.formIntersection(ids)
+        runningThreads.formIntersection(keys)
     }
 
     private func refresh() {
@@ -333,7 +342,7 @@ final class FileViewerViewController: NSViewController {
         Task { [weak self] in
             let loaded: Loaded
             do {
-                loaded = .content(try await engine.readWorkspaceFile(key.threadID, path: key.path))
+                loaded = .content(try await engine.readWorkspaceFile(key.workspace, path: key.path))
             } catch {
                 loaded = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
@@ -359,7 +368,7 @@ final class FileViewerViewController: NSViewController {
         guard let key = currentKey else {
             updateHeader(nil)
             shown = nil
-            show(message: "Start the thread to browse its files.", editorButton: false)
+            show(message: "Choose a project or start the thread to browse files.", editorButton: false)
             return
         }
         updateHeader(key)
@@ -400,7 +409,7 @@ final class FileViewerViewController: NSViewController {
         let palette = PaletteCenter.shared.palette
         breadcrumbs.attributedStringValue = Self.breadcrumbs(key?.path ?? "", palette: palette)
         breadcrumbs.toolTip = key?.path
-        let hasURL = key.flatMap { engine.workspaceFileURL($0.threadID, path: $0.path) } != nil
+        let hasURL = key.flatMap { engine.workspaceFileURL($0.workspace, path: $0.path) } != nil
         refreshButton.isEnabled = key != nil
         editorButton.isEnabled = hasURL
         revealButton.isEnabled = hasURL
@@ -552,7 +561,7 @@ final class FileViewerViewController: NSViewController {
 
     private var currentURL: URL? {
         guard let key = currentKey else { return nil }
-        return engine.workspaceFileURL(key.threadID, path: key.path)
+        return engine.workspaceFileURL(key.workspace, path: key.path)
     }
 
     private func copyContents() {

@@ -23,6 +23,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     /// Called when the composer's height changes so the container can re-pin it and pad the timeline.
     var onHeightChange: ((CGFloat) -> Void)?
+    /// Called when a draft became a thread, before the thread is selected, so the container can
+    /// hand the draft's terminals and tabs to it.
+    var onDraftLaunched: ((ThreadDraft, _ threadID: String) -> Void)?
 
     // MARK: Views
 
@@ -644,6 +647,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             guard let self else { return }
             do {
                 let threadID = try await engine.launchThread(draft, text: text, attachments: files)
+                onDraftLaunched?(draft, threadID)
                 state.select(.thread(threadID))
             } catch {
                 restoreUnsent(text: text, attachments: files, to: sentFrom)

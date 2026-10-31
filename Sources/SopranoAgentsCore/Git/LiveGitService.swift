@@ -183,6 +183,17 @@ public struct LiveGitService: GitService {
         return root.isEmpty ? nil : root
     }
 
+    public func checkedOutBranch(_ cwd: String) async -> String? {
+        guard FileManager.default.fileExists(atPath: cwd),
+              let result = try? await git(
+                  ["symbolic-ref", "--quiet", "--short", "HEAD"], in: URL(fileURLWithPath: cwd), isRead: true, accepting: [0, 1, 128]
+              ),
+              result.exitCode == 0
+        else { return nil }
+        let branch = result.trimmed
+        return branch.isEmpty ? nil : branch
+    }
+
     // MARK: Checkpoints
 
     public func captureCheckpoint(cwd: String, ref: String) async throws {
