@@ -400,9 +400,13 @@ extension AgentEngine {
         }
     }
 
-    /// Inserts or replaces an item of the running turn (keeping its original start time).
+    /// Inserts or replaces an item of the running turn (keeping its original start time). An
+    /// advisor review that lands after its turn ended (omp keeps it as a card while idle) joins
+    /// the latest turn.
     private func upsertItem(_ threadID: String, _ item: TurnItem) {
-        guard let turnID = thread(threadID)?.openTurn?.id else { return }
+        let current = thread(threadID)
+        let lateTurnID: String? = if case .advisory = item.kind { current?.turns.last?.id } else { nil }
+        guard let turnID = current?.openTurn?.id ?? lateTurnID else { return }
         let now = environment.now()
         var created = false
         var item = item

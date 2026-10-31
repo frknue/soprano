@@ -300,7 +300,8 @@ enum DemoFixtures {
     }
 
     /// An omp turn that yielded while a background job it started still runs ("background"
-    /// scenario only): its answer is final, a muted note says the job is still running.
+    /// scenario only): its answer is final, an advisor flagged a concern, a muted note says the
+    /// job is still running.
     static func backgroundThread(_ now: Date) -> AgentThread {
         func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
         return AgentThread(
@@ -314,6 +315,7 @@ enum DemoFixtures {
                     TurnItem(id: "bg1", kind: .command(CommandExecution(command: "swift test", cwd: "/Users/demo/code/app", output: "Started background job bg-1\n", exitCode: 0, durationMs: 140)), status: .completed, startedAt: ago(280), completedAt: ago(279)),
                     TurnItem(id: "bg2", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update)]), status: .completed, startedAt: ago(250), completedAt: ago(249)),
                     TurnItem(id: "bg3", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s. The full test suite is still running in the background; I'll report back when it finishes.", isFinal: false), status: .completed, startedAt: ago(240), completedAt: ago(232)),
+                    TurnItem(id: "bg4", kind: .advisory([AdvisorNote(text: "The retry cap changed from 8 s to 4 s; `UploadClientTests.testBackoffCap` still expects 8 s and will fail once the suite gets there.", severity: .concern, advisor: "Final reviewer")]), status: .completed, startedAt: ago(220), completedAt: ago(220)),
                 ],
                 yieldedAt: ago(232)
             )]

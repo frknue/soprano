@@ -131,6 +131,7 @@ final class TimelineListView: NSView {
         case .approval: "approval"
         case .error: "error"
         case .notice: "notice"
+        case .advisory: "advisory"
         case .backgroundWork: "backgroundWork"
         case .changedFiles: "changedFiles"
         case .queued: "queued"
@@ -150,6 +151,7 @@ final class TimelineListView: NSView {
         case .approval: ApprovalRowView(frame: .zero)
         case .error: ErrorRowView(frame: .zero)
         case .notice: NoticeRowView(frame: .zero)
+        case .advisory: AdvisoryRowView(frame: .zero)
         case .backgroundWork: BackgroundWorkRowView(frame: .zero)
         case .changedFiles: ChangedFilesRowView(frame: .zero)
         case .queued: QueuedMessageRowView(frame: .zero)
@@ -411,6 +413,7 @@ enum TimelineFind {
         switch row.content {
         case let .user(model): MarkdownRenderer.render(model.message.text, style: .user).searchableTexts
         case let .assistant(model): MarkdownRenderer.render(model.text, style: .assistant).searchableTexts
+        case let .advisory(model): MarkdownRenderer.render(model.note.text, style: .thought).searchableTexts
         default: []
         }
     }

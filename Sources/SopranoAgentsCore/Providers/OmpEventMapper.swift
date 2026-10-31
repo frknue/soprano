@@ -59,6 +59,8 @@ public struct OmpUIRequest: Sendable, Hashable {
 ///   cacheRead + cacheWrite). One with `stopReason:"stop"` (no tool call) also marks its text
 ///   final: the run answered, though omp may still wrap up (advisor review, stop hooks) or run
 ///   again before `prompt_result`.
+/// - `message_end` of an advisor review (`role:"custom"`, `customType:"advisor"`,
+///   `details.notes[{note, severity, advisor}]`) → an `advisory` item.
 /// - `tool_execution_start|update|end {toolCallId, toolName, args, intent, partialResult,
 ///   result{content, details}, isError}` → items: bash → command (cumulative output, exit code
 ///   from `details.exitCode`, else 0 on success), write/edit/ast_edit → file change (edit
@@ -291,8 +293,12 @@ public struct OmpEventMapper: Sendable {
         }
     }
 
-    private func mapMessageEnd(_ frame: JSONValue) -> [ProviderEvent] {
-        guard let message = frame["message"], message["role"]?.stringValue == "assistant" else { return [] }
+    private mutating func mapMessageEnd(_ frame: JSONValue) -> [ProviderEvent] {
+        guard let message = frame["message"] else { return [] }
+        if message["role"]?.stringValue == "custom", message["customType"]?.stringValue == "advisor" {
+            return mapAdvisory(message, messageID: frame["messageId"]?.stringValue)
+        }
+        guard message["role"]?.stringValue == "assistant" else { return [] }
         var events: [ProviderEvent] = []
         if message["stopReason"]?.stringValue == "stop", let messageID = frame["messageId"]?.stringValue,
            let last = lastText, last.id.hasPrefix("\(itemPrefix)\(messageID):") {
@@ -303,6 +309,23 @@ public struct OmpEventMapper: Sendable {
             if used > 0 { events.append(.tokenUsage(TokenUsage(usedTokens: used, contextWindow: contextWindow))) }
         }
         return events
+    }
+
+    /// An advisor review (`role:"custom"`, `customType:"advisor"`): `details.notes[{note,
+    /// severity?, advisor?}]`, else the message text as one note.
+    private mutating func mapAdvisory(_ message: JSONValue, messageID: String?) -> [ProviderEvent] {
+        var notes = (message["details"]?["notes"]?.arrayValue ?? []).compactMap { note -> AdvisorNote? in
+            guard let text = note["note"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+            let severity = note["severity"]?.stringValue.flatMap(AdvisorNote.Severity.init(rawValue:)) ?? .nit
+            return AdvisorNote(text: text, severity: severity, advisor: note["advisor"]?.nonEmptyString)
+        }
+        if notes.isEmpty, let text = Self.contentText(message["content"])?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            notes = [AdvisorNote(text: text)]
+        }
+        guard !notes.isEmpty else { return [] }
+        noticeCount += 1
+        let id = messageID.map { "\(itemPrefix)\($0)" } ?? "\(itemPrefix)advisory:\(noticeCount)"
+        return [.itemUpdated(TurnItem(id: id, kind: .advisory(notes), status: .completed))]
     }
 
     private mutating func mapPromptResult(_ frame: JSONValue) -> [ProviderEvent] {

@@ -87,7 +87,8 @@ Engine behavior:
   after relaunch), closed on delete/shutdown. Provider events fold into the open turn
   (`AgentThread.openTurn`, the last turn while `.running`): `itemUpdated` replaces by id, deltas
   append, approvals/user input become items, `turnCompleted` finishes the turn and starts the
-  next queued message.
+  next queued message. Items arriving without an open turn are dropped, except an `advisory`,
+  which joins the last turn.
 - Yielded turns: `turnYielded(outcome, error)` (see omp below) sets `Turn.yieldedAt`
   (persisted; a failed yield also sets `failureMessage`): the answer is final, so
   `AgentThread.activeTurn`/`isRunning` skip the turn (no Working pill, Stop, "Working for" row,
@@ -216,13 +217,15 @@ relaunch), `tool_execution_start|update|end` → bash → command, write/edit/as
 (edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
 `intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
-marks its text final (the timeline drops "Thinking" under it; a resumed yield un-marks it);
-compaction/retry → notices. Subagents: `set_subagent_subscription {level:"events"}` after the
+marks its text final (the timeline drops "Thinking" under it; a resumed yield un-marks it); an
+advisor review (`message_end` of `role:"custom"`, `customType:"advisor"`, `details.notes[{note,
+severity, advisor}]`) → `advisory` (one timeline row per note, never folded; one arriving after
+the turn ended joins the latest turn); compaction/retry → notices. Subagents: `set_subagent_subscription {level:"events"}` after the
 handshake (`try?`: older builds show none); `OmpSubagentMapper` folds `subagent_lifecycle`
 (status), `subagent_progress` (assignment, `lastIntent`, `resolvedModelIdentity`; repeats are
 dropped) and `subagent_event` (the subagent's own session events: `agent_start` opens a run,
 reported with the first `user` or `custom` message; `irc:incoming` messages read "From <agent>:
-…", other custom messages become notices; assistant messages get a synthesized `messageId`
+…", advisor reviews become one `advisory`, other custom messages notices; assistant messages get a synthesized `messageId`
 since subagent events carry none, then go through a per-subagent `OmpEventMapper`; tool
 updates after a tool's end are dropped; `agent_end` ends the run, `stopReason` aborted →
 interrupted, error → failed). `steer_subagent {subagentId, message}`, `cancel_subagent
@@ -553,8 +556,9 @@ command list for it and the `app` project: `--perform composer.focus --type "/re
 filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context card, and
 `--fixture failed --perform composer.focus --type "/"` the empty state. `--fixture background`
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
-"Background work still running…" row, Send instead of Stop); `--fixture answered` one whose
-final answer arrived while omp still wraps up the turn (Working, Stop, no "Thinking" row);
+an advisor's Concern, "Background work still running…" row, Send instead of Stop);
+`--fixture answered` one whose final answer arrived while omp still wraps up the turn (Working,
+Stop, no "Thinking" row);
 `--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
 `--fixture subagents` adds and selects a thread whose yielded turn started two subagents
 (running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture

@@ -141,6 +141,17 @@ struct OmpEventMapperTests {
         #expect(item?.kind == .notice(text: "auto-double-check: second pass before finishing"))
     }
 
+    @Test func anAdvisorReviewBecomesAnAdvisoryWithItsNotes() throws {
+        let item = Self.item("msg-15", in: try Self.replay())
+
+        #expect(item?.kind == .advisory([AdvisorNote(
+            text: "Your verification report violates the user's explicit “Then reply with one word: done” requirement. The earlier `done` does not justify extra output; return exactly `done`, without the report or commentary.",
+            severity: .concern,
+            advisor: "Final reviewer"
+        )]))
+        #expect(item?.status == .completed)
+    }
+
     // MARK: - Recorded commands and compaction (omp 18.14, claude-haiku-5-5)
 
     /// `omp-commands-compact.jsonl`: the `get_available_commands` response, the

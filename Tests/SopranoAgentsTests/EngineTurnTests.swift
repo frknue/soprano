@@ -112,6 +112,24 @@ struct EngineTurnTests {
         #expect(item.kind == .command(CommandExecution(command: "ls", output: "a.txt\n", exitCode: 0)))
     }
 
+    @Test func anAdvisorReviewAfterTheTurnEndedJoinsThatTurnButOtherItemsAreDropped() async throws {
+        let driver = ScriptedDriver()
+        let engine = EngineHarness.engine(driver: driver)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "hi", attachments: [])
+        let session = try #require(driver.session)
+        session.emit(.turnCompleted(outcome: .completed, error: nil))
+        #expect(await EngineHarness.eventually { engine.thread(threadID)?.isRunning == false })
+
+        let review = AdvisorNote(text: "Run the tests before claiming done.", severity: .concern, advisor: "Final reviewer")
+        session.emit(.itemUpdated(TurnItem(id: "late-notice", kind: .notice(text: "late"), status: .completed)))
+        session.emit(.itemUpdated(TurnItem(id: "review", kind: .advisory([review]), status: .completed)))
+
+        #expect(await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.items.isEmpty == false })
+        #expect(engine.thread(threadID)?.turns.last?.items.map(\.kind) == [.advisory([review])])
+        #expect(engine.thread(threadID)?.isRunning == false)
+    }
+
     @Test func anApprovalBlocksTheThreadUntilTheUserAnswersIt() async throws {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver)

@@ -235,6 +235,71 @@ final class NoticeRowView: TimelineRowView {
     }
 }
 
+/// An advisor note: "Final reviewer · Concern" (severity colored) with its time, the note as
+/// Markdown under it.
+final class AdvisoryRowView: TimelineRowView {
+    private let icon = TimelineIconView(symbol: TimelineIcon.advisor, size: 13)
+    private let header = NSTextField.timelineLabel("", size: Typography.smallSize)
+    private let time = NSTextField.timelineLabel("", size: Typography.smallSize)
+    private let markdown = MarkdownView(frame: .zero)
+    private var model: AdvisoryRowModel?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        for view in [icon, header, time, markdown] as [NSView] { addSubview(view) }
+        applyPalette(palette)
+    }
+
+    override func configure(_ row: TimelineRow) {
+        super.configure(row)
+        guard case let .advisory(model) = row.content else { return }
+        self.model = model
+        markdown.apply(MarkdownRenderer.render(model.note.text, style: .thought))
+        time.stringValue = TimelineFormat.timestamp(model.date)
+        time.toolTip = TimelineFormat.tooltip(model.date)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel("\(model.note.advisor ?? "Advisor") \(model.note.severity.title)")
+        applyPalette(palette)
+    }
+
+    override func layoutRow(width: CGFloat) -> CGFloat {
+        let timeWidth = time.textFitWidth
+        time.frame = NSRect(x: width - 2 - timeWidth, y: 2 + 2, width: timeWidth, height: 16)
+        icon.frame = NSRect(x: 6, y: 2 + 2, width: 16, height: 16)
+        header.frame = NSRect(x: 32, y: 2 + 2, width: max(0, min(header.textFitWidth, time.frame.minX - 8 - 32)), height: 16)
+        markdown.frame.origin = NSPoint(x: 32, y: 2 + 22)
+        let height = markdown.layoutMarkdown(width: max(0, width - 32 - 4))
+        return 2 + 22 + height + 2
+    }
+
+    override func applyFind(_ highlights: [FindHighlight]) {
+        markdown.applyFind(highlights)
+    }
+
+    override func findRect(unit: Int, range: NSRange) -> NSRect? {
+        markdown.findRect(unit: unit, range: range).map { $0.offsetBy(dx: markdown.frame.minX, dy: markdown.frame.minY) }
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        let severity = model?.note.severity ?? .nit
+        let tint: NSColor = switch severity {
+        case .blocker: palette.errorForeground
+        case .concern: palette.warningForeground
+        case .nit: palette.mutedForeground
+        }
+        icon.contentTintColor = tint
+        let text = NSMutableAttributedString(string: model?.note.advisor ?? "Advisor", attributes: [
+            .font: Typography.ui(Typography.smallSize, weight: .medium), .foregroundColor: palette.secondaryLabel,
+        ])
+        text.append(NSAttributedString(string: " · \(severity.title)", attributes: [
+            .font: Typography.ui(Typography.smallSize), .foregroundColor: tint,
+        ]))
+        header.attributedStringValue = text
+        time.textColor = palette.mutedForeground
+        markdown.setQuoteColor(palette.foreground.timelineAlpha(0.8 * 0.35))
+    }
+}
+
 /// "Background work still running…" under a yielded turn: its answer is final while jobs the
 /// agent started still run (and may wake it). One muted line.
 final class BackgroundWorkRowView: TimelineRowView {

@@ -116,6 +116,10 @@ All notable changes to Soprano Agents are documented here. The format follows
   dimmed backdrop outside the card does.
 - Once the agent has answered, the timeline no longer shows "Thinking" under the answer while
   omp wraps up the turn (advisor review, stop hooks); it returns if the agent works again.
+- omp's advisor reviews show in the timeline: each note sits under the agent's work with the
+  advisor's name and its severity (Nit, Concern, Blocker), stays visible when the turn is
+  folded, and is found by Find in Thread. A review that arrives after the turn ended joins that
+  turn instead of vanishing.
 - omp threads whose conversation holds a cut-off emoji or icon glyph no longer stall for a
   minute at the end of every turn: Stop ends the turn right away again, and replies to
   messages sent during that minute no longer go missing.

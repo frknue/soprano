@@ -85,6 +85,12 @@ struct ApprovalRowModel: Hashable, Sendable {
     var request: ApprovalRequest
 }
 
+/// One advisor note under the agent's work: who flagged it, how serious, the note.
+struct AdvisoryRowModel: Hashable, Sendable {
+    var note: AdvisorNote
+    var date: Date
+}
+
 enum TimelineRowContent: Hashable, Sendable {
     case user(UserRowModel)
     case fold(FoldRowModel)
@@ -97,6 +103,7 @@ enum TimelineRowContent: Hashable, Sendable {
     case approval(ApprovalRowModel)
     case error(message: String, date: Date)
     case notice(text: String)
+    case advisory(AdvisoryRowModel)
     /// "Background work still running…" under a yielded turn.
     case backgroundWork
     case changedFiles(ChangedFilesModel)
@@ -253,6 +260,7 @@ enum TimelineBuilder {
                     message: message, turnID: nil, canEdit: false, expanded: expansion.messages.contains(message.id)
                 ))))
             case let .item(item):
+                let previousAnswered = answered
                 answered = false
                 switch item.kind {
                 case let .assistantMessage(text, isFinal):
@@ -278,6 +286,13 @@ enum TimelineBuilder {
                 case let .notice(text):
                     flushGroup(trailing: false)
                     rows.append(TimelineRow(id: "notice:\(item.id)", content: .notice(text: text)))
+                case let .advisory(notes):
+                    flushGroup(trailing: false)
+                    // A review is not the agent working: an answer before it stays the last word.
+                    answered = previousAnswered
+                    for (index, note) in notes.enumerated() {
+                        rows.append(TimelineRow(id: "advisory:\(item.id):\(index)", content: .advisory(AdvisoryRowModel(note: note, date: item.startedAt))))
+                    }
                 case let .approval(request) where request.decision == nil:
                     flushGroup(trailing: false)
                     if isRunning { waitsOnUser = true }
@@ -323,12 +338,12 @@ enum TimelineBuilder {
     }
 
     /// The closed fold hides commentary and finished work; it keeps the answer, cards, errors,
-    /// notices, questions, pending approvals and failed work after the answer.
+    /// notices, advisor notes, questions, pending approvals and failed work after the answer.
     private static func hidesInFold(_ item: TurnItem, index: Int, terminalIndex: Int, terminalID: String?) -> Bool {
         switch item.kind {
         case .assistantMessage:
             return item.id != terminalID
-        case .error, .notice, .userInput:
+        case .error, .notice, .advisory, .userInput:
             return false
         case let .approval(request):
             return request.decision != nil
@@ -372,7 +387,7 @@ enum TimelineBuilder {
             case let .workEntry(model):
                 if continues { 0 } else { model.grouped ? 4 : 8 }
             case .thinking, .approval: continues ? 0 : 8
-            case .error, .notice, .queued: 8
+            case .error, .notice, .advisory, .queued: 8
             case .backgroundWork: 16
             case .empty: 0
             }

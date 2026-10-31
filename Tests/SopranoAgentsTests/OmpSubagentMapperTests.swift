@@ -114,4 +114,23 @@ struct OmpSubagentMapperTests {
         #expect(mapper.runningIDs.isEmpty)
         #expect(mapper.abortAll().isEmpty)
     }
+
+    @Test func aSubagentsAdvisorReviewShowsOnceAsAnAdvisory() throws {
+        var mapper = OmpSubagentMapper()
+        let review = #"{"role":"custom","customType":"advisor","content":"The following is an aggregated review from other models.\n<advisory advisor=\"Final reviewer\" severity=\"blocker\">\nCheck the tests.\n</advisory>","display":true,"details":{"notes":[{"note":"Check the tests.","severity":"blocker","advisor":"Final reviewer"}]}}"#
+        let frames = [
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"agent_start"}}}"#,
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"message_start","message":{"role":"user","content":"List files"}}}}"#,
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"message_start","message":{"role":"assistant","content":[]}}}}"#,
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Done."}],"stopReason":"stop"}}}}"#,
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"message_start","message":"# + review + #"}}}"#,
+            #"{"type":"subagent_event","payload":{"id":"Lister","event":{"type":"message_end","message":"# + review + #"}}}"#,
+        ]
+        let items = try frames.flatMap { mapper.map(try JSONValue.parse($0)) }.compactMap { event -> TurnItem? in
+            if case let .subagent(_, .itemUpdated(item)) = event { return item }
+            return nil
+        }
+
+        #expect(items.map(\.kind) == [.advisory([AdvisorNote(text: "Check the tests.", severity: .blocker, advisor: "Final reviewer")])])
+    }
 }

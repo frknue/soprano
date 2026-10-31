@@ -26,6 +26,7 @@ enum TimelineIcon {
     static let close = "xmark"
     static let minimize = "arrow.down.right.and.arrow.up.left"
     static let shield = "shield"
+    static let advisor = "text.bubble"
     static let unfoldAll = "chevron.up.chevron.down"
 }
 
@@ -97,7 +98,7 @@ struct WorkLogEntry: Hashable, Identifiable, Sendable {
 /// Work-log presentation: entry labels, group summaries, live labels, thought lines.
 enum WorkLog {
     /// The work-log entry for an item, nil for items the timeline shows as their own rows
-    /// (assistant messages, errors, notices).
+    /// (assistant messages, errors, notices, advisor notes).
     static func entry(for item: TurnItem) -> WorkLogEntry? {
         func make(
             _ kind: WorkLogEntry.Kind,
@@ -183,7 +184,7 @@ enum WorkLog {
                 bodyIsMarkdown: true,
                 icon: TimelineIcon.workMessage
             )
-        case .assistantMessage, .error, .notice:
+        case .assistantMessage, .error, .notice, .advisory:
             return nil
         }
     }

@@ -48,6 +48,36 @@ public enum TurnItemKind: Codable, Sendable, Hashable {
     case error(message: String)
     /// Informational divider ("Context compacted").
     case notice(text: String)
+    /// Review notes another model (omp's advisor) sent the agent; the agent weighs them.
+    case advisory([AdvisorNote])
+}
+
+/// One advisor note: what the reviewer flagged, how serious, and which advisor sent it.
+public struct AdvisorNote: Codable, Sendable, Hashable {
+    public enum Severity: String, Codable, Sendable, Hashable {
+        case nit
+        case concern
+        case blocker
+
+        public var title: String {
+            switch self {
+            case .nit: "Nit"
+            case .concern: "Concern"
+            case .blocker: "Blocker"
+            }
+        }
+    }
+
+    public var text: String
+    public var severity: Severity
+    /// The configured advisor's name ("Final reviewer"); nil for the default advisor.
+    public var advisor: String?
+
+    public init(text: String, severity: Severity = .nit, advisor: String? = nil) {
+        self.text = text
+        self.severity = severity
+        self.advisor = advisor
+    }
 }
 
 public struct CommandExecution: Codable, Sendable, Hashable {

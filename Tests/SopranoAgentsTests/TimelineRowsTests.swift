@@ -189,6 +189,22 @@ struct TimelineRowsTests {
         #expect(ids(TimelineBuilder.rows(for: thread([noted]))) == ["user:m-t1", "fold:t1", "notice:n1"])
     }
 
+    @Test func advisorNotesStayOutOfTheFoldOneRowPerNoteWithoutBringingBackThinking() {
+        let notes = [AdvisorNote(text: "Run the tests.", severity: .concern, advisor: "Final reviewer"), AdvisorNote(text: "Typo in the commit.")]
+        let reviewed = turn(items: [
+            item("c1", .command(CommandExecution(command: "ls"))),
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("v1", .advisory(notes)),
+        ])
+        let rows = TimelineBuilder.rows(for: thread([reviewed]))
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "advisory:v1:0", "advisory:v1:1"])
+        #expect(rows[3].content == .advisory(AdvisoryRowModel(note: notes[0], date: at(1))))
+
+        var running = reviewed
+        running.status = .running
+        #expect(ids(TimelineBuilder.rows(for: thread([running]))).last == "advisory:v1:1")
+    }
+
     @Test func changedFilesWithoutAnAnswerGetTheirOwnCard() {
         let silent = turn(items: [item("f1", .fileChange([FileChange(path: "A.swift", kind: .add)]))], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
         #expect(ids(TimelineBuilder.rows(for: thread([silent]))) == ["user:m-t1", "fold:t1", "files:t1"])
