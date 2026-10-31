@@ -12,7 +12,8 @@ import Foundation
 ///   opens a run, reported with the first message that reaches it (`message_start` of a `user`
 ///   message, or a `custom` one: `irc:incoming` from another agent, background-job notices);
 ///   later messages in the run are `.message` (user, IRC), an advisory (advisor review) or a
-///   notice item (other custom).
+///   notice item (other custom). An advisor review opens no run: it names a pending one
+///   ("Advisor review") and otherwise joins the open or last run.
 ///   Assistant text, thinking and tools go through a per-subagent `OmpEventMapper`; subagent
 ///   events carry no `messageId`, so each assistant `message_start` gets one (`m<N>`).
 ///   `agent_end` ends the run: the last assistant message's `stopReason` `aborted` →
@@ -168,19 +169,22 @@ struct OmpSubagentMapper: Sendable {
                 } else {
                     events.append(.message(text))
                 }
+            case "custom" where message?["customType"]?.stringValue == "advisor":
+                // A review that starts a run names it; one arriving while idle joins the last run
+                // (the engine) instead of opening one. The inner mapper turns it into an advisory;
+                // its `message_end` is not forwarded, so it shows once.
+                if agent.isRunPending { openRun("Advisor review") }
+                guard case var .object(object) = event else { break }
+                agent.noticeCount += 1
+                object["type"] = .string("message_end")
+                object["messageId"] = .string("advisory:\(agent.messageCount):\(agent.noticeCount)")
+                events += Self.subagentEvents(agent.mapper.map(.object(object)))
             case "custom":
                 let (text, isMessage) = Self.customText(message)
                 if agent.isRunPending || !agent.isRunOpen {
                     openRun(text)
                 } else if isMessage {
                     events.append(.message(text))
-                } else if message?["customType"]?.stringValue == "advisor", case var .object(object) = event {
-                    // The inner mapper turns the review into an advisory (its `message_end` is
-                    // not forwarded, so it shows once).
-                    agent.noticeCount += 1
-                    object["type"] = .string("message_end")
-                    object["messageId"] = .string("advisory:\(agent.messageCount):\(agent.noticeCount)")
-                    events += Self.subagentEvents(agent.mapper.map(.object(object)))
                 } else if !text.isEmpty {
                     agent.noticeCount += 1
                     events.append(.itemUpdated(TurnItem(id: "notice:\(agent.messageCount):\(agent.noticeCount)", kind: .notice(text: text), status: .completed)))

@@ -78,7 +78,9 @@ extension AgentEngine {
                 subagent.turns[index].steers.append(UserMessage(text: text, createdAt: now, isSteer: true))
             }
         case let .itemUpdated(item):
-            mutateSubagentItem(threadID, name) { items in
+            // An advisor review that arrives while the subagent is idle joins its last run.
+            let isAdvisory = if case .advisory = item.kind { true } else { false }
+            mutateSubagentItem(threadID, name, joinsLastRun: isAdvisory) { items in
                 var item = item
                 if !item.status.isActive, item.completedAt == nil { item.completedAt = now }
                 if let existing = items.firstIndex(where: { $0.id == item.id }) {
@@ -199,9 +201,9 @@ extension AgentEngine {
         }
     }
 
-    private func mutateSubagentItem(_ threadID: String, _ name: String, _ change: (inout [TurnItem]) -> Void) {
+    private func mutateSubagentItem(_ threadID: String, _ name: String, joinsLastRun: Bool = false, _ change: (inout [TurnItem]) -> Void) {
         mutateSubagent(threadID, name) { subagent in
-            guard let index = Self.openTurnIndex(subagent) else { return }
+            guard let index = Self.openTurnIndex(subagent) ?? (joinsLastRun ? subagent.turns.indices.last : nil) else { return }
             change(&subagent.turns[index].items)
         }
     }

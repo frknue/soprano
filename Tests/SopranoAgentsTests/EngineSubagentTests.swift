@@ -60,6 +60,32 @@ struct EngineSubagentTests {
         #expect(engine.thread(threadID)?.turns.isEmpty == true)
     }
 
+    @Test func aSubagentsAdvisorReviewsLandInTheirRunsAtRunBoundariesWithoutPhantomRuns() throws {
+        let engine = EngineHarness.engine()
+        let threadID = EngineHarness.idleThread(in: engine)
+        var mapper = OmpSubagentMapper()
+        func review(_ note: String, _ severity: String) -> [String] {
+            let message = #"{"role":"custom","customType":"advisor","content":"The following is an aggregated review from other models.\n<advisory>\n"# + note + #"\n</advisory>","display":true,"details":{"notes":[{"note":""# + note + #"","severity":""# + severity + #""}]}}"#
+            return ["message_start", "message_end"].map { #"{"type":""# + $0 + #"","message":"# + message + "}" }
+        }
+        let run = [#"{"type":"message_start","message":{"role":"assistant","content":[]}}"#, #"{"type":"agent_end","messages":[{"role":"assistant","stopReason":"stop"}]}"#]
+        let events = [#"{"type":"agent_start"}"#, #"{"type":"message_start","message":{"role":"user","content":"List files"}}"#] + run
+            + review("Idle note", "nit") // after the run ended, nothing starts
+            + [#"{"type":"agent_start"}"#] + review("Fix it", "concern") + run // a review that starts the next run
+        for event in events {
+            let frame = try JSONValue.parse(#"{"type":"subagent_event","payload":{"id":"Lister","event":"# + event + "}}")
+            for providerEvent in mapper.map(frame) { engine.apply(providerEvent, threadID: threadID) }
+        }
+
+        let turns = try #require(engine.subagent(threadID, "Lister")?.turns)
+        #expect(turns.map(\.userMessage.text) == ["List files", "Advisor review"])
+        #expect(turns.map(\.status) == [.completed, .completed])
+        #expect(turns.map { $0.items.map(\.kind) } == [
+            [.advisory([AdvisorNote(text: "Idle note")])],
+            [.advisory([AdvisorNote(text: "Fix it", severity: .concern)])],
+        ])
+    }
+
     @Test func editingFromATurnDropsTheSubagentsItsRewoundTurnsStarted() async throws {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver)

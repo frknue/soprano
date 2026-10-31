@@ -225,7 +225,9 @@ handshake (`try?`: older builds show none); `OmpSubagentMapper` folds `subagent_
 (status), `subagent_progress` (assignment, `lastIntent`, `resolvedModelIdentity`; repeats are
 dropped) and `subagent_event` (the subagent's own session events: `agent_start` opens a run,
 reported with the first `user` or `custom` message; `irc:incoming` messages read "From <agent>:
-…", advisor reviews become one `advisory`, other custom messages notices; assistant messages get a synthesized `messageId`
+…", advisor reviews become one `advisory` (never opening a run: a pending run is named "Advisor
+review", an idle subagent's review joins its last run), other custom messages notices; assistant
+messages get a synthesized `messageId`
 since subagent events carry none, then go through a per-subagent `OmpEventMapper`; tool
 updates after a tool's end are dropped; `agent_end` ends the run, `stopReason` aborted →
 interrupted, error → failed). `steer_subagent {subagentId, message}`, `cancel_subagent
