@@ -13,6 +13,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "chat.new",
                 title: "New Thread",
+                description: "Start a new thread",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+n", "cmd+shift+o"],
@@ -24,6 +25,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "chat.newLocal",
                 title: "New Thread in Current Project",
+                description: "Start a thread in the current project",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+n"],
@@ -35,6 +37,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "chat.newWithoutProject",
                 title: "New Thread Without a Project",
+                description: "Start a thread in a scratch folder",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+ctrl+n"],
@@ -44,16 +47,19 @@ enum SidebarCommands {
                 ThreadActions.newDraft(projectID: nil, state: state)
             },
             AppCommand(
-                id: "project.add",
-                title: "Add Project…",
+                id: "project.open",
+                title: "Open Project…",
+                description: "Start a thread in a project or a folder of your project directories",
                 category: .project,
+                defaultKeys: ["cmd+shift+k"],
                 icon: Icon.folderPlus
             ) { context in
-                context.workspace?.sidebar.addProject()
+                CommandPalette.openProjects(in: context)
             },
             AppCommand(
                 id: "thread.previous",
                 title: "Previous Thread",
+                description: "Select the thread above in the list",
                 category: .navigation,
                 defaultKeys: ["cmd+shift+["],
                 icon: "chevron.up",
@@ -65,6 +71,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.next",
                 title: "Next Thread",
+                description: "Select the thread below in the list",
                 category: .navigation,
                 defaultKeys: ["cmd+shift+]"],
                 icon: "chevron.down",
@@ -76,6 +83,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.settle",
                 title: "Settle Thread",
+                description: "Mark the thread done or reopen it",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+s"],
@@ -88,6 +96,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.pin",
                 title: "Pin Thread",
+                description: "Keep the thread at the top of the list",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+p"],
@@ -101,6 +110,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.rename",
                 title: "Rename Thread",
+                description: "Change the thread's name",
                 category: .thread,
                 scopes: [.sidebar],
                 icon: SidebarSymbol.pencil,
@@ -116,6 +126,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.archive",
                 title: "Archive Thread",
+                description: "Hide the thread from the list",
                 category: .thread,
                 icon: SidebarSymbol.archive,
                 isEnabled: { $0.thread.map { !$0.isRunning } ?? false }
@@ -126,6 +137,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.delete",
                 title: "Delete Thread",
+                description: "Remove the thread permanently",
                 category: .thread,
                 icon: SidebarSymbol.trash,
                 isEnabled: { $0.thread != nil }
@@ -136,6 +148,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "thread.copyReference",
                 title: "Copy Thread Reference",
+                description: "Copy a link to this thread",
                 category: .thread,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+c"],
@@ -148,6 +161,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "sidebar.search",
                 title: "Search Threads",
+                description: "Search threads by name",
                 category: .navigation,
                 icon: Icon.search
             ) { context in
@@ -158,6 +172,7 @@ enum SidebarCommands {
             AppCommand(
                 id: "sidebar.filterProjects",
                 title: "Filter Threads by Project",
+                description: "Show only threads from chosen projects",
                 category: .navigation,
                 icon: Icon.listFilter,
                 isEnabled: { !($0.engine?.projects.isEmpty ?? true) }
@@ -172,6 +187,7 @@ enum SidebarCommands {
             commands.append(AppCommand(
                 id: "thread.jump.\(position)",
                 title: "Go to Thread \(position)",
+                description: "Select the thread at this position",
                 category: .navigation,
                 defaultKeys: ["ctrl+\(position)"],
                 icon: "number",

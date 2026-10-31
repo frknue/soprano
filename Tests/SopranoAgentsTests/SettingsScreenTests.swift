@@ -18,7 +18,7 @@ struct SettingsScreenTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let registry = CommandRegistry()
         registry.register([
-            AppCommand(id: "palette.open", title: "Command Palette", category: .app, defaultKeys: ["cmd+k"], perform: { _ in }),
+            AppCommand(id: "palette.open", title: "Command Palette", description: "", category: .app, defaultKeys: ["cmd+k"], perform: { _ in }),
         ])
         let center = SettingsCenter(fileURL: directory.appendingPathComponent("settings.json"), registry: registry)
         center.start(watching: false)
@@ -70,7 +70,7 @@ struct SettingsScreenTests {
     }
 
     @Test func keybindingFilterMatchesTitleIdAndShortcut() throws {
-        let command = AppCommand(id: "view.toggleSidebar", title: "Toggle Sidebar", category: .view, defaultKeys: ["cmd+b"], perform: { _ in })
+        let command = AppCommand(id: "view.toggleSidebar", title: "Toggle Sidebar", description: "", category: .view, defaultKeys: ["cmd+b"], perform: { _ in })
         let chords = try [#require(KeyChord.parse("cmd+b"))]
         for query in ["sidebar", "view.toggle", "⌘B", ""] {
             #expect(SettingsController.keybindingMatches(command, query: query, chords: chords, prefixKey: "a"), "\(query)")

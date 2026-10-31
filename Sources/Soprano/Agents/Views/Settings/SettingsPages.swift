@@ -90,6 +90,29 @@ extension SettingsController {
                 control: followUp
             ),
         ]))
+
+        let configuredFolders = (center.configuredValue(at: ["projects", "directories"]) as? [Any])?.compactMap { $0 as? String }
+        let folders = form.field(
+            (configuredFolders ?? []).joined(separator: ", "),
+            placeholder: "~/git/private, ~/git/work",
+            width: 288,
+            identifier: "projects.directories",
+            mono: true
+        ) { [weak self] value in
+            // A comma inside a folder name stays: entries start with "~" or "/".
+            let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ","))
+            let paths = value.split(separator: #/,\s*(?=[~\/])/#).map { $0.trimmingCharacters(in: separators) }.filter { !$0.isEmpty }
+            if paths.isEmpty { self?.remove(["projects", "directories"]) } else { self?.write(paths, at: ["projects", "directories"]) }
+        }
+        let shortcut = center.keycaps(for: "project.open").map { " (\($0.joined(separator: " ")))" } ?? ""
+        sections.append(form.section("Projects", [
+            form.row(
+                "Project folders",
+                description: "Open Project…\(shortcut) lists their subfolders; picking one adds it as a project and starts a thread. Separate folders with commas.",
+                reset: reset(["projects", "directories"], isDefault: settings.projectDirectories == defaults.projectDirectories),
+                control: folders
+            ),
+        ]))
         return sections
     }
 

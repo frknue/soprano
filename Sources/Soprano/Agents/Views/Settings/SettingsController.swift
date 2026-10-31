@@ -24,7 +24,7 @@ final class SettingsController: NSObject {
     private weak var router: KeyboardRouter?
 
     private let window = OverlayWindow()
-    private let card = OverlayCardView(surface: .background)
+    private let card = OverlayCardView()
     private let nav = SettingsNavView()
     private let header = SettingsHeaderView()
     private let scrollView = NSScrollView()

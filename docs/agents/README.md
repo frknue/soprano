@@ -38,7 +38,9 @@ The installer never restarts a running Soprano Agents; the update applies on the
 
 ## Using it
 
-1. Add a project (**File › Add Project…**) or start without one (`⌃⌘N`).
+1. Open a project (`⇧⌘K`: your projects plus the subfolders of the project folders in
+   **Settings › General**, e.g. `~/git/private`; **Choose Folder…** for any other) or start
+   without one (`⌃⌘N`).
 2. Pick a model (`⇧⌘M`), permissions (`⇧⌘A`) and workspace (`⇧⌘X`: current checkout or a
    new worktree), type, and press Return.
 3. While the agent works, sending again steers the running turn (or queues, per
@@ -58,8 +60,8 @@ The installer never restarts a running Soprano Agents; the update applies on the
    (`⌘U` for details) and **Settings › Accounts** to add logins and let omp prefer one or balance
    across them.
 
-`⌘K` opens the command palette: every action, recent threads, projects and settings pages, with
-fuzzy search; `>` lists actions only. When the app is in the background, finished, failed and
+`⌘K` (or `⌘P`) opens the command palette, Soprano's own: every action with its shortcut, threads,
+projects and settings pages. When the app is in the background, finished, failed and
 waiting threads post a notification, and the Dock icon counts threads waiting for you.
 
 ## Keyboard shortcuts
@@ -70,7 +72,8 @@ right-panel tab) has focus.
 
 | Action | Shortcut | Where |
 |---|---|---|
-| Command Palette | `⌘K` | everywhere |
+| Command Palette | `⌘K`, `⌘P` | everywhere |
+| Open Project… | `⇧⌘K` | everywhere |
 | Settings | `⌘,` | everywhere |
 | Toggle Sidebar | `⌘E` | everywhere |
 | Toggle Thread Details | `⇧⌘B` | not terminal |
@@ -104,7 +107,7 @@ right-panel tab) has focus.
 | Open in Editor | `⌘O` | everywhere |
 | Show Usage | `⌘U` | everywhere |
 
-Unbound by default (bind them in Settings): Open settings.json, Add Project, Archive / Delete
+Unbound by default (bind them in Settings): Open settings.json, Archive / Delete
 Thread, Search Threads, Filter Threads by Project, Expand / Collapse All Work, Interrupt, Commit,
 Push, Create PR, Toggle Split Diff View, Toggle Diff File Tree, Maximize Right Panel, Search Files,
 Compact Conversation, Manage Accounts, Refresh Usage.
@@ -130,6 +133,7 @@ keeping your comments.
 | `textGeneration.model` / `.titles` | omp's configured model / `true` | titles, commit messages, branch names, generated with omp |
 | `worktrees.directory` | `~/.soprano-agents/worktrees` | new worktrees go to `<directory>/<repo>/<branch>` |
 | `worktrees.branchPrefix` | `"soprano"` | `soprano/fix-login-error` |
+| `projects.directories` | `[]` | folders whose subfolders Open Project… (`⇧⌘K`) lists, e.g. `["~/git/private", "~/git/work"]` |
 | `chat.followUp` | `"steer"` | `steer` or `queue` |
 | `chat.width` | `"normal"` | `normal`, `wide`, `full` |
 | `notifications.enabled` / `.sound` | `true` / `true` | background notifications |

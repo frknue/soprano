@@ -193,7 +193,8 @@ enum SnapshotCommand {
             await settle(0.25)
         }
         if let text = options.type {
-            let target = OverlayWindow.topmost(over: window) ?? window
+            let palette = window.childWindows?.last { $0 is CommandPalettePanel && $0.isVisible }
+            let target = OverlayWindow.topmost(over: window) ?? palette ?? window
             guard let responder = target.firstResponder as? NSTextView else {
                 throw CaptureError(description: "--type: the first responder is not a text view")
             }

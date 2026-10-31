@@ -64,7 +64,7 @@ enum SettingsResolver {
             issues.append(ConfigIssue(severity: .warning, message: message))
         }
 
-        let knownTopLevel: Set<String> = ["theme", "agents", "providers", "textGeneration", "worktrees", "chat", "notifications", "editor", "keybindings"]
+        let knownTopLevel: Set<String> = ["theme", "agents", "providers", "textGeneration", "worktrees", "projects", "chat", "notifications", "editor", "keybindings"]
         for key in root.keys.sorted() where !knownTopLevel.contains(key) {
             warn("Unknown setting \"\(key)\".")
         }
@@ -142,6 +142,30 @@ enum SettingsResolver {
                     result.settings.branchPrefix = prefix
                 } else {
                     warn("worktrees.branchPrefix must be a string without spaces.")
+                }
+            }
+        }
+
+        if let projects = section("projects", in: root, warn: warn) {
+            for key in projects.keys.sorted() where key != "directories" {
+                warn("Unknown setting \"projects.\(key)\".")
+            }
+            if let value = projects["directories"] {
+                if let entries = value as? [Any], entries.allSatisfy({ $0 is String }) {
+                    var directories: [String] = []
+                    for raw in entries.compactMap({ $0 as? String }) {
+                        let path = URL(fileURLWithPath: expandingTilde(raw)).standardizedFileURL.path
+                        var isDirectory: ObjCBool = false
+                        guard raw.hasPrefix("/") || raw.hasPrefix("~"),
+                              FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                            warn("projects.directories: \"\(raw)\" is not a folder.")
+                            continue
+                        }
+                        if !directories.contains(path) { directories.append(path) }
+                    }
+                    result.settings.projectDirectories = directories
+                } else {
+                    warn("projects.directories must be an array of folder paths.")
                 }
             }
         }

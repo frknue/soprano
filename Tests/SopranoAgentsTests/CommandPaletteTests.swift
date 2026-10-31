@@ -5,125 +5,38 @@ import Testing
 
 @MainActor
 struct CommandPaletteTests {
-    private func entry(_ title: String, kind: PaletteEntryKind? = nil, subtitle: String? = nil, terms: [String] = []) -> PaletteEntry {
-        PaletteEntry(id: title, kind: kind ?? .command(title), title: title, subtitle: subtitle, icon: "command", searchTerms: terms)
+    private func context(_ engine: AgentEngine) -> CommandContext {
+        CommandContext(window: nil, engine: engine, state: WorkspaceState(), workspace: nil, focus: nil, isTextInput: false)
     }
 
-    // MARK: Fuzzy matching
-
-    @Test func aContiguousWordStartMatchBeatsAScatteredOne() throws {
-        let tight = try #require(FuzzyMatch.match("term", in: "Toggle Terminal Drawer"))
-        let loose = try #require(FuzzyMatch.match("term", in: "Testing rmdir output"))
-        #expect(tight.score > loose.score)
-        #expect(tight.positions == [7, 8, 9, 10])
+    private func folder(_ path: String, in root: URL) throws -> URL {
+        let url = root.appendingPathComponent(path, isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
-    @Test func matchingIgnoresCaseAndWhitespaceInTheQuery() throws {
-        let match = try #require(FuzzyMatch.match("Dark Mode", in: "Add dark mode toggle"))
-        #expect(match.positions == [4, 5, 6, 7, 9, 10, 11, 12])
-        #expect(FuzzyMatch.match("darkmode", in: "Add dark mode toggle") != nil)
-    }
+    // MARK: Command palette
 
-    @Test func lettersMissingOrOutOfOrderAreNoMatch() {
-        #expect(FuzzyMatch.match("xyz", in: "Toggle Sidebar") == nil)
-        #expect(FuzzyMatch.match("rabdis", in: "Toggle Sidebar") == nil)
-        #expect(FuzzyMatch.match("   ", in: "Toggle Sidebar") == nil)
-    }
-
-    @Test func aQueryScatteredOverManyRunsIsNoMatch() {
-        // t…h…r…e…a…d spread over five words is noise, not a hit.
-        #expect(FuzzyMatch.match("thread", in: "The quick hare raced a dog") == nil)
-        #expect(FuzzyMatch.match("togside", in: "Toggle Sidebar") != nil)
-    }
-
-    // MARK: Groups
-
-    private var source: PaletteSource {
-        PaletteSource(
-            actions: [
-                entry("New thread in...", kind: .submenu(.newThreadIn), terms: ["new thread project"]),
-                entry("Toggle Sidebar", terms: ["view.toggleSidebar"]),
-                entry("Toggle Terminal Drawer", terms: ["view.toggleTerminal"]),
-                entry("Open settings.json", terms: ["settings.openFile"]),
-            ],
-            threads: (0..<15).map { entry("Thread \($0)", kind: .thread("t\($0)"), subtitle: "app · soprano/branch-\($0)", terms: ["soprano/branch-\($0)", "app"]) },
-            projects: [entry("app", kind: .project("p1"), subtitle: "~/code/app"), entry("site", kind: .project("p2"), subtitle: "~/code/site")],
-            settings: [entry("Chat width", kind: .settings(.general), subtitle: "Settings · General", terms: ["wide full width"])]
-        )
-    }
-
-    @Test func anEmptyQueryShowsActionsAndTwelveRecentThreads() {
-        let groups = PaletteSearch.groups(query: "", submenu: nil, source: source)
-        #expect(groups.map(\.title) == ["Actions", "Recent Threads"])
-        #expect(groups[0].entries.count == 4)
-        #expect(groups[1].entries.map(\.title) == (0..<12).map { "Thread \($0)" })
-    }
-
-    @Test func aQueryRanksEveryGroupAndDropsEmptyOnes() {
-        let groups = PaletteSearch.groups(query: "term", submenu: nil, source: source)
-        #expect(groups.map(\.title) == ["Actions"])
-        #expect(groups[0].entries.map(\.title) == ["Toggle Terminal Drawer"])
-        #expect(groups[0].entries[0].highlights == [7, 8, 9, 10])
-
-        let width = PaletteSearch.groups(query: "wide", submenu: nil, source: source)
-        #expect(width.map(\.title) == ["Settings"])
-        // Matched only through its search terms: no title highlight.
-        #expect(width[0].entries[0].highlights.isEmpty)
-    }
-
-    @Test func threadsMatchByBranchAndProjectsByTitle() {
-        let branch = PaletteSearch.groups(query: "branch-14", submenu: nil, source: source)
-        #expect(branch.first { $0.title == "Threads" }?.entries.first?.kind == .thread("t14"))
-
-        let project = PaletteSearch.groups(query: "site", submenu: nil, source: source)
-        #expect(project.first { $0.title == "Projects" }?.entries.map(\.kind) == [.project("p2")])
-    }
-
-    @Test func aTitleMatchOutranksAMatchInSearchTerms() {
-        let ranked = PaletteSearch.rank([
-            entry("Open settings.json", terms: ["sidebar"]),
-            entry("Toggle Sidebar"),
-        ], query: "sidebar")
-        #expect(ranked.map(\.title) == ["Toggle Sidebar", "Open settings.json"])
-    }
-
-    @Test func aGreaterThanPrefixListsOnlyActions() {
-        let all = PaletteSearch.groups(query: ">", submenu: nil, source: source)
-        #expect(all.map(\.title) == ["Actions"])
-        #expect(all[0].entries.count == 4)
-
-        let filtered = PaletteSearch.groups(query: "> app", submenu: nil, source: source)
-        #expect(filtered.isEmpty)
-        #expect(PaletteSearch.groups(query: ">side", submenu: nil, source: source).first?.entries.map(\.title) == ["Toggle Sidebar"])
-    }
-
-    @Test func theNewThreadSubmenuListsProjects() {
-        let groups = PaletteSearch.groups(query: "", submenu: .newThreadIn, source: source)
-        #expect(groups.map(\.title) == ["Projects"])
-        #expect(groups[0].entries.map(\.kind) == [.project("p1"), .project("p2")])
-        #expect(PaletteSearch.groups(query: "si", submenu: .newThreadIn, source: source).first?.entries.map(\.title) == ["site"])
-    }
-
-    // MARK: Source
-
-    @Test func theSourceSkipsDisabledCommandsThePaletteItselfAndArchivedThreads() throws {
+    @Test func theCommandListSkipsDisabledCommandsThePaletteItselfAndArchivedThreads() throws {
         let built = try DemoFixtures.build("demo")
         let commands = [
-            AppCommand(id: "palette.open", title: "Command Palette", category: .app, perform: { _ in }),
-            AppCommand(id: "view.toggleSidebar", title: "Toggle Sidebar", category: .view, perform: { _ in }),
-            AppCommand(id: "thread.stop", title: "Interrupt", category: .thread, isEnabled: { _ in false }, perform: { _ in }),
-            AppCommand(id: "timeline.next", title: "Next", category: .navigation, inPalette: false, perform: { _ in }),
+            AppCommand(id: "palette.open", title: "Command Palette", description: "", category: .app, perform: { _ in }),
+            AppCommand(id: "view.toggleSidebar", title: "Toggle Sidebar", description: "Show or hide the thread list", category: .view, perform: { _ in }),
+            AppCommand(id: "thread.stop", title: "Interrupt", description: "", category: .thread, isEnabled: { _ in false }, perform: { _ in }),
+            AppCommand(id: "timeline.next", title: "Next", description: "", category: .navigation, inPalette: false, perform: { _ in }),
         ]
-        let context = CommandContext(window: nil, engine: built.engine, state: WorkspaceState(), workspace: nil, focus: nil, isTextInput: false)
-        let source = PaletteSource.make(
-            commands: commands, context: context, keycaps: { $0 == "view.toggleSidebar" ? ["⌘B"] : nil },
+        let rows = PaletteItems.root(
+            commands: commands, context: context(built.engine), keycaps: { $0 == "view.toggleSidebar" ? ["⌘E"] : nil },
             engine: built.engine, now: Date()
         )
 
-        #expect(source.actions.map(\.kind) == [.submenu(.newThreadIn), .command("view.toggleSidebar")])
-        #expect(source.actions[1].keycaps == ["⌘B"])
-        let threadIDs = source.threads.compactMap { entry -> String? in
-            if case let .thread(id) = entry.kind { return id }
+        let commandRows = rows.filter { if case .command = $0.choice { true } else { false } }
+        #expect(commandRows == [PaletteRow(
+            id: "command:view.toggleSidebar", icon: "command", label: "Toggle Sidebar", description: "Show or hide the thread list",
+            shortcut: ["⌘E"], searchText: "view.toggleSidebar", choice: .command("view.toggleSidebar")
+        )])
+        let threadIDs = rows.compactMap { row -> String? in
+            if case let .thread(id) = row.choice { return id }
             return nil
         }
         let archived = Set(built.engine.threads.filter { $0.archivedAt != nil }.map(\.id))
@@ -131,12 +44,77 @@ struct CommandPaletteTests {
         #expect(archived.isDisjoint(with: threadIDs))
         #expect(threadIDs.count == built.engine.threads.count - archived.count)
         // Most recently used first.
-        let dates = threadIDs.compactMap { built.engine.thread($0) }.map(PaletteSource.lastUse)
+        let dates = threadIDs.compactMap { built.engine.thread($0) }.map(PaletteItems.lastUse)
         #expect(dates == dates.sorted(by: >))
-        #expect(source.projects.count == built.engine.projects.count)
-        #expect(Set(source.settings.compactMap { entry -> SettingsPage? in
-            if case let .settings(page) = entry.kind { return page }
+        #expect(Set(rows.compactMap { row -> SettingsPage? in
+            if case let .settings(page) = row.choice { return page }
             return nil
         }) == Set(SettingsPage.allCases))
+    }
+
+    @Test func aThreadRowNamesItsProjectAndBranchAndMatchesBoth() throws {
+        let built = try DemoFixtures.build("demo")
+        let thread = try #require(built.engine.threads.first { $0.archivedAt == nil && $0.branch != nil && $0.projectID != nil })
+        let project = try #require(built.engine.project(thread.projectID))
+        let now = Date()
+        let rows = PaletteItems.root(commands: [], context: context(built.engine), keycaps: { _ in nil }, engine: built.engine, now: now)
+        let row = try #require(rows.first { $0.choice == .thread(thread.id) })
+
+        #expect(row.label == thread.title)
+        #expect(row.description == "\(project.title) · \(thread.branch!) · \(DurationText.relative(thread.activityDate, now: now))")
+        #expect(CommandPaletteSearch.filter([item(row)], query: thread.branch!).count == 1)
+    }
+
+    private func item(_ row: PaletteRow) -> CommandItem {
+        CommandItem(id: row.id, icon: row.icon, label: row.label, description: row.description, shortcut: row.shortcut, searchText: row.searchText) {}
+    }
+
+    // MARK: Open Project…
+
+    @Test func projectFoldersAreTheVisibleSubfoldersOfEachRootOnceByName() throws {
+        let home = EngineHarness.temporaryDirectory()
+        let privateRoot = try folder("private", in: home)
+        let work = try folder("work", in: home)
+        _ = try folder("zeta", in: privateRoot)
+        _ = try folder("Alpha", in: privateRoot)
+        _ = try folder(".hidden", in: privateRoot)
+        _ = try folder("beta", in: work)
+        try "x".write(to: work.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+
+        let folders = ProjectFolders.scan([privateRoot.path, work.path, privateRoot.path + "/", home.appendingPathComponent("missing").path])
+
+        #expect(folders.map(\.name) == ["Alpha", "beta", "zeta"])
+        #expect(folders.map(\.path) == [
+            privateRoot.appendingPathComponent("Alpha").standardizedFileURL.path,
+            work.appendingPathComponent("beta").standardizedFileURL.path,
+            privateRoot.appendingPathComponent("zeta").standardizedFileURL.path,
+        ])
+    }
+
+    @Test func openProjectListsProjectsThenNewFoldersThenChooseFolder() throws {
+        let engine = EngineHarness.engine()
+        let root = EngineHarness.temporaryDirectory()
+        let known = try folder("known", in: root).standardizedFileURL.path
+        let fresh = try folder("fresh", in: root).standardizedFileURL.path
+        let project = engine.addProject(path: known)
+
+        let rows = PaletteItems.projects(engine: engine, folders: ProjectFolders.scan([root.path]))
+
+        #expect(rows.map(\.choice) == [.project(project.id), .folder(fresh), .chooseFolder])
+        #expect(rows[1].label == "fresh")
+    }
+
+    @Test func pickingAFolderAddsItAsAProjectOnceAndStartsAThreadInIt() throws {
+        let built = try DemoFixtures.build("demo")
+        let controller = MainWindowController(engine: built.engine, state: WorkspaceState(), defaults: UserDefaults(suiteName: UUID().uuidString)!, persistsFrame: false)
+        let path = EngineHarness.temporaryDirectory().standardizedFileURL.path
+        let before = built.engine.projects.count
+
+        controller.palette.run(.folder(path))
+        controller.palette.run(.folder(path))
+
+        let added = try #require(built.engine.projects.first { $0.path == path })
+        #expect(built.engine.projects.count == before + 1)
+        #expect(controller.state.selection == .draft(projectID: added.id))
     }
 }

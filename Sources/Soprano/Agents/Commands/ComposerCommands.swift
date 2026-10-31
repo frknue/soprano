@@ -17,6 +17,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.focus",
                 title: "Focus Composer",
+                description: "Move the cursor into the message box",
                 category: .composer,
                 defaultKeys: ["cmd+shift+l"],
                 icon: "text.cursor",
@@ -27,6 +28,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "modelPicker.toggle",
                 title: "Model Picker",
+                description: "Choose the model for this thread",
                 category: .composer,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+m"],
@@ -38,6 +40,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.effort",
                 title: "Reasoning Effort",
+                description: "Set how much the model reasons",
                 category: .composer,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+e"],
@@ -49,6 +52,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.mode",
                 title: "Permissions",
+                description: "Choose what the agent may do without asking",
                 category: .composer,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+a"],
@@ -60,6 +64,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.workspace",
                 title: "Workspace",
+                description: "Choose where the thread works on the repository",
                 category: .composer,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+x"],
@@ -71,6 +76,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.branch",
                 title: "Branch",
+                description: "Pick the git branch for the thread",
                 category: .composer,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+g"],
@@ -82,6 +88,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "composer.sendAlternate",
                 title: "Steer or Queue (opposite)",
+                description: "Send as steer or queue, whichever isn't default",
                 category: .composer,
                 scopes: [.composer],
                 defaultKeys: ["cmd+enter"],
@@ -93,6 +100,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "thread.stop",
                 title: "Interrupt",
+                description: "Stop the running turn",
                 category: .thread,
                 icon: Icon.stop,
                 isEnabled: { composer($0)?.canStop ?? false }
@@ -102,6 +110,7 @@ enum ComposerCommands {
             AppCommand(
                 id: "thread.compact",
                 title: "Compact Conversation",
+                description: "Summarize history to free up context",
                 category: .thread,
                 icon: "arrow.down.right.and.arrow.up.left",
                 isEnabled: { composer($0)?.canCompact ?? false }

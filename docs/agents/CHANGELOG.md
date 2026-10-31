@@ -61,8 +61,12 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Thread details card (⇧⌘B): open the workspace in your editor (⌘O, `editor.app`), run project
   scripts in the terminal, copy the branch name, commit / push / create a PR with generated
   messages and the "Commit changes" dialog, and open uncommitted changes.
-- Command palette (⌘K): actions with their shortcuts, recent threads, projects and settings
-  pages, fuzzy search, `>` for actions only, "New thread in..." per project.
+- Command palette (⌘K or ⌘P), Soprano's own: every action with a one-line description and its
+  shortcut, threads, projects and settings pages.
+- Open Project… (⇧⌘K, also the sidebar's and the new thread screen's add-project buttons):
+  the projects plus every subfolder of your project folders (`projects.directories`, Settings ›
+  General › Project folders, e.g. `~/git/private`, `~/git/work`); picking a folder adds it as a
+  project and starts a thread in it. Choose Folder… still opens Finder.
 - Settings screen (⌘,): General, Providers, Text generation, Worktrees, Notifications,
   Keybindings (record, turn off or reset any shortcut), Archive and About; every change is
   written to `~/.config/soprano-agents/settings.json`.

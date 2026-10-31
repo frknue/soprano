@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct KeymapTests {
     private func command(_ id: String, scopes: Set<FocusRegion> = [], keys: [String]) -> AppCommand {
-        AppCommand(id: id, title: id, category: .app, scopes: scopes, defaultKeys: keys, perform: { _ in })
+        AppCommand(id: id, title: id, description: "", category: .app, scopes: scopes, defaultKeys: keys, perform: { _ in })
     }
 
     private var commands: [AppCommand] {
@@ -29,7 +29,7 @@ struct KeymapTests {
             ("chat.new", notTerminal, ["cmd+n", "cmd+shift+o"]),
             ("chat.newLocal", notTerminal, ["cmd+shift+n"]),
             ("chat.newWithoutProject", notTerminal, ["cmd+ctrl+n"]),
-            ("project.add", [], []),
+            ("project.open", [], ["cmd+shift+k"]),
             ("thread.previous", [], ["cmd+shift+["]),
             ("thread.next", [], ["cmd+shift+]"]),
             ("thread.settle", notTerminal, ["cmd+shift+s"]),
@@ -79,14 +79,14 @@ struct KeymapTests {
 
         #expect(keymap.issues.map(\.message) == [])
         #expect(keymap.conflictingIDs.isEmpty)
-        #expect(keymap.chords(for: "palette.open").map(\.canonicalString) == ["cmd+k"])
+        #expect(keymap.chords(for: "palette.open").map(\.canonicalString) == ["cmd+k", "cmd+p"])
         #expect(keymap.chords(for: "settings.open").first?.keycaps(prefixKey: "a") == ["⌘,"])
         #expect(keymap.chords(for: "view.toggleRightPanel").first?.keycaps(prefixKey: "a") == ["⌘L"])
     }
 
     @Test func shellCommandsCarryTheDocumentedDefaultKeys() {
         let expected: [String: [String]] = [
-            "palette.open": ["cmd+k"],
+            "palette.open": ["cmd+k", "cmd+p"],
             "settings.open": ["cmd+,"],
             "settings.openFile": [],
             "view.toggleSidebar": ["cmd+e"],

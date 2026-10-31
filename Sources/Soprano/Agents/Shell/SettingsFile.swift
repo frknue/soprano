@@ -119,6 +119,11 @@ enum SettingsFile {
             "branchPrefix": "soprano"
           },
 
+          "projects": {
+            // Folders whose subfolders Open Project… (⇧⌘K) lists, e.g. ["~/git/private", "~/git/work"].
+            "directories": []
+          },
+
           "chat": {
             // Sending while the agent works: "steer" the running turn or "queue" after it. ⌘↩ does the other.
             "followUp": "steer",

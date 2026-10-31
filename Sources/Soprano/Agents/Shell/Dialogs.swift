@@ -149,7 +149,7 @@ final class DialogController {
 
     func present(over parent: NSWindow) {
         window.owner = self
-        let card = OverlayCardView(surface: .background)
+        let card = OverlayCardView()
         card.translatesAutoresizingMaskIntoConstraints = false
         window.backdrop.addSubview(card)
         let maxWidth = card.widthAnchor.constraint(equalToConstant: Self.width)

@@ -331,7 +331,7 @@ buttons, and the snapshot harness runs them with `--perform <id>`. `CommandConte
 ### Settings (`Shell/AppEnvironment.swift`, `SettingsResolution.swift`, `SettingsFile.swift`)
 `~/.config/soprano-agents/settings.json` (JSONC, `SOPRANO_AGENTS_CONFIG` overrides), live
 reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultModel, defaultRuntimeMode}`,
-`providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`,
+`providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`, `projects.directories`,
 `chat.{followUp, width}`, `notifications.{enabled, sound}`, `editor.app`,
 `keybindings.{prefixKey, prefixTimeoutMs, bindings}`. `AppSettings.engineSettings` feeds
 `AgentEngine.settings`. Window geometry, panel
@@ -348,7 +348,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 
 | Command id | Title | Scope | Keys | Owner |
 |---|---|---|---|---|
-| `palette.open` | Command Palette | global | `cmd+k` | Shell |
+| `palette.open` | Command Palette | global | `cmd+k`, `cmd+p` | Shell |
 | `settings.open` | Settings | global | `cmd+,` | Shell |
 | `settings.openFile` | Open settings.json | global | — | Shell |
 | `view.toggleSidebar` | Toggle Sidebar | global | `cmd+e` | Shell |
@@ -358,7 +358,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `chat.new` | New Thread | not terminal | `cmd+n`, `cmd+shift+o` | Sidebar |
 | `chat.newLocal` | New Thread in Current Project | not terminal | `cmd+shift+n` | Sidebar |
 | `chat.newWithoutProject` | New Thread Without a Project | not terminal | `cmd+ctrl+n` | Sidebar |
-| `project.add` | Add Project… | global | — | Sidebar |
+| `project.open` | Open Project… | global | `cmd+shift+k` | Sidebar |
 | `thread.previous` / `thread.next` | Previous / Next Thread | global | `cmd+shift+[` / `cmd+shift+]` | Sidebar |
 | `thread.jump.1`…`9` | Go to Thread N | global | `ctrl+1`…`ctrl+9` | Sidebar |
 | `thread.settle` | Settle Thread | not terminal | `cmd+shift+s` | Sidebar |
@@ -470,10 +470,19 @@ has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %
 75 %/38 %; `pending` adds a waiting omp Claude sign-in and a failed action on the Codex list.
 `--perform usage.open` opens the usage card; `--click "Account usage"` clicks the indicator.
 
-Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless
+Modal surfaces (settings screen, `Dialogs`) are `OverlayWindow`s: borderless
 child windows covering the main window with a dimmed backdrop and one card. Their keys
 go to the overlay's `keyHandler` before menus and fields; while the settings screen records a
 shortcut it routes every key through `KeyboardRouter.capture`.
+
+The command palette and Open Project… (`Views/Palette/`) are Soprano's `CommandPalettePanel`
+(vendored), one per window (`MainWindowController.palette`): a child panel under the titlebar
+over a scrim, rows of icon, title over `AppCommand.description`, keycaps; substring search on
+title, then description, then search text. `PaletteItems` builds the rows (commands, threads by
+last use, projects, settings rows; or projects, the subfolders of `projects.directories` that are
+no project yet, Choose Folder…); a chosen row runs after the panel closed. While it is key, only
+`palette.open` / `project.open` reach the menu (close, or switch to projects). The harness types
+into it with `--type` and sends it `--keys`.
 
 ## Tests
 

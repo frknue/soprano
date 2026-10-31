@@ -47,7 +47,7 @@ enum SettingsPage: String, CaseIterable, Sendable {
         switch self {
         case .general:
             [("Theme", "color scheme appearance dark light soprano"), ("Chat width", "wide full width column layout messages composer"),
-             ("Follow-up behavior", "queue steer running turn send")]
+             ("Follow-up behavior", "queue steer running turn send"), ("Project folders", "projects directories open project git repositories")]
         case .providers:
             [("omp", "provider agent cli version path executable"),
              ("Default model", "new thread reasoning"), ("Permissions", "runtime mode approval full access supervised")]

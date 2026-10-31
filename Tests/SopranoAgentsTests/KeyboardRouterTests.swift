@@ -16,7 +16,7 @@ struct KeyboardRouterTests {
         log: Log
     ) -> AppCommand {
         AppCommand(
-            id: id, title: id, category: .app, scopes: scopes, defaultKeys: keys,
+            id: id, title: id, description: "", category: .app, scopes: scopes, defaultKeys: keys,
             isEnabled: { _ in enabled },
             perform: { _ in log.ran.append(id) }
         )
@@ -62,9 +62,9 @@ struct KeyboardRouterTests {
     }
 
     @Test func menusOfferACommandOnlyWhereItsShortcutWouldFire() {
-        let notTerminal = AppCommand(id: "diff.toggle", title: "Toggle Diff", category: .diff, scopes: [.sidebar, .timeline, .composer, .rightPanel]) { _ in }
-        let timelineOnly = AppCommand(id: "timeline.jumpToLatest", title: "Jump", category: .navigation, scopes: [.timeline]) { _ in }
-        let global = AppCommand(id: "palette.open", title: "Palette", category: .app) { _ in }
+        let notTerminal = AppCommand(id: "diff.toggle", title: "Toggle Diff", description: "", category: .diff, scopes: [.sidebar, .timeline, .composer, .rightPanel]) { _ in }
+        let timelineOnly = AppCommand(id: "timeline.jumpToLatest", title: "Jump", description: "", category: .navigation, scopes: [.timeline]) { _ in }
+        let global = AppCommand(id: "palette.open", title: "Palette", description: "", category: .app) { _ in }
 
         #expect(!notTerminal.isAvailable(in: .terminal))
         #expect(notTerminal.isAvailable(in: nil))

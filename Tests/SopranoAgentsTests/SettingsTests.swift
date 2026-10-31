@@ -70,6 +70,22 @@ struct SettingsTests {
         #expect(resolved.issues.allSatisfy { $0.severity == .warning })
     }
 
+    @Test func projectDirectoriesKeepExistingFoldersOnceAndWarnAboutTheRest() throws {
+        let root = EngineHarness.temporaryDirectory().standardizedFileURL
+        let work = root.appendingPathComponent("work")
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try "x".write(to: root.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        let resolved = try SettingsResolver.resolve(text: """
+        { "projects": { "directories": ["\(root.path)", "\(work.path)/", "\(root.path)/missing", "\(root.path)/file.txt", "relative"] } }
+        """)
+
+        #expect(resolved.settings.projectDirectories == [root.path, work.path])
+        #expect(resolved.issues.count == 3)
+        let notAList = try SettingsResolver.resolve(text: #"{ "projects": { "directories": "~/git" } }"#)
+        #expect(notAList.settings.projectDirectories.isEmpty)
+        #expect(notAList.issues.map(\.message) == ["projects.directories must be an array of folder paths."])
+    }
+
     @Test func theTemplateIsValidAndResolvesToTheDefaults() throws {
         let resolved = try SettingsResolver.resolve(text: SettingsFile.template)
         #expect(resolved.issues.isEmpty)

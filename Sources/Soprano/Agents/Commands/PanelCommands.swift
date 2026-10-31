@@ -12,6 +12,7 @@ enum PanelCommands {
             AppCommand(
                 id: "diff.toggle",
                 title: "Toggle Diff",
+                description: "Show or hide the changes panel",
                 category: .diff,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+d"],
@@ -27,6 +28,7 @@ enum PanelCommands {
             AppCommand(
                 id: "diff.toggleLayout",
                 title: "Toggle Split Diff View",
+                description: "Switch between unified and side-by-side diff",
                 category: .diff,
                 icon: "rectangle.split.2x1"
             ) { context in
@@ -37,6 +39,7 @@ enum PanelCommands {
             AppCommand(
                 id: "diff.toggleFileTree",
                 title: "Toggle Diff File Tree",
+                description: "Show or hide the changed files list",
                 category: .diff,
                 icon: "list.bullet.indent"
             ) { context in
@@ -47,6 +50,7 @@ enum PanelCommands {
             AppCommand(
                 id: "files.toggle",
                 title: "Toggle Files",
+                description: "Show or hide the project file browser",
                 category: .view,
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+f"],
@@ -63,6 +67,7 @@ enum PanelCommands {
             AppCommand(
                 id: "files.search",
                 title: "Search Files",
+                description: "Find a file in the project by name",
                 category: .view,
                 icon: "magnifyingglass",
                 isEnabled: { $0.state?.workspace != nil }
@@ -74,6 +79,7 @@ enum PanelCommands {
             AppCommand(
                 id: "rightPanel.newTerminal",
                 title: "New Terminal in Right Panel",
+                description: "Open a terminal tab in the right panel",
                 category: .terminal,
                 defaultKeys: ["cmd+shift+j"],
                 icon: Icon.terminal,
@@ -84,6 +90,7 @@ enum PanelCommands {
             AppCommand(
                 id: "rightPanel.closeTab",
                 title: "Close Tab",
+                description: "Close the active right panel tab",
                 category: .view,
                 scopes: [.rightPanel],
                 defaultKeys: ["cmd+w"],
@@ -95,6 +102,7 @@ enum PanelCommands {
             AppCommand(
                 id: "rightPanel.find",
                 title: "Find in Panel",
+                description: "Search the open file, files or thread",
                 category: .view,
                 scopes: [.rightPanel],
                 defaultKeys: ["cmd+f"],
@@ -115,6 +123,7 @@ enum PanelCommands {
             AppCommand(
                 id: "rightPanel.toggleMaximized",
                 title: "Maximize Right Panel",
+                description: "Expand the right panel or restore its size",
                 category: .view,
                 icon: "arrow.up.left.and.arrow.down.right",
                 isEnabled: { $0.state?.isRightPanelVisible == true }
@@ -125,6 +134,7 @@ enum PanelCommands {
             AppCommand(
                 id: "terminal.new",
                 title: "New Terminal",
+                description: "Open another terminal session",
                 category: .terminal,
                 scopes: [.terminal],
                 defaultKeys: ["cmd+n"],
@@ -141,6 +151,7 @@ enum PanelCommands {
             AppCommand(
                 id: "terminal.close",
                 title: "Close Terminal",
+                description: "Close the active terminal session",
                 category: .terminal,
                 scopes: [.terminal],
                 defaultKeys: ["cmd+w"],
@@ -157,6 +168,7 @@ enum PanelCommands {
             AppCommand(
                 id: "editor.openFavorite",
                 title: "Open in Editor",
+                description: "Open the working folder in your editor",
                 category: .project,
                 defaultKeys: ["cmd+o"],
                 icon: "arrow.up.forward.app",
@@ -167,6 +179,7 @@ enum PanelCommands {
             AppCommand(
                 id: "git.commit",
                 title: "Commit",
+                description: "Commit the thread's changes",
                 category: .project,
                 icon: "checkmark.circle",
                 isEnabled: { $0.state?.selectedThreadID != nil }
@@ -176,6 +189,7 @@ enum PanelCommands {
             AppCommand(
                 id: "git.push",
                 title: "Push",
+                description: "Push the current branch to the remote",
                 category: .project,
                 icon: "icloud.and.arrow.up",
                 isEnabled: { $0.state?.selectedThreadID != nil }
@@ -185,6 +199,7 @@ enum PanelCommands {
             AppCommand(
                 id: "git.createPR",
                 title: "Create PR",
+                description: "Open a pull request for the current branch",
                 category: .project,
                 icon: "arrow.triangle.pull",
                 isEnabled: { $0.state?.selectedThreadID != nil }

@@ -12,6 +12,7 @@ enum TimelineCommands {
             AppCommand(
                 id: "chat.find",
                 title: "Find in Thread",
+                description: "Search text in the conversation",
                 category: .thread,
                 // The right panel has its own ⌘F (`rightPanel.find`), which falls back to this.
                 scopes: [.sidebar, .timeline, .composer],
@@ -23,6 +24,7 @@ enum TimelineCommands {
             AppCommand(
                 id: "timeline.jumpToLatest",
                 title: "Jump to Latest",
+                description: "Scroll to the newest message",
                 category: .navigation,
                 scopes: [.timeline],
                 defaultKeys: ["cmd+down"],
@@ -33,6 +35,7 @@ enum TimelineCommands {
             AppCommand(
                 id: "timeline.expandAll",
                 title: "Expand All Work",
+                description: "Open every tool call and step",
                 category: .thread,
                 icon: "chevron.down",
                 isEnabled: { hasThread($0) },
@@ -41,6 +44,7 @@ enum TimelineCommands {
             AppCommand(
                 id: "timeline.collapseAll",
                 title: "Collapse All Work",
+                description: "Fold every tool call and step",
                 category: .thread,
                 icon: "chevron.right",
                 isEnabled: { hasThread($0) },

@@ -9,16 +9,18 @@ enum ShellCommands {
             AppCommand(
                 id: "palette.open",
                 title: "Command Palette",
+                description: "Search commands, threads, projects and settings",
                 category: .app,
-                defaultKeys: ["cmd+k"],
+                defaultKeys: ["cmd+k", "cmd+p"],
                 icon: Icon.search,
                 inPalette: false
             ) { context in
-                CommandPaletteController.toggle(in: context)
+                CommandPalette.toggle(in: context)
             },
             AppCommand(
                 id: "settings.open",
                 title: "Settings",
+                description: "Open the settings screen",
                 category: .app,
                 defaultKeys: ["cmd+,"],
                 icon: Icon.settings
@@ -28,6 +30,7 @@ enum ShellCommands {
             AppCommand(
                 id: "view.toggleSidebar",
                 title: "Toggle Sidebar",
+                description: "Show or hide the thread list",
                 category: .view,
                 defaultKeys: ["cmd+e"],
                 icon: "sidebar.left"
@@ -38,6 +41,7 @@ enum ShellCommands {
             AppCommand(
                 id: "view.toggleThreadDetails",
                 title: "Toggle Thread Details",
+                description: "Show or hide the thread's git and folder info",
                 category: .view,
                 scopes: FocusRegion.outsideTerminal,
                 defaultKeys: ["cmd+shift+b"],
@@ -49,6 +53,7 @@ enum ShellCommands {
             AppCommand(
                 id: "view.toggleTerminal",
                 title: "Toggle Terminal Drawer",
+                description: "Show or hide the terminal below the thread",
                 category: .view,
                 defaultKeys: ["cmd+j"],
                 icon: Icon.panelBottom,
@@ -60,6 +65,7 @@ enum ShellCommands {
             AppCommand(
                 id: "view.toggleRightPanel",
                 title: "Toggle Right Panel",
+                description: "Show or hide the panel on the right",
                 category: .view,
                 defaultKeys: ["cmd+l"],
                 icon: Icon.panelRight
@@ -70,6 +76,7 @@ enum ShellCommands {
             AppCommand(
                 id: "settings.openFile",
                 title: "Open settings.json",
+                description: "Edit the raw settings file in your editor",
                 category: .app,
                 icon: "doc.text"
             ) { _ in

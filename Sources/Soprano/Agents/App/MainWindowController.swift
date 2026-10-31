@@ -26,6 +26,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         keymap: { SettingsCenter.shared.keymap },
         context: { [weak self] in self?.commandContext() }
     )
+    /// The command palette and Open Project… of this window.
+    private(set) lazy var palette = CommandPalette(controller: self)
     private let persistsFrame: Bool
 
     private static let frameAutosaveName = "SopranoAgentsMainWindow"

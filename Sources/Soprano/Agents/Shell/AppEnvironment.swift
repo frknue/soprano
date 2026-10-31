@@ -41,6 +41,9 @@ struct AppSettings: Equatable, Sendable {
     var worktreesDirectory: String = NSString(string: "~/.soprano-agents/worktrees").expandingTildeInPath
     var branchPrefix = "soprano"
 
+    /// Folders whose subfolders Open Project… offers (absolute, existing, each once).
+    var projectDirectories: [String] = []
+
     var followUp: FollowUp = .steer
     var chatWidth: ChatWidth = .normal
 

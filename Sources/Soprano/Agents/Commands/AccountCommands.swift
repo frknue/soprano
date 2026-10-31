@@ -9,6 +9,7 @@ enum AccountCommands {
             AppCommand(
                 id: "usage.open",
                 title: "Show Usage",
+                description: "Show plan limits and usage in the sidebar",
                 category: .app,
                 defaultKeys: ["cmd+u"],
                 icon: "gauge.medium"
@@ -21,6 +22,7 @@ enum AccountCommands {
             AppCommand(
                 id: "accounts.manage",
                 title: "Manage Accounts…",
+                description: "Add or switch accounts in settings",
                 category: .app,
                 icon: "person.2"
             ) { context in
@@ -30,6 +32,7 @@ enum AccountCommands {
             AppCommand(
                 id: "usage.refresh",
                 title: "Refresh Usage",
+                description: "Fetch the latest usage numbers",
                 category: .app,
                 icon: "arrow.clockwise"
             ) { _ in

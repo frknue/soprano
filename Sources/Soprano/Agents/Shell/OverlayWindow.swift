@@ -1,6 +1,6 @@
 import AppKit
 
-/// A modal surface over the main window for dialogs, the command palette and settings
+/// A modal surface over the main window for dialogs and the settings
 /// modal: a borderless child window covering the parent with a dimmed backdrop
 /// (`dialog-backdrop`) and one card on it. Child windows (not sheets or `NSPopover`) so the
 /// snapshot harness renders them with the window.
@@ -129,20 +129,11 @@ final class OverlayBackdropView: PaletteView {
 /// view behind it (drawn content, so the snapshot harness renders it too). Content goes into
 /// `content`, which clips to the corners.
 final class OverlayCardView: PaletteView {
-    enum Surface {
-        /// `bg-background` (dialogs, settings).
-        case background
-        /// `bg-popover` (command palette).
-        case popover
-    }
-
     let content = ClippingView()
-    private let surface: Surface
     private let radius: CGFloat
     private var shadowView: OverlayShadowView?
 
-    init(surface: Surface = .background, radius: CGFloat = Radius.xxl) {
-        self.surface = surface
+    init(radius: CGFloat = Radius.xxl) {
         self.radius = radius
         super.init(frame: .zero)
         layer?.cornerRadius = radius
@@ -178,8 +169,7 @@ final class OverlayCardView: PaletteView {
     }
 
     override func applyPalette(_ palette: Palette) {
-        let fill = surface == .popover ? palette.popover : palette.background
-        layer?.backgroundColor = fill.cgColor
+        layer?.backgroundColor = palette.background.cgColor
         layer?.borderWidth = 1
         layer?.borderColor = palette.foreground.withAlphaComponent(palette.isDark ? 0.08 : 0.1).cgColor
     }

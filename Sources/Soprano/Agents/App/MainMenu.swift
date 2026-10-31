@@ -41,7 +41,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         fileMenu.addItem(commandItem("chat.newLocal", title: "New Thread in Current Project"))
         fileMenu.addItem(commandItem("chat.newWithoutProject", title: "New Thread Without a Project"))
         fileMenu.addItem(.separator())
-        fileMenu.addItem(commandItem("project.add", title: "Add Project…"))
+        fileMenu.addItem(commandItem("project.open", title: "Open Project…"))
         fileMenu.addItem(commandItem("editor.openFavorite", title: "Open in Editor"))
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "")
@@ -65,6 +65,16 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
 
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(commandItem("palette.open", title: "Command Palette…"))
+        // ⌘P (and any other ⌘ chord of the palette) also closes it while it has the keyboard,
+        // where only menu key equivalents reach commands.
+        for equivalent in SettingsCenter.shared.chords(for: "palette.open").compactMap(\.menuKeyEquivalent).dropFirst() {
+            let alternate = commandItem("palette.open", title: "Command Palette…")
+            alternate.keyEquivalent = equivalent.key
+            alternate.keyEquivalentModifierMask = equivalent.modifiers
+            alternate.isHidden = true
+            alternate.allowsKeyEquivalentWhenHidden = true
+            viewMenu.addItem(alternate)
+        }
         viewMenu.addItem(.separator())
         viewMenu.addItem(commandItem("view.toggleSidebar"))
         viewMenu.addItem(commandItem("view.toggleThreadDetails"))
@@ -150,8 +160,11 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(performCommand(_:)) else { return true }
         guard let id = menuItem.representedObject as? String, let command = registry.command(id) else { return false }
-        // While a dialog or the palette has the keyboard, commands wait.
-        if let key = NSApp.keyWindow, !(key is MainWindow) { return false }
+        // While a dialog or the palette has the keyboard, commands wait; the palette's own
+        // shortcuts still close it or switch it to the projects.
+        if let key = NSApp.keyWindow, !(key is MainWindow) {
+            return key is CommandPalettePanel && ["palette.open", "project.open"].contains(id)
+        }
         guard let controller = windowController() else { return false }
         if controller.window?.attachedSheet != nil { return false }
         // A menu key equivalent must not do what the shortcut wouldn't (⌘D in the terminal,

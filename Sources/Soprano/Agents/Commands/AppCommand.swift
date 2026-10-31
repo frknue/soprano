@@ -61,6 +61,8 @@ struct AppCommand {
     /// Stable id; also the key in settings.json `keybindings.bindings`.
     let id: String
     let title: String
+    /// One line under the title in the command palette ("Show or hide the thread list").
+    let description: String
     let category: CommandCategory
     /// Areas where its keys fire. Empty = everywhere.
     let scopes: Set<FocusRegion>
@@ -77,6 +79,7 @@ struct AppCommand {
     init(
         id: String,
         title: String,
+        description: String,
         category: CommandCategory,
         scopes: Set<FocusRegion> = [],
         defaultKeys: [String] = [],
@@ -87,6 +90,7 @@ struct AppCommand {
     ) {
         self.id = id
         self.title = title
+        self.description = description
         self.category = category
         self.scopes = scopes
         self.defaultKeys = defaultKeys

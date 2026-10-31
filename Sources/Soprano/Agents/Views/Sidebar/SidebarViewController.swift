@@ -72,7 +72,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         toggleButton.onClick = { [weak self] in self?.perform("view.toggleSidebar") }
 
         filterButton.onClick = { [weak self] in self?.toggleProjectFilter() }
-        addProjectButton.onClick = { [weak self] in self?.addProject() }
+        addProjectButton.onClick = { [weak self] in self?.perform("project.open") }
         newThreadButton.onClick = { [weak self] in
             let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
             self?.perform(shift ? "chat.newLocal" : "chat.new")
@@ -383,7 +383,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         case let .empty(emptyState):
             let cell = reuse("empty") { SidebarEmptyCell(frame: .zero) }
             cell.configure(emptyState)
-            cell.addProjectButton.onClick = { [weak self] in self?.addProject() }
+            cell.addProjectButton.onClick = { [weak self] in self?.perform("project.open") }
             return cell
         }
     }
@@ -446,6 +446,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         searchField.focus()
     }
 
+    /// Open Project… → Choose Folder…: any folder from a Finder panel becomes a project with a
+    /// new thread draft.
     func addProject() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true

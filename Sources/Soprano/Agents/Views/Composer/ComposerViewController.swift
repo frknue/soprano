@@ -247,7 +247,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         questionPanel.onDismiss = { [weak self] in self?.dismissQuestion() }
         hero.onProjectPicker = { [weak self] button in self?.toggleProjectPicker(anchor: button) }
         hero.onStartWithoutProject = { [weak self] in self?.state.select(.draft(projectID: nil)) }
-        hero.onAddProject = { [weak self] in self?.perform("project.add") }
+        hero.onAddProject = { [weak self] in self?.perform("project.open") }
         contextStrip.workspaceChip.onClick = { [weak self] in self?.toggleWorkspaceMenu() }
         contextStrip.branchChip.onClick = { [weak self] in self?.toggleBranchPicker() }
     }
@@ -970,7 +970,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             guard let self else { return }
             switch choice {
             case let .project(id): state.select(.draft(projectID: id))
-            case .addProject: perform("project.add")
+            case .addProject: perform("project.open")
             case .noProject: state.select(.draft(projectID: nil))
             }
         }
