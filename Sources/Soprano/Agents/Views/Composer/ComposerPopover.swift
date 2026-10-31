@@ -456,15 +456,21 @@ final class ComposerListRow: InteractiveView {
 }
 
 /// A list of `ComposerListRow`s with one keyboard/mouse highlight, scrolling past `maxHeight`.
-final class ComposerListView: PaletteView {
+/// A view-based table builds only the rows on screen, so long lists (omp's 140+ commands and
+/// skills) open and filter without laying out every row. Row heights are measured at the list's
+/// width and cached by row shape; only rows whose subtitle wraps are measured per text.
+final class ComposerListView: PaletteView, NSTableViewDataSource, NSTableViewDelegate {
     private let scrollView = NSScrollView()
-    private let document = ComposerFlippedView()
-    private let stack = ComposerColumn(spacing: 2)
+    private let tableView = NSTableView()
     private var heightConstraint: NSLayoutConstraint?
-    private(set) var rows: [ComposerListRow] = []
+    private var models: [ComposerListRow.Model] = []
     private var actions: [() -> Void] = []
     let maxHeight: CGFloat
     private let insets: NSEdgeInsets
+    private static let rowSpacing: CGFloat = 2
+    private var heights: [RowHeightKey: CGFloat] = [:]
+    /// The row width the table's heights were last given for.
+    private var measuredWidth: CGFloat = 0
 
     private(set) var highlightedIndex: Int?
 
@@ -472,13 +478,27 @@ final class ComposerListView: PaletteView {
         self.maxHeight = maxHeight
         self.insets = insets
         super.init(frame: .zero)
-        document.addSubview(stack)
-        document.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = document
+        tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row")))
+        tableView.headerView = nil
+        tableView.style = .plain
+        // The gap between rows is part of each cell (`ComposerListCell`), so the list's insets
+        // are exactly its top and bottom padding.
+        tableView.intercellSpacing = .zero
+        tableView.selectionHighlightStyle = .none
+        tableView.backgroundColor = .clear
+        tableView.gridStyleMask = []
+        tableView.focusRingType = .none
+        tableView.refusesFirstResponder = true
+        tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        tableView.dataSource = self
+        tableView.delegate = self
+        scrollView.documentView = tableView
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets(top: insets.top, left: 0, bottom: insets.bottom, right: 0)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
         let height = scrollView.heightAnchor.constraint(equalToConstant: 0)
@@ -489,54 +509,92 @@ final class ComposerListView: PaletteView {
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             height,
-            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: insets.left),
-            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -insets.right),
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: insets.top),
-            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -insets.bottom),
         ])
     }
 
     /// Replaces the rows. `actions[i]` runs when row i is chosen.
     func setRows(_ models: [ComposerListRow.Model], actions: [() -> Void], highlight: Int?) {
-        stack.removeAll()
-        rows = models.map(ComposerListRow.init)
+        self.models = models
         self.actions = actions
-        for (index, row) in rows.enumerated() {
-            stack.add(row)
-            row.onClick = { [weak self] in self?.choose(index) }
-            row.onHover = { [weak self] in self?.setHighlight(index) }
-        }
-        stack.rebuild()
-        let contentHeight = rows.isEmpty ? 0 : stack.fittingSize.height + insets.top + insets.bottom
-        heightConstraint?.constant = min(contentHeight, maxHeight)
         highlightedIndex = nil
+        measuredWidth = rowWidth
+        tableView.reloadData()
+        heightConstraint?.constant = contentHeight()
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: -insets.top))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
         setHighlight(highlight)
     }
 
-    var isEmpty: Bool { rows.isEmpty }
+    override func layout() {
+        super.layout()
+        // Wrapping subtitles change height with the width: re-measure once it is known or changes.
+        guard abs(rowWidth - measuredWidth) > 0.5 else { return }
+        measuredWidth = rowWidth
+        if models.contains(where: RowHeightKey.wraps) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<models.count))
+            }
+        }
+    }
+
+    /// The width rows get (0 before the first layout).
+    private var rowWidth: CGFloat {
+        max(0, bounds.width - insets.left - insets.right)
+    }
+
+    /// The list's height up to `maxHeight`, from the rows' heights until they fill it.
+    private func contentHeight() -> CGFloat {
+        guard !models.isEmpty else { return 0 }
+        var height = insets.top + insets.bottom
+        for index in models.indices {
+            height += cellHeight(index)
+            if height >= maxHeight { return maxHeight }
+        }
+        return height
+    }
+
+    /// Row `index`'s height plus the gap below it (none below the last row).
+    private func cellHeight(_ index: Int) -> CGFloat {
+        rowHeight(models[index]) + (index < models.count - 1 ? Self.rowSpacing : 0)
+    }
+
+    private func rowHeight(_ model: ComposerListRow.Model) -> CGFloat {
+        let width = measuredWidth
+        let key = RowHeightKey(model, width: width)
+        if let height = heights[key] { return height }
+        let row = ComposerListRow(model)
+        if width > 0 {
+            // Lay the row out at its width first so a wrapping subtitle learns where to wrap.
+            row.frame = NSRect(x: 0, y: 0, width: width, height: 1000)
+            row.layoutSubtreeIfNeeded()
+            row.widthAnchor.constraint(equalToConstant: width).isActive = true
+        }
+        let height = row.fittingSize.height
+        heights[key] = height
+        return height
+    }
+
+    var isEmpty: Bool { models.isEmpty }
 
     func setHighlight(_ index: Int?) {
-        let valid = index.flatMap { rows.indices.contains($0) && rows[$0].isEnabled ? $0 : nil }
-        if let old = highlightedIndex, rows.indices.contains(old) { rows[old].isHighlighted = false }
+        let valid = index.flatMap { models.indices.contains($0) && !models[$0].isDisabled ? $0 : nil }
+        if let old = highlightedIndex { shownRow(old)?.isHighlighted = false }
         highlightedIndex = valid
         if let valid {
-            rows[valid].isHighlighted = true
-            layoutSubtreeIfNeeded()
-            rows[valid].scrollToVisible(rows[valid].bounds)
+            shownRow(valid)?.isHighlighted = true
+            tableView.scrollRowToVisible(valid)
         }
     }
 
     /// Moves the highlight by `delta`, skipping disabled rows.
     func moveHighlight(by delta: Int) {
-        guard !rows.isEmpty else { return }
-        var index = highlightedIndex ?? (delta > 0 ? -1 : rows.count)
-        for _ in rows.indices {
+        guard !models.isEmpty else { return }
+        var index = highlightedIndex ?? (delta > 0 ? -1 : models.count)
+        for _ in models.indices {
             index += delta
-            guard rows.indices.contains(index) else { return }
-            if rows[index].isEnabled {
+            guard models.indices.contains(index) else { return }
+            if !models[index].isDisabled {
                 setHighlight(index)
                 return
             }
@@ -550,13 +608,88 @@ final class ComposerListView: PaletteView {
     }
 
     func choose(_ index: Int) {
-        guard rows.indices.contains(index), rows[index].isEnabled else { return }
+        guard models.indices.contains(index), !models[index].isDisabled else { return }
         actions[index]()
+    }
+
+    /// The row view for `index` when the table has built it (it is on screen).
+    private func shownRow(_ index: Int) -> ComposerListRow? {
+        guard index < tableView.numberOfRows else { return nil }
+        return (tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? ComposerListCell)?.row
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { models.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        models.indices.contains(row) ? cellHeight(row) : 0
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
+        let row = ComposerListRow(models[index])
+        row.isHighlighted = index == highlightedIndex
+        row.onClick = { [weak self] in self?.choose(index) }
+        row.onHover = { [weak self] in self?.setHighlight(index) }
+        return ComposerListCell(row, insets: insets, gapBelow: index < models.count - 1 ? Self.rowSpacing : 0)
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+}
+
+/// What a list row's height depends on: its chrome, and its text and width only when its
+/// subtitle may wrap (titles, notes and one-line subtitles truncate instead).
+private struct RowHeightKey: Hashable {
+    var font: NSFont
+    var imageHeight: CGFloat?
+    var hasSubtitle: Bool
+    var wrappingSubtitle: String?
+    var subtitleLines: Int
+    var width: CGFloat
+    var hasTitleNote: Bool
+    var hasTrailingNote: Bool
+    var hasBadge: Bool
+    var hasKbd: Bool
+    var showsCheck: Bool
+
+    static func wraps(_ model: ComposerListRow.Model) -> Bool {
+        model.subtitle != nil && model.subtitleLines != 1
+    }
+
+    init(_ model: ComposerListRow.Model, width: CGFloat) {
+        let wraps = Self.wraps(model)
+        font = model.titleFont
+        imageHeight = model.image?.size.height
+        hasSubtitle = model.subtitle != nil
+        wrappingSubtitle = wraps ? model.subtitle : nil
+        subtitleLines = model.subtitleLines
+        self.width = wraps ? width : 0
+        hasTitleNote = model.titleNote != nil
+        hasTrailingNote = model.trailingNote != nil
+        hasBadge = model.badge != nil
+        hasKbd = model.kbd != nil
+        showsCheck = model.showsCheck
     }
 }
 
-final class ComposerFlippedView: NSView {
-    override var isFlipped: Bool { true }
+/// A table cell holding one `ComposerListRow`, inset by the list's horizontal insets, with the
+/// gap to the next row below it.
+private final class ComposerListCell: NSView {
+    let row: ComposerListRow
+
+    init(_ row: ComposerListRow, insets: NSEdgeInsets, gapBelow: CGFloat) {
+        self.row = row
+        super.init(frame: .zero)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: insets.left),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -insets.right),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -gapBelow),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// Small muted group label in menus ("Reasoning", "Permissions", "Workspace").
