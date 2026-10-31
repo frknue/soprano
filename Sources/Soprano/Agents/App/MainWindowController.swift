@@ -49,6 +49,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         )
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // An empty unified toolbar makes the titlebar `Metrics.topbarHeight` tall, so the traffic
+        // lights center on the same line as the sidebar toggle, brand and chat header.
+        window.toolbar = NSToolbar(identifier: "SopranoAgentsMainWindow")
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = false
         window.minSize = Metrics.windowMinSize
         window.title = "Soprano Agents"
