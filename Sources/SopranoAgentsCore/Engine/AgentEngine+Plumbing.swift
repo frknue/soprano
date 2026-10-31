@@ -327,6 +327,7 @@ extension AgentEngine {
                 finishTurn(threadID, turn.id, status: .failed, error: error ?? "The provider session ended unexpectedly.")
             }
         }
+        abortSubagents(threadID)
         if let session {
             Task { await session.close() }
         }
@@ -394,6 +395,8 @@ extension AgentEngine {
             mutateTurn(threadID, turn.id) { $0.yieldedAt = nil }
         case let .sessionEnded(error):
             sessionEnded(threadID, error: error)
+        case let .subagent(id, event):
+            applySubagent(id, event, threadID: threadID)
         }
     }
 

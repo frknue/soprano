@@ -287,6 +287,10 @@ extension AgentEngine {
 
         let now = environment.now()
         updateThread(threadID) { thread in
+            // Subagents the dropped turns started go with them: omp's rewound session can hand
+            // out their names again, which would merge a new subagent into an old one.
+            let droppedCalls = Set(thread.turns.filter { $0.ordinal >= turn.ordinal }.flatMap { $0.items.map(\.id) })
+            thread.subagents.removeAll { $0.parentToolCallID.map(droppedCalls.contains) ?? false }
             thread.turns.removeAll { $0.ordinal >= turn.ordinal }
             thread.updatedAt = now
             // The conversation now ends where the kept turns ended.

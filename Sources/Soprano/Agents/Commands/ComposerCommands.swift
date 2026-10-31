@@ -39,7 +39,7 @@ enum ComposerCommands {
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+m"],
                 icon: "cpu",
-                isEnabled: { composer($0) != nil }
+                isEnabled: { composer($0)?.showsThreadSettings ?? false }
             ) { context in
                 revealedComposer(context)?.toggleModelPicker()
             },
@@ -51,7 +51,7 @@ enum ComposerCommands {
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+e"],
                 icon: Icon.gauge,
-                isEnabled: { composer($0) != nil }
+                isEnabled: { composer($0)?.showsThreadSettings ?? false }
             ) { context in
                 revealedComposer(context)?.toggleTraits()
             },
@@ -63,7 +63,7 @@ enum ComposerCommands {
                 scopes: notTerminal,
                 defaultKeys: ["cmd+shift+a"],
                 icon: "lock",
-                isEnabled: { composer($0) != nil }
+                isEnabled: { composer($0)?.showsThreadSettings ?? false }
             ) { context in
                 revealedComposer(context)?.togglePermissions()
             },

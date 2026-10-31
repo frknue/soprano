@@ -59,6 +59,7 @@ struct SidebarModelTests {
             switch item {
             case let .card(row): "card \(row.threadID)"
             case let .slim(row): "slim \(row.threadID)"
+            case let .subagent(row): "subagent \(row.threadID)/\(row.subagentID)\(row.isSelected ? " selected" : "")"
             case let .shelf(section, count, expanded): "\(section.title) \(count)\(expanded ? " open" : "")"
             case let .showMore(count): "more \(count)"
             case .spacer: "spacer"
@@ -208,5 +209,70 @@ struct SidebarModelTests {
         #expect(ProjectIdentity.monogram("  ") == "PR")
         #expect(ProjectIdentity.colorIndex("app", count: 7) == ProjectIdentity.colorIndex("APP", count: 7))
         #expect((0..<7).contains(ProjectIdentity.colorIndex("soprano-agents", count: 7)))
+    }
+
+    private static func withSubagents(_ thread: AgentThread, _ subagents: [(String, SubagentStatus)]) -> AgentThread {
+        var thread = thread
+        thread.subagents = subagents.map { Subagent(id: $0.0, agent: "sonic", status: $0.1, lastIntent: "Reading \($0.0)", startedAt: ago(30)) }
+        return thread
+    }
+
+    @Test func runningSubagentsAreListedUnderTheirThreadsCardUntilItIsClosed() {
+        let parent = Self.withSubagents(Self.thread("p"), [("Reader", .running), ("Writer", .completed)])
+        let items = Self.build([parent, Self.thread("q", ago: 900)])
+        #expect(Self.describe(items) == ["card p", "subagent p/Reader", "subagent p/Writer", "card q", "spacer", "Settled 0"])
+        let row = items.compactMap(\.thread).first
+        #expect(row?.subagents == SidebarThreadRow.SubagentSummary(count: 2, running: 1, expanded: true))
+        #expect(row?.hasMetaLine == true)
+        guard case let .subagent(reader) = items[1], case let .subagent(writer) = items[2] else {
+            Issue.record("expected two subagent rows")
+            return
+        }
+        #expect(reader.detail == "Reading Reader")
+        #expect(!reader.isLast && writer.isLast)
+
+        let closed = Self.build([parent], SidebarListOptions(subagentDisclosure: ["p": false]))
+        #expect(Self.describe(closed) == ["card p", "spacer", "Settled 0"])
+    }
+
+    @Test func finishedSubagentsStayClosedUntilOpened() {
+        let parent = Self.withSubagents(Self.thread("p"), [("Reader", .completed)])
+        #expect(Self.describe(Self.build([parent])) == ["card p", "spacer", "Settled 0"])
+        let opened = Self.build([parent], SidebarListOptions(subagentDisclosure: ["p": true]))
+        #expect(Self.describe(opened) == ["card p", "subagent p/Reader", "spacer", "Settled 0"])
+    }
+
+    @Test func theSelectedSubagentStaysListedAndItsThreadsCardIsNotSelected() {
+        let parent = Self.withSubagents(Self.thread("p"), [("Reader", .completed), ("Writer", .completed)])
+        let options = SidebarListOptions(selectedThreadID: "p", selectedSubagentID: "Writer")
+        let items = Self.build([parent], options)
+        #expect(Self.describe(items) == ["card p", "subagent p/Writer selected", "spacer", "Settled 0"])
+        #expect(items.compactMap(\.thread).first?.isSelected == false)
+
+        let settled = Self.withSubagents(Self.thread("s", settled: true), [("Reader", .completed)])
+        let fromShelf = Self.build([settled], SidebarListOptions(selectedThreadID: "s", selectedSubagentID: "Reader"))
+        #expect(Self.describe(fromShelf) == ["spacer", "Settled 1", "slim s", "subagent s/Reader selected"])
+
+        let running = Self.withSubagents(Self.thread("r", settled: true), [("Reader", .running)])
+        let shelf = SidebarListOptions(expandedShelves: [.settled])
+        #expect(Self.describe(Self.build([running], shelf)) == ["spacer", "Settled 1 open", "slim r", "subagent r/Reader"])
+        var closed = shelf
+        closed.subagentDisclosure = ["r": false]
+        #expect(Self.describe(Self.build([running], closed)) == ["spacer", "Settled 1 open", "slim r"])
+        #expect(Self.build([running], closed).compactMap(\.thread).first?.subagents?.expanded == false)
+    }
+
+    @Test func searchMatchesKeepTheirSubagentDropdown() {
+        let parent = Self.withSubagents(Self.thread("p", title: "Audit retries"), [("Reader", .completed)])
+        let searching = SidebarListOptions(searchText: "audit")
+        #expect(Self.describe(Self.build([parent], searching)) == ["card p"])
+
+        var opened = searching
+        opened.subagentDisclosure = ["p": true]
+        #expect(Self.describe(Self.build([parent], opened)) == ["card p", "subagent p/Reader"])
+
+        opened.selectedThreadID = "p"
+        opened.selectedSubagentID = "Reader"
+        #expect(Self.describe(Self.build([parent], opened)) == ["card p", "subagent p/Reader selected"])
     }
 }

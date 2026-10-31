@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "draft", "empty"]
+    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "subagents", "subagent", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -20,6 +20,7 @@ enum DemoFixtures {
         let extra: [AgentThread] = switch scenario {
         case "background": [backgroundThread(now)]
         case "answered": [answeredThread(now)]
+        case "subagents", "subagent": [subagentsThread(now)]
         default: []
         }
         var sample = threads(now) + extra
@@ -50,6 +51,8 @@ enum DemoFixtures {
         case "failed": .thread(ID.failed)
         case "background": .thread(ID.background)
         case "answered": .thread(ID.answered)
+        case "subagents": .thread(ID.subagents)
+        case "subagent": .subagent(threadID: ID.subagents, subagentID: "Reader")
         case "draft": .draft(projectID: ID.app)
         case "empty": .draft(projectID: nil)
         default: .thread(ID.demo)
@@ -89,6 +92,7 @@ enum DemoFixtures {
         static let scratch = "thread-scratch"
         static let background = "thread-background"
         static let answered = "thread-answered"
+        static let subagents = "thread-subagents"
     }
 
     static func projects(_ now: Date) -> [Project] {
@@ -332,6 +336,59 @@ enum DemoFixtures {
                     TurnItem(id: "an2", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s.", isFinal: true), status: .completed, startedAt: ago(10), completedAt: ago(8)),
                 ]
             )]
+        )
+    }
+
+    /// A yielded omp turn whose agent started two subagents ("subagents" selects the thread,
+    /// "subagent" its running subagent Reader): Reader still works (steered once), Scout is done.
+    static func subagentsThread(_ now: Date) -> AgentThread {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        let reader = Subagent(
+            id: "Reader", agent: "sonic",
+            assignment: "Read Sources/Upload/UploadClient.swift and UploadTests.swift, then list every retry path.",
+            status: .running, model: "anthropic/claude-haiku-5-5", lastIntent: "Reading UploadTests.swift",
+            parentToolCallID: "task-1", isDetached: true, startedAt: ago(90), updatedAt: ago(4),
+            turns: [Turn(
+                id: "reader-1", ordinal: 1,
+                userMessage: UserMessage(text: "Complete assignment thoroughly:\n\nRead Sources/Upload/UploadClient.swift and UploadTests.swift, then list every retry path.", createdAt: ago(88)),
+                modelSelection: omp, status: .running, startedAt: ago(88),
+                items: [
+                    TurnItem(id: "r1", kind: .assistantMessage(text: "I'll read both files.", isFinal: false), status: .completed, startedAt: ago(80), completedAt: ago(79)),
+                    TurnItem(id: "r2", kind: .command(CommandExecution(command: "sed -n 1,120p Sources/Upload/UploadClient.swift", cwd: "/Users/demo/code/app", output: "import Foundation\n", exitCode: 0, durationMs: 12)), status: .completed, startedAt: ago(70), completedAt: ago(70)),
+                    TurnItem(id: "r3", kind: .toolCall(ToolCall(name: "read", category: .read, title: "Read Tests/UploadTests.swift")), status: .running, startedAt: ago(4)),
+                ],
+                steers: [UserMessage(text: "Also note which paths have no test.", createdAt: ago(30), isSteer: true)]
+            )]
+        )
+        let scout = Subagent(
+            id: "Scout", agent: "scout", description: "Map the upload client",
+            assignment: "Find every caller of UploadClient.retry.",
+            status: .completed, model: "anthropic/claude-haiku-5-5", lastIntent: "Searching callers",
+            parentToolCallID: "task-1", isDetached: true, startedAt: ago(90), updatedAt: ago(60), completedAt: ago(60),
+            turns: [Turn(
+                id: "scout-1", ordinal: 1,
+                userMessage: UserMessage(text: "Find every caller of UploadClient.retry.", createdAt: ago(88)),
+                modelSelection: omp, status: .completed, startedAt: ago(88), completedAt: ago(60),
+                items: [
+                    TurnItem(id: "s1", kind: .toolCall(ToolCall(name: "grep", category: .search, title: "Searched retry( in Sources")), status: .completed, startedAt: ago(80), completedAt: ago(79)),
+                    TurnItem(id: "s2", kind: .assistantMessage(text: "Two callers: `UploadQueue.resume()` and `BackgroundUploader.handle(_:)`.", isFinal: true), status: .completed, startedAt: ago(62), completedAt: ago(60)),
+                ]
+            )]
+        )
+        return AgentThread(
+            id: ID.subagents, projectID: ID.app, title: "Audit the upload retry paths", createdAt: ago(120), updatedAt: ago(4),
+            modelSelection: omp, branch: "main", lastVisitedAt: ago(4),
+            turns: [Turn(
+                id: "turn-subagents-1", ordinal: 1,
+                userMessage: UserMessage(text: "Audit every retry path in the upload client. Use helpers for the reading.", createdAt: ago(100)),
+                modelSelection: omp, status: .running, startedAt: ago(100),
+                items: [
+                    TurnItem(id: "sa1", kind: .toolCall(ToolCall(name: "task", category: .subagent, title: "Subagent: Reader, Scout")), status: .completed, startedAt: ago(92), completedAt: ago(90)),
+                    TurnItem(id: "sa2", kind: .assistantMessage(text: "Reader and Scout are on it; I'll combine their findings when they report back.", isFinal: false), status: .completed, startedAt: ago(89), completedAt: ago(86)),
+                ],
+                yieldedAt: ago(86)
+            )],
+            subagents: [reader, scout]
         )
     }
 

@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 final class WorkspaceState {
     enum Change: Equatable {
-        /// The selected thread or the draft changed.
+        /// The selected thread, subagent or the draft changed.
         case selection
         case panels
         /// Sidebar project filter or search.
@@ -20,6 +20,9 @@ final class WorkspaceState {
         /// A new, unsent thread ("draft hero" with the composer centered).
         case draft(projectID: String?)
         case thread(String)
+        /// One of a thread's subagents: its runs in the timeline, messages go to it. The panels
+        /// keep showing the thread's workspace.
+        case subagent(threadID: String, subagentID: String)
     }
 
     /// One right-panel tab. Diff and Files exist at most once per workspace; a file tab per
@@ -88,8 +91,17 @@ final class WorkspaceState {
         observers.add(owner, handler)
     }
 
+    /// The thread the selection belongs to: the selected thread, or a selected subagent's thread.
     var selectedThreadID: String? {
-        if case let .thread(id) = selection { return id }
+        switch selection {
+        case let .thread(id), let .subagent(id, _): id
+        case .draft: nil
+        }
+    }
+
+    /// The selected subagent's id; nil unless a subagent is selected.
+    var selectedSubagentID: String? {
+        if case let .subagent(_, id) = selection { return id }
         return nil
     }
 
@@ -107,7 +119,7 @@ final class WorkspaceState {
     /// which has no folder until its thread starts.
     var workspace: WorkspaceRef? {
         switch selection {
-        case let .thread(id): .thread(id)
+        case let .thread(id), let .subagent(id, _): .thread(id)
         case let .draft(projectID): projectID.map { .draft(projectID: $0) }
         }
     }

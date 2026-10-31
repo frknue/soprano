@@ -153,6 +153,8 @@ enum Icon {
     static let squarePenFile = "square.and.pencil"
     static let alarm = "alarm"
     static let statistics = "chart.bar.xaxis"                      // Statistics board
+    static let subagent = "cpu"                                    // Subagents
+    static let circleStop = "stop.circle"                          // Stopped subagent
 }
 
 extension NSImage {

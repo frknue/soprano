@@ -139,6 +139,8 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
     /// Latest known context fill of the thread's provider conversation (every token update,
     /// the exact reading after a turn or compaction); nil = unknown. Older files lack it.
     public var contextUsage: TokenUsage?
+    /// Helper agents the thread's agent started, in start order. Older files lack it.
+    public var subagents: [Subagent]
 
     public init(
         id: String = UUID().uuidString,
@@ -158,7 +160,8 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         turns: [Turn] = [],
         queue: [QueuedMessage] = [],
         isGeneratingTitle: Bool = false,
-        contextUsage: TokenUsage? = nil
+        contextUsage: TokenUsage? = nil,
+        subagents: [Subagent] = []
     ) {
         self.id = id
         self.projectID = projectID
@@ -178,6 +181,7 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         self.queue = queue
         self.isGeneratingTitle = isGeneratingTitle
         self.contextUsage = contextUsage
+        self.subagents = subagents
     }
 
     /// The last turn while it has not ended, working or yielded (`Turn.isYielded`): provider
@@ -199,6 +203,37 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
     /// Timestamp the sidebar shows: the latest user message, else the last update.
     public var activityDate: Date {
         turns.last?.userMessage.createdAt ?? updatedAt
+    }
+
+    public func subagent(_ id: String?) -> Subagent? {
+        guard let id else { return nil }
+        return subagents.first { $0.id == id }
+    }
+}
+
+extension AgentThread {
+    /// Synthesized decoding plus defaults for fields older files lack.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
+        title = try container.decode(String.self, forKey: .title)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        modelSelection = try container.decode(ModelSelection.self, forKey: .modelSelection)
+        runtimeMode = try container.decode(RuntimeMode.self, forKey: .runtimeMode)
+        branch = try container.decodeIfPresent(String.self, forKey: .branch)
+        worktreePath = try container.decodeIfPresent(String.self, forKey: .worktreePath)
+        pinnedAt = try container.decodeIfPresent(Date.self, forKey: .pinnedAt)
+        settledAt = try container.decodeIfPresent(Date.self, forKey: .settledAt)
+        archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+        lastVisitedAt = try container.decodeIfPresent(Date.self, forKey: .lastVisitedAt)
+        providerThreadID = try container.decodeIfPresent(String.self, forKey: .providerThreadID)
+        turns = try container.decode([Turn].self, forKey: .turns)
+        queue = try container.decode([QueuedMessage].self, forKey: .queue)
+        isGeneratingTitle = try container.decode(Bool.self, forKey: .isGeneratingTitle)
+        contextUsage = try container.decodeIfPresent(TokenUsage.self, forKey: .contextUsage)
+        subagents = try container.decodeIfPresent([Subagent].self, forKey: .subagents) ?? []
     }
 }
 

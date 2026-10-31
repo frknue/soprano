@@ -67,7 +67,8 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
     }
 
     /// A thread as it was persisted mid-turn: the running turn (and its live items) become
-    /// interrupted; a yielded turn ends with its yielded outcome at its yield.
+    /// interrupted; a yielded turn ends with its yielded outcome at its yield. Running subagents
+    /// (their process is gone) become aborted, their open run interrupted.
     static func recovered(_ thread: AgentThread) -> AgentThread {
         var thread = thread
         thread.isGeneratingTitle = false
@@ -96,6 +97,19 @@ public final class JSONFileThreadStore: ThreadStore, @unchecked Sendable {
                 }
             }
             thread.turns[index] = turn
+        }
+        for index in thread.subagents.indices where thread.subagents[index].status == .running {
+            var subagent = thread.subagents[index]
+            subagent.status = .aborted
+            subagent.completedAt = subagent.completedAt ?? subagent.updatedAt
+            for run in subagent.turns.indices where subagent.turns[run].status == .running {
+                subagent.turns[run].status = .interrupted
+                subagent.turns[run].completedAt = subagent.updatedAt
+                for item in subagent.turns[run].items.indices where subagent.turns[run].items[item].status.isActive {
+                    subagent.turns[run].items[item].status = .interrupted
+                }
+            }
+            thread.subagents[index] = subagent
         }
         return thread
     }

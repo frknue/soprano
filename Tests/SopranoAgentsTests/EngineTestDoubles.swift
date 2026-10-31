@@ -17,6 +17,8 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     private var _answers: [(id: String, answers: [String: [String]])] = []
     private var _rollbacks: [(ordinal: Int, providerTurnID: String?)] = []
     private var _compactions = 0
+    private var _subagentSteers: [(id: String, text: String)] = []
+    private var _subagentCancels: [String] = []
     private var _closed = false
     var conversationID = "conv-1"
     var startTurnError: (any Error)?
@@ -37,6 +39,8 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     var rollbacks: [(ordinal: Int, providerTurnID: String?)] { lock.withLock { _rollbacks } }
     var compactions: Int { lock.withLock { _compactions } }
     var closed: Bool { lock.withLock { _closed } }
+    var subagentSteers: [(id: String, text: String)] { lock.withLock { _subagentSteers } }
+    var subagentCancels: [String] { lock.withLock { _subagentCancels } }
 
     func start(_ config: SessionConfig) async throws -> String {
         lock.withLock { _configs.append(config) }
@@ -68,6 +72,14 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
 
     func rollback(beforeTurn ordinal: Int, providerTurnID: String?) async throws {
         lock.withLock { _rollbacks.append((ordinal, providerTurnID)) }
+    }
+
+    func steerSubagent(_ id: String, text: String) async throws {
+        lock.withLock { _subagentSteers.append((id, text)) }
+    }
+
+    func cancelSubagent(_ id: String) async throws {
+        lock.withLock { _subagentCancels.append(id) }
     }
 
     func close() async {

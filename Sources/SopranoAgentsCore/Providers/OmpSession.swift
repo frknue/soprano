@@ -32,6 +32,11 @@ import Foundation
 /// before; the new session file becomes the conversation id. (`navigate_tree` would only move
 /// the leaf in memory, which the next `--resume` undoes.)
 ///
+/// Subagents: `set_subagent_subscription {level:"events"}` after the handshake (builds without
+/// it show none); `OmpSubagentMapper` turns the forwarded frames into `subagent` events.
+/// `steer_subagent {subagentId, message}` and `cancel_subagent {subagentId}` act on one. A
+/// restart (new approval mode) or the process's end stops them: they are reported aborted.
+///
 /// Commands: `get_available_commands` after the handshake, then every pushed
 /// `available_commands_update` (`commands` events). Context: when a turn ends, `get_state`'s
 /// `contextUsage` is reported as `tokenUsage`. Compaction (`compact()`): the `compact` command,
@@ -58,6 +63,7 @@ public actor OmpSession: ProviderSession {
     private var client: OmpClient?
     private var generation = 0
     private var mapper = OmpEventMapper()
+    private var subagents = OmpSubagentMapper()
     private var sessionFile: String?
     /// omp's configured model, for switching back to "default".
     private var configuredModel: ModelID?
@@ -108,6 +114,7 @@ public actor OmpSession: ProviderSession {
         self.executable = executable
         self.config = config
         mapper = OmpEventMapper(cwd: config.cwd)
+        subagents = OmpSubagentMapper(cwd: config.cwd)
         // A saved session whose file is gone (deleted, never written) starts fresh.
         let resume = config.resumeID.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
         do {
@@ -275,6 +282,16 @@ public actor OmpSession: ProviderSession {
         await refreshBranchTip()
     }
 
+    public func steerSubagent(_ id: String, text: String) async throws {
+        guard let client else { throw ProviderError.notStarted }
+        _ = try await client.request("steer_subagent", ["subagentId": .string(id), "message": .string(text)])
+    }
+
+    public func cancelSubagent(_ id: String) async throws {
+        guard let client else { throw ProviderError.notStarted }
+        _ = try await client.request("cancel_subagent", ["subagentId": .string(id)])
+    }
+
     public func close() async {
         guard !isClosing else { return }
         isClosing = true
@@ -321,6 +338,8 @@ public actor OmpSession: ProviderSession {
             // `select`/`editor` dialogs, which the mapper handles.
             _ = try? await client.request("set_ask_dialog", ["enabled": true])
             _ = try await client.request("set_event_filter", ["events": .null, "messageUpdates": "delta"])
+            // Builds without subagent forwarding answer with a failure; they show no subagents.
+            _ = try? await client.request("set_subagent_subscription", ["level": "events"])
             return try await client.request("get_state")
         }
         sessionFile = state["sessionFile"]?.nonEmptyString ?? sessionFile
@@ -398,6 +417,7 @@ public actor OmpSession: ProviderSession {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
         retire()
+        for event in subagents.abortAll() { continuation.yield(event) }
         do {
             try await spawn(resume: resume, selection: selection, runtime: runtime)
         } catch {
@@ -475,6 +495,9 @@ public actor OmpSession: ProviderSession {
             return
         case "session_settled":
             await endHeldPrompt { $0.releaseAwaitingSettlement() }
+            return
+        case "subagent_lifecycle", "subagent_progress", "subagent_event":
+            for event in subagents.map(frame) { continuation.yield(event) }
             return
         default:
             break
@@ -602,6 +625,7 @@ public actor OmpSession: ProviderSession {
         hasEnded = true
         activePromptID = nil
         compactionID = nil
+        for event in subagents.abortAll() { continuation.yield(event) }
         continuation.yield(.sessionEnded(error: error))
         continuation.finish()
     }

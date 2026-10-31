@@ -13,6 +13,10 @@ public enum EngineEvent: Sendable, Hashable {
     /// A thread's (or a workspace's remembered) provider commands and skills changed:
     /// re-read `commands(forThread:)` / `commands(forDraft:projectID:)`.
     case commandsChanged
+    /// A subagent's runs or items changed (streaming too). Cheap path for a timeline showing it.
+    case subagentChanged(threadID: String, subagentID: String)
+    /// A thread's subagents were added, or one's status or activity line changed (the sidebar).
+    case subagentListChanged(threadID: String)
 }
 
 /// Where a new thread works.

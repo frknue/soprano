@@ -32,6 +32,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private var heightWithoutSpacer: CGFloat = 0
     private var expandedShelves: Set<InboxSection> = []
     private var settledLimit = SidebarListModel.settledInitialCount
+    /// Subagent disclosures the user toggled, per thread (`SidebarListOptions.subagentDisclosure`).
+    private var subagentDisclosure: [String: Bool] = [:]
     private var renamingThreadID: String?
     private var reloadAfterRename = false
     private var showsJumpHints = false
@@ -144,16 +146,17 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
         engine.addObserver(self) { [weak self] event in
             switch event {
-            case .projectsChanged, .threadListChanged: self?.reload()
+            case .projectsChanged, .threadListChanged, .subagentListChanged: self?.reload()
             case let .threadChanged(threadID): self?.refreshRow(of: threadID)
-            case .itemChanged, .providersChanged, .commandsChanged: break
+            case .itemChanged, .subagentChanged, .providersChanged, .commandsChanged: break
             }
         }
         state.addObserver(self) { [weak self] change in
             guard let self else { return }
             switch change {
             case .selection:
-                if let id = state.selectedThreadID { engine.markVisited(id) }
+                // A subagent's timeline does not show its thread's answer: the thread stays unread.
+                if case let .thread(id) = state.selection { engine.markVisited(id) }
                 reload()
             case .filter:
                 searchField.text = state.searchText
@@ -238,10 +241,12 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private var listOptions: SidebarListOptions {
         SidebarListOptions(
             selectedThreadID: state.selectedThreadID,
+            selectedSubagentID: state.selectedSubagentID,
             projectFilter: state.projectFilter,
             searchText: state.searchText,
             expandedShelves: expandedShelves,
-            settledLimit: settledLimit
+            settledLimit: settledLimit,
+            subagentDisclosure: subagentDisclosure
         )
     }
 
@@ -283,7 +288,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             return
         }
         let projects = Dictionary(engine.projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let row = SidebarListModel.row(for: thread, projects: projects, selectedID: state.selectedThreadID)
+        let row = SidebarListModel.row(for: thread, projects: projects, options: listOptions)
         let item: SidebarItem = if case .slim = items[index] { .slim(row) } else { .card(row) }
         guard item != items[index] else { return }
         // Status or section changes reshuffle the list; anything else is this row only.
@@ -299,7 +304,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
     /// The open thread finished while the user is looking at it: no unread pill.
     private func markSelectedVisitedIfSeen() {
-        guard view.window?.isKeyWindow == true, let id = state.selectedThreadID, let thread = engine.thread(id) else { return }
+        guard view.window?.isKeyWindow == true, case let .thread(id) = state.selection, let thread = engine.thread(id) else { return }
         let status = ThreadStatus.of(thread)
         if status == .done || status == .failed { engine.markVisited(id) }
     }
@@ -374,6 +379,11 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             cell.configure(model, now: now)
             cell.jumpHint = jumpHint(for: model.threadID, order: order)
             return cell
+        case let .subagent(model):
+            let cell = reuse("subagent") { SidebarSubagentCell(frame: .zero) }
+            cell.actions = rowActions
+            cell.configure(model, now: now)
+            return cell
         case let .shelf(section, count, expanded):
             let cell = reuse("shelf") { SidebarShelfCell(frame: .zero) }
             cell.configure(section: section, count: count, expanded: expanded)
@@ -409,7 +419,13 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         setSettled: { [weak self] id, settled in self?.engine.setSettled(id, settled) },
         menu: { [weak self] id in self?.menu(for: id) },
         commitRename: { [weak self] id, title in self?.finishRename(id, title: title) },
-        cancelRename: { [weak self] in self?.finishRename(nil, title: nil) }
+        cancelRename: { [weak self] in self?.finishRename(nil, title: nil) },
+        selectSubagent: { [weak self] threadID, subagentID in self?.openSubagent(threadID, subagentID) },
+        subagentMenu: { [weak self] threadID, subagentID in
+            guard let self else { return nil }
+            return SubagentActions.menu(threadID: threadID, subagentID: subagentID, engine: engine, state: state, window: view.window)
+        },
+        toggleSubagents: { [weak self] threadID in self?.toggleSubagents(threadID) }
     )
 
     // MARK: Actions
@@ -420,6 +436,20 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             view.window?.makeFirstResponder(tableView)
         }
         scrollToThread(threadID)
+    }
+
+    func openSubagent(_ threadID: String, _ subagentID: String) {
+        SubagentActions.open(threadID: threadID, subagentID: subagentID, state: state)
+        if view.window?.firstResponder !== searchField.field.currentEditor() {
+            view.window?.makeFirstResponder(tableView)
+        }
+    }
+
+    /// Opens or closes a card's subagent rows (the selected subagent stays listed).
+    func toggleSubagents(_ threadID: String) {
+        guard let thread = engine.thread(threadID) else { return }
+        subagentDisclosure[threadID] = !SidebarListModel.subagentsExpanded(thread, options: listOptions)
+        reload()
     }
 
     /// Moves the selection `delta` rows in list order (wrapping), like ⇧⌘[ / ⇧⌘].
@@ -540,7 +570,10 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     // MARK: Live times and jump hints
 
     private func updateTimer() {
-        let working = items.contains { $0.thread?.status.isWorking == true }
+        let working = items.contains { item in
+            if case let .subagent(row) = item { return row.status == .running }
+            return item.thread?.status.isWorking == true
+        }
         let interval: TimeInterval = working ? 1 : 30
         guard interval != timerInterval || timer == nil else { return }
         timer?.invalidate()
@@ -555,7 +588,9 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         let visible = tableView.rows(in: tableView.visibleRect)
         guard visible.length > 0 else { return }
         for row in visible.location..<(visible.location + visible.length) {
-            (tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarThreadCell)?.refreshTime(now)
+            let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+            (cell as? SidebarThreadCell)?.refreshTime(now)
+            (cell as? SidebarSubagentCell)?.refreshTime(now)
         }
     }
 

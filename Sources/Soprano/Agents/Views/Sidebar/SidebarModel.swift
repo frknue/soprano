@@ -23,6 +23,15 @@ struct SidebarThreadRow: Equatable {
     /// Read and idle (or working in the background): drawn muted as a receded row.
     let recedes: Bool
     let isGeneratingTitle: Bool
+    /// The thread's subagents (the card's disclosure); nil when it has none.
+    let subagents: SubagentSummary?
+
+    struct SubagentSummary: Equatable {
+        let count: Int
+        let running: Int
+        /// Its subagent rows are listed under the card.
+        let expanded: Bool
+    }
 
     struct DiffStat: Equatable {
         let additions: Int
@@ -33,12 +42,32 @@ struct SidebarThreadRow: Equatable {
     var timestamp: Date { isSettled ? (settledAt ?? activityDate) : activityDate }
 }
 
+/// A subagent row under its thread's card.
+struct SidebarSubagentRow: Equatable {
+    let threadID: String
+    let subagentID: String
+    /// The provider's name ("Reader"); shown.
+    let name: String
+    let agent: String
+    /// What it is doing while it runs (latest intent), else its description or assignment.
+    let detail: String?
+    let status: SubagentStatus
+    /// Start of its latest run; running rows count from here.
+    let since: Date
+    let isSelected: Bool
+    /// Last subagent of its thread (the tree line ends here).
+    let isLast: Bool
+}
+
 /// A row of the sidebar list, top to bottom.
 enum SidebarItem: Equatable {
     /// Pinned, Active and Working threads (78 pt cards).
     case card(SidebarThreadRow)
     /// Settled threads (36 pt rows).
     case slim(SidebarThreadRow)
+    /// A thread's subagent, listed under its card while the card's disclosure is open (the
+    /// selected subagent always).
+    case subagent(SidebarSubagentRow)
     /// "Working 2 ›" / "Settled 43 ›" shelf header.
     case shelf(InboxSection, count: Int, expanded: Bool)
     /// "Show 25 more" under the visible part of the Settled shelf.
@@ -60,6 +89,7 @@ enum SidebarItem: Equatable {
         case let .card(row): "card:\(row.threadID)"
         case let .slim(row): "slim:\(row.threadID)"
         case let .shelf(section, _, _): "shelf:\(section.rawValue)"
+        case let .subagent(row): "subagent:\(row.threadID):\(row.subagentID)"
         case .showMore: "more"
         case .spacer: "spacer"
         case let .empty(state): "empty:\(state.message)"
@@ -111,13 +141,19 @@ struct SidebarStatusPill: Equatable {
 
 /// Inputs of one sidebar render besides the engine's threads and projects.
 struct SidebarListOptions: Equatable {
+    /// The selected thread, or the selected subagent's thread.
     var selectedThreadID: String?
+    /// The selected subagent; its thread's card is then not selected.
+    var selectedSubagentID: String?
     /// Empty = all projects.
     var projectFilter: Set<String> = []
     var searchText = ""
     var expandedShelves: Set<InboxSection> = []
     /// Settled rows shown while the Settled shelf is open.
     var settledLimit = SidebarListModel.settledInitialCount
+    /// Subagent disclosures the user opened (true) or closed (false) per thread; others are open
+    /// while a subagent runs.
+    var subagentDisclosure: [String: Bool] = [:]
 }
 
 /// Builds the sidebar rows: Pinned and Active cards, then the
@@ -140,7 +176,9 @@ enum SidebarListModel {
                 .filter { matches($0, query: query) }
                 .sorted { $0.activityDate > $1.activityDate }
             guard !found.isEmpty else { return [.empty(.noResults)] }
-            return found.map { SidebarItem.card(row(for: $0, projects: projectsByID, selectedID: options.selectedThreadID)) }
+            return found.flatMap { thread -> [SidebarItem] in
+                [.card(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
+            }
         }
 
         var pinned: [AgentThread] = []
@@ -166,22 +204,22 @@ enum SidebarListModel {
         working.sort { workingSince($0) > workingSince($1) }
         settled.sort { ($0.settledAt ?? $0.activityDate) > ($1.settledAt ?? $1.activityDate) }
 
-        func card(_ thread: AgentThread) -> SidebarItem {
-            .card(row(for: thread, projects: projectsByID, selectedID: options.selectedThreadID))
+        func card(_ thread: AgentThread) -> [SidebarItem] {
+            [.card(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
         }
-        func slim(_ thread: AgentThread) -> SidebarItem {
-            .slim(row(for: thread, projects: projectsByID, selectedID: options.selectedThreadID))
+        func slim(_ thread: AgentThread) -> [SidebarItem] {
+            [.slim(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
         }
         /// A closed shelf still shows the open thread.
         func visible(_ threads: [AgentThread], in section: InboxSection) -> [AgentThread] {
             options.expandedShelves.contains(section) ? threads : threads.filter { $0.id == options.selectedThreadID }
         }
 
-        var items = pinned.map(card) + active.map(card)
+        var items = pinned.flatMap(card) + active.flatMap(card)
         items.append(.spacer)
         if !working.isEmpty {
             items.append(.shelf(.working, count: working.count, expanded: options.expandedShelves.contains(.working)))
-            items += visible(working, in: .working).map(card)
+            items += visible(working, in: .working).flatMap(card)
         }
         let settledExpanded = options.expandedShelves.contains(.settled)
         items.append(.shelf(.settled, count: settled.count, expanded: settledExpanded))
@@ -192,11 +230,11 @@ enum SidebarListModel {
             if let selected = settled.dropFirst(limit).first(where: { $0.id == options.selectedThreadID }) {
                 shown.append(selected)
             }
-            items += shown.map(slim)
+            items += shown.flatMap(slim)
             let hidden = settled.count - shown.count
             if hidden > 0 { items.append(.showMore(min(hidden, settledPageCount))) }
         } else {
-            items += visible(settled, in: .settled).map(slim)
+            items += visible(settled, in: .settled).flatMap(slim)
         }
         return items
     }
@@ -206,9 +244,9 @@ enum SidebarListModel {
         items.compactMap { $0.thread?.threadID }
     }
 
-    static func row(for thread: AgentThread, projects: [String: Project], selectedID: String?) -> SidebarThreadRow {
+    static func row(for thread: AgentThread, projects: [String: Project], options: SidebarListOptions) -> SidebarThreadRow {
         let status = ThreadStatus.of(thread)
-        let selected = thread.id == selectedID
+        let selected = thread.id == options.selectedThreadID && options.selectedSubagentID == nil
         let checkpoint = thread.turns.last?.checkpoint
         let diff: SidebarThreadRow.DiffStat? = checkpoint.flatMap { checkpoint in
             guard checkpoint.status == .ready, checkpoint.additions + checkpoint.deletions > 0 else { return nil }
@@ -230,8 +268,47 @@ enum SidebarListModel {
             isSettled: thread.settledAt != nil,
             isSelected: selected,
             recedes: recedes(status: status, selected: selected),
-            isGeneratingTitle: thread.isGeneratingTitle
+            isGeneratingTitle: thread.isGeneratingTitle,
+            subagents: thread.subagents.isEmpty ? nil : SidebarThreadRow.SubagentSummary(
+                count: thread.subagents.count,
+                running: thread.subagents.filter(\.isRunning).count,
+                expanded: subagentsExpanded(thread, options: options)
+            )
         )
+    }
+
+    /// The card's disclosure: as the user left it, else open while a subagent runs.
+    static func subagentsExpanded(_ thread: AgentThread, options: SidebarListOptions) -> Bool {
+        options.subagentDisclosure[thread.id] ?? thread.subagents.contains(where: \.isRunning)
+    }
+
+    /// Subagent rows under a thread's card or slim row: all of them while its disclosure is open,
+    /// else only the selected one.
+    static func subagentRows(of thread: AgentThread, options: SidebarListOptions) -> [SidebarItem] {
+        let selectedID = thread.id == options.selectedThreadID ? options.selectedSubagentID : nil
+        let shown = subagentsExpanded(thread, options: options)
+            ? thread.subagents
+            : thread.subagents.filter { $0.id == selectedID }
+        return shown.enumerated().map { index, subagent in
+            let detail = subagent.isRunning
+                ? subagent.lastIntent ?? subagent.description ?? subagent.assignment
+                : subagent.description ?? subagent.assignment ?? subagent.lastIntent
+            return .subagent(SidebarSubagentRow(
+                threadID: thread.id,
+                subagentID: subagent.id,
+                name: subagent.name,
+                agent: subagent.agent,
+                detail: detail.map(firstLine),
+                status: subagent.status,
+                since: subagent.turns.last?.startedAt ?? subagent.startedAt,
+                isSelected: subagent.id == selectedID,
+                isLast: index == shown.count - 1
+            ))
+        }
+    }
+
+    private static func firstLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
     }
 
     /// Read rows that need nothing step back.

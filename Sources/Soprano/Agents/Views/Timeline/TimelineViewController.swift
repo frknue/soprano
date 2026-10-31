@@ -91,9 +91,11 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             switch event {
             case let .threadChanged(threadID), let .itemChanged(threadID, _, _):
                 if threadID == state.selectedThreadID { scheduleReload() }
+            case let .subagentChanged(threadID, subagentID):
+                if threadID == state.selectedThreadID, subagentID == state.selectedSubagentID { scheduleReload() }
             case .threadListChanged:
                 scheduleReload()
-            case .projectsChanged, .providersChanged, .commandsChanged:
+            case .projectsChanged, .providersChanged, .commandsChanged, .subagentListChanged:
                 break
             }
         }
@@ -122,11 +124,16 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
 
     // MARK: Rows
 
-    /// Rows of the selected thread (none for a draft: the composer draws the hero).
+    /// Rows of the selected thread or subagent (none for a draft: the composer draws the hero).
     var currentRows: [TimelineRow] { list.rows }
 
+    /// The selected thread; a selected subagent as a thread of its runs
+    /// (`Subagent.timelineThread`), whose id no engine thread has, so thread actions do nothing.
     private var selectedThread: AgentThread? {
-        state.isDraft ? nil : engine.thread(state.selectedThreadID)
+        if state.isDraft { return nil }
+        guard let thread = engine.thread(state.selectedThreadID) else { return nil }
+        guard let subagentID = state.selectedSubagentID else { return thread }
+        return thread.subagent(subagentID)?.timelineThread(in: thread)
     }
 
     private func scheduleReload() {
@@ -142,7 +149,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     func reload(scrollToEnd: Bool = false) {
         guard isViewLoaded else { return }
         let thread = selectedThread
-        let rows = TimelineBuilder.rows(for: thread, expansion: expansion)
+        let rows = TimelineBuilder.rows(for: thread, expansion: expansion, editable: state.selectedSubagentID == nil)
         let threadChanged = thread?.id != shownThreadID
         shownThreadID = thread?.id
         list.setRows(rows, scrollToEnd: scrollToEnd || threadChanged)

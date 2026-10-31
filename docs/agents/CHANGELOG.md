@@ -51,6 +51,11 @@ All notable changes to Soprano Agents are documented here. The format follows
   the timeline.
 - Typing `/` at the start of a line in the composer lists omp's commands and `/skill:` skills:
   ↑/↓ choose, Enter or Tab insert, Esc closes.
+- Subagents: when omp's agent starts helper agents (its `task` tool), they appear under their
+  thread in the sidebar, opened by a "⌄ ⚙ N" dropdown on the thread's row (open on its own while
+  one runs), each with its status, what it is doing and its run time. Click one to follow its
+  work in the timeline, message it from the composer (it gets the message at its next step) or
+  stop it with Stop; its menu also copies its name, assignment and transcript path.
 - Accounts, as in Soprano: sign in to several Claude and Codex accounts for omp in Settings →
   Accounts, and let omp prefer one or balance across them; new threads start with the preferred
   account.

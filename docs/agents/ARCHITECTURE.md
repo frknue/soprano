@@ -33,7 +33,7 @@ swift test
 | `Sources/SopranoAgentsCore/Git/` (rest) | Git | `GitRunner` (the only place that spawns git), `LiveGitService` (checkpoints, diffs, status, branches, worktrees, commit/push/PR via `gh`), parsers. |
 | `Sources/SopranoAgents/Theme/` | Shared kit | `Palette` + `PaletteCenter`, `Typography`, `Metrics`, `Radius`, `Icon`, `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`, `KbdView`. |
 | `Sources/SopranoAgents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
-| `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox, chat header + title-bar toggles. |
+| `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox (with subagent rows under their thread's card, `SubagentActions`), chat header + title-bar toggles. |
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
 | `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
@@ -58,13 +58,16 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
 - `.projectsChanged`, `.threadListChanged` (add/remove, title, section, status pill, branch),
   `.threadChanged(threadID:)` (turns/queue/settings), `.itemChanged(threadID:turnID:itemID:)`
   (streaming deltas: re-render just that row), `.providersChanged`, `.commandsChanged` (re-read
-  the command lists).
+  the command lists), `.subagentChanged(threadID:subagentID:)` (a subagent's runs or items,
+  streaming too), `.subagentListChanged(threadID:)` (a subagent added, or its status or activity
+  line changed: the sidebar).
 - Mutations: `addProject`, `removeProject`, `rename`, `setPinned`, `setSettled`, `setArchived`,
   `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`,
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
   `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
-  `rememberCommands`. Reads: `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
+  `rememberCommands`, `steerSubagent`, `cancelSubagent`. Reads: `subagent(_:_:)`,
+  `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
   `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL` (all by `WorkspaceRef`: `.thread(id)`
   or `.draft(projectID:)`, the project root a "Current checkout" thread will use; `key` is the
   UI's per-workspace dictionary key), `commands(forThread:)`, `commands(forDraft:projectID:)`,
@@ -134,6 +137,19 @@ Engine behavior:
   sorted (commands A–Z, then skills A–Z), kept per thread, and remembered per provider and
   workspace for drafts (a worktree thread's list also counts for its project; all scratch threads
   share one). Text starting with `/` reaches the provider with its first characters intact.
+- Subagents: `ProviderEvent.subagent(id:, SubagentEvent)` folds into `AgentThread.subagents`
+  (persisted, start order; `AgentEngine+Subagents.swift`): `.updated` merges reported facts
+  (agent, assignment, model, latest intent, status; a status other than running ends its open
+  run), `.runStarted(message:)` appends a run (`Turn`, the waking message as its user message),
+  `.message` adds a steer to the open run, item and delta events fold into the open run like a
+  thread's, `.runEnded` ends it. `steerSubagent` / `cancelSubagent` need a running subagent and
+  the thread's live session (the message shows up when the subagent reports it). The session's
+  end aborts running subagents; a crash-recovered thread loads them aborted. Identity: the
+  provider's id (`Subagent.name`) is unique only within one omp session, so an event goes to the
+  latest subagent of that name unless its reported transcript or starting tool call differs from
+  the known one; then it gets a new entry (`Subagent.id` "Reader#2", `providerID` "Reader").
+  Views select and address subagents by `id`; messages and Stop reach omp by `name`. "Edit from
+  here" drops the subagents its rewound turns started.
 
 ### Providers (Core/Providers)
 `ProviderDriver` creates `ProviderSession`s, probes the CLI (`probe()` → version, health,
@@ -201,7 +217,16 @@ relaunch), `tool_execution_start|update|end` → bash → command, write/edit/as
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
 `intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
 marks its text final (the timeline drops "Thinking" under it; a resumed yield un-marks it);
-compaction/retry → notices. Rollback before a turn: `get_entries`, the
+compaction/retry → notices. Subagents: `set_subagent_subscription {level:"events"}` after the
+handshake (`try?`: older builds show none); `OmpSubagentMapper` folds `subagent_lifecycle`
+(status), `subagent_progress` (assignment, `lastIntent`, `resolvedModelIdentity`; repeats are
+dropped) and `subagent_event` (the subagent's own session events: `agent_start` opens a run,
+reported with the first `user` or `custom` message; `irc:incoming` messages read "From <agent>:
+…", other custom messages become notices; assistant messages get a synthesized `messageId`
+since subagent events carry none, then go through a per-subagent `OmpEventMapper`; tool
+updates after a tool's end are dropped; `agent_end` ends the run, `stopReason` aborted →
+interrupted, error → failed). `steer_subagent {subagentId, message}`, `cancel_subagent
+{subagentId}`. A restart or the process's end reports running subagents aborted. Rollback before a turn: `get_entries`, the
 turn's entry (its `providerTurnID`; turns recorded as `prompt-N` count user-authored, non-steering
 user messages), then `fork {entryId}` of the last `message` entry before it on the current
 branch, or `new_session` when none; the new `sessionFile` becomes the conversation id.
@@ -212,7 +237,8 @@ the old tip. No Plan mode (omp's RPC has no plan-mode switch). Probe:
 named "<model> · configured", then "<name> · <provider>", effort = "off" + `thinking.efforts`).
 The composer's model list shows the first 80 matches of a multi-word search plus a "N more" row.
 Traces: `Tests/SopranoAgentsTests/Fixtures/omp-ask-write-edit-bash.jsonl`, `omp-builtin-yield.jsonl`
-(`/context`, then an async bash job that yields, wakes the agent and settles).
+(`/context`, then an async bash job that yields, wakes the agent and settles), `omp-subagent.jsonl`
+(a detached `sonic` subagent steered mid-run that gets a background-job notice and completes).
 
 Context, compaction and commands:
 - omp: `get_available_commands` after the handshake, then `available_commands_update`
@@ -288,7 +314,11 @@ action flow (push = `git push -- <remote> HEAD:refs/heads/<b>` + upstream config
 `gh pr create`; open PR lookup via `gh pr view --json` (4 s deadline, failures ignored).
 
 ### `WorkspaceState` (Shell)
-UI state: `selection` (`.draft(projectID:)` or `.thread(id)`) and its `workspace` (`WorkspaceRef`;
+UI state: `selection` (`.draft(projectID:)`, `.thread(id)` or `.subagent(threadID:subagentID:)`:
+the timeline shows the subagent's runs via `Subagent.timelineThread`, not editable; the composer
+messages it (Stop stops it; model, permissions and attachments hide); the header reads `project /
+thread / Reader · sonic`, the thread title opens the thread; `selectedThreadID` is the owning
+thread, `selectedSubagentID` the subagent) and its `workspace` (`WorkspaceRef`;
 nil for a projectless draft, which has no folder), panel visibility (sidebar, thread details card,
 terminal drawer, right panel, statistics board), the right-panel tabs per workspace key (`RightPanelSurface`:
 `.diff`, `.files`, `.file(path)`, `.terminal(sessionID)`; `rightPanelSurfaces`, the active
@@ -485,6 +515,13 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   popovers, code blocks, changed-files card 8; sidebar cards 6.
 - Status pills (sidebar): Working (info, `circle.dashed`, live duration), Approval (warning),
   Input (indigo), Failed (error), Done (success), else relative time ("now", "5m", "3h", "2d").
+- Subagents (sidebar): a card with subagents shows its meta line with a disclosure "⌄ ⚙ N"
+  (running/total while one runs, info-tinted); a slim row shows it before its time. Open (by
+  default while one runs, else after a click) it lists 30 pt rows under the thread, indented
+  18 pt with a tree guide: status glyph (running `circle.dashed` info, done `checkmark.circle`,
+  failed, stopped `stop.circle`), name, "agent · latest intent" (else description or
+  assignment), live run time. A selected subagent stays listed under a closed disclosure; its
+  row, not the thread's, is highlighted, and its thread stays unread until opened itself.
 - Motion: opacity/scale fades ≤ 200 ms, none under Reduce Motion; streaming text appears without
   animation.
 - Floating surfaces that must appear in snapshots (palette, model picker, menus of the composer,
@@ -493,7 +530,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|subagents|subagent|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -519,6 +556,9 @@ adds and selects an omp thread whose turn yielded while a background job runs (f
 "Background work still running…" row, Send instead of Stop); `--fixture answered` one whose
 final answer arrived while omp still wraps up the turn (Working, Stop, no "Thinking" row);
 `--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
+`--fixture subagents` adds and selects a thread whose yielded turn started two subagents
+(running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture
+subagent` selects Reader (its run with a steer, "Message Reader", Stop).
 `--accounts` installs an
 `AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
 has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %/93 % and

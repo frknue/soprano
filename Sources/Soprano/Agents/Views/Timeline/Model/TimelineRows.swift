@@ -22,6 +22,8 @@ struct UserRowModel: Hashable, Sendable {
     var turnID: String?
     var canEdit: Bool
     var expanded: Bool
+    /// Offers "Edit from here" (a subagent's runs cannot be rewound).
+    var editable = true
 }
 
 struct FoldRowModel: Hashable, Sendable {
@@ -132,14 +134,15 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 ///   final answer before it ends the turn).
 /// - Steers sit at the time they were sent; queued messages close the thread.
 enum TimelineBuilder {
-    static func rows(for thread: AgentThread?, expansion: TimelineExpansion = TimelineExpansion()) -> [TimelineRow] {
+    /// `editable` false: no "Edit from here" (a subagent's runs, shown as a thread).
+    static func rows(for thread: AgentThread?, expansion: TimelineExpansion = TimelineExpansion(), editable: Bool = true) -> [TimelineRow] {
         guard let thread else { return [] }
         var rows: [TimelineRow] = []
         if thread.turns.isEmpty, thread.queue.isEmpty {
             return [TimelineRow(id: "empty", content: .empty)]
         }
         for turn in thread.turns {
-            appendTurn(turn, of: thread, expansion: expansion, to: &rows)
+            appendTurn(turn, of: thread, expansion: expansion, editable: editable, to: &rows)
         }
         for queued in thread.queue {
             rows.append(TimelineRow(id: "queued:\(queued.id)", content: .queued(queued.message)))
@@ -161,14 +164,15 @@ enum TimelineBuilder {
         case steer(UserMessage)
     }
 
-    private static func appendTurn(_ turn: Turn, of thread: AgentThread, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
+    private static func appendTurn(_ turn: Turn, of thread: AgentThread, expansion: TimelineExpansion, editable: Bool, to rows: inout [TimelineRow]) {
         let isRunning = turn.status == .running && !turn.isYielded
         let status = turn.isYielded ? turn.yieldedStatus : turn.status
         rows.append(TimelineRow(id: "user:\(turn.userMessage.id)", content: .user(UserRowModel(
             message: turn.userMessage,
             turnID: turn.id,
             canEdit: !thread.isRunning,
-            expanded: expansion.messages.contains(turn.userMessage.id)
+            expanded: expansion.messages.contains(turn.userMessage.id),
+            editable: editable
         ))))
 
         let terminalID = turn.items.last { if case .assistantMessage = $0.kind { return true } else { return false } }?.id

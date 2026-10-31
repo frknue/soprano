@@ -5,11 +5,11 @@ import SopranoAgentsCore
 /// thread action menu, delete and archive flows, copy.
 @MainActor
 enum ThreadActions {
-    /// Opens a thread. The sidebar marks every newly selected thread visited (clearing its
-    /// Done / Failed pill); re-opening the open thread clears a pill it got meanwhile. Either way
-    /// the statistics board closes (`WorkspaceState.select`).
+    /// Opens a thread (also from one of its subagents). The sidebar marks every newly selected
+    /// thread visited (clearing its Done / Failed pill); re-opening the open thread clears a pill
+    /// it got meanwhile. Either way the statistics board closes (`WorkspaceState.select`).
     static func open(_ threadID: String, engine: AgentEngine, state: WorkspaceState) {
-        let wasSelected = state.selectedThreadID == threadID
+        let wasSelected = state.selection == .thread(threadID)
         state.select(.thread(threadID))
         guard wasSelected, let thread = engine.thread(threadID) else { return }
         let status = ThreadStatus.of(thread)
@@ -25,7 +25,7 @@ enum ThreadActions {
     /// the sidebar is filtered to, else the most recently active project.
     static func currentProjectID(engine: AgentEngine, state: WorkspaceState) -> String? {
         switch state.selection {
-        case let .thread(id):
+        case let .thread(id), let .subagent(id, _):
             if let projectID = engine.thread(id)?.projectID, engine.project(projectID) != nil { return projectID }
         case let .draft(projectID):
             if let projectID, engine.project(projectID) != nil { return projectID }

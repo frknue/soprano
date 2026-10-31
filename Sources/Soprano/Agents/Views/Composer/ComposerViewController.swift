@@ -48,9 +48,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     // MARK: State
 
-    /// Whose text the editor holds: a thread, or the draft of a project (nil = no project).
+    /// Whose text the editor holds: a thread, a subagent, or the draft of a project (nil = no
+    /// project).
     enum Target: Hashable {
         case thread(String)
+        case subagent(threadID: String, subagentID: String)
         case draft(String?)
     }
 
@@ -276,7 +278,10 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
                 if slashMenu != nil { showSlashMenu() }
             case .providersChanged, .projectsChanged, .threadListChanged:
                 refresh()
-            case .threadChanged, .itemChanged:
+            case let .subagentListChanged(threadID) where threadID == state.selectedThreadID && state.selectedSubagentID != nil:
+                // The selected subagent may have started or stopped running.
+                refresh()
+            case .threadChanged, .itemChanged, .subagentChanged, .subagentListChanged:
                 break
             }
         }
@@ -294,6 +299,14 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     private var currentThread: AgentThread? {
         engine.thread(state.selectedThreadID)
     }
+
+    /// The selected subagent: messages go to it, Stop stops it.
+    private var currentSubagent: Subagent? {
+        engine.subagent(state.selectedThreadID, state.selectedSubagentID)
+    }
+
+    /// Model, effort and permissions apply to the thread; a selected subagent hides them.
+    var showsThreadSettings: Bool { currentSubagent == nil }
 
     private var pendingApproval: ApprovalRequest? {
         currentThread?.activeTurn?.pendingApproval
@@ -343,6 +356,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         saveCurrent()
         target = switch state.selection {
         case let .thread(id): .thread(id)
+        case let .subagent(threadID, subagentID): .subagent(threadID: threadID, subagentID: subagentID)
         case let .draft(projectID): .draft(projectID)
         }
         let restored = stored[target]
@@ -352,7 +366,8 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         history = ComposerHistory(entries: ComposerHistory.entries(of: currentThread))
         if case let .draft(projectID) = target { loadDraftGit(projectID) }
         refresh()
-        editor.textView.setAccessibilityLabel(currentThread.map { "Message \($0.title)" } ?? "Message")
+        let label = currentSubagent.map { "Message \($0.id)" } ?? currentThread.map { "Message \($0.title)" } ?? "Message"
+        editor.textView.setAccessibilityLabel(label)
         if let window = view.window, !Self.isForeignTextInput(window.firstResponder, in: view) {
             focusEditor()
         }
@@ -442,14 +457,20 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     }
 
     private var placeholder: String {
-        if pendingApproval != nil { return "Send a message to decline and redirect the agent" }
         if let input = pendingInput, let draft = answers[input.id], let question = currentQuestion(draft, in: input) {
             return question.allowsOther ? "Type your own answer, or leave this blank to use the selected option" : "Choose an option above"
         }
+        if let subagent = currentSubagent {
+            return subagent.isRunning ? "Message \(subagent.name)" : "\(subagent.name) is not running, so it can’t take messages"
+        }
+        if pendingApproval != nil { return "Send a message to decline and redirect the agent" }
         return "Ask anything"
     }
 
     private func refreshChips() {
+        let isSubagent = currentSubagent != nil
+        // A subagent runs its own model and permissions, and takes text only.
+        for view in [modelChip, traitsChip, attachButton] as [NSView] { view.isHidden = isSubagent }
         let selection = selection
         let status = engine.status(of: selection.provider)
         let model = ModelChoice.model(for: selection, status: status)
@@ -473,7 +494,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         traitsChip.setAccessibilityLabel(traitsChip.toolTip)
 
         let mode = runtimeMode
-        permissionsChip.isHidden = mode == engine.settings.defaultRuntimeMode
+        permissionsChip.isHidden = isSubagent || mode == engine.settings.defaultRuntimeMode
         permissionsChip.configure(title: mode.title, image: NSImage.symbol(mode.symbolName, size: 13))
         permissionsChip.toolTip = "Permissions: \(mode.title). \(mode.summary)"
         permissionsChip.setAccessibilityLabel("Permissions: \(mode.title)")
@@ -512,6 +533,16 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         previousButton.isHidden = true
         answerButton.isHidden = true
         primaryButton.isHidden = false
+        if let subagent = currentSubagent {
+            let action: ComposerPrimaryAction = subagent.isRunning ? (hasContent ? .steer : .stop) : .sendDisabled
+            let tooltip = switch action {
+            case .steer: "Send to \(subagent.name)"
+            case .stop: "Stop \(subagent.name)"
+            default: "\(subagent.name) is not running"
+            }
+            primaryButton.update(action, tooltip: tooltip, stopping: false)
+            return
+        }
         let action = ComposerPrimaryAction.resolve(
             isRunning: thread?.isRunning ?? false,
             hasContent: hasContent,
@@ -590,6 +621,10 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             return
         }
         guard let thread = currentThread else { return }
+        if let subagent = currentSubagent {
+            sendToSubagent(subagent, of: thread.id, text: text)
+            return
+        }
         if let approval = pendingApproval {
             // Decline, then deliver the message: it steers the turn the agent continues.
             let sentFrom = target
@@ -629,6 +664,25 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     /// ⌘↩: the opposite of the follow-up setting while a turn runs.
     func sendAlternate() {
         submit(alternate: true)
+    }
+
+    /// Delivers text to a subagent (attachments stay in the composer: subagents take text only).
+    private func sendToSubagent(_ subagent: Subagent, of threadID: String, text: String) {
+        guard !text.isEmpty else { return }
+        let sentFrom = target
+        editor.textView.setText("")
+        history.reset()
+        updatePrimary()
+        let subagentID = subagent.id
+        let name = subagent.name
+        Task { [weak self] in
+            do {
+                try await self?.engine.steerSubagent(threadID, subagentID, text: text)
+            } catch {
+                self?.restoreUnsent(text: text, attachments: [], to: sentFrom)
+                await Dialogs.alert(title: "Couldn’t message \(name)", message: error.localizedDescription, in: self?.view.window)
+            }
+        }
     }
 
     private func launchDraft(text: String, attachments files: [Attachment]) {
@@ -678,13 +732,21 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
     }
 
-    /// Interrupts the selected thread's running turn.
+    /// Interrupts the selected thread's running turn, or stops the selected subagent.
     func stop() {
+        if let subagent = currentSubagent {
+            guard subagent.isRunning, let threadID = state.selectedThreadID else { return }
+            SubagentActions.stop(threadID: threadID, subagentID: subagent.id, engine: engine, window: view.window)
+            return
+        }
         guard let thread = currentThread, thread.isRunning else { return }
         Task { await engine.interrupt(thread.id) }
     }
 
-    var canStop: Bool { currentThread?.isRunning ?? false }
+    var canStop: Bool {
+        if let subagent = currentSubagent { return subagent.isRunning }
+        return currentThread?.isRunning ?? false
+    }
 
     // MARK: Approvals and questions
 
@@ -996,6 +1058,8 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let reading = contextReading
         contextMeter.isCompacting = isCompacting
         contextMeter.update(reading)
+        // The meter reads the thread's conversation, not a subagent's.
+        if currentSubagent != nil { contextMeter.isHidden = true }
         contextCard?.update(reading, canCompact: canCompact, isCompacting: isCompacting)
     }
 

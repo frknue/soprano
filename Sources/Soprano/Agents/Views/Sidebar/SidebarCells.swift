@@ -16,11 +16,13 @@ enum SidebarLayout {
     static let showMoreHeight: CGFloat = 37
     static let emptyHeight: CGFloat = 64
     static let emptyWithButtonHeight: CGFloat = 92
+    static let subagentHeight: CGFloat = 30
 
     static func height(of item: SidebarItem) -> CGFloat {
         switch item {
         case let .card(row): row.hasMetaLine ? cardHeight : compactCardHeight
         case .slim: slimHeight
+        case .subagent: subagentHeight
         case .shelf: shelfHeight
         case .showMore: showMoreHeight
         case .spacer: 0
@@ -30,8 +32,9 @@ enum SidebarLayout {
 }
 
 extension SidebarThreadRow {
-    /// The meta line shows a branch or a diff; without either the card drops it.
-    var hasMetaLine: Bool { branch != nil || diff != nil }
+    /// The meta line shows a branch, a diff or the subagent disclosure; without any the card
+    /// drops it.
+    var hasMetaLine: Bool { branch != nil || diff != nil || subagents != nil }
 }
 
 /// Callbacks a thread row raises; the sidebar controller owns the behavior.
@@ -43,6 +46,10 @@ struct SidebarRowActions {
     var menu: (String) -> NSMenu?
     var commitRename: (String, String) -> Void
     var cancelRename: () -> Void
+    var selectSubagent: (_ threadID: String, _ subagentID: String) -> Void
+    var subagentMenu: (_ threadID: String, _ subagentID: String) -> NSMenu?
+    /// Opens or closes the subagent rows under a card.
+    var toggleSubagents: (_ threadID: String) -> Void
 }
 
 // MARK: - Thread rows
@@ -186,6 +193,7 @@ final class SidebarCardCell: SidebarThreadCell {
     private let branchLabel = NSTextField.middleTruncating(size: Typography.smallSize)
     private let diffLabel = NSTextField.label("", size: Typography.smallSize)
     private let providerIcon = NSImageView()
+    private let subagentsButton = SubagentDisclosureButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -194,7 +202,7 @@ final class SidebarCardCell: SidebarThreadCell {
         timeLabel.font = Typography.tabular(Typography.smallSize)
         statusLabel.font = Typography.tabular(Typography.smallSize, weight: .medium)
         timeLabel.alignment = .right
-        for view in [favicon, pinIcon, projectLabel, statusIcon, statusLabel, timeLabel, settleButton, moreButton, titleLabel, worktreeIcon, branchLabel, diffLabel, providerIcon] as [NSView] {
+        for view in [favicon, pinIcon, projectLabel, statusIcon, statusLabel, timeLabel, settleButton, moreButton, titleLabel, worktreeIcon, branchLabel, diffLabel, providerIcon, subagentsButton] as [NSView] {
             addSubview(view)
         }
         settleButton.onClick = { [weak self] in
@@ -202,6 +210,10 @@ final class SidebarCardCell: SidebarThreadCell {
             actions?.setSettled(row.threadID, true)
         }
         moreButton.onClick = { [weak self] in self?.showMoreMenu() }
+        subagentsButton.onClick = { [weak self] in
+            guard let self, let row else { return }
+            actions?.toggleSubagents(row.threadID)
+        }
     }
 
     override var surfaceRect: NSRect {
@@ -220,6 +232,8 @@ final class SidebarCardCell: SidebarThreadCell {
         branchLabel.isHidden = row.branch == nil
         providerIcon.image = ProviderGlyph.image(for: row.provider, size: 14)
         diffLabel.isHidden = row.diff == nil
+        subagentsButton.isHidden = row.subagents == nil
+        if let summary = row.subagents { subagentsButton.configure(summary) }
         settleButton.isHidden = row.isPinned
         super.configure(row, now: now)
         refreshStatus()
@@ -337,7 +351,7 @@ final class SidebarCardCell: SidebarThreadCell {
         let titleSize = titleLabel.intrinsicContentSize
         titleLabel.frame = NSRect(x: left - 2, y: line2 + (20 - titleSize.height) / 2, width: max(0, titleRight - left + 4), height: titleSize.height)
 
-        // Line 3: worktree + branch … diff stat, provider mark.
+        // Line 3: subagent disclosure, worktree + branch … diff stat, provider mark.
         if hasMeta {
             providerIcon.frame = NSRect(x: right - 14, y: line3 + 1, width: 14, height: 14)
             var metaRight = providerIcon.frame.minX - 6
@@ -347,6 +361,11 @@ final class SidebarCardCell: SidebarThreadCell {
                 metaRight = diffLabel.frame.minX - 6
             }
             var metaX = left
+            if !subagentsButton.isHidden {
+                let width = subagentsButton.fittingWidth
+                subagentsButton.frame = NSRect(x: metaX - 4, y: line3 - 2, width: width, height: 20)
+                metaX = subagentsButton.frame.maxX + 6
+            }
             if !worktreeIcon.isHidden {
                 worktreeIcon.frame = NSRect(x: metaX, y: line3 + 1, width: 14, height: 14)
                 metaX += 14 + 6
@@ -381,8 +400,8 @@ final class SidebarCardCell: SidebarThreadCell {
     }
 }
 
-/// Settled-shelf row (`h-9 px-2.5 gap-2.5`): faded favicon, title, time; hover swaps the time
-/// for ↶ "Un-settle thread".
+/// Settled-shelf row (`h-9 px-2.5 gap-2.5`): faded favicon, title, subagent disclosure, time;
+/// hover swaps the time for ↶ "Un-settle thread".
 final class SidebarSlimCell: SidebarThreadCell {
     private let favicon = ProjectMonogramView()
     private let titleLabel = NSTextField.label("", size: Typography.bodySize)
@@ -390,13 +409,14 @@ final class SidebarSlimCell: SidebarThreadCell {
     private let timeLabel = NSTextField.label("", size: Typography.smallSize)
     private let unsettleButton = RowActionButton(symbol: SidebarSymbol.undo2, symbolSize: 12, accessibility: "Un-settle thread")
     private let settleButton = RowActionButton(symbol: Icon.check, symbolSize: 11, accessibility: "Settle thread")
+    private let subagentsButton = SubagentDisclosureButton()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         pinIcon.image = NSImage.symbol(Icon.pin, size: 9)
         timeLabel.font = Typography.tabular(Typography.smallSize)
         timeLabel.alignment = .right
-        for view in [favicon, titleLabel, pinIcon, timeLabel, unsettleButton, settleButton] as [NSView] {
+        for view in [favicon, titleLabel, pinIcon, timeLabel, unsettleButton, settleButton, subagentsButton] as [NSView] {
             addSubview(view)
         }
         unsettleButton.onClick = { [weak self] in
@@ -406,6 +426,10 @@ final class SidebarSlimCell: SidebarThreadCell {
         settleButton.onClick = { [weak self] in
             guard let self, let row else { return }
             actions?.setSettled(row.threadID, true)
+        }
+        subagentsButton.onClick = { [weak self] in
+            guard let self, let row else { return }
+            actions?.toggleSubagents(row.threadID)
         }
     }
 
@@ -419,6 +443,8 @@ final class SidebarSlimCell: SidebarThreadCell {
         titleLabel.stringValue = row.title
         titleLabel.font = Typography.ui(Typography.bodySize, weight: row.recedes ? .regular : .medium)
         pinIcon.isHidden = !row.isPinned
+        subagentsButton.isHidden = row.subagents == nil
+        if let summary = row.subagents { subagentsButton.configure(summary) }
         super.configure(row, now: now)
     }
 
@@ -466,6 +492,11 @@ final class SidebarSlimCell: SidebarThreadCell {
             slotLeft = timeLabel.frame.minX
         }
         var titleRight = slotLeft - 10
+        if !subagentsButton.isHidden {
+            let width = subagentsButton.fittingWidth
+            subagentsButton.frame = NSRect(x: titleRight + 4 - width, y: surface.midY - 10, width: width, height: 20)
+            titleRight = subagentsButton.frame.minX - 6
+        }
         if !pinIcon.isHidden {
             pinIcon.frame = NSRect(x: titleRight - 12, y: surface.midY - 6, width: 12, height: 12)
             titleRight = pinIcon.frame.minX - 10
@@ -496,6 +527,176 @@ final class SidebarSlimCell: SidebarThreadCell {
         pinIcon.contentTintColor = palette.mutedForeground.alphaScaled(by: 0.65)
         timeLabel.textColor = palette.secondaryLabel
         refreshStatus()
+    }
+}
+
+// MARK: - Subagents
+
+/// The card's subagent disclosure on the meta line: "⌄ ⚙ 2" (chevron points right while
+/// closed), tinted while one runs.
+final class SubagentDisclosureButton: InteractiveView {
+    private let chevron = NSImageView()
+    private let icon = NSImageView()
+    private let label = NSTextField.label("", size: Typography.smallSize, weight: .medium)
+    private var summary: SidebarThreadRow.SubagentSummary?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = Radius.sm
+        label.font = Typography.tabular(Typography.smallSize, weight: .medium)
+        icon.image = NSImage.symbol(Icon.subagent, size: 10.5)
+        for view in [chevron, icon, label] as [NSView] { addSubview(view) }
+        setAccessibilityRole(.button)
+    }
+
+    func configure(_ summary: SidebarThreadRow.SubagentSummary) {
+        self.summary = summary
+        chevron.image = NSImage.symbol(summary.expanded ? Icon.chevronDown : Icon.chevronRight, size: 8, weight: .semibold)
+        label.stringValue = summary.running > 0 ? "\(summary.running)/\(summary.count)" : "\(summary.count)"
+        let noun = summary.count == 1 ? "subagent" : "subagents"
+        let text = summary.running > 0 ? "\(summary.count) \(noun), \(summary.running) running" : "\(summary.count) \(noun)"
+        toolTip = "\(text) (\(summary.expanded ? "hide" : "show"))"
+        setAccessibilityLabel(text)
+        setAccessibilityExpanded(summary.expanded)
+        applyPalette(palette)
+        needsLayout = true
+    }
+
+    var fittingWidth: CGFloat {
+        4 + 10 + 3 + 14 + 3 + ceil(label.intrinsicContentSize.width) + 4
+    }
+
+    override func layout() {
+        super.layout()
+        let midY = bounds.midY
+        chevron.frame = NSRect(x: 4, y: midY - 5, width: 10, height: 10)
+        icon.frame = NSRect(x: chevron.frame.maxX + 3, y: midY - 7, width: 14, height: 14)
+        let size = label.intrinsicContentSize
+        label.frame = NSRect(x: icon.frame.maxX + 1, y: midY - size.height / 2, width: ceil(size.width) + 4, height: size.height)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        let running = (summary?.running ?? 0) > 0
+        let tint = running ? palette.color(for: .working) : isHovered ? palette.sidebarForeground : palette.secondaryLabel
+        chevron.contentTintColor = isHovered ? palette.sidebarForeground : palette.mutedForeground
+        icon.contentTintColor = tint
+        label.textColor = tint
+        layer?.backgroundColor = (isHovered ? palette.sidebarRowHover : .clear).cgColor
+    }
+}
+
+/// A subagent under its thread's card (30 pt): tree line, status glyph, name, agent, and what it
+/// is doing (or was asked); running ones count their run's time on the right.
+final class SidebarSubagentCell: InteractiveView {
+    private(set) var row: SidebarSubagentRow?
+    var actions: SidebarRowActions?
+    private var now = Date()
+    private let surface = NSView()
+    private let guide = NSView()
+    private let statusIcon = NSImageView()
+    private let nameLabel = NSTextField.label("", size: Typography.smallSize, weight: .medium)
+    private let detailLabel = NSTextField.label("", size: Typography.smallSize)
+    private let timeLabel = NSTextField.label("", size: Typography.smallSize)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        surface.wantsLayer = true
+        surface.layer?.cornerRadius = Radius.md
+        guide.wantsLayer = true
+        detailLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.lineBreakMode = .byTruncatingTail
+        timeLabel.font = Typography.tabular(Typography.smallSize)
+        timeLabel.alignment = .right
+        for view in [surface, guide, statusIcon, nameLabel, detailLabel, timeLabel] as [NSView] { addSubview(view) }
+        setAccessibilityRole(.row)
+    }
+
+    func configure(_ row: SidebarSubagentRow, now: Date) {
+        self.row = row
+        self.now = now
+        nameLabel.stringValue = row.name
+        detailLabel.stringValue = [row.agent, row.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        statusIcon.image = NSImage.symbol(Self.symbol(row.status), size: 11)
+        setAccessibilityLabel("Subagent \(row.name), \(row.status.rawValue)")
+        toolTip = row.detail
+        refreshTime(now)
+        applyPalette(palette)
+    }
+
+    func refreshTime(_ now: Date) {
+        self.now = now
+        guard let row else { return }
+        timeLabel.isHidden = row.status != .running
+        timeLabel.stringValue = DurationText.compact(now.timeIntervalSince(row.since))
+        needsLayout = true
+    }
+
+    private static func symbol(_ status: SubagentStatus) -> String {
+        switch status {
+        case .running: Icon.circleDashed
+        case .completed: Icon.circleCheck
+        case .failed: Icon.circleAlert
+        case .aborted: Icon.circleStop
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        let inset = SidebarLayout.contentInset
+        // Indented under the card's favicon column.
+        let rect = NSRect(x: inset + 18, y: 1, width: bounds.width - inset * 2 - 18, height: bounds.height - 2)
+        surface.frame = rect
+        let guideX = inset + SidebarLayout.rowInset + 7
+        guide.frame = NSRect(x: guideX, y: 0, width: 1, height: row?.isLast == true ? bounds.midY : bounds.height)
+        let left = rect.minX + 8
+        let right = rect.maxX - 8
+        statusIcon.frame = NSRect(x: left, y: rect.midY - 7, width: 14, height: 14)
+        var textRight = right
+        if !timeLabel.isHidden {
+            let size = timeLabel.intrinsicContentSize
+            let width = max(24, ceil(size.width) + 4)
+            timeLabel.frame = NSRect(x: right + 2 - width, y: rect.midY - size.height / 2, width: width, height: size.height)
+            textRight = timeLabel.frame.minX - 6
+        }
+        let nameX = statusIcon.frame.maxX + 6
+        let nameSize = nameLabel.intrinsicContentSize
+        let nameWidth = min(ceil(nameSize.width) + 4, max(0, textRight - nameX + 2))
+        nameLabel.frame = NSRect(x: nameX - 2, y: rect.midY - nameSize.height / 2, width: nameWidth, height: nameSize.height)
+        let detailX = nameLabel.frame.maxX + 4
+        let detailSize = detailLabel.intrinsicContentSize
+        detailLabel.frame = NSRect(x: detailX, y: rect.midY - detailSize.height / 2, width: max(0, textRight - detailX + 2), height: detailSize.height)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        guard let row else { return }
+        let fill: NSColor = row.isSelected ? palette.sidebarRowActive : isHovered ? palette.sidebarRowHover : .clear
+        surface.layer?.backgroundColor = fill.cgColor
+        surface.layer?.borderWidth = row.isSelected && !palette.isDark ? 1 : 0
+        surface.layer?.borderColor = palette.sidebarBorder.alphaScaled(by: 0.7).cgColor
+        guide.layer?.backgroundColor = palette.sidebarBorder.cgColor
+        let lit = row.isSelected || isHovered
+        statusIcon.contentTintColor = switch row.status {
+        case .running: palette.color(for: .working)
+        case .completed: palette.color(for: .done)
+        case .failed: palette.color(for: .failed)
+        case .aborted: palette.mutedForeground
+        }
+        nameLabel.textColor = lit || row.status == .running ? palette.sidebarForeground : palette.sidebarForeground.alphaScaled(by: 0.8)
+        detailLabel.textColor = palette.secondaryLabel
+        timeLabel.textColor = palette.color(for: .working)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        super.mouseUp(with: event)
+        guard inside, let row else { return }
+        actions?.selectSubagent(row.threadID, row.subagentID)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let row else { return nil }
+        return actions?.subagentMenu(row.threadID, row.subagentID)
     }
 }
 

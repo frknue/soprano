@@ -1,7 +1,8 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Sidebar slice: the 52 pt chat header: breadcrumb project / thread title
+/// Sidebar slice: the 52 pt chat header: breadcrumb project / thread title (/ subagent when one
+/// is selected; the thread title then opens the thread)
 /// (title click opens the thread action menu, double-click renames inline, right-click anywhere
 /// opens the menu), the workspace location (`repo/sub/folder` and branch; click toggles the thread
 /// details) plus the fixed title-bar toggles (thread details, terminal, right panel).
@@ -15,6 +16,9 @@ final class ChatHeaderView: PaletteView {
     private let projectButton = BreadcrumbProjectButton()
     private let separator = NSTextField.label("/", size: Typography.bodySize, weight: .medium)
     private let titleButton = HeaderTitleButton()
+    private let subagentSeparator = NSTextField.label("/", size: Typography.bodySize, weight: .medium)
+    /// "Reader · sonic" while a subagent is selected.
+    private let subagentLabel = NSTextField.label("", size: Typography.bodySize, weight: .medium)
     private let locationButton = HeaderLocationButton()
     /// What `locationButton` shows was loaded for; a change reloads it.
     private var locationSignature: String?
@@ -29,7 +33,8 @@ final class ChatHeaderView: PaletteView {
         self.engine = engine
         self.state = state
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: Metrics.topbarHeight))
-        for view in [sidebarButton, projectButton, separator, titleButton, locationButton, detailsButton, terminalButton, rightPanelButton] as [NSView] {
+        subagentLabel.lineBreakMode = .byTruncatingTail
+        for view in [sidebarButton, projectButton, separator, titleButton, subagentSeparator, subagentLabel, locationButton, detailsButton, terminalButton, rightPanelButton] as [NSView] {
             addSubview(view)
         }
         sidebarButton.onClick = { [weak self] in self?.perform("view.toggleSidebar") }
@@ -41,10 +46,18 @@ final class ChatHeaderView: PaletteView {
             guard let self, let projectID = projectButton.projectID else { return }
             ThreadActions.newDraft(projectID: projectID, state: state)
         }
-        titleButton.onSingleClick = { [weak self] in self?.scheduleTitleMenu() }
+        titleButton.onSingleClick = { [weak self] in
+            guard let self else { return }
+            if let threadID = state.selectedThreadID, state.selectedSubagentID != nil {
+                ThreadActions.open(threadID, engine: engine, state: state)
+            } else {
+                scheduleTitleMenu()
+            }
+        }
         titleButton.onDoubleClick = { [weak self] in
-            self?.pendingMenu?.cancel()
-            self?.beginRename()
+            guard let self, state.selectedSubagentID == nil else { return }
+            pendingMenu?.cancel()
+            beginRename()
         }
 
         engine.addObserver(self) { [weak self] event in
@@ -52,6 +65,7 @@ final class ChatHeaderView: PaletteView {
             switch event {
             case .projectsChanged, .threadListChanged: refresh()
             case let .threadChanged(threadID) where threadID == state.selectedThreadID: refresh()
+            case let .subagentListChanged(threadID) where threadID == state.selectedThreadID: refresh()
             default: break
             }
         }
@@ -69,6 +83,8 @@ final class ChatHeaderView: PaletteView {
 
     private var thread: AgentThread? { engine.thread(state.selectedThreadID) }
 
+    private var subagent: Subagent? { engine.subagent(state.selectedThreadID, state.selectedSubagentID) }
+
     private func refresh() {
         let thread = thread
         let projectID = thread?.projectID ?? state.draftProjectID
@@ -78,6 +94,12 @@ final class ChatHeaderView: PaletteView {
         titleButton.title = thread?.title ?? ""
         titleButton.isHidden = thread == nil
         separator.isHidden = project == nil || thread == nil
+        let subagent = subagent
+        subagentLabel.stringValue = subagent.map { "\($0.name) · \($0.agent)" } ?? ""
+        subagentLabel.toolTip = subagent?.assignment
+        subagentLabel.isHidden = subagent == nil
+        subagentSeparator.isHidden = subagent == nil
+        titleButton.toolTip = subagent == nil ? nil : "Open \(thread?.title ?? "thread")"
         if thread == nil { cancelRename() }
 
         sidebarButton.isHidden = state.isSidebarVisible
@@ -164,7 +186,7 @@ final class ChatHeaderView: PaletteView {
             let title: CGFloat = if renameField != nil {
                 max(160, titleButton.frame.width + 40)
             } else {
-                titleButton.isHidden ? 0 : titleButton.fittingWidth
+                titleButton.isHidden ? 0 : titleButton.fittingWidth + subagentWidth
             }
             let room = limit - left - prefix - gap
             let natural = locationButton.fittingWidth
@@ -188,8 +210,18 @@ final class ChatHeaderView: PaletteView {
             left = separator.frame.maxX + 12
         }
         if !titleButton.isHidden {
-            let width = min(titleButton.fittingWidth, max(0, breadcrumbLimit - left))
+            // A selected subagent's label keeps its room; the thread title truncates first.
+            let room = subagentLabel.isHidden ? breadcrumbLimit - left : max(80, breadcrumbLimit - left - subagentWidth)
+            let width = min(titleButton.fittingWidth, max(0, room))
             titleButton.frame = NSRect(x: left, y: (height - 28) / 2, width: width, height: 28)
+            left = titleButton.frame.maxX
+        }
+        if !subagentLabel.isHidden {
+            let size = subagentSeparator.intrinsicContentSize
+            subagentSeparator.frame = NSRect(x: left + 8, y: (height - size.height) / 2, width: ceil(size.width) + 4, height: size.height)
+            left = subagentSeparator.frame.maxX + 8
+            let labelSize = subagentLabel.intrinsicContentSize
+            subagentLabel.frame = NSRect(x: left, y: (height - labelSize.height) / 2, width: max(0, min(ceil(labelSize.width) + 4, breadcrumbLimit - left)), height: labelSize.height)
         }
         if let renameField {
             let title = titleButton.frame
@@ -197,15 +229,26 @@ final class ChatHeaderView: PaletteView {
         }
     }
 
+    /// Width of "/ Reader · sonic" after the title while a subagent is selected.
+    private var subagentWidth: CGFloat {
+        guard !subagentLabel.isHidden else { return 0 }
+        return 8 + ceil(subagentSeparator.intrinsicContentSize.width) + 4 + 8 + ceil(subagentLabel.intrinsicContentSize.width) + 4
+    }
+
     override func applyPalette(_ palette: Palette) {
         layer?.backgroundColor = palette.background.cgColor
         separator.textColor = palette.mutedForeground
+        subagentSeparator.textColor = palette.mutedForeground
+        subagentLabel.textColor = palette.foreground
     }
 
     // MARK: Menu and rename
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        threadMenu()
+        if let threadID = state.selectedThreadID, let subagentID = state.selectedSubagentID {
+            return SubagentActions.menu(threadID: threadID, subagentID: subagentID, engine: engine, state: state, window: window)
+        }
+        return threadMenu()
     }
 
     private func threadMenu() -> NSMenu? {

@@ -73,7 +73,7 @@ final class UserMessageRowView: TimelineRowView {
         steerLabel.isHidden = !isSteer
         timeLabel.stringValue = TimelineFormat.timestamp(model.message.createdAt)
         timeLabel.toolTip = TimelineFormat.tooltip(model.message.createdAt)
-        editButton.isHidden = model.turnID == nil
+        editButton.isHidden = model.turnID == nil || !model.editable
         editButton.isEnabled = model.canEdit
         toggleButton.title = model.expanded ? "Show less" : "Show full message"
         if changedAttachments { rebuildAttachments(model.message.attachments) }

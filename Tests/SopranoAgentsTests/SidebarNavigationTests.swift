@@ -80,4 +80,16 @@ struct SidebarNavigationTests {
         state.setSearchText("redirect")
         #expect(sidebar.threadOrder == [DemoFixtures.ID.demo])
     }
+
+    @Test func openingASubagentLeavesItsThreadsUnreadStateAlone() throws {
+        let (sidebar, engine, state) = try sidebar("subagents")
+        engine.markUnread(DemoFixtures.ID.subagents)
+        sidebar.openSubagent(DemoFixtures.ID.subagents, "Scout")
+        #expect(state.selectedSubagentID == "Scout")
+        #expect(engine.thread(DemoFixtures.ID.subagents)?.lastVisitedAt == nil)
+
+        sidebar.open(DemoFixtures.ID.subagents)
+        #expect(state.selectedSubagentID == nil)
+        #expect(engine.thread(DemoFixtures.ID.subagents)?.lastVisitedAt != nil)
+    }
 }
