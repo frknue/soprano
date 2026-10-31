@@ -115,7 +115,6 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
 
     public var modelSelection: ModelSelection
     public var runtimeMode: RuntimeMode
-    public var interactionMode: InteractionMode
 
     /// Branch the thread works on (worktree branch or the checkout's branch at creation).
     public var branch: String?
@@ -129,7 +128,8 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
     /// Last time the user looked at the thread; drives "Done"/"Failed" unread pills.
     public var lastVisitedAt: Date?
 
-    /// Provider-native conversation id: Codex thread id or Claude session id. Used to resume.
+    /// omp's conversation: the absolute path of its session file (`get_state` `sessionFile`).
+    /// Used to resume.
     public var providerThreadID: String?
 
     public var turns: [Turn]
@@ -148,7 +148,6 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         updatedAt: Date? = nil,
         modelSelection: ModelSelection,
         runtimeMode: RuntimeMode = .fullAccess,
-        interactionMode: InteractionMode = .build,
         branch: String? = nil,
         worktreePath: String? = nil,
         pinnedAt: Date? = nil,
@@ -168,7 +167,6 @@ public struct AgentThread: Codable, Sendable, Hashable, Identifiable {
         self.updatedAt = updatedAt ?? createdAt
         self.modelSelection = modelSelection
         self.runtimeMode = runtimeMode
-        self.interactionMode = interactionMode
         self.branch = branch
         self.worktreePath = worktreePath
         self.pinnedAt = pinnedAt

@@ -13,7 +13,7 @@ struct ThreadNotifierTests {
     }
 
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
-    private let model = ModelSelection(provider: .codex, model: "gpt-6.1-sol")
+    private let model = ModelSelection(provider: .omp, model: "openai-codex/gpt-6.1-sol")
 
     private func runningThread(_ id: String, title: String) -> AgentThread {
         AgentThread(

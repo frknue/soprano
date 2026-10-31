@@ -15,46 +15,34 @@ enum AppPaths {
     }
 }
 
-/// Executable overrides from settings.json, readable from the drivers' background tasks.
+/// Executable override from settings.json, readable from the driver's background tasks.
 final class ExecutablePaths: @unchecked Sendable {
     private let lock = NSLock()
-    private var paths: [ProviderKind: String] = [:]
+    private var ompPath: String?
 
     func update(_ settings: EngineSettings) {
-        lock.withLock {
-            paths = [:]
-            paths[.omp] = settings.ompPath
-            paths[.codex] = settings.codexPath
-            paths[.claude] = settings.claudePath
-        }
+        lock.withLock { ompPath = settings.ompPath }
     }
 
-    func path(for kind: ProviderKind) -> String? {
-        lock.withLock { paths[kind] }
+    /// `providers.ompPath`, or nil to search PATH.
+    var omp: String? {
+        lock.withLock { ompPath }
     }
 }
 
-/// The account each new Codex and omp process starts with, read from the vendored
-/// `AccountLaunchState` that `AccountsController` publishes into: the chosen Codex account's
-/// `CODEX_HOME` (linking whatever `~/.codex` gained since), and omp's `--config` overlay with
-/// the preferred accounts. Claude Code switches its login for the whole Mac, so it gets nothing.
+/// The accounts each new omp process starts with, read from the vendored `AccountLaunchState`
+/// that `AccountsController` publishes into: omp's `--config` overlay with the preferred accounts.
 enum AccountLaunchBridge {
-    static func adjustments(for kind: ProviderKind, state: AccountLaunchState = .shared) -> ProviderLaunchAdjustments {
-        let profile: String
-        switch kind {
-        case .codex: profile = "codex"
-        case .omp: profile = "omp"
-        case .claude: return .none
-        }
-        let adjustments = state.adjustments(forProfile: profile)
+    static func ompAdjustments(state: AccountLaunchState = .shared) -> ProviderLaunchAdjustments {
+        let adjustments = state.adjustments(forProfile: "omp")
         return ProviderLaunchAdjustments(environment: adjustments.environment, arguments: adjustments.arguments)
     }
 }
 
-/// Builds the engine the app runs with: JSON-file store, git CLI, omp, Codex and Claude drivers.
+/// Builds the engine the app runs with: JSON-file store, git CLI and the omp driver.
 @MainActor
 enum EngineFactory {
-    /// Executable overrides the drivers read on every spawn; the app delegate keeps them current.
+    /// The executable override the driver reads on every spawn; the app delegate keeps it current.
     static let executablePaths = ExecutablePaths()
 
     static func live(settings: EngineSettings) -> AgentEngine {
@@ -65,14 +53,9 @@ enum EngineFactory {
         let environment = EngineEnvironment(
             drivers: [
                 .omp: OmpDriver(
-                    executablePath: { paths.path(for: .omp) },
-                    launchAdjustments: { AccountLaunchBridge.adjustments(for: .omp) }
+                    executablePath: { paths.omp },
+                    launchAdjustments: { AccountLaunchBridge.ompAdjustments() }
                 ),
-                .codex: CodexDriver(
-                    executablePath: { paths.path(for: .codex) },
-                    launchAdjustments: { AccountLaunchBridge.adjustments(for: .codex) }
-                ),
-                .claude: ClaudeDriver(executablePath: { paths.path(for: .claude) }),
             ],
             git: LiveGitService(),
             store: JSONFileThreadStore(directory: dataDirectory),

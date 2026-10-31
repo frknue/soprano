@@ -38,7 +38,7 @@ struct WorkspaceLocationTests {
         try await repo.git("worktree", "add", "--quiet", "-b", "feature/x", worktree.path)
         let engine = engine(sandbox)
         let project = engine.addProject(path: repo.path)
-        var thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .codex))
+        var thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .omp))
         thread.worktreePath = worktree.path
         engine.insertThread(thread)
 
@@ -56,7 +56,7 @@ struct WorkspaceLocationTests {
         try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
         let engine = engine(sandbox)
         let project = engine.addProject(path: plain.path)
-        let scratch = AgentThread(projectID: nil, title: "S", modelSelection: .default(for: .codex))
+        let scratch = AgentThread(projectID: nil, title: "S", modelSelection: .default(for: .omp))
         engine.insertThread(scratch)
 
         let folder = try #require(await engine.workspaceLocation(.draft(projectID: project.id)))

@@ -77,14 +77,6 @@ struct MarkdownDocumentTests {
         #expect(MarkdownDocument.parse("<div>hi</div>") == [.html("<div>hi</div>")])
     }
 
-    @Test func thePlanTitleIsItsFirstHeadingAndTheBodyDropsIt() {
-        let plan = "# Docs redesign\n\n## Summary\n\nShort.\n\n## Steps\n1. Do it"
-        #expect(MarkdownDocument.firstHeading(in: plan) == "Docs redesign")
-        #expect(MarkdownDocument.strippingTitle(plan) == "Short.\n\n## Steps\n1. Do it")
-        #expect(MarkdownDocument.firstHeading(in: "No heading here\n#hashtag") == nil)
-        #expect(MarkdownDocument.strippingTitle("Just text\n") == "Just text")
-    }
-
     @Test func plainTextReadsLikeTheRenderedLine() {
         let inlines: [MarkdownInline] = [.text("a "), .strong([.text("b")]), .softBreak, .code("c"), .image(source: "x.png", alt: "pic")]
         #expect(MarkdownDocument.plainText(of: inlines) == "a b cpic")

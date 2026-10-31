@@ -26,9 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.install()
         menuController = menu
 
-        // Accounts first: `start()` writes omp's account overlay and publishes the chosen Codex
-        // home before the engine's first probe spawns a provider. Only the real launch does
-        // this; tests and the snapshot harness keep the inert or fixture source.
+        // Accounts first: `start()` writes omp's account overlay before the engine's first probe
+        // spawns omp. Only the real launch does this; tests and the snapshot harness keep the
+        // inert or fixture source.
         AccountsCenter.source = AccountsController.shared
         AccountsController.shared.start()
 

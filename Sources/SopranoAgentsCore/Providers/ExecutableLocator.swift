@@ -1,11 +1,11 @@
 import Foundation
 
-/// Finds the agent CLIs and builds the environment their processes run with.
+/// Finds the agent CLI and builds the environment its processes run with.
 ///
 /// GUI apps start with launchd's minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so the
-/// inherited PATH is extended with the directories installers put `codex` and `claude` in:
+/// inherited PATH is extended with the directories installers put `omp` in:
 /// `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin`, `~/.cargo/bin`,
-/// `~/.npm-global/bin`. Children get the same extended PATH so the CLIs find node, git, etc.
+/// `~/.npm-global/bin`. Children get the same extended PATH so the CLI finds node, git, etc.
 public enum ExecutableLocator {
     /// Extra tool directories, in search order after the inherited PATH.
     public static func toolDirectories(home: String) -> [String] {
@@ -29,7 +29,7 @@ public enum ExecutableLocator {
         return (inherited + toolDirectories(home: home)).filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    /// Resolves `name`. An explicit path (settings `providers.codexPath` / `claudePath`, `~`
+    /// Resolves `name`. An explicit path (settings `providers.ompPath`, `~`
     /// expanded) wins and is never second-guessed: nil when it is not an executable file.
     /// Without one, the first executable `name` on `searchPath`.
     public static func locate(

@@ -1,53 +1,18 @@
 import Foundation
 
-/// The agent CLIs Soprano Agents drives. One thread talks to exactly one provider.
-/// Declaration order is display order (pickers, settings): omp first.
+/// The agent CLI Soprano Agents drives: omp. One thread talks to exactly one provider.
 public enum ProviderKind: String, Codable, Sendable, CaseIterable, Hashable {
     /// `omp --mode rpc-ui` (oh-my-pi's JSONL RPC with host-rendered tool UI: approvals, `ask`).
     case omp
-    /// `codex app-server` (JSON-RPC over stdio).
-    case codex
-    /// `claude -p --input-format stream-json --output-format stream-json` with the stdio control protocol.
-    case claude
 
-    public var displayName: String {
-        switch self {
-        case .omp: "omp"
-        case .codex: "Codex"
-        case .claude: "Claude Code"
-        }
-    }
+    public var displayName: String { "omp" }
 
     /// The CLI's executable name.
-    public var executableName: String {
-        switch self {
-        case .omp: "omp"
-        case .codex: "codex"
-        case .claude: "claude"
-        }
-    }
+    public var executableName: String { "omp" }
 
-    /// Build/Plan applies: omp's RPC has no plan-mode switch, so its composer hides the toggle.
-    public var supportsPlanMode: Bool { self != .omp }
-
-    /// Default chat model when the provider's live catalog is not known yet. For omp this is
-    /// `ModelSelection.ompDefaultModel`: whatever omp itself is configured to use.
-    public var defaultModel: String {
-        switch self {
-        case .omp: ModelSelection.ompDefaultModel
-        case .codex: "gpt-6.1-sol"
-        case .claude: "claude-opus-5-5"
-        }
-    }
-
-    /// Default model for background text generation (titles, commit messages, branch names).
-    public var textGenerationModel: String {
-        switch self {
-        case .omp: ModelSelection.ompDefaultModel
-        case .codex: "gpt-6-luna"
-        case .claude: "claude-haiku-5-5"
-        }
-    }
+    /// Default chat model when omp's live catalog is not known yet:
+    /// `ModelSelection.ompDefaultModel`, whatever omp itself is configured to use.
+    public var defaultModel: String { ModelSelection.ompDefaultModel }
 }
 
 /// How much the agent may do without asking. Four modes with fixed labels.
@@ -86,19 +51,6 @@ public enum RuntimeMode: String, Codable, Sendable, CaseIterable, Hashable {
     }
 }
 
-/// Build (default) or Plan. Plan asks the agent for a plan instead of changes.
-public enum InteractionMode: String, Codable, Sendable, CaseIterable, Hashable {
-    case build = "default"
-    case plan
-
-    public var title: String {
-        switch self {
-        case .build: "Build"
-        case .plan: "Plan"
-        }
-    }
-}
-
 /// One selectable value of a model option (e.g. reasoning effort "high").
 public struct ModelOptionChoice: Codable, Sendable, Hashable, Identifiable {
     public var id: String
@@ -112,14 +64,14 @@ public struct ModelOptionChoice: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// A provider-supplied option for a model: a select (effort, service tier) or a boolean (fast mode).
+/// A provider-supplied option for a model: a select (reasoning effort) or a boolean (fast mode).
 public struct ModelOption: Codable, Sendable, Hashable, Identifiable {
     public enum Kind: String, Codable, Sendable, Hashable {
         case select
         case boolean
     }
 
-    /// Stable id; also the key in `ModelSelection.options`. Known ids: `effort`, `fastMode`, `serviceTier`.
+    /// Stable id; also the key in `ModelSelection.options`. Known ids: `effort`, `fastMode`.
     public var id: String
     public var label: String
     public var kind: Kind
@@ -139,9 +91,9 @@ public struct ModelOption: Codable, Sendable, Hashable, Identifiable {
 /// A model a provider offers.
 public struct ProviderModel: Codable, Sendable, Hashable, Identifiable {
     public var id: String { slug }
-    /// Id sent to the provider (`gpt-6.1-sol`, `claude-opus-5-5`).
+    /// Id sent to the provider (`anthropic/claude-opus-5-5`, or `default` for omp's configured model).
     public var slug: String
-    /// Display name ("GPT-6.1 Sol", "Claude Opus 5.5").
+    /// Display name ("Claude Opus 5.5 · anthropic").
     public var name: String
     public var isDefault: Bool
     public var options: [ModelOption]
@@ -171,10 +123,8 @@ public struct ProviderStatus: Codable, Sendable, Hashable, Identifiable {
     public var id: ProviderKind { kind }
     public var kind: ProviderKind
     public var health: Health
-    /// CLI version ("0.166.0", "2.1.314").
+    /// CLI version ("18.14.0").
     public var version: String?
-    /// Account label ("ChatGPT Pro 100 Subscription", "Claude Max").
-    public var accountLabel: String?
     public var models: [ProviderModel]
     /// Human-readable problem when `health` is not `ready`.
     public var message: String?
@@ -183,14 +133,12 @@ public struct ProviderStatus: Codable, Sendable, Hashable, Identifiable {
         kind: ProviderKind,
         health: Health = .unknown,
         version: String? = nil,
-        accountLabel: String? = nil,
         models: [ProviderModel] = [],
         message: String? = nil
     ) {
         self.kind = kind
         self.health = health
         self.version = version
-        self.accountLabel = accountLabel
         self.models = models
         self.message = message
     }
@@ -237,5 +185,4 @@ extension ModelSelection {
 public enum ModelOptionID {
     public static let effort = "effort"
     public static let fastMode = "fastMode"
-    public static let serviceTier = "serviceTier"
 }

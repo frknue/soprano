@@ -1,7 +1,7 @@
 import Foundation
 
-/// Extra environment and arguments for one provider CLI spawn, such as the account the app
-/// picked: `CODEX_HOME` for Codex, `--config <overlay>` for omp. Drivers and sessions read
+/// Extra environment and arguments for one omp spawn, such as the accounts the app picked
+/// (`--config <overlay>`). Drivers and sessions read
 /// it through a `@Sendable () -> ProviderLaunchAdjustments` closure on every spawn (sessions,
 /// probes, text generation), the same way they read `executablePath`; the app injects it
 /// from `EngineFactory`, tests and fixtures use `.none`.

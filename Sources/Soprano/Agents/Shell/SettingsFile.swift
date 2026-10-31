@@ -95,25 +95,20 @@ enum SettingsFile {
           "theme": "soprano",
 
           "agents": {
-            // Provider new threads start with: "omp", "codex" or "claude".
-            "defaultProvider": "omp",
-            // Model id ("provider/id" for omp); omit for the provider's default (omp: its own configured model).
-            // "defaultModel": "gpt-6.1-sol",
+            // omp model id ("provider/id"); omit for omp's own configured model.
+            // "defaultModel": "anthropic/claude-sonnet-5-5",
             // "approval-required" (Supervised), "auto-accept-edits", "auto", or "full-access".
             "defaultRuntimeMode": "full-access"
           },
 
           "providers": {
-            // Executables; omit to find them on PATH.
-            // "ompPath": "~/.bun/bin/omp",
-            // "codexPath": "~/.local/bin/codex",
-            // "claudePath": "~/.local/bin/claude"
+            // The omp executable; omit to find it on PATH.
+            // "ompPath": "~/.bun/bin/omp"
           },
 
           "textGeneration": {
-            // Thread titles, commit messages and branch names.
-            "provider": "codex",
-            // "model": "gpt-6-luna",
+            // Thread titles, commit messages and branch names. omp model id; omit for omp's own model.
+            // "model": "anthropic/claude-haiku-5-5",
             "titles": true
           },
 

@@ -28,17 +28,13 @@ struct AppSettings: Equatable, Sendable {
     /// "soprano" (follow Soprano's own theme and appearance) or an id from `AppTheme.options`.
     var theme: String = "soprano"
 
-    var defaultProvider: ProviderKind = .omp
-    /// nil = the provider's default model.
+    /// nil = omp's own configured model (`ModelSelection.ompDefaultModel`).
     var defaultModel: String?
     var defaultRuntimeMode: RuntimeMode = .fullAccess
-    /// Executable overrides; nil = find on PATH.
+    /// Executable override; nil = find `omp` on PATH.
     var ompPath: String?
-    var codexPath: String?
-    var claudePath: String?
 
-    var textGenerationProvider: ProviderKind = .codex
-    /// nil = the provider's text-generation default (`gpt-6-luna`, `claude-haiku-5-5`).
+    /// nil = omp's own configured model.
     var textGenerationModel: String?
     var generateTitles = true
 
@@ -58,12 +54,8 @@ struct AppSettings: Equatable, Sendable {
 
     /// The engine's view of these settings.
     var engineSettings: EngineSettings {
-        let model = ModelSelection(provider: defaultProvider, model: defaultModel ?? defaultProvider.defaultModel)
-        let generation = ModelSelection(
-            provider: textGenerationProvider,
-            model: textGenerationModel ?? textGenerationProvider.textGenerationModel,
-            options: textGenerationProvider == .codex ? [ModelOptionID.effort: "low"] : [:]
-        )
+        let model = ModelSelection(provider: .omp, model: defaultModel ?? ModelSelection.ompDefaultModel)
+        let generation = ModelSelection(provider: .omp, model: textGenerationModel ?? ModelSelection.ompDefaultModel)
         return EngineSettings(
             defaultModel: model,
             defaultRuntimeMode: defaultRuntimeMode,
@@ -71,9 +63,7 @@ struct AppSettings: Equatable, Sendable {
             branchPrefix: branchPrefix,
             worktreesDirectory: worktreesDirectory,
             generateTitles: generateTitles,
-            ompPath: ompPath,
-            codexPath: codexPath,
-            claudePath: claudePath
+            ompPath: ompPath
         )
     }
 }

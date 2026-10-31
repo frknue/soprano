@@ -14,7 +14,7 @@ struct EngineWorkspaceTests {
         let engine = EngineHarness.engine(driver: driver)
         let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
         let missing = "/tmp/soprano-agents-deleted-\(UUID().uuidString)"
-        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), worktreePath: missing)
+        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .omp), worktreePath: missing)
         engine.insertThread(thread)
 
         try await engine.send(thread.id, text: "go", attachments: [])
@@ -31,7 +31,7 @@ struct EngineWorkspaceTests {
         settings.worktreesDirectory = EngineHarness.temporaryDirectory().path
         let engine = EngineHarness.engine(driver: driver, git: git, settings: settings)
         let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
-        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "main"))
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), workspace: .newWorktree(baseBranch: "main"))
         let threadID = try await engine.launchThread(draft, text: "first", attachments: [])
         #expect(await failure(of: threadID, in: engine) == "worktree add failed")
 
@@ -42,36 +42,13 @@ struct EngineWorkspaceTests {
         #expect(await failure(of: threadID, in: engine) != nil)
     }
 
-    @Test func switchingProviderAfterRewindingTheFirstTurnStartsAFreshConversation() async throws {
-        let codex = ScriptedDriver(kind: .codex)
-        let claude = ScriptedDriver(kind: .claude)
-        let environment = EngineEnvironment(
-            drivers: [.codex: codex, .claude: claude],
-            git: RecordingGit(),
-            store: InMemoryThreadStore(),
-            dataDirectory: EngineHarness.temporaryDirectory()
-        )
-        let engine = AgentEngine(environment: environment, settings: EngineSettings(generateTitles: false))
-        let id = EngineHarness.idleThread(in: engine)
-        try await engine.send(id, text: "one", attachments: [])
-        codex.session?.emit(.turnCompleted(outcome: .completed, error: nil))
-        #expect(await EngineHarness.eventually { engine.thread(id)?.turns.last?.checkpoint != nil })
-        let first = try #require(engine.thread(id)?.turns.first)
-        _ = try await engine.revert(id, toBeforeTurn: first.id, restoreFiles: false)
-
-        engine.setModelSelection(id, .default(for: .claude))
-        try await engine.send(id, text: "two", attachments: [])
-
-        #expect(claude.session?.configs.first?.resumeID == nil)
-    }
-
     @Test func aFailedFileRestoreStillRewindsTheConversationItRolledBack() async throws {
         let driver = ScriptedDriver()
         let git = RecordingGit()
         let engine = EngineHarness.engine(driver: driver, git: git)
         let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
         let worktree = EngineHarness.temporaryDirectory().path
-        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), worktreePath: worktree)
+        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .omp), worktreePath: worktree)
         engine.insertThread(thread)
         for text in ["one", "two"] {
             try await engine.send(thread.id, text: text, attachments: [])

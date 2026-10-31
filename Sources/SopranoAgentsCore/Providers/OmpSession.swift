@@ -37,9 +37,6 @@ import Foundation
 /// `contextUsage` is reported as `tokenUsage`. Compaction (`compact()`): the `compact` command,
 /// answered once it has ended (`manual_compaction_start|end` in between), reported as a turn:
 /// its notice, the new `contextUsage`, the compaction entry as the turn's id, `turnCompleted`.
-///
-/// Not supported: plan mode (omp has no host-driven plan mode over RPC; turns run as Build) and
-/// decline feedback (omp's approval select has no text field).
 public actor OmpSession: ProviderSession {
     public nonisolated let kind = ProviderKind.omp
     public nonisolated let events: AsyncStream<ProviderEvent>
@@ -141,7 +138,6 @@ public actor OmpSession: ProviderSession {
         }
         config.modelSelection = input.modelSelection
         config.runtimeMode = input.runtimeMode
-        config.interactionMode = input.interactionMode
         self.config = config
         try await apply(input.modelSelection)
         guard let live = client else { throw ProviderError.notStarted }
@@ -192,7 +188,7 @@ public actor OmpSession: ProviderSession {
         await endHeldPrompt { $0.releaseAwaitingSettlement() }
     }
 
-    public func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async {
+    public func respond(toApproval id: String, decision: ApprovalDecision) async {
         guard let request = pending.removeValue(forKey: id) else { return }
         if decision == .decline || decision == .cancel { mapper.markDeclined(requestID: id) }
         let frame = OmpProtocol.approvalLabel(for: decision, options: request.options)

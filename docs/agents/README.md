@@ -2,30 +2,26 @@
 
 **A native macOS app for coding agents, in the Soprano family.**
 
-Soprano Agents gives the `omp`, `codex` and `claude` CLIs a native home in the Soprano family,
+Soprano Agents gives the `omp` CLI (oh-my-pi) a native home in the Soprano family,
 colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a floating
 composer, collapsible work logs, approvals and questions inline, per-turn diffs
 from hidden git checkpoints, worktrees, a terminal drawer and a diff panel on the right. It is a
-Swift 6 / AppKit app, not a web view, and it talks to the agent CLIs directly: there is no server.
+Swift 6 / AppKit app, not a web view, and it talks to `omp` directly: there is no server.
 
 ## Requirements
 
 - macOS 14 or later.
-- At least one agent CLI, installed and signed in:
-  - **omp** ([oh-my-pi](https://github.com/can1357/oh-my-pi), the default): the `omp` CLI with at
-    least one model provider logged in (`omp login`). Soprano Agents runs
-    `omp --mode rpc-ui`, omp's host-UI protocol, so omp's tool approvals and its `ask` tool show
-    up inline. Every model omp knows (its `/model` list across Anthropic, OpenAI, Copilot,
-    OpenRouter, …) is in the model picker; "configured" is whatever omp itself defaults to.
-  - **Codex**: the `codex` CLI (`codex login` once). Soprano Agents runs `codex app-server`.
-  - **Claude Code**: the `claude` CLI (run `claude` once to sign in). Soprano Agents runs
-    `claude -p` with the stream-json protocol.
+- The `omp` CLI ([oh-my-pi](https://github.com/can1357/oh-my-pi)) with at least one model
+  provider logged in (`omp login`). Soprano Agents runs `omp --mode rpc-ui`, omp's host-UI
+  protocol, so omp's tool approvals and its `ask` tool show up inline. Every model omp knows (its
+  `/model` list across Anthropic, OpenAI, Copilot, OpenRouter, …) is in the model picker;
+  "configured" is whatever omp itself defaults to.
 - `git` for checkpoints, diffs and worktrees; `gh` for creating pull requests.
 
 Apps started from the Dock get a minimal `PATH`, so Soprano Agents also looks in
-`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin` and `~/.cargo/bin`. If a CLI
-lives elsewhere, set its path in **Settings › Providers** (`providers.ompPath`,
-`providers.codexPath`, `providers.claudePath`). The same page shows each provider's version, account and health.
+`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin` and `~/.cargo/bin`. If `omp`
+lives elsewhere, set its path in **Settings › Providers** (`providers.ompPath`). The same page
+shows omp's version and health.
 
 ## Install and build
 
@@ -56,11 +52,11 @@ The installer never restarts a running Soprano Agents; the update applies on the
    opened file, and terminals (`⇧⌘J`) next to the bottom drawer's. `+` adds a surface; with every
    tab closed, "Open a surface" offers Terminal (`T`), Files (`F`) and Diff (`D`).
 7. The ring next to Send shows how full the context window is; click it to compact the
-   conversation (or send `/compact`). Type `/` at the start of a line for the provider's commands
-   and skills (`$` for Codex skills): ↑/↓ choose, Enter or Tab insert, Esc closes.
-8. Several Claude and Codex accounts, as in Soprano: usage at the bottom of the sidebar (`⌘U` for
-   details) and **Settings › Accounts** to add, switch or prefer logins for omp, Claude Code and
-   the Codex CLI.
+   conversation (or send `/compact`). Type `/` at the start of a line for omp's commands and
+   skills: ↑/↓ choose, Enter or Tab insert, Esc closes.
+8. Several Claude and Codex accounts for omp, as in Soprano: usage at the bottom of the sidebar
+   (`⌘U` for details) and **Settings › Accounts** to add logins and let omp prefer one or balance
+   across them.
 
 `⌘K` opens the command palette: every action, recent threads, projects and settings pages, with
 fuzzy search; `>` lists actions only. When the app is in the background, finished, failed and
@@ -97,7 +93,6 @@ right-panel tab) has focus.
 | Permissions | `⇧⌘A` | not terminal |
 | Workspace | `⇧⌘X` | not terminal |
 | Branch | `⇧⌘G` | not terminal |
-| Toggle Plan Mode | `⇧⇥` | composer |
 | Steer or Queue (the other one) | `⌘↩` | composer |
 | Toggle Diff | `⌘D` | not terminal |
 | Toggle Files | `⇧⌘F` | not terminal |
@@ -129,11 +124,10 @@ keeping your comments.
 | Key | Default | |
 |---|---|---|
 | `theme` | `"soprano"` | `soprano` (follow Soprano's theme and appearance) or a Soprano theme id (`folio` follows macOS, `folio-paper`, `folio-ink`, `nord`, …) |
-| `agents.defaultProvider` | `"omp"` | `omp`, `codex` or `claude` |
-| `agents.defaultModel` | provider default | model id (`provider/id` for omp, e.g. `anthropic/claude-opus-5-5`) |
+| `agents.defaultModel` | omp's configured model | model id `provider/id`, e.g. `anthropic/claude-opus-5-5` |
 | `agents.defaultRuntimeMode` | `"full-access"` | `approval-required`, `auto-accept-edits`, `auto`, `full-access` |
-| `providers.ompPath`, `providers.codexPath`, `providers.claudePath` | found on `PATH` | executable paths |
-| `textGeneration.provider` / `.model` / `.titles` | `codex` / provider default / `true` | titles, commit messages, branch names (`omp`, `codex` or `claude`) |
+| `providers.ompPath` | found on `PATH` | path to the `omp` executable |
+| `textGeneration.model` / `.titles` | omp's configured model / `true` | titles, commit messages, branch names, generated with omp |
 | `worktrees.directory` | `~/.soprano-agents/worktrees` | new worktrees go to `<directory>/<repo>/<branch>` |
 | `worktrees.branchPrefix` | `"soprano"` | `soprano/fix-login-error` |
 | `chat.followUp` | `"steer"` | `steer` or `queue` |

@@ -1,18 +1,16 @@
 import AppKit
 import SopranoAgentsCore
 
-/// The command token the caret is in: a word that starts a line with a sigil (`/`, or `$` for
-/// Codex skills) and runs to the next whitespace. Ranges are UTF-16 (`NSString`) offsets.
+/// The command token the caret is in: a word that starts a line with `/` and runs to the next
+/// whitespace. Ranges are UTF-16 (`NSString`) offsets.
 struct SlashToken: Equatable {
-    /// "/" or "$".
-    let sigil: Character
-    /// The whole token, sigil included.
+    /// The whole token, `/` included.
     let range: NSRange
-    /// What was typed between the sigil and the caret.
+    /// What was typed between the `/` and the caret.
     let query: String
 
-    /// The token around `caret`, when the caret sits after its sigil and no further than its end.
-    static func at(_ text: String, caret: Int, sigils: Set<Character>) -> SlashToken? {
+    /// The token around `caret`, when the caret sits after its `/` and no further than its end.
+    static func at(_ text: String, caret: Int) -> SlashToken? {
         let string = text as NSString
         guard caret > 0, caret <= string.length else { return nil }
         let whitespace = CharacterSet.whitespacesAndNewlines
@@ -26,15 +24,13 @@ struct SlashToken: Equatable {
             let before = string.character(at: start - 1)
             guard before == 0x0A || before == 0x0D else { return nil }
         }
-        guard let sigilScalar = UnicodeScalar(string.character(at: start)) else { return nil }
-        let sigil = Character(sigilScalar)
-        guard sigils.contains(sigil) else { return nil }
+        guard string.character(at: start) == 0x2F else { return nil }
         var end = caret
         while end < string.length, let scalar = UnicodeScalar(string.character(at: end)), !whitespace.contains(scalar) {
             end += 1
         }
         let query = string.substring(with: NSRange(location: start + 1, length: caret - start - 1))
-        return SlashToken(sigil: sigil, range: NSRange(location: start, length: end - start), query: query)
+        return SlashToken(range: NSRange(location: start, length: end - start), query: query)
     }
 
     /// The edit that replaces the token with `insertText`. When the inserted text ends in a space
@@ -73,11 +69,11 @@ enum SlashCommandFilter {
         insertText: "/compact "
     )
 
-    /// Commands reachable with `sigil`, plus the app's `/compact` row when `includeCompact` and
-    /// the provider has none of its own.
-    static func candidates(_ commands: [ProviderCommand], sigil: Character, includeCompact: Bool) -> [ProviderCommand] {
-        var result = commands.filter { $0.insertText.first == sigil }
-        if includeCompact, sigil == "/", !result.contains(where: { $0.insertText.trimmingCharacters(in: .whitespaces) == "/compact" }) {
+    /// The provider's `/` commands, plus the app's `/compact` row when `includeCompact` and the
+    /// provider has none of its own.
+    static func candidates(_ commands: [ProviderCommand], includeCompact: Bool) -> [ProviderCommand] {
+        var result = commands.filter { $0.insertText.first == "/" }
+        if includeCompact, !result.contains(where: { $0.insertText.trimmingCharacters(in: .whitespaces) == "/compact" }) {
             result.append(compactCommand)
         }
         return result
@@ -106,10 +102,9 @@ enum SlashCommandFilter {
     }
 
     /// The muted single row when nothing can be listed.
-    static func emptyText(provider: ProviderKind, sigil: Character, hasCandidates: Bool, query: String) -> String {
-        if hasCandidates { return "No commands match “\(sigil)\(query)”" }
-        let noun = sigil == "$" ? "skills" : "commands"
-        return "No \(noun) from \(provider.displayName) yet — they load once the session starts."
+    static func emptyText(hasCandidates: Bool, query: String) -> String {
+        if hasCandidates { return "No commands match “/\(query)”" }
+        return "No commands from omp yet — they load once the session starts."
     }
 }
 

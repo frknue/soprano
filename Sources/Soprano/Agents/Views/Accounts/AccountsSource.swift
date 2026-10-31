@@ -18,6 +18,11 @@ protocol AccountsSource: AnyObject {
     func dismissError(in list: AccountListID)
 }
 
+extension AccountListID {
+    /// The lists the accounts UI shows, in display order: omp's Claude logins, then its Codex logins.
+    static let shown: [AccountListID] = [.ompClaude, .ompCodex]
+}
+
 extension AccountsController: AccountsSource {}
 
 /// The accounts source the UI uses. Inert (empty, no CLIs) until the app delegate installs

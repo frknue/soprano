@@ -40,7 +40,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     private let modelChip = ComposerChip()
     private let traitsChip = ComposerChip()
     private let permissionsChip = ComposerChip()
-    private let modeChip = ComposerChip()
     private let previousButton = TextButton("Previous", variant: .outline, size: .sm)
     private let answerButton = ComposerPillButton("Submit answer")
     private let primaryButton = ComposerPrimaryButton()
@@ -64,7 +63,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     struct NewThreadOptions: Equatable {
         var modelSelection: ModelSelection
         var runtimeMode: RuntimeMode
-        var interactionMode: InteractionMode = .build
         var usesWorktree = false
         /// Base ref of the new worktree; nil = the current branch.
         var baseBranch: String?
@@ -167,7 +165,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         traitsChip.setPadding(leading: 0, trailing: 8)
         traitsChip.mutesTitle = true
         permissionsChip.setPadding(leading: 6, trailing: 8)
-        let chips = NSStackView(views: [modelGroup, permissionsChip, modeChip])
+        let chips = NSStackView(views: [modelGroup, permissionsChip])
         chips.orientation = .horizontal
         chips.spacing = 2
         let actions = NSStackView(views: [previousButton, answerButton, contextMeter, primaryButton])
@@ -226,7 +224,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         textView.delegate = self
         textView.onSubmit = { [weak self] alternate in self?.submit(alternate: alternate) }
         textView.onHistory = { [weak self] up in self?.recallHistory(up: up) ?? false }
-        textView.onTogglePlan = { [weak self] in self?.togglePlanMode() }
         textView.onEscape = { [weak self] in self?.closePopoverIfOpen() }
         textView.onFiles = { [weak self] urls in self?.importFiles(urls) }
         textView.onImageData = { [weak self] data in self?.importImageData(data) }
@@ -242,7 +239,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         modelChip.onClick = { [weak self] in self?.toggleModelPicker() }
         traitsChip.onClick = { [weak self] in self?.toggleTraits() }
         permissionsChip.onClick = { [weak self] in self?.togglePermissions() }
-        modeChip.onClick = { [weak self] in self?.togglePlanMode() }
         primaryButton.onClick = { [weak self] in self?.primaryClicked() }
         previousButton.onClick = { [weak self] in self?.previousQuestion() }
         answerButton.onClick = { [weak self] in self?.advanceQuestion() }
@@ -329,7 +325,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     private var selection: ModelSelection { currentThread?.modelSelection ?? draftOptions.modelSelection }
     private var runtimeMode: RuntimeMode { currentThread?.runtimeMode ?? draftOptions.runtimeMode }
-    private var interactionMode: InteractionMode { currentThread?.interactionMode ?? draftOptions.interactionMode }
 
     /// Git facts of the draft's project, once loaded and only for repositories.
     private var draftRepository: DraftGit? {
@@ -459,7 +454,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             title: ProviderCatalog.displayName(for: selection, in: status),
             image: ProviderGlyph.image(for: selection.provider, size: 16)
         )
-        modelChip.leadingTint = selection.provider == .claude ? .original : .automatic
         modelChip.toolTip = ModelChoice.chipTitle(selection, status: status)
         modelChip.setAccessibilityLabel(modelChip.toolTip)
 
@@ -482,13 +476,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         permissionsChip.configure(title: mode.title, image: NSImage.symbol(mode.symbolName, size: 13))
         permissionsChip.toolTip = "Permissions: \(mode.title). \(mode.summary)"
         permissionsChip.setAccessibilityLabel("Permissions: \(mode.title)")
-
-        let plan = interactionMode == .plan
-        modeChip.isHidden = !selection.provider.supportsPlanMode
-        modeChip.configure(title: plan ? "Plan" : "Build", image: NSImage.symbol(plan ? Icon.pencilRuler : Icon.bot, size: 13))
-        modeChip.isOpen = plan
-        modeChip.toolTip = plan ? "Plan mode. Click to return to normal build mode" : "Default mode. Click to enter plan mode"
-        modeChip.setAccessibilityLabel(modeChip.toolTip)
     }
 
     private func refreshContextStrip() {
@@ -598,9 +585,19 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
         guard let thread = currentThread else { return }
         if let approval = pendingApproval {
-            guard !text.isEmpty else { return }
-            editor.textView.setText("")
-            Task { await engine.respond(thread.id, approvalID: approval.id, decision: .decline, feedback: text) }
+            // Decline, then deliver the message: it steers the turn the agent continues.
+            let sentFrom = target
+            clearComposer()
+            Task { [weak self] in
+                guard let self else { return }
+                await engine.respond(thread.id, approvalID: approval.id, decision: .decline)
+                do {
+                    try await engine.send(thread.id, text: text, attachments: files)
+                } catch {
+                    restoreUnsent(text: text, attachments: files, to: sentFrom)
+                    await Dialogs.alert(title: "Couldn’t send message", message: error.localizedDescription, in: view.window)
+                }
+            }
             return
         }
         let action = ComposerPrimaryAction.resolve(
@@ -638,7 +635,6 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             projectID: state.draftProjectID,
             modelSelection: options.modelSelection,
             runtimeMode: options.runtimeMode,
-            interactionMode: options.interactionMode,
             workspace: workspace
         )
         let sentFrom = target
@@ -878,24 +874,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
     }
 
-    /// Shift+Tab: Build ↔ Plan.
-    func togglePlanMode() {
-        guard selection.provider.supportsPlanMode else { return }
-        let next: InteractionMode = interactionMode == .plan ? .build : .plan
-        if let thread = currentThread {
-            engine.setInteractionMode(thread.id, next)
-        } else {
-            draftOptions.interactionMode = next
-            refresh()
-        }
-    }
-
     func toggleModelPicker() {
         guard popoverKind != .model else { return closePopover() }
-        var statuses: [ProviderKind: ProviderStatus] = [:]
-        for kind in ProviderKind.allCases { statuses[kind] = engine.status(of: kind) }
-        let locked = currentThread.flatMap { $0.turns.isEmpty ? nil : $0.modelSelection.provider }
-        let content = ModelPickerContent(selection: selection, statuses: statuses, lockedProvider: locked) { [weak self] selection in
+        let content = ModelPickerContent(selection: selection, status: engine.status(of: selection.provider)) { [weak self] selection in
             self?.setModelSelection(selection)
         }
         present(.model, content: content, anchor: modelChip, side: .above, alignment: .leading) { [weak self] open in
@@ -1049,17 +1030,12 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     // MARK: Slash commands
 
-    /// `$` lists Codex skills; every provider's commands start with `/`.
-    private var slashSigils: Set<Character> {
-        selection.provider == .codex ? ["/", "$"] : ["/"]
-    }
-
     /// Opens, filters or closes the `/` menu for the token at the caret.
     private func syncSlashMenu() {
         let textView = editor.textView
         let caret = textView.selectedRange()
         let token = questionRequestID == nil && pendingApproval == nil && caret.length == 0
-            ? SlashToken.at(textView.string, caret: caret.location, sigils: slashSigils)
+            ? SlashToken.at(textView.string, caret: caret.location)
             : nil
         guard let token else {
             slashDismissed = false
@@ -1080,13 +1056,12 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     /// Shows the menu for `slashToken`, or re-lists it in place when it already shows.
     private func showSlashMenu() {
         guard let token = slashToken else { return }
-        let provider = selection.provider
         let thread = currentThread
         let commands = thread.map { engine.commands(forThread: $0.id) }
-            ?? engine.commands(forDraft: provider, projectID: state.draftProjectID)
-        let candidates = SlashCommandFilter.candidates(commands, sigil: token.sigil, includeCompact: thread.map { engine.canCompact($0.id) } ?? false)
+            ?? engine.commands(forDraft: selection.provider, projectID: state.draftProjectID)
+        let candidates = SlashCommandFilter.candidates(commands, includeCompact: thread.map { engine.canCompact($0.id) } ?? false)
         let matches = SlashCommandFilter.matching(candidates, query: token.query)
-        let emptyText = SlashCommandFilter.emptyText(provider: provider, sigil: token.sigil, hasCandidates: !candidates.isEmpty, query: token.query)
+        let emptyText = SlashCommandFilter.emptyText(hasCandidates: !candidates.isEmpty, query: token.query)
         if slashMenu != nil, let slashContent {
             slashContent.show(matches, emptyText: emptyText)
             return

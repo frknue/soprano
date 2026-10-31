@@ -52,24 +52,25 @@ struct AccountsSettingsPageTests {
         return result
     }
 
-    @Test func thePageListsEveryAccountListWithItsLoginsAndActions() throws {
+    @Test func thePageListsOmpsAccountListsWithTheirLoginsAndActions() throws {
         let fixture = try makeFixture(AccountFixtures.demo())
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
 
         let sections = fixture.controller.buildPage(.accounts, form: SettingsForm(width: 768))
         let shown = texts(sections)
 
-        #expect(sections.count == 1 + AccountListID.all.count)
-        for title in ["Claude · omp", "Claude · Claude Code", "Codex · omp", "Codex · Codex CLI"] {
+        #expect(sections.count == 1 + AccountListID.shown.count)
+        for title in ["Claude · omp", "Codex · omp"] {
             #expect(shown.contains(title), "\(title)")
         }
+        #expect(!shown.contains { $0.contains("Claude Code") || $0.contains("Codex CLI") })
         #expect(shown.contains("Updated 4m ago"))
-        #expect(shown.contains("Automatic"))
-        #expect(shown.filter { $0 == "ada@example.com" }.count == 1)
+        #expect(shown.filter { $0 == "Automatic" }.count == 2)
+        #expect(shown.filter { $0 == "ada@example.com" }.count == 2)
         #expect(shown.contains("grace@example.com"))
-        #expect(shown.filter { $0 == "System default" }.count == 2)
-        #expect(shown.filter { $0 == "Prefer" }.count == 2)
-        #expect(shown.filter { $0 == "Add Account" }.count == 4)
+        #expect(!shown.contains("System default"))
+        #expect(shown.filter { $0 == "Prefer" }.count == 3)
+        #expect(shown.filter { $0 == "Add Account" }.count == 2)
         #expect(shown.contains { $0.contains("Soprano") && !$0.contains("Soprano Agents") } == false)
     }
 
@@ -96,7 +97,7 @@ struct AccountsSettingsPageTests {
         #expect(shown.contains("Waiting for sign-in in your browser…"))
         #expect(shown.contains("Open Sign-in Page"))
         #expect(shown.contains("Cancel"))
-        #expect(shown.contains("Keychain: could not store the login in \"Soprano Claude Code Accounts\"."))
+        #expect(shown.contains("omp sign-in failed: the browser closed before the login finished."))
         #expect(shown.contains("Dismiss"))
         #expect(buttons(sections, titled: "Add Account").allSatisfy { !$0.isEnabled })
         #expect(buttons(sections, titled: "Re-authenticate").allSatisfy { !$0.isEnabled })
@@ -113,7 +114,7 @@ struct AccountsSettingsPageTests {
 
         let shown = texts(fixture.controller.buildPage(.accounts, form: SettingsForm(width: 768)))
 
-        #expect(shown.filter { $0 == "Not signed in" }.count == 2)
+        #expect(!shown.contains("Not signed in"))
         #expect(shown.filter { $0 == "Balance by usage" }.count == 2)
         #expect(!shown.contains("Re-authenticate"))
     }
@@ -124,19 +125,20 @@ struct AccountsSettingsPageTests {
 
         let shown = texts(fixture.controller.buildPage(.accounts, form: SettingsForm(width: 768)))
 
-        #expect(shown.filter { $0 == "Accounts not loaded yet." }.count == AccountListID.all.count)
+        #expect(shown.filter { $0 == "Accounts not loaded yet." }.count == AccountListID.shown.count)
         #expect(shown.contains("Not updated yet"))
     }
 
-    @Test func theUsageCardShowsEveryLoginGroupedByProviderAndFollowsChanges() throws {
+    @Test func theUsageCardShowsOmpsLoginsGroupedByProviderAndFollowsChanges() throws {
         let card = UsageCardContent(snapshot: AccountFixtures.demo())
         let shown = texts([card])
 
         #expect(shown.contains("CLAUDE"))
         #expect(shown.contains("CODEX"))
-        #expect(shown.contains("omp · automatic"))
-        #expect(shown.contains("System default — ada@example.com"))
+        #expect(shown.filter { $0 == "omp · automatic" }.count == 2)
+        #expect(shown.filter { $0 == "ada@example.com" }.count == 2)
         #expect(shown.contains("93%"))
+        #expect(shown.contains("75%"))
         #expect(!shown.contains("No accounts yet."))
 
         var refreshing = AccountFixtures.empty()

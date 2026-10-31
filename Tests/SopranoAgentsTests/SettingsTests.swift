@@ -16,9 +16,9 @@ struct SettingsTests {
         // comment
         {
           "theme": "folio-ink",
-          "agents": { "defaultProvider": "claude", "defaultModel": "claude-sonnet-5", "defaultRuntimeMode": "approval-required" },
-          "providers": { "ompPath": "~/.bun/bin/omp", "codexPath": "/opt/homebrew/bin/codex", "claudePath": "~/bin/claude" },
-          "textGeneration": { "provider": "claude", "model": "claude-haiku-5-5", "titles": false },
+          "agents": { "defaultModel": "anthropic/claude-sonnet-5-5", "defaultRuntimeMode": "approval-required" },
+          "providers": { "ompPath": "~/.bun/bin/omp" },
+          "textGeneration": { "model": "anthropic/claude-haiku-5-5", "titles": false },
           "worktrees": { "directory": "~/worktrees", "branchPrefix": "agent" },
           "chat": { "followUp": "queue", "width": "wide" },
           "notifications": { "enabled": false, "sound": false },
@@ -29,14 +29,10 @@ struct SettingsTests {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var expected = AppSettings()
         expected.theme = "folio-ink"
-        expected.defaultProvider = .claude
-        expected.defaultModel = "claude-sonnet-5"
+        expected.defaultModel = "anthropic/claude-sonnet-5-5"
         expected.defaultRuntimeMode = .approvalRequired
         expected.ompPath = home + "/.bun/bin/omp"
-        expected.codexPath = "/opt/homebrew/bin/codex"
-        expected.claudePath = home + "/bin/claude"
-        expected.textGenerationProvider = .claude
-        expected.textGenerationModel = "claude-haiku-5-5"
+        expected.textGenerationModel = "anthropic/claude-haiku-5-5"
         expected.generateTitles = false
         expected.worktreesDirectory = home + "/worktrees"
         expected.branchPrefix = "agent"
@@ -81,26 +77,24 @@ struct SettingsTests {
         #expect(resolved.keybindings == KeybindingSettings())
     }
 
-    @Test func engineSettingsCarryTheDefaultsAndTheProviderFallbacks() {
+    @Test func engineSettingsRunEverythingOnOmp() {
         let defaults = AppSettings.defaults.engineSettings
         #expect(defaults.defaultModel == ModelSelection(provider: .omp, model: ModelSelection.ompDefaultModel))
         #expect(defaults.defaultRuntimeMode == .fullAccess)
-        #expect(defaults.textGenerationModel == ModelSelection(provider: .codex, model: "gpt-6-luna", options: ["effort": "low"]))
+        #expect(defaults.textGenerationModel == ModelSelection(provider: .omp, model: ModelSelection.ompDefaultModel))
         #expect(defaults.branchPrefix == "soprano")
         #expect(defaults.generateTitles)
-        #expect(defaults.ompPath == nil && defaults.codexPath == nil && defaults.claudePath == nil)
+        #expect(defaults.ompPath == nil)
 
         var settings = AppSettings()
-        settings.defaultProvider = .claude
-        settings.textGenerationProvider = .claude
-        settings.textGenerationModel = "claude-sonnet-5"
-        settings.claudePath = "/usr/local/bin/claude"
+        settings.defaultModel = "anthropic/claude-opus-5-5"
+        settings.textGenerationModel = "anthropic/claude-haiku-5-5"
+        settings.ompPath = "/usr/local/bin/omp"
         settings.generateTitles = false
         let mapped = settings.engineSettings
-        #expect(mapped.defaultModel == ModelSelection(provider: .claude, model: "claude-opus-5-5"))
-        // Claude has no effort option for text generation.
-        #expect(mapped.textGenerationModel == ModelSelection(provider: .claude, model: "claude-sonnet-5"))
-        #expect(mapped.claudePath == "/usr/local/bin/claude")
+        #expect(mapped.defaultModel == ModelSelection(provider: .omp, model: "anthropic/claude-opus-5-5"))
+        #expect(mapped.textGenerationModel == ModelSelection(provider: .omp, model: "anthropic/claude-haiku-5-5"))
+        #expect(mapped.ompPath == "/usr/local/bin/omp")
         #expect(!mapped.generateTitles)
     }
 
@@ -187,17 +181,17 @@ struct SettingsTests {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("settings.json")
-        try #"{ "providers": { "codexPath": "/opt/tools/codex" }, "keybindings": { "bindings": { "palette.open": null } } }"#
+        try #"{ "providers": { "ompPath": "/opt/tools/omp" }, "keybindings": { "bindings": { "palette.open": null } } }"#
             .write(to: url, atomically: true, encoding: .utf8)
         let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
         center.start(watching: false)
 
-        #expect(center.remove(at: ["providers", "codexPath"]))
+        #expect(center.remove(at: ["providers", "ompPath"]))
         #expect(center.remove(at: ["keybindings", "bindings", "palette.open"]))
 
-        #expect(center.settings.codexPath == nil)
+        #expect(center.settings.ompPath == nil)
         #expect(center.keybindingSettings.overrides.isEmpty)
-        #expect(center.configuredValue(at: ["providers", "codexPath"]) == nil)
+        #expect(center.configuredValue(at: ["providers", "ompPath"]) == nil)
     }
 
     @Test func aWriteEditsTheFileOnDiskEvenBeforeAHandEditWasReloaded() throws {

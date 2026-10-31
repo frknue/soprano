@@ -26,7 +26,7 @@ struct EngineContextTests {
         #expect(await EngineHarness.eventually { engine.thread(threadID)?.contextUsage?.usedTokens == 1_000 })
         #expect(engine.thread(threadID)?.turns.last?.tokenUsage == TokenUsage(usedTokens: 1_000, contextWindow: 10_000))
         session.emit(.turnCompleted(outcome: .completed, error: nil))
-        // An exact reading after the turn ended (omp `get_state`, Claude `get_context_usage`).
+        // An exact reading after the turn ended (omp `get_state`).
         session.emit(.tokenUsage(TokenUsage(usedTokens: 1_200, contextWindow: 10_000)))
 
         #expect(await EngineHarness.eventually { engine.thread(threadID)?.contextUsage?.usedTokens == 1_200 })
@@ -125,7 +125,7 @@ struct EngineContextTests {
         #expect(await EngineHarness.eventually { session.turns.map(\.text) == ["hi", "next"] })
     }
 
-    @Test func aProviderSwitchForgetsTheContextFillAndARewindKeepsTheKeptTurnsFill() async throws {
+    @Test func aRewindKeepsTheKeptTurnsFillAndAModelSwitchKeepsTheConversation() async throws {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver)
         let threadID = EngineHarness.idleThread(in: engine)
@@ -140,10 +140,9 @@ struct EngineContextTests {
 
         _ = try await engine.revert(threadID, toBeforeTurn: second.id, restoreFiles: false)
         #expect(engine.thread(threadID)?.contextUsage == TokenUsage(usedTokens: 100, contextWindow: 1_000))
-        engine.setModelSelection(threadID, ModelSelection(provider: .codex, model: "gpt-6.1-terra"))
-        #expect(engine.thread(threadID)?.contextUsage != nil)
-        engine.setModelSelection(threadID, .default(for: .claude))
-        #expect(engine.thread(threadID)?.contextUsage == nil)
-        #expect(!engine.canCompact(threadID))
+        engine.setModelSelection(threadID, ModelSelection(provider: .omp, model: "anthropic/claude-haiku-5-5"))
+        #expect(engine.thread(threadID)?.contextUsage == TokenUsage(usedTokens: 100, contextWindow: 1_000))
+        #expect(engine.thread(threadID)?.providerThreadID == "conv-1")
+        #expect(engine.canCompact(threadID))
     }
 }

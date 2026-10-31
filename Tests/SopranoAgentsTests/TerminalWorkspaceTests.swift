@@ -158,7 +158,7 @@ struct TerminalWorkspaceTests {
         let session = try #require(store.create(in: draft, placement: .panel))
         #expect(harness.launches() == [project.path])
 
-        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .codex))
+        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .omp))
         harness.engine.insertThread(thread)
         store.moveDraftSessions(projectID: project.id, to: thread.id)
 
@@ -189,7 +189,7 @@ struct TerminalWorkspaceTests {
         harness.state.setTerminalVisible(true)
         #expect(harness.launches().count == 1)
 
-        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .codex))
+        let thread = AgentThread(projectID: project.id, title: "T", modelSelection: .default(for: .omp))
         harness.engine.insertThread(thread)
         harness.drawer.store.moveDraftSessions(projectID: project.id, to: thread.id)
         harness.state.select(.thread(thread.id))

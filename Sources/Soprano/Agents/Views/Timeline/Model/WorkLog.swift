@@ -26,9 +26,6 @@ enum TimelineIcon {
     static let close = "xmark"
     static let minimize = "arrow.down.right.and.arrow.up.left"
     static let shield = "shield"
-    static let circle = "circle"
-    static let circleHalf = "circle.lefthalf.filled"
-    static let checkCircleFill = "checkmark.circle.fill"
     static let unfoldAll = "chevron.up.chevron.down"
 }
 
@@ -100,7 +97,7 @@ struct WorkLogEntry: Hashable, Identifiable, Sendable {
 /// Work-log presentation: entry labels, group summaries, live labels, thought lines.
 enum WorkLog {
     /// The work-log entry for an item, nil for items the timeline shows as their own rows
-    /// (assistant messages, plans, task lists, errors, notices).
+    /// (assistant messages, errors, notices).
     static func entry(for item: TurnItem) -> WorkLogEntry? {
         func make(
             _ kind: WorkLogEntry.Kind,
@@ -158,7 +155,7 @@ enum WorkLog {
                 return make(.codeSearch, label: title.isEmpty ? "Searched files" : title, body: body, icon: TimelineIcon.workSearch)
             case .subagent:
                 return make(.subagent, label: title.isEmpty ? (tool.name.isEmpty ? "Subagent" : tool.name) : title, body: body, icon: TimelineIcon.workAgent)
-            case .mcp, .other:
+            case .other:
                 let name = tool.name.trimmingCharacters(in: .whitespaces)
                 return make(.tool, label: title.isEmpty ? (name.isEmpty ? "Tool call" : name) : title, body: body, icon: TimelineIcon.workTool)
             }
@@ -186,7 +183,7 @@ enum WorkLog {
                 bodyIsMarkdown: true,
                 icon: TimelineIcon.workMessage
             )
-        case .assistantMessage, .todoList, .plan, .error, .notice:
+        case .assistantMessage, .error, .notice:
             return nil
         }
     }
@@ -288,16 +285,6 @@ enum WorkLog {
             return String(text[..<end.upperBound])
         }
         return text
-    }
-
-    /// "Tasks 2/4 · Draft the new sidebar".
-    static func todoTitle(_ steps: [TodoStep]) -> String {
-        let done = steps.filter { $0.status == .completed }.count
-        var title = "Tasks \(done)/\(steps.count)"
-        if let current = steps.first(where: { $0.status == .inProgress }) ?? steps.first(where: { $0.status == .pending }) {
-            title += " · \(current.text)"
-        }
-        return title
     }
 
     static func decisionNote(_ decision: ApprovalDecision) -> String {

@@ -71,8 +71,8 @@ final class ThreadRuntime {
     var holdQueue = false
     /// Latest title request; older ones finishing later are ignored.
     var titleRequest: UUID?
-    /// The live session's command list and the provider that reported it.
-    var commands: (provider: ProviderKind, list: [ProviderCommand])?
+    /// The live session's command list.
+    var commands: [ProviderCommand]?
 
     func dropSession() {
         consumer?.cancel()

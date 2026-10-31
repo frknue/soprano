@@ -2,8 +2,8 @@ import AppKit
 
 /// The prompt editor: plain text at 14 pt with relaxed leading (1.625), at least two
 /// lines + 8 pt, growing to 208 pt and then scrolling. Enter sends, Shift+Enter adds a newline,
-/// Up/Down in an empty editor walk the message history, Shift+Tab toggles plan mode, Escape
-/// closes open pickers. While the `/` command menu shows, `menuKeyHandler` takes its keys
+/// Up/Down in an empty editor walk the message history, Escape closes open pickers. While the
+/// `/` command menu shows, `menuKeyHandler` takes its keys
 /// first. Pasted or dropped files and images become attachments.
 final class ComposerTextView: NSTextView {
     static let font = Typography.ui(Typography.bodySize)
@@ -23,7 +23,6 @@ final class ComposerTextView: NSTextView {
     var onSubmit: ((_ alternate: Bool) -> Void)?
     /// Up (true) / Down (false). Returns true when it recalled history.
     var onHistory: ((_ up: Bool) -> Bool)?
-    var onTogglePlan: (() -> Void)?
     /// Escape: closes an open picker.
     var onEscape: (() -> Void)?
     var onFiles: (([URL]) -> Void)?
@@ -127,11 +126,6 @@ final class ComposerTextView: NSTextView {
         if (event.keyCode == 36 || event.keyCode == 76), flags.contains(.command) {
             return
         }
-        // Shift+Tab arrives as backtab from the keyboard but as a shifted tab from synthesized events.
-        if event.keyCode == 48, flags == .shift, Self.shiftTabTogglesPlan {
-            onTogglePlan?()
-            return
-        }
         super.keyDown(with: event)
     }
 
@@ -139,12 +133,6 @@ final class ComposerTextView: NSTextView {
         let resigned = super.resignFirstResponder()
         if resigned { onResignFocus?() }
         return resigned
-    }
-
-    /// The router never runs chords without ⌘/⌃ in text input, so the editor handles
-    /// `composer.togglePlan` itself, and only while it is bound to Shift+Tab.
-    static var shiftTabTogglesPlan: Bool {
-        SettingsCenter.shared.chords(for: "composer.togglePlan").contains { KeyStroke(key: "\t", shift: true).matches($0, mode: .direct) }
     }
 
     override func doCommand(by selector: Selector) {
@@ -159,8 +147,6 @@ final class ComposerTextView: NSTextView {
             if onHistory?(true) != true { super.doCommand(by: selector) }
         case #selector(moveDown(_:)):
             if onHistory?(false) != true { super.doCommand(by: selector) }
-        case #selector(insertBacktab(_:)):
-            if Self.shiftTabTogglesPlan { onTogglePlan?() } else { super.doCommand(by: selector) }
         case #selector(cancelOperation(_:)):
             // Escape closes an open picker; it never opens NSTextView's completion list.
             onEscape?()

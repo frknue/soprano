@@ -5,7 +5,7 @@ import Testing
 
 struct SidebarModelTests {
     private static let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
-    private static let model = ModelSelection(provider: .codex, model: "gpt-6.1-sol")
+    private static let model = ModelSelection(provider: .omp, model: "openai-codex/gpt-6.1-sol")
     private static let app = Project(id: "app", title: "app", path: "/tmp/app")
     private static let site = Project(id: "site", title: "site", path: "/tmp/site")
 

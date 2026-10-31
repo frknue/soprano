@@ -1,15 +1,14 @@
 import Foundation
 
-/// A slash command or skill the thread's provider offers, as the composer's `/` menu lists it.
-/// omp: `get_available_commands` / `available_commands_update`; Claude Code: the `initialize`
-/// response and `system/commands_changed`; Codex: enabled `skills/list` skills.
+/// A slash command or skill omp offers (`get_available_commands` / `available_commands_update`),
+/// as the composer's `/` menu lists it.
 public struct ProviderCommand: Sendable, Hashable, Codable {
     public enum Kind: String, Sendable, Hashable, Codable {
         case command
         case skill
     }
 
-    /// Display name without "/" or "$" ("review", "skill:foo", "foo").
+    /// Display name without "/" ("review", "skill:foo").
     public var name: String
     public var kind: Kind
     public var description: String?
@@ -17,7 +16,7 @@ public struct ProviderCommand: Sendable, Hashable, Codable {
     public var argumentHint: String?
     /// Short badge text: "Built-in", "Skill", "Extension", "MCP", "Custom"; nil = none.
     public var source: String?
-    /// Exactly what the composer inserts ("/review ", "/skill:foo ", "$foo ").
+    /// Exactly what the composer inserts ("/review ", "/skill:foo ").
     public var insertText: String
 
     public init(name: String, kind: Kind, description: String? = nil, argumentHint: String? = nil, source: String? = nil, insertText: String) {

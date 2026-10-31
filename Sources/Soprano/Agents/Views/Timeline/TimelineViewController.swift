@@ -238,7 +238,6 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     func timelineToggleGroup(_ groupID: String) { toggle(groupID, in: \.groups) }
     func timelineToggleEntry(_ itemID: String) { toggle(itemID, in: \.entries) }
     func timelineToggleMessage(_ messageID: String) { toggle(messageID, in: \.messages) }
-    func timelineTogglePlan(_ itemID: String) { toggle(itemID, in: \.plans) }
 
     func timelineSetClosedFolders(turnID: String, paths: Set<String>) {
         expansion.closedFolders[turnID] = paths
@@ -366,20 +365,14 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
         )
     }
 
-    /// Opens a folded message or plan that holds the current match, then scrolls to it.
+    /// Opens a folded message that holds the current match, then scrolls to it.
     private func revealActiveMatch() {
         guard findIndex < findMatches.count else { return }
         let match = findMatches[findIndex]
         if let row = list.rows.first(where: { $0.id == match.rowID }) {
-            switch row.content {
-            case let .user(model) where !model.expanded:
+            if case let .user(model) = row.content, !model.expanded {
                 expansion.messages.insert(model.message.id)
                 reload()
-            case let .plan(model) where !model.expanded && model.canCollapse:
-                expansion.plans.insert(model.itemID)
-                reload()
-            default:
-                break
             }
         }
         list.reveal(rowID: match.rowID)

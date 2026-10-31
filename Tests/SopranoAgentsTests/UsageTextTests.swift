@@ -9,7 +9,7 @@ struct UsageTextTests {
     @Test func theIndicatorShowsEachProvidersTightestHeadlineWindow() {
         let snapshot = AccountFixtures.demo(now: now)
         // Claude: omp is automatic, so the account with the most headroom (ada, 9%) leads;
-        // Codex: omp has no Codex login, so the CLI's own login (75%) does.
+        // Codex: omp's only Codex login (75%) does.
         #expect(UsageText.indicator(snapshot) == "Claude 9% · Codex 75%")
         #expect(UsageText.headlines(snapshot).map(\.severity) == [.normal, .warning])
     }
@@ -25,6 +25,16 @@ struct UsageTextTests {
         #expect(UsageText.indicator(AccountsSnapshot()) == nil)
         #expect(UsageText.indicator(AccountFixtures.empty(now: now)) == nil)
         #expect(UsageText.tooltip(AccountsSnapshot(), now: now) == nil)
+    }
+
+    @Test func theCLIListsTheVendoredControllerStillLoadsNeverReachTheIndicator() {
+        var snapshot = AccountFixtures.empty(now: now)
+        let usage = AccountUsage(windows: [UsageWindow(label: "5h", usedFraction: 0.5, resetsAt: nil)], fetchedAt: now)
+        snapshot.lists[.codexCLI] = AccountList(
+            id: .codexCLI,
+            systemDefault: AccountRow(id: "system-default", identity: AccountIdentity(email: "ada@example.com"), usage: usage)
+        )
+        #expect(UsageText.indicator(snapshot) == nil)
     }
 
     @Test func severityTurnsWarningAtSeventyAndCriticalAtNinetyPercent() {
@@ -53,7 +63,7 @@ struct UsageTextTests {
     @Test func listCaptionsSayWhenOmpBalancesAutomatically() {
         let snapshot = AccountFixtures.demo(now: now)
         #expect(snapshot.lists[.ompClaude].map(UsageText.caption(for:)) == "omp · automatic")
-        #expect(snapshot.lists[.claudeCode].map(UsageText.caption(for:)) == "Claude Code")
+        #expect(snapshot.lists[.ompCodex].map(UsageText.caption(for:)) == "omp · automatic")
         var preferred = snapshot.lists[.ompClaude]
         preferred?.selectedAccountId = "ada@example.com|org-ada"
         #expect(preferred.map(UsageText.caption(for:)) == "omp")

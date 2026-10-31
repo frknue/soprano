@@ -80,17 +80,6 @@ enum ComposerCommands {
                 composer(context)?.toggleBranchPicker()
             },
             AppCommand(
-                id: "composer.togglePlan",
-                title: "Toggle Plan Mode",
-                category: .composer,
-                scopes: [.composer],
-                defaultKeys: ["shift+tab"],
-                icon: Icon.pencilRuler,
-                isEnabled: { composer($0) != nil }
-            ) { context in
-                composer(context)?.togglePlanMode()
-            },
-            AppCommand(
                 id: "composer.sendAlternate",
                 title: "Steer or Queue (opposite)",
                 category: .composer,

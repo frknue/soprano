@@ -97,7 +97,6 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         threadMenu.addItem(commandItem("modelPicker.toggle", title: "Model Picker"))
         threadMenu.addItem(commandItem("composer.effort", title: "Reasoning Effort"))
         threadMenu.addItem(commandItem("composer.mode", title: "Permissions"))
-        threadMenu.addItem(commandItem("composer.togglePlan", title: "Toggle Plan Mode"))
         threadMenu.addItem(.separator())
         threadMenu.addItem(commandItem("git.commit", title: "Commit"))
         threadMenu.addItem(commandItem("git.push", title: "Push"))

@@ -7,8 +7,8 @@ enum AccountFixtures {
     nonisolated static let scenarios = ["none", "demo", "empty", "pending"]
 
     /// `none`: never loaded (the indicator hides, the page says "not loaded"); `demo`: two
-    /// Claude logins in omp, Claude Code's own login, one Codex CLI login; `empty`: loaded,
-    /// nobody signed in; `pending`: `demo` with an omp sign-in waiting and a failed Claude Code action.
+    /// Claude logins and one Codex login in omp; `empty`: loaded, nobody signed in; `pending`:
+    /// `demo` with an omp Claude sign-in waiting and a failed omp Codex action.
     static func snapshot(_ name: String, now: Date = Date()) throws -> AccountsSnapshot {
         switch name {
         case "none": return AccountsSnapshot()
@@ -21,7 +21,7 @@ enum AccountFixtures {
                 accountId: nil,
                 signInURL: URL(string: "https://claude.ai/oauth/authorize?client_id=demo")
             )
-            snapshot.errors[.claudeCode] = "Keychain: could not store the login in \"Soprano Claude Code Accounts\"."
+            snapshot.errors[.ompCodex] = "omp sign-in failed: the browser closed before the login finished."
             return snapshot
         default:
             throw SnapshotCommand.CaptureError(description: "--accounts must be one of \(scenarios.joined(separator: ", "))")
@@ -57,14 +57,9 @@ enum AccountFixtures {
                 AccountRow(id: grace.key, identity: grace, organizationName: "Analytical Engines", plan: "team", usage: graceClaude),
             ]
         )
-        snapshot.lists[.claudeCode] = AccountList(
-            id: .claudeCode,
-            systemDefault: AccountRow(id: "system-default", identity: ada, organizationName: "Ada's Workshop", plan: "max", usage: adaClaude)
-        )
-        snapshot.lists[.ompCodex] = AccountList(id: .ompCodex)
-        snapshot.lists[.codexCLI] = AccountList(
-            id: .codexCLI,
-            systemDefault: AccountRow(id: "system-default", identity: ada, plan: "plus", usage: adaCodex)
+        snapshot.lists[.ompCodex] = AccountList(
+            id: .ompCodex,
+            accounts: [AccountRow(id: ada.key, identity: ada, plan: "plus", usage: adaCodex)]
         )
         snapshot.lastRefresh = now.addingTimeInterval(-4 * 60)
         return snapshot
@@ -72,7 +67,7 @@ enum AccountFixtures {
 
     static func empty(now: Date = Date()) -> AccountsSnapshot {
         var snapshot = AccountsSnapshot()
-        for id in AccountListID.all {
+        for id in AccountListID.shown {
             snapshot.lists[id] = AccountList(id: id)
         }
         snapshot.lastRefresh = now.addingTimeInterval(-30)

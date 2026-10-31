@@ -10,7 +10,7 @@ struct EngineRevertTests {
         let git = RecordingGit()
         let engine = EngineHarness.engine(driver: driver, git: git)
         let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
-        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), worktreePath: worktreePath)
+        let thread = AgentThread(projectID: project.id, modelSelection: .default(for: .omp), worktreePath: worktreePath)
         engine.insertThread(thread)
         for text in texts {
             try await engine.send(thread.id, text: text, attachments: [])
@@ -70,31 +70,31 @@ struct EngineRevertTests {
     }
 
     /// A thread whose turns carry the given native ids (nil = the provider never received it).
-    private func threadWithRecordedTurns(_ turns: [(String?, ProviderKind)]) -> (AgentEngine, AgentThread, ScriptedDriver) {
+    private func threadWithRecordedTurns(_ providerTurnIDs: [String?]) -> (AgentEngine, AgentThread, ScriptedDriver) {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver)
         let project = engine.addProject(path: EngineHarness.temporaryDirectory().path)
-        var thread = AgentThread(projectID: project.id, modelSelection: .default(for: .codex), providerThreadID: "conv-1")
-        thread.turns = turns.enumerated().map { index, entry in
-            Turn(ordinal: index + 1, userMessage: UserMessage(text: "t\(index + 1)"), modelSelection: .default(for: entry.1), status: .completed, providerTurnID: entry.0)
+        var thread = AgentThread(projectID: project.id, modelSelection: .default(for: .omp), providerThreadID: "conv-1")
+        thread.turns = providerTurnIDs.enumerated().map { index, providerTurnID in
+            Turn(ordinal: index + 1, userMessage: UserMessage(text: "t\(index + 1)"), modelSelection: .default(for: .omp), status: .completed, providerTurnID: providerTurnID)
         }
         engine.insertThread(thread)
         return (engine, thread, driver)
     }
 
     @Test func revertingRewindsTheProviderToBeforeTheEarliestLaterTurnItReceived() async throws {
-        let (engine, thread, driver) = threadWithRecordedTurns([("p1", .codex), (nil, .codex), ("c3", .claude), ("p4", .codex), (nil, .codex)])
+        let (engine, thread, driver) = threadWithRecordedTurns(["p1", nil, nil, "p4", nil])
 
         _ = try await engine.revert(thread.id, toBeforeTurn: thread.turns[1].id, restoreFiles: false)
 
-        // Turn 2 never reached Codex and turn 3 ran on Claude: Codex rewinds to before turn 4.
+        // Turns 2 and 3 never reached omp: it rewinds to before turn 4.
         #expect(driver.session?.rollbacks.map(\.ordinal) == [4])
         #expect(driver.session?.rollbacks.map(\.providerTurnID) == ["p4"])
         #expect(engine.thread(thread.id)?.turns.map(\.userMessage.text) == ["t1"])
     }
 
     @Test func revertingOnlyTurnsTheProviderNeverReceivedLeavesItsConversationAlone() async throws {
-        let (engine, thread, driver) = threadWithRecordedTurns([("p1", .codex), (nil, .codex)])
+        let (engine, thread, driver) = threadWithRecordedTurns(["p1", nil])
 
         let message = try await engine.revert(thread.id, toBeforeTurn: thread.turns[1].id, restoreFiles: false)
 

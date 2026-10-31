@@ -6,26 +6,19 @@ public struct SessionConfig: Sendable, Hashable {
     public var cwd: String
     public var modelSelection: ModelSelection
     public var runtimeMode: RuntimeMode
-    public var interactionMode: InteractionMode
-    /// Provider-native conversation to resume (Codex thread id, Claude session id); nil = new.
+    /// omp session file to resume (`AgentThread.providerThreadID`); nil = new.
     public var resumeID: String?
-    /// Extra directories the agent may read (attachments).
-    public var additionalDirectories: [String]
 
     public init(
         cwd: String,
         modelSelection: ModelSelection,
         runtimeMode: RuntimeMode,
-        interactionMode: InteractionMode,
-        resumeID: String? = nil,
-        additionalDirectories: [String] = []
+        resumeID: String? = nil
     ) {
         self.cwd = cwd
         self.modelSelection = modelSelection
         self.runtimeMode = runtimeMode
-        self.interactionMode = interactionMode
         self.resumeID = resumeID
-        self.additionalDirectories = additionalDirectories
     }
 }
 
@@ -33,17 +26,15 @@ public struct SessionConfig: Sendable, Hashable {
 public struct TurnInput: Sendable, Hashable {
     public var text: String
     public var attachments: [Attachment]
-    /// Applies from this turn on; the session switches model/effort/mode in place when it can.
+    /// Applies from this turn on; the session switches model/effort in place.
     public var modelSelection: ModelSelection
     public var runtimeMode: RuntimeMode
-    public var interactionMode: InteractionMode
 
-    public init(text: String, attachments: [Attachment], modelSelection: ModelSelection, runtimeMode: RuntimeMode, interactionMode: InteractionMode) {
+    public init(text: String, attachments: [Attachment], modelSelection: ModelSelection, runtimeMode: RuntimeMode) {
         self.text = text
         self.attachments = attachments
         self.modelSelection = modelSelection
         self.runtimeMode = runtimeMode
-        self.interactionMode = interactionMode
     }
 }
 
@@ -55,7 +46,7 @@ public enum ProviderTurnOutcome: String, Sendable, Hashable {
 
 /// Normalized events every provider session emits. The engine folds them into the active turn.
 public enum ProviderEvent: Sendable, Hashable {
-    /// Native conversation id became known (Claude `system/init` session_id, Codex `thread/start`).
+    /// Native conversation id became known (omp `get_state` `sessionFile`).
     case conversationID(String)
     case turnStarted(providerTurnID: String?)
     /// Insert or replace an item by id (status and content are authoritative).
@@ -66,16 +57,14 @@ public enum ProviderEvent: Sendable, Hashable {
     case reasoningDelta(itemID: String, delta: String)
     /// Append live output to `.command` item `itemID`.
     case commandOutputDelta(itemID: String, delta: String)
-    /// Append streamed plan markdown to `.plan` item `itemID` (created if missing).
-    case planDelta(itemID: String, delta: String)
     /// The agent needs an approval; becomes an `.approval` item and blocks until answered.
     case approvalRequested(ApprovalRequest)
     /// The agent asks questions; becomes a `.userInput` item and blocks until answered.
     case userInputRequested(UserInputRequest)
     /// The provider resolved or withdrew a pending request on its own.
     case requestResolved(id: String)
-    /// The conversation's context fill: per-turn usage, and (omp `get_state`, Claude
-    /// `get_context_usage`) the exact fill read after a turn or a compaction.
+    /// The conversation's context fill: per-turn usage, and (omp `get_state`) the exact fill
+    /// read after a turn or a compaction.
     case tokenUsage(TokenUsage)
     /// The provider's slash commands and skills (the complete list; replaces the previous one).
     case commands([ProviderCommand])
@@ -117,7 +106,7 @@ public protocol ProviderSession: AnyObject, Sendable {
     /// Nothing happens when no turn is yielded.
     func releaseYieldedTurn() async
 
-    func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async
+    func respond(toApproval id: String, decision: ApprovalDecision) async
 
     func answer(userInput id: String, answers: [String: [String]]) async
 

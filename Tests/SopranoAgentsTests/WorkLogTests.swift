@@ -57,7 +57,7 @@ struct WorkLogTests {
         #expect(edit("e", ["Sources/App.swift"]).label == "Changed Sources/App.swift")
         #expect(edit("e", ["A.swift", "B.swift"]).label == "Changed 2 files")
         #expect(entry("w", .webSearch(query: "timing")).label == "Searched the web")
-        #expect(entry("t", .toolCall(ToolCall(name: "github.create_issue", category: .mcp, title: ""))).label == "github.create_issue")
+        #expect(entry("t", .toolCall(ToolCall(name: "github.create_issue", category: .other, title: ""))).label == "github.create_issue")
         #expect(entry("r", .reasoning(text: "x"), status: .running).label == "Thinking")
         let approval = ApprovalRequest(id: "a", kind: .command, detail: "rm -rf build", decision: .decline)
         #expect(entry("a", .approval(approval)).label == "Approval requested")
@@ -88,15 +88,5 @@ struct WorkLogTests {
         #expect(WorkLog.thoughtLine("**Tracing the redirect**\nThe loop likely comes from…") == "Tracing the redirect")
         #expect(WorkLog.thoughtLine("Check `SessionStore` first. Then the [router](x).") == "Check SessionStore first.")
         #expect(WorkLog.thoughtLine("- a *list* item without an end") == "a list item without an end")
-    }
-
-    @Test func theTaskTitleCountsDoneStepsAndNamesTheCurrentOne() {
-        let steps = [
-            TodoStep(id: "1", text: "Inventory", status: .completed),
-            TodoStep(id: "2", text: "Draft", status: .inProgress),
-            TodoStep(id: "3", text: "Ship", status: .pending),
-        ]
-        #expect(WorkLog.todoTitle(steps) == "Tasks 1/3 · Draft")
-        #expect(WorkLog.todoTitle(steps.map { TodoStep(id: $0.id, text: $0.text, status: .completed) }) == "Tasks 3/3")
     }
 }

@@ -107,7 +107,7 @@ extension SettingsController {
 
     static func statusDescription(_ status: ProviderStatus) -> String {
         if status.health == .ready {
-            return [status.version.map { "Version \($0)" }, status.accountLabel].compactMap { $0 }.joined(separator: " · ")
+            return status.version.map { "Version \($0)" } ?? ""
         }
         if let message = status.message, !message.isEmpty { return message }
         let command = status.kind.executableName
@@ -119,14 +119,15 @@ extension SettingsController {
         }
     }
 
-    private func models(for kind: ProviderKind) -> [ProviderModel] {
-        let live = engine.status(of: kind).models
-        return live.isEmpty ? ProviderCatalog.fallback(kind) : live
+    /// omp's live catalog, or the fallback while it is not known yet.
+    private func ompModels() -> [ProviderModel] {
+        let live = engine.status(of: .omp).models
+        return live.isEmpty ? ProviderCatalog.fallback(.omp) : live
     }
 
-    private func modelOptions(for kind: ProviderKind, defaultSlug: String) -> [SelectOption] {
-        let models = models(for: kind)
-        let defaultName = models.first { $0.slug == defaultSlug }?.name ?? defaultSlug
+    private func modelOptions() -> [SelectOption] {
+        let models = ompModels()
+        let defaultName = models.first { $0.slug == ModelSelection.ompDefaultModel }?.name ?? ModelSelection.ompDefaultModel
         var options = [SelectOption(title: "Default (\(defaultName))", value: "")]
         // omp's "default" entry is the same choice as the empty value above.
         for (index, model) in models.filter({ $0.slug != ModelSelection.ompDefaultModel }).enumerated() {
@@ -135,46 +136,31 @@ extension SettingsController {
         return options
     }
 
-    private func providerOptions() -> [SelectOption] {
-        ProviderKind.allCases.map { SelectOption(title: $0.displayName, value: $0.rawValue) }
-    }
-
     private func providersPage(_ form: SettingsForm) -> [NSView] {
-        var sections: [NSView] = []
-        for kind in ProviderKind.allCases {
-            let status = engine.status(of: kind)
-            let health = Self.healthLabel(status)
-            let badge = ThemedLabel(health.text, size: Typography.smallSize, weight: .medium, role: health.role)
-            let check = form.button("Check again", size: .xs) { [weak self] in
-                guard let engine = self?.engine else { return }
-                Task { await engine.refreshProviders() }
-            }
-            let key = "\(kind.rawValue)Path"
-            let command = kind.executableName
-            let configured = center.configuredValue(at: ["providers", key]) as? String
-            let path = form.field(configured ?? "", placeholder: "\(command) on PATH", width: 256, identifier: "providers.\(key)", mono: true) { [weak self] value in
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty { self?.remove(["providers", key]) } else { self?.write(trimmed, at: ["providers", key]) }
-            }
-            sections.append(form.section(kind.displayName, [
-                form.row("Status", description: Self.statusDescription(status), control: form.group([badge, check], spacing: 10)),
-                form.row(
-                    "Executable",
-                    description: "Path to the \(command) CLI. Leave empty to find it on PATH.",
-                    reset: reset(["providers", key], isDefault: configured == nil),
-                    control: path
-                ),
-            ]))
+        let status = engine.status(of: .omp)
+        let health = Self.healthLabel(status)
+        let badge = ThemedLabel(health.text, size: Typography.smallSize, weight: .medium, role: health.role)
+        let check = form.button("Check again", size: .xs) { [weak self] in
+            guard let engine = self?.engine else { return }
+            Task { await engine.refreshProviders() }
         }
+        let command = ProviderKind.omp.executableName
+        let configured = center.configuredValue(at: ["providers", "ompPath"]) as? String
+        let path = form.field(configured ?? "", placeholder: "\(command) on PATH", width: 256, identifier: "providers.ompPath", mono: true) { [weak self] value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { self?.remove(["providers", "ompPath"]) } else { self?.write(trimmed, at: ["providers", "ompPath"]) }
+        }
+        var sections: [NSView] = [form.section(ProviderKind.omp.displayName, [
+            form.row("Status", description: Self.statusDescription(status), control: form.group([badge, check], spacing: 10)),
+            form.row(
+                "Executable",
+                description: "Path to the \(command) CLI. Leave empty to find it on PATH.",
+                reset: reset(["providers", "ompPath"], isDefault: configured == nil),
+                control: path
+            ),
+        ])]
 
-        let provider = form.select(providerOptions(), selected: settings.defaultProvider.rawValue, width: 192, label: "Default provider") { [weak self] value in
-            self?.write(value, at: ["agents", "defaultProvider"])
-            self?.remove(["agents", "defaultModel"])
-        }
-        let model = form.select(
-            modelOptions(for: settings.defaultProvider, defaultSlug: settings.defaultProvider.defaultModel),
-            selected: settings.defaultModel ?? "", width: 224, label: "Default model"
-        ) { [weak self] value in
+        let model = form.select(modelOptions(), selected: settings.defaultModel ?? "", width: 224, label: "Default model") { [weak self] value in
             if value.isEmpty { self?.remove(["agents", "defaultModel"]) } else { self?.write(value, at: ["agents", "defaultModel"]) }
         }
         let modes = RuntimeMode.allCases.map { SelectOption(title: $0.title, value: $0.rawValue) }
@@ -182,12 +168,6 @@ extension SettingsController {
             self?.write(value, at: ["agents", "defaultRuntimeMode"])
         }
         sections.append(form.section("New threads", [
-            form.row(
-                "Default provider",
-                description: "The agent new threads start with. Each thread keeps its provider.",
-                reset: reset(["agents", "defaultProvider"], isDefault: settings.defaultProvider == defaults.defaultProvider),
-                control: provider
-            ),
             form.row(
                 "Default model",
                 description: "Model new threads start with; the composer's model picker changes it per thread.",
@@ -207,27 +187,13 @@ extension SettingsController {
     // MARK: Text generation
 
     private func textGenerationPage(_ form: SettingsForm) -> [NSView] {
-        let kind = settings.textGenerationProvider
-        let provider = form.select(providerOptions(), selected: kind.rawValue, width: 192, label: "Text generation provider") { [weak self] value in
-            self?.write(value, at: ["textGeneration", "provider"])
-            self?.remove(["textGeneration", "model"])
-        }
-        let model = form.select(
-            modelOptions(for: kind, defaultSlug: kind.textGenerationModel),
-            selected: settings.textGenerationModel ?? "", width: 224, label: "Text generation model"
-        ) { [weak self] value in
+        let model = form.select(modelOptions(), selected: settings.textGenerationModel ?? "", width: 224, label: "Text generation model") { [weak self] value in
             if value.isEmpty { self?.remove(["textGeneration", "model"]) } else { self?.write(value, at: ["textGeneration", "model"]) }
         }
         let titles = form.toggle(settings.generateTitles, label: "Generate thread titles") { [weak self] isOn in
             self?.write(isOn, at: ["textGeneration", "titles"])
         }
         return [form.section("Text generation", [
-            form.row(
-                "Provider",
-                description: "The agent CLI that writes thread titles, commit messages and branch names.",
-                reset: reset(["textGeneration", "provider"], isDefault: kind == defaults.textGenerationProvider),
-                control: provider
-            ),
             form.row(
                 "Text generation model",
                 description: "Used for thread titles, commit messages and branch names. A small, fast model works best.",

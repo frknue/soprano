@@ -49,11 +49,11 @@ enum SettingsPage: String, CaseIterable, Sendable {
             [("Theme", "color scheme appearance dark light soprano"), ("Chat width", "wide full width column layout messages composer"),
              ("Follow-up behavior", "queue steer running turn send")]
         case .providers:
-            [("Codex", "provider cli version account path executable"), ("Claude Code", "provider cli version account path executable"),
-             ("Default provider", "new thread"), ("Default model", "new thread provider reasoning"), ("Permissions", "runtime mode approval full access supervised")]
+            [("omp", "provider agent cli version path executable"),
+             ("Default model", "new thread reasoning"), ("Permissions", "runtime mode approval full access supervised")]
         case .accounts:
-            [("Claude accounts", "account usage limits login sign in omp claude code switch"),
-             ("Codex accounts", "account usage limits login sign in omp codex cli switch")]
+            [("Claude accounts", "account usage limits login sign in omp claude anthropic prefer"),
+             ("Codex accounts", "account usage limits login sign in omp codex openai chatgpt prefer")]
         case .textGeneration:
             [("Text generation model", "thread titles commit messages branch names"), ("Generate thread titles", "title")]
         case .worktrees:

@@ -35,17 +35,17 @@ struct SlashCommandFilterTests {
         #expect(names == ["skill:pr", "skill:refactor"])
     }
 
-    @Test func candidatesFollowTheSigilAndAddTheAppCompactRowOnlyWhenMissing() {
-        let codex = [ProviderCommand(name: "pdf", kind: .skill, description: "Read PDFs", insertText: "$pdf ")]
-        #expect(SlashCommandFilter.candidates(codex, sigil: "$", includeCompact: true).map(\.name) == ["pdf"])
-        #expect(SlashCommandFilter.candidates(codex, sigil: "/", includeCompact: true) == [SlashCommandFilter.compactCommand])
-        #expect(SlashCommandFilter.candidates(codex, sigil: "/", includeCompact: false).isEmpty)
-        #expect(SlashCommandFilter.candidates(commands, sigil: "/", includeCompact: true) == commands)
+    @Test func candidatesAreTheSlashCommandsPlusTheAppCompactRowOnlyWhenMissing() {
+        let withoutCompact = Array(commands.dropFirst())
+        #expect(SlashCommandFilter.candidates(withoutCompact, includeCompact: true) == withoutCompact + [SlashCommandFilter.compactCommand])
+        #expect(SlashCommandFilter.candidates(withoutCompact, includeCompact: false) == withoutCompact)
+        #expect(SlashCommandFilter.candidates(commands, includeCompact: true) == commands)
+        let bare = [ProviderCommand(name: "pdf", kind: .skill, insertText: "pdf ")]
+        #expect(SlashCommandFilter.candidates(bare, includeCompact: false).isEmpty)
     }
 
-    @Test func theEmptyRowNamesTheProviderOrTheUnmatchedQuery() {
-        #expect(SlashCommandFilter.emptyText(provider: .claude, sigil: "/", hasCandidates: false, query: "") == "No commands from Claude Code yet — they load once the session starts.")
-        #expect(SlashCommandFilter.emptyText(provider: .codex, sigil: "$", hasCandidates: false, query: "") == "No skills from Codex yet — they load once the session starts.")
-        #expect(SlashCommandFilter.emptyText(provider: .omp, sigil: "/", hasCandidates: true, query: "zz") == "No commands match “/zz”")
+    @Test func theEmptyRowSaysCommandsAreLoadingOrNamesTheUnmatchedQuery() {
+        #expect(SlashCommandFilter.emptyText(hasCandidates: false, query: "") == "No commands from omp yet — they load once the session starts.")
+        #expect(SlashCommandFilter.emptyText(hasCandidates: true, query: "zz") == "No commands match “/zz”")
     }
 }

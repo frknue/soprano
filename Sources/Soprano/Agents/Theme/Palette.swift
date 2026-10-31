@@ -99,21 +99,6 @@ enum ThreadStatusTone {
     case working, approval, input, failed, done, muted
 }
 
-private func hex(_ value: UInt32, _ alpha: CGFloat = 1) -> NSColor {
-    NSColor(
-        srgbRed: CGFloat((value >> 16) & 0xff) / 255,
-        green: CGFloat((value >> 8) & 0xff) / 255,
-        blue: CGFloat(value & 0xff) / 255,
-        alpha: alpha
-    )
-}
-
-
-extension Palette {
-    /// Claude's brand orange for its provider mark, same in light and dark.
-    var claudeBrand: NSColor { hex(0xd97757) }
-}
-
 extension Palette {
     /// Maps a Soprano theme onto the app's tokens.
     init(soprano theme: AppTheme) {

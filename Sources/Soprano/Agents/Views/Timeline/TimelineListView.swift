@@ -129,8 +129,6 @@ final class TimelineListView: NSView {
         case .workEntry: "workEntry"
         case .liveWork, .thinking: "liveWork"
         case .approval: "approval"
-        case .plan: "plan"
-        case .todo: "todo"
         case .error: "error"
         case .notice: "notice"
         case .backgroundWork: "backgroundWork"
@@ -150,8 +148,6 @@ final class TimelineListView: NSView {
         case .workEntry: WorkEntryRowView(frame: .zero)
         case .liveWork, .thinking: LiveWorkRowView(frame: .zero)
         case .approval: ApprovalRowView(frame: .zero)
-        case .plan: PlanRowView(frame: .zero)
-        case .todo: TodoRowView(frame: .zero)
         case .error: ErrorRowView(frame: .zero)
         case .notice: NoticeRowView(frame: .zero)
         case .backgroundWork: BackgroundWorkRowView(frame: .zero)
@@ -407,7 +403,7 @@ struct TimelineFindMatch: Hashable {
     var range: NSRange
 }
 
-/// Find in thread: searches the rendered text of messages and plans, case- and diacritic-insensitive.
+/// Find in thread: searches the rendered text of messages, case- and diacritic-insensitive.
 enum TimelineFind {
     /// Searchable units of a row, in order (one per rendered Markdown segment).
     @MainActor
@@ -415,7 +411,6 @@ enum TimelineFind {
         switch row.content {
         case let .user(model): MarkdownRenderer.render(model.message.text, style: .user).searchableTexts
         case let .assistant(model): MarkdownRenderer.render(model.text, style: .assistant).searchableTexts
-        case let .plan(model): MarkdownRenderer.render(MarkdownDocument.strippingTitle(model.markdown), style: .plan).searchableTexts
         default: []
         }
     }

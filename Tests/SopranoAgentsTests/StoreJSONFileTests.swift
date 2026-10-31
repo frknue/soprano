@@ -8,7 +8,7 @@ struct StoreJSONFileTests {
     }
 
     private func thread(title: String, turns: [Turn] = []) -> AgentThread {
-        AgentThread(id: "thread-1", projectID: "p1", title: title, createdAt: Date(timeIntervalSince1970: 1000), modelSelection: .default(for: .claude), turns: turns)
+        AgentThread(id: "thread-1", projectID: "p1", title: title, createdAt: Date(timeIntervalSince1970: 1000), modelSelection: .default(for: .omp), turns: turns)
     }
 
     @Test func projectsAndThreadsSurviveARoundTrip() throws {
@@ -16,7 +16,7 @@ struct StoreJSONFileTests {
         let store = JSONFileThreadStore(directory: dir)
         let project = Project(id: "p1", title: "app", path: "/tmp/app", createdAt: Date(timeIntervalSince1970: 5))
         let saved = thread(title: "Fix login", turns: [
-            Turn(ordinal: 1, userMessage: UserMessage(text: "hi", createdAt: Date(timeIntervalSince1970: 1001)), modelSelection: .default(for: .claude),
+            Turn(ordinal: 1, userMessage: UserMessage(text: "hi", createdAt: Date(timeIntervalSince1970: 1001)), modelSelection: .default(for: .omp),
                  status: .completed, startedAt: Date(timeIntervalSince1970: 1001), completedAt: Date(timeIntervalSince1970: 1002.5),
                  items: [TurnItem(id: "m", kind: .assistantMessage(text: "Hello", isFinal: true), status: .completed, startedAt: Date(timeIntervalSince1970: 1001.25))]),
         ])
@@ -65,7 +65,7 @@ struct StoreJSONFileTests {
         let running = Turn(
             ordinal: 1,
             userMessage: UserMessage(text: "go"),
-            modelSelection: .default(for: .claude),
+            modelSelection: .default(for: .omp),
             startedAt: Date(timeIntervalSince1970: 1000),
             items: [TurnItem(id: "cmd", kind: .command(CommandExecution(command: "make")), status: .running, startedAt: Date(timeIntervalSince1970: 1010))]
         )
@@ -145,7 +145,7 @@ struct StoreJSONFileTests {
         let running = Turn(
             ordinal: 1,
             userMessage: UserMessage(text: "go"),
-            modelSelection: .default(for: .codex),
+            modelSelection: .default(for: .omp),
             items: [
                 TurnItem(id: "ap1", kind: .approval(ApprovalRequest(id: "ap1", kind: .command, detail: "rm -rf build")), status: .pending),
                 TurnItem(id: "q1", kind: .userInput(UserInputRequest(id: "q1", questions: [

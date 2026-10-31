@@ -8,7 +8,7 @@ extension NSAttributedString.Key {
 }
 
 /// How a piece of Markdown is set: the chat's assistant prose (14 pt, line height 1.625,
-/// `foreground 90%`), a user bubble, a plan.
+/// `foreground 90%`), a user bubble, a reasoning line.
 struct MarkdownStyle: Hashable {
     var fontSize: CGFloat = Typography.bodySize
     var lineHeightMultiple: CGFloat = 1.625
@@ -21,7 +21,6 @@ struct MarkdownStyle: Hashable {
 
     static let assistant = MarkdownStyle()
     static let user = MarkdownStyle(foregroundAlpha: 1, usesMessageForeground: true, lineBreaks: true)
-    static let plan = MarkdownStyle(foregroundAlpha: 1)
     static let thought = MarkdownStyle(foregroundAlpha: 0.8, lineBreaks: true)
 }
 

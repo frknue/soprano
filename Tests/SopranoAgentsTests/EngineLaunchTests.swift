@@ -50,7 +50,7 @@ struct EngineLaunchTests {
         let worktrees = EngineHarness.temporaryDirectory().path
         let engine = EngineHarness.engine(driver: driver, git: git, settings: EngineSettings(branchPrefix: "soprano", worktreesDirectory: worktrees, generateTitles: false))
         let project = engine.addProject(path: Self.repository())
-        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "main"))
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), workspace: .newWorktree(baseBranch: "main"))
 
         let threadID = try await engine.launchThread(draft, text: "Fix the login redirect", attachments: [])
         let temporary = try #require(engine.thread(threadID)?.branch)
@@ -74,17 +74,16 @@ struct EngineLaunchTests {
         git.currentBranch = "develop"
         let engine = EngineHarness.engine(driver: driver, git: git)
         let project = engine.addProject(path: Self.repository())
-        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), runtimeMode: .approvalRequired, interactionMode: .plan)
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), runtimeMode: .approvalRequired)
 
-        let threadID = try await engine.launchThread(draft, text: "Plan it", attachments: [])
+        let threadID = try await engine.launchThread(draft, text: "Do it here", attachments: [])
         await engine.runtime.waitForBackgroundWork()
 
         let thread = try #require(engine.thread(threadID))
         #expect(thread.branch == "develop")
         #expect(thread.worktreePath == nil)
-        #expect(thread.title == "Plan it")
+        #expect(thread.title == "Do it here")
         #expect(driver.session?.configs.first?.runtimeMode == .approvalRequired)
-        #expect(driver.session?.configs.first?.interactionMode == .plan)
         #expect(!git.calls.contains { $0.hasPrefix("worktree") })
     }
 
@@ -94,7 +93,7 @@ struct EngineLaunchTests {
         git.worktreeError = EngineError.message("fatal: invalid reference: nope")
         let engine = EngineHarness.engine(driver: driver, git: git)
         let project = engine.addProject(path: Self.repository())
-        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "nope"))
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), workspace: .newWorktree(baseBranch: "nope"))
 
         let threadID = try await engine.launchThread(draft, text: "Do it", attachments: [])
         await engine.runtime.waitForBackgroundWork()
@@ -110,7 +109,7 @@ struct EngineLaunchTests {
         let git = RecordingGit()
         let engine = EngineHarness.engine(driver: driver, git: git)
         let project = engine.addProject(path: Self.repository())
-        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .codex), workspace: .newWorktree(baseBranch: "main"))
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), workspace: .newWorktree(baseBranch: "main"))
 
         let threadID = try await engine.launchThread(draft, text: "Do it", attachments: [])
         await engine.interrupt(threadID)
@@ -125,7 +124,7 @@ struct EngineLaunchTests {
         let driver = ScriptedDriver()
         driver.generate = { _ in .object(["title": .string("'Login Redirect Loop'"), "needsRefinement": .bool(false)]) }
         let engine = EngineHarness.engine(driver: driver, settings: EngineSettings(generateTitles: true))
-        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .codex))
+        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .omp))
 
         let threadID = try await engine.launchThread(draft, text: "the login page keeps redirecting to itself", attachments: [])
         #expect(engine.thread(threadID)?.title == "the login page keeps redirecting to itself")
@@ -140,7 +139,7 @@ struct EngineLaunchTests {
     @Test func aFailedTitleGenerationKeepsTheSeedAfterRetrying() async throws {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver, settings: EngineSettings(generateTitles: true))
-        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .codex))
+        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .omp))
 
         let threadID = try await engine.launchThread(draft, text: "hello there", attachments: [])
         await engine.runtime.waitForBackgroundWork()
@@ -153,7 +152,7 @@ struct EngineLaunchTests {
     @Test func scratchThreadsGetTheirOwnDirectory() async throws {
         let driver = ScriptedDriver()
         let engine = EngineHarness.engine(driver: driver)
-        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .codex))
+        let draft = ThreadDraft(projectID: nil, modelSelection: .default(for: .omp))
 
         let threadID = try await engine.launchThread(draft, text: "scratch", attachments: [])
         await engine.runtime.waitForBackgroundWork()

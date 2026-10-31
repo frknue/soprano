@@ -287,7 +287,6 @@ final class ComposerApprovalPanel: PaletteView {
         case .command: Icon.terminal
         case .fileChange: Icon.squarePenFile
         case .fileRead: Icon.eye
-        case .permission: Icon.wrench
         case .other: Icon.shieldQuestion
         }
     }

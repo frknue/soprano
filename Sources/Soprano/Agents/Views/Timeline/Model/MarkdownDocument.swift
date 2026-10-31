@@ -72,43 +72,6 @@ enum MarkdownDocument {
         return result
     }
 
-    /// The first heading's text, else nil.
-    static func firstHeading(in markdown: String) -> String? {
-        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.drop { $0 == " " }
-            guard line.count - trimmed.count <= 3, trimmed.hasPrefix("#") else { continue }
-            let hashes = trimmed.prefix { $0 == "#" }
-            guard hashes.count <= 6 else { continue }
-            let rest = trimmed.dropFirst(hashes.count)
-            guard rest.first == " " || rest.first == "\t" else { continue }
-            let title = rest.trimmingCharacters(in: .whitespaces)
-            if !title.isEmpty { return title }
-        }
-        return nil
-    }
-
-    /// The plan body without its leading title heading (and a "Summary" heading right after it),
-    ///.
-    static func strippingTitle(_ markdown: String) -> String {
-        var lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
-        func isHeading(_ line: String) -> Bool {
-            let trimmed = line.drop { $0 == " " }
-            guard line.count - trimmed.count <= 3 else { return false }
-            let hashes = trimmed.prefix { $0 == "#" }
-            return (1...6).contains(hashes.count) && trimmed.dropFirst(hashes.count).first == " "
-        }
-        func dropBlank() { while let first = lines.first, first.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeFirst() } }
-        if let first = lines.first, isHeading(first) { lines.removeFirst() }
-        dropBlank()
-        if let first = lines.first, isHeading(first),
-           first.drop(while: { $0 == " " || $0 == "#" }).trimmingCharacters(in: .whitespaces).lowercased() == "summary" {
-            lines.removeFirst()
-            dropBlank()
-        }
-        return lines.joined(separator: "\n")
-    }
-
     // MARK: - Conversion
 
     private static func blocks(of children: MarkupChildren, lineBreaks: Bool) -> [MarkdownBlock] {

@@ -3,8 +3,6 @@ import SopranoAgentsCore
 
 /// Composer symbols (kept with the composer; `Icon` holds the shared ones).
 extension Icon {
-    static let bot = "cpu"                                   // Build mode
-    static let pencilRuler = "pencil.and.ruler"              // Plan mode
     static let cornerUpRight = "arrow.uturn.right"           // Steer
     static let listPlus = "text.badge.plus"                  // Queue
     static let zap = "bolt.fill"                             // Fast mode
@@ -46,19 +44,6 @@ final class ComposerChip: InteractiveView {
 
     /// Read-only chips show their label without hover or press.
     var isInteractive = true {
-        didSet { applyPalette(palette) }
-    }
-
-    enum ImageTint {
-        /// Muted icon (regular chips), label color (context chips).
-        case automatic
-        /// The label's color (provider mark next to the model name).
-        case text
-        /// The image's own colors (Claude's mark).
-        case original
-    }
-
-    var leadingTint: ImageTint = .automatic {
         didSet { applyPalette(palette) }
     }
 
@@ -130,11 +115,7 @@ final class ComposerChip: InteractiveView {
         let text = active ? palette.foreground : (mutesTitle ? palette.mutedForeground : base)
         label.textColor = isEnabled ? text : text.withAlphaComponent(0.64)
         let iconTint = size == .regular ? (active ? palette.foreground : palette.mutedForeground) : label.textColor
-        leadingImage.contentTintColor = switch leadingTint {
-        case .automatic: iconTint
-        case .text: label.textColor
-        case .original: nil
-        }
+        leadingImage.contentTintColor = iconTint
         trailingImage.contentTintColor = mutesTitle && !active ? palette.mutedForeground : iconTint
         alphaValue = isPressed ? 0.9 : 1
     }
@@ -368,12 +349,12 @@ final class ComposerBadge: PaletteView {
     }
 }
 
-/// A 1 pt divider in `border` at 70% (horizontal unless `vertical`).
+/// A 1 pt horizontal divider in `border` at 70%.
 final class ComposerDivider: PaletteView {
-    init(vertical: Bool = false) {
+    init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        (vertical ? widthAnchor : heightAnchor).constraint(equalToConstant: 1).isActive = true
+        heightAnchor.constraint(equalToConstant: 1).isActive = true
         applyPalette(palette)
     }
 

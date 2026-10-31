@@ -29,11 +29,11 @@ struct TimelineFindTests {
     @Test func findSearchesTheRenderedTextOfMessagesNotTheirMarkdownSource() throws {
         let thread = AgentThread(
             projectID: nil,
-            modelSelection: ModelSelection(provider: .codex, model: "m"),
+            modelSelection: ModelSelection(provider: .omp, model: "m"),
             turns: [Turn(
                 ordinal: 1,
                 userMessage: UserMessage(id: "u", text: "Why does **login** loop?"),
-                modelSelection: ModelSelection(provider: .codex, model: "m"),
+                modelSelection: ModelSelection(provider: .omp, model: "m"),
                 status: .completed,
                 completedAt: Date(),
                 items: [

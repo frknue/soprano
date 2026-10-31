@@ -48,10 +48,13 @@ struct UsageHeadline: Equatable {
 
 /// Text for the usage indicator, the usage card and Settings → Accounts.
 enum UsageText {
-    /// One headline per provider with usage, in provider order.
+    /// One headline per provider with usage in omp's lists, in provider order.
     static func headlines(_ snapshot: AccountsSnapshot) -> [UsageHeadline] {
-        AccountProvider.allCases.compactMap { provider in
-            guard let headline = snapshot.headline(for: provider), let window = headline.usage.tightest else { return nil }
+        // The vendored controller also loads the CLI lists; the headline reads omp's only.
+        var shown = snapshot
+        shown.lists = shown.lists.filter { AccountListID.shown.contains($0.key) }
+        return AccountProvider.allCases.compactMap { provider in
+            guard let headline = shown.headline(for: provider), let window = headline.usage.tightest else { return nil }
             return UsageHeadline(provider: provider, row: headline.row, usage: headline.usage, window: window)
         }
     }
@@ -102,10 +105,9 @@ enum UsageText {
         return (blocks + ["Click for details"]).joined(separator: "\n\n")
     }
 
-    /// A list's caption in the usage card: "omp · automatic", "omp", "Claude Code".
+    /// A list's caption in the usage card: "omp · automatic" until a login is preferred, then "omp".
     static func caption(for list: AccountList) -> String {
-        let isAutomatic = list.id.tool == .omp && list.selectedAccountId == nil
-        return isAutomatic ? "\(list.id.tool.displayName) · automatic" : list.id.tool.displayName
+        list.selectedAccountId == nil ? "\(list.id.tool.displayName) · automatic" : list.id.tool.displayName
     }
 
     /// "Updated 4m ago": recomputed on every render, which each refresh triggers.
@@ -139,27 +141,9 @@ enum UsageText {
         return parts
     }
 
-    /// Settings → Accounts: what each list is for.
-    static func listNote(_ tool: AccountTool) -> String {
-        switch tool {
-        case .omp:
-            "omp uses every account and fails over when one runs out. New omp threads try the preferred account first."
-        case .claudeCode:
-            "Choosing an account signs Claude Code in with it on this Mac; running claude sessions switch too. System default is the login Claude Code had before."
-        case .codexCLI:
-            "New Codex threads use the chosen account; running ones keep theirs. History, config and skills stay shared."
-        }
-    }
+    /// Settings → Accounts: what each omp list is for.
+    static let listNote = "omp uses every account and fails over when one runs out. New omp threads try the preferred account first."
 
     /// The confirmation text for removing an account.
-    static func removalExplanation(_ tool: AccountTool) -> String {
-        switch tool {
-        case .omp:
-            "omp signs this account out on this Mac."
-        case .claudeCode:
-            "Soprano Agents forgets this login. If it is active, Claude Code goes back to the System default."
-        case .codexCLI:
-            "Soprano Agents deletes this account's sign-in. If it is active, new Codex threads use the System default."
-        }
-    }
+    static let removalExplanation = "omp signs this account out on this Mac."
 }

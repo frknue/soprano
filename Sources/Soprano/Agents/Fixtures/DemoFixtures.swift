@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "approval", "input", "plan", "failed", "background", "draft", "empty"]
+    static let scenarios = ["demo", "running", "approval", "input", "failed", "background", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -29,25 +29,7 @@ enum DemoFixtures {
             now: { now }
         )
         let engine = AgentEngine(environment: environment)
-        for kind in ProviderKind.allCases {
-            let version: String = switch kind {
-            case .omp: "18.14.0"
-            case .codex: "0.166.0"
-            case .claude: "2.1.314"
-            }
-            let account: String? = switch kind {
-            case .omp: nil
-            case .codex: "ChatGPT Pro 100 Subscription"
-            case .claude: "Claude Max"
-            }
-            engine.setProviderStatus(ProviderStatus(
-                kind: kind,
-                health: .ready,
-                version: version,
-                accountLabel: account,
-                models: kind == .omp ? ompModels : ProviderCatalog.fallback(kind)
-            ))
-        }
+        engine.setProviderStatus(ProviderStatus(kind: .omp, health: .ready, version: "18.14.0", models: ompModels))
         // The `/` menu's list for omp in the demo thread's worktree and in the app project (drafts).
         for directory in [demoWorktree, "/Users/demo/code/app"] {
             engine.rememberCommands(ompCommands, provider: .omp, workingDirectory: directory)
@@ -56,7 +38,6 @@ enum DemoFixtures {
         case "running": .thread(ID.running)
         case "approval": .thread(ID.approval)
         case "input": .thread(ID.input)
-        case "plan": .thread(ID.plan)
         case "failed": .thread(ID.failed)
         case "background": .thread(ID.background)
         case "draft": .draft(projectID: ID.app)
@@ -93,7 +74,6 @@ enum DemoFixtures {
         static let running = "thread-dark-mode"
         static let approval = "thread-jsonc"
         static let input = "thread-flaky"
-        static let plan = "thread-plan"
         static let failed = "thread-renderer"
         static let pinned = "thread-release"
         static let scratch = "thread-scratch"
@@ -112,7 +92,8 @@ enum DemoFixtures {
     }
 
     static let omp = ModelSelection(provider: .omp, model: "anthropic/claude-opus-5-5", options: [ModelOptionID.effort: "high"])
-    static let codex = ModelSelection(provider: .codex, model: "gpt-6.1-sol", options: [ModelOptionID.effort: "high"])
+    static let sonnet = ModelSelection(provider: .omp, model: "anthropic/claude-sonnet-5-5", options: [ModelOptionID.effort: "medium"])
+    static let sol = ModelSelection(provider: .omp, model: "openai-codex/gpt-6.1-sol", options: [ModelOptionID.effort: "high"])
 
     /// A slice of omp's catalog as `get_available_models` reports it (`provider/id`, "<name> · <provider>").
     static let ompModels: [ProviderModel] = {
@@ -128,7 +109,6 @@ enum DemoFixtures {
         return [ProviderModel(slug: ModelSelection.ompDefaultModel, name: "Claude Opus 5.5 · configured", isDefault: true, options: [efforts])]
             + entries.map { ProviderModel(slug: $0.0, name: $0.1, options: [efforts]) }
     }()
-    static let claude = ModelSelection(provider: .claude, model: "claude-opus-5-5", options: [ModelOptionID.effort: "medium"])
 
     static func threads(_ now: Date) -> [AgentThread] {
         func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
@@ -191,12 +171,12 @@ enum DemoFixtures {
         // 2. Running thread with a live command (Working).
         result.append(AgentThread(
             id: ID.running, projectID: ID.app, title: "Add dark mode toggle to settings", createdAt: ago(200), updatedAt: ago(5),
-            modelSelection: claude, branch: "soprano/dark-mode-toggle", worktreePath: "/Users/demo/.soprano-agents/worktrees/app/soprano-dark-mode-toggle",
+            modelSelection: sonnet, branch: "soprano/dark-mode-toggle", worktreePath: "/Users/demo/.soprano-agents/worktrees/app/soprano-dark-mode-toggle",
             lastVisitedAt: ago(100),
             turns: [Turn(
                 id: "turn-dark-1", ordinal: 1,
                 userMessage: UserMessage(text: "Add a dark mode toggle to the settings screen that follows the system by default.", createdAt: ago(134)),
-                modelSelection: claude, status: .running, startedAt: ago(134),
+                modelSelection: sonnet, status: .running, startedAt: ago(134),
                 items: [
                     TurnItem(id: "dr1", kind: .reasoning(text: "Looking for the settings screen and how themes are applied."), status: .completed, startedAt: ago(132), completedAt: ago(128)),
                     TurnItem(id: "dt1", kind: .toolCall(ToolCall(name: "Grep", category: .search, title: "Searched \"ThemeManager\" in Sources")), status: .completed, startedAt: ago(127), completedAt: ago(126)),
@@ -209,14 +189,14 @@ enum DemoFixtures {
         // 3. Waiting on a command approval (Approval).
         result.append(AgentThread(
             id: ID.approval, projectID: ID.soprano, title: "Migrate settings to JSONC", createdAt: ago(900), updatedAt: ago(40),
-            modelSelection: codex, runtimeMode: .approvalRequired, branch: "main", lastVisitedAt: ago(60),
+            modelSelection: sol, runtimeMode: .approvalRequired, branch: "main", lastVisitedAt: ago(60),
             turns: [Turn(
                 id: "turn-jsonc-1", ordinal: 1,
                 userMessage: UserMessage(text: "Switch the settings parser to JSONC so comments survive saves.", createdAt: ago(120)),
-                modelSelection: codex, status: .running, startedAt: ago(120),
+                modelSelection: sol, status: .running, startedAt: ago(120),
                 items: [
                     TurnItem(id: "ja1", kind: .assistantMessage(text: "I'll add the parser and run the existing settings tests first.", isFinal: false), status: .completed, startedAt: ago(110), completedAt: ago(109)),
-                    TurnItem(id: "jp1", kind: .approval(ApprovalRequest(id: "approval-1", kind: .command, detail: "swift test --filter SettingsTests", reason: "Run the settings test suite"))),
+                    TurnItem(id: "approval-1", kind: .approval(ApprovalRequest(id: "approval-1", kind: .command, detail: "swift test --filter SettingsTests", reason: "Run the settings test suite"))),
                 ]
             )]
         ))
@@ -224,11 +204,11 @@ enum DemoFixtures {
         // 4. Waiting on answers (Input).
         result.append(AgentThread(
             id: ID.input, projectID: ID.app, title: "Investigate flaky upload test", createdAt: ago(3000), updatedAt: ago(300),
-            modelSelection: claude, lastVisitedAt: ago(400),
+            modelSelection: sonnet, lastVisitedAt: ago(400),
             turns: [Turn(
                 id: "turn-flaky-1", ordinal: 1,
                 userMessage: UserMessage(text: "UploadTests.testResume fails about 1 in 10 runs on CI. Dig in.", createdAt: ago(900)),
-                modelSelection: claude, status: .running, startedAt: ago(900),
+                modelSelection: sonnet, status: .running, startedAt: ago(900),
                 items: [
                     TurnItem(id: "fi1", kind: .command(CommandExecution(command: "for i in $(seq 20); do swift test --filter testResume || break; done", output: "…\nTest Case 'UploadTests.testResume' failed (2.104 seconds).", exitCode: 1, durationMs: 41_000)), status: .failed, startedAt: ago(880), completedAt: ago(839)),
                     TurnItem(id: "fq1", kind: .userInput(UserInputRequest(id: "input-1", questions: [
@@ -242,72 +222,52 @@ enum DemoFixtures {
             )]
         ))
 
-        // 5. Plan mode thread with a todo list and a plan card.
-        result.append(AgentThread(
-            id: ID.plan, projectID: ID.site, title: "Plan the docs site redesign", createdAt: ago(7200), updatedAt: ago(3500),
-            modelSelection: claude, interactionMode: .plan, lastVisitedAt: ago(3000),
-            turns: [Turn(
-                id: "turn-plan-1", ordinal: 1,
-                userMessage: UserMessage(text: "Plan a redesign of the docs site navigation. Don't change anything yet.", createdAt: ago(3700)),
-                modelSelection: claude, status: .completed, startedAt: ago(3700), completedAt: ago(3500),
-                items: [
-                    TurnItem(id: "pt1", kind: .todoList(steps: [
-                        TodoStep(id: "s1", text: "Inventory current pages", status: .completed),
-                        TodoStep(id: "s2", text: "Group pages into sections", status: .completed),
-                        TodoStep(id: "s3", text: "Draft the new sidebar", status: .inProgress),
-                        TodoStep(id: "s4", text: "Write migration notes", status: .pending),
-                    ], explanation: nil), status: .completed, startedAt: ago(3690), completedAt: ago(3600)),
-                    TurnItem(id: "pp1", kind: .plan(markdown: planMarkdown), status: .completed, startedAt: ago(3550), completedAt: ago(3500)),
-                ]
-            )]
-        ))
-
-        // 6. Failed turn (Failed).
+        // 5. Failed turn (Failed).
         result.append(AgentThread(
             id: ID.failed, projectID: ID.soprano, title: "Refactor diff renderer", createdAt: ago(10000), updatedAt: ago(5000),
-            modelSelection: codex, lastVisitedAt: ago(9000),
+            modelSelection: sol, lastVisitedAt: ago(9000),
             turns: [Turn(
                 id: "turn-renderer-1", ordinal: 1,
                 userMessage: UserMessage(text: "Split DiffRows.swift into one file per row type.", createdAt: ago(5200)),
-                modelSelection: codex, status: .failed, failureMessage: "Codex exited unexpectedly (exit code 1).", startedAt: ago(5200), completedAt: ago(5000),
-                items: [TurnItem(id: "fe1", kind: .error(message: "Codex exited unexpectedly (exit code 1)."), status: .failed, startedAt: ago(5000), completedAt: ago(5000))]
+                modelSelection: sol, status: .failed, failureMessage: "omp exited unexpectedly (exit code 1).", startedAt: ago(5200), completedAt: ago(5000),
+                items: [TurnItem(id: "fe1", kind: .error(message: "omp exited unexpectedly (exit code 1)."), status: .failed, startedAt: ago(5000), completedAt: ago(5000))]
             )]
         ))
 
-        // 7. Pinned, unread completion (Done).
+        // 6. Pinned, unread completion (Done).
         result.append(AgentThread(
             id: ID.pinned, projectID: ID.app, title: "Release checklist for 2.4", createdAt: ago(86400 * 2), updatedAt: ago(7200),
-            modelSelection: codex, pinnedAt: ago(86400), lastVisitedAt: ago(86400),
+            modelSelection: sol, pinnedAt: ago(86400), lastVisitedAt: ago(86400),
             turns: [Turn(
                 ordinal: 1, userMessage: UserMessage(text: "Draft the 2.4 release checklist.", createdAt: ago(7400)),
-                modelSelection: codex, status: .completed, startedAt: ago(7400), completedAt: ago(7200),
+                modelSelection: sol, status: .completed, startedAt: ago(7400), completedAt: ago(7200),
                 items: [TurnItem(id: "rc1", kind: .assistantMessage(text: "Here's the checklist:\n\n- [ ] Bump versions\n- [ ] Changelog\n- [ ] Tag", isFinal: true), status: .completed)]
             )]
         ))
 
-        // 8. Scratch thread without a project.
+        // 7. Scratch thread without a project.
         result.append(AgentThread(
             id: ID.scratch, projectID: nil, title: "Explain Swift actors vs locks", createdAt: ago(86400 * 3), updatedAt: ago(86400 * 3),
-            modelSelection: claude, lastVisitedAt: ago(86400),
+            modelSelection: sonnet, lastVisitedAt: ago(86400),
             turns: [Turn(
                 ordinal: 1, userMessage: UserMessage(text: "When should I use an actor instead of a lock?", createdAt: ago(86400 * 3)),
-                modelSelection: claude, status: .completed, startedAt: ago(86400 * 3), completedAt: ago(86400 * 3 - 40),
+                modelSelection: sonnet, status: .completed, startedAt: ago(86400 * 3), completedAt: ago(86400 * 3 - 40),
                 items: [TurnItem(id: "sa1", kind: .assistantMessage(text: "Use an actor when the state is accessed from async code…", isFinal: true), status: .completed)]
             )]
         ))
 
-        // 9. Settled history.
+        // 8. Settled history.
         let settledTitles = ["Bump swift-markdown to 0.8", "Fix terminal resize flicker", "Add CHANGELOG entry", "Rename AgentManager APIs", "Document keybindings"]
         for (index, title) in settledTitles.enumerated() {
             let created = ago(Double(86400 * (4 + index)))
             result.append(AgentThread(
                 id: "thread-settled-\(index)", projectID: index.isMultiple(of: 2) ? ID.soprano : ID.app, title: title, createdAt: created, updatedAt: created,
-                modelSelection: index.isMultiple(of: 2) ? codex : claude, settledAt: created.addingTimeInterval(3600), lastVisitedAt: created.addingTimeInterval(3600),
-                turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: codex, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(300))]
+                modelSelection: index.isMultiple(of: 2) ? sol : sonnet, settledAt: created.addingTimeInterval(3600), lastVisitedAt: created.addingTimeInterval(3600),
+                turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: sol, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(300))]
             ))
         }
 
-        // 10. Archived (Settings › Archive).
+        // 9. Archived (Settings › Archive).
         let archived: [(String, String?, Double, Double)] = [
             ("Prototype onboarding carousel", ID.app, 86400 * 2, 86400 * 12),
             ("Try SwiftData for thread storage", ID.soprano, 86400 * 6, 86400 * 15),
@@ -317,8 +277,8 @@ enum DemoFixtures {
             let created = ago(createdAgo)
             result.append(AgentThread(
                 id: "thread-archived-\(index)", projectID: projectID, title: title, createdAt: created, updatedAt: created,
-                modelSelection: codex, archivedAt: ago(archivedAgo), lastVisitedAt: created.addingTimeInterval(600),
-                turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: codex, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(240))]
+                modelSelection: sol, archivedAt: ago(archivedAgo), lastVisitedAt: created.addingTimeInterval(600),
+                turns: [Turn(ordinal: 1, userMessage: UserMessage(text: title, createdAt: created), modelSelection: sol, status: .completed, startedAt: created, completedAt: created.addingTimeInterval(240))]
             ))
         }
         return result
@@ -370,22 +330,6 @@ enum DemoFixtures {
     | `testRedirectKeepsDeepLink` | passed |
 
     Run `swift test --filter LoginRedirectTests` to check it yourself.
-    """
-
-    nonisolated static let planMarkdown = """
-    # Docs navigation redesign
-
-    ## Goals
-    - Readers find a page in two clicks
-    - Section names match the product's own vocabulary
-
-    ## Steps
-    1. Merge *Guides* and *Tutorials* into **Learn**
-    2. Move API pages under **Reference**, generated from the source
-    3. Add a persistent search field to the sidebar
-
-    ## Risks
-    - Old links break → add redirects for every moved page
     """
 
     nonisolated static let sampleDiff = """

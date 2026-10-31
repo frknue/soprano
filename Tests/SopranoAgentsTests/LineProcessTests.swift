@@ -76,7 +76,7 @@ struct LineProcessTests {
     }
 
     @Test func aMissingExecutableFailsToStart() {
-        let process = LineProcess(LineProcess.Configuration(executable: "/nonexistent/codex", arguments: [], environment: [:]))
+        let process = LineProcess(LineProcess.Configuration(executable: "/nonexistent/omp", arguments: [], environment: [:]))
         #expect(throws: LineProcessError.self) { try process.start() }
     }
 

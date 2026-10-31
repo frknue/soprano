@@ -79,15 +79,8 @@ enum SettingsResolver {
         }
 
         if let agents = section("agents", in: root, warn: warn) {
-            for key in agents.keys.sorted() where !["defaultProvider", "defaultModel", "defaultRuntimeMode"].contains(key) {
+            for key in agents.keys.sorted() where !["defaultModel", "defaultRuntimeMode"].contains(key) {
                 warn("Unknown setting \"agents.\(key)\".")
-            }
-            if let value = agents["defaultProvider"] {
-                if let raw = value as? String, let provider = ProviderKind(rawValue: raw) {
-                    result.settings.defaultProvider = provider
-                } else {
-                    warn("agents.defaultProvider must be \"omp\", \"codex\" or \"claude\".")
-                }
             }
             if let value = agents["defaultModel"] {
                 if let model = value as? String, !model.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -107,24 +100,15 @@ enum SettingsResolver {
         }
 
         if let providers = section("providers", in: root, warn: warn) {
-            for key in providers.keys.sorted() where !["ompPath", "codexPath", "claudePath"].contains(key) {
+            for key in providers.keys.sorted() where key != "ompPath" {
                 warn("Unknown setting \"providers.\(key)\".")
             }
             result.settings.ompPath = optionalPath(providers["ompPath"], key: "providers.ompPath", warn: warn) ?? result.settings.ompPath
-            result.settings.codexPath = optionalPath(providers["codexPath"], key: "providers.codexPath", warn: warn) ?? result.settings.codexPath
-            result.settings.claudePath = optionalPath(providers["claudePath"], key: "providers.claudePath", warn: warn) ?? result.settings.claudePath
         }
 
         if let generation = section("textGeneration", in: root, warn: warn) {
-            for key in generation.keys.sorted() where !["provider", "model", "titles"].contains(key) {
+            for key in generation.keys.sorted() where !["model", "titles"].contains(key) {
                 warn("Unknown setting \"textGeneration.\(key)\".")
-            }
-            if let value = generation["provider"] {
-                if let raw = value as? String, let provider = ProviderKind(rawValue: raw) {
-                    result.settings.textGenerationProvider = provider
-                } else {
-                    warn("textGeneration.provider must be \"omp\", \"codex\" or \"claude\".")
-                }
             }
             if let value = generation["model"] {
                 if let model = value as? String, !model.isEmpty {

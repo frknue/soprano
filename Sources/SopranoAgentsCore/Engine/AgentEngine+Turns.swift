@@ -54,7 +54,6 @@ extension AgentEngine {
             createdAt: now,
             modelSelection: draft.modelSelection,
             runtimeMode: draft.runtimeMode,
-            interactionMode: draft.interactionMode,
             isGeneratingTitle: settings.generateTitles
         )
         var worktree: (project: Project, baseBranch: String, branch: String)?
@@ -157,8 +156,8 @@ extension AgentEngine {
         finishTurn(threadID, turn.id, status: .interrupted, error: nil)
     }
 
-    /// Answers a pending approval. `feedback` accompanies a decline when the provider supports it.
-    public func respond(_ threadID: String, approvalID: String, decision: ApprovalDecision, feedback: String? = nil) async {
+    /// Answers a pending approval.
+    public func respond(_ threadID: String, approvalID: String, decision: ApprovalDecision) async {
         guard let turn = thread(threadID)?.turns.last(where: { turn in
             turn.items.contains { item in
                 if case let .approval(request) = item.kind { return request.id == approvalID && request.decision == nil }
@@ -170,12 +169,11 @@ extension AgentEngine {
             guard let index = turn.items.firstIndex(where: { $0.id == approvalID }),
                   case var .approval(request) = turn.items[index].kind else { return }
             request.decision = decision
-            request.feedback = feedback
             turn.items[index].kind = .approval(request)
             turn.items[index].status = decision == .accept || decision == .acceptForSession ? .completed : .declined
             turn.items[index].completedAt = now
         }
-        await runtime.existingThread(threadID)?.session?.respond(toApproval: approvalID, decision: decision, feedback: feedback)
+        await runtime.existingThread(threadID)?.session?.respond(toApproval: approvalID, decision: decision)
     }
 
     /// Answers pending agent questions: question id → selected option labels or free text.
@@ -243,10 +241,9 @@ extension AgentEngine {
         }
 
         // Rewind the provider to before the earliest turn from here on that it actually received
-        // (a turn stopped during startup, failed before sending, or run on another provider has
-        // no native id). When none of them reached it, its conversation already ends here.
-        let provider = thread.modelSelection.provider
-        let anchor = thread.turns.first { $0.ordinal >= turn.ordinal && $0.providerTurnID != nil && $0.modelSelection.provider == provider }
+        // (a turn stopped during startup or failed before sending has no native id). When none
+        // of them reached it, its conversation already ends here.
+        let anchor = thread.turns.first { $0.ordinal >= turn.ordinal && $0.providerTurnID != nil }
         if thread.providerThreadID != nil, let anchor {
             let session: any ProviderSession
             do {

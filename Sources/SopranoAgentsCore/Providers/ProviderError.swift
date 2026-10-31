@@ -7,8 +7,8 @@ public enum ProviderError: Error, LocalizedError, Sendable, Hashable {
     case spawnFailed(String)
     /// The process exited while a request or turn was in flight.
     case processExited(ProviderKind, status: Int32, stderr: String)
-    /// Error response to a request: Codex app-server JSON-RPC errors, omp `success:false`
-    /// responses (`method` = the command type, `code` 0).
+    /// Error response to a request: omp `success:false` responses (`method` = the command
+    /// type, `code` 0).
     case rpc(method: String, code: Int, message: String)
     case timedOut(String)
     case invalidOutput(String)

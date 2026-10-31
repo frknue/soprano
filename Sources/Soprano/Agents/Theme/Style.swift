@@ -103,7 +103,7 @@ enum Radius {
     /// Buttons, menus, popovers, code blocks, changed-files card (`--control-radius`).
     static let lg: CGFloat = 8
     static let xl: CGFloat = 12
-    /// Composer, user bubbles, dialogs, plan cards, thread details card.
+    /// Composer, user bubbles, dialogs, thread details card.
     static let xxl: CGFloat = 16
 }
 
@@ -150,9 +150,7 @@ enum Icon {
     static let brain = "brain"
     static let eye = "eye"
     static let globe = "globe"
-    static let wrench = "wrench.and.screwdriver"
     static let squarePenFile = "square.and.pencil"
-    static let listTodo = "checklist"
     static let alarm = "alarm"
 }
 

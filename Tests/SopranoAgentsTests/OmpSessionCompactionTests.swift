@@ -104,11 +104,11 @@ struct OmpSessionCompactionTests {
     }
 
     private func config(_ cwd: String) -> SessionConfig {
-        SessionConfig(cwd: cwd, modelSelection: .default(for: .omp), runtimeMode: .fullAccess, interactionMode: .build)
+        SessionConfig(cwd: cwd, modelSelection: .default(for: .omp), runtimeMode: .fullAccess)
     }
 
     private func input(_ text: String) -> TurnInput {
-        TurnInput(text: text, attachments: [], modelSelection: .default(for: .omp), runtimeMode: .fullAccess, interactionMode: .build)
+        TurnInput(text: text, attachments: [], modelSelection: .default(for: .omp), runtimeMode: .fullAccess)
     }
 
     /// Collects session events on a background task.

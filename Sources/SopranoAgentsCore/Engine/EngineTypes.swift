@@ -85,20 +85,17 @@ public struct ThreadDraft: Sendable, Hashable {
     public var projectID: String?
     public var modelSelection: ModelSelection
     public var runtimeMode: RuntimeMode
-    public var interactionMode: InteractionMode
     public var workspace: WorkspaceChoice
 
     public init(
         projectID: String?,
         modelSelection: ModelSelection,
         runtimeMode: RuntimeMode = .fullAccess,
-        interactionMode: InteractionMode = .build,
         workspace: WorkspaceChoice = .projectRoot
     ) {
         self.projectID = projectID
         self.modelSelection = modelSelection
         self.runtimeMode = runtimeMode
-        self.interactionMode = interactionMode
         self.workspace = workspace
     }
 }
@@ -116,7 +113,7 @@ public enum SendMode: Sendable, Hashable {
 public struct EngineSettings: Sendable, Hashable {
     public var defaultModel: ModelSelection
     public var defaultRuntimeMode: RuntimeMode
-    /// Provider + model for titles, commit messages and branch names.
+    /// Model for titles, commit messages and branch names.
     public var textGenerationModel: ModelSelection
     /// Prefix of temporary and generated worktree branches ("soprano" → `soprano/fix-login`).
     public var branchPrefix: String
@@ -124,21 +121,17 @@ public struct EngineSettings: Sendable, Hashable {
     public var worktreesDirectory: String
     /// Generate thread titles with `textGenerationModel` after the first message.
     public var generateTitles: Bool
-    /// Executable overrides; nil = find `omp` / `codex` / `claude` on PATH.
+    /// Executable override; nil = find `omp` on PATH.
     public var ompPath: String?
-    public var codexPath: String?
-    public var claudePath: String?
 
     public init(
         defaultModel: ModelSelection = .default(for: .omp),
         defaultRuntimeMode: RuntimeMode = .fullAccess,
-        textGenerationModel: ModelSelection = ModelSelection(provider: .codex, model: ProviderKind.codex.textGenerationModel, options: ["effort": "low"]),
+        textGenerationModel: ModelSelection = .default(for: .omp),
         branchPrefix: String = "soprano",
         worktreesDirectory: String = NSString(string: "~/.soprano-agents/worktrees").expandingTildeInPath,
         generateTitles: Bool = true,
-        ompPath: String? = nil,
-        codexPath: String? = nil,
-        claudePath: String? = nil
+        ompPath: String? = nil
     ) {
         self.defaultModel = defaultModel
         self.defaultRuntimeMode = defaultRuntimeMode
@@ -147,8 +140,6 @@ public struct EngineSettings: Sendable, Hashable {
         self.worktreesDirectory = worktreesDirectory
         self.generateTitles = generateTitles
         self.ompPath = ompPath
-        self.codexPath = codexPath
-        self.claudePath = claudePath
     }
 }
 

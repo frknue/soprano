@@ -4,7 +4,7 @@ import Testing
 @testable import SopranoAgentsCore
 
 struct ComposerHistoryTests {
-    private let model = ModelSelection.default(for: .codex)
+    private let model = ModelSelection.default(for: .omp)
 
     @Test func entriesAreTheThreadsUserMessagesAndSteersOldestFirst() {
         let thread = AgentThread(projectID: nil, modelSelection: model, turns: [

@@ -60,7 +60,7 @@ public struct OmpDriver: ProviderDriver {
             guard models.count > 1 else {
                 return ProviderStatus(kind: .omp, health: .unauthenticated, version: version, models: models, message: "omp has no usable models. Run `omp` and sign in with /login.")
             }
-            return ProviderStatus(kind: .omp, health: .ready, version: version, accountLabel: nil, models: models)
+            return ProviderStatus(kind: .omp, health: .ready, version: version, models: models)
         } catch {
             return ProviderStatus(kind: .omp, health: .error, version: version, models: fallback, message: error.localizedDescription)
         }

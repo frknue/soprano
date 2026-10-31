@@ -1,7 +1,7 @@
 import AppKit
 
-/// The usage card: every account list with each login's usage and which login is chosen,
-/// grouped by provider. It follows `AccountsCenter.source` while open, so a refresh or a
+/// The usage card: omp's account lists with each login's usage and which login is preferred,
+/// one per provider. It follows `AccountsCenter.source` while open, so a refresh or a
 /// selection made in Settings shows up live.
 ///
 ///     CLAUDE
@@ -79,25 +79,16 @@ final class UsageCardContent: ComposerPopoverContent {
             fullWidth.append(view)
         }
 
-        var currentProvider: AccountProvider?
-        for listID in AccountListID.all {
-            guard let list = snapshot.lists[listID], !list.accounts.isEmpty || list.systemDefault != nil else { continue }
-            if listID.provider != currentProvider {
-                if let last = contentStack.arrangedSubviews.last {
-                    contentStack.setCustomSpacing(12, after: last)
-                    add(AccountsRule(), after: 12)
-                }
-                add(eyebrow(listID.provider.displayName), after: 8)
-                currentProvider = listID.provider
-            } else if let last = contentStack.arrangedSubviews.last {
+        for listID in AccountListID.shown {
+            guard let list = snapshot.lists[listID], !list.accounts.isEmpty else { continue }
+            if let last = contentStack.arrangedSubviews.last {
                 contentStack.setCustomSpacing(12, after: last)
+                add(AccountsRule(), after: 12)
             }
+            add(eyebrow(listID.provider.displayName), after: 8)
             add(ThemedLabel(UsageText.caption(for: list), size: Typography.smallSize) { $0.mutedForeground }, after: 6)
-            if let systemDefault = list.systemDefault {
-                add(makeRow(systemDefault, isSelected: list.selectedAccountId == nil, isSystemDefault: true, now: now), after: 8)
-            }
             for account in list.accounts {
-                add(makeRow(account, isSelected: list.selectedAccountId == account.id, isSystemDefault: false, now: now), after: 8)
+                add(makeRow(account, isSelected: list.selectedAccountId == account.id, now: now), after: 8)
             }
         }
         if fullWidth.isEmpty {
@@ -125,20 +116,14 @@ final class UsageCardContent: ComposerPopoverContent {
     }
 
     /// The login on one line, then one line per usage window.
-    private func makeRow(_ row: AccountRow, isSelected: Bool, isSystemDefault: Bool, now: Date) -> NSView {
+    private func makeRow(_ row: AccountRow, isSelected: Bool, now: Date) -> NSView {
         let hasProblem = !(row.problem ?? "").isEmpty
         let mark = AccountMarkView(isSelected: isSelected, hasProblem: hasProblem)
 
-        let name = NSMutableAttributedString()
-        if isSystemDefault {
-            name.append(NSAttributedString(string: "System default — ", attributes: [
-                .font: Typography.ui(Typography.rowSize), .foregroundColor: palette.mutedForeground,
-            ]))
-        }
-        name.append(NSAttributedString(string: row.identity.email.isEmpty ? (row.problem ?? "") : row.identity.email, attributes: [
+        let name = NSMutableAttributedString(string: row.identity.email.isEmpty ? (row.problem ?? "") : row.identity.email, attributes: [
             .font: Typography.ui(Typography.rowSize, weight: isSelected ? .semibold : .regular),
             .foregroundColor: palette.foreground,
-        ]))
+        ])
         let truncating = NSMutableParagraphStyle()
         truncating.lineBreakMode = .byTruncatingMiddle
         name.addAttribute(.paragraphStyle, value: truncating, range: NSRange(location: 0, length: name.length))

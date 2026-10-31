@@ -49,7 +49,6 @@ struct KeymapTests {
             ("composer.mode", notTerminal, ["cmd+shift+a"]),
             ("composer.workspace", notTerminal, ["cmd+shift+x"]),
             ("composer.branch", notTerminal, ["cmd+shift+g"]),
-            ("composer.togglePlan", [.composer], ["shift+tab"]),
             ("composer.sendAlternate", [.composer], ["cmd+enter"]),
             ("thread.stop", [], []),
             ("diff.toggle", notTerminal, ["cmd+d"]),

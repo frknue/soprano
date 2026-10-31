@@ -13,7 +13,7 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     private var _turns: [TurnInput] = []
     private var _steers: [TurnInput] = []
     private var _interrupts = 0
-    private var _responses: [(id: String, decision: ApprovalDecision, feedback: String?)] = []
+    private var _responses: [(id: String, decision: ApprovalDecision)] = []
     private var _answers: [(id: String, answers: [String: [String]])] = []
     private var _rollbacks: [(ordinal: Int, providerTurnID: String?)] = []
     private var _compactions = 0
@@ -32,7 +32,7 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     var turns: [TurnInput] { lock.withLock { _turns } }
     var steers: [TurnInput] { lock.withLock { _steers } }
     var interrupts: Int { lock.withLock { _interrupts } }
-    var responses: [(id: String, decision: ApprovalDecision, feedback: String?)] { lock.withLock { _responses } }
+    var responses: [(id: String, decision: ApprovalDecision)] { lock.withLock { _responses } }
     var answers: [(id: String, answers: [String: [String]])] { lock.withLock { _answers } }
     var rollbacks: [(ordinal: Int, providerTurnID: String?)] { lock.withLock { _rollbacks } }
     var compactions: Int { lock.withLock { _compactions } }
@@ -54,8 +54,8 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     func steer(_ input: TurnInput) async throws { lock.withLock { _steers.append(input) } }
     func interrupt() async { lock.withLock { _interrupts += 1 } }
 
-    func respond(toApproval id: String, decision: ApprovalDecision, feedback: String?) async {
-        lock.withLock { _responses.append((id, decision, feedback)) }
+    func respond(toApproval id: String, decision: ApprovalDecision) async {
+        lock.withLock { _responses.append((id, decision)) }
     }
 
     func answer(userInput id: String, answers: [String: [String]]) async {
@@ -84,7 +84,7 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     private var _prompts: [String] = []
     var generate: @Sendable (String) throws -> JSONValue = { _ in throw EngineError.message("no generation scripted") }
 
-    init(kind: ProviderKind = .codex) {
+    init(kind: ProviderKind = .omp) {
         self.kind = kind
     }
 
@@ -228,7 +228,7 @@ enum EngineHarness {
     /// A project thread with no turns yet, working in a fresh temporary project folder.
     static func idleThread(in engine: AgentEngine) -> String {
         let project = engine.addProject(path: temporaryDirectory().path)
-        let thread = AgentThread(projectID: project.id, title: "Thread", modelSelection: .default(for: .codex))
+        let thread = AgentThread(projectID: project.id, title: "Thread", modelSelection: .default(for: .omp))
         engine.insertThread(thread)
         return thread.id
     }

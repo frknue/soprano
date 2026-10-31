@@ -566,7 +566,19 @@ public struct OmpEventMapper: Sendable {
     // MARK: - Helpers
 
     private func relative(_ path: String) -> String {
-        ClaudeEventMapper.relative(path, to: cwd)
+        Self.relative(path, to: cwd)
+    }
+
+    /// `path` relative to `cwd` when inside it (`/tmp` and `/private/tmp` treated alike).
+    static func relative(_ path: String, to cwd: String?) -> String {
+        guard let cwd, !cwd.isEmpty else { return path }
+        let bases = cwd.hasPrefix("/private/") ? [cwd, String(cwd.dropFirst("/private".count))] : [cwd, "/private" + cwd]
+        for base in bases {
+            if path == base { return "." }
+            let prefix = base.hasSuffix("/") ? base : base + "/"
+            if path.hasPrefix(prefix) { return String(path.dropFirst(prefix.count)) }
+        }
+        return path
     }
 
     static func contentText(_ content: JSONValue?) -> String? {
@@ -579,8 +591,10 @@ public struct OmpEventMapper: Sendable {
         }
     }
 
+    /// Pretty-printed tool arguments; nil for an empty object.
     static func inputText(_ args: JSONValue) -> String? {
-        ClaudeEventMapper.inputText(args)
+        if case let .object(object) = args, object.isEmpty { return nil }
+        return args.prettyJSONString()
     }
 
     /// omp's display diff (`-12|old`, `+12|new`, ` 12|context`, `...` between hunks) → unified

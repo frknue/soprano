@@ -12,8 +12,6 @@ struct TimelineExpansion: Hashable, Sendable {
     var entries: Set<String> = []
     /// Long user messages shown in full.
     var messages: Set<String> = []
-    /// Plans shown in full.
-    var plans: Set<String> = []
     /// Changed-files cards: turn id → closed folder paths.
     var closedFolders: [String: Set<String>] = [:]
 }
@@ -85,22 +83,6 @@ struct ApprovalRowModel: Hashable, Sendable {
     var request: ApprovalRequest
 }
 
-struct PlanRowModel: Hashable, Sendable {
-    var itemID: String
-    var markdown: String
-    var expanded: Bool
-
-    var title: String { MarkdownDocument.firstHeading(in: markdown) ?? "Proposed plan" }
-    /// Plans collapse when over 900 characters or 20 lines.
-    var canCollapse: Bool { markdown.count > 900 || markdown.split(separator: "\n", omittingEmptySubsequences: false).count > 20 }
-}
-
-struct TodoRowModel: Hashable, Sendable {
-    var itemID: String
-    var steps: [TodoStep]
-    var explanation: String?
-}
-
 enum TimelineRowContent: Hashable, Sendable {
     case user(UserRowModel)
     case fold(FoldRowModel)
@@ -111,8 +93,6 @@ enum TimelineRowContent: Hashable, Sendable {
     case liveWork(LiveWorkRowModel)
     case thinking
     case approval(ApprovalRowModel)
-    case plan(PlanRowModel)
-    case todo(TodoRowModel)
     case error(message: String, date: Date)
     case notice(text: String)
     /// "Background work still running…" under a yielded turn.
@@ -282,14 +262,6 @@ enum TimelineBuilder {
                         date: item.completedAt ?? item.startedAt,
                         changedFiles: files
                     ))))
-                case let .plan(markdown):
-                    flushGroup(trailing: false)
-                    rows.append(TimelineRow(id: "plan:\(item.id)", content: .plan(PlanRowModel(
-                        itemID: item.id, markdown: markdown, expanded: expansion.plans.contains(item.id)
-                    ))))
-                case let .todoList(steps, explanation):
-                    flushGroup(trailing: false)
-                    rows.append(TimelineRow(id: "todo:\(item.id)", content: .todo(TodoRowModel(itemID: item.id, steps: steps, explanation: explanation))))
                 case let .error(message):
                     flushGroup(trailing: false)
                     rows.append(TimelineRow(id: "error:\(item.id)", content: .error(message: message, date: item.startedAt)))
@@ -346,7 +318,7 @@ enum TimelineBuilder {
         switch item.kind {
         case .assistantMessage:
             return item.id != terminalID
-        case .plan, .todoList, .error, .notice, .userInput:
+        case .error, .notice, .userInput:
             return false
         case let .approval(request):
             return request.decision != nil
@@ -382,7 +354,7 @@ enum TimelineBuilder {
             let next = index + 1 < rows.count ? rows[index + 1].content : nil
             let continues = next?.isWorkLog ?? false
             let spacing: CGFloat = switch rows[index].content {
-            case .user, .plan, .todo, .changedFiles: 16
+            case .user, .changedFiles: 16
             case .fold, .working: 6
             case let .assistant(model): model.showMeta ? 16 : 8
             case let .workGroup(model): continues || model.expanded ? 0 : 8

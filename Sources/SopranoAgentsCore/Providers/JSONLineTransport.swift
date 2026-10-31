@@ -31,7 +31,7 @@ extension JSONValue {
     }
 }
 
-/// Prompt text shared by both providers.
+/// Prompt text sent to omp.
 enum ProviderPrompt {
     /// Message text with attachment paths: every attachment is listed after the
     /// text as `[Attached image "shot.png" is saved at: /path]`, so the agent can open it even
@@ -43,10 +43,5 @@ enum ProviderPrompt {
             result = result.isEmpty ? context : "\(result)\n\n\(context)"
         }
         return result
-    }
-
-    /// Client version reported to the CLIs (bundle version, or the package default in tests).
-    static var clientVersion: String {
-        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "0.1.0"
     }
 }

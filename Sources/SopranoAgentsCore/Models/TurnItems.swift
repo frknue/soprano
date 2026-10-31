@@ -43,10 +43,6 @@ public enum TurnItemKind: Codable, Sendable, Hashable {
     /// Any other tool: read/grep/glob, MCP, dynamic tools, subagents.
     case toolCall(ToolCall)
     case webSearch(query: String)
-    /// The agent's task list (Codex `turn/plan/updated`, Claude `TodoWrite`).
-    case todoList(steps: [TodoStep], explanation: String?)
-    /// Proposed plan (plan mode; Codex `plan` item, Claude `ExitPlanMode`).
-    case plan(markdown: String)
     case approval(ApprovalRequest)
     case userInput(UserInputRequest)
     case error(message: String)
@@ -99,12 +95,11 @@ public struct ToolCall: Codable, Sendable, Hashable {
         case read
         /// grep/glob/ls/find.
         case search
-        case mcp
         case subagent
         case other
     }
 
-    /// Native tool name ("Read", "Grep", "github.create_issue").
+    /// Native tool name ("read", "grep", "github.create_issue").
     public var name: String
     public var category: Category
     /// One-line label for the work log ("Read Sources/App.swift", "Searched TODO in Sources").
@@ -122,29 +117,10 @@ public struct ToolCall: Codable, Sendable, Hashable {
     }
 }
 
-public struct TodoStep: Codable, Sendable, Hashable, Identifiable {
-    public enum Status: String, Codable, Sendable, Hashable {
-        case pending
-        case inProgress
-        case completed
-    }
-
-    public var id: String
-    public var text: String
-    public var status: Status
-
-    public init(id: String, text: String, status: Status) {
-        self.id = id
-        self.text = text
-        self.status = status
-    }
-}
-
 public enum ApprovalKind: String, Codable, Sendable, Hashable {
     case command
     case fileChange
     case fileRead
-    case permission
     case other
 
     public var title: String {
@@ -152,13 +128,12 @@ public enum ApprovalKind: String, Codable, Sendable, Hashable {
         case .command: "Command approval"
         case .fileChange: "File change approval"
         case .fileRead: "File read approval"
-        case .permission: "Permission approval"
         case .other: "Approval"
         }
     }
 }
 
-/// Answers to an approval. Same vocabulary as the Codex app-server.
+/// Answers to an approval; omp's approval prompt maps them onto its offered choices.
 public enum ApprovalDecision: String, Codable, Sendable, Hashable, CaseIterable {
     case accept
     case acceptForSession
@@ -187,8 +162,6 @@ public struct ApprovalRequest: Codable, Sendable, Hashable, Identifiable {
     /// Decisions the provider accepts, in display order (Cancel, Decline, Always…, Approve).
     public var options: [ApprovalDecision]
     public var decision: ApprovalDecision?
-    /// Feedback sent with a decline ("do it differently").
-    public var feedback: String?
 
     public init(
         id: String,
@@ -196,8 +169,7 @@ public struct ApprovalRequest: Codable, Sendable, Hashable, Identifiable {
         detail: String,
         reason: String? = nil,
         options: [ApprovalDecision] = [.cancel, .decline, .acceptForSession, .accept],
-        decision: ApprovalDecision? = nil,
-        feedback: String? = nil
+        decision: ApprovalDecision? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -205,7 +177,6 @@ public struct ApprovalRequest: Codable, Sendable, Hashable, Identifiable {
         self.reason = reason
         self.options = options
         self.decision = decision
-        self.feedback = feedback
     }
 }
 
@@ -239,7 +210,7 @@ public struct UserInputQuestion: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// The agent asks the user structured questions (Codex `item/tool/requestUserInput`, Claude `AskUserQuestion`).
+/// The agent asks the user structured questions (omp `ask` and host-rendered select/confirm/input).
 public struct UserInputRequest: Codable, Sendable, Hashable, Identifiable {
     public var id: String
     public var questions: [UserInputQuestion]

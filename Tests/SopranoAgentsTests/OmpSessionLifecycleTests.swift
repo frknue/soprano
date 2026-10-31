@@ -230,11 +230,11 @@ struct OmpSessionLifecycleTests {
     }
 
     private func config(cwd: String, runtime: RuntimeMode = .approvalRequired, resumeID: String? = nil) -> SessionConfig {
-        SessionConfig(cwd: cwd, modelSelection: .default(for: .omp), runtimeMode: runtime, interactionMode: .build, resumeID: resumeID)
+        SessionConfig(cwd: cwd, modelSelection: .default(for: .omp), runtimeMode: runtime, resumeID: resumeID)
     }
 
     private func input(_ text: String, runtime: RuntimeMode = .approvalRequired) -> TurnInput {
-        TurnInput(text: text, attachments: [], modelSelection: .default(for: .omp), runtimeMode: runtime, interactionMode: .build)
+        TurnInput(text: text, attachments: [], modelSelection: .default(for: .omp), runtimeMode: runtime)
     }
 
     /// Collects session events on a background task.
@@ -398,7 +398,7 @@ struct OmpSessionLifecycleTests {
         let asked = await recorder.wait { events in
             events.contains { if case .approvalRequested = $0 { true } else { false } }
         }
-        await session.respond(toApproval: "ui-1", decision: .acceptForSession, feedback: nil)
+        await session.respond(toApproval: "ui-1", decision: .acceptForSession)
         let finished = await recorder.wait(until: Self.completed)
         await session.close()
 
@@ -437,7 +437,7 @@ struct OmpSessionLifecycleTests {
         _ = try await session.startTurn(input("start a background job; it wakes you"))
         let asked = await recorder.wait { $0.contains { if case .approvalRequested = $0 { true } else { false } } }
         let completedBeforeSettling = Self.completed(recorder.events)
-        await session.respond(toApproval: "ui-2", decision: .accept, feedback: nil)
+        await session.respond(toApproval: "ui-2", decision: .accept)
         let finished = await recorder.wait(until: Self.completed)
         await session.close()
 
@@ -633,7 +633,7 @@ struct OmpSessionLifecycleTests {
         _ = try await session.startTurn(input("approve again"))
         _ = await recorder.wait { $0.contains { if case .approvalRequested = $0 { true } else { false } } }
         try await session.steer(input("approve again"))
-        await session.respond(toApproval: "ui-1", decision: .accept, feedback: nil)
+        await session.respond(toApproval: "ui-1", decision: .accept)
         _ = await recorder.wait { $0.filter { if case .turnCompleted = $0 { true } else { false } }.count == 2 }
         await session.close()
 

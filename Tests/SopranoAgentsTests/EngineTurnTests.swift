@@ -122,11 +122,10 @@ struct EngineTurnTests {
         session.emit(.approvalRequested(ApprovalRequest(id: "req-7", kind: .command, detail: "rm -rf build")))
         #expect(await EngineHarness.eventually { ThreadStatus.of(engine.thread(threadID)!) == .approval })
 
-        await engine.respond(threadID, approvalID: "req-7", decision: .decline, feedback: "use make clean")
+        await engine.respond(threadID, approvalID: "req-7", decision: .decline)
 
         #expect(session.responses.map(\.id) == ["req-7"])
         #expect(session.responses.first?.decision == .decline)
-        #expect(session.responses.first?.feedback == "use make clean")
         let item = try #require(engine.thread(threadID)?.activeTurn?.items.first)
         #expect(item.status == .declined)
         guard case let .approval(request) = item.kind else { Issue.record("not an approval"); return }
@@ -233,10 +232,10 @@ struct EngineTurnTests {
         try await engine.send(threadID, text: "first", attachments: [])
         let session = try #require(driver.session)
 
-        session.emit(.sessionEnded(error: "codex exited with status 1"))
+        session.emit(.sessionEnded(error: "omp exited with status 1"))
 
         #expect(await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.status == .failed })
-        #expect(engine.thread(threadID)?.turns.last?.failureMessage == "codex exited with status 1")
+        #expect(engine.thread(threadID)?.turns.last?.failureMessage == "omp exited with status 1")
 
         try await engine.send(threadID, text: "again", attachments: [])
         #expect(driver.sessions.count == 2)

@@ -3,7 +3,7 @@ import SopranoAgentsCore
 
 /// What the composer's round primary button does.
 enum ComposerPrimaryAction: Equatable {
-    /// Idle with text or attachments: start a turn (or decline a pending approval with feedback).
+    /// Idle with text or attachments: start a turn (or decline a pending approval and redirect).
     case send
     /// Idle and empty: the send button is shown disabled.
     case sendDisabled
@@ -15,8 +15,8 @@ enum ComposerPrimaryAction: Equatable {
     case stop
 
     /// - Parameters:
-    ///   - isAwaitingApproval: the running turn waits on an approval; sending declines it with the
-    ///     text as feedback, so it is a plain send rather than a steer or queue.
+    ///   - isAwaitingApproval: the running turn waits on an approval; sending declines it and
+    ///     delivers the message, so it is a plain send rather than a steer or queue.
     ///   - alternate: ⌘ is held (⌘-click, ⌘↩): steer and queue swap.
     static func resolve(
         isRunning: Bool,
@@ -57,20 +57,14 @@ enum ComposerPrimaryAction: Equatable {
 
 /// Model choice rules shared by the model picker, the traits menu and the model chip.
 enum ModelChoice {
-    /// Models a provider offers: its live catalog once probed, else the built-in fallback.
-    static func models(for provider: ProviderKind, status: ProviderStatus?) -> [ProviderModel] {
+    /// omp's models: its live catalog once probed, else the built-in fallback.
+    static func models(status: ProviderStatus?) -> [ProviderModel] {
         let live = status?.models ?? []
-        return live.isEmpty ? ProviderCatalog.fallback(provider) : live
+        return live.isEmpty ? ProviderCatalog.fallback(.omp) : live
     }
 
     static func model(for selection: ModelSelection, status: ProviderStatus?) -> ProviderModel? {
-        models(for: selection.provider, status: status).first { $0.slug == selection.model }
-    }
-
-    /// The provider's default model (live default, else the catalog's).
-    static func defaultModel(for provider: ProviderKind, status: ProviderStatus?) -> ProviderModel? {
-        let models = models(for: provider, status: status)
-        return models.first(where: \.isDefault) ?? models.first
+        models(status: status).first { $0.slug == selection.model }
     }
 
     /// Option values `model` accepts: unknown option ids and values outside a select's choices
@@ -85,18 +79,9 @@ enum ModelChoice {
         }
     }
 
-    /// Picking `model` of `provider` keeps the current option values the new model supports.
-    static func selecting(_ model: ProviderModel, of provider: ProviderKind, from current: ModelSelection) -> ModelSelection {
-        ModelSelection(provider: provider, model: model.slug, options: supportedOptions(current.options, for: model))
-    }
-
-    /// Switching providers lands on the provider's default model, keeping supported option values.
-    static func switching(to provider: ProviderKind, status: ProviderStatus?, from current: ModelSelection) -> ModelSelection {
-        guard provider != current.provider else { return current }
-        guard let model = defaultModel(for: provider, status: status) else {
-            return ModelSelection.default(for: provider)
-        }
-        return selecting(model, of: provider, from: current)
+    /// Picking `model` keeps the current option values the new model supports.
+    static func selecting(_ model: ProviderModel, from current: ModelSelection) -> ModelSelection {
+        ModelSelection(provider: .omp, model: model.slug, options: supportedOptions(current.options, for: model))
     }
 
     /// The effort in effect: the explicit value when the model offers it, else the model's default.

@@ -5,7 +5,7 @@ import Testing
 
 struct TimelineRowsTests {
     private let start = Date(timeIntervalSince1970: 1_000_000)
-    private let selection = ModelSelection(provider: .codex, model: "gpt-6.1-sol")
+    private let selection = ModelSelection(provider: .omp, model: "openai-codex/gpt-6.1-sol")
 
     private func at(_ seconds: TimeInterval) -> Date { start.addingTimeInterval(seconds) }
 
@@ -161,14 +161,12 @@ struct TimelineRowsTests {
         #expect(entry.entry.note == "Await")
     }
 
-    @Test func plansTaskListsAndNoticesAreNeverFolded() {
-        let planned = turn(items: [
+    @Test func noticesAreNeverFolded() {
+        let noted = turn(items: [
             item("c1", .command(CommandExecution(command: "ls"))),
             item("n1", .notice(text: "Context compacted")),
-            item("td", .todoList(steps: [TodoStep(id: "s", text: "Do", status: .pending)], explanation: nil)),
-            item("pl", .plan(markdown: "# Plan\nBody")),
         ])
-        #expect(ids(TimelineBuilder.rows(for: thread([planned]))) == ["user:m-t1", "fold:t1", "notice:n1", "todo:td", "plan:pl"])
+        #expect(ids(TimelineBuilder.rows(for: thread([noted]))) == ["user:m-t1", "fold:t1", "notice:n1"])
     }
 
     @Test func changedFilesWithoutAnAnswerGetTheirOwnCard() {

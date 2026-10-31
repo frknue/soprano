@@ -1,10 +1,10 @@
 # Soprano Agents architecture
 
-Soprano Agents is a native macOS GUI for coding agents (omp, Codex, Claude Code) in the Soprano
-family, colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a
-floating composer, collapsible work logs, per-turn diffs from hidden git checkpoints, a terminal
-drawer and a right panel. Swift 6 + programmatic AppKit (no SwiftUI, no storyboards), SPM, macOS
-14+. The app talks to the agent CLIs directly; there is no server process.
+Soprano Agents is a native macOS GUI for the `omp` coding agent (oh-my-pi) in the Soprano family,
+colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a floating
+composer, collapsible work logs, per-turn diffs from hidden git checkpoints, a terminal drawer and
+a right panel. Swift 6 + programmatic AppKit (no SwiftUI, no storyboards), SPM, macOS 14+. The app
+talks to the `omp` CLI directly; there is no server process.
 
 ## Toolchain
 
@@ -23,7 +23,7 @@ swift test
 |---|---|---|
 | `Sources/SopranoAgentsCore/Models/` | Contract | Domain types: `Project`, `AgentThread`, `Turn`, `TurnItem(Kind)`, approvals, user input, `ModelSelection`, `ProviderStatus`, `ThreadStatus`/`InboxSection`, `DurationText`, `JSONValue`. Foundation only. |
 | `Sources/SopranoAgentsCore/Providers/ProviderSession.swift` | Contract | `ProviderDriver`, `ProviderSession`, `ProviderEvent`, `SessionConfig`, `TurnInput`. |
-| `Sources/SopranoAgentsCore/Providers/` (rest) | Providers | `LineProcess` (stdio JSON-lines transport), Codex app-server client + session + driver, Claude stream-json session + driver, model catalogs, `generateJSON` for both. |
+| `Sources/SopranoAgentsCore/Providers/` (rest) | Providers | `LineProcess` (stdio JSON-lines transport), the omp driver, session, RPC client and event mapper, model catalog, `generateJSON`. |
 | `Sources/SopranoAgentsCore/Engine/` | Engine | `AgentEngine` (state owner, observers, inbox lifecycle), `AgentEngine+Turns.swift` (sessions, sending, steering, queue, approvals, checkpoints, revert, diffs, titles, git actions) and `AgentEngine+Files.swift` (workspace files). `EngineTypes.swift` is contract. |
 | `Sources/SopranoAgentsCore/Files/` | Files | `WorkspaceFileService` (contract), `WorkspaceFileContent`, `WorkspaceFilePath` (the one escape check), `LiveWorkspaceFileService`. |
 | `Sources/SopranoAgentsCore/Store/` | Engine | `JSONFileThreadStore`. |
@@ -37,7 +37,7 @@ swift test
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
 | `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar usage indicator, usage card, Settings → Accounts, account fixtures. |
 | `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
-| `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController`, the omp, Claude Code and Codex managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
+| `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController` and its account managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
 
 Modules talk only through the contracts: views read `AgentEngine` state and call its methods;
 UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never talks to
@@ -57,7 +57,7 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   (streaming deltas: re-render just that row), `.providersChanged`, `.commandsChanged` (re-read
   the command lists).
 - Mutations: `addProject`, `removeProject`, `rename`, `setPinned`, `setSettled`, `setArchived`,
-  `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`, `setInteractionMode`,
+  `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`,
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
   `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
@@ -74,14 +74,13 @@ Engine behavior:
   project) fails the turn with `EngineError.workspaceMissing` before anything spawns, and the
   provider sessions refuse a missing cwd too. A new-worktree thread owns its planned worktree
   path from launch, so during setup or after a failed setup nothing falls back to the project root.
-- A provider switch clears `providerThreadID` (no cross-provider resume). Turns recovered after a
-  crash cancel their pending approvals and questions.
+- Turns recovered after a crash cancel their pending approvals and questions.
 - One `ProviderSession` per thread, created lazily on first send (resumes `providerThreadID`
   after relaunch), closed on delete/shutdown. Provider events fold into the open turn
   (`AgentThread.openTurn`, the last turn while `.running`): `itemUpdated` replaces by id, deltas
   append, approvals/user input become items, `turnCompleted` finishes the turn and starts the
   next queued message.
-- Yielded turns: `turnYielded(outcome, error)` (omp only, see below) sets `Turn.yieldedAt`
+- Yielded turns: `turnYielded(outcome, error)` (see omp below) sets `Turn.yieldedAt`
   (persisted; a failed yield also sets `failureMessage`): the answer is final, so
   `AgentThread.activeTurn`/`isRunning` skip the turn (no Working pill, Stop, "Working for" row,
   steering or approval bar; Edit from here and archive allowed), its live items settle, its
@@ -100,9 +99,9 @@ Engine behavior:
   `TurnCheckpoint(files:)` from `changedFiles(ref(N-1), ref(N))`. Not a repo → status `.missing`.
 - Turn diff N = `diff(ref(N-1), ref(N))`; thread diff = `diff(ref(0), ref(last))`.
 - Revert to before turn N: interrupt guard, provider `rollback(beforeTurn:providerTurnID:)` for
-  the earliest turn ≥ N that the thread's current provider received (has a `providerTurnID` and
-  ran on that provider; none → no provider call, its conversation already ends there), optional
-  `restoreCheckpoint(ref(N-1))`, delete refs ≥ N, drop turns ≥ N, return turn N's user message.
+  the earliest turn ≥ N that has a `providerTurnID` (none → no provider call, the conversation
+  already ends there), optional `restoreCheckpoint(ref(N-1))`, delete refs ≥ N, drop turns ≥ N,
+  return turn N's user message.
 - Titles: first message → title seed (first 50 chars + "...") immediately, then
   `textGenerationModel` via `ProviderDriver.generateJSON` with the title prompt in
   `TextGeneration`.
@@ -121,8 +120,8 @@ Engine behavior:
   files). Reads resolve symlinks and refuse anything outside the working directory; text up to
   2 MiB, images by extension up to 20 MiB, NUL or invalid UTF-8 = binary.
 - Context: every `tokenUsage` event sets the latest turn's usage and `AgentThread.contextUsage`
-  (persisted; `TokenUsage.fraction` = used / window). A provider switch clears it; an "Edit from
-  here" rewind sets it to the last kept turn's usage.
+  (persisted; `TokenUsage.fraction` = used / window). An "Edit from here" rewind sets it to the
+  last kept turn's usage.
 - Compaction: text that is exactly `/compact` (no attachments) runs as a compaction turn via
   `ProviderSession.compact()`. It needs a conversation and an idle thread, or `.queue`; messages
   sent during it are queued. The provider's notice (or error) lands in that turn.
@@ -132,11 +131,11 @@ Engine behavior:
   share one). Text starting with `/` reaches the provider with its first characters intact.
 
 ### Providers (Core/Providers)
-`ProviderDriver` per kind (`OmpDriver`, `CodexDriver`, `ClaudeDriver`) creates `ProviderSession`s,
-probes the CLI (`probe()` → version, account, models), and runs one-shot `generateJSON`.
-`ProviderKind` declaration order (omp, Codex, Claude Code) is display order everywhere.
+`ProviderDriver` creates `ProviderSession`s, probes the CLI (`probe()` → version, health,
+models), and runs one-shot `generateJSON`. `OmpDriver` is the only implementation and
+`ProviderKind` has the single case `.omp`; the seam keeps the engine testable against a fake driver.
 
-**omp** (oh-my-pi, the default provider) — `omp --mode rpc-ui --cwd <cwd> --approval-mode <mode>
+**omp** (oh-my-pi) — `omp --mode rpc-ui --cwd <cwd> --approval-mode <mode>
 [--model <provider/id>] [--thinking <level>] [--resume <session file>]`, one process per thread
 (path from `EngineSettings.ompPath` or PATH; never `--no-ui`, which makes approvals fail closed).
 omp's RPC (docs: `omp://rpc.md`) is JSONL, not JSON-RPC: commands `{id?, type, …}`, responses
@@ -196,7 +195,7 @@ turn's entry (its `providerTurnID`; turns recorded as `prompt-N` count user-auth
 user messages), then `fork {entryId}` of the last `message` entry before it on the current
 branch, or `new_session` when none; the new `sessionFile` becomes the conversation id.
 `navigate_tree` is not used: it only moves the leaf in memory and the next `--resume` restores
-the old tip. No Plan mode (no RPC switch), so the composer hides Build/Plan for omp. Probe:
+the old tip. No Plan mode (omp's RPC has no plan-mode switch). Probe:
 `omp --version` plus a short-lived `omp --mode rpc --no-session --no-extensions --no-skills
 --no-rules --no-lsp` for `get_state` and `get_available_models` (≈730 models: first `default`
 named "<model> · configured", then "<name> · <provider>", effort = "off" + `thinking.efforts`).
@@ -204,79 +203,7 @@ The composer's model list shows the first 80 matches of a multi-word search plus
 Traces: `Tests/SopranoAgentsTests/Fixtures/omp-ask-write-edit-bash.jsonl`, `omp-builtin-yield.jsonl`
 (`/context`, then an async bash job that yields, wakes the agent and settles).
 
-**Codex** — `codex app-server` (path from `EngineSettings.codexPath` or PATH; GUI apps get a
-minimal PATH, so search `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin`,
-`~/.cargo/bin` too). Env `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Soprano Agents`. Newline-delimited
-JSON-RPC without a `jsonrpc` field: requests `{id, method, params}`, responses `{id, result|error}`,
-notifications `{method, params}`, server requests `{id, method, params}` (ids may be numbers or
-strings). Handshake `initialize {clientInfo:{name:"soprano_agents", title:"Soprano Agents",
-version}, capabilities:{experimentalApi:true, optOutNotificationMethods:["turn/diff/updated"]}}`
-then notification `initialized`. Threads: `thread/start {cwd, model, config:{"tools.update_plan.enabled":true}}`,
-`thread/resume {threadId, excludeTurns:true, cwd, model}`, `turn/start {threadId, input:[{type:"text",
-text, text_elements:[]}, {type:"localImage", path}], cwd, model, effort, summary:"detailed",
-approvalPolicy, sandboxPolicy, collaborationMode?}`, `turn/steer {threadId, expectedTurnId, input}`,
-`turn/interrupt {threadId, turnId}`, `thread/revert {threadId, beforeTurnId}`. Runtime mode map:
-
-| RuntimeMode | approvalPolicy | sandboxPolicy |
-|---|---|---|
-| approval-required | `untrusted` | `{type:"readOnly", networkAccess:false}` |
-| auto-accept-edits | `on-request` | `{type:"workspaceWrite", writableRoots:[], networkAccess:false, excludeTmpdirEnvVar:false, excludeSlashTmp:false}` |
-| auto | `on-request` (+ `approvalsReviewer:"auto_review"`) | workspaceWrite as above |
-| full-access | `never` | `{type:"dangerFullAccess"}` |
-
-Notifications → events: `turn/started`, `item/started|completed` (`ThreadItem` union: `userMessage`
-ignored, `agentMessage` (`phase:"final_answer"` = final), `reasoning`, `commandExecution`,
-`fileChange`, `mcpToolCall`, `dynamicToolCall`, `webSearch`, `plan`, `contextCompaction`),
-`item/agentMessage/delta`, `item/reasoning/summaryTextDelta`, `item/commandExecution/outputDelta`,
-`item/plan/delta`, `turn/plan/updated` (todo list, item id `turn-plan:<turnId>`),
-`thread/tokenUsage/updated`, `error`, `turn/completed` (`completed|interrupted|failed`).
-Server requests: `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` →
-`{decision: "accept"|"acceptForSession"|"decline"|"cancel"}`; `item/permissions/requestApproval`;
-`item/tool/requestUserInput` → `{answers:{<qid>:{answers:[…]}}}` (empty answers = dismissed);
-`serverRequest/resolved` withdraws a pending request; `mcpServer/elicitation/request` is declined;
-anything else → JSON-RPC error -32601. Approval ids are `approval:<approvalId ?? itemId>` and
-`input:<itemId>` so they never collide with the item they gate. Every `turn/start` also sends
-`approvalsReviewer` (`"user"`, `"auto_review"` for Auto); fast mode is `serviceTier:"priority"` and Fast off sends `serviceTier:null` (the tier persists for later turns);
-attachment paths are appended to the text. Rollback: `thread/revert {threadId, beforeTurnId}`,
-finding the turn through `thread/turns/list` when its id is unknown. Notifications for other
-threads (subagents) are ignored. TypeScript bindings: `codex app-server generate-ts --out <dir>`.
-A real trace is in `Tests/SopranoAgentsTests/Fixtures/codex-turn.jsonl`.
-
-**Claude Code** — `claude -p --input-format stream-json --output-format stream-json --verbose
---include-partial-messages --permission-prompt-tool stdio --permission-mode <mode>
---allow-dangerously-skip-permissions --thinking-display summarized --model <id> [--effort <e>]
-[--fast-mode on] [--resume <session> [--resume-session-at <assistant uuid>] | --session-id <uuid>]
-[--add-dir …]`, started without `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SSE_PORT`.
-One long-lived process per
-thread; each turn writes `{"type":"user","message":{"role":"user","content":[…image blocks…,
-{"type":"text","text":…}]},"parent_tool_use_id":null}`. Control protocol on the same pipes:
-host → CLI `{"type":"control_request","request_id","request":{"subtype":"initialize"|"interrupt"|
-"set_permission_mode","mode"|"set_model","model"}}`; CLI → host `{"type":"control_request",
-"request_id","request":{"subtype":"can_use_tool","tool_name","input","permission_suggestions",
-"tool_use_id"}}` answered with `{"type":"control_response","response":{"subtype":"success",
-"request_id","response":{"behavior":"allow","updatedInput":{…}} | {"behavior":"deny","message":…}}}`.
-Steering = another user message with `"priority":"now"` while the turn runs; Claude Code then ends
-the replaced request with a `result` whose `terminal_reason` is `aborted_tools`/`aborted_streaming`
-(subtype `success`, observed with 2.1.314), which the session swallows so the turn continues with
-the steered answer (an aborted result without a steer is an interrupt). A saved session id
-without a transcript under `~/.claude/projects` starts fresh with `--session-id`. Permission mode map:
-plan → `plan`; approval-required → `default`; auto-accept-edits → `acceptEdits`; auto → `auto`;
-full-access → `bypassPermissions`. Answers carry `toolUseID`; cancel denies with "User cancelled
-tool execution." and interrupts. `AskUserQuestion` arrives as `can_use_tool` and becomes a user
-input request (allow with `updatedInput {questions, answers}`; empty answers deny as dismissed);
-`ExitPlanMode` becomes a plan item and is denied with a message telling Claude to wait for the
-user's decision. Messages: `system/init`
-(session id; sent after every user message), `stream_event` (`text_delta`, `thinking_delta`),
-`assistant` (text, thinking, tool_use), `user` (tool_result), `result` (turn end). Tool → item:
-Bash → command, Edit/MultiEdit/Write/NotebookEdit → fileChange, Read/Glob/Grep/LS → toolCall
-read/search, WebFetch/WebSearch → webSearch, TodoWrite → todoList, others → toolCall. Effort
-changes restart the process with `--resume`; `ultrathink` is a prompt prefix, not `--effort`.
-Rollback: each turn's user message carries a `uuid`; rolling back before turn N resumes with
-`--resume-session-at <last assistant uuid of turn N-1>` (read back from
-`~/.claude/projects/*/<session>.jsonl` after relaunch); before turn 1 starts a fresh session. Probe:
-`claude --version` and `claude auth status --json`. Traces: `Tests/SopranoAgentsTests/Fixtures/claude-*.jsonl`.
-
-Context, compaction and commands per provider:
+Context, compaction and commands:
 - omp: `get_available_commands` after the handshake, then `available_commands_update`
   (`{name, source, aliases?, description?, input?{hint}, subcommands?}`); skills are
   `skill:<name>`; badges builtin → Built-in, skill → Skill, extension → Extension, mcp_prompt →
@@ -285,43 +212,27 @@ Context, compaction and commands per provider:
   which gives the notice (committed / skip reason / cancelled) or an error; then `get_state` and
   `get_entries` (the compaction entry becomes the turn id). A skip ("Already compacted") is a
   failed response but the turn completes.
-- Codex: `skills/list {cwds:[cwd]}` after `thread/start`/`thread/resume` and again with
-  `forceReload` on `skills/changed`; enabled skills become `$name ` commands, and a message
-  mentioning `$name` adds `{type:"skill", name, path}` to `turn/start`/`turn/steer` input.
-  `thread/compact/start {threadId}` runs as its own turn (`turn/started`, `contextCompaction` item,
-  `thread/tokenUsage/updated`, `turn/completed`).
-- Claude Code: commands from the `initialize` response and `system/commands_changed`; a command
-  whose name or alias is in `system/init` `skills` is a skill; MCP prompts insert
-  `/server:prompt (MCP) `. After every `result`, `get_context_usage {detail:"summary"}` reports
-  `totalTokens` of `maxTokens` (the auto-compact window). `/compact` is a user turn:
-  `system/compact_boundary` gives the notice, and the kept messages Claude re-sends afterwards
-  (same uuid) are ignored. Slash text gets no `ultrathink` prefix; attachment notes follow it.
-- Traces: `omp-commands-compact.jsonl`, `codex-skills-compact.jsonl`,
-  `claude-commands-compact.jsonl`, `claude-context-compact-replay.jsonl`.
+- Traces: `omp-commands-compact.jsonl`.
 
-Text generation: omp `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules
+Text generation: `omp -p --no-session --no-tools --no-extensions --no-skills --no-rules
 --no-context-files --no-lsp [--model <provider/id>] --thinking low` (prompt plus schema on stdin,
-first JSON object of stdout); Codex `codex exec --ephemeral --skip-git-repo-check -s read-only --model <m>
---config model_reasoning_effort="low" --output-schema <file> --output-last-message <file> -`
-(prompt on stdin); Claude `claude -p --output-format json --json-schema <schema> --model <m>
---tools "" --disable-slash-commands --no-session-persistence --permission-mode dontAsk` (prompt on
-stdin). 180 s timeout.
+first JSON object of stdout). 180 s timeout.
 
 ### Accounts (`Vendored/Accounts`, `Views/Accounts`)
 Soprano's accounts layer is vendored unchanged. `AccountsController.shared.start()` runs only in
-`AppDelegate`, before the engine is built: it writes omp's preference overlay and publishes the
-chosen Codex home into `AccountLaunchState`. Views read and act only through
-`AccountsCenter.source` (`AccountsSource`: snapshot, observers, refresh, add, reauthenticate,
-cancel, select, remove, dismiss); the app installs the controller, tests and the snapshot harness
-use `FixtureAccountsSource`, so no account CLI, Keychain read or usage request runs there.
-Launch seam: drivers and sessions take `launchAdjustments: @Sendable () ->
+`AppDelegate`, before the engine is built: it writes omp's preference overlay into
+`AccountLaunchState`. The app lists only omp's Claude and Codex logins (`AccountListID.ompClaude`,
+`.ompCodex`, in that order); the controller's other lists stay unused. Views read and act only
+through `AccountsCenter.source` (`AccountsSource`: snapshot, observers, refresh, add,
+reauthenticate, cancel, select, remove, dismiss); the app installs the controller, tests and the
+snapshot harness use `FixtureAccountsSource`, so no account CLI, Keychain read or usage request
+runs there. Launch seam: drivers and sessions take `launchAdjustments: @Sendable () ->
 ProviderLaunchAdjustments` (environment over the app's, arguments before the provider's) and read
 it on every spawn (sessions, probes, text generation). `EngineFactory` injects
-`AccountLaunchBridge.adjustments(for:)`: Codex gets `CODEX_HOME=<managed home>` (the home linker
-runs first), omp gets `--config <Application Support>/<bundle id>/omp-accounts.yml` once a
-preference exists, Claude Code gets nothing (its login switches Mac-wide). The account list is in
-UserDefaults `soprano-accounts` (separate from Soprano's); Keychain items, omp's logins and
-`~/.claude.json` are shared with Soprano.
+`AccountLaunchBridge.ompAdjustments(state:)`: omp gets `--config <Application Support>/<bundle
+id>/omp-accounts.yml` once a preference exists. The account list is in UserDefaults
+`soprano-accounts` (separate from Soprano's); Keychain items and omp's logins are shared with
+Soprano.
 
 ### Git (Core/Git)
 `LiveGitService: GitService`. All git through `GitRunner` (`git --no-pager -c core.quotepath=false
@@ -387,7 +298,7 @@ unknown usage, tooltip `Context: 62.4k / 200k tokens (31%)`. Clicking it opens a
 conversation" (`engine.compact`, enabled by `engine.canCompact`; failures are alerts). The `/`
 command menu (`SlashCommandMenuContent`) is a passive `ComposerPopover` (never key; clicks on the
 composer pass through) anchored above the composer at its width. It opens while the caret is in a
-line-start token starting with `/` (or `$` for Codex skills; `SlashToken`), lists
+line-start token starting with `/` (`SlashToken`), lists
 `engine.commands(forThread:)` / `commands(forDraft:projectID:)` plus the app's `/compact` row when
 the thread can compact and the provider has none, filtered by `SlashCommandFilter` (name prefix,
 then name substring, then description substring), and re-lists on `.commandsChanged`. The editor
@@ -399,7 +310,7 @@ closes on send, focus loss, thread switch and when another of the app's windows 
 it; the editor has inline predictions and text completion off.
 
 The sidebar footer shows account usage next to the gear (`UsageIndicatorView`: `Claude 9% · Codex
-75%`, each provider's headline account's tightest window; muted below 70%, `warning` from 70%,
+75%`, the headline Claude and Codex login's tightest window; muted below 70%, `warning` from 70%,
 `error` from 90%; hidden without usage). Clicking it or `usage.open` toggles the usage card
 (child window): per provider, per account list, each login with its 5h/7d bars, percent and
 reset, plus Refresh and "Manage Accounts…" (Settings → Accounts).
@@ -413,11 +324,11 @@ buttons, and the snapshot harness runs them with `--perform <id>`. `CommandConte
 
 ### Settings (`Shell/AppEnvironment.swift`, `SettingsResolution.swift`, `SettingsFile.swift`)
 `~/.config/soprano-agents/settings.json` (JSONC, `SOPRANO_AGENTS_CONFIG` overrides), live
-reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultProvider, defaultModel,
-defaultRuntimeMode}` (default provider `omp`), `providers.{ompPath, codexPath, claudePath}`, `textGeneration.{provider, model,
-titles}`, `worktrees.{directory, branchPrefix}`, `chat.{followUp, width}`,
-`notifications.{enabled, sound}`, `editor.app`, `keybindings.{prefixKey, prefixTimeoutMs,
-bindings}`. `AppSettings.engineSettings` feeds `AgentEngine.settings`. Window geometry, panel
+reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultModel, defaultRuntimeMode}`,
+`providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`,
+`chat.{followUp, width}`, `notifications.{enabled, sound}`, `editor.app`,
+`keybindings.{prefixKey, prefixTimeoutMs, bindings}`. `AppSettings.engineSettings` feeds
+`AgentEngine.settings`. Window geometry, panel
 widths and per-thread UI state stay in `UserDefaults`.
 
 ## Keyboard model
@@ -460,7 +371,6 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `composer.mode` | Permissions | not terminal | `cmd+shift+a` | Composer |
 | `composer.workspace` | Workspace | not terminal | `cmd+shift+x` | Composer |
 | `composer.branch` | Branch | not terminal | `cmd+shift+g` | Composer |
-| `composer.togglePlan` | Toggle Plan Mode | composer | `shift+tab` | Composer |
 | `composer.sendAlternate` | Steer or Queue (opposite) | composer | `cmd+enter` | Composer |
 | `thread.stop` | Interrupt | global | — | Composer |
 | `thread.compact` | Compact Conversation | — | — | Composer |
@@ -510,7 +420,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   separators render; without either, SF Mono with Symbols Nerd Font Mono as fallback when
   installed (regular cells only: SwiftTerm derives bold/italic without it). Icons are SF Symbols (`Icon` names
   them by role), 16 pt in 28 pt ghost buttons.
-- Radii from `Radius`: composer, bubbles, dialogs, plan cards, details card 16; buttons, menus,
+- Radii from `Radius`: composer, bubbles, dialogs, details card 16; buttons, menus,
   popovers, code blocks, changed-files card 8; sidebar cards 6.
 - Status pills (sidebar): Working (info, `circle.dashed`, live duration), Approval (warning),
   Input (indigo), Failed (error), Done (success), else relative time ("now", "5m", "3h", "2d").
@@ -522,7 +432,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|plan|failed|background|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|approval|input|failed|background|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -547,8 +457,8 @@ filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context car
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
 "Background work still running…" row, Send instead of Stop). `--accounts` installs an
 `AccountFixtures` snapshot before the window is built (default `none`: indicator hidden): `demo`
-has two Claude logins in omp, Claude Code's own login and one Codex CLI login with 5h/7d windows
-at 9 %, 72 %/93 % and 75 %; `pending` adds a waiting omp sign-in and a failed Claude Code action.
+has two Claude logins and one Codex login in omp with 5h/7d windows at 9 %, 72 %/93 % and
+75 %/38 %; `pending` adds a waiting omp Claude sign-in and a failed action on the Codex list.
 `--perform usage.open` opens the usage card; `--click "Account usage"` clicks the indicator.
 
 Modal surfaces (command palette, settings screen, `Dialogs`) are `OverlayWindow`s: borderless

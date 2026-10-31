@@ -85,8 +85,7 @@ extension AgentEngine {
                     text: turn.userMessage.text,
                     attachments: turn.userMessage.attachments,
                     modelSelection: turn.modelSelection,
-                    runtimeMode: current.runtimeMode,
-                    interactionMode: current.interactionMode
+                    runtimeMode: current.runtimeMode
                 )
                 providerTurnID = try await session.startTurn(input)
             }
@@ -226,8 +225,7 @@ extension AgentEngine {
             text: message.text,
             attachments: message.attachments,
             modelSelection: thread.modelSelection,
-            runtimeMode: thread.runtimeMode,
-            interactionMode: thread.interactionMode
+            runtimeMode: thread.runtimeMode
         ))
         var steered = message
         steered.isSteer = true
@@ -259,12 +257,7 @@ extension AgentEngine {
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         let rt = runtime.thread(threadID)
         if let starting = rt.starting { return try await starting.value }
-        if let session = rt.session {
-            if session.kind == thread.modelSelection.provider { return session }
-            rt.dropSession()
-            await session.close()
-            return try await ensureSession(threadID)
-        }
+        if let session = rt.session { return session }
         try requireWorkspace(for: thread)
         let kind = thread.modelSelection.provider
         guard let driver = environment.drivers[kind] else {
@@ -275,9 +268,7 @@ extension AgentEngine {
             cwd: workingDirectory(for: thread),
             modelSelection: thread.modelSelection,
             runtimeMode: thread.runtimeMode,
-            interactionMode: thread.interactionMode,
-            resumeID: thread.providerThreadID,
-            additionalDirectories: [attachmentsDirectory.path]
+            resumeID: thread.providerThreadID
         )
         rt.session = session
         rt.consumer = consume(session, threadID: threadID)
@@ -360,11 +351,6 @@ extension AgentEngine {
                 guard case var .command(execution) = kind else { return nil }
                 execution.output += delta
                 return .command(execution)
-            }
-        case let .planDelta(itemID, delta):
-            appendToItem(threadID, itemID, create: { .plan(markdown: delta) }) { kind in
-                guard case let .plan(markdown) = kind else { return nil }
-                return .plan(markdown: markdown + delta)
             }
         case let .approvalRequested(request):
             upsertItem(threadID, TurnItem(id: request.id, kind: .approval(request), status: .pending, startedAt: environment.now()))

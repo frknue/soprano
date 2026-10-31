@@ -78,8 +78,6 @@ public enum JSONValue: Sendable, Hashable, Codable {
         return nil
     }
 
-    public var isNull: Bool { self == .null }
-
     /// Compact single-line JSON (one message per line on stdio transports).
     public func jsonString(sortedKeys: Bool = false) -> String {
         let encoder = JSONEncoder()
