@@ -191,14 +191,11 @@ public struct OmpEventMapper: Sendable {
         guard heldOutcome != nil, !isBackgroundRunActive, let type = frame["type"]?.stringValue, Self.runFrames.contains(type) else {
             return mapFrame(frame)
         }
-        // Background work woke the agent after the yield: the turn works again, and its answer
-        // so far is no longer the last word (the end marks the last text final again).
+        // Background work woke the agent after the yield: the turn works again. Its answer so far
+        // stays an answer (the engine's `Turn.resumedAt` tells the timeline it is no longer the
+        // last word).
         isBackgroundRunActive = true
-        var events: [ProviderEvent] = [.turnResumed]
-        if let last = lastText {
-            events.append(.itemUpdated(TurnItem(id: last.id, kind: .assistantMessage(text: last.text, isFinal: false), status: .completed)))
-        }
-        return events + mapFrame(frame)
+        return [.turnResumed] + mapFrame(frame)
     }
 
     private mutating func mapFrame(_ frame: JSONValue) -> [ProviderEvent] {

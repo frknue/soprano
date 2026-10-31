@@ -319,15 +319,23 @@ struct EngineTurnTests {
         let idle = try #require(engine.thread(threadID))
         session.emit(.turnResumed)
         let resumed = await EngineHarness.eventually { engine.thread(threadID)?.isRunning == true }
+        let woken = try #require(engine.thread(threadID)?.turns.last)
         session.emit(.turnYielded(outcome: .completed, error: nil))
         let yieldedAgain = await EngineHarness.eventually { engine.thread(threadID)?.isRunning == false }
+        session.emit(.turnCompleted(outcome: .completed, error: nil))
+        let ended = await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.status == .completed }
 
-        #expect(yielded && resumed && yieldedAgain)
+        #expect(yielded && resumed && yieldedAgain && ended)
         #expect(idle.activeTurn == nil)
         #expect(idle.openTurn?.status == .running)
         #expect(ThreadStatus.of(idle) == .done)
         // The answer's live item settled at the yield.
         #expect(idle.turns.last?.items.first?.status == .completed)
+        // The resume is recorded for the timeline (an earlier answer is no longer the last word)
+        // and forgotten once the turn ends.
+        #expect(idle.turns.last?.resumedAt == nil)
+        #expect(woken.resumedAt != nil)
+        #expect(engine.thread(threadID)?.turns.last?.resumedAt == nil)
     }
 
     @Test func aMessageToAYieldedThreadEndsThatTurnAndStartsANewOne() async throws {

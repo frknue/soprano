@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "subagents", "subagent", "draft", "empty"]
+    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "rechecked", "subagents", "subagent", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -20,6 +20,7 @@ enum DemoFixtures {
         let extra: [AgentThread] = switch scenario {
         case "background": [backgroundThread(now)]
         case "answered": [answeredThread(now)]
+        case "rechecked": [recheckedThread(now)]
         case "subagents", "subagent": [subagentsThread(now)]
         default: []
         }
@@ -51,6 +52,7 @@ enum DemoFixtures {
         case "failed": .thread(ID.failed)
         case "background": .thread(ID.background)
         case "answered": .thread(ID.answered)
+        case "rechecked": .thread(ID.rechecked)
         case "subagents": .thread(ID.subagents)
         case "subagent": .subagent(threadID: ID.subagents, subagentID: "Reader")
         case "draft": .draft(projectID: ID.app)
@@ -92,6 +94,7 @@ enum DemoFixtures {
         static let scratch = "thread-scratch"
         static let background = "thread-background"
         static let answered = "thread-answered"
+        static let rechecked = "thread-rechecked"
         static let subagents = "thread-subagents"
     }
 
@@ -337,6 +340,36 @@ enum DemoFixtures {
                     TurnItem(id: "an1", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update)]), status: .completed, startedAt: ago(40), completedAt: ago(39)),
                     TurnItem(id: "an2", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s.", isFinal: true), status: .completed, startedAt: ago(10), completedAt: ago(8)),
                 ]
+            )]
+        )
+    }
+
+    /// A finished omp turn that answered twice ("rechecked" scenario only): an advisor's note
+    /// and omp's auto-double-check woke the agent after its first answer; the closed fold keeps
+    /// both answers, the notes between them and the changed files under the last.
+    static func recheckedThread(_ now: Date) -> AgentThread {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        let path = "Sources/Upload/UploadClient.swift"
+        return AgentThread(
+            id: ID.rechecked, projectID: ID.app, title: "Tighten the upload retry delay", createdAt: ago(600), updatedAt: ago(20),
+            modelSelection: omp, branch: "main", lastVisitedAt: ago(20),
+            turns: [Turn(
+                id: "turn-rechecked-1", ordinal: 1,
+                userMessage: UserMessage(text: "Tighten the retry delay in UploadClient.", createdAt: ago(500)),
+                modelSelection: omp, status: .completed, startedAt: ago(500), completedAt: ago(20),
+                items: [
+                    TurnItem(id: "rc1", kind: .fileChange([FileChange(path: path, kind: .update)]), status: .completed, startedAt: ago(460), completedAt: ago(459)),
+                    TurnItem(id: "rc2", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s.", isFinal: true), status: .completed, startedAt: ago(420), completedAt: ago(410)),
+                    TurnItem(id: "rc3", kind: .advisory([AdvisorNote(text: "`UploadClientTests.testBackoffCap` still expects an 8 s cap.", severity: .concern, advisor: "Final reviewer")]), status: .completed, startedAt: ago(400), completedAt: ago(400)),
+                    TurnItem(id: "rc4", kind: .notice(text: "auto-double-check: second pass before finishing"), status: .completed, startedAt: ago(390), completedAt: ago(390)),
+                    TurnItem(id: "rc5", kind: .command(CommandExecution(command: "swift test --filter UploadClientTests", cwd: "/Users/demo/code/app", output: "Executed 12 tests, with 1 failure\n", exitCode: 1, durationMs: 4200)), status: .completed, startedAt: ago(300), completedAt: ago(296)),
+                    TurnItem(id: "rc6", kind: .fileChange([FileChange(path: "Tests/UploadClientTests.swift", kind: .update)]), status: .completed, startedAt: ago(200), completedAt: ago(199)),
+                    TurnItem(id: "rc7", kind: .assistantMessage(text: "Second pass: the backoff test expected the old 8 s cap; it now checks 4 s and the suite passes.", isFinal: true), status: .completed, startedAt: ago(40), completedAt: ago(20)),
+                ],
+                checkpoint: TurnCheckpoint(ref: "refs/soprano-agents/checkpoints/\(ID.rechecked)/1", status: .ready, files: [
+                    ChangedFileStat(path: path, additions: 4, deletions: 2),
+                    ChangedFileStat(path: "Tests/UploadClientTests.swift", additions: 1, deletions: 1),
+                ])
             )]
         )
     }

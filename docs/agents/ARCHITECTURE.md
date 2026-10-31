@@ -94,8 +94,10 @@ Engine behavior:
   `AgentThread.activeTurn`/`isRunning` skip the turn (no Working pill, Stop, "Working for" row,
   steering or approval bar; Edit from here and archive allowed), its live items settle, its
   checkpoint is captured, and a queued message starts after a completed yield. The turn stays
-  open: `turnResumed` (background work woke the agent) clears `yieldedAt` and the run streams
-  into it; `turnCompleted` ends it at `completedAt = yieldedAt` (or now after a resumed run).
+  open: `turnResumed` (background work woke the agent) clears `yieldedAt`, sets `resumedAt`
+  (answers before it stop counting as the last word for the timeline's "Thinking"; cleared when
+  the turn ends) and the run streams into it; `turnCompleted` ends it at
+  `completedAt = yieldedAt` (or now after a resumed run).
   Anything that starts new work first ends the yielded turn (`releaseYieldedTurn`): `send`,
   `sendQueuedNow`, the queue, `compact`, `revert` call `ProviderSession.releaseYieldedTurn()`
   (default no-op), wait up to `EngineRuntime.yieldReleaseTimeout` (5 s) for its
@@ -217,7 +219,8 @@ relaunch), `tool_execution_start|update|end` → bash → command, write/edit/as
 (edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
 `intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
-marks its text final (the timeline drops "Thinking" under it; a resumed yield un-marks it); an
+marks its text final (the timeline drops "Thinking" under it and keeps every final answer out of
+the closed fold; a resume keeps the flag, `Turn.resumedAt` brings "Thinking" back); an
 advisor review (`message_end` of `role:"custom"`, `customType:"advisor"`, `details.notes[{note,
 severity, advisor}]`) → `advisory` (one timeline row per note, never folded; one arriving after
 the turn ended joins the latest turn); compaction/retry → notices. Subagents: `set_subagent_subscription {level:"events"}` after the
@@ -536,7 +539,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|subagents|subagent|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|rechecked|subagents|subagent|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -561,7 +564,9 @@ filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context car
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
 an advisor's Concern, "Background work still running…" row, Send instead of Stop);
 `--fixture answered` one whose final answer arrived while omp still wraps up the turn (Working,
-Stop, no "Thinking" row);
+Stop, no "Thinking" row); `--fixture rechecked` a finished turn that answered twice (an advisor
+note and omp's auto-double-check woke the agent): the closed fold keeps both answers with their
+copy rows, the note and notice between them, and the changed files under the last;
 `--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
 `--fixture subagents` adds and selects a thread whose yielded turn started two subagents
 (running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture

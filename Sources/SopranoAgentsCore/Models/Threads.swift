@@ -308,6 +308,9 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
     /// When the user pressed Stop on the running turn; the turn shows "Stopping…" until the
     /// provider ends it. Cleared when it ends. Older files lack it.
     public var stopRequestedAt: Date?
+    /// When background work last woke the yielded turn (omp `turnResumed`): answers that ended
+    /// before it are no longer the turn's last word. Cleared when the turn ends. Older files lack it.
+    public var resumedAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -324,7 +327,8 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         providerTurnID: String? = nil,
         tokenUsage: TokenUsage? = nil,
         yieldedAt: Date? = nil,
-        stopRequestedAt: Date? = nil
+        stopRequestedAt: Date? = nil,
+        resumedAt: Date? = nil
     ) {
         self.id = id
         self.ordinal = ordinal
@@ -341,6 +345,7 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         self.tokenUsage = tokenUsage
         self.yieldedAt = yieldedAt
         self.stopRequestedAt = stopRequestedAt
+        self.resumedAt = resumedAt
     }
 
     /// Open but yielded (`yieldedAt`): done for the user while background work runs.

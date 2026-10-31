@@ -124,6 +124,10 @@ All notable changes to Soprano Agents are documented here. The format follows
   advisor's name and its severity (Nit, Concern, Blocker), stays visible when the turn is
   folded, and is found by Find in Thread. A review that arrives after the turn ended joins that
   turn instead of vanishing.
+- A turn that answers more than once (omp's auto-double-check or an advisor review sends the
+  agent back to work after its answer, or a background job wakes it) keeps every answer
+  visible when "Worked for …" is closed, each with its copy button and time; before, only the
+  last answer showed and the first recap hid inside the fold.
 - omp threads whose conversation holds a cut-off emoji or icon glyph no longer stall for a
   minute at the end of every turn: Stop ends the turn right away again, and replies to
   messages sent during that minute no longer go missing.

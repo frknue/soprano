@@ -205,6 +205,50 @@ struct TimelineRowsTests {
         #expect(ids(TimelineBuilder.rows(for: thread([running]))).last == "advisory:v1:1")
     }
 
+    @Test func aSecondPassKeepsTheFirstAnswerOutOfTheFold() {
+        let note = AdvisorNote(text: "Check the claims.", severity: .concern, advisor: "Final reviewer")
+        let rechecked = turn(items: [
+            item("c1", .command(CommandExecution(command: "rg x"))),
+            item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("v1", .advisory([note])),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "Re-checking.", isFinal: false)),
+            item("c2", .command(CommandExecution(command: "swift test"))),
+            item("a3", .assistantMessage(text: "Second pass.", isFinal: true)),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+        let rows = TimelineBuilder.rows(for: thread([rechecked]))
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "advisory:v1:0", "notice:n1", "assistant:a3"])
+        guard case let .assistant(first) = rows[2].content, case let .assistant(last) = rows[5].content else {
+            Issue.record("unexpected rows \(rows)")
+            return
+        }
+        #expect(first.showMeta)
+        #expect(first.changedFiles == nil)
+        #expect(last.showMeta)
+        #expect(last.changedFiles?.files.map(\.path) == ["A.swift"])
+
+        let open = TimelineBuilder.rows(for: thread([rechecked]), expansion: TimelineExpansion(turns: ["t1"]))
+        #expect(ids(open) == ["user:m-t1", "fold:t1", "entry:c1", "assistant:a1", "advisory:v1:0", "notice:n1", "assistant:a2", "entry:c2", "assistant:a3"])
+    }
+
+    @Test func backgroundWorkThatWakesTheTurnBringsBackThinkingAndKeepsTheYieldedAnswer() {
+        var resumed = turn(status: .running, items: [
+            item("c1", .command(CommandExecution(command: "sleep 8")), at: 1),
+            item("a1", .assistantMessage(text: "Started.", isFinal: true), at: 2),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([resumed]))).last == "assistant:a1")
+        resumed.resumedAt = at(10)
+        #expect(ids(TimelineBuilder.rows(for: thread([resumed]))).last == "thinking:t1")
+
+        resumed.items.append(item("a2", .assistantMessage(text: "The job finished.", isFinal: true), at: 12))
+        #expect(ids(TimelineBuilder.rows(for: thread([resumed]))).last == "assistant:a2")
+
+        resumed.status = .completed
+        resumed.completedAt = at(20)
+        resumed.resumedAt = nil
+        #expect(ids(TimelineBuilder.rows(for: thread([resumed]))) == ["user:m-t1", "fold:t1", "assistant:a1", "assistant:a2"])
+    }
+
     @Test func changedFilesWithoutAnAnswerGetTheirOwnCard() {
         let silent = turn(items: [item("f1", .fileChange([FileChange(path: "A.swift", kind: .add)]))], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
         #expect(ids(TimelineBuilder.rows(for: thread([silent]))) == ["user:m-t1", "fold:t1", "files:t1"])

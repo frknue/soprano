@@ -120,6 +120,7 @@ extension AgentEngine {
             turn.completedAt = turn.isYielded ? turn.yieldedAt ?? now : now
             turn.yieldedAt = nil
             turn.stopRequestedAt = nil
+            turn.resumedAt = nil
             turn.status = status
             if status == .failed {
                 turn.failureMessage = error ?? turn.failureMessage ?? "The turn failed."
@@ -392,7 +393,10 @@ extension AgentEngine {
             yieldTurn(threadID, outcome: outcome, error: error)
         case .turnResumed:
             guard let turn = thread(threadID)?.openTurn, turn.yieldedAt != nil else { return }
-            mutateTurn(threadID, turn.id) { $0.yieldedAt = nil }
+            mutateTurn(threadID, turn.id) {
+                $0.yieldedAt = nil
+                $0.resumedAt = environment.now()
+            }
         case let .sessionEnded(error):
             sessionEnded(threadID, error: error)
         case let .subagent(id, event):

@@ -47,7 +47,8 @@ struct AssistantRowModel: Hashable, Sendable {
     var itemID: String
     var text: String
     var isStreaming: Bool
-    /// The turn's answer once the turn finished: copy button and timestamp below it.
+    /// A final answer once it is complete (every one of the turn's runs: a double-check or advisor
+    /// pass answers again), or the finished turn's last message: copy button and timestamp below it.
     var showMeta: Bool
     var date: Date
     var changedFiles: ChangedFilesModel?
@@ -131,14 +132,17 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 ///
 /// - Each turn: the user message, then "Working for" while it runs ("Stopping…" once Stop was
 ///   pressed, without "Thinking"), or a "Worked for …" fold when
-///   it finished (closed by default; it hides everything but the answer and the cards). A yielded
+///   it finished (closed by default; it hides commentary and work, never an answer or a card). A
+///   turn can answer more than once (omp's auto-double-check or an advisor review wakes the agent
+///   after its answer), so every final answer stays out of the fold. A yielded
 ///   turn (answer final, background work still running) shows as finished, with a
 ///   "Background work still running…" note at its end.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
 ///   or a single entry row when the group holds one tool call.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
 ///   shows no live tool, waits on nobody and has not just answered (omp wraps up after the
-///   final answer before it ends the turn).
+///   final answer before it ends the turn); an answer from before background work woke the turn
+///   (`Turn.resumedAt`) no longer counts.
 /// - Steers sit at the time they were sent; queued messages close the thread.
 enum TimelineBuilder {
     /// `editable` false: no "Edit from here" (a subagent's runs, shown as a thread).
@@ -265,8 +269,10 @@ enum TimelineBuilder {
                 switch item.kind {
                 case let .assistantMessage(text, isFinal):
                     flushGroup(trailing: false)
-                    answered = isFinal
+                    let endedBeforeResume = turn.resumedAt.map { (item.completedAt ?? item.startedAt) < $0 } ?? false
+                    answered = isFinal && !endedBeforeResume
                     let isTerminal = item.id == terminalID && !isRunning
+                    let showMeta = isTerminal || (isFinal && !item.status.isActive)
                     var files: ChangedFilesModel?
                     if isTerminal, let changedFiles {
                         files = changedFiles
@@ -276,7 +282,7 @@ enum TimelineBuilder {
                         itemID: item.id,
                         text: text,
                         isStreaming: item.status.isActive && isRunning,
-                        showMeta: isTerminal,
+                        showMeta: showMeta,
                         date: item.completedAt ?? item.startedAt,
                         changedFiles: files
                     ))))
@@ -337,12 +343,13 @@ enum TimelineBuilder {
         }
     }
 
-    /// The closed fold hides commentary and finished work; it keeps the answer, cards, errors,
-    /// notices, advisor notes, questions, pending approvals and failed work after the answer.
+    /// The closed fold hides commentary and finished work; it keeps every final answer (a
+    /// second pass must not bury the first), the last message, cards, errors, notices, advisor
+    /// notes, questions, pending approvals and failed work after the last message.
     private static func hidesInFold(_ item: TurnItem, index: Int, terminalIndex: Int, terminalID: String?) -> Bool {
         switch item.kind {
-        case .assistantMessage:
-            return item.id != terminalID
+        case let .assistantMessage(_, isFinal):
+            return !isFinal && item.id != terminalID
         case .error, .notice, .advisory, .userInput:
             return false
         case let .approval(request):

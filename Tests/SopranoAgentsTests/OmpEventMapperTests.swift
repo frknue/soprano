@@ -390,9 +390,10 @@ struct OmpEventMapperTests {
             }
             events += produced
             if produced.contains(.turnResumed) {
-                // The woken run may answer again: the yielded answer is no longer final.
+                // The woken run may answer again, but the yielded answer stays an answer: the
+                // timeline keeps it out of the fold (only "Thinking" looks at the resume).
                 let started = Self.latestItems(events).last { if case .assistantMessage("started", _) = $0.kind { true } else { false } }
-                #expect(started?.kind == .assistantMessage(text: "started", isFinal: false))
+                #expect(started?.kind == .assistantMessage(text: "started", isFinal: true))
             }
         }
 
