@@ -83,6 +83,8 @@ All notable changes to Soprano Agents are documented here. The format follows
 
 ### Fixed
 
+- Selecting text in a chat message highlights exactly the selected lines; a selection over
+  several lines no longer draws bands between them or skips lines.
 - omp slash commands typed in the composer (`/usage`, `/session`, `/context`, `/tools`, …) now show
   their output in the thread instead of ending the turn with nothing visible.
 - The composer's buttons (attach, model, reasoning/permissions, send) and its text area take clicks again; the composer's outline was swallowing them.

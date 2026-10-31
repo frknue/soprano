@@ -72,19 +72,31 @@ final class MarkdownLayoutManager: NSLayoutManager {
     var chipColor: NSColor = .clear
     var quoteRuleColor: NSColor = .clear
 
-    /// Find highlights hug the glyphs instead of filling the whole (1.625) line.
+    /// Selection and find highlights hug the glyphs instead of filling the whole (1.625) line:
+    /// each rect is cut into one band per line fragment it covers, from that line's baseline
+    /// (glyphs sit low in the line, and a selection rect can span several lines).
     override func fillBackgroundRectArray(_ rectArray: UnsafePointer<NSRect>, count rectCount: Int, forCharacterRange charRange: NSRange, color: NSColor) {
-        guard let storage = textStorage, charRange.location < storage.length,
-              let font = storage.attribute(.font, at: charRange.location, effectiveRange: nil) as? NSFont else {
+        guard let storage = textStorage, charRange.location < storage.length else {
             super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
             return
         }
-        let glyphHeight = ceil(font.ascender - font.descender) + 2
+        let origin = firstTextView?.textContainerOrigin ?? .zero
+        var bands: [(line: ClosedRange<CGFloat>, glyphs: ClosedRange<CGFloat>)] = []
+        enumerateLineFragments(forGlyphRange: glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)) { fragment, _, _, lineGlyphs, _ in
+            let lineChars = self.characterRange(forGlyphRange: lineGlyphs, actualGlyphRange: nil)
+            let first = min(max(lineChars.location, charRange.location), storage.length - 1)
+            guard let font = storage.attribute(.font, at: first, effectiveRange: nil) as? NSFont else { return }
+            let baseline = origin.y + fragment.minY + self.location(forGlyphAt: lineGlyphs.location).y
+            let top = origin.y + fragment.minY
+            bands.append((top...(top + fragment.height), (baseline - font.ascender - 1)...(baseline - font.descender + 1)))
+        }
         color.setFill()
         for index in 0..<rectCount {
             let rect = rectArray[index]
-            let inset = max(0, (rect.height - glyphHeight) / 2)
-            NSBezierPath(roundedRect: rect.insetBy(dx: 0, dy: inset), xRadius: 2, yRadius: 2).fill()
+            for band in bands where min(band.line.upperBound, rect.maxY) - max(band.line.lowerBound, rect.minY) > 1 {
+                let fill = NSRect(x: rect.minX, y: band.glyphs.lowerBound, width: rect.width, height: band.glyphs.upperBound - band.glyphs.lowerBound)
+                NSBezierPath(roundedRect: fill, xRadius: 2, yRadius: 2).fill()
+            }
         }
     }
 
