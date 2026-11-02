@@ -5,7 +5,7 @@ import SopranoAgentsCore
 /// [--theme <id>] [--hide-sidebar] [--details] [--terminal] [--right-panel]
 /// [--diff thread|turn:<n>|uncommitted] [--perform <command id>]… [--type "<text>"] [--keys "<chord> …"]
 /// [--hover <accessibility label>] [--click <accessibility label>]… [--settings <page>] [--dialog confirm|choose|prompt|alert]
-/// [--accounts none|demo|empty|pending] [--wait <seconds>]`
+/// [--accounts none|demo|empty|pending] [--work-log detailed|minimal] [--wait <seconds>]`
 ///
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
@@ -37,6 +37,8 @@ enum SnapshotCommand {
         var dialog: String?
         /// The `AccountFixtures` snapshot the account button, usage card and Settings → Accounts show.
         var accounts = "none"
+        /// Overrides `chat.workLog` in memory (settings.json stays untouched).
+        var workLog: AppSettings.WorkLog?
         var wait: Double = 0.4
     }
 
@@ -48,7 +50,7 @@ enum SnapshotCommand {
                                   [--type "<text>"] [--keys "<chord> …"] [--hover <label>] [--click <label>]…
                                   [--settings \(SettingsPage.allCases.map(\.rawValue).joined(separator: "|"))]
                                   [--dialog \(dialogs.joined(separator: "|"))] [--accounts \(AccountFixtures.scenarios.joined(separator: "|"))]
-                                  [--wait <seconds>]
+                                  [--work-log detailed|minimal] [--wait <seconds>]
     """
 
     nonisolated static let dialogs = ["confirm", "choose", "prompt", "alert"]
@@ -106,6 +108,10 @@ enum SnapshotCommand {
                     throw CaptureError(description: "--accounts must be one of \(AccountFixtures.scenarios.joined(separator: ", "))")
                 }
                 options.accounts = raw
+            case "--work-log":
+                let raw = try value(option)
+                guard let workLog = AppSettings.WorkLog(rawValue: raw) else { throw CaptureError(description: "--work-log must be detailed or minimal") }
+                options.workLog = workLog
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             default: throw CaptureError(description: "unknown option \(option)")
             }
@@ -142,6 +148,10 @@ enum SnapshotCommand {
     static func capture(_ options: Options) async throws {
         let settings = SettingsCenter.shared
         settings.start(createIfMissing: false, watching: false)
+        if let workLog = options.workLog {
+            let text = (try? SettingsFile.read(at: settings.fileURL)) ?? nil
+            settings.apply(text: try JSONCText.setting(workLog.rawValue, at: ["chat", "workLog"], in: text ?? "{}"), notify: false)
+        }
         ThemeCenter.shared.forcedAppearance = options.dark ? .dark : .light
         PaletteCenter.shared.apply(setting: options.theme ?? AppTheme.folioId)
         NSApp.appearance = PaletteCenter.shared.palette.appearance

@@ -222,8 +222,13 @@ answered as `extension_ui_response {id, value}`); other `select`, `confirm`, `in
 customInput?}]`, dismissed → `cancelled:true`); `cancel {targetId}` withdraws one; `notify` is a
 notice; dialogs arriving after the turn ended are cancelled. Events (`OmpEventMapper`):
 `message_update` text/thinking deltas (item ids `<messageId>:<contentIndex>`, prefixed after a
-relaunch), `tool_execution_start|update|end` → bash → command, write/edit/ast_edit → fileChange
-(edit diffs converted from omp's line-numbered format), read/grep/glob/find → toolCall, web_search
+relaunch), `tool_execution_start|update|end` → bash → command, write/edit/apply_patch/ast_edit →
+fileChange (edit diffs converted from omp's line-numbered format; without one, a running call and a
+write show the code their arguments carry, `OmpEditPreview`: write content as added lines,
+hashline/apply_patch/sloppy/replace/patch edits as unpositioned hunks), `toolcall_start|delta|end`
+of a write/edit/apply_patch call → that same fileChange item while the model still streams it
+(partial argument JSON closed by `OmpEditPreview.partialObject`, re-read per new line or 256
+characters), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
 `intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
 marks its text final (the timeline drops "Thinking" under it and keeps every final answer out of
@@ -449,7 +454,7 @@ buttons, and the snapshot harness runs them with `--perform <id>`. `CommandConte
 `~/.config/soprano-agents/settings.json` (JSONC, `SOPRANO_AGENTS_CONFIG` overrides), live
 reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultModel, defaultRuntimeMode}`,
 `providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`, `projects.directories`,
-`chat.{followUp, width}`, `notifications.{enabled, sound}`, `editor.app`,
+`chat.{followUp, width, workLog}`, `notifications.{enabled, sound}`, `editor.app`,
 `keybindings.{prefixKey, prefixTimeoutMs, bindings}`. `AppSettings.engineSettings` feeds
 `AgentEngine.settings`. Window geometry, panel
 widths and per-thread UI state stay in `UserDefaults`.
@@ -488,6 +493,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `chat.find` | Find in Thread | sidebar, timeline, composer | `cmd+f` | Timeline |
 | `timeline.jumpToLatest` | Jump to Latest | timeline | `cmd+down` | Timeline |
 | `timeline.expandAll` / `timeline.collapseAll` | Expand / Collapse All Work | — | — | Timeline |
+| `timeline.toggleWorkLog` | Toggle Detailed Work Log (writes `chat.workLog`) | sidebar, timeline, composer, rightPanel | `cmd+shift+d` | Timeline |
 | `composer.focus` | Focus Composer | global | `cmd+shift+l` | Composer |
 | `modelPicker.toggle` | Model Picker | not terminal | `cmd+shift+m` | Composer |
 | `composer.effort` | Reasoning Effort | not terminal | `cmd+shift+e` | Composer |
@@ -562,6 +568,14 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   failed, stopped `stop.circle`), name, "agent · latest intent" (else description or
   assignment), live run time. A selected subagent stays listed under a closed disclosure; its
   row, not the thread's, is highlighted, and its thread stays unread until opened itself.
+- Work log (`chat.workLog`, ⇧⌘D toggles): `detailed` (default) opens every "Worked for" fold,
+  work group and file diff; a running turn lists its steps with the current one live. `minimal`
+  closes them all and shows one shimmering live row. A file change is one `FileDiffRowView` per
+  file: a work-log line ("Editing/Writing/Edited/Created/Deleted path", "+N −M") over a 1 pt
+  bordered, `Radius.md` panel of Diff-panel line rows (`DiffStyle`, `DiffLineDrawing`: tint,
+  change bar, line numbers, syntax colors, wrapped), at most 360 pt tall, scrolling inside;
+  unpositioned preview hunks show their op ("PUT 12.=14:") and no line numbers. While the call
+  runs, the panel keeps its newest line in view unless the user scrolled up.
 - Motion: opacity/scale fades ≤ 200 ms, none under Reduce Motion; streaming text appears without
   animation.
 - Floating surfaces that must appear in snapshots (palette, model picker, menus of the composer,
@@ -570,11 +584,11 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|approval|input|failed|background|answered|rechecked|subagents|subagent|draft|empty]
+`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|editing|approval|input|failed|background|answered|rechecked|subagents|subagent|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
-[--accounts none|demo|empty|pending]
+[--accounts none|demo|empty|pending] [--work-log detailed|minimal]
 [--dialog confirm|choose|prompt|alert] [--type "<text>"] [--keys "<chord> …"] [--hover <label>]
 [--click <label>]… [--wait <seconds>]` builds the real window offscreen on a `DemoFixtures` scenario and writes a PNG
 of it and its child windows. `--perform` runs any registered command (open the palette, the model
@@ -586,7 +600,9 @@ the hover state of the `InteractiveView` with that accessibility label or toolti
 a real mouse down/up at its center through the window, so whatever the window hit-tests there
 (including a view drawn over the control) gets the click, as it would live. Clicks in the
 titlebar strip start a window drag offscreen instead; use them below the header. Agents verify
-UI with it and `read` the PNG; they do not launch the GUI.
+UI with it and `read` the PNG; they do not launch the GUI. `--work-log` overrides `chat.workLog`
+in memory (never `--perform timeline.toggleWorkLog`: that writes settings.json); the `editing`
+fixture is a running turn with an applied edit and a write whose code is still streaming in.
 
 The demo fixture's thread reports 124k of 200k context tokens and the engine remembers an omp
 command list for it and the `app` project: `--perform composer.focus --type "/re"` opens the

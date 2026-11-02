@@ -96,6 +96,7 @@ right-panel tab) has focus.
 | Copy Thread Reference | `⇧⌘C` | not terminal |
 | Find in Thread | `⌘F` | sidebar, timeline, composer |
 | Jump to Latest | `⌘↓` | timeline |
+| Toggle Detailed Work Log | `⇧⌘D` | not terminal |
 | Focus Composer | `⇧⌘L` | everywhere |
 | Model Picker | `⇧⌘M` | not terminal |
 | Reasoning Effort | `⇧⌘E` | not terminal |
@@ -145,6 +146,7 @@ keeping your comments.
 | `projects.directories` | `[]` | folders whose subfolders Open Project… (`⇧⌘K`) lists, e.g. `["~/git/private", "~/git/work"]` |
 | `chat.followUp` | `"steer"` | `steer` or `queue` |
 | `chat.width` | `"normal"` | `normal`, `wide`, `full` |
+| `chat.workLog` | `"detailed"` | `detailed` (every step, edits as diffs, code as it is written) or `minimal`; `⇧⌘D` toggles |
 | `notifications.enabled` / `.sound` | `true` / `true` | background notifications |
 | `editor.app` | first installed | `cursor`, `vscode`, `zed`, `xcode`, `finder`, … |
 | `keybindings.prefixKey` / `.prefixTimeoutMs` | `"a"` / `1500` | prefix chord |

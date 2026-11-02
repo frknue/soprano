@@ -171,7 +171,7 @@ enum SettingsResolver {
         }
 
         if let chat = section("chat", in: root, warn: warn) {
-            for key in chat.keys.sorted() where !["followUp", "width"].contains(key) {
+            for key in chat.keys.sorted() where !["followUp", "width", "workLog"].contains(key) {
                 warn("Unknown setting \"chat.\(key)\".")
             }
             if let value = chat["followUp"] {
@@ -186,6 +186,13 @@ enum SettingsResolver {
                     result.settings.chatWidth = width
                 } else {
                     warn("chat.width must be \"normal\", \"wide\" or \"full\".")
+                }
+            }
+            if let value = chat["workLog"] {
+                if let raw = value as? String, let workLog = AppSettings.WorkLog(rawValue: raw) {
+                    result.settings.workLog = workLog
+                } else {
+                    warn("chat.workLog must be \"detailed\" or \"minimal\".")
                 }
             }
         }

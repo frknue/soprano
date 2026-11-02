@@ -116,8 +116,11 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             self?.list.reconfigureVisibleRows()
         }
         list.maxLaneWidth = SettingsCenter.shared.settings.chatWidth.maxWidth
+        expansion.detailed = SettingsCenter.shared.settings.workLog == .detailed
         SettingsCenter.shared.addObserver(self) { [weak self] in
-            self?.list.maxLaneWidth = SettingsCenter.shared.settings.chatWidth.maxWidth
+            guard let self else { return }
+            list.maxLaneWidth = SettingsCenter.shared.settings.chatWidth.maxWidth
+            setDetailed(SettingsCenter.shared.settings.workLog == .detailed)
         }
         reload(scrollToEnd: true)
     }
@@ -202,16 +205,28 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
 
     // MARK: Expansion
 
-    /// Opens every fold, checks row and work group of the selected thread.
+    /// Switches the work log's defaults; what the user opened or closed was relative to the old
+    /// ones, so it starts over.
+    private func setDetailed(_ detailed: Bool) {
+        guard expansion.detailed != detailed else { return }
+        expansion.detailed = detailed
+        expansion.turns.removeAll()
+        expansion.groups.removeAll()
+        expansion.diffs.removeAll()
+        reload()
+    }
+
+    /// Opens every fold, checks row, work group and file diff of the selected thread.
     func expandAll() {
         guard let thread = selectedThread else { return }
-        expansion.turns.formUnion(thread.turns.map(\.id))
+        for turn in thread.turns { expansion.set(turn.id, open: true, in: \.turns) }
         expansion.checks.formUnion(thread.turns.map(\.id))
         for _ in 0..<2 {
             for row in TimelineBuilder.rows(for: thread, expansion: expansion) {
                 switch row.content {
-                case let .workGroup(model): expansion.groups.insert(model.groupID)
-                case let .liveWork(model): expansion.groups.insert(model.groupID)
+                case let .workGroup(model): expansion.set(model.groupID, open: true, in: \.groups)
+                case let .liveWork(model): expansion.set(model.groupID, open: true, in: \.groups)
+                case let .fileDiff(model): expansion.set(model.id, open: true, in: \.diffs)
                 default: break
                 }
             }
@@ -221,15 +236,20 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
 
     func collapseAll() {
         guard let thread = selectedThread else { return }
-        let turnIDs = Set(thread.turns.map(\.id))
-        expansion.turns.subtract(turnIDs)
+        let turnIDs = thread.turns.map(\.id)
+        // Every fold and checks row open, so the work inside them is listed too.
+        var everything = expansion
+        for id in turnIDs { everything.set(id, open: true, in: \.turns) }
+        everything.checks.formUnion(turnIDs)
+        let rows = TimelineBuilder.rows(for: thread, expansion: everything)
+        for id in turnIDs { expansion.set(id, open: false, in: \.turns) }
         expansion.checks.subtract(turnIDs)
-        let rows = TimelineBuilder.rows(for: thread, expansion: TimelineExpansion(turns: turnIDs, checks: turnIDs, groups: expansion.groups))
         for row in rows {
             switch row.content {
-            case let .workGroup(model): expansion.groups.remove(model.groupID)
-            case let .liveWork(model): expansion.groups.remove(model.groupID)
+            case let .workGroup(model): expansion.set(model.groupID, open: false, in: \.groups)
+            case let .liveWork(model): expansion.set(model.groupID, open: false, in: \.groups)
             case let .workEntry(model): expansion.entries.remove(model.entry.id)
+            case let .fileDiff(model): expansion.set(model.id, open: false, in: \.diffs)
             default: break
             }
         }
@@ -258,6 +278,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     }
     func timelineToggleGroup(_ groupID: String) { toggle(groupID, in: \.groups) }
     func timelineToggleEntry(_ itemID: String) { toggle(itemID, in: \.entries) }
+    func timelineToggleDiff(_ diffID: String) { toggle(diffID, in: \.diffs) }
     func timelineToggleMessage(_ messageID: String) { toggle(messageID, in: \.messages) }
 
     func timelineSetClosedFolders(turnID: String, paths: Set<String>) {

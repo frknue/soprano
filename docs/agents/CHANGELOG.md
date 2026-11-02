@@ -25,6 +25,11 @@ All notable changes to Soprano Agents are documented here. The format follows
   Markdown answers with code blocks and tables, "Worked for …" folds over each turn's work log, a
   live "Working for" row, inline approvals, changed-files cards that open the diff, queued
   messages, and Find in Thread (⌘F). ⌘↓ jumps to the latest message.
+- See the code while the agent works: every edit and write shows inline as a colored diff with
+  line numbers and syntax colors, and a write or edit appears line by line while the model is
+  still typing it. The detailed work log (default) keeps every step and each turn's work open;
+  ⇧⌘D, or Settings → General → Work log (`chat.workLog`: `detailed` / `minimal`), switches to
+  the minimal one-line view.
 - Composer: attachments (paperclip, paste, drop), model picker (⇧⌘M), reasoning effort (⇧⌘E),
   permissions Supervised / Auto-accept edits / Auto / Full access (⇧⌘A), steer or queue while the
   agent works (⌘↩ does the other one, `chat.followUp`), Stop, approval and question answering

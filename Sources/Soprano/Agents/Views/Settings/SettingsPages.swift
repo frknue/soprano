@@ -61,6 +61,14 @@ extension SettingsController {
         let width = form.select(widths, selected: settings.chatWidth.rawValue, width: 192, label: "Chat width") { [weak self] value in
             self?.write(value, at: ["chat", "width"])
         }
+        let workLogs = [
+            SelectOption(title: "Detailed (default)", value: AppSettings.WorkLog.detailed.rawValue),
+            SelectOption(title: "Minimal", value: AppSettings.WorkLog.minimal.rawValue),
+        ]
+        let workLog = form.select(workLogs, selected: settings.workLog.rawValue, width: 192, label: "Work log") { [weak self] value in
+            self?.write(value, at: ["chat", "workLog"])
+        }
+        let workLogShortcut = center.shortcutText(for: "timeline.toggleWorkLog").map { " (\($0))" } ?? ""
         sections.append(form.section("Appearance", [
             form.row(
                 "Theme",
@@ -73,6 +81,12 @@ extension SettingsController {
                 description: "Set how wide messages and the composer can grow on large screens.",
                 reset: reset(["chat", "width"], isDefault: settings.chatWidth == defaults.chatWidth),
                 control: width
+            ),
+            form.row(
+                "Work log",
+                description: "Detailed shows every step while the agent works, with each edit as a diff, its code appearing as the agent writes it. Minimal folds the work to one line per step. Switch any time\(workLogShortcut).",
+                reset: reset(["chat", "workLog"], isDefault: settings.workLog == defaults.workLog),
+                control: workLog
             ),
         ]))
 

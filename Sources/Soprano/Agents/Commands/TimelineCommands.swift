@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Timeline module: find in thread, jump to latest, expand/collapse the work log.
+/// Timeline module: find in thread, jump to latest, expand/collapse the work log, its detail.
 @MainActor
 enum TimelineCommands {
     /// `!terminalFocus`.
@@ -49,6 +49,20 @@ enum TimelineCommands {
                 icon: "chevron.right",
                 isEnabled: { hasThread($0) },
                 perform: { timeline(in: $0)?.collapseAll() }
+            ),
+            AppCommand(
+                id: "timeline.toggleWorkLog",
+                title: "Toggle Detailed Work Log",
+                description: "Switch between every step with edits as diffs and the minimal one-line work log",
+                category: .thread,
+                scopes: [.sidebar, .timeline, .composer, .rightPanel],
+                defaultKeys: ["cmd+shift+d"],
+                icon: "text.line.magnify",
+                perform: { _ in
+                    let detailed = SettingsCenter.shared.settings.workLog == .detailed
+                    let next: AppSettings.WorkLog = detailed ? .minimal : .detailed
+                    SettingsCenter.shared.write(next.rawValue, at: ["chat", "workLog"])
+                }
             ),
         ]
     }

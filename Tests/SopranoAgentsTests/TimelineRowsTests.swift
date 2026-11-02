@@ -63,7 +63,7 @@ struct TimelineRowsTests {
 
     @Test func openingTheFoldShowsCommentaryBetweenSummarizedWorkGroups() {
         let rows = TimelineBuilder.rows(for: thread([workedTurn]), expansion: TimelineExpansion(turns: ["t1"]))
-        #expect(ids(rows) == ["user:m-t1", "fold:t1", "group:r1", "assistant:a1", "entry:f1", "assistant:a2"])
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "group:r1", "assistant:a1", "diff:f1:0", "assistant:a2"])
         guard case let .workGroup(group) = rows[2].content, case let .assistant(commentary) = rows[3].content else {
             Issue.record("unexpected rows \(rows)")
             return
@@ -72,7 +72,7 @@ struct TimelineRowsTests {
         #expect(!commentary.showMeta)
 
         let open = TimelineBuilder.rows(for: thread([workedTurn]), expansion: TimelineExpansion(turns: ["t1"], groups: ["group:r1"]))
-        #expect(ids(open) == ["user:m-t1", "fold:t1", "group:r1", "entry:r1", "entry:c1", "entry:t1", "assistant:a1", "entry:f1", "assistant:a2"])
+        #expect(ids(open) == ["user:m-t1", "fold:t1", "group:r1", "entry:r1", "entry:c1", "entry:t1", "assistant:a1", "diff:f1:0", "assistant:a2"])
     }
 
     @Test func adjacentWorkLogRowsSitFlushAndBlocksKeepTheirSpacing() {
@@ -84,7 +84,7 @@ struct TimelineRowsTests {
         #expect(spacing["entry:r1"] == 0)
         #expect(spacing["entry:t1"] == 4)
         #expect(spacing["assistant:a1"] == 8)
-        #expect(spacing["entry:f1"] == 8)
+        #expect(spacing["diff:f1:0"] == 8)
         #expect(spacing["assistant:a2"] == 16)
     }
 
@@ -415,5 +415,75 @@ struct TimelineRowsTests {
         #expect(fold.label == "Worked for 1m")
         #expect(user.canEdit)
         #expect(rows[3].content == .backgroundWork)
+    }
+
+    // MARK: - Detailed work log and file diffs
+
+    private var detailed: TimelineExpansion {
+        var expansion = TimelineExpansion()
+        expansion.detailed = true
+        return expansion
+    }
+
+    private var editingTurn: Turn {
+        turn(status: .running, items: [
+            item("s1", .toolCall(ToolCall(name: "Read", category: .read, title: "Read A.swift")), at: 1),
+            item("f1", .fileChange([FileChange(path: "A.swift", kind: .update, diff: "@@ -1,1 +1,1 @@\n-a\n+b")]), at: 2),
+            item("f2", .fileChange([FileChange(path: "B.swift", kind: .add, diff: "@@ -0,0 +1,1 @@\n+new")]), status: .running, at: 3),
+        ])
+    }
+
+    @Test func theDetailedLogListsARunningTurnsStepsWithTheEditBeingWrittenOpen() {
+        let rows = TimelineBuilder.rows(for: thread([editingTurn]), expansion: detailed)
+        #expect(ids(rows) == ["user:m-t1", "working:t1", "entry:s1", "diff:f1:0", "diff:f2:0"])
+        guard case let .fileDiff(done) = rows[3].content, case let .fileDiff(live) = rows[4].content else {
+            Issue.record("expected diff rows, got \(rows)")
+            return
+        }
+        #expect(done.expanded && live.expanded)
+        #expect(live.isActive)
+        #expect(live.label == "Writing B.swift")
+        #expect(done.label == "Edited A.swift")
+    }
+
+    @Test func collapsingTheRunningGroupInTheDetailedLogGivesTheLiveRow() {
+        var expansion = detailed
+        expansion.set("group:s1", open: false, in: \.groups)
+        let rows = TimelineBuilder.rows(for: thread([editingTurn]), expansion: expansion)
+        #expect(ids(rows) == ["user:m-t1", "working:t1", "live:t1"])
+    }
+
+    @Test func theMinimalLogShowsOnlyTheLiveStepAndClosedDiffsWhenOpened() {
+        #expect(ids(TimelineBuilder.rows(for: thread([editingTurn]))) == ["user:m-t1", "working:t1", "live:t1"])
+
+        var expansion = TimelineExpansion()
+        expansion.set("group:s1", open: true, in: \.groups)
+        let rows = TimelineBuilder.rows(for: thread([editingTurn]), expansion: expansion)
+        #expect(ids(rows) == ["user:m-t1", "working:t1", "live:t1", "entry:s1", "diff:f1:0", "diff:f2:0"])
+        guard case let .fileDiff(diff) = rows[4].content else { return }
+        #expect(!diff.expanded)
+    }
+
+    @Test func theDetailedLogOpensFinishedFoldsAndAClosedDiffStaysClosed() {
+        let edited = turn(items: [
+            item("f1", .fileChange([
+                FileChange(path: "A.swift", kind: .update, diff: "@@ -1,1 +1,1 @@\n-a\n+b"),
+                FileChange(path: "C.swift", kind: .delete),
+            ])),
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+        ])
+        var expansion = detailed
+        expansion.set("f1:0", open: false, in: \.diffs)
+        let rows = TimelineBuilder.rows(for: thread([edited]), expansion: expansion)
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "diff:f1:0", "diff:f1:1", "assistant:a1"])
+        guard case let .fold(fold) = rows[1].content, case let .fileDiff(closed) = rows[2].content,
+              case let .fileDiff(deleted) = rows[3].content else { return }
+        #expect(fold.expanded)
+        #expect(!closed.expanded)
+        #expect(!deleted.canExpand)
+        #expect(deleted.label == "Deleted C.swift")
+
+        expansion.set("t1", open: false, in: \.turns)
+        #expect(ids(TimelineBuilder.rows(for: thread([edited]), expansion: expansion)) == ["user:m-t1", "fold:t1", "assistant:a1"])
     }
 }

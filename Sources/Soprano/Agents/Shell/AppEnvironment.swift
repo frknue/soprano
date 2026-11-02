@@ -25,6 +25,13 @@ struct AppSettings: Equatable, Sendable {
         }
     }
 
+    /// How much of the agent's work the chat shows: every step open, edits as diffs
+    /// (`detailed`), or one line per group and the live step (`minimal`).
+    enum WorkLog: String, Equatable, Sendable, CaseIterable {
+        case detailed
+        case minimal
+    }
+
     /// "soprano" (follow Soprano's own theme and appearance) or an id from `AppTheme.options`.
     var theme: String = "soprano"
 
@@ -46,6 +53,7 @@ struct AppSettings: Equatable, Sendable {
 
     var followUp: FollowUp = .steer
     var chatWidth: ChatWidth = .normal
+    var workLog: WorkLog = .detailed
 
     var notificationsEnabled = true
     var notificationSound = true

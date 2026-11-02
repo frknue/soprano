@@ -9,6 +9,7 @@ protocol TimelineRowDelegate: AnyObject {
     func timelineToggleChecks(turnID: String)
     func timelineToggleGroup(_ groupID: String)
     func timelineToggleEntry(_ itemID: String)
+    func timelineToggleDiff(_ diffID: String)
     func timelineToggleMessage(_ messageID: String)
     func timelineSetClosedFolders(turnID: String, paths: Set<String>)
     func timelineEditFromHere(turnID: String)

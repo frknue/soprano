@@ -6,7 +6,7 @@ import SopranoAgentsCore
 @MainActor
 enum DemoFixtures {
     /// Scenario names accepted by `snapshot --fixture`.
-    static let scenarios = ["demo", "running", "stopping", "approval", "input", "failed", "background", "answered", "rechecked", "subagents", "subagent", "draft", "empty"]
+    static let scenarios = ["demo", "running", "stopping", "editing", "approval", "input", "failed", "background", "answered", "rechecked", "subagents", "subagent", "draft", "empty"]
 
     struct Built {
         let engine: AgentEngine
@@ -19,6 +19,7 @@ enum DemoFixtures {
         }
         let extra: [AgentThread] = switch scenario {
         case "background": [backgroundThread(now)]
+        case "editing": [editingThread(now)]
         case "answered": [answeredThread(now)]
         case "rechecked": [recheckedThread(now)]
         case "subagents", "subagent": [subagentsThread(now)]
@@ -47,6 +48,7 @@ enum DemoFixtures {
         }
         let selection: WorkspaceState.Selection = switch scenario {
         case "running", "stopping": .thread(ID.running)
+        case "editing": .thread(ID.editing)
         case "approval": .thread(ID.approval)
         case "input": .thread(ID.input)
         case "failed": .thread(ID.failed)
@@ -96,6 +98,7 @@ enum DemoFixtures {
         static let answered = "thread-answered"
         static let rechecked = "thread-rechecked"
         static let subagents = "thread-subagents"
+        static let editing = "thread-editing"
     }
 
     static func projects(_ now: Date) -> [Project] {
@@ -339,6 +342,53 @@ enum DemoFixtures {
                 items: [
                     TurnItem(id: "an1", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update)]), status: .completed, startedAt: ago(40), completedAt: ago(39)),
                     TurnItem(id: "an2", kind: .assistantMessage(text: "The retry delay now starts at 250 ms and doubles up to 4 s.", isFinal: true), status: .completed, startedAt: ago(10), completedAt: ago(8)),
+                ]
+            )]
+        )
+    }
+
+    /// A running omp turn mid-edit ("editing" scenario only): it read a file, applied an edit
+    /// (omp's hunk with line numbers) and is still writing a new file, whose code so far streams in.
+    static func editingThread(_ now: Date) -> AgentThread {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        let edit = """
+        @@ -18,7 +18,9 @@
+             private var attempts = 0
+         
+        -    func retryDelay(attempt: Int) -> Duration {
+        -        .seconds(min(30, 2 << attempt))
+        +    /// 250 ms, doubling, at most 4 s.
+        +    func retryDelay(attempt: Int) -> Duration {
+        +        let milliseconds = min(4_000, 250 << attempt)
+        +        return .milliseconds(milliseconds)
+             }
+         
+             func upload(_ chunk: Chunk) async throws {
+        """
+        let streaming = """
+        @@ -0,0 +1,9 @@
+        +import Testing
+        +@testable import Upload
+        +
+        +struct UploadRetryTests {
+        +    @Test func delaysDoubleFrom250Milliseconds() {
+        +        let client = UploadClient()
+        +        #expect(client.retryDelay(attempt: 0) == .milliseconds(250))
+        +        #expect(client.retryDelay(attempt: 1) == .milliseconds(500))
+        +        #expect(client.retryDelay(attempt: 9) == .mil
+        """
+        return AgentThread(
+            id: ID.editing, projectID: ID.app, title: "Tighten the upload retry delay", createdAt: ago(200), updatedAt: ago(2),
+            modelSelection: omp, branch: "main", lastVisitedAt: ago(2),
+            turns: [Turn(
+                id: "turn-editing-1", ordinal: 1,
+                userMessage: UserMessage(text: "Tighten the retry delay in UploadClient and add a test.", createdAt: ago(90)),
+                modelSelection: omp, status: .running, startedAt: ago(90),
+                items: [
+                    TurnItem(id: "ed1", kind: .reasoning(text: "**Checking the current backoff**\n\nThe delay doubles from 2 s up to 30 s."), status: .completed, startedAt: ago(80), completedAt: ago(78)),
+                    TurnItem(id: "ed2", kind: .toolCall(ToolCall(name: "read", category: .read, title: "Read Sources/Upload/UploadClient.swift")), status: .completed, startedAt: ago(76), completedAt: ago(75)),
+                    TurnItem(id: "ed3", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update, diff: edit)]), status: .completed, startedAt: ago(40), completedAt: ago(39)),
+                    TurnItem(id: "ed4", kind: .fileChange([FileChange(path: "Tests/UploadTests/UploadRetryTests.swift", kind: .add, diff: streaming)]), status: .running, startedAt: ago(6)),
                 ]
             )]
         )

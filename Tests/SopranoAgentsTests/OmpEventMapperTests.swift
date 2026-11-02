@@ -102,7 +102,7 @@ struct OmpEventMapperTests {
         let edit = try #require(Self.item("toolu_01UTHhuJMbSx6h49UfBR1Qon", in: events))
         let bash = try #require(Self.item("toolu_01LsbcaUNi98HXJkjuQmWruR", in: events))
 
-        #expect(write.kind == .fileChange([FileChange(path: "color.txt", kind: .update)]))
+        #expect(write.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -0,0 +1,1 @@\n+blue")]))
         #expect(edit.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -1,1 +1,1 @@\n-blue\n+blue sky")]))
         guard case let .command(command) = bash.kind else {
             Issue.record("bash should be a command")
@@ -115,14 +115,35 @@ struct OmpEventMapperTests {
         #expect([write, edit, bash].allSatisfy { $0.status == .completed })
     }
 
-    @Test func theRunningEditNamesItsFileBeforeTheResultArrives() throws {
-        let events = try Self.replay()
-        let first = events.first { if case let .itemUpdated(item) = $0 { item.id == "toolu_01UTHhuJMbSx6h49UfBR1Qon" } else { false } }
+    @Test func theEditShowsItsCodeWhileTheModelWritesItThenOmpsDiff() throws {
+        var mapper = OmpEventMapper(cwd: "/tmp/demo", contextWindow: 100_000)
+        let frames = try Self.trace()
+        let id = "toolu_01UTHhuJMbSx6h49UfBR1Qon"
+        let start = try #require(frames.firstIndex { $0["type"]?.stringValue == "tool_execution_start" && $0["toolCallId"]?.stringValue == id })
+        let streamed = frames[..<start].flatMap { mapper.map($0) }
+        let preview = try #require(Self.item(id, in: streamed))
 
-        if case let .itemUpdated(item)? = first {
-            #expect(item.kind == .fileChange([FileChange(path: "color.txt", kind: .update)]))
-            #expect(item.status == .running)
+        #expect(preview.status == .running)
+        #expect(preview.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -0,0 +0,1 @@ PUT 1.=1:\n+blue sky")]))
+        let rest = frames[start...].flatMap { mapper.map($0) }
+        #expect(Self.item(id, in: rest)?.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -1,1 +1,1 @@\n-blue\n+blue sky")]))
+    }
+
+    @Test func aWriteStreamsItsContentBeforeTheToolCallEnds() throws {
+        var mapper = OmpEventMapper(cwd: "/tmp/demo", contextWindow: 100_000)
+        let frames = try Self.trace()
+        let id = "toolu_0148z2qAHYzePrKK6zQ7cVpG"
+        let end = try #require(frames.firstIndex {
+            $0["assistantMessageEvent"]?["type"]?.stringValue == "toolcall_end" && $0["assistantMessageEvent"]?["toolCall"]?["id"]?.stringValue == id
+        })
+        let streamed = frames[..<end].flatMap { mapper.map($0) }
+
+        // The streamed path is the model's own (the trace's cwd differs), the content so far added lines.
+        guard case let .fileChange(changes)? = Self.item(id, in: streamed)?.kind else {
+            Issue.record("expected the write's streamed code before its call ended")
+            return
         }
+        #expect(changes.map(\.diff) == ["@@ -0,0 +1,1 @@\n+blue"])
     }
 
     @Test func assistantUsageReportsTokensAgainstTheContextWindow() throws {

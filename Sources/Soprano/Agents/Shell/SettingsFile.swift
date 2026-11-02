@@ -128,7 +128,9 @@ enum SettingsFile {
             // Sending while the agent works: "steer" the running turn or "queue" after it. ⌘↩ does the other.
             "followUp": "steer",
             // Chat lane: "normal" (736 pt), "wide", or "full".
-            "width": "normal"
+            "width": "normal",
+            // The agent's work: "detailed" (every step, edits as diffs, code as it is written) or "minimal".
+            "workLog": "detailed"
           },
 
           "notifications": {

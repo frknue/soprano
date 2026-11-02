@@ -63,11 +63,16 @@ public struct OmpUIRequest: Sendable, Hashable {
 ///   `details.notes[{note, severity, advisor}]`) → an `advisory` item.
 /// - `tool_execution_start|update|end {toolCallId, toolName, args, intent, partialResult,
 ///   result{content, details}, isError}` → items: bash → command (cumulative output, exit code
-///   from `details.exitCode`, else 0 on success), write/edit/ast_edit → file change (edit
-///   `details.diff` "-N|old"/"+N|new" lines converted to a unified hunk), read → read tool call,
+///   from `details.exitCode`, else 0 on success), write/edit/apply_patch/ast_edit → file change
+///   (edit `details.diff` "-N|old"/"+N|new" lines converted to a unified hunk; without one, the
+///   code the arguments carry, `OmpEditPreview`), read → read tool call,
 ///   grep/glob/find/ast_grep → search, web_search → web search, task → subagent, todo →
 ///   "Updated tasks", ask → nothing (its dialog is the user-input item), others → tool call
 ///   titled by `intent`.
+/// - `message_update` `toolcall_start|delta|end` of a write/edit/apply_patch call → the running
+///   file-change item (id = the tool call id) with the code streamed so far, before omp runs it:
+///   the partial argument JSON is closed (`OmpEditPreview.partialObject`) and re-read on every
+///   new line or 256 streamed characters.
 /// - `extension_ui_request`: approval selects (`Allow tool: …`) → `approvalRequested`; other
 ///   selects, `confirm`, `input`, `editor`, `ask` → `userInputRequested`; `cancel` →
 ///   `requestResolved(targetId)`; `notify` → notice. Status/widget/title/editor-text are ignored.
@@ -107,6 +112,19 @@ public struct OmpEventMapper: Sendable {
     private var tools: [String: Tool] = [:]
     private var approvalTools: [String: String] = [:]
     private var declinedTools: Set<String> = []
+    /// Write/edit calls the model is still streaming, by `<messageId>:<contentIndex>`.
+    private var streamingCalls: [String: StreamingCall] = [:]
+
+    private struct StreamingCall: Sendable {
+        var toolCallID: String
+        var name: String
+        var json = ""
+        /// `json` length at the last emitted preview.
+        var emittedLength = 0
+    }
+
+    /// Tools whose arguments carry code (`OmpEditPreview`).
+    private static let codeTools: Set<String> = ["write", "edit", "apply_patch"]
     private var noticeCount = 0
     /// How the last manual compaction ended (`manual_compaction_end`); cleared per turn.
     public private(set) var compactionEnd: CompactionEnd?
@@ -181,6 +199,7 @@ public struct OmpEventMapper: Sendable {
         tools.removeAll()
         approvalTools.removeAll()
         declinedTools.removeAll()
+        streamingCalls.removeAll()
         heldOutcome = nil
         isBackgroundRunActive = false
         compactionEnd = nil
@@ -285,9 +304,36 @@ public struct OmpEventMapper: Sendable {
         case "thinking_end":
             guard let text = event["content"]?.nonEmptyString else { return [] }
             return [.itemUpdated(TurnItem(id: itemID, kind: .reasoning(text: text), status: .completed))]
+        case "toolcall_start":
+            let block = event["block"]
+            guard let toolCallID = block?["id"]?.nonEmptyString, let name = block?["name"]?.stringValue,
+                  Self.codeTools.contains(name) else { return [] }
+            streamingCalls[itemID] = StreamingCall(toolCallID: toolCallID, name: name)
+            return []
+        case "toolcall_delta":
+            guard var call = streamingCalls[itemID], let delta = event["delta"]?.stringValue, !delta.isEmpty else { return [] }
+            call.json += delta
+            let due = delta.contains("\\n") || delta.contains("\n") || call.json.count - call.emittedLength >= 256
+            if due { call.emittedLength = call.json.count }
+            streamingCalls[itemID] = call
+            guard due, let args = OmpEditPreview.partialObject(call.json) else { return [] }
+            return streamedPreview(call, args: args)
+        case "toolcall_end":
+            guard let call = streamingCalls.removeValue(forKey: itemID) else { return [] }
+            let args = event["toolCall"]?["arguments"] ?? OmpEditPreview.partialObject(call.json) ?? [:]
+            return streamedPreview(call, args: args)
         default:
             return []
         }
+    }
+
+    /// The running file-change item of a call still streaming; nothing once omp runs it (the tool
+    /// item takes over) or while its arguments carry no code yet.
+    private func streamedPreview(_ call: StreamingCall, args: JSONValue) -> [ProviderEvent] {
+        guard tools[call.toolCallID] == nil else { return [] }
+        let changes = OmpEditPreview.changes(tool: call.name, args: args) { Self.relative($0, to: cwd) }
+        guard !changes.isEmpty else { return [] }
+        return [.itemUpdated(TurnItem(id: call.toolCallID, kind: .fileChange(changes), status: .running))]
     }
 
     private mutating func mapMessageEnd(_ frame: JSONValue) -> [ProviderEvent] {
@@ -451,8 +497,8 @@ public struct OmpEventMapper: Sendable {
                 exitCode: exitCode,
                 durationMs: details?["wallTimeMs"]?.doubleValue.map { Int($0.rounded()) }
             )))
-        case "write", "edit", "ast_edit":
-            return item(.fileChange(fileChanges(tool: tool, result: result)))
+        case "write", "edit", "apply_patch", "ast_edit":
+            return item(.fileChange(fileChanges(tool: tool, status: status, result: result)))
         case "read":
             return item(.toolCall(ToolCall(name: tool.name, category: .read, title: "Read \(relative(path ?? ""))", input: Self.inputText(args), output: output)))
         case "grep", "glob", "find", "ast_grep":
@@ -480,7 +526,22 @@ public struct OmpEventMapper: Sendable {
         }
     }
 
-    private func fileChanges(tool: Tool, result: JSONValue?) -> [FileChange] {
+    private func fileChanges(tool: Tool, status: TurnItemStatus, result: JSONValue?) -> [FileChange] {
+        let changes = reportedChanges(tool: tool, result: result)
+        // A running call and a write report no diff: show the code the arguments carry. A failed
+        // or declined call changed nothing.
+        guard status != .failed, status != .declined, changes.allSatisfy({ $0.diff == nil }) else { return changes }
+        let preview = OmpEditPreview.changes(tool: tool.name, args: tool.args, relative: relative)
+        guard let first = preview.first else { return changes }
+        if preview.count == 1, changes.count == 1, !changes[0].path.isEmpty {
+            var change = changes[0]
+            change.diff = first.diff
+            return [change]
+        }
+        return preview
+    }
+
+    private func reportedChanges(tool: Tool, result: JSONValue?) -> [FileChange] {
         let details = result?["details"]
         if let perFile = details?["perFileResults"]?.arrayValue, !perFile.isEmpty {
             return perFile.compactMap { file in
@@ -549,7 +610,7 @@ public struct OmpEventMapper: Sendable {
         let tool = request.approvalTool ?? ""
         let kind: ApprovalKind = switch tool {
         case "bash", "eval": .command
-        case "write", "edit", "ast_edit": .fileChange
+        case "write", "edit", "apply_patch", "ast_edit": .fileChange
         case "read", "grep", "glob", "find": .fileRead
         default: .other
         }

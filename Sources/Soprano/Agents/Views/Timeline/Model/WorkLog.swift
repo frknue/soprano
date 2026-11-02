@@ -73,6 +73,8 @@ struct WorkLogEntry: Hashable, Identifiable, Sendable {
     var bodyIsMarkdown: Bool
     var changedFiles: [String]
     var icon: String
+    /// The files of a file change, each shown as its own diff row.
+    var fileChanges: [FileChange] = []
 
     var isToolLike: Bool { kind != .reasoning }
     var isFailed: Bool { status == .failed }
@@ -138,12 +140,15 @@ enum WorkLog {
             return make(.command, label: item.status.isActive ? "Running command" : "Ran command", detail: singleLine(command.command), detailIsCode: true, body: body, icon: TimelineIcon.workCommand)
         case let .fileChange(changes):
             let paths = changes.map { $0.movePath ?? $0.path }
-            let label = changes.count == 1 ? "Changed \(paths[0])" : "Changed \(changes.count) files"
+            let verb = item.status.isActive ? "Editing" : "Changed"
+            let label = changes.count == 1 ? "\(verb) \(paths[0])" : "\(verb) \(changes.count) files"
             let diffs = changes.compactMap(\.diff).filter { !$0.isEmpty }
             let body = diffs.isEmpty
                 ? changes.map { "\(fileChangeVerb($0.kind)) \(changeDescription($0))" }.joined(separator: "\n")
                 : diffs.joined(separator: "\n")
-            return make(.fileChange, label: changes.isEmpty ? "Changed files" : label, body: body, changedFiles: paths, icon: TimelineIcon.workEdit)
+            var entry = make(.fileChange, label: changes.isEmpty ? "\(verb) files" : label, body: body, changedFiles: paths, icon: TimelineIcon.workEdit)
+            entry.fileChanges = changes
+            return entry
         case let .toolCall(tool):
             let body = [tool.input, tool.output]
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -3,12 +3,16 @@ import SopranoAgentsCore
 
 /// What the user opened or closed in the timeline. Ids are turn, group and item ids, unique
 /// across threads, so one value serves the whole window.
+///
+/// `turns`, `groups` and `diffs` hold what the user toggled away from the work log's default:
+/// closed in the minimal work log, open in the detailed one (`detailed`). Read them through
+/// `isTurnOpen` / `isGroupOpen` / `isDiffOpen`.
 struct TimelineExpansion: Hashable, Sendable {
-    /// Finished turns whose "Worked for …" fold is open.
+    /// Finished turns whose "Worked for …" fold the user toggled.
     var turns: Set<String> = []
     /// Finished turns whose checks (advisor reviews, double-checks after the first answer) are open.
     var checks: Set<String> = []
-    /// Work groups (and live work rows) showing their entries.
+    /// Work groups (and live work rows) the user toggled.
     var groups: Set<String> = []
     /// Work entries showing their output.
     var entries: Set<String> = []
@@ -16,6 +20,19 @@ struct TimelineExpansion: Hashable, Sendable {
     var messages: Set<String> = []
     /// Changed-files cards: turn id → closed folder paths.
     var closedFolders: [String: Set<String>] = [:]
+    /// File diffs (`FileDiffRowModel.id`) the user toggled.
+    var diffs: Set<String> = []
+    /// The detailed work log (`chat.workLog`): folds, work groups and file diffs open by default.
+    var detailed = false
+
+    func isTurnOpen(_ turnID: String) -> Bool { turns.contains(turnID) != detailed }
+    func isGroupOpen(_ groupID: String) -> Bool { groups.contains(groupID) != detailed }
+    func isDiffOpen(_ diffID: String) -> Bool { diffs.contains(diffID) != detailed }
+
+    /// Opens or closes `id` in a set read against the default (`turns`, `groups`, `diffs`).
+    mutating func set(_ id: String, open: Bool, in keyPath: WritableKeyPath<TimelineExpansion, Set<String>>) {
+        if open != detailed { self[keyPath: keyPath].insert(id) } else { self[keyPath: keyPath].remove(id) }
+    }
 }
 
 struct UserRowModel: Hashable, Sendable {
@@ -84,6 +101,39 @@ struct LiveWorkRowModel: Hashable, Sendable {
     var active: Bool
 }
 
+/// One file an edit or write touched: a header line ("Edited Sources/App.swift  +12 −3") that
+/// opens its diff. A running call shows the code as the model writes it.
+struct FileDiffRowModel: Hashable, Sendable {
+    /// The item id and the file's index in it: the row's expansion key.
+    var id: String
+    var change: FileChange
+    var status: TurnItemStatus
+    var date: Date
+    var expanded: Bool
+    /// Part of an expanded group (no own vertical padding).
+    var grouped: Bool
+
+    var isActive: Bool { status.isActive }
+    var canExpand: Bool { !(change.diff ?? "").isEmpty }
+
+    /// "Editing App.swift", "Created App.swift", "Edit failed: App.swift".
+    var label: String {
+        let path = change.movePath.map { "\(change.path) → \($0)" } ?? change.path
+        let verb: String = switch (status, change.kind) {
+        case (.pending, .add), (.running, .add): "Writing"
+        case (.pending, _), (.running, _): "Editing"
+        case (.failed, _): "Edit failed:"
+        case (.declined, _): "Declined"
+        case (.interrupted, _): "Stopped editing"
+        case (.completed, .add): "Created"
+        case (.completed, .delete): "Deleted"
+        case (.completed, .move): "Moved"
+        case (.completed, .update): "Edited"
+        }
+        return "\(verb) \(path)"
+    }
+}
+
 struct ApprovalRowModel: Hashable, Sendable {
     var request: ApprovalRequest
 }
@@ -122,6 +172,7 @@ enum TimelineRowContent: Hashable, Sendable {
     case assistant(AssistantRowModel)
     case workGroup(WorkGroupRowModel)
     case workEntry(WorkEntryRowModel)
+    case fileDiff(FileDiffRowModel)
     case liveWork(LiveWorkRowModel)
     case thinking
     case approval(ApprovalRowModel)
@@ -138,7 +189,7 @@ enum TimelineRowContent: Hashable, Sendable {
     /// Rows of the work log: adjacent ones sit flush.
     var isWorkLog: Bool {
         switch self {
-        case .workGroup, .workEntry, .liveWork, .thinking, .approval: true
+        case .workGroup, .workEntry, .fileDiff, .liveWork, .thinking, .approval: true
         default: false
         }
     }
@@ -166,7 +217,11 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 ///   reply to it (errors and failed work after the last message stay out). Open, the checks show
 ///   as while the turn ran: every final answer stays out of the fold.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
-///   or a single entry row when the group holds one tool call.
+///   or a single entry row when the group holds one tool call. A file change shows as one diff
+///   row per file (`FileDiffRowModel`).
+/// - The detailed work log (`TimelineExpansion.detailed`) opens folds, groups and diffs by
+///   default; a running turn then lists its trailing steps with the current one live (an edit as
+///   its diff, growing while the model writes it). Collapsing that group gives the minimal live row.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
 ///   shows no live tool, waits on nobody and has not just answered (omp wraps up after the
 ///   final answer before it ends the turn); an answer from before background work woke the turn
@@ -244,7 +299,7 @@ enum TimelineBuilder {
                 hidden.insert(item.id)
             }
         }
-        let foldOpen = expansion.turns.contains(turn.id)
+        let foldOpen = expansion.isTurnOpen(turn.id)
         if isRunning {
             rows.append(TimelineRow(id: "working:\(turn.id)", content: .working(startedAt: turn.startedAt, stopping: turn.stopRequestedAt != nil)))
         } else if !hidden.isEmpty {
@@ -269,23 +324,40 @@ enum TimelineBuilder {
             guard !group.isEmpty else { return }
             defer { group = [] }
             let groupID = "group:\(group[0].id)"
-            let expanded = expansion.groups.contains(groupID)
+            let expanded = expansion.isGroupOpen(groupID)
             if trailing, isRunning, let last = group.last, !last.isFailed {
                 let running = group.last { $0.isActive }
-                let thought = group.last { $0.kind == .reasoning && !($0.detail ?? "").isEmpty }?.detail
+                let current = running ?? last
                 let active = running != nil || last.status == .completed
                 hasLiveActivity = hasLiveActivity || active
+                if expanded, expansion.detailed {
+                    // Every step in order, the current one live: an edit as its code is written.
+                    appendEntries(group.filter { $0.id != current.id }, grouped: false, expansion: expansion, to: &rows)
+                    if !current.fileChanges.isEmpty {
+                        appendDiffs(of: current, grouped: false, expansion: expansion, to: &rows)
+                    } else {
+                        rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
+                            groupID: groupID, entry: current, thought: nil, expanded: true, active: active
+                        ))))
+                    }
+                    return
+                }
+                let thought = group.last { $0.kind == .reasoning && !($0.detail ?? "").isEmpty }?.detail
                 rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
-                    groupID: groupID, entry: running ?? last, thought: thought, expanded: expanded, active: active
+                    groupID: groupID, entry: current, thought: thought, expanded: expanded, active: active
                 ))))
-                if expanded { appendEntries(group, expansion: expansion, to: &rows) }
+                if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
                 return
             }
             if group.count == 1, group[0].isToolLike {
                 let entry = group[0]
+                if !entry.fileChanges.isEmpty {
+                    appendDiffs(of: entry, grouped: false, expansion: expansion, to: &rows)
+                    return
+                }
                 rows.append(TimelineRow(id: "entry:\(entry.id)", content: .workEntry(WorkEntryRowModel(
                     entry: entry,
-                    displayLabel: entry.action == .edit && entry.changedFiles.count > 1 ? WorkLog.summary(group) : nil,
+                    displayLabel: nil,
                     grouped: false,
                     expanded: expansion.entries.contains(entry.id)
                 ))))
@@ -300,7 +372,7 @@ enum TimelineBuilder {
                 expanded: expanded,
                 date: group[0].startedAt
             ))))
-            if expanded { appendEntries(group, expansion: expansion, to: &rows) }
+            if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
         }
 
         for piece in pieces {
@@ -389,10 +461,25 @@ enum TimelineBuilder {
         }
     }
 
-    private static func appendEntries(_ entries: [WorkLogEntry], expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
+    /// The steps of a work group: a diff row per changed file, an entry row for everything else.
+    private static func appendEntries(_ entries: [WorkLogEntry], grouped: Bool, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
         for entry in entries {
+            if !entry.fileChanges.isEmpty {
+                appendDiffs(of: entry, grouped: grouped, expansion: expansion, to: &rows)
+                continue
+            }
             rows.append(TimelineRow(id: "entry:\(entry.id)", content: .workEntry(WorkEntryRowModel(
-                entry: entry, displayLabel: nil, grouped: true, expanded: expansion.entries.contains(entry.id)
+                entry: entry, displayLabel: nil, grouped: grouped, expanded: expansion.entries.contains(entry.id)
+            ))))
+        }
+    }
+
+    private static func appendDiffs(of entry: WorkLogEntry, grouped: Bool, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
+        for (index, change) in entry.fileChanges.enumerated() {
+            let id = "\(entry.id):\(index)"
+            rows.append(TimelineRow(id: "diff:\(id)", content: .fileDiff(FileDiffRowModel(
+                id: id, change: change, status: entry.status, date: entry.startedAt,
+                expanded: expansion.isDiffOpen(id), grouped: grouped
             ))))
         }
     }
@@ -577,6 +664,8 @@ enum TimelineBuilder {
             case let .workGroup(model): continues || model.expanded ? 0 : 8
             case let .liveWork(model): continues || model.expanded ? 0 : 8
             case let .workEntry(model):
+                if continues { 0 } else { model.grouped ? 4 : 8 }
+            case let .fileDiff(model):
                 if continues { 0 } else { model.grouped ? 4 : 8 }
             case .thinking, .approval: continues ? 0 : 8
             case .error, .notice, .advisory, .queued: 8

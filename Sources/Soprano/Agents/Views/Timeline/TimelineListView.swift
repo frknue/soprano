@@ -127,6 +127,7 @@ final class TimelineListView: NSView {
         case .assistant: "assistant"
         case .workGroup: "workGroup"
         case .workEntry: "workEntry"
+        case .fileDiff: "fileDiff"
         case .liveWork, .thinking: "liveWork"
         case .approval: "approval"
         case .error: "error"
@@ -148,6 +149,7 @@ final class TimelineListView: NSView {
         case .assistant: AssistantRowView(frame: .zero)
         case .workGroup: WorkGroupRowView(frame: .zero)
         case .workEntry: WorkEntryRowView(frame: .zero)
+        case .fileDiff: FileDiffRowView(frame: .zero)
         case .liveWork, .thinking: LiveWorkRowView(frame: .zero)
         case .approval: ApprovalRowView(frame: .zero)
         case .error: ErrorRowView(frame: .zero)
