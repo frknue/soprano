@@ -220,8 +220,9 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 ///   or a single entry row when the group holds one tool call. A file change shows as one diff
 ///   row per file (`FileDiffRowModel`).
 /// - The detailed work log (`TimelineExpansion.detailed`) opens folds, groups and diffs by
-///   default; a running turn then lists its trailing steps with the current one live (an edit as
-///   its diff, growing while the model writes it). Collapsing that group gives the minimal live row.
+///   default; a running turn's trailing group then shows like any open group, its running step
+///   shimmering and expandable (command output, an edit's diff growing while the model writes
+///   it). Collapsing that group gives the minimal live row.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
 ///   shows no live tool, waits on nobody and has not just answered (omp wraps up after the
 ///   final answer before it ends the turn); an answer from before background work woke the turn
@@ -330,24 +331,17 @@ enum TimelineBuilder {
                 let current = running ?? last
                 let active = running != nil || last.status == .completed
                 hasLiveActivity = hasLiveActivity || active
-                if expanded, expansion.detailed {
-                    // Every step in order, the current one live: an edit as its code is written.
-                    appendEntries(group.filter { $0.id != current.id }, grouped: false, expansion: expansion, to: &rows)
-                    if !current.fileChanges.isEmpty {
-                        appendDiffs(of: current, grouped: false, expansion: expansion, to: &rows)
-                    } else {
-                        rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
-                            groupID: groupID, entry: current, thought: nil, expanded: true, active: active
-                        ))))
-                    }
+                // Detailed: the group shows as any open one below (its header collapses it to this
+                // live row); the running step shimmers and opens like the others (command output,
+                // the edit's code as it is written).
+                if !(expanded && expansion.detailed) {
+                    let thought = group.last { $0.kind == .reasoning && !($0.detail ?? "").isEmpty }?.detail
+                    rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
+                        groupID: groupID, entry: current, thought: thought, expanded: expanded, active: active
+                    ))))
+                    if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
                     return
                 }
-                let thought = group.last { $0.kind == .reasoning && !($0.detail ?? "").isEmpty }?.detail
-                rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
-                    groupID: groupID, entry: current, thought: thought, expanded: expanded, active: active
-                ))))
-                if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
-                return
             }
             if group.count == 1, group[0].isToolLike {
                 let entry = group[0]

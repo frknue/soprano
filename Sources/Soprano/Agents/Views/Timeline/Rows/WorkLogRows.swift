@@ -421,6 +421,8 @@ final class WorkEntryRowView: ClickableRowView {
         line.detail.font = entry.detailIsCode ? Typography.mono(Typography.smallSize) : Typography.ui(Typography.bodySize)
         line.note.stringValue = entry.note ?? ""
         line.failMark.isHidden = true
+        // A running step (the detailed work log lists it) shimmers like the live row.
+        line.label.isShimmering = entry.isActive
         line.time.stringValue = TimelineFormat.timestamp(entry.startedAt)
         line.showsChevron = entry.canExpand
         line.chevron.setSymbol(model.expanded ? Icon.chevronDown : Icon.chevronRight, size: 10, weight: .medium)
@@ -494,7 +496,7 @@ final class WorkEntryRowView: ClickableRowView {
         guard let model else { return }
         let entry = model.entry
         let labelColor = entry.isToolLike ? palette.secondaryLabel : palette.foreground.timelineAlpha(0.8)
-        line.label.set(model.displayLabel ?? entry.label, font: Typography.ui(Typography.bodySize), color: labelColor, highlightColor: labelColor)
+        line.label.set(model.displayLabel ?? entry.label, font: Typography.ui(Typography.bodySize), color: labelColor, highlightColor: entry.isActive ? palette.foreground : labelColor)
         line.applyColors(palette: palette, labelColor: labelColor, failed: entry.isFailed)
         bodyPanel.layer?.backgroundColor = palette.foreground.timelineAlpha(palette.isDark ? 0.04 : 0.03).cgColor
         bodyText.applyColors(palette, quoteColor: .clear)

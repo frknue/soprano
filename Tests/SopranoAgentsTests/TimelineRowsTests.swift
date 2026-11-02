@@ -435,8 +435,8 @@ struct TimelineRowsTests {
 
     @Test func theDetailedLogListsARunningTurnsStepsWithTheEditBeingWrittenOpen() {
         let rows = TimelineBuilder.rows(for: thread([editingTurn]), expansion: detailed)
-        #expect(ids(rows) == ["user:m-t1", "working:t1", "entry:s1", "diff:f1:0", "diff:f2:0"])
-        guard case let .fileDiff(done) = rows[3].content, case let .fileDiff(live) = rows[4].content else {
+        #expect(ids(rows) == ["user:m-t1", "working:t1", "group:s1", "entry:s1", "diff:f1:0", "diff:f2:0"])
+        guard case let .fileDiff(done) = rows[4].content, case let .fileDiff(live) = rows[5].content else {
             Issue.record("expected diff rows, got \(rows)")
             return
         }
@@ -444,6 +444,26 @@ struct TimelineRowsTests {
         #expect(live.isActive)
         #expect(live.label == "Writing B.swift")
         #expect(done.label == "Edited A.swift")
+    }
+
+    @Test func theDetailedLogKeepsARunningCommandsOutputOneClickAway() {
+        let running = turn(status: .running, items: [
+            item("s1", .toolCall(ToolCall(name: "Read", category: .read, title: "Read A.swift")), at: 1),
+            item("c1", .command(CommandExecution(command: "swift test", output: "Building…\n")), status: .running, at: 2),
+        ])
+        let closed = TimelineBuilder.rows(for: thread([running]), expansion: detailed)
+        #expect(ids(closed) == ["user:m-t1", "working:t1", "group:s1", "entry:s1", "entry:c1"])
+        guard case let .workEntry(command) = closed[4].content else { return }
+        #expect(command.entry.isActive && command.entry.canExpand && !command.expanded)
+
+        var expansion = detailed
+        expansion.entries.insert("c1")
+        let open = TimelineBuilder.rows(for: thread([running]), expansion: expansion)
+        guard case let .workEntry(opened) = open[4].content else { return }
+        #expect(opened.expanded)
+        #expect(opened.entry.body == "$ swift test\nBuilding…")
+        // A thought, not "Thinking": the running command is the live activity.
+        #expect(!ids(open).contains("thinking:t1"))
     }
 
     @Test func collapsingTheRunningGroupInTheDetailedLogGivesTheLiveRow() {

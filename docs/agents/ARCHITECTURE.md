@@ -569,7 +569,8 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   assignment), live run time. A selected subagent stays listed under a closed disclosure; its
   row, not the thread's, is highlighted, and its thread stays unread until opened itself.
 - Work log (`chat.workLog`, ⇧⌘D toggles): `detailed` (default) opens every "Worked for" fold,
-  work group and file diff; a running turn lists its steps with the current one live. `minimal`
+  work group and file diff; a running turn's steps show as an open group, the running one
+  shimmering and expandable like the rest (its group header collapses to the live row). `minimal`
   closes them all and shows one shimmering live row. A file change is one `FileDiffRowView` per
   file: a work-log line ("Editing/Writing/Edited/Created/Deleted path", "+N −M") over a 1 pt
   bordered, `Radius.md` panel of Diff-panel line rows (`DiffStyle`, `DiffLineDrawing`: tint,
