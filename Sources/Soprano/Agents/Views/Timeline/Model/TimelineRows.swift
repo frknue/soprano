@@ -112,6 +112,9 @@ struct FileDiffRowModel: Hashable, Sendable {
     var expanded: Bool
     /// Part of an expanded group (no own vertical padding).
     var grouped: Bool
+    /// The turn whose checkpoint diff "Open in Diff" shows; nil: the uncommitted changes (the
+    /// turn still runs, has no checkpoint yet, or is a subagent's run).
+    var turnOrdinal: Int?
 
     var isActive: Bool { status.isActive }
     var canExpand: Bool { !(change.diff ?? "").isEmpty }
@@ -302,6 +305,8 @@ enum TimelineBuilder {
             }
         }
         let foldOpen = expansion.isTurnOpen(turn.id)
+        // A finished thread turn's checkpoint holds its edits; otherwise they are still uncommitted.
+        let diffTurn = editable && !isRunning && turn.checkpoint?.status == .ready ? turn.ordinal : nil
         if isRunning {
             rows.append(TimelineRow(id: "working:\(turn.id)", content: .working(startedAt: turn.startedAt, stopping: turn.stopRequestedAt != nil)))
         } else if !hidden.isEmpty {
@@ -343,14 +348,14 @@ enum TimelineBuilder {
                     rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
                         groupID: groupID, entry: current, thought: thought, expanded: expanded, active: active
                     ))))
-                    if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
+                    if expanded { appendEntries(group, grouped: true, diffTurn: diffTurn, expansion: expansion, to: &rows) }
                     return
                 }
             }
             if group.count == 1, group[0].isToolLike {
                 let entry = group[0]
                 if !entry.fileChanges.isEmpty {
-                    appendDiffs(of: entry, grouped: false, expansion: expansion, to: &rows)
+                    appendDiffs(of: entry, grouped: false, diffTurn: diffTurn, expansion: expansion, to: &rows)
                     return
                 }
                 rows.append(TimelineRow(id: "entry:\(entry.id)", content: .workEntry(WorkEntryRowModel(
@@ -370,7 +375,7 @@ enum TimelineBuilder {
                 expanded: expanded,
                 date: group[0].startedAt
             ))))
-            if expanded { appendEntries(group, grouped: true, expansion: expansion, to: &rows) }
+            if expanded { appendEntries(group, grouped: true, diffTurn: diffTurn, expansion: expansion, to: &rows) }
         }
 
         for piece in pieces {
@@ -460,10 +465,10 @@ enum TimelineBuilder {
     }
 
     /// The steps of a work group: a diff row per changed file, an entry row for everything else.
-    private static func appendEntries(_ entries: [WorkLogEntry], grouped: Bool, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
+    private static func appendEntries(_ entries: [WorkLogEntry], grouped: Bool, diffTurn: Int?, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
         for entry in entries {
             if !entry.fileChanges.isEmpty {
-                appendDiffs(of: entry, grouped: grouped, expansion: expansion, to: &rows)
+                appendDiffs(of: entry, grouped: grouped, diffTurn: diffTurn, expansion: expansion, to: &rows)
                 continue
             }
             rows.append(TimelineRow(id: "entry:\(entry.id)", content: .workEntry(WorkEntryRowModel(
@@ -472,12 +477,12 @@ enum TimelineBuilder {
         }
     }
 
-    private static func appendDiffs(of entry: WorkLogEntry, grouped: Bool, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
+    private static func appendDiffs(of entry: WorkLogEntry, grouped: Bool, diffTurn: Int?, expansion: TimelineExpansion, to rows: inout [TimelineRow]) {
         for (index, change) in entry.fileChanges.enumerated() {
             let id = "\(entry.id):\(index)"
             rows.append(TimelineRow(id: "diff:\(id)", content: .fileDiff(FileDiffRowModel(
                 id: id, change: change, status: entry.status, date: entry.startedAt,
-                expanded: expansion.isDiffOpen(id), grouped: grouped
+                expanded: expansion.isDiffOpen(id), grouped: grouped, turnOrdinal: diffTurn
             ))))
         }
     }

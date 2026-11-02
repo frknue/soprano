@@ -29,7 +29,7 @@ All notable changes to Soprano Agents are documented here. The format follows
   line numbers and syntax colors, and a write or edit appears line by line while the model is
   still typing it. The detailed work log (default) keeps every step and each turn's work open;
   ⇧⌘D, or Settings → General → Work log (`chat.workLog`: `detailed` / `minimal`), switches to
-  the minimal one-line view.
+  the minimal one-line view. Each file's button next to its diff opens it in the Diff panel.
 - Composer: attachments (paperclip, paste, drop), model picker (⇧⌘M), reasoning effort (⇧⌘E),
   permissions Supervised / Auto-accept edits / Auto / Full access (⇧⌘A), steer or queue while the
   agent works (⌘↩ does the other one, `chat.followUp`), Stop, approval and question answering

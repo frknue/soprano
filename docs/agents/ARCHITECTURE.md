@@ -575,7 +575,9 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   steps "Thinking" shows). `minimal`
   closes them all and shows one shimmering live row. A file change is one `FileDiffRowView` per
   file: a work-log line ("Editing/Writing/Edited/Wrote/Created/Deleted path", "+N −M", or "N
-  lines" for a write's whole content, drawn as plain numbered lines) over a 1 pt bordered,
+  lines" for a write's whole content, drawn as plain numbered lines; an Open in Diff panel
+  button opens the turn's checkpoint diff at that file once the turn finished, else the
+  uncommitted changes; clicking the line folds the body) over a 1 pt bordered,
   `Radius.md` panel of Diff-panel line rows (`DiffStyle`, `DiffLineDrawing`: tint, change bar,
   line numbers, syntax colors once open, wrapped), at most 360 pt tall, scrolling inside;
   unpositioned preview hunks show their op ("PUT 12.=14:") and no line numbers. While the call

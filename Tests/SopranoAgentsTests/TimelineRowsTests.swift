@@ -446,6 +446,20 @@ struct TimelineRowsTests {
         #expect(done.label == "Edited A.swift")
     }
 
+    @Test func openInDiffUsesTheFinishedTurnsCheckpointElseTheUncommittedChanges() {
+        func turnOrdinals(_ rows: [TimelineRow]) -> [Int?] {
+            rows.compactMap { if case let .fileDiff(model) = $0.content { model.turnOrdinal } else { nil } }
+        }
+        #expect(turnOrdinals(TimelineBuilder.rows(for: thread([editingTurn]), expansion: detailed)) == [nil, nil])
+
+        let finished = turn(items: [
+            item("f1", .fileChange([FileChange(path: "A.swift", kind: .update, diff: "@@ -1,1 +1,1 @@\n-a\n+b")])),
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 1)])
+        #expect(turnOrdinals(TimelineBuilder.rows(for: thread([finished]), expansion: detailed)) == [1])
+        #expect(turnOrdinals(TimelineBuilder.rows(for: thread([finished]), expansion: detailed, editable: false)) == [nil])
+    }
+
     @Test func theDetailedLogKeepsARunningCommandsOutputOneClickAway() {
         let running = turn(status: .running, items: [
             item("s1", .toolCall(ToolCall(name: "Read", category: .read, title: "Read A.swift")), at: 1),

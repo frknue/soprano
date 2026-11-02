@@ -14,7 +14,8 @@ protocol TimelineRowDelegate: AnyObject {
     func timelineSetClosedFolders(turnID: String, paths: Set<String>)
     func timelineEditFromHere(turnID: String)
     func timelineRespond(approvalID: String, decision: ApprovalDecision)
-    func timelineOpenDiff(turnOrdinal: Int, path: String?)
+    /// Opens the Diff panel on turn `turnOrdinal` (nil: uncommitted changes), at `path` when given.
+    func timelineOpenDiff(turnOrdinal: Int?, path: String?)
     func timelineSendQueuedNow(messageID: String)
     func timelineRemoveQueued(messageID: String)
     func timelineCopy(_ text: String)
@@ -184,6 +185,13 @@ final class TimelineButton: InteractiveView {
     }
 
     override var intrinsicContentSize: NSSize { NSSize(width: fittingWidth, height: height) }
+
+    /// The whole button takes the click: its icon is an `NSImageView` (an `NSControl`), which
+    /// would otherwise receive the mouse-down itself.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, frame.contains(point) else { return nil }
+        return self
+    }
 
     override func layout() {
         super.layout()

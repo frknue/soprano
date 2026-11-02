@@ -112,6 +112,8 @@ final class WorkLogLineView: NSView {
     var chevronSlot = true
     var showsTime = false
     var chevronAfterLabel = false
+    /// Space kept free left of the chevron for a row's own control (a diff row's Open in Diff).
+    var trailingReserve: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -136,6 +138,7 @@ final class WorkLogLineView: NSView {
         } else if !chevronAfterLabel {
             chevron.isHidden = true
         }
+        right -= trailingReserve
         time.isHidden = !showsTime || time.stringValue.isEmpty
         if !time.isHidden {
             let timeWidth = time.textFitWidth

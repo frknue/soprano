@@ -197,10 +197,18 @@ final class FileDiffRowView: ClickableRowView {
     private var style = DiffStyle(palette: PaletteCenter.shared.palette)
     /// The file the body last showed (a reused view starts at the top, or the end while live).
     private var shownID: String?
+    /// Opens the Diff panel at this file: the turn's checkpoint diff, else the uncommitted changes.
+    private let openButton = TimelineButton(symbol: Icon.fileDiff, toolTip: "Open in Diff panel")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         addSubview(line)
+        addSubview(openButton)
+        line.trailingReserve = 28
+        openButton.onClick = { [weak self] in
+            guard let self, let model else { return }
+            delegate?.timelineOpenDiff(turnOrdinal: model.turnOrdinal, path: model.change.movePath ?? model.change.path)
+        }
         addSubview(bodyPanel)
         bodyPanel.wantsLayer = true
         bodyPanel.layer?.cornerRadius = Radius.md
@@ -245,6 +253,8 @@ final class FileDiffRowView: ClickableRowView {
         line.showsTime = isHovered
         line.frame = NSRect(x: 0, y: pad, width: width, height: WorkLogLineView.height)
         line.layoutLine(width: width)
+        // Left of the chevron slot (2 pt edge + 16 pt chevron + 6 pt gap), in the line's reserve.
+        openButton.frame = NSRect(x: width - 2 - 16 - 6 - 24, y: pad, width: 24, height: 24)
         var y = pad + WorkLogLineView.height
         headerRect = NSRect(x: 0, y: 0, width: width, height: y + pad)
         window?.invalidateCursorRects(for: self)

@@ -325,8 +325,8 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
         }
     }
 
-    func timelineOpenDiff(turnOrdinal: Int, path: String?) {
-        state.showDiff(.turn(turnOrdinal), focus: path)
+    func timelineOpenDiff(turnOrdinal: Int?, path: String?) {
+        state.showDiff(turnOrdinal.map { .turn($0) } ?? .uncommitted, focus: path)
     }
 
     func timelineSendQueuedNow(messageID: String) {
