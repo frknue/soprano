@@ -110,12 +110,15 @@ public struct FileChange: Codable, Sendable, Hashable {
     public var movePath: String?
     /// Unified diff of this file when the provider reports one.
     public var diff: String?
+    /// `diff` is the file's whole new content (a write), not a change against the old file.
+    public var isFullContent: Bool?
 
-    public init(path: String, kind: Kind, movePath: String? = nil, diff: String? = nil) {
+    public init(path: String, kind: Kind, movePath: String? = nil, diff: String? = nil, isFullContent: Bool? = nil) {
         self.path = path
         self.kind = kind
         self.movePath = movePath
         self.diff = diff
+        self.isFullContent = isFullContent
     }
 }
 

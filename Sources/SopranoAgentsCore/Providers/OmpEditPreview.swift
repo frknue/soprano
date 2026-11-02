@@ -23,7 +23,7 @@ public enum OmpEditPreview {
                   let content = args["content"]?.stringValue else { return [] }
             var hunk = Hunk(numbered: true)
             for line in lines(content) { hunk.add(.added, line) }
-            return [FileChange(path: relative(path), kind: .update, diff: render([hunk]))]
+            return [FileChange(path: relative(path), kind: .update, diff: render([hunk]), isFullContent: true)]
         case "edit", "apply_patch":
             if let input = args["input"]?.stringValue {
                 return sections(input).map { section in
@@ -105,10 +105,11 @@ public enum OmpEditPreview {
         }.joined(separator: "\n")
     }
 
-    /// Lines of a text; a final newline ends the last line rather than starting an empty one.
+    /// Lines of a text (`\n` or `\r\n`, which Swift reads as one character); a final line break
+    /// ends the last line rather than starting an empty one.
     private static func lines(_ text: String) -> [String] {
         guard !text.isEmpty else { return [] }
-        var parts = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var parts = text.split(omittingEmptySubsequences: false) { $0 == "\n" || $0 == "\r\n" }.map(String.init)
         if parts.last == "" { parts.removeLast() }
         return parts
     }

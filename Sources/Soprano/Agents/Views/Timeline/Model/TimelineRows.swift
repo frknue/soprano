@@ -116,19 +116,20 @@ struct FileDiffRowModel: Hashable, Sendable {
     var isActive: Bool { status.isActive }
     var canExpand: Bool { !(change.diff ?? "").isEmpty }
 
-    /// "Editing App.swift", "Created App.swift", "Edit failed: App.swift".
+    /// "Editing App.swift", "Wrote App.swift", "Edit failed: App.swift".
     var label: String {
         let path = change.movePath.map { "\(change.path) → \($0)" } ?? change.path
+        let wrote = change.isFullContent == true
         let verb: String = switch (status, change.kind) {
         case (.pending, .add), (.running, .add): "Writing"
-        case (.pending, _), (.running, _): "Editing"
-        case (.failed, _): "Edit failed:"
+        case (.pending, _), (.running, _): wrote ? "Writing" : "Editing"
+        case (.failed, _): wrote ? "Write failed:" : "Edit failed:"
         case (.declined, _): "Declined"
-        case (.interrupted, _): "Stopped editing"
+        case (.interrupted, _): wrote ? "Stopped writing" : "Stopped editing"
         case (.completed, .add): "Created"
         case (.completed, .delete): "Deleted"
         case (.completed, .move): "Moved"
-        case (.completed, .update): "Edited"
+        case (.completed, .update): wrote ? "Wrote" : "Edited"
         }
         return "\(verb) \(path)"
     }
@@ -329,12 +330,15 @@ enum TimelineBuilder {
             if trailing, isRunning, let last = group.last, !last.isFailed {
                 let running = group.last { $0.isActive }
                 let current = running ?? last
-                let active = running != nil || last.status == .completed
+                let detailed = expanded && expansion.detailed
+                // The minimal live row shimmers with the last step too; the detailed steps shimmer
+                // only while one runs, else "Thinking" shows the turn is alive.
+                let active = running != nil || (!detailed && last.status == .completed)
                 hasLiveActivity = hasLiveActivity || active
                 // Detailed: the group shows as any open one below (its header collapses it to this
                 // live row); the running step shimmers and opens like the others (command output,
                 // the edit's code as it is written).
-                if !(expanded && expansion.detailed) {
+                if !detailed {
                     let thought = group.last { $0.kind == .reasoning && !($0.detail ?? "").isEmpty }?.detail
                     rows.append(TimelineRow(id: "live:\(turn.id)", content: .liveWork(LiveWorkRowModel(
                         groupID: groupID, entry: current, thought: thought, expanded: expanded, active: active

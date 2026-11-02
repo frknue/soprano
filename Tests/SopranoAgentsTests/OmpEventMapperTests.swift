@@ -102,7 +102,7 @@ struct OmpEventMapperTests {
         let edit = try #require(Self.item("toolu_01UTHhuJMbSx6h49UfBR1Qon", in: events))
         let bash = try #require(Self.item("toolu_01LsbcaUNi98HXJkjuQmWruR", in: events))
 
-        #expect(write.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -0,0 +1,1 @@\n+blue")]))
+        #expect(write.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -0,0 +1,1 @@\n+blue", isFullContent: true)]))
         #expect(edit.kind == .fileChange([FileChange(path: "color.txt", kind: .update, diff: "@@ -1,1 +1,1 @@\n-blue\n+blue sky")]))
         guard case let .command(command) = bash.kind else {
             Issue.record("bash should be a command")
@@ -144,6 +144,30 @@ struct OmpEventMapperTests {
             return
         }
         #expect(changes.map(\.diff) == ["@@ -0,0 +1,1 @@\n+blue"])
+    }
+
+    @Test func aStreamedEditWaitsForEarlierCallsOfItsMessageSoItsItemNeverLandsAboveThem() {
+        var mapper = OmpEventMapper(cwd: "/repo")
+        func update(_ index: Int, _ event: JSONValue) -> JSONValue {
+            var event = event
+            if case var .object(fields) = event { fields["contentIndex"] = .number(Double(index)); event = .object(fields) }
+            return ["type": "message_update", "messageId": "msg-1", "assistantMessageEvent": event]
+        }
+        let streamed = [
+            update(0, ["type": "toolcall_start", "block": ["type": "toolCall", "id": "b1", "name": "bash", "arguments": [:]]]),
+            update(0, ["type": "toolcall_delta", "delta": #"{"command": "mkdir -p src"}"#]),
+            update(1, ["type": "toolcall_start", "block": ["type": "toolCall", "id": "w1", "name": "write", "arguments": [:]]]),
+            update(1, ["type": "toolcall_delta", "delta": #"{"path": "/repo/src/a.txt", "content": "one\ntwo\n"#]),
+            update(1, ["type": "toolcall_end", "toolCall": ["id": "w1", "arguments": ["path": "/repo/src/a.txt", "content": "one\ntwo\n"]]]),
+        ].flatMap { mapper.map($0) }
+        #expect(Self.latestItems(streamed).isEmpty)
+
+        let ran = [
+            ["type": "tool_execution_start", "toolCallId": "b1", "toolName": "bash", "args": ["command": "mkdir -p src"]],
+            ["type": "tool_execution_start", "toolCallId": "w1", "toolName": "write", "args": ["path": "/repo/src/a.txt", "content": "one\ntwo\n"]],
+        ].flatMap { mapper.map($0) }
+        #expect(Self.latestItems(ran).map(\.id) == ["b1", "w1"])
+        #expect(Self.item("w1", in: ran)?.kind == .fileChange([FileChange(path: "src/a.txt", kind: .update, diff: "@@ -0,0 +1,2 @@\n+one\n+two", isFullContent: true)]))
     }
 
     @Test func assistantUsageReportsTokensAgainstTheContextWindow() throws {

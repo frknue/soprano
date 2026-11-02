@@ -140,7 +140,8 @@ enum WorkLog {
             return make(.command, label: item.status.isActive ? "Running command" : "Ran command", detail: singleLine(command.command), detailIsCode: true, body: body, icon: TimelineIcon.workCommand)
         case let .fileChange(changes):
             let paths = changes.map { $0.movePath ?? $0.path }
-            let verb = item.status.isActive ? "Editing" : "Changed"
+            let writes = !changes.isEmpty && changes.allSatisfy { $0.isFullContent == true }
+            let verb = item.status.isActive ? (writes ? "Writing" : "Editing") : "Changed"
             let label = changes.count == 1 ? "\(verb) \(paths[0])" : "\(verb) \(changes.count) files"
             let diffs = changes.compactMap(\.diff).filter { !$0.isEmpty }
             let body = diffs.isEmpty

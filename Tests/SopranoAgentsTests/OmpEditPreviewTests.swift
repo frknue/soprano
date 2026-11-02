@@ -34,7 +34,12 @@ struct OmpEditPreviewTests {
 
     @Test func aWriteAddsEveryLineFromTheFirst() {
         let changes = OmpEditPreview.changes(tool: "write", args: ["path": "/repo/a.txt", "content": "one\ntwo\n"]) { $0.replacingOccurrences(of: "/repo/", with: "") }
-        #expect(changes == [FileChange(path: "a.txt", kind: .update, diff: "@@ -0,0 +1,2 @@\n+one\n+two")])
+        #expect(changes == [FileChange(path: "a.txt", kind: .update, diff: "@@ -0,0 +1,2 @@\n+one\n+two", isFullContent: true)])
+    }
+
+    @Test func windowsLineBreaksSplitLikeUnixOnes() {
+        let changes = OmpEditPreview.changes(tool: "write", args: ["path": "run.bat", "content": "@echo off\r\necho one\r\n"])
+        #expect(changes.map(\.diff) == ["@@ -0,0 +1,2 @@\n+@echo off\n+echo one"])
     }
 
     @Test func writesToInternalURLsCarryNoCode() {

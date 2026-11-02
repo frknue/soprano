@@ -224,11 +224,12 @@ notice; dialogs arriving after the turn ended are cancelled. Events (`OmpEventMa
 `message_update` text/thinking deltas (item ids `<messageId>:<contentIndex>`, prefixed after a
 relaunch), `tool_execution_start|update|end` → bash → command, write/edit/apply_patch/ast_edit →
 fileChange (edit diffs converted from omp's line-numbered format; without one, a running call and a
-write show the code their arguments carry, `OmpEditPreview`: write content as added lines,
-hashline/apply_patch/sloppy/replace/patch edits as unpositioned hunks), `toolcall_start|delta|end`
-of a write/edit/apply_patch call → that same fileChange item while the model still streams it
-(partial argument JSON closed by `OmpEditPreview.partialObject`, re-read per new line or 256
-characters), read/grep/glob/find → toolCall, web_search
+write show the code their arguments carry, `OmpEditPreview`: write content as one numbered hunk
+marked `FileChange.isFullContent`, hashline/apply_patch/sloppy/replace/patch edits as
+unpositioned hunks), `toolcall_start|delta|end` of a write/edit/apply_patch call → that same
+fileChange item while the model still streams it (partial argument JSON closed by
+`OmpEditPreview.partialObject`, re-read on a new line, then every 1/64 of its size as it grows;
+held until the earlier calls of its message ran), read/grep/glob/find → toolCall, web_search
 → webSearch, task → subagent, todo → "Updated tasks", ask → none, others → toolCall titled by
 `intent`; assistant `usage` → token usage; an assistant `message_end` with `stopReason:"stop"`
 marks its text final (the timeline drops "Thinking" under it and keeps every final answer out of
@@ -570,11 +571,13 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   row, not the thread's, is highlighted, and its thread stays unread until opened itself.
 - Work log (`chat.workLog`, ⇧⌘D toggles): `detailed` (default) opens every "Worked for" fold,
   work group and file diff; a running turn's steps show as an open group, the running one
-  shimmering and expandable like the rest (its group header collapses to the live row). `minimal`
+  shimmering and expandable like the rest (its group header collapses to the live row; between
+  steps "Thinking" shows). `minimal`
   closes them all and shows one shimmering live row. A file change is one `FileDiffRowView` per
-  file: a work-log line ("Editing/Writing/Edited/Created/Deleted path", "+N −M") over a 1 pt
-  bordered, `Radius.md` panel of Diff-panel line rows (`DiffStyle`, `DiffLineDrawing`: tint,
-  change bar, line numbers, syntax colors, wrapped), at most 360 pt tall, scrolling inside;
+  file: a work-log line ("Editing/Writing/Edited/Wrote/Created/Deleted path", "+N −M", or "N
+  lines" for a write's whole content, drawn as plain numbered lines) over a 1 pt bordered,
+  `Radius.md` panel of Diff-panel line rows (`DiffStyle`, `DiffLineDrawing`: tint, change bar,
+  line numbers, syntax colors once open, wrapped), at most 360 pt tall, scrolling inside;
   unpositioned preview hunks show their op ("PUT 12.=14:") and no line numbers. While the call
   runs, the panel keeps its newest line in view unless the user scrolled up.
 - Motion: opacity/scale fades ≤ 200 ms, none under Reduce Motion; streaming text appears without

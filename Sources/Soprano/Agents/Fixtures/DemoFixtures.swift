@@ -388,7 +388,7 @@ enum DemoFixtures {
                     TurnItem(id: "ed1", kind: .reasoning(text: "**Checking the current backoff**\n\nThe delay doubles from 2 s up to 30 s."), status: .completed, startedAt: ago(80), completedAt: ago(78)),
                     TurnItem(id: "ed2", kind: .toolCall(ToolCall(name: "read", category: .read, title: "Read Sources/Upload/UploadClient.swift")), status: .completed, startedAt: ago(76), completedAt: ago(75)),
                     TurnItem(id: "ed3", kind: .fileChange([FileChange(path: "Sources/Upload/UploadClient.swift", kind: .update, diff: edit)]), status: .completed, startedAt: ago(40), completedAt: ago(39)),
-                    TurnItem(id: "ed4", kind: .fileChange([FileChange(path: "Tests/UploadTests/UploadRetryTests.swift", kind: .add, diff: streaming)]), status: .running, startedAt: ago(6)),
+                    TurnItem(id: "ed4", kind: .fileChange([FileChange(path: "Tests/UploadTests/UploadRetryTests.swift", kind: .update, diff: streaming, isFullContent: true)]), status: .running, startedAt: ago(6)),
                 ]
             )]
         )

@@ -21,12 +21,18 @@ struct InlineDiff {
     /// Lines past this are not syntax colored (a streamed write recolors on every new line).
     static let highlightLimit = 3_000
 
+    private var file: FileDiff?
+    private var highlightable = false
+    private(set) var isHighlighted = false
+
     /// `diff`: unified hunks as `FileChange.diff` carries them (a whole patch: the file at `path`).
-    init(diff: String, path: String) {
+    /// `fullContent`: the hunk is a written file's whole content, shown as plain lines.
+    init(diff: String, path: String, fullContent: Bool = false) {
         let isPatch = diff.hasPrefix("diff ") || diff.hasPrefix("--- ")
         let header = "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n"
         let files = DiffParser.parse(isPatch ? diff : header + diff)
         guard let file = files.first(where: { $0.newPath == path || $0.oldPath == path }) ?? files.first else { return }
+        self.file = file
         var allNumbered = true
         for (index, hunk) in file.hunks.enumerated() {
             let numbered = hunk.oldStart != 0 || hunk.newStart != 0
@@ -34,35 +40,48 @@ struct InlineDiff {
             if index > 0 || !hunk.section.isEmpty {
                 lines.append(.separator(hunk.section.isEmpty ? "⋯" : hunk.section))
             }
-            for line in hunk.lines {
-                lines.append(.line(line, numbered: numbered))
+            for var line in hunk.lines {
                 switch line.kind {
                 case .added: additions += 1
                 case .removed: deletions += 1
                 case .context, .noNewlineMarker: break
                 }
+                if fullContent, line.kind == .added { line.kind = .context }
+                lines.append(.line(line, numbered: numbered))
                 if numbered { maxNumber = max(maxNumber, line.oldNumber ?? 0, line.newNumber ?? 0) }
             }
         }
         // Unpositioned hunks share line numbers, so their tokens would collide.
-        if allNumbered, lines.count <= Self.highlightLimit {
-            highlights = DiffHighlights.compute(file: file)
-        }
+        highlightable = allNumbered && lines.count <= Self.highlightLimit
     }
 
-    @MainActor private static var cache: [String: InlineDiff] = [:]
+    /// Syntax colors, computed once the diff shows (a closed row only needs its counts).
+    mutating func highlight() {
+        guard !isHighlighted else { return }
+        isHighlighted = true
+        if highlightable, let file { highlights = DiffHighlights.compute(file: file) }
+    }
 
-    /// The diff of `change`, parsed once per text (the sizing and the shown row both ask).
+    /// Per row id: the diff text it was parsed from and the result.
+    @MainActor private static var cache: [String: (diff: String, fullContent: Bool, value: InlineDiff)] = [:]
+
+    /// The diff of row `id`, parsed once per text (the sizing and the shown row both ask) and
+    /// colored once `highlighted` (open).
     @MainActor
-    static func of(_ change: FileChange) -> InlineDiff? {
+    static func of(_ change: FileChange, id: String, highlighted: Bool) -> InlineDiff? {
         guard let diff = change.diff, !diff.isEmpty else { return nil }
-        let path = change.movePath ?? change.path
-        let key = path + "\u{0}" + diff
-        if let cached = cache[key] { return cached }
-        let parsed = InlineDiff(diff: diff, path: path)
-        if cache.count >= 32 { cache.removeAll() }
-        cache[key] = parsed
-        return parsed
+        let fullContent = change.isFullContent == true
+        var value: InlineDiff
+        if let cached = cache[id], cached.fullContent == fullContent, cached.diff == diff {
+            guard highlighted, !cached.value.isHighlighted else { return cached.value }
+            value = cached.value
+        } else {
+            value = InlineDiff(diff: diff, path: change.movePath ?? change.path, fullContent: fullContent)
+        }
+        if highlighted { value.highlight() }
+        if cache[id] == nil, cache.count >= 512 { cache.removeAll() }
+        cache[id] = (diff, fullContent, value)
+        return value
     }
 }
 
@@ -200,7 +219,7 @@ final class FileDiffRowView: ClickableRowView {
         super.configure(row)
         guard case let .fileDiff(model) = row.content else { return }
         self.model = model
-        diff = model.canExpand ? InlineDiff.of(model.change) : nil
+        diff = model.canExpand ? InlineDiff.of(model.change, id: model.id, highlighted: model.expanded) : nil
         line.icon.setSymbol(TimelineIcon.workEdit, size: 13)
         line.detail.stringValue = ""
         line.failMark.isHidden = model.status != .failed
@@ -268,7 +287,12 @@ final class FileDiffRowView: ClickableRowView {
         let labelColor = palette.secondaryLabel
         line.label.set(model.label, font: Typography.ui(Typography.bodySize), color: labelColor, highlightColor: palette.foreground)
         line.applyColors(palette: palette, labelColor: labelColor, failed: model.status == .failed)
-        if let diff, diff.additions + diff.deletions > 0 {
+        if let diff, model.change.isFullContent == true {
+            // A write carries the whole new file, not a change: +N would claim every line is new.
+            line.note.attributedStringValue = NSAttributedString(string: "\(diff.additions) \(diff.additions == 1 ? "line" : "lines")", attributes: [
+                .font: Typography.mono(Typography.smallSize), .foregroundColor: palette.mutedForeground,
+            ])
+        } else if let diff, diff.additions + diff.deletions > 0 {
             line.note.attributedStringValue = DiffStatText.make(additions: diff.additions, deletions: diff.deletions, palette: palette, size: Typography.smallSize, muteZero: true)
         } else {
             line.note.stringValue = ""

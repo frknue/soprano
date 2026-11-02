@@ -462,8 +462,20 @@ struct TimelineRowsTests {
         guard case let .workEntry(opened) = open[4].content else { return }
         #expect(opened.expanded)
         #expect(opened.entry.body == "$ swift test\nBuilding…")
-        // A thought, not "Thinking": the running command is the live activity.
+        // No "Thinking": the running command is the live activity.
         #expect(!ids(open).contains("thinking:t1"))
+    }
+
+    @Test func betweenStepsTheDetailedLogSaysTheAgentIsThinking() {
+        let between = turn(status: .running, items: [
+            item("s1", .toolCall(ToolCall(name: "Read", category: .read, title: "Read A.swift")), at: 1),
+            item("s2", .toolCall(ToolCall(name: "Read", category: .read, title: "Read B.swift")), at: 2),
+        ])
+        // Nothing runs, so nothing in the steps shimmers: the Thinking row shows the turn is alive.
+        #expect(ids(TimelineBuilder.rows(for: thread([between]), expansion: detailed))
+            == ["user:m-t1", "working:t1", "group:s1", "entry:s1", "entry:s2", "thinking:t1"])
+        // The minimal live row shimmers with the last step instead.
+        #expect(ids(TimelineBuilder.rows(for: thread([between]))) == ["user:m-t1", "working:t1", "live:t1"])
     }
 
     @Test func collapsingTheRunningGroupInTheDetailedLogGivesTheLiveRow() {

@@ -71,8 +71,9 @@ public struct OmpUIRequest: Sendable, Hashable {
 ///   titled by `intent`.
 /// - `message_update` `toolcall_start|delta|end` of a write/edit/apply_patch call → the running
 ///   file-change item (id = the tool call id) with the code streamed so far, before omp runs it:
-///   the partial argument JSON is closed (`OmpEditPreview.partialObject`) and re-read on every
-///   new line or 256 streamed characters.
+///   the partial argument JSON is closed (`OmpEditPreview.partialObject`) and re-read on a new line
+///   (then every 1/64 of its size as it grows). A call waits until the earlier calls of its
+///   message ran, so its item never lands above theirs.
 /// - `extension_ui_request`: approval selects (`Allow tool: …`) → `approvalRequested`; other
 ///   selects, `confirm`, `input`, `editor`, `ask` → `userInputRequested`; `cancel` →
 ///   `requestResolved(targetId)`; `notify` → notice. Status/widget/title/editor-text are ignored.
@@ -114,13 +115,26 @@ public struct OmpEventMapper: Sendable {
     private var declinedTools: Set<String> = []
     /// Write/edit calls the model is still streaming, by `<messageId>:<contentIndex>`.
     private var streamingCalls: [String: StreamingCall] = [:]
+    /// Every tool call of a streaming message in order (`<prefix><messageId>` → tool call ids).
+    private var messageCalls: [String: [String]] = [:]
 
     private struct StreamingCall: Sendable {
         var toolCallID: String
         var name: String
+        var messageKey: String
         var json = ""
-        /// `json` length at the last emitted preview.
-        var emittedLength = 0
+        /// UTF-8 length of `json` (counting a String is linear).
+        var bytes = 0
+        /// `bytes` at the last emitted preview.
+        var emittedBytes = 0
+
+        /// Re-read the arguments on a new line or 256 more bytes while small; as they grow, only
+        /// after another 1/64 of their size, so a long write costs O(n log n), not O(n²).
+        func isDue(newLine: Bool) -> Bool {
+            let growth = bytes - emittedBytes
+            let step = bytes / 64
+            return growth >= max(256, step) || (newLine && growth >= step)
+        }
     }
 
     /// Tools whose arguments carry code (`OmpEditPreview`).
@@ -200,6 +214,7 @@ public struct OmpEventMapper: Sendable {
         approvalTools.removeAll()
         declinedTools.removeAll()
         streamingCalls.removeAll()
+        messageCalls.removeAll()
         heldOutcome = nil
         isBackgroundRunActive = false
         compactionEnd = nil
@@ -306,17 +321,21 @@ public struct OmpEventMapper: Sendable {
             return [.itemUpdated(TurnItem(id: itemID, kind: .reasoning(text: text), status: .completed))]
         case "toolcall_start":
             let block = event["block"]
-            guard let toolCallID = block?["id"]?.nonEmptyString, let name = block?["name"]?.stringValue,
-                  Self.codeTools.contains(name) else { return [] }
-            streamingCalls[itemID] = StreamingCall(toolCallID: toolCallID, name: name)
+            guard let toolCallID = block?["id"]?.nonEmptyString, let name = block?["name"]?.stringValue else { return [] }
+            let messageKey = "\(itemPrefix)\(messageID)"
+            messageCalls[messageKey, default: []].append(toolCallID)
+            guard Self.codeTools.contains(name) else { return [] }
+            streamingCalls[itemID] = StreamingCall(toolCallID: toolCallID, name: name, messageKey: messageKey)
             return []
         case "toolcall_delta":
             guard var call = streamingCalls[itemID], let delta = event["delta"]?.stringValue, !delta.isEmpty else { return [] }
             call.json += delta
-            let due = delta.contains("\\n") || delta.contains("\n") || call.json.count - call.emittedLength >= 256
-            if due { call.emittedLength = call.json.count }
-            streamingCalls[itemID] = call
-            guard due, let args = OmpEditPreview.partialObject(call.json) else { return [] }
+            call.bytes += delta.utf8.count
+            defer { streamingCalls[itemID] = call }
+            // A cut number or literal does not parse yet: try again on the next delta.
+            guard call.isDue(newLine: delta.contains("\\n") || delta.contains("\n")),
+                  let args = OmpEditPreview.partialObject(call.json) else { return [] }
+            call.emittedBytes = call.bytes
             return streamedPreview(call, args: args)
         case "toolcall_end":
             guard let call = streamingCalls.removeValue(forKey: itemID) else { return [] }
@@ -328,9 +347,12 @@ public struct OmpEventMapper: Sendable {
     }
 
     /// The running file-change item of a call still streaming; nothing once omp runs it (the tool
-    /// item takes over) or while its arguments carry no code yet.
+    /// item takes over), while its arguments carry no code yet, or while an earlier call of the
+    /// same message has not run (its item would land below this one; omp runs them in order).
     private func streamedPreview(_ call: StreamingCall, args: JSONValue) -> [ProviderEvent] {
         guard tools[call.toolCallID] == nil else { return [] }
+        let earlier = (messageCalls[call.messageKey] ?? []).prefix { $0 != call.toolCallID }
+        guard earlier.allSatisfy({ tools[$0] != nil }) else { return [] }
         let changes = OmpEditPreview.changes(tool: call.name, args: args) { Self.relative($0, to: cwd) }
         guard !changes.isEmpty else { return [] }
         return [.itemUpdated(TurnItem(id: call.toolCallID, kind: .fileChange(changes), status: .running))]
@@ -536,6 +558,7 @@ public struct OmpEventMapper: Sendable {
         if preview.count == 1, changes.count == 1, !changes[0].path.isEmpty {
             var change = changes[0]
             change.diff = first.diff
+            change.isFullContent = first.isFullContent
             return [change]
         }
         return preview
