@@ -500,10 +500,10 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 ┌ sidebar 256 (208…) ┬ chat column (≥ 640) ──────────────────────────────┬ right panel 540 (360…70%) ┐
 │ [traffic lights]   │ header 52: project / Title ⌄ ▢ repo ⑂ br [▤][▭][◫] │ tabs [Diff][Files][x.swift]+│
 │ Search  [⫶][📁][✎] │   lane ≤ 736 centered                ┌ details ┐   │                             │
-│ Pinned / Active    │   user bubble right (≤ 80%, r16)    │ card 280 │   │                             │
-│ cards (78)         │   Worked for 3m 12s ›               └──────────┘   │                             │
-│ …                  │   assistant markdown 14/1.625                      │                             │
-│ Working 1 ›        │   N changed files card                             │                             │
+│ Pinned / Working ⌄ │   user bubble right (≤ 80%, r16)    │ card 280 │   │                             │
+│ Blocked / Failed / │   Worked for 3m 12s ›               └──────────┘   │                             │
+│ Done / Idle ⌄ (78) │   assistant markdown 14/1.625                      │                             │
+│ …                  │   N changed files card                             │                             │
 │ Settled 43 ›       │   ┌ composer r16, glass ┐                          │                             │
 │ [⚙][▥][◎]          │ terminal drawer 280 (180…75%)                      │                             │
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
@@ -522,6 +522,11 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
   them by role), 16 pt in 28 pt ghost buttons.
 - Radii from `Radius`: composer, bubbles, dialogs, details card 16; buttons, menus,
   popovers, code blocks, changed-files card 8; sidebar cards 6.
+- Sidebar sections (`InboxSection`, top to bottom): Pinned, Working, Blocked (approval or input
+  pending), Failed, Done, Idle (no turn yet, or interrupted), each a collapsible "Title N ⌄"
+  header shown only when non-empty and open by default; Settled sits at the bottom, closed by
+  default, 10 slim rows then "Show 25 more". Groups follow the last turn's outcome, not the
+  unread state, so opening a thread never moves it. A closed section still lists the open thread.
 - Status pills (sidebar): Working (info, `circle.dashed`, live duration), Approval (warning),
   Input (indigo), Failed (error), Done (success), else relative time ("now", "5m", "3h", "2d").
 - Subagents (sidebar): a card with subagents shows its meta line with a disclosure "⌄ ⚙ N"

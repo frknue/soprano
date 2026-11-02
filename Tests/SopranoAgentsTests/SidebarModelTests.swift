@@ -68,27 +68,46 @@ struct SidebarModelTests {
         }
     }
 
-    @Test func pinnedComeFirstThenActiveByLatestActivityThenTheShelvesAtTheBottom() {
+    @Test func sectionsGroupThreadsByStatusWithWorkingFirstAndSettledAtTheBottom() {
+        var blocked = Self.thread("ask", ago: 40, status: .running)
+        blocked.turns[0].items.append(TurnItem(id: "ap", kind: .approval(ApprovalRequest(id: "ap", kind: .command, detail: "rm -rf build")), status: .pending))
+        var empty = Self.thread("new", ago: 5)
+        empty.turns = []
         let items = Self.build([
             Self.thread("old", ago: 9000),
-            Self.thread("new", ago: 60),
+            Self.thread("unread", ago: 60, visited: false),
             Self.thread("pin", ago: 99_000, pinned: true),
             Self.thread("run", ago: 30, status: .running),
-            Self.thread("done", ago: 50_000, settled: true),
+            blocked,
+            Self.thread("broke", ago: 70, status: .failed),
+            Self.thread("stop", ago: 80, status: .interrupted),
+            empty,
+            Self.thread("filed", ago: 50_000, settled: true),
         ])
-        #expect(Self.describe(items) == ["card pin", "card new", "card old", "spacer", "Working 1", "Settled 1"])
+        #expect(Self.describe(items) == [
+            "Pinned 1 open", "card pin",
+            "Working 1 open", "card run",
+            "Blocked 1 open", "card ask",
+            "Failed 1 open", "card broke",
+            // Reading a finished thread drops its pill but keeps it in Done.
+            "Done 2 open", "card unread", "card old",
+            "Idle 2 open", "card new", "card stop",
+            "spacer", "Settled 1",
+        ])
     }
 
-    @Test func closedShelvesStillShowTheOpenThread() {
+    @Test func closedSectionsStillShowTheOpenThread() {
         let threads = [
             Self.thread("a", settled: true),
             Self.thread("b", ago: 900, settled: true),
             Self.thread("run", status: .running),
+            Self.thread("d1"),
+            Self.thread("d2", ago: 900),
         ]
         let items = Self.build(threads, SidebarListOptions(selectedThreadID: "b"))
-        #expect(Self.describe(items) == ["spacer", "Working 1", "Settled 2", "slim b"])
-        let working = Self.build(threads, SidebarListOptions(selectedThreadID: "run"))
-        #expect(Self.describe(working) == ["spacer", "Working 1", "card run", "Settled 2"])
+        #expect(Self.describe(items) == ["Working 1 open", "card run", "Done 2 open", "card d1", "card d2", "spacer", "Settled 2", "slim b"])
+        let closed = Self.build(threads, SidebarListOptions(selectedThreadID: "d2", expandedShelves: []))
+        #expect(Self.describe(closed) == ["Working 1", "Done 2", "card d2", "spacer", "Settled 2"])
     }
 
     @Test func theSettledShelfShowsTenThenOffersTheNextPage() {
@@ -220,11 +239,11 @@ struct SidebarModelTests {
     @Test func runningSubagentsAreListedUnderTheirThreadsCardUntilItIsClosed() {
         let parent = Self.withSubagents(Self.thread("p"), [("Reader", .running), ("Writer", .completed)])
         let items = Self.build([parent, Self.thread("q", ago: 900)])
-        #expect(Self.describe(items) == ["card p", "subagent p/Reader", "subagent p/Writer", "card q", "spacer", "Settled 0"])
+        #expect(Self.describe(items) == ["Done 2 open", "card p", "subagent p/Reader", "subagent p/Writer", "card q", "spacer", "Settled 0"])
         let row = items.compactMap(\.thread).first
         #expect(row?.subagents == SidebarThreadRow.SubagentSummary(count: 2, running: 1, expanded: true))
         #expect(row?.hasMetaLine == true)
-        guard case let .subagent(reader) = items[1], case let .subagent(writer) = items[2] else {
+        guard case let .subagent(reader) = items[2], case let .subagent(writer) = items[3] else {
             Issue.record("expected two subagent rows")
             return
         }
@@ -232,21 +251,21 @@ struct SidebarModelTests {
         #expect(!reader.isLast && writer.isLast)
 
         let closed = Self.build([parent], SidebarListOptions(subagentDisclosure: ["p": false]))
-        #expect(Self.describe(closed) == ["card p", "spacer", "Settled 0"])
+        #expect(Self.describe(closed) == ["Done 1 open", "card p", "spacer", "Settled 0"])
     }
 
     @Test func finishedSubagentsStayClosedUntilOpened() {
         let parent = Self.withSubagents(Self.thread("p"), [("Reader", .completed)])
-        #expect(Self.describe(Self.build([parent])) == ["card p", "spacer", "Settled 0"])
+        #expect(Self.describe(Self.build([parent])) == ["Done 1 open", "card p", "spacer", "Settled 0"])
         let opened = Self.build([parent], SidebarListOptions(subagentDisclosure: ["p": true]))
-        #expect(Self.describe(opened) == ["card p", "subagent p/Reader", "spacer", "Settled 0"])
+        #expect(Self.describe(opened) == ["Done 1 open", "card p", "subagent p/Reader", "spacer", "Settled 0"])
     }
 
     @Test func theSelectedSubagentStaysListedAndItsThreadsCardIsNotSelected() {
         let parent = Self.withSubagents(Self.thread("p"), [("Reader", .completed), ("Writer", .completed)])
         let options = SidebarListOptions(selectedThreadID: "p", selectedSubagentID: "Writer")
         let items = Self.build([parent], options)
-        #expect(Self.describe(items) == ["card p", "subagent p/Writer selected", "spacer", "Settled 0"])
+        #expect(Self.describe(items) == ["Done 1 open", "card p", "subagent p/Writer selected", "spacer", "Settled 0"])
         #expect(items.compactMap(\.thread).first?.isSelected == false)
 
         let settled = Self.withSubagents(Self.thread("s", settled: true), [("Reader", .completed)])

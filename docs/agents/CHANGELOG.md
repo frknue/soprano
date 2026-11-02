@@ -15,8 +15,9 @@ All notable changes to Soprano Agents are documented here. The format follows
   words, e.g. `opus openrouter`), with omp's thinking levels as Reasoning. Set
   `providers.ompPath` if `omp` is not on `PATH`.
 - Thread inbox sidebar: search (titles, branches, messages), project filter, Add project, New
-  thread (⌘N, ⇧⌘N, ⌃⌘N), Pinned and Active cards with live status pills (Working, Approval,
-  Input, Failed, Done), Working and Settled shelves, inline rename (double-click or F2), thread
+  thread (⌘N, ⇧⌘N, ⌃⌘N), collapsible Pinned, Working, Blocked, Failed, Done and Idle sections
+  at the top with live status pills (Working, Approval, Input, Failed, Done; reading a thread
+  never moves it), the Settled shelf at the bottom, inline rename (double-click or F2), thread
   menu (pin, settle, rename, regenerate title, mark unread, copy, archive, delete), ⇧⌘[ / ⇧⌘]
   and ⌃1–⌃9 navigation (as in Soprano) with hints while ⌃ is held, ⇧⌘S settle, ⇧⌘P pin,
   ⇧⌘C copy reference.

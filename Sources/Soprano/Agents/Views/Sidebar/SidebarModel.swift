@@ -17,6 +17,7 @@ struct SidebarThreadRow: Equatable {
     /// "Nm" times count from here (latest user message, else last update).
     let activityDate: Date
     let settledAt: Date?
+    let section: InboxSection
     let isPinned: Bool
     let isSettled: Bool
     let isSelected: Bool
@@ -61,18 +62,18 @@ struct SidebarSubagentRow: Equatable {
 
 /// A row of the sidebar list, top to bottom.
 enum SidebarItem: Equatable {
-    /// Pinned, Active and Working threads (78 pt cards).
+    /// Pinned and status-group threads (78 pt cards).
     case card(SidebarThreadRow)
     /// Settled threads (36 pt rows).
     case slim(SidebarThreadRow)
     /// A thread's subagent, listed under its card while the card's disclosure is open (the
     /// selected subagent always).
     case subagent(SidebarSubagentRow)
-    /// "Working 2 ›" / "Settled 43 ›" shelf header.
+    /// "Working 2 ⌄" / "Settled 43 ›" section header.
     case shelf(InboxSection, count: Int, expanded: Bool)
     /// "Show 25 more" under the visible part of the Settled shelf.
     case showMore(Int)
-    /// Flexible gap that pushes the shelves to the bottom of the list (`mt-auto`).
+    /// Flexible gap that pushes the Settled shelf to the bottom of the list (`mt-auto`).
     case spacer
     case empty(SidebarEmptyState)
 
@@ -148,7 +149,7 @@ struct SidebarListOptions: Equatable {
     /// Empty = all projects.
     var projectFilter: Set<String> = []
     var searchText = ""
-    var expandedShelves: Set<InboxSection> = []
+    var expandedShelves: Set<InboxSection> = SidebarListModel.defaultExpandedShelves
     /// Settled rows shown while the Settled shelf is open.
     var settledLimit = SidebarListModel.settledInitialCount
     /// Subagent disclosures the user opened (true) or closed (false) per thread; others are open
@@ -156,11 +157,14 @@ struct SidebarListOptions: Equatable {
     var subagentDisclosure: [String: Bool] = [:]
 }
 
-/// Builds the sidebar rows: Pinned and Active cards, then the
-/// Working and Settled shelves pushed to the bottom. Searching replaces the list with matches.
+/// Builds the sidebar rows: one collapsible section per non-empty group (Pinned, Working,
+/// Blocked, Failed, Done, Idle) at the top, the Settled shelf pushed to the bottom. Searching
+/// replaces the list with matches.
 enum SidebarListModel {
     static let settledInitialCount = 10
     static let settledPageCount = 25
+    /// Every section starts open except Settled.
+    static let defaultExpandedShelves = Set(InboxSection.allCases).subtracting([.settled])
 
     static func build(threads: [AgentThread], projects: [Project], options: SidebarListOptions) -> [SidebarItem] {
         let projectsByID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -181,46 +185,41 @@ enum SidebarListModel {
             }
         }
 
-        var pinned: [AgentThread] = []
-        var active: [AgentThread] = []
-        var working: [AgentThread] = []
-        var settled: [AgentThread] = []
+        var groups: [InboxSection: [AgentThread]] = [:]
         for thread in scoped {
-            switch InboxSection.of(thread) {
-            case .pinned: pinned.append(thread)
-            case .active: active.append(thread)
-            case .working: working.append(thread)
-            case .settled: settled.append(thread)
-            case nil: break
-            }
+            guard let section = InboxSection.of(thread) else { continue }
+            groups[section, default: []].append(thread)
         }
-
-        guard pinned.count + active.count + working.count + settled.count > 0 else {
+        guard !groups.isEmpty else {
             return [.empty(emptyState(projects: projects, filter: options.projectFilter))]
         }
 
-        pinned.sort { ($0.pinnedAt ?? .distantPast, $0.id) < ($1.pinnedAt ?? .distantPast, $1.id) }
-        active.sort(by: newestActivityFirst)
-        working.sort { workingSince($0) > workingSince($1) }
-        settled.sort { ($0.settledAt ?? $0.activityDate) > ($1.settledAt ?? $1.activityDate) }
-
+        func sorted(_ threads: [AgentThread], in section: InboxSection) -> [AgentThread] {
+            switch section {
+            case .pinned: threads.sorted { ($0.pinnedAt ?? .distantPast, $0.id) < ($1.pinnedAt ?? .distantPast, $1.id) }
+            case .working: threads.sorted { workingSince($0) > workingSince($1) }
+            case .settled: threads.sorted { ($0.settledAt ?? $0.activityDate) > ($1.settledAt ?? $1.activityDate) }
+            case .blocked, .failed, .done, .idle: threads.sorted(by: newestActivityFirst)
+            }
+        }
         func card(_ thread: AgentThread) -> [SidebarItem] {
             [.card(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
         }
         func slim(_ thread: AgentThread) -> [SidebarItem] {
             [.slim(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
         }
-        /// A closed shelf still shows the open thread.
-        func visible(_ threads: [AgentThread], in section: InboxSection) -> [AgentThread] {
-            options.expandedShelves.contains(section) ? threads : threads.filter { $0.id == options.selectedThreadID }
-        }
 
-        var items = pinned.flatMap(card) + active.flatMap(card)
-        items.append(.spacer)
-        if !working.isEmpty {
-            items.append(.shelf(.working, count: working.count, expanded: options.expandedShelves.contains(.working)))
-            items += visible(working, in: .working).flatMap(card)
+        var items: [SidebarItem] = []
+        for section in InboxSection.allCases where section != .settled {
+            guard let threads = groups[section] else { continue }
+            let expanded = options.expandedShelves.contains(section)
+            items.append(.shelf(section, count: threads.count, expanded: expanded))
+            // A closed section still shows the open thread.
+            let shown = expanded ? threads : threads.filter { $0.id == options.selectedThreadID }
+            items += sorted(shown, in: section).flatMap(card)
         }
+        items.append(.spacer)
+        let settled = sorted(groups[.settled] ?? [], in: .settled)
         let settledExpanded = options.expandedShelves.contains(.settled)
         items.append(.shelf(.settled, count: settled.count, expanded: settledExpanded))
         if settledExpanded {
@@ -234,7 +233,7 @@ enum SidebarListModel {
             let hidden = settled.count - shown.count
             if hidden > 0 { items.append(.showMore(min(hidden, settledPageCount))) }
         } else {
-            items += visible(settled, in: .settled).flatMap(slim)
+            items += settled.filter { $0.id == options.selectedThreadID }.flatMap(slim)
         }
         return items
     }
@@ -264,6 +263,7 @@ enum SidebarListModel {
             status: status,
             activityDate: thread.activityDate,
             settledAt: thread.settledAt,
+            section: InboxSection.of(thread) ?? .idle,
             isPinned: thread.pinnedAt != nil,
             isSettled: thread.settledAt != nil,
             isSelected: selected,

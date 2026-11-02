@@ -177,7 +177,7 @@ class SidebarThreadCell: InteractiveView {
     var isRenaming: Bool { renameField != nil }
 }
 
-/// Pinned / Active / Working card (`h-[4.875rem] px-2.5 py-2`): project line with the status
+/// Pinned / status-section card (`h-[4.875rem] px-2.5 py-2`): project line with the status
 /// slot, title line, meta line (branch, diff stat, provider mark).
 final class SidebarCardCell: SidebarThreadCell {
     private let favicon = ProjectMonogramView()

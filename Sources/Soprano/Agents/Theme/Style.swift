@@ -87,7 +87,7 @@ enum Metrics {
     static let terminalHeight: CGFloat = 280
     static let terminalMinHeight: CGFloat = 180
 
-    /// Sidebar card row (Pinned / Active) and slim row (shelves).
+    /// Sidebar card row (Pinned and status sections) and slim row (Settled shelf).
     static let cardRowHeight: CGFloat = 78
     static let slimRowHeight: CGFloat = 36
 

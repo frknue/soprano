@@ -55,18 +55,27 @@ public enum ThreadStatus: Sendable, Hashable {
     }
 }
 
-/// The sidebar sections of the thread inbox.
+/// The sidebar sections of the thread inbox, top to bottom. Unpinned, unsettled threads group by
+/// what their agent is doing or how its last turn ended; reading a thread never moves it.
 public enum InboxSection: String, Sendable, Hashable, CaseIterable {
     case pinned
-    case active
     case working
+    /// Waiting on an approval or answers.
+    case blocked
+    case failed
+    case done
+    /// No turn yet, or the last one was interrupted.
+    case idle
     case settled
 
     public var title: String {
         switch self {
         case .pinned: "Pinned"
-        case .active: "Active"
         case .working: "Working"
+        case .blocked: "Blocked"
+        case .failed: "Failed"
+        case .done: "Done"
+        case .idle: "Idle"
         case .settled: "Settled"
         }
     }
@@ -76,8 +85,16 @@ public enum InboxSection: String, Sendable, Hashable, CaseIterable {
         if thread.archivedAt != nil { return nil }
         if thread.pinnedAt != nil { return .pinned }
         if thread.settledAt != nil { return .settled }
-        if ThreadStatus.of(thread).isWorking { return .working }
-        return .active
+        if let turn = thread.activeTurn {
+            return turn.pendingApproval != nil || turn.pendingUserInput != nil ? .blocked : .working
+        }
+        guard let last = thread.turns.last else { return .idle }
+        // A yielded turn is over for the user while background work runs.
+        switch last.isYielded ? last.yieldedStatus : last.status {
+        case .failed: return .failed
+        case .completed: return .done
+        case .interrupted, .running: return .idle
+        }
     }
 }
 

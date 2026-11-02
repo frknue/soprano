@@ -2,9 +2,9 @@ import AppKit
 import SopranoAgentsCore
 
 /// The thread inbox: 52 pt header with the brand, the search row with
-/// the project filter / add project / new thread buttons, the list (Pinned and Active cards,
-/// then the Working and Settled shelves pushed to the bottom) and the footer with Settings, the
-/// Statistics board toggle and the account button.
+/// the project filter / add project / new thread buttons, the list (collapsible Pinned, Working,
+/// Blocked, Failed, Done and Idle sections of cards, then the Settled shelf pushed to the bottom)
+/// and the footer with Settings, the Statistics board toggle and the account button.
 /// The list is an `NSTableView` of reused cells, so hundreds of threads stay cheap.
 @MainActor
 final class SidebarViewController: NSViewController, FocusRegionController, NSTableViewDataSource, NSTableViewDelegate {
@@ -30,7 +30,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     /// The rows on screen, top to bottom.
     private(set) var items: [SidebarItem] = []
     private var heightWithoutSpacer: CGFloat = 0
-    private var expandedShelves: Set<InboxSection> = []
+    private var expandedShelves = SidebarListModel.defaultExpandedShelves
     private var settledLimit = SidebarListModel.settledInitialCount
     /// Subagent disclosures the user toggled, per thread (`SidebarListOptions.subagentDisclosure`).
     private var subagentDisclosure: [String: Bool] = [:]
@@ -291,7 +291,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         let item: SidebarItem = if case .slim = items[index] { .slim(row) } else { .card(row) }
         guard item != items[index] else { return }
         // Status or section changes reshuffle the list; anything else is this row only.
-        if items[index].thread?.status != row.status || items[index].thread?.isSettled != row.isSettled || items[index].thread?.isPinned != row.isPinned {
+        if items[index].thread?.status != row.status || items[index].thread?.section != row.section {
             reload()
             return
         }

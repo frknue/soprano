@@ -32,7 +32,7 @@ struct SidebarNavigationTests {
 
     @Test func jumpingOpensTheNthThreadAndIgnoresMissingPositions() throws {
         let (sidebar, _, state) = try sidebar()
-        // Pinned first, then the active cards by activity.
+        // Pinned first, then the status sections (Working, Blocked, Failed, Done, Idle).
         sidebar.jump(to: 1)
         #expect(state.selectedThreadID == DemoFixtures.ID.pinned)
         sidebar.jump(to: 2)
