@@ -18,6 +18,8 @@ Goal: Soprano Agents, a native macOS app in the Soprano family for the `omp` cod
   `navigate_tree`), and reload + resume.
 
 ## Next
+- Geplante Features nach Priorität: `docs/BACKLOG.md` (zuerst 1–3: in den Base-Branch mergen und
+  aufräumen, Live-Checkliste, Link-Karte).
 - First real GUI session (not launched by agents): check the terminal drawer's colors (the
   offscreen harness renders SwiftTerm's background white, drawer and panel tabs alike), the
   composer blur, window focus, and the right panel's "+" menu and file context menu (native
