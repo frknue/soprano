@@ -149,7 +149,11 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     func reload(scrollToEnd: Bool = false) {
         guard isViewLoaded else { return }
         let thread = selectedThread
-        let rows = TimelineBuilder.rows(for: thread, expansion: expansion, editable: state.selectedSubagentID == nil)
+        // Find searches the shown rows: while it has a query, every turn's checks are open so their
+        // notes and replies stay findable.
+        var shown = expansion
+        if isSearching, let thread { shown.checks.formUnion(thread.turns.map(\.id)) }
+        let rows = TimelineBuilder.rows(for: thread, expansion: shown, editable: state.selectedSubagentID == nil)
         let threadChanged = thread?.id != shownThreadID
         shownThreadID = thread?.id
         list.setRows(rows, scrollToEnd: scrollToEnd || threadChanged)
@@ -198,10 +202,11 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
 
     // MARK: Expansion
 
-    /// Opens every fold and work group of the selected thread.
+    /// Opens every fold, checks row and work group of the selected thread.
     func expandAll() {
         guard let thread = selectedThread else { return }
         expansion.turns.formUnion(thread.turns.map(\.id))
+        expansion.checks.formUnion(thread.turns.map(\.id))
         for _ in 0..<2 {
             for row in TimelineBuilder.rows(for: thread, expansion: expansion) {
                 switch row.content {
@@ -218,7 +223,8 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
         guard let thread = selectedThread else { return }
         let turnIDs = Set(thread.turns.map(\.id))
         expansion.turns.subtract(turnIDs)
-        let rows = TimelineBuilder.rows(for: thread, expansion: TimelineExpansion(turns: turnIDs, groups: expansion.groups))
+        expansion.checks.subtract(turnIDs)
+        let rows = TimelineBuilder.rows(for: thread, expansion: TimelineExpansion(turns: turnIDs, checks: turnIDs, groups: expansion.groups))
         for row in rows {
             switch row.content {
             case let .workGroup(model): expansion.groups.remove(model.groupID)
@@ -242,6 +248,14 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     // MARK: TimelineRowDelegate
 
     func timelineToggleFold(turnID: String) { toggle(turnID, in: \.turns) }
+    func timelineToggleChecks(turnID: String) {
+        // While Find has a query every checks row is open (see `reload`).
+        guard !isSearching else { return }
+        let opening = !expansion.checks.contains(turnID)
+        toggle(turnID, in: \.checks)
+        // A pinned timeline follows its end; keep the opened row's header in view instead.
+        if opening { list.reveal(rowID: "checks:\(turnID)", rect: NSRect(x: 0, y: 0, width: 1, height: 24)) }
+    }
     func timelineToggleGroup(_ groupID: String) { toggle(groupID, in: \.groups) }
     func timelineToggleEntry(_ itemID: String) { toggle(itemID, in: \.entries) }
     func timelineToggleMessage(_ messageID: String) { toggle(messageID, in: \.messages) }
@@ -325,6 +339,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     }
 
     func closeFind(focusTimeline: Bool = true) {
+        let wasSearching = isSearching
         isFindOpen = false
         findBar.isHidden = true
         list.revealTopInset = 0
@@ -333,12 +348,20 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
         findMatches = []
         findIndex = 0
         list.findHighlights = [:]
+        if wasSearching { reload() }
         if focusTimeline { view.window?.makeFirstResponder(list) }
     }
 
+    /// Find is open with a query: checks render open (see `reload`).
+    private var isSearching: Bool {
+        isFindOpen && !findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func setFindQuery(_ query: String) {
+        let wasSearching = isSearching
         findQuery = query
         findIndex = 0
+        if isSearching != wasSearching { reload() }
         refreshFind(keepIndex: false, reveal: true)
     }
 

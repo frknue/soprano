@@ -300,6 +300,141 @@ final class AdvisoryRowView: TimelineRowView {
     }
 }
 
+/// "2 checks after this answer ›" under a finished turn's recap; closed, one block per check:
+/// who checked (advisor severity colored) and, in a column, the opening prose of the agent's
+/// reply (up to four lines). A click on the row (on the header once open) opens the checks'
+/// notes, replies and work below it.
+final class ChecksRowView: ClickableRowView {
+    private static let maxOutcomeLines = 4
+    private let icon = TimelineIconView(symbol: TimelineIcon.checks, size: 13)
+    private let label = NSTextField.timelineLabel("", size: Typography.bodySize)
+    private let chevron = TimelineIconView(symbol: Icon.chevronRight, size: 11)
+    /// Per shown check: who checked, and the reply.
+    private var lines: [(source: NSTextField, outcome: NSTextField)] = []
+    private var model: ChecksRowModel?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        for view in [icon, label, chevron] as [NSView] { addSubview(view) }
+        onToggle = { [weak self] in
+            guard let self, let model else { return }
+            delegate?.timelineToggleChecks(turnID: model.turnID)
+        }
+        applyPalette(palette)
+    }
+
+    override func configure(_ row: TimelineRow) {
+        super.configure(row)
+        guard case let .checks(model) = row.content else { return }
+        self.model = model
+        let count = model.passes.count
+        label.stringValue = count == 1 ? "1 check after this answer" : "\(count) checks after this answer"
+        chevron.setSymbol(model.expanded ? Icon.chevronDown : Icon.chevronRight, size: 11, weight: .medium)
+        let shown = model.expanded ? 0 : count
+        while lines.count < shown {
+            let source = NSTextField.timelineLabel("", size: Typography.smallSize)
+            source.lineBreakMode = .byTruncatingTail
+            source.maximumNumberOfLines = 1
+            let outcome = NSTextField(wrappingLabelWithString: "")
+            outcome.font = Typography.ui(Typography.rowSize)
+            outcome.maximumNumberOfLines = Self.maxOutcomeLines
+            // Wraps; the fourth line ends in "…" when the paragraph runs longer.
+            outcome.lineBreakMode = .byWordWrapping
+            outcome.cell?.truncatesLastVisibleLine = true
+            outcome.isSelectable = false
+            addSubview(source)
+            addSubview(outcome)
+            lines.append((source, outcome))
+        }
+        while lines.count > shown {
+            let line = lines.removeLast()
+            line.source.removeFromSuperview()
+            line.outcome.removeFromSuperview()
+        }
+        for (line, pass) in zip(lines, model.passes) {
+            line.source.toolTip = pass.sources.joined(separator: ", ")
+            line.outcome.toolTip = Self.summary(pass)
+        }
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(([label.stringValue] + model.passes.map(Self.spoken)).joined(separator: ". "))
+        applyPalette(palette)
+    }
+
+    /// The reply's opening prose; without a reply, "No reply" and the advisor's note.
+    private static func summary(_ pass: CheckPassModel) -> String {
+        pass.outcome ?? (pass.note.map { "No reply · \($0)" } ?? "No reply")
+    }
+
+    private static func spoken(_ pass: CheckPassModel) -> String {
+        let who = pass.sources.joined(separator: ", ") + (pass.severity.map { " \($0.title)" } ?? "")
+        return "\(who): \(summary(pass))"
+    }
+
+    override func layoutRow(width: CGFloat) -> CGFloat {
+        let headerHeight: CGFloat = 24
+        icon.frame = NSRect(x: 6, y: (headerHeight - 16) / 2, width: 16, height: 16)
+        let labelWidth = min(label.textFitWidth, max(0, width - 32 - 18))
+        label.frame = NSRect(x: 32, y: (headerHeight - label.lineHeight) / 2, width: labelWidth, height: label.lineHeight)
+        chevron.frame = NSRect(x: label.frame.maxX + 4, y: (headerHeight - 14) / 2, width: 14, height: 14)
+        headerRect = NSRect(x: 0, y: 0, width: chevron.frame.maxX + 4, height: headerHeight)
+        var y = headerHeight
+        // Replies line up after the widest source, which takes at most 40 % of the lane.
+        let available = max(0, width - 32 - 4)
+        let sourceWidth = min(lines.map(\.source.textFitWidth).max() ?? 0, floor(available * 0.4))
+        let outcomeX = 32 + sourceWidth + 10
+        let outcomeWidth = max(0, 32 + available - outcomeX)
+        for line in lines {
+            let lineHeight = line.outcome.lineHeight
+            let measured = line.outcome.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: outcomeWidth, height: 10_000)).height ?? lineHeight
+            let height = min(ceil(measured), lineHeight * CGFloat(Self.maxOutcomeLines))
+            line.outcome.frame = NSRect(x: outcomeX, y: y + 2, width: outcomeWidth, height: height)
+            // The source sits on the reply's first line.
+            line.source.frame = NSRect(x: 32, y: y + 2 + (lineHeight - 17) / 2, width: sourceWidth, height: 17)
+            y += max(20, height + 4)
+        }
+        // Closed, the whole row opens the checks (its hover tints the header).
+        if !lines.isEmpty { headerRect = NSRect(x: 0, y: 0, width: width, height: y + 2) }
+        window?.invalidateCursorRects(for: self)
+        return y + (lines.isEmpty ? 0 : 2)
+    }
+
+    /// Clicks on the check lines reach the row, not the labels.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let hit = super.hitTest(point) else { return nil }
+        return headerRect.contains(convert(point, from: superview)) ? self : hit
+    }
+
+    override func hoverChanged() {
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        let tint = isHovered ? palette.foreground : palette.mutedForeground
+        icon.contentTintColor = tint
+        label.textColor = tint
+        chevron.contentTintColor = tint
+        guard let model else { return }
+        for (line, pass) in zip(lines, model.passes) {
+            let source = NSMutableAttributedString(string: pass.sources.joined(separator: ", "), attributes: [
+                .font: Typography.ui(Typography.smallSize, weight: .medium), .foregroundColor: palette.secondaryLabel,
+            ])
+            if let severity = pass.severity {
+                let color: NSColor = switch severity {
+                case .blocker: palette.errorForeground
+                case .concern: palette.warningForeground
+                case .nit: palette.mutedForeground
+                }
+                source.append(NSAttributedString(string: " · \(severity.title)", attributes: [
+                    .font: Typography.ui(Typography.smallSize), .foregroundColor: color,
+                ]))
+            }
+            line.source.attributedStringValue = source
+            line.outcome.stringValue = Self.summary(pass)
+            line.outcome.textColor = pass.outcome == nil ? palette.mutedForeground : palette.foreground.timelineAlpha(0.85)
+        }
+    }
+}
+
 /// "Background work still running…" under a yielded turn: its answer is final while jobs the
 /// agent started still run (and may wake it). One muted line.
 final class BackgroundWorkRowView: TimelineRowView {

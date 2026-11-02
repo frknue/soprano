@@ -9,7 +9,8 @@ indirect enum MarkdownInline: Hashable, Sendable {
     case strikethrough([MarkdownInline])
     case code(String)
     case link(destination: String?, [MarkdownInline])
-    /// Images show as their alt text (agent output may point anywhere; nothing is fetched).
+    /// Images show as their alt text in the chat (agent output may point anywhere; nothing is
+    /// fetched); a document's image-only paragraphs become image blocks of workspace files.
     case image(source: String?, alt: String)
     case softBreak
     case lineBreak

@@ -23,6 +23,13 @@ enum Typography {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
+    /// New York, the reader face of Markdown file tabs (Soprano's Markdown reader).
+    static func serif(_ size: CGFloat = bodySize, weight: NSFont.Weight = .regular) -> NSFont {
+        let base = NSFont.systemFont(ofSize: size, weight: weight)
+        guard let descriptor = base.fontDescriptor.withDesign(.serif) else { return base }
+        return NSFont(descriptor: descriptor, size: size) ?? base
+    }
+
     /// Tabular digits for live durations ("Working for 12s").
     static func tabular(_ size: CGFloat = bodySize, weight: NSFont.Weight = .regular) -> NSFont {
         NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)

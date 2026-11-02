@@ -2,10 +2,11 @@ import AppKit
 import SopranoAgentsCore
 
 /// A file tab of the right panel: the active `.file(path)` of the selected workspace (thread or
-/// project draft), read-only. A breadcrumb header with Refresh, Copy contents, Open in Editor and
-/// Reveal in Finder over the text (SF Mono, line numbers, syntax colors, no wrapping), the image,
-/// or a note for binary and oversized files. Contents are cached per workspace and path while the
-/// tab is open.
+/// project draft), read-only. A breadcrumb header with Markdown Preview (Markdown files only),
+/// Refresh, Copy contents, Open in Editor and Reveal in Finder over the text (SF Mono, line
+/// numbers, syntax colors, no wrapping), a Markdown file's reader (`MarkdownReaderView`, the
+/// default for `.md`/`.markdown`), the image, or a note for binary and oversized files. Contents
+/// are cached per workspace and path while the tab is open.
 @MainActor
 final class FileViewerViewController: NSViewController {
     let engine: AgentEngine
@@ -37,6 +38,10 @@ final class FileViewerViewController: NSViewController {
     /// Files to reload next time they show (their thread finished a turn, or their project draft
     /// was re-entered: a thread may have changed them meanwhile).
     private var stale: Set<FileKey> = []
+    /// Markdown files switched to their source (the others show the reader).
+    private var sourceMode: Set<FileKey> = []
+    /// Headings to scroll to once a Markdown file opened from a link shows (`#anchor`).
+    private var pendingAnchors: [FileKey: String] = [:]
     private var lastWorkspace: WorkspaceRef?
     /// Threads seen running, to notice when their turn ends.
     private var runningThreads: Set<String> = []
@@ -47,12 +52,14 @@ final class FileViewerViewController: NSViewController {
     private var highlights: [FileKey: [SyntaxToken]] = [:]
     private var highlightGeneration = 0
     private var showsText = false
+    private var showsMarkdown = false
 
     // Views
     private let header = NSView()
     private let headerRule = HairlineView()
     private let breadcrumbs = NSTextField.label(size: Typography.smallSize)
     private let refreshButton = GhostIconButton(symbol: "arrow.clockwise", size: 28, symbolSize: 12, toolTip: "Refresh file")
+    private let previewButton = GhostIconButton(symbol: "eye", size: 28, symbolSize: 12, toolTip: "Markdown Preview")
     private let copyButton = GhostIconButton(symbol: Icon.copy, size: 28, symbolSize: 12, toolTip: "Copy contents")
     private let editorButton = GhostIconButton(symbol: "arrow.up.forward.app", size: 28, symbolSize: 12, toolTip: "Open in Editor")
     private let revealButton = GhostIconButton(symbol: "folder", size: 28, symbolSize: 12, toolTip: "Reveal in Finder")
@@ -60,6 +67,7 @@ final class FileViewerViewController: NSViewController {
     private let textView: NSTextView
     private let gutter: FileLineNumberGutter
     private let imageView = NSImageView()
+    private let reader = MarkdownReaderView(frame: .zero)
     private let messageStack = NSStackView()
     private let messageLabel = NSTextField.label(size: Typography.smallSize)
     private let messageEditorButton = TextButton("Open in Editor", symbol: "arrow.up.forward.app", variant: .outline, size: .sm)
@@ -86,6 +94,7 @@ final class FileViewerViewController: NSViewController {
 
     override func loadView() {
         let root = FilesSurfaceRootView(frame: NSRect(x: 0, y: 0, width: 540, height: 600))
+        root.acceptsFocus = true
         view = root
         buildHeader()
         buildText()
@@ -106,7 +115,9 @@ final class FileViewerViewController: NSViewController {
         messageStack.addArrangedSubview(messageLabel)
         messageStack.addArrangedSubview(messageEditorButton)
 
-        for subview in [header, headerRule, gutter, textScrollView, imageView, messageStack] {
+        reader.onOpenFile = { [weak self] path, anchor in self?.openLinkedFile(path, anchor: anchor) }
+
+        for subview in [header, headerRule, gutter, textScrollView, reader, imageView, messageStack] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -129,6 +140,11 @@ final class FileViewerViewController: NSViewController {
             textScrollView.leadingAnchor.constraint(equalTo: gutter.trailingAnchor),
             textScrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             textScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            reader.topAnchor.constraint(equalTo: headerRule.bottomAnchor),
+            reader.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            reader.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            reader.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
             imageView.topAnchor.constraint(equalTo: headerRule.bottomAnchor, constant: 16),
             imageView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
@@ -166,10 +182,11 @@ final class FileViewerViewController: NSViewController {
         breadcrumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         breadcrumbs.setContentHuggingPriority(.init(1), for: .horizontal)
         refreshButton.onClick = { [weak self] in self?.refresh() }
+        previewButton.onClick = { [weak self] in self?.toggleMarkdownPreview() }
         copyButton.onClick = { [weak self] in self?.copyContents() }
         editorButton.onClick = { [weak self] in self?.openInEditor() }
         revealButton.onClick = { [weak self] in self?.revealInFinder() }
-        let stack = NSStackView(views: [breadcrumbs, refreshButton, copyButton, editorButton, revealButton])
+        let stack = NSStackView(views: [breadcrumbs, previewButton, refreshButton, copyButton, editorButton, revealButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 2
@@ -243,21 +260,78 @@ final class FileViewerViewController: NSViewController {
 
     // MARK: - Focus
 
-    /// Makes the text the first responder when a text file shows.
+    /// Makes the text (or the Markdown reader) the first responder when a text file shows.
     func focusText() {
         guard isViewLoaded else { return }
-        view.window?.makeFirstResponder(showsText ? textView : view)
+        if showsMarkdown {
+            reader.focus()
+        } else {
+            view.window?.makeFirstResponder(showsText ? textView : view)
+        }
     }
 
-    /// ⌘F in a text file tab: the text view's find bar. Returns false when no text shows.
+    /// ⌘F in a text file tab: the text view's find bar; a Markdown preview switches to its
+    /// source first. Returns false when no text shows.
     @discardableResult
     func showFind() -> Bool {
-        guard isViewLoaded, showsText else { return false }
+        guard isViewLoaded else { return false }
+        if showsMarkdown, let key = currentKey {
+            setSourceMode(true, for: key)
+        }
+        guard showsText else { return false }
         view.window?.makeFirstResponder(textView)
         let item = NSMenuItem()
         item.tag = NSTextFinder.Action.showFindInterface.rawValue
         textView.performTextFinderAction(item)
         return true
+    }
+
+    // MARK: - Markdown
+
+    static func isMarkdown(_ path: String) -> Bool {
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return false }
+        return ["md", "markdown"].contains(name[name.index(after: dot)...].lowercased())
+    }
+
+    /// Larger Markdown files open as source: the reader sets the whole document at once on the
+    /// main thread (≈ 0.2 s at 50 KB, ≈ 1 s at 200 KB, a minute at 2 MB).
+    nonisolated static let maximumPreviewBytes = 128 * 1024
+
+    /// A Markdown file whose loaded text (if any yet) fits the reader.
+    private func canPreview(_ key: FileKey) -> Bool {
+        guard Self.isMarkdown(key.path) else { return false }
+        guard case let .content(.text(text))? = cache[key] else { return true }
+        return text.utf8.count <= Self.maximumPreviewBytes
+    }
+
+    /// Whether the active tab is a Markdown file the reader can show (Markdown Preview applies).
+    var showsMarkdownFile: Bool {
+        guard isViewLoaded, isShowing, let key = currentKey else { return false }
+        return canPreview(key)
+    }
+
+    /// Markdown Preview: the active Markdown tab between its reader and its source.
+    func toggleMarkdownPreview() {
+        guard showsMarkdownFile, let key = currentKey else { return }
+        setSourceMode(!sourceMode.contains(key), for: key)
+    }
+
+    private func setSourceMode(_ source: Bool, for key: FileKey) {
+        guard sourceMode.contains(key) != source else { return }
+        if source { sourceMode.insert(key) } else { sourceMode.remove(key) }
+        if shown?.key == key { shown = nil }
+        render()
+    }
+
+    /// A link in the reader to another workspace file: its tab, at the linked heading (headings
+    /// exist only in the reader, so a Markdown target shown as source switches back to it).
+    private func openLinkedFile(_ path: String, anchor: String?) {
+        guard let workspace = state.workspace else { return }
+        let key = FileKey(workspace: workspace, path: path)
+        pendingAnchors[key] = anchor
+        if anchor != nil { sourceMode.remove(key) }
+        state.showRightPanel(.file(path))
     }
 
     // MARK: - State
@@ -303,6 +377,8 @@ final class FileViewerViewController: NSViewController {
         highlights[key] = nil
         pending[key] = nil
         stale.remove(key)
+        sourceMode.remove(key)
+        pendingAnchors[key] = nil
         if shown?.key == key { shown = nil }
     }
 
@@ -363,8 +439,21 @@ final class FileViewerViewController: NSViewController {
 
     // MARK: - Rendering
 
+    /// Shows the active tab. Switching what shows (reader, text, image, "Loading…") removes or
+    /// hides the focused view; when the viewer had the keyboard it keeps it: on the root while
+    /// nothing focusable shows, then on the reader or text once the file arrives.
     private func render() {
         guard isViewLoaded, isShowing else { return }
+        let hadFocus = (view.window?.firstResponder as? NSView)?.isDescendant(of: view) == true
+        renderContent()
+        guard hadFocus else { return }
+        let responder = view.window?.firstResponder as? NSView
+        if responder?.isDescendant(of: view) != true || responder === view || responder?.isHiddenOrHasHiddenAncestor == true {
+            focusText()
+        }
+    }
+
+    private func renderContent() {
         guard let key = currentKey else {
             updateHeader(nil)
             shown = nil
@@ -389,6 +478,8 @@ final class FileViewerViewController: NSViewController {
         switch loaded {
         case let .failed(text):
             show(message: text, editorButton: false)
+        case let .content(.text(text)) where canPreview(key) && !sourceMode.contains(key):
+            showMarkdown(text, key: key, keepScroll: sameFile)
         case let .content(.text(text)):
             showText(text, key: key, keepScroll: sameFile)
         case let .content(.image(data)):
@@ -402,7 +493,8 @@ final class FileViewerViewController: NSViewController {
         case let .content(.tooLarge(byteCount)):
             show(message: "File is too large to preview · \(Self.size(byteCount))", editorButton: true)
         }
-        copyButton.isEnabled = showsText
+        copyButton.isEnabled = showsText || showsMarkdown
+        if pendingAnchors[key] != nil, !showsMarkdown { pendingAnchors[key] = nil }
     }
 
     private func updateHeader(_ key: FileKey?) {
@@ -413,7 +505,16 @@ final class FileViewerViewController: NSViewController {
         refreshButton.isEnabled = key != nil
         editorButton.isEnabled = hasURL
         revealButton.isEnabled = hasURL
-        copyButton.isEnabled = showsText && shown?.key == key
+        copyButton.isEnabled = (showsText || showsMarkdown) && shown?.key == key
+        let markdown = key.map { Self.isMarkdown($0.path) } ?? false
+        let previewable = key.map(canPreview) ?? false
+        previewButton.isHidden = !markdown
+        previewButton.isEnabled = previewable
+        previewButton.isOn = previewable && key.map { !sourceMode.contains($0) } ?? false
+        previewButton.toolTip = !previewable
+            ? "Too large for the Markdown preview (over \(Self.size(Self.maximumPreviewBytes)))"
+            : previewButton.isOn ? "Show Source" : "Show Markdown Preview"
+        previewButton.setAccessibilityLabel(previewButton.toolTip)
     }
 
     /// "Sources / Auth / LoginController.swift": folders and separators muted, the name in the
@@ -445,6 +546,7 @@ final class FileViewerViewController: NSViewController {
 
     private func show(message: String, editorButton: Bool) {
         clearText()
+        clearMarkdown()
         imageView.image = nil
         imageView.isHidden = true
         textScrollView.isHidden = true
@@ -456,6 +558,7 @@ final class FileViewerViewController: NSViewController {
 
     private func showImage(_ image: NSImage) {
         clearText()
+        clearMarkdown()
         imageView.image = image
         imageView.isHidden = false
         textScrollView.isHidden = true
@@ -472,7 +575,41 @@ final class FileViewerViewController: NSViewController {
         gutter.lineStarts = [0]
     }
 
+    private func clearMarkdown() {
+        reader.isHidden = true
+        guard showsMarkdown else { return }
+        showsMarkdown = false
+        reader.clear()
+    }
+
+    private func showMarkdown(_ text: String, key: FileKey, keepScroll: Bool) {
+        clearText()
+        imageView.image = nil
+        imageView.isHidden = true
+        messageStack.isHidden = true
+        textScrollView.isHidden = true
+        gutter.isHidden = true
+        reader.isHidden = false
+        showsMarkdown = true
+        let workspace = key.workspace
+        let engine = engine
+        reader.loadImage = { path in
+            switch try? await engine.readWorkspaceFile(workspace, path: path) {
+            case let .image(data)?: return NSImage(data: data)
+            // The file service reads SVG as text; NSImage draws it.
+            case let .text(svg)? where path.lowercased().hasSuffix(".svg"): return NSImage(data: Data(svg.utf8))
+            default: return nil
+            }
+        }
+        view.layoutSubtreeIfNeeded()
+        reader.show(text, path: key.path, keepScroll: keepScroll)
+        if let anchor = pendingAnchors.removeValue(forKey: key) {
+            reader.scroll(toAnchor: anchor)
+        }
+    }
+
     private func showText(_ text: String, key: FileKey, keepScroll: Bool) {
+        clearMarkdown()
         imageView.image = nil
         imageView.isHidden = true
         messageStack.isHidden = true

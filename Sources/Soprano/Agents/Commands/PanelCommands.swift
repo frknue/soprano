@@ -121,6 +121,18 @@ enum PanelCommands {
                 }
             },
             AppCommand(
+                id: "rightPanel.toggleMarkdownPreview",
+                title: "Toggle Markdown Preview",
+                description: "Switch a Markdown file tab between the reader and its source",
+                category: .view,
+                scopes: [.rightPanel],
+                defaultKeys: ["cmd+shift+v"],
+                icon: "eye",
+                isEnabled: { $0.workspace?.rightPanel.fileViewer.showsMarkdownFile == true }
+            ) { context in
+                context.workspace?.rightPanel.fileViewer.toggleMarkdownPreview()
+            },
+            AppCommand(
                 id: "rightPanel.toggleMaximized",
                 title: "Maximize Right Panel",
                 description: "Expand the right panel or restore its size",

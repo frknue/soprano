@@ -311,6 +311,10 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
     /// When background work last woke the yielded turn (omp `turnResumed`): answers that ended
     /// before it are no longer the turn's last word. Cleared when the turn ends. Older files lack it.
     public var resumedAt: Date?
+    /// When background work first woke the yielded turn; kept after the turn ends, so the
+    /// timeline knows a later answer reported that work rather than answered a check. Older files
+    /// lack it.
+    public var wokenAt: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -328,7 +332,8 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         tokenUsage: TokenUsage? = nil,
         yieldedAt: Date? = nil,
         stopRequestedAt: Date? = nil,
-        resumedAt: Date? = nil
+        resumedAt: Date? = nil,
+        wokenAt: Date? = nil
     ) {
         self.id = id
         self.ordinal = ordinal
@@ -346,6 +351,7 @@ public struct Turn: Codable, Sendable, Hashable, Identifiable {
         self.yieldedAt = yieldedAt
         self.stopRequestedAt = stopRequestedAt
         self.resumedAt = resumedAt
+        self.wokenAt = wokenAt
     }
 
     /// Open but yielded (`yieldedAt`): done for the user while background work runs.

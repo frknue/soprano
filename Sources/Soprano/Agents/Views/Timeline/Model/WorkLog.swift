@@ -27,6 +27,7 @@ enum TimelineIcon {
     static let minimize = "arrow.down.right.and.arrow.up.left"
     static let shield = "shield"
     static let advisor = "text.bubble"
+    static let checks = "checkmark.shield"
     static let unfoldAll = "chevron.up.chevron.down"
 }
 

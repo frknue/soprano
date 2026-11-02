@@ -132,6 +132,7 @@ final class TimelineListView: NSView {
         case .error: "error"
         case .notice: "notice"
         case .advisory: "advisory"
+        case .checks: "checks"
         case .backgroundWork: "backgroundWork"
         case .changedFiles: "changedFiles"
         case .queued: "queued"
@@ -152,6 +153,7 @@ final class TimelineListView: NSView {
         case .error: ErrorRowView(frame: .zero)
         case .notice: NoticeRowView(frame: .zero)
         case .advisory: AdvisoryRowView(frame: .zero)
+        case .checks: ChecksRowView(frame: .zero)
         case .backgroundWork: BackgroundWorkRowView(frame: .zero)
         case .changedFiles: ChangedFilesRowView(frame: .zero)
         case .queued: QueuedMessageRowView(frame: .zero)

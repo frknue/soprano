@@ -51,8 +51,10 @@ The installer never restarts a running Soprano Agents; the update applies on the
    here" rewinds the thread (and optionally the files) to before that turn.
 6. The right panel (`⌘L`) keeps tabs per thread, as in T3 Code: Diff, Files (`⇧⌘F`: browse and
    search the thread's workspace; ignored files stay out) with a read-only, syntax-colored tab per
-   opened file, and terminals (`⇧⌘J`) next to the bottom drawer's. `+` adds a surface; with every
-   tab closed, "Open a surface" offers Terminal (`T`), Files (`F`) and Diff (`D`).
+   opened file — Markdown files open in Soprano's reader (links to other files open their tab,
+   `⇧⌘V` or the eye button shows the source) —, and terminals (`⇧⌘J`) next to the bottom
+   drawer's. `+` adds a surface; with every tab closed, "Open a surface" offers Terminal (`T`),
+   Files (`F`) and Diff (`D`).
 7. The ring next to Send shows how full the context window is; click it to compact the
    conversation (or send `/compact`). Type `/` at the start of a line for omp's commands and
    skills: ↑/↓ choose, Enter or Tab insert, Esc closes.
@@ -105,7 +107,8 @@ right-panel tab) has focus.
 | Toggle Files | `⇧⌘F` | not terminal |
 | New Terminal in Right Panel | `⇧⌘J` | everywhere |
 | Close Tab | `⌘W` | right panel |
-| Find in Panel (find bar in a file tab, search in Files, else Find in Thread) | `⌘F` | right panel |
+| Find in Panel (find bar in a file tab — a Markdown preview switches to its source —, search in Files, else Find in Thread) | `⌘F` | right panel |
+| Toggle Markdown Preview (a Markdown file tab's reader or source) | `⇧⌘V` | right panel |
 | New Terminal | `⌘N` | terminal (drawer or right-panel tab) |
 | Close Terminal | `⌘W` | terminal (drawer or right-panel tab) |
 | Open in Editor | `⌘O` | everywhere |

@@ -513,12 +513,18 @@ final class FilesSurfaceViewController: NSViewController, NSOutlineViewDataSourc
     }
 }
 
-/// Background of the Files surface.
+/// Background of the Files surface and the file viewer.
 final class FilesSurfaceRootView: PaletteView {
+    /// The file viewer's root holds the keyboard while nothing focusable shows ("Loading…", an
+    /// image, a note), so the right panel keeps focus and its shortcuts.
+    var acceptsFocus = false
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         applyPalette(palette)
     }
+
+    override var acceptsFirstResponder: Bool { acceptsFocus }
 
     override func applyPalette(_ palette: Palette) {
         layer?.backgroundColor = palette.background.cgColor

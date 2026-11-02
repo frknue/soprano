@@ -6,6 +6,8 @@ import SopranoAgentsCore
 struct TimelineExpansion: Hashable, Sendable {
     /// Finished turns whose "Worked for …" fold is open.
     var turns: Set<String> = []
+    /// Finished turns whose checks (advisor reviews, double-checks after the first answer) are open.
+    var checks: Set<String> = []
     /// Work groups (and live work rows) showing their entries.
     var groups: Set<String> = []
     /// Work entries showing their output.
@@ -92,6 +94,27 @@ struct AdvisoryRowModel: Hashable, Sendable {
     var date: Date
 }
 
+/// One check that woke the agent after a finished turn's first answer (an advisor review, omp's
+/// auto-double-check) and how the agent's reply to it opens.
+struct CheckPassModel: Hashable, Sendable {
+    /// "Final reviewer", "Double-check"; several when they woke the agent together.
+    var sources: [String]
+    /// The most serious advisor note; nil when no advisor took part.
+    var severity: AdvisorNote.Severity?
+    /// The reply's opening prose (`TimelineBuilder.openingProse`); nil when the agent did not reply.
+    var outcome: String?
+    /// The first advisor note's opening prose, shown when the agent did not reply.
+    var note: String?
+}
+
+/// "2 checks after this answer" under a finished turn's first answer: one line per check while
+/// closed; open, the checks' notes, replies and work follow it.
+struct ChecksRowModel: Hashable, Sendable {
+    var turnID: String
+    var passes: [CheckPassModel]
+    var expanded: Bool
+}
+
 enum TimelineRowContent: Hashable, Sendable {
     case user(UserRowModel)
     case fold(FoldRowModel)
@@ -105,6 +128,7 @@ enum TimelineRowContent: Hashable, Sendable {
     case error(message: String, date: Date)
     case notice(text: String)
     case advisory(AdvisoryRowModel)
+    case checks(ChecksRowModel)
     /// "Background work still running…" under a yielded turn.
     case backgroundWork
     case changedFiles(ChangedFilesModel)
@@ -133,10 +157,14 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 /// - Each turn: the user message, then "Working for" while it runs ("Stopping…" once Stop was
 ///   pressed, without "Thinking"), or a "Worked for …" fold when
 ///   it finished (closed by default; it hides commentary and work, never an answer or a card). A
-///   turn can answer more than once (omp's auto-double-check or an advisor review wakes the agent
-///   after its answer), so every final answer stays out of the fold. A yielded
-///   turn (answer final, background work still running) shows as finished, with a
+///   yielded turn (answer final, background work still running) shows as finished, with a
 ///   "Background work still running…" note at its end.
+/// - A turn can answer more than once: an advisor review or omp's auto-double-check wakes the
+///   agent after its answer. A completed turn that background work never woke keeps its first
+///   answer (the recap) as its answer, with the changed files under it, and closes everything
+///   after it behind one checks row that names each check and the opening prose of the agent's
+///   reply to it (errors and failed work after the last message stay out). Open, the checks show
+///   as while the turn ran: every final answer stays out of the fold.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
 ///   or a single entry row when the group holds one tool call.
 /// - A running turn's trailing tools become one live row; "Thinking" ends a running turn that
@@ -189,7 +217,27 @@ enum TimelineBuilder {
         let terminalID = turn.items.last { if case .assistantMessage = $0.kind { return true } else { return false } }?.id
         let terminalIndex = terminalID.flatMap { id in turn.items.firstIndex { $0.id == id } } ?? turn.items.count
 
-        // Which items the closed fold hides.
+        // Checks after the first answer: the closed checks row hides them. Only a completed turn
+        // that background work never woke has them (stopped, failed, yielded and woken turns
+        // show every answer). Errors and failed work after the last message stay out.
+        let checks = turn.status == .completed && turn.wokenAt == nil ? checkSection(of: turn) : nil
+        let checksOpen = expansion.checks.contains(turn.id)
+        var checkHidden: Set<String> = []
+        if let checks, !checksOpen {
+            for index in turn.items.indices.dropFirst(checks.start) {
+                let item = turn.items[index]
+                switch item.kind {
+                case .error: continue
+                case .reasoning, .command, .fileChange, .toolCall, .webSearch:
+                    if index > terminalIndex, item.status == .failed { continue }
+                default: break
+                }
+                checkHidden.insert(item.id)
+            }
+        }
+
+        // Which items the closed fold hides (work behind the checks row counts, so the fold row
+        // does not come and go with the checks).
         var hidden: Set<String> = []
         if !isRunning, status != .failed {
             for (index, item) in turn.items.enumerated() where hidesInFold(item, index: index, terminalIndex: terminalIndex, terminalID: terminalID) {
@@ -211,7 +259,7 @@ enum TimelineBuilder {
         }
         var placedChangedFiles = false
 
-        let pieces = interleave(turn.items.filter { foldOpen || !hidden.contains($0.id) }, steers: turn.steers)
+        let pieces = interleave(turn.items.filter { !checkHidden.contains($0.id) && (foldOpen || !hidden.contains($0.id)) }, steers: turn.steers)
         var group: [WorkLogEntry] = []
         var hasLiveActivity = false
         var waitsOnUser = false
@@ -274,7 +322,8 @@ enum TimelineBuilder {
                     let isTerminal = item.id == terminalID && !isRunning
                     let showMeta = isTerminal || (isFinal && !item.status.isActive)
                     var files: ChangedFilesModel?
-                    if isTerminal, let changedFiles {
+                    // With checks, the recap carries the turn's changed files.
+                    if item.id == (checks?.recapID ?? terminalID), !isRunning, let changedFiles {
                         files = changedFiles
                         placedChangedFiles = true
                     }
@@ -286,6 +335,11 @@ enum TimelineBuilder {
                         date: item.completedAt ?? item.startedAt,
                         changedFiles: files
                     ))))
+                    if let checks, item.id == checks.recapID {
+                        rows.append(TimelineRow(id: "checks:\(turn.id)", content: .checks(ChecksRowModel(
+                            turnID: turn.id, passes: checks.passes, expanded: checksOpen
+                        ))))
+                    }
                 case let .error(message):
                     flushGroup(trailing: false)
                     rows.append(TimelineRow(id: "error:\(item.id)", content: .error(message: message, date: item.startedAt)))
@@ -361,6 +415,137 @@ enum TimelineBuilder {
         }
     }
 
+    private struct CheckSection {
+        /// The turn's first final answer.
+        var recapID: String
+        /// Index of the first item after the recap the checks row holds.
+        var start: Int
+        var passes: [CheckPassModel]
+    }
+
+    /// The checks after a turn's first final answer: from the first advisor review, or
+    /// auto-double-check notice right after an answer, that follows it. nil when the user steered
+    /// after the answer, the agent answered again unprompted, or nothing woke it to reply.
+    /// Triggers with no reply between them form one pass; other notices (compaction, retries)
+    /// are neither.
+    private static func checkSection(of turn: Turn) -> CheckSection? {
+        guard let recapIndex = turn.items.firstIndex(where: {
+            if case .assistantMessage(_, true) = $0.kind { true } else { false }
+        }) else { return nil }
+        let recap = turn.items[recapIndex]
+        let answeredAt = recap.completedAt ?? recap.startedAt
+        guard !turn.steers.contains(where: { $0.createdAt >= answeredAt }) else { return nil }
+
+        var start: Int?
+        var passes: [CheckPassModel] = []
+        var current: CheckPassModel?
+        var afterAnswer = true
+        func trigger(_ sources: [String], severity: AdvisorNote.Severity?, note: String? = nil, at index: Int) {
+            if start == nil { start = index }
+            if let pass = current, pass.outcome != nil {
+                passes.append(pass)
+                current = nil
+            }
+            var pass = current ?? CheckPassModel(sources: [])
+            for source in sources where !pass.sources.contains(source) { pass.sources.append(source) }
+            if let severity, severityRank(severity) > pass.severity.map(severityRank) ?? -1 { pass.severity = severity }
+            if pass.note == nil { pass.note = note }
+            current = pass
+        }
+        for index in turn.items.indices.dropFirst(recapIndex + 1) {
+            let item = turn.items[index]
+            switch item.kind {
+            case let .advisory(notes):
+                let worst = notes.map(\.severity).max { severityRank($0) < severityRank($1) }
+                trigger(notes.map { $0.advisor ?? "Advisor" }, severity: worst, note: notes.first.flatMap { openingProse($0.text) }, at: index)
+            case let .notice(text) where afterAnswer && isDoubleCheck(text):
+                trigger(["Double-check"], severity: nil, at: index)
+            case let .assistantMessage(text, isFinal):
+                guard current != nil else { return nil }
+                // The pass's final answer is its reply; commentary only stands in until one comes.
+                if isFinal || current?.outcome == nil, let prose = openingProse(text) { current?.outcome = prose }
+                afterAnswer = isFinal
+            case .command, .fileChange, .toolCall, .webSearch, .approval, .userInput:
+                afterAnswer = false
+            case .reasoning, .error, .notice:
+                break
+            }
+        }
+        if let pass = current, pass.outcome != nil || pass.severity != nil { passes.append(pass) }
+        guard let start, !passes.isEmpty else { return nil }
+        return CheckSection(recapID: recap.id, start: start, passes: passes)
+    }
+
+    private static func severityRank(_ severity: AdvisorNote.Severity) -> Int {
+        switch severity {
+        case .nit: 0
+        case .concern: 1
+        case .blocker: 2
+        }
+    }
+
+    /// omp's auto-double-check notice ("auto-double-check: second pass before finishing").
+    private static func isDoubleCheck(_ notice: String) -> Bool {
+        notice.localizedCaseInsensitiveContains("double-check")
+    }
+
+    /// About four lines of the checks row's reply column.
+    private static let proseBudget = 480
+
+    /// How a reply reads at a glance, inline Markdown removed: its prose from the top, paragraph
+    /// after paragraph, until about four lines' worth (`proseBudget` characters). Headings,
+    /// all-bold title lines ("**Double-check report**"), tables, fences and rules are skipped;
+    /// list items read as sentences. More than the first sentence or paragraph: a correction often
+    /// comes later ("I changed PR #47 after the review. … that changes my earlier conclusion", a
+    /// report's "**Defects:** …" under its table). A reply without prose gives its table rows.
+    static func openingProse(_ markdown: String) -> String? {
+        var parts: [String] = []
+        var length = 0
+        var tableRows: [String] = []
+        var title: String?
+        var inFence = false
+        for raw in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.hasPrefix("```") || line.hasPrefix("~~~") {
+                inFence.toggle()
+                continue
+            }
+            if inFence || line.isEmpty || line.allSatisfy({ "-*_= ".contains($0) }) { continue }
+            if line.hasPrefix("|") {
+                let cells = line.split(separator: "|").map { plainInline(String($0)) }
+                    .filter { !$0.isEmpty && !$0.allSatisfy { "-: ".contains($0) } }
+                if !cells.isEmpty { tableRows.append(cells.joined(separator: " · ")) }
+                continue
+            }
+            let text = plainInline(line)
+            guard !text.isEmpty else { continue }
+            let isHeading = line.range(of: #"^#{1,6}(\s|$)"#, options: .regularExpression) != nil
+            let isBoldTitle = line.hasPrefix("**") && line.hasSuffix("**") && line.components(separatedBy: "**").count == 3
+            if isHeading || isBoldTitle {
+                if title == nil { title = text }
+                continue
+            }
+            parts.append(text)
+            length += text.count + 1
+            if length >= proseBudget { break }
+        }
+        if !parts.isEmpty { return parts.joined(separator: " ") }
+        if !tableRows.isEmpty { return tableRows.joined(separator: " / ") }
+        return title
+    }
+
+    /// One Markdown line as it reads: heading, quote and list markers, links, emphasis and code
+    /// ticks removed ("#47" stays: a heading marker needs a space after it).
+    private static func plainInline(_ line: String) -> String {
+        var text = line
+        for pattern in [#"^#{1,6}\s+"#, #"^(>\s?)+"#, #"^[-*+]\s+"#] {
+            text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        text = text.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        for marker in ["**", "__", "`"] { text = text.replacingOccurrences(of: marker, with: "") }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Items in order with each steer placed before the first item that started after it.
     private static func interleave(_ items: [TurnItem], steers: [UserMessage]) -> [Piece] {
         var pieces: [Piece] = []
@@ -395,6 +580,7 @@ enum TimelineBuilder {
                 if continues { 0 } else { model.grouped ? 4 : 8 }
             case .thinking, .approval: continues ? 0 : 8
             case .error, .notice, .advisory, .queued: 8
+            case let .checks(model): model.expanded ? 8 : 16
             case .backgroundWork: 16
             case .empty: 0
             }

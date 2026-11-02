@@ -6,6 +6,7 @@ import SopranoAgentsCore
 @MainActor
 protocol TimelineRowDelegate: AnyObject {
     func timelineToggleFold(turnID: String)
+    func timelineToggleChecks(turnID: String)
     func timelineToggleGroup(_ groupID: String)
     func timelineToggleEntry(_ itemID: String)
     func timelineToggleMessage(_ messageID: String)

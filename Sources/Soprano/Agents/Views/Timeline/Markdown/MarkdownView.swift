@@ -144,9 +144,12 @@ final class MarkdownLayoutManager: NSLayoutManager {
     }
 }
 
-/// Read-only, selectable rendered text (no insets, no padding), links open in the browser.
+/// Read-only, selectable rendered text (no insets, no padding), links open in the browser unless
+/// `linkHandler` takes them.
 final class MarkdownTextView: NSTextView {
     let markdownLayoutManager = MarkdownLayoutManager()
+    /// Link clicks go here first; true = handled, else the URL opens in its default app.
+    var linkHandler: ((URL) -> Bool)?
 
     init() {
         let storage = NSTextStorage()
@@ -178,6 +181,12 @@ final class MarkdownTextView: NSTextView {
     func setText(_ text: NSAttributedString) {
         guard textStorage?.isEqual(to: text) != true else { return }
         textStorage?.setAttributedString(text)
+    }
+
+    override func clicked(onLink link: Any, at charIndex: Int) {
+        let url = (link as? URL) ?? (link as? String).flatMap { URL(string: $0) }
+        if let url, linkHandler?(url) == true { return }
+        super.clicked(onLink: link, at: charIndex)
     }
 
     func setWidth(_ width: CGFloat, height: CGFloat) {
@@ -296,6 +305,9 @@ final class MarkdownTableView: PaletteView {
     private var table = MarkdownTableRendering(alignments: [], header: [], rows: [])
     private var cellViews: [MarkdownTextView] = []
     private var separators: [NSView] = []
+    var linkHandler: ((URL) -> Bool)? {
+        didSet { cellViews.forEach { $0.linkHandler = linkHandler } }
+    }
 
     static let cellPadding = NSSize(width: 12, height: 7)
     static let headerPadding: CGFloat = 9
@@ -305,6 +317,7 @@ final class MarkdownTableView: PaletteView {
         let cells = table.header + table.rows.flatMap { $0 }
         while cellViews.count < cells.count {
             let view = MarkdownTextView()
+            view.linkHandler = linkHandler
             cellViews.append(view)
             addSubview(view)
         }
@@ -458,6 +471,60 @@ final class MarkdownRuleView: PaletteView {
     }
 }
 
+// MARK: - Image
+
+/// An image block of a document: the image at its natural size, scaled down to the width,
+/// rounded 8 (Soprano's reader); its alt text in muted italics until the image arrives or when
+/// it can't be shown.
+final class MarkdownImageView: PaletteView {
+    static let placeholderHeight: CGFloat = 26
+
+    private let imageView = NSImageView()
+    private let altLabel = NSTextField.label(size: Typography.bodySize)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 8
+        imageView.layer?.masksToBounds = true
+        altLabel.font = NSFontManager.shared.convert(Typography.ui(Typography.bodySize), toHaveTrait: .italicFontMask)
+        altLabel.lineBreakMode = .byTruncatingTail
+        addSubview(imageView)
+        addSubview(altLabel)
+        applyPalette(palette)
+    }
+
+    func configure(source: String, alt: String, image: NSImage?) {
+        imageView.image = image
+        imageView.setAccessibilityLabel(alt.isEmpty ? source : alt)
+        imageView.isHidden = image == nil
+        altLabel.stringValue = alt.isEmpty ? source : alt
+        altLabel.toolTip = source
+        altLabel.isHidden = image != nil
+        needsLayout = true
+    }
+
+    /// The image's natural size (points), scaled down to `width`; the alt line without an image.
+    static func size(of image: NSImage?, width: CGFloat) -> NSSize {
+        guard let image, image.size.width > 0, image.size.height > 0 else {
+            return NSSize(width: max(0, width), height: placeholderHeight)
+        }
+        let fitted = min(max(0, width), image.size.width)
+        return NSSize(width: fitted, height: (image.size.height * fitted / image.size.width).rounded())
+    }
+
+    override func layout() {
+        super.layout()
+        imageView.frame = bounds
+        altLabel.frame = NSRect(x: 0, y: (bounds.height - 18) / 2, width: bounds.width, height: 18)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        altLabel.textColor = palette.mutedForeground
+    }
+}
+
 // MARK: - Markdown view
 
 /// Lays out a `MarkdownRendering` top to bottom at a width. Height comes from `TextMeasure`,
@@ -466,6 +533,15 @@ final class MarkdownView: PaletteView {
     private(set) var rendering: MarkdownRendering?
     private var segmentViews: [NSView] = []
     private var quoteColor: NSColor = .clear
+    /// Pictures of the rendering's image blocks by source; the owner loads them (lay out again
+    /// after changing them).
+    var images: [String: NSImage] = [:] {
+        didSet { configureImages() }
+    }
+    /// Link clicks of the text and table cells; true = handled, else the URL opens in its default app.
+    var linkHandler: ((URL) -> Bool)? {
+        didSet { applyLinkHandler() }
+    }
 
     func apply(_ rendering: MarkdownRendering) {
         guard rendering !== self.rendering else { return }
@@ -487,26 +563,82 @@ final class MarkdownView: PaletteView {
                 return view
             case .rule:
                 return MarkdownRuleView(frame: .zero)
+            case .image:
+                return MarkdownImageView(frame: .zero)
             }
         }
         segmentViews.forEach(addSubview)
+        configureImages()
+        applyLinkHandler()
         applyPalette(palette)
     }
 
-    static func height(of rendering: MarkdownRendering, width: CGFloat) -> CGFloat {
+    private func configureImages() {
+        guard let rendering else { return }
+        for (piece, view) in zip(rendering.pieces, segmentViews) {
+            guard case let .image(source, alt, _) = piece.segment, let imageView = view as? MarkdownImageView else { continue }
+            imageView.configure(source: source, alt: alt, image: images[source])
+        }
+    }
+
+    private func applyLinkHandler() {
+        for view in segmentViews {
+            (view as? MarkdownTextView)?.linkHandler = linkHandler
+            (view as? MarkdownTableView)?.linkHandler = linkHandler
+        }
+    }
+
+    /// A point in the rendering that survives relayout: a segment and the distance into it.
+    struct ReadingPosition {
+        var segment: Int
+        var offset: CGFloat
+    }
+
+    /// The segment at or below `y` (this view's coordinates) and `y`'s distance from its top
+    /// (negative in the gap above it).
+    func readingPosition(at y: CGFloat) -> ReadingPosition? {
+        guard let last = segmentViews.indices.last else { return nil }
+        let index = segmentViews.firstIndex { $0.frame.maxY > y } ?? last
+        return ReadingPosition(segment: index, offset: y - segmentViews[index].frame.minY)
+    }
+
+    func y(of position: ReadingPosition) -> CGFloat? {
+        guard position.segment < segmentViews.count else { return nil }
+        return segmentViews[position.segment].frame.minY + position.offset
+    }
+
+    /// Top of the heading whose anchor (`.markdownAnchor`) is `slug`, in this view's coordinates.
+    func anchorTop(_ slug: String) -> CGFloat? {
+        guard let rendering else { return nil }
+        for (index, piece) in rendering.pieces.enumerated() {
+            guard case let .text(text) = piece.segment else { continue }
+            var found: NSRange?
+            text.enumerateAttribute(.markdownAnchor, in: NSRange(location: 0, length: text.length)) { value, range, stop in
+                if value as? String == slug {
+                    found = range
+                    stop.pointee = true
+                }
+            }
+            if let found, let rect = findRect(unit: index, range: found) { return rect.minY }
+        }
+        return nil
+    }
+
+    static func height(of rendering: MarkdownRendering, width: CGFloat, images: [String: NSImage] = [:]) -> CGFloat {
         var y: CGFloat = 0
         for piece in rendering.pieces {
-            y += piece.spacingBefore + segmentHeight(piece.segment, width: width)
+            y += piece.spacingBefore + segmentHeight(piece.segment, width: width, images: images)
         }
         return ceil(y)
     }
 
-    private static func segmentHeight(_ segment: MarkdownSegment, width: CGFloat) -> CGFloat {
+    private static func segmentHeight(_ segment: MarkdownSegment, width: CGFloat, images: [String: NSImage]) -> CGFloat {
         switch segment {
         case let .text(text): TextMeasure.height(text, width: width)
         case let .code(_, _, highlighted, indent): CodeBlockView.height(highlighted: highlighted, width: width - indent)
         case let .table(table, indent): MarkdownTableView.height(table, width: width - indent)
         case .rule: 1
+        case let .image(source, _, indent): MarkdownImageView.size(of: images[source], width: width - indent).height
         }
     }
 
@@ -533,6 +665,10 @@ final class MarkdownView: PaletteView {
             case let .rule(indent):
                 view.frame = NSRect(x: indent, y: y, width: width - indent, height: 1)
                 y += 1
+            case let .image(source, _, indent):
+                let size = MarkdownImageView.size(of: images[source], width: width - indent)
+                view.frame = NSRect(origin: NSPoint(x: indent, y: y), size: size)
+                y += size.height
             }
         }
         frame.size = NSSize(width: width, height: ceil(y))

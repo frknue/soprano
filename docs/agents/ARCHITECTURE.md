@@ -97,7 +97,8 @@ Engine behavior:
   checkpoint is captured, and a queued message starts after a completed yield. The turn stays
   open: `turnResumed` (background work woke the agent) clears `yieldedAt`, sets `resumedAt`
   (answers before it stop counting as the last word for the timeline's "Thinking"; cleared when
-  the turn ends) and the run streams into it; `turnCompleted` ends it at
+  the turn ends) and, on the first wake, `wokenAt` (kept: the timeline shows every answer of a
+  woken turn instead of folding later ones as checks), and the run streams into it; `turnCompleted` ends it at
   `completedAt = yieldedAt` (or now after a resumed run).
   Anything that starts new work first ends the yielded turn (`releaseYieldedTurn`): `send`,
   `sendQueuedNow`, the queue, `compact`, `revert` call `ProviderSession.releaseYieldedTurn()`
@@ -228,8 +229,15 @@ relaunch), `tool_execution_start|update|end` → bash → command, write/edit/as
 marks its text final (the timeline drops "Thinking" under it and keeps every final answer out of
 the closed fold; a resume keeps the flag, `Turn.resumedAt` brings "Thinking" back); an
 advisor review (`message_end` of `role:"custom"`, `customType:"advisor"`, `details.notes[{note,
-severity, advisor}]`) → `advisory` (one timeline row per note, never folded; one arriving after
-the turn ended joins the latest turn); compaction/retry → notices. Subagents: `set_subagent_subscription {level:"events"}` after the
+severity, advisor}]`) → `advisory` (one timeline row per note, never in the "Worked for" fold; one
+arriving after the turn ended joins the latest turn); compaction/retry → notices. In a completed
+turn that background work never woke (`Turn.wokenAt`, kept after the turn ends), an advisory or
+an auto-double-check notice right after an answer that follows the first final answer (no steer
+after it) starts the checks: `TimelineBuilder` keeps that first answer as the recap with the
+changed files, and one `checks` row under it (closed by default, `TimelineExpansion.checks`;
+open while Find has a query) names each check and up to four lines of the reply's opening prose
+(`openingProse`), hiding everything after the recap but errors and failed work after the last
+message. Subagents: `set_subagent_subscription {level:"events"}` after the
 handshake (`try?`: older builds show none); `OmpSubagentMapper` folds `subagent_lifecycle`
 (status), `subagent_progress` (assignment, `lastIntent`, `resolvedModelIdentity`; repeats are
 dropped) and `subagent_event` (the subagent's own session events: `agent_start` opens a run,
@@ -366,7 +374,16 @@ changes and app activation, squeezes to 160 pt before the breadcrumb, and hides 
 launcher (`T`/`F`/`D` while it has focus; Terminal and Files need a workspace, so only a
 projectless draft disables them) and one controller per surface kind: `DiffSurfaceViewController`
 (drafts always show Uncommitted), `FilesSurfaceViewController` (explorer, search, context menu),
-`FileViewerViewController` (breadcrumbs, line numbers, syntax colors, images),
+`FileViewerViewController` (breadcrumbs, line numbers, syntax colors, images; `.md`/`.markdown`
+tabs open in `MarkdownReaderView`, Soprano's Markdown reader on the timeline renderer:
+`MarkdownStyle.document` sets New York 16/26 in a ≤ 920 pt column with ruled h2 headings and
+heading anchors, image-only paragraphs become image blocks loaded through
+`engine.readWorkspaceFile`, and `MarkdownReaderLink` resolves links — relative and `/`-rooted
+paths open file tabs inside the workspace, `#anchor` scrolls, http(s)/mailto go to the browser,
+anything else is refused; the eye button or `rightPanel.toggleMarkdownPreview` shows the source,
+which ⌘F also switches to for its find bar; files over
+`FileViewerViewController.maximumPreviewBytes` (128 KB) open as source, the reader lays out the
+whole document on the main thread),
 `TerminalSurfaceViewController` (focus region `.terminal`). Terminals, Files and the drawer work
 in a project draft (the project root); when the draft starts a "Current checkout" thread, its
 tabs and running terminals move to that thread (`ComposerViewController.onDraftLaunched`).
@@ -485,7 +502,8 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `files.search` | Search Files | — | — | Panels |
 | `rightPanel.newTerminal` | New Terminal in Right Panel | global | `cmd+shift+j` | Panels |
 | `rightPanel.closeTab` | Close Tab | rightPanel | `cmd+w` | Panels |
-| `rightPanel.find` | Find in Panel (file tab: find bar; Files: search; else Find in Thread) | rightPanel | `cmd+f` | Panels |
+| `rightPanel.find` | Find in Panel (file tab: find bar, a Markdown preview switches to its source; Files: search; else Find in Thread) | rightPanel | `cmd+f` | Panels |
+| `rightPanel.toggleMarkdownPreview` | Toggle Markdown Preview (reader ↔ source of a Markdown file tab) | rightPanel | `cmd+shift+v` | Panels |
 | `terminal.new` | New Terminal (drawer, or a panel tab when one has focus) | terminal | `cmd+n` | Panels |
 | `terminal.close` | Close Terminal (drawer, or the focused panel tab) | terminal | `cmd+w` | Panels |
 | `editor.openFavorite` | Open in Editor | global | `cmd+o` | Panels |
@@ -577,9 +595,9 @@ filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context car
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
 an advisor's Concern, "Background work still running…" row, Send instead of Stop);
 `--fixture answered` one whose final answer arrived while omp still wraps up the turn (Working,
-Stop, no "Thinking" row); `--fixture rechecked` a finished turn that answered twice (an advisor
-note and omp's auto-double-check woke the agent): the closed fold keeps both answers with their
-copy rows, the note and notice between them, and the changed files under the last;
+Stop, no "Thinking" row); `--fixture rechecked` a finished turn that answered three times (an
+advisor note, then omp's auto-double-check woke the agent): the recap with the changed files,
+then the closed "2 checks after this answer" row (`--perform timeline.expandAll` opens it);
 `--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
 `--fixture subagents` adds and selects a thread whose yielded turn started two subagents
 (running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture

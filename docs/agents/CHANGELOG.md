@@ -46,6 +46,12 @@ All notable changes to Soprano Agents are documented here. The format follows
   tab, `⌘F` in the panel opens a file tab's find bar or the Files search (Find in Thread
   elsewhere), tabs that don't fit scroll sideways, and with every tab closed "Open a surface"
   offers Terminal (`T`), Files (`F`) and Diff (`D`).
+- Markdown files (`.md`, `.markdown`) open in the Files tab as a rendered reader, as in
+  Soprano's Markdown reader: New York text in a centered column, headings, code blocks, tables,
+  task lists and the repository's own images. Links to other files open their tab (at the linked
+  heading), `#heading` links scroll, web links open in the browser. The eye button or
+  Toggle Markdown Preview (`⇧⌘V`) switches to the source; `⌘F` shows the source with its find bar.
+  Markdown files over 128 KB open as source.
 - A context meter next to Send shows how full the thread's context window is, read exactly from
   omp after every turn; click it for the token count and "Compact conversation" (also Compact
   Conversation in the command palette, or send `/compact`). omp's result appears as a notice in
@@ -122,13 +128,17 @@ All notable changes to Soprano Agents are documented here. The format follows
 - Once the agent has answered, the timeline no longer shows "Thinking" under the answer while
   omp wraps up the turn (advisor review, stop hooks); it returns if the agent works again.
 - omp's advisor reviews show in the timeline: each note sits under the agent's work with the
-  advisor's name and its severity (Nit, Concern, Blocker), stays visible when the turn is
-  folded, and is found by Find in Thread. A review that arrives after the turn ended joins that
-  turn instead of vanishing.
-- A turn that answers more than once (omp's auto-double-check or an advisor review sends the
-  agent back to work after its answer, or a background job wakes it) keeps every answer
-  visible when "Worked for …" is closed, each with its copy button and time; before, only the
-  last answer showed and the first recap hid inside the fold.
+  advisor's name and its severity (Nit, Concern, Blocker) and is found by Find in Thread. A
+  review that arrives after the turn ended joins that turn instead of vanishing.
+- A finished turn whose answer was checked (an advisor review or omp's auto-double-check sent
+  the agent back to work) ends with its first answer, the recap, and the changed files under it.
+  Below it, "2 checks after this answer" lists each check (advisor and severity, or
+  Double-check) with up to four lines of the agent's reply, so a correction such as "that
+  changes my earlier conclusion" shows without opening it; click it to open the notes, the
+  later answers and, with "Worked for …" open, their work. Before, the last check's reply ended
+  the turn and the recap sat above it among the other answers. Expand All Work opens the checks
+  too, and Find in Thread searches them while it has a query. Stopped or failed turns, and turns
+  a background job woke, keep every answer visible.
 - omp threads whose conversation holds a cut-off emoji or icon glyph no longer stall for a
   minute at the end of every turn: Stop ends the turn right away again, and replies to
   messages sent during that minute no longer go missing.

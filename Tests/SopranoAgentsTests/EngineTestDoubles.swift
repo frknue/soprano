@@ -254,9 +254,10 @@ enum EngineHarness {
         return thread.id
     }
 
-    /// Polls `condition` on the main actor until it holds or two seconds pass.
-    static func eventually(_ condition: () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(2)
+    /// Polls `condition` on the main actor until it holds or `timeout` passes. Views that load
+    /// files through the engine wait longer: the full parallel suite can stall a hop for seconds.
+    static func eventually(timeout: Duration = .seconds(2), _ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
         while !condition() {
             if ContinuousClock.now > deadline { return false }
             try? await Task.sleep(for: .milliseconds(2))

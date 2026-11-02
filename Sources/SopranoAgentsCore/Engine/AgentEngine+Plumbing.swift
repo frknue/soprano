@@ -396,6 +396,7 @@ extension AgentEngine {
             mutateTurn(threadID, turn.id) {
                 $0.yieldedAt = nil
                 $0.resumedAt = environment.now()
+                $0.wokenAt = $0.wokenAt ?? $0.resumedAt
             }
         case let .sessionEnded(error):
             sessionEnded(threadID, error: error)

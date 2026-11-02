@@ -332,10 +332,11 @@ struct EngineTurnTests {
         // The answer's live item settled at the yield.
         #expect(idle.turns.last?.items.first?.status == .completed)
         // The resume is recorded for the timeline (an earlier answer is no longer the last word)
-        // and forgotten once the turn ends.
+        // and forgotten once the turn ends; that a wake happened stays.
         #expect(idle.turns.last?.resumedAt == nil)
         #expect(woken.resumedAt != nil)
         #expect(engine.thread(threadID)?.turns.last?.resumedAt == nil)
+        #expect(engine.thread(threadID)?.turns.last?.wokenAt == woken.resumedAt)
     }
 
     @Test func aMessageToAYieldedThreadEndsThatTurnAndStartsANewOne() async throws {

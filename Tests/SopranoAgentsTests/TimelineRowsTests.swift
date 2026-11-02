@@ -189,46 +189,175 @@ struct TimelineRowsTests {
         #expect(ids(TimelineBuilder.rows(for: thread([noted]))) == ["user:m-t1", "fold:t1", "notice:n1"])
     }
 
-    @Test func advisorNotesStayOutOfTheFoldOneRowPerNoteWithoutBringingBackThinking() {
-        let notes = [AdvisorNote(text: "Run the tests.", severity: .concern, advisor: "Final reviewer"), AdvisorNote(text: "Typo in the commit.")]
+    @Test func anUnansweredReviewClosesUnderTheAnswerWithItsNoteAndOpensOneRowPerNote() {
+        let notes = [AdvisorNote(text: "Run the tests. Then say so.", severity: .concern, advisor: "Final reviewer"), AdvisorNote(text: "Typo in the commit.")]
         let reviewed = turn(items: [
             item("c1", .command(CommandExecution(command: "ls"))),
             item("a1", .assistantMessage(text: "Done.", isFinal: true)),
             item("v1", .advisory(notes)),
         ])
         let rows = TimelineBuilder.rows(for: thread([reviewed]))
-        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "advisory:v1:0", "advisory:v1:1"])
-        #expect(rows[3].content == .advisory(AdvisoryRowModel(note: notes[0], date: at(1))))
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1"])
+        #expect(rows[3].content == .checks(ChecksRowModel(turnID: "t1", passes: [
+            CheckPassModel(sources: ["Final reviewer", "Advisor"], severity: .concern, outcome: nil, note: "Run the tests. Then say so."),
+        ], expanded: false)))
+
+        let open = TimelineBuilder.rows(for: thread([reviewed]), expansion: TimelineExpansion(checks: ["t1"]))
+        #expect(ids(open) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "advisory:v1:0", "advisory:v1:1"])
+        #expect(open[4].content == .advisory(AdvisoryRowModel(note: notes[0], date: at(1))))
 
         var running = reviewed
         running.status = .running
-        #expect(ids(TimelineBuilder.rows(for: thread([running]))).last == "advisory:v1:1")
+        #expect(ids(TimelineBuilder.rows(for: thread([running]))).suffix(2) == ["advisory:v1:0", "advisory:v1:1"])
     }
 
-    @Test func aSecondPassKeepsTheFirstAnswerOutOfTheFold() {
-        let note = AdvisorNote(text: "Check the claims.", severity: .concern, advisor: "Final reviewer")
+    @Test func checksAfterTheRecapCloseUnderItWithEachReplysOpeningProseAndKeepErrorsOut() {
+        let first = AdvisorNote(text: "Check the claims.", severity: .concern, advisor: "Final reviewer")
+        let second = AdvisorNote(text: "Cap is 4 s.", severity: .nit, advisor: "Final reviewer")
         let rechecked = turn(items: [
             item("c1", .command(CommandExecution(command: "rg x"))),
             item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
-            item("v1", .advisory([note])),
+            item("v1", .advisory([first])),
             item("n1", .notice(text: "auto-double-check: second pass before finishing")),
             item("a2", .assistantMessage(text: "Re-checking.", isFinal: false)),
             item("c2", .command(CommandExecution(command: "swift test"))),
-            item("a3", .assistantMessage(text: "Second pass.", isFinal: true)),
+            item("e1", .error(message: "Tool crashed.")),
+            item("a3", .assistantMessage(text: "**Double-check report**\n\nThe second pass found one bug.\nIt is fixed.\n\n| # | Status |\n|---|---|", isFinal: true)),
+            item("v2", .advisory([second])),
+            item("c3", .command(CommandExecution(command: "swift test"))),
+            // A correction in the second sentence must survive into the closed row.
+            item("a4", .assistantMessage(text: "I changed [PR #47](https://x.test) after the review. **The reviewer was right**, and that changes my earlier conclusion: the audit stays red.\n\n- `a.swift`: fixed", isFinal: true)),
         ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+
         let rows = TimelineBuilder.rows(for: thread([rechecked]))
-        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "advisory:v1:0", "notice:n1", "assistant:a3"])
-        guard case let .assistant(first) = rows[2].content, case let .assistant(last) = rows[5].content else {
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "error:e1"])
+        guard case let .assistant(recap) = rows[2].content else {
             Issue.record("unexpected rows \(rows)")
             return
         }
-        #expect(first.showMeta)
-        #expect(first.changedFiles == nil)
-        #expect(last.showMeta)
-        #expect(last.changedFiles?.files.map(\.path) == ["A.swift"])
+        #expect(recap.showMeta)
+        #expect(recap.changedFiles?.files.map(\.path) == ["A.swift"])
+        #expect(rows[3].content == .checks(ChecksRowModel(turnID: "t1", passes: [
+            CheckPassModel(sources: ["Final reviewer", "Double-check"], severity: .concern, outcome: "The second pass found one bug. It is fixed.", note: "Check the claims."),
+            CheckPassModel(sources: ["Final reviewer"], severity: .nit, outcome: "I changed PR #47 after the review. The reviewer was right, and that changes my earlier conclusion: the audit stays red. a.swift: fixed", note: "Cap is 4 s."),
+        ], expanded: false)))
 
-        let open = TimelineBuilder.rows(for: thread([rechecked]), expansion: TimelineExpansion(turns: ["t1"]))
-        #expect(ids(open) == ["user:m-t1", "fold:t1", "entry:c1", "assistant:a1", "advisory:v1:0", "notice:n1", "assistant:a2", "entry:c2", "assistant:a3"])
+        let checks = TimelineBuilder.rows(for: thread([rechecked]), expansion: TimelineExpansion(checks: ["t1"]))
+        #expect(ids(checks) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "advisory:v1:0", "notice:n1", "error:e1", "assistant:a3", "advisory:v2:0", "assistant:a4"])
+        guard case let .assistant(last) = checks[9].content else { return }
+        #expect(last.showMeta)
+        #expect(last.changedFiles == nil)
+
+        let all = TimelineBuilder.rows(for: thread([rechecked]), expansion: TimelineExpansion(turns: ["t1"], checks: ["t1"]))
+        #expect(ids(all) == [
+            "user:m-t1", "fold:t1", "entry:c1", "assistant:a1", "checks:t1", "advisory:v1:0", "notice:n1",
+            "assistant:a2", "entry:c2", "error:e1", "assistant:a3", "advisory:v2:0", "entry:c3", "assistant:a4",
+        ])
+    }
+
+    @Test func onlyACheckThatWokeTheAgentWithoutTheUserCutsInClosesTheRest() {
+        let compacted = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true), at: 1),
+            item("n1", .notice(text: "Context compacted"), at: 3),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([compacted]))) == ["user:m-t1", "assistant:a1", "notice:n1"])
+
+        let steered = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true), at: 1),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing"), at: 4),
+            item("a2", .assistantMessage(text: "Docs too.", isFinal: true), at: 5),
+        ], steers: [UserMessage(id: "steer", text: "Also docs", createdAt: at(3), isSteer: true)])
+        #expect(ids(TimelineBuilder.rows(for: thread([steered]))) == ["user:m-t1", "assistant:a1", "user:steer", "notice:n1", "assistant:a2"])
+
+        // Compaction and retry notices neither start a check nor name one.
+        let noisy = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "Context compacted")),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .nit, advisor: "Final reviewer")])),
+            item("n2", .notice(text: "auto-double-check: second pass before finishing")),
+            item("n3", .notice(text: "Retrying (attempt 1 of 3): overloaded")),
+            item("a2", .assistantMessage(text: "Checked.", isFinal: true)),
+        ])
+        guard case let .checks(model) = TimelineBuilder.rows(for: thread([noisy]))[2].content else {
+            Issue.record("expected a checks row")
+            return
+        }
+        #expect(model.passes.map(\.sources) == [["Final reviewer", "Double-check"]])
+    }
+
+    @Test func stoppedAndWokenTurnsKeepEveryAnswerAndFailedWorkAfterTheLastReplyStaysVisible() {
+        let checkedItems = [
+            item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "Let me re-run the tests.", isFinal: false)),
+            item("c1", .command(CommandExecution(command: "swift test")), status: .interrupted),
+        ]
+        let stopped = turn(status: .interrupted, items: checkedItems)
+        #expect(ids(TimelineBuilder.rows(for: thread([stopped]))) == ["user:m-t1", "fold:t1", "assistant:a1", "notice:n1", "assistant:a2"])
+
+        // A background job's report after a review is no reply to it.
+        var woken = turn(items: [
+            item("a1", .assistantMessage(text: "Started the suite.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .concern)])),
+            item("c1", .command(CommandExecution(command: "cat log"))),
+            item("a2", .assistantMessage(text: "The suite finished: 3 tests fail.", isFinal: true)),
+        ])
+        woken.wokenAt = at(5)
+        #expect(ids(TimelineBuilder.rows(for: thread([woken]))) == ["user:m-t1", "fold:t1", "assistant:a1", "advisory:v1:0", "assistant:a2"])
+
+        let failedPush = turn(items: [
+            item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Push it.", severity: .concern)])),
+            item("a2", .assistantMessage(text: "Pushing the fix.", isFinal: true)),
+            item("c1", .command(CommandExecution(command: "git push", exitCode: 1)), status: .failed),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([failedPush]))) == ["user:m-t1", "assistant:a1", "checks:t1", "entry:c1"])
+    }
+
+    @Test func theWorkedForFoldStaysWhenOnlyTheClosedChecksHideWork() {
+        let checked = turn(items: [
+            item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Check it.")])),
+            item("c1", .command(CommandExecution(command: "swift test"))),
+            item("a2", .assistantMessage(text: "Checked.", isFinal: true)),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([checked]))) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1"])
+        let open = TimelineBuilder.rows(for: thread([checked]), expansion: TimelineExpansion(checks: ["t1"]))
+        #expect(ids(open) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "advisory:v1:0", "assistant:a2"])
+    }
+
+    @Test func aChecksReplyReadsAsItsProseUpToAboutFourLines() {
+        let report = """
+        **Double-check report**
+
+        | # | Status |
+        |---|---|
+        | 1 | verified |
+
+        Re-ran `swift test`: 214 tests pass.
+
+        **Defects:** `testBackoffCap` still expected 8 s, so my earlier claim was wrong.
+        """
+        #expect(TimelineBuilder.openingProse(report) == "Re-ran swift test: 214 tests pass. Defects: testBackoffCap still expected 8 s, so my earlier claim was wrong.")
+        #expect(TimelineBuilder.openingProse("#47 is merged.\n\nAll checks pass.") == "#47 is merged. All checks pass.")
+        #expect(TimelineBuilder.openingProse("## Result\n\n| # | Status |\n|---|---|\n| 1 | failing |") == "# · Status / 1 · failing")
+        #expect(TimelineBuilder.openingProse("```\nlog\n```\n**Done**") == "Done")
+        let long = Array(repeating: "A sentence of forty characters or so.", count: 40).joined(separator: "\n\n")
+        #expect((TimelineBuilder.openingProse(long)?.count ?? 0) < 560)
+
+        // The pass's final answer is its reply, even when commentary came first.
+        let pass = turn(items: [
+            item("a1", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "Let me re-run the tests.", isFinal: false)),
+            item("c1", .command(CommandExecution(command: "swift test"))),
+            item("a3", .assistantMessage(text: "| Requirement | Status |\n|---|---|\n| Cap | failing |", isFinal: true)),
+        ])
+        guard case let .checks(model) = TimelineBuilder.rows(for: thread([pass]))[3].content else {
+            Issue.record("expected a checks row")
+            return
+        }
+        #expect(model.passes.map(\.outcome) == ["Requirement · Status / Cap · failing"])
     }
 
     @Test func backgroundWorkThatWakesTheTurnBringsBackThinkingAndKeepsTheYieldedAnswer() {

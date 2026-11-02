@@ -5,6 +5,9 @@ extension NSAttributedString.Key {
     static let timelineInlineCode = NSAttributedString.Key("SopranoAgents.timelineInlineCode")
     /// Block quotes: x positions (from the text's left edge) of the 2 pt quote rules of a paragraph.
     static let timelineQuoteRules = NSAttributedString.Key("SopranoAgents.timelineQuoteRules")
+    /// Headings of a document rendering: the heading's anchor slug ("getting-started"), the
+    /// target of `#fragment` links.
+    static let markdownAnchor = NSAttributedString.Key("SopranoAgents.markdownAnchor")
 }
 
 /// How a piece of Markdown is set: the chat's assistant prose (14 pt, line height 1.625,
@@ -18,10 +21,15 @@ struct MarkdownStyle: Hashable {
     var usesMessageForeground = false
     /// Soft line breaks become hard ones (user messages).
     var lineBreaks = false
+    /// A Markdown file read in a file tab (Soprano's reader): New York, reader headings (h2
+    /// ruled) with anchors, paragraphs of only images as image blocks, compact sans tables.
+    var isDocument = false
 
     static let assistant = MarkdownStyle()
     static let user = MarkdownStyle(foregroundAlpha: 1, usesMessageForeground: true, lineBreaks: true)
     static let thought = MarkdownStyle(foregroundAlpha: 0.8, lineBreaks: true)
+    /// New York 16/26 in the foreground.
+    static let document = MarkdownStyle(fontSize: 16, foregroundAlpha: 1, isDocument: true)
 }
 
 /// A rendered table: attributed cells plus alignment.
@@ -39,6 +47,8 @@ enum MarkdownSegment {
     case code(language: String?, code: String, highlighted: NSAttributedString, indent: CGFloat)
     case table(MarkdownTableRendering, indent: CGFloat)
     case rule(indent: CGFloat)
+    /// An image on its own line in a document: `source` as written, shown by its owner's images.
+    case image(source: String, alt: String, indent: CGFloat)
 
     /// Text a find searches in this segment.
     var searchableText: String {
@@ -48,6 +58,7 @@ enum MarkdownSegment {
         case let .table(table, _):
             (table.header + table.rows.flatMap { $0 }).map(\.string).joined(separator: "\n")
         case .rule: ""
+        case let .image(_, alt, _): alt
         }
     }
 }
@@ -97,6 +108,24 @@ enum MarkdownRenderer {
         let rendering = MarkdownRendering(pieces: builder.finish(), style: style)
         cache[key] = rendering
         return rendering
+    }
+
+    /// A heading's anchor before de-duplication: case- and diacritic-folded letters and digits,
+    /// runs of anything else as one "-" ("Sign-in flow" → "sign-in-flow"), "section" when empty.
+    nonisolated static func anchorSlug(_ title: String) -> String {
+        let folded = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        var slug = ""
+        var needsDash = false
+        for scalar in folded.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                if needsDash, !slug.isEmpty { slug.append("-") }
+                slug.unicodeScalars.append(scalar)
+                needsDash = false
+            } else {
+                needsDash = true
+            }
+        }
+        return slug.isEmpty ? "section" : slug
     }
 
     /// Syntax colors for code, mapped onto palette tokens.
@@ -163,6 +192,8 @@ enum MarkdownRenderer {
         /// Margin before the current text segment's first paragraph.
         var textSegmentSpacing: CGFloat = 0
         var isFirstBlock = true
+        /// Anchor slugs handed out so far (a repeated heading gets "-1", "-2").
+        var slugCounts: [String: Int] = [:]
 
         init(style: MarkdownStyle, palette: Palette) {
             self.style = style
@@ -173,7 +204,16 @@ enum MarkdownRenderer {
             (style.usesMessageForeground ? palette.messageForeground : palette.foreground).timelineAlpha(style.foregroundAlpha)
         }
 
-        var blockMargin: CGFloat { (style.fontSize * 0.65 / 0.875).rounded() } // 0.65rem at 14 pt prose ≈ 10
+        /// Documents: Soprano's reader paragraph margin.
+        var blockMargin: CGFloat { style.isDocument ? 16 : (style.fontSize * 0.65 / 0.875).rounded() } // 0.65rem at 14 pt prose ≈ 10
+        /// Space a block asks above itself. Documents set block margins below only (Soprano's
+        /// `margin: 0 0 16px`), so a heading's own bottom margin is the gap under it.
+        var blockTop: CGFloat { style.isDocument ? 0 : blockMargin }
+
+        /// Prose face: New York in documents, else the UI font.
+        func proseFont(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+            style.isDocument ? Typography.serif(size, weight: weight) : Typography.ui(size, weight: weight)
+        }
 
         // MARK: Blocks
 
@@ -185,49 +225,82 @@ enum MarkdownRenderer {
             switch block {
             case let .paragraph(inlines):
                 let margin = context.tightSpacing ?? blockMargin
-                appendParagraph(inlines: inlines, font: Typography.ui(style.fontSize), color: context.color ?? bodyColor,
-                                lineHeight: style.fontSize * style.lineHeightMultiple, top: margin, bottom: margin, context: context)
-            case let .heading(level, inlines):
-                let size: CGFloat = switch level {
-                case 1: style.fontSize + 6
-                case 2: style.fontSize + 4
-                case 3: style.fontSize + 2
-                default: style.fontSize
+                let top = context.tightSpacing ?? blockTop
+                if style.isDocument, pendingMarker == nil, let images = Self.imagesOnly(inlines) {
+                    flushText()
+                    for image in images {
+                        appendSegment(.image(source: image.source, alt: image.alt, indent: context.indent), top: top, bottom: margin)
+                    }
+                    return
                 }
-                let color = level == 6 ? palette.mutedForeground : palette.foreground
-                appendParagraph(inlines: inlines, font: Typography.ui(size, weight: .semibold), color: color,
-                                lineHeight: (size * 1.3).rounded(), top: 20, bottom: 8, context: context)
+                appendParagraph(inlines: inlines, font: proseFont(style.fontSize), color: context.color ?? bodyColor,
+                                lineHeight: style.fontSize * style.lineHeightMultiple, top: top, bottom: margin, context: context)
+            case let .heading(level, inlines):
+                guard style.isDocument else {
+                    let size: CGFloat = switch level {
+                    case 1: style.fontSize + 6
+                    case 2: style.fontSize + 4
+                    case 3: style.fontSize + 2
+                    default: style.fontSize
+                    }
+                    let color = level == 6 ? palette.mutedForeground : palette.foreground
+                    appendParagraph(inlines: inlines, font: Typography.ui(size, weight: .semibold), color: color,
+                                    lineHeight: (size * 1.3).rounded(), top: 20, bottom: 8, context: context)
+                    return
+                }
+                // Soprano's reader: h1 28/34, h2 21/28 over a rule, h3 17/22 medium, h4–h6 16/26 semibold.
+                let (font, lineHeight, top, bottom): (NSFont, CGFloat, CGFloat, CGFloat) = switch level {
+                case 1: (Typography.serif(28), 34, 0, 12)
+                case 2: (Typography.serif(21), 28, 28, 6)
+                case 3: (Typography.serif(17, weight: .medium), 22, 24, 8)
+                default: (Typography.serif(16, weight: .semibold), 26, 20, 6)
+                }
+                appendParagraph(inlines: inlines, font: font, color: palette.foreground, lineHeight: lineHeight, top: top, bottom: bottom,
+                                context: context, anchor: anchorSlug(MarkdownDocument.plainText(of: inlines)))
+                if level == 2 {
+                    flushText()
+                    appendSegment(.rule(indent: context.indent), top: 6, bottom: 10)
+                }
             case let .list(ordered, start, items):
                 renderList(ordered: ordered, start: start, items: items, context: context)
             case let .blockquote(blocks):
                 var inner = context
                 inner.quoteRules.append(context.indent)
                 inner.indent = context.indent + 2 + 12.8
+                // Documents mute quoted text (Soprano's reader).
+                if style.isDocument { inner.color = palette.mutedForeground }
                 let before = pendingMargin
-                pendingMargin = max(before, blockMargin)
+                pendingMargin = max(before, blockTop)
                 renderBlocks(blocks, context: inner)
                 pendingMargin = max(pendingMargin, blockMargin)
             case let .code(language, code):
                 flushText()
                 let highlighted = MarkdownRenderer.highlightedCode(code, language: language, palette: palette)
-                appendSegment(.code(language: language, code: code, highlighted: highlighted, indent: context.indent), top: blockMargin, bottom: blockMargin)
+                appendSegment(.code(language: language, code: code, highlighted: highlighted, indent: context.indent), top: blockTop, bottom: blockMargin)
             case let .table(table):
                 flushText()
-                appendSegment(.table(renderTable(table), indent: context.indent), top: blockMargin, bottom: blockMargin)
+                appendSegment(.table(renderTable(table), indent: context.indent), top: blockTop, bottom: blockMargin)
             case .thematicBreak:
                 flushText()
-                appendSegment(.rule(indent: context.indent), top: 16, bottom: 16)
+                let margin: CGFloat = style.isDocument ? 24 : 16
+                appendSegment(.rule(indent: context.indent), top: margin, bottom: margin)
             case let .html(source):
+                if style.isDocument {
+                    // Raw HTML stays visible as muted source, never interpreted (as in Soprano).
+                    appendParagraph(inlines: [.text(source)], font: Typography.mono(Typography.codeSize), color: palette.mutedForeground,
+                                    lineHeight: 20, top: blockTop, bottom: blockMargin, context: context)
+                    return
+                }
                 appendParagraph(inlines: [.text(source)], font: Typography.ui(style.fontSize), color: context.color ?? bodyColor,
                                 lineHeight: style.fontSize * style.lineHeightMultiple, top: blockMargin, bottom: blockMargin, context: context)
             }
         }
 
         mutating func renderList(ordered: Bool, start: Int, items: [MarkdownListItem], context: Context) {
-            let gutter: CGFloat = 20
-            let font = Typography.ui(style.fontSize)
+            let gutter: CGFloat = style.isDocument ? 24 : 20
+            let font = proseFont(style.fontSize)
             let listMargin = context.tightSpacing != nil ? 4 : blockMargin
-            pendingMargin = max(pendingMargin, listMargin)
+            pendingMargin = max(pendingMargin, context.tightSpacing != nil ? 4 : blockTop)
             for (index, item) in items.enumerated() {
                 var inner = context
                 inner.indent = context.indent + gutter
@@ -310,7 +383,8 @@ enum MarkdownRenderer {
             top: CGFloat,
             bottom: CGFloat,
             context: Context,
-            marker explicitMarker: (Marker, CGFloat, NSFont)? = nil
+            marker explicitMarker: (Marker, CGFloat, NSFont)? = nil,
+            anchor: String? = nil
         ) {
             let spacing = max(pendingMargin, top)
             let marker = explicitMarker ?? pendingMarker
@@ -362,6 +436,9 @@ enum MarkdownRenderer {
                 if !context.quoteRules.isEmpty {
                     text.addAttribute(.timelineQuoteRules, value: context.quoteRules, range: range)
                 }
+                if let anchor {
+                    text.addAttribute(.markdownAnchor, value: anchor, range: range)
+                }
             }
             // Consecutive paragraphs of one quote share the rule across their gap.
             if start < paragraphStart, start > 0, !context.quoteRules.isEmpty,
@@ -369,6 +446,34 @@ enum MarkdownRenderer {
                 text.addAttribute(.timelineQuoteRules, value: context.quoteRules, range: NSRange(location: start, length: 1))
             }
             pendingMargin = bottom
+        }
+
+        /// The paragraph's images when it holds nothing else (whitespace and breaks aside); an
+        /// image inside a link or next to text stays inline as its alt text.
+        static func imagesOnly(_ inlines: [MarkdownInline]) -> [(source: String, alt: String)]? {
+            var images: [(source: String, alt: String)] = []
+            for inline in inlines {
+                switch inline {
+                case let .image(source?, alt) where !source.isEmpty:
+                    images.append((source, alt))
+                case .softBreak, .lineBreak:
+                    continue
+                case let .text(value) where value.allSatisfy(\.isWhitespace):
+                    continue
+                default:
+                    return nil
+                }
+            }
+            return images.isEmpty ? nil : images
+        }
+
+        /// GitHub-style heading anchor: lowercased letters and digits joined by "-", unique in the
+        /// document (Soprano's reader slugs).
+        mutating func anchorSlug(_ title: String) -> String {
+            let slug = MarkdownRenderer.anchorSlug(title)
+            let count = slugCounts[slug, default: 0]
+            slugCounts[slug] = count + 1
+            return count == 0 ? slug : "\(slug)-\(count)"
         }
 
         func checkbox(_ checked: Bool, font: NSFont, baseline: CGFloat) -> NSAttributedString {
@@ -404,7 +509,9 @@ enum MarkdownRenderer {
                 case let .code(value):
                     let base = attributes[.font] as? NSFont ?? Typography.ui(style.fontSize)
                     var next = attributes
-                    next[.font] = Typography.mono((base.pointSize * 0.85).rounded(), weight: base.fontDescriptor.symbolicTraits.contains(.bold) ? .semibold : .regular)
+                    // Documents: SF Mono 13 at any size, as Soprano's reader sets `code`.
+                    let size = style.isDocument ? Typography.codeSize : (base.pointSize * 0.85).rounded()
+                    next[.font] = Typography.mono(size, weight: base.fontDescriptor.symbolicTraits.contains(.bold) ? .semibold : .regular)
                     next[.foregroundColor] = palette.foreground
                     next[.timelineInlineCode] = true
                     // Room for the chip's horizontal padding (0.35em each side).
@@ -438,10 +545,21 @@ enum MarkdownRenderer {
             }
         }
 
+        /// New York (document prose) keeps its design through italic and weight changes, which
+        /// `NSFontManager` conversions would drop.
+        func isSerif(_ font: NSFont) -> Bool {
+            style.isDocument && font.familyName == Typography.serif(font.pointSize).familyName
+        }
+
+        func italic(_ font: NSFont) -> NSFont {
+            let traits = font.fontDescriptor.symbolicTraits.union(.italic)
+            return NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(traits), size: font.pointSize) ?? font
+        }
+
         func with(_ attributes: [NSAttributedString.Key: Any], trait: NSFontTraitMask) -> [NSAttributedString.Key: Any] {
             var next = attributes
             if let font = attributes[.font] as? NSFont {
-                next[.font] = NSFontManager.shared.convert(font, toHaveTrait: trait)
+                next[.font] = isSerif(font) && trait == .italicFontMask ? italic(font) : NSFontManager.shared.convert(font, toHaveTrait: trait)
             }
             return next
         }
@@ -449,11 +567,16 @@ enum MarkdownRenderer {
         func withWeight(_ attributes: [NSAttributedString.Key: Any], _ weight: NSFont.Weight) -> [NSAttributedString.Key: Any] {
             var next = attributes
             if let font = attributes[.font] as? NSFont {
-                let italic = font.fontDescriptor.symbolicTraits.contains(.italic)
+                let isItalic = font.fontDescriptor.symbolicTraits.contains(.italic)
+                if isSerif(font) {
+                    let bold = Typography.serif(font.pointSize, weight: weight)
+                    next[.font] = isItalic ? italic(bold) : bold
+                    return next
+                }
                 var bold = font.fontDescriptor.symbolicTraits.contains(.monoSpace)
                     ? Typography.mono(font.pointSize, weight: weight)
                     : Typography.ui(font.pointSize, weight: weight)
-                if italic { bold = NSFontManager.shared.convert(bold, toHaveTrait: .italicFontMask) }
+                if isItalic { bold = NSFontManager.shared.convert(bold, toHaveTrait: .italicFontMask) }
                 next[.font] = bold
             }
             return next
@@ -462,8 +585,10 @@ enum MarkdownRenderer {
         // MARK: Tables
 
         func renderTable(_ table: MarkdownTable) -> MarkdownTableRendering {
-            let font = Typography.ui(style.fontSize)
-            let lineHeight = (style.fontSize * style.lineHeightMultiple).rounded()
+            // Documents: compact sans tables (Soprano's reader sets them in the system font 13/18).
+            let fontSize = style.isDocument ? Typography.codeSize : style.fontSize
+            let font = Typography.ui(fontSize)
+            let lineHeight = style.isDocument ? 18 : (style.fontSize * style.lineHeightMultiple).rounded()
             func cell(_ inlines: [MarkdownInline], header: Bool, alignment: NSTextAlignment) -> NSAttributedString {
                 let output = NSMutableAttributedString()
                 let paragraph = NSMutableParagraphStyle()
@@ -471,7 +596,7 @@ enum MarkdownRenderer {
                 paragraph.maximumLineHeight = lineHeight
                 paragraph.alignment = alignment
                 paragraph.lineBreakMode = .byWordWrapping
-                let cellFont = header ? Typography.ui(style.fontSize, weight: .semibold) : font
+                let cellFont = header ? Typography.ui(fontSize, weight: .semibold) : font
                 let baseline = (lineHeight - (cellFont.ascender - cellFont.descender)) / 4
                 appendInlines(inlines, attributes: [.font: cellFont, .foregroundColor: header ? palette.foreground : bodyColor, .baselineOffset: baseline], to: output)
                 output.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: output.length))
