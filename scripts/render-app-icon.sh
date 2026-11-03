@@ -13,6 +13,10 @@ if [[ $# -ne 0 ]]; then
 fi
 
 xcode_app="${XCODE_DIR:-/Applications/Xcode.app}"
+if [[ "$xcode_app" != /* ]]; then
+    echo "XCODE_DIR must be an absolute path: $xcode_app" >&2
+    exit 2
+fi
 ictool="$xcode_app/Contents/Applications/Icon Composer.app/Contents/Executables/ictool"
 if [[ ! -x "$ictool" ]]; then
     echo "Missing $ictool (needs Xcode 26 or later; set XCODE_DIR)" >&2
