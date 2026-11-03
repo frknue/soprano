@@ -174,6 +174,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   `X` now simply kills the active pane with all its pane tabs.
 - `⌘T` now opens a tab; a new terminal pane beside the focused one moved to `⌘D`
   (`new-terminal`).
+- The app icon is rendered from an Icon Composer document, so macOS draws its tile
+  shape, rim, and shadow like those of its own icons.
 
 ### Removed
 - Window depth: `⌃A` → `I` / `O`, the `‹ DEPTH n ›` pane header controls, the
