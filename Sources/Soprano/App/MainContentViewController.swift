@@ -623,7 +623,7 @@ final class MainContentViewController: NSViewController {
             controller.onAgentSelected = { [weak self] paneId, tabId in
                 guard let self else { return }
                 self.closeDashboard(restoreKeyboardFocus: false)
-                self.agentManager.focusTab(paneId: paneId, tabId: tabId)
+                self.agentManager.focusTab(paneId: paneId, tabId: tabId, revealInSidebar: true)
                 self.splitTreeView.restoreKeyboardFocus()
             }
             addChild(controller)

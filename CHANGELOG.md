@@ -183,6 +183,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- Opening an agent from the **Agent Dashboard** unfolds its window group in the sidebar
+  when it was collapsed, so the agent's pane row is visible.
 - OpenCode 2 panes report `WORKING`, `NEEDS INPUT`, and errors again, notify for
   approvals and questions quoting what is asked, and keep their conversation for
   restart. OpenCode 2 runs every session in one shared background server that never

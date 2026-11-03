@@ -130,6 +130,41 @@ struct AgentDashboardSnapshotTests {
         #expect(manager.panes[agentPaneId]?.activeTab?.id == agentTabId)
     }
 
+    @Test func openingTheAlreadyFocusedAgentFromTheDashboardStillUnfoldsItsGroupAndRefreshesTheSidebar() throws {
+        let manager = AgentManager()
+        let windowId = manager.activeWindowId
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.collapseAllSidebarWindows()
+        var changeCount = 0
+        let observerId = "dashboard-unfold-focused-test"
+        manager.addObserver(id: observerId) {
+            changeCount += 1
+        }
+        defer {
+            manager.removeObserver(id: observerId)
+        }
+
+        manager.focusTab(paneId: paneId, tabId: tabId, revealInSidebar: true)
+
+        #expect(manager.windows[windowId]?.isSidebarCollapsed == false)
+        #expect(changeCount == 1)
+    }
+
+    @Test func focusingATabFromItsPaneLeavesACollapsedWindowGroupFolded() throws {
+        let manager = AgentManager()
+        let windowId = manager.activeWindowId
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        _ = try #require(manager.createWindow())
+        manager.collapseAllSidebarWindows()
+
+        manager.focusTab(paneId: paneId, tabId: tabId)
+
+        #expect(manager.activeWindowId == windowId)
+        #expect(manager.windows[windowId]?.isSidebarCollapsed == true)
+    }
+
     private func entry(
         id: String,
         status: AgentStatus,
@@ -420,6 +455,61 @@ struct AgentDashboardViewTests {
         #expect(agentManager.activePaneId == claudePaneId)
         #expect(agentManager.activePaneId != codexPaneId)
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
+    }
+
+    @Test func openingAnAgentFromTheDashboardUnfoldsOnlyItsCollapsedWindowGroupInTheSidebar() throws {
+        let suiteName = "AgentDashboardUnfoldTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let agentManager = AgentManager()
+        let agentWindowId = agentManager.activeWindowId
+        let paneId = try #require(agentManager.spawnAgent("codex"))
+        let otherWindowId = try #require(agentManager.createWindow())
+        agentManager.collapseAllSidebarWindows()
+        let contentViewController = MainContentViewController(
+            agentManager: agentManager,
+            sessionManager: SessionManager(agentManager: agentManager, defaults: defaults),
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            gitBranchMonitor: GitBranchMonitor(),
+            defaults: defaults,
+            splitTreeViewFactory: { agentManager, themeManager in
+                SplitTreeView(
+                    agentManager: agentManager,
+                    themeManager: themeManager,
+                    terminalViewFactory: { _, _, _ in NSView() }
+                )
+            }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 1_100, height: 720),
+            styleMask: [.titled, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = contentViewController
+        let paneRows = {
+            allSubviews(in: contentViewController.view).filter {
+                $0.identifier?.rawValue == "sidebar-pane-\(paneId)"
+            }
+        }
+        contentViewController.view.layoutSubtreeIfNeeded()
+        #expect(paneRows().isEmpty)
+
+        contentViewController.showDashboard()
+        contentViewController.view.layoutSubtreeIfNeeded()
+        let dashboardRoot = try #require(
+            allSubviews(in: contentViewController.view)
+                .first { $0.identifier?.rawValue == "agent-dashboard" }
+        )
+        let enter = try #require(keyEvent(character: "\r", keyCode: 36, window: window))
+        #expect(dashboardRoot.performKeyEquivalent(with: enter))
+        contentViewController.view.layoutSubtreeIfNeeded()
+
+        #expect(agentManager.activePaneId == paneId)
+        #expect(paneRows().count == 1)
+        #expect(agentManager.windows[agentWindowId]?.isSidebarCollapsed == false)
+        #expect(agentManager.windows[otherWindowId]?.isSidebarCollapsed == true)
     }
 
     @Test func jFromTheDetailTextMovesTheSelectionAndGivesTheListKeyboardFocus() throws {

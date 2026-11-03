@@ -1200,18 +1200,28 @@ final class AgentManager: @unchecked Sendable {
         return agent
     }
 
-    func focusTab(paneId: String, tabId: String) {
+    /// Focuses one pane tab. `revealInSidebar` unfolds the window group the
+    /// sidebar lists it under, for jumps from outside the sidebar such as the
+    /// Agent Dashboard; clicks inside a pane leave the sidebar as it is.
+    func focusTab(paneId: String, tabId: String, revealInSidebar: Bool = false) {
         guard let pane = panes[paneId],
               let terminalWindow = window(containingPane: paneId),
               let index = pane.tabs.firstIndex(where: { $0.id == tabId })
         else { return }
 
+        let unfolded = revealInSidebar && terminalWindow.isSidebarCollapsed
+        if unfolded {
+            terminalWindow.isSidebarCollapsed = false
+        }
         let isAlreadyFocused = activeWindowId == terminalWindow.id
             && terminalWindow.layout?.containsLeaf(paneId) == true
             && terminalWindow.activePaneId == paneId
             && pane.activeTabIndex == index
         if isAlreadyFocused {
-            clearAttention(paneId: paneId, tabId: tabId)
+            let clearedAttention = clearAttentionWithoutNotification(paneId: paneId)
+            if clearedAttention || unfolded {
+                notifyChange()
+            }
         } else {
             exitMaximize()
             let windowChanged = activeWindowId != terminalWindow.id
