@@ -1,17 +1,20 @@
 import Foundation
 
-/// The agent CLIs whose own transcript the dashboard can read. Each keeps its
-/// conversation as JSON Lines in a different shape.
+/// The agent CLIs whose own transcript the dashboard can read. Claude Code,
+/// Codex and omp keep their conversations as JSON Lines, each in a different
+/// shape; OpenCode keeps them in a SQLite database.
 enum AgentTranscriptFormat: String, Sendable, CaseIterable {
     case claudeCode
     case codex
     case omp
+    case openCode
 
     init?(profileId: String) {
         switch profileId {
         case "claude-code": self = .claudeCode
         case "codex": self = .codex
         case "omp": self = .omp
+        case "opencode": self = .openCode
         default: return nil
         }
     }

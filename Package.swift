@@ -28,6 +28,8 @@ let package = Package(
                 .copy("Resources/AppIcon.icns"),
                 .copy("Resources/SopranoCopyMode.conf"),
                 .copy("Resources/SopranoOpenCodePlugin.js"),
+                .copy("Resources/SopranoOpenCode"),
+                .copy("Resources/SopranoOpenCodeAmbient"),
                 .copy("Resources/SopranoOmpExtension.js"),
                 .copy("Resources/SopranoOmpAmbient.js"),
                 .copy("Resources/SopranoZsh"),

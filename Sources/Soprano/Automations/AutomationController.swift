@@ -375,6 +375,8 @@ final class AutomationController {
         }()
         let worktreeDirectory = environment.worktreeDirectory
         let claudeConfig = automation.agentId == "claude-code" ? environment.claudeConfig : nil
+        let openCodeCommand = automation.agentId == "opencode" && automation.model != nil
+            ? AgentCatalog.profile(for: "opencode")?.command : nil
         let date = environment.now()
         let shell = environment.shell
         let folder = automation.folder
@@ -405,6 +407,17 @@ final class AutomationController {
                     configURL: claudeConfig
                 )
             }
+            if let openCodeCommand, proceeds, preparation.failure == nil {
+                let workingDirectory = preparation.checkout?.workingDirectory ?? folder
+                preparation.startsOpenCodeServer = Self.openCodeHasPrivateServer(
+                    command: openCodeCommand, folder: workingDirectory, shell: shell
+                )
+                if preparation.startsOpenCodeServer {
+                    preparation.openCodeAgents = Self.openCodePrimaryAgents(
+                        command: openCodeCommand, folder: workingDirectory, shell: shell
+                    )
+                }
+            }
             let result = preparation
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -419,6 +432,43 @@ final class AutomationController {
         var precheck: AutomationPrecheck.Outcome?
         var checkout: AutomationWorktree.Checkout?
         var failure: String?
+        /// The run's OpenCode takes its model through a private server.
+        var startsOpenCodeServer = false
+        /// Its agents the run's model is pinned on.
+        var openCodeAgents: [String] = []
+    }
+
+    /// OpenCode 2 lists `--standalone` in its help; OpenCode 1.x rejects the
+    /// flag. A CLI the login shell cannot run is taken for the current major.
+    /// Blocks; call it off the main thread.
+    nonisolated static func openCodeHasPrivateServer(command: String, folder: String, shell: String) -> Bool {
+        let quoted = "'" + command.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let help = AutomationPrecheck.run("exec \(quoted) --help", in: folder, timeout: 20, shell: shell)
+        guard help.passed else { return true }
+        return help.output.contains("--standalone")
+    }
+
+    /// The agents a session can start with. OpenCode 2's terminal UI prefers
+    /// an agent's own model over the top-level one, so a run's model is pinned
+    /// on each of them. Blocks; call it off the main thread.
+    nonisolated static func openCodePrimaryAgents(command: String, folder: String, shell: String) -> [String] {
+        let quoted = "'" + command.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let listed = AutomationPrecheck.run(
+            "exec \(quoted) debug agents --standalone 2>/dev/null",
+            in: folder, timeout: 30, shell: shell, keepingLast: .max
+        )
+        // Login files may print before the command; the list is the JSON array.
+        guard listed.passed,
+              let start = listed.output.firstIndex(of: "["),
+              let agents = try? JSONSerialization.jsonObject(with: Data(listed.output[start...].utf8)) as? [[String: Any]]
+        else { return [] }
+        return agents.compactMap { agent in
+            guard let id = agent["id"] as? String,
+                  agent["hidden"] as? Bool != true,
+                  ["primary", "all"].contains(agent["mode"] as? String)
+            else { return nil }
+            return id
+        }
     }
 
     private func prepared(_ runId: String, automation: Automation, preparation: Preparation) {
@@ -449,7 +499,13 @@ final class AutomationController {
             profileId: automation.agentId,
             cwd: workingDirectory,
             runId: runId,
-            launch: AgentLaunch(prompt: automation.prompt, model: automation.model, skipsApprovals: true)
+            launch: AgentLaunch(
+                prompt: automation.prompt,
+                model: automation.model,
+                skipsApprovals: true,
+                startsPrivateServer: preparation.startsOpenCodeServer,
+                modelAgents: preparation.openCodeAgents
+            )
         ) else {
             discard(preparation.checkout)
             store.update(runId) { $0.worktree?.removed = preparation.checkout != nil }
@@ -663,7 +719,7 @@ final class AutomationController {
     /// The agent's last reply from its transcript, for the CLIs that write one.
     nonisolated static func finalReply(profileId: String, conversation: AgentConversation, home: URL) -> String? {
         guard let source = AgentTranscriptSource(profileId: profileId, conversation: conversation) else { return nil }
-        let timeline = TranscriptFollower(source: source, home: home).readAppended()
+        let timeline = source.makeReader(home: home).readAppended()
         for item in timeline?.items.reversed() ?? [] {
             if case .reply(let text) = item.kind { return text }
         }

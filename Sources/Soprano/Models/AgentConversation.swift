@@ -4,8 +4,9 @@ import Foundation
 struct AgentConversation: Codable, Equatable {
     let id: String
     var cwd: String? = nil
-    /// The JSON Lines file the agent writes this conversation to, as its hooks
-    /// report it. Optional so workspaces saved before it existed still open.
+    /// The file the agent writes this conversation to, as its hooks report
+    /// it: JSON Lines, or OpenCode's SQLite database. Optional so workspaces
+    /// saved before it existed still open.
     var transcriptPath: String? = nil
 
     static func supports(profileId: String) -> Bool {
@@ -31,9 +32,9 @@ struct AgentConversation: Codable, Equatable {
         else { return nil }
         let cwd = (object["cwd"] as? String).flatMap { $0.hasPrefix("/") ? $0 : nil }
         // Claude Code and Codex hooks name the file; Soprano's omp extension
-        // forwards the same key.
+        // and OpenCode plugin forward the same key.
         let transcriptPath = (object["transcript_path"] as? String).flatMap {
-            $0.hasPrefix("/") && $0.hasSuffix(".jsonl") ? $0 : nil
+            $0.hasPrefix("/") && ($0.hasSuffix(".jsonl") || $0.hasSuffix(".db")) ? $0 : nil
         }
         return AgentConversation(id: id, cwd: cwd, transcriptPath: transcriptPath)
     }

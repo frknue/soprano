@@ -59,7 +59,7 @@ struct AgentWaitingReasonTests {
     }
 
     @Test func aPromptThatStartsLikeAnOptionIsPassedAfterTheEndOfOptions() {
-        let launch = AgentLaunch(prompt: "- check the PRs\n- report", model: "opus", skipsApprovals: true)
+        let launch = AgentLaunch(prompt: "- check the PRs\n- report", model: "opus", skipsApprovals: true, startsPrivateServer: true)
 
         #expect(
             TerminalConfig.launchArguments(profileId: "claude-code", launch: launch, includingPrompt: true)
@@ -71,7 +71,7 @@ struct AgentWaitingReasonTests {
         )
         #expect(
             TerminalConfig.launchArguments(profileId: "opencode", launch: launch, includingPrompt: true)
-                == ["--auto", "--prompt=- check the PRs\n- report"]
+                == ["--standalone", "--auto", "--prompt=- check the PRs\n- report"]
         )
     }
 

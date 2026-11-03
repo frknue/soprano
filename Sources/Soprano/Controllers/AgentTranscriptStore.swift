@@ -4,7 +4,8 @@ import Foundation
 struct AgentTranscriptSource: Hashable, Sendable {
     let format: AgentTranscriptFormat
     let conversationId: String
-    /// The file the agent's hooks reported; located from the id when nil.
+    /// The file the agent's hooks reported: the transcript for JSON Lines
+    /// CLIs, the SQLite database for OpenCode. Located from the id when nil.
     let path: String?
 
     /// The transcript of an agent's current conversation, when its CLI writes
@@ -20,10 +21,32 @@ struct AgentTranscriptSource: Hashable, Sendable {
     }
 }
 
-/// Follows the transcripts of the agents on the Agent Dashboard. A file is read
-/// from its end when first seen and afterwards only for the bytes appended
-/// since; parsing runs on a background queue and finished timelines arrive on
-/// the main actor. The dashboard owns the store, so nothing is read while it is
+/// Reads one agent's conversation for the dashboard, whatever its CLI keeps
+/// it in. Only the store's serial queue calls a reader.
+protocol AgentTranscriptReader: AnyObject, Sendable {
+    var source: AgentTranscriptSource { get }
+    /// The timeline after reading what changed, or nil when nothing visible
+    /// changed or the transcript is missing.
+    func readAppended() -> AgentTimeline?
+}
+
+extension AgentTranscriptSource {
+    /// A reader for this transcript; `home` is where the CLIs keep their data.
+    func makeReader(home: URL) -> any AgentTranscriptReader {
+        switch format {
+        case .claudeCode: TranscriptFollower(source: self, home: home, makeDecoder: { ClaudeTranscriptDecoder() })
+        case .codex: TranscriptFollower(source: self, home: home, makeDecoder: { CodexRolloutDecoder() })
+        case .omp: TranscriptFollower(source: self, home: home, makeDecoder: { OmpSessionDecoder() })
+        case .openCode: OpenCodeTranscriptReader(source: self, home: home)
+        }
+    }
+}
+
+/// Follows the transcripts of the agents on the Agent Dashboard. A JSON Lines
+/// file is read from its end when first seen and afterwards only for the bytes
+/// appended since, an OpenCode database only for the messages that changed;
+/// parsing runs on a background queue and finished timelines arrive on the
+/// main actor. The dashboard owns the store, so nothing is read while it is
 /// closed.
 @MainActor
 final class AgentTranscriptStore {
@@ -32,7 +55,7 @@ final class AgentTranscriptStore {
 
     private let home: URL
     private let queue = DispatchQueue(label: "com.soprano.agent-transcripts", qos: .utility)
-    private var followers: [String: TranscriptFollower] = [:]
+    private var followers: [String: any AgentTranscriptReader] = [:]
     private var timelines: [String: AgentTimeline] = [:]
     private var reading: Set<ObjectIdentifier> = []
 
@@ -56,7 +79,7 @@ final class AgentTranscriptStore {
             timelines[entryId] = nil
         }
         for (entryId, source) in sources where followers[entryId]?.source != source {
-            followers[entryId] = TranscriptFollower(source: source, home: home)
+            followers[entryId] = source.makeReader(home: home)
             timelines[entryId] = nil
             read(entryId)
         }
@@ -89,8 +112,9 @@ final class AgentTranscriptStore {
     }
 }
 
-/// One transcript being followed. Only the store's serial queue touches it.
-final class TranscriptFollower: @unchecked Sendable {
+/// One JSON Lines transcript being followed. Only the store's serial queue
+/// touches it.
+final class TranscriptFollower: AgentTranscriptReader, @unchecked Sendable {
     /// Bytes read from the end of a transcript when it is first opened.
     static let initialWindow: UInt64 = 2 << 20
     /// The first read grows its window up to this size to reach at least
@@ -109,13 +133,19 @@ final class TranscriptFollower: @unchecked Sendable {
     private var lastLookup: Date?
     private var offset: UInt64 = 0
     private var remainder = Data()
+    private let makeDecoder: @Sendable () -> any AgentTranscriptDecoding
     private var decoder: any AgentTranscriptDecoding
     private var entries: [AgentTranscriptEntry] = []
 
-    init(source: AgentTranscriptSource, home: URL) {
+    init(
+        source: AgentTranscriptSource,
+        home: URL,
+        makeDecoder: @escaping @Sendable () -> any AgentTranscriptDecoding
+    ) {
         self.source = source
         self.home = home
-        decoder = source.format.makeDecoder()
+        self.makeDecoder = makeDecoder
+        decoder = makeDecoder()
         url = source.path.map { URL(fileURLWithPath: $0) }
     }
 
@@ -219,7 +249,7 @@ final class TranscriptFollower: @unchecked Sendable {
         offset = 0
         remainder = Data()
         entries = []
-        decoder = source.format.makeDecoder()
+        decoder = makeDecoder()
     }
 }
 
@@ -261,6 +291,10 @@ enum AgentTranscriptLocator {
                 named: { $0.hasSuffix("_\(conversationId).jsonl") },
                 fileManager: fileManager
             )
+        case .openCode:
+            // A database, not a file per conversation: OpenCodeTranscriptReader
+            // searches OpenCode's data directories itself.
+            return nil
         }
     }
 
@@ -283,15 +317,5 @@ enum AgentTranscriptLocator {
             }
         }
         return newest?.url
-    }
-}
-
-extension AgentTranscriptFormat {
-    func makeDecoder() -> any AgentTranscriptDecoding {
-        switch self {
-        case .claudeCode: ClaudeTranscriptDecoder()
-        case .codex: CodexRolloutDecoder()
-        case .omp: OmpSessionDecoder()
-        }
     }
 }

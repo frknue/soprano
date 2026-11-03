@@ -181,12 +181,14 @@ enum AutomationPrecheck {
     static let outputLimit = 4_000
 
     /// Runs `command` through the user's login shell so it finds what their
-    /// terminal finds (`gh`, `jq`). Blocks; call it off the main thread.
+    /// terminal finds (`gh`, `jq`). Keeps the last `limit` characters of what
+    /// it printed. Blocks; call it off the main thread.
     static func run(
         _ command: String,
         in folder: String,
         timeout: TimeInterval,
-        shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        shell: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
+        keepingLast limit: Int = outputLimit
     ) -> Outcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: shell)
@@ -235,7 +237,7 @@ enum AutomationPrecheck {
         return Outcome(
             exitCode: process.terminationStatus,
             timedOut: timedOut,
-            output: String(text.suffix(outputLimit))
+            output: String(text.suffix(limit))
         )
     }
 

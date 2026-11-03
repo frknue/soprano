@@ -43,6 +43,12 @@ struct AgentLaunch: Equatable, Sendable {
     var model: String?
     /// Skip the CLI's approval prompts: nobody is there to answer them.
     var skipsApprovals: Bool
+    /// OpenCode 2 only: start a private server (`--standalone`), the only kind
+    /// that reads the run's model from the pane. OpenCode 1.x rejects the flag.
+    var startsPrivateServer = false
+    /// OpenCode agents the model is pinned on: OpenCode 2 lets an agent's own
+    /// model win over the top-level one.
+    var modelAgents: [String] = []
 }
 
 /// What an agent waiting on a person waits for. Soprano shows all three as

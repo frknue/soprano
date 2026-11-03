@@ -161,7 +161,10 @@ launchers configure those hooks per launch, without changing your global configu
 - **Codex** — its external turn notifier plus OSC approval notifications.
 - **Claude Code** — launch-scoped `SessionStart`, `UserPromptSubmit`, `Stop`, and
   permission hooks.
-- **OpenCode** — a launch-scoped plugin through `OPENCODE_CONFIG_CONTENT`.
+- **OpenCode** — OpenCode 2 runs every session in one shared background server that
+  never sees a pane's environment, so a launch-scoped plugin reports from its terminal
+  UI through `OPENCODE_CLI_CONFIG_CONTENT`; the plugins in your own `cli.json` keep
+  loading. OpenCode 1.x gets a server plugin through `OPENCODE_CONFIG_CONTENT`.
 - **omp (Oh My Pi)** — a launch-scoped extension reports session, turn, and tool
   approval events; install the [`omp` CLI](https://omp.sh/docs/cli) separately.
   Soprano runs its interactive terminal client, not the Bun-only SDK.
@@ -194,7 +197,7 @@ Soprano cannot re-prompt — the section links straight to
 **System Settings → Notifications → Soprano** instead.
 
 <details>
-<summary><b>Agents you start yourself — aliases, scripts, plain <code>omp</code> in a shell</b></summary>
+<summary><b>Agents you start yourself — aliases, scripts, plain <code>omp</code> or <code>opencode</code> in a shell</b></summary>
 
 To recognize agents started outside the built-in launchers, install their lifecycle
 integration separately:
@@ -219,6 +222,18 @@ integration separately:
   events from the `⌘4` launcher. An omp process already running when you install
   it must exit and resume (`omp --resume <session-id>` or `omp --continue`) to
   load it; restarting Soprano alone does not inject hooks into that process.
+- **OpenCode 2:** link its shell integration once after installing Soprano:
+
+  ```bash
+  mkdir -p ~/.config/opencode/plugins
+  ln -s /Applications/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoOpenCodeAmbient \
+    ~/.config/opencode/plugins/soprano
+  ```
+
+  From a source checkout, `./scripts/install-opencode-plugin.sh` does the same
+  without replacing an existing entry (it honors `XDG_CONFIG_HOME`). The plugin does
+  nothing outside Soprano and does not duplicate events from the `⌘3` launcher. Quit
+  and restart an `opencode` that was already running to load it.
 
 Preserve existing hook groups when merging Codex or Claude Code hooks. The commands
 no-op outside Soprano, and the first lifecycle event automatically associates the
@@ -402,15 +417,16 @@ doing right now.
 
 The selected agent shows its title and location over a toolbar: **Timeline** /
 **Terminal**, **Show details**, and **Open**, **Stop**, and **Restart**. For a Claude
-Code, Codex, or omp agent the **timeline** reads as a conversation from the transcript
-the agent writes while it runs in its pane: your prompts as cards, each answer under the
-agent's name with its replies rendered as Markdown, and every run of tool calls in one
-card — a line per call with its result (✓, ✗, or ▶ while it runs) and the diff of every
-edit. It keeps to a readable column on wide windows; **Jump to latest** appears once you
-scroll away from the newest entry. Claude Code and omp report their transcript through
-Soprano's hooks; Codex is found once its first reply arrives, or right away with the
-[Codex hooks](#agents-that-report-in) installed. Plain terminals, OpenCode, and custom
-agents show their live terminal in a card instead, with theme-aware highlighting for
+Code, Codex, OpenCode, or omp agent the **timeline** reads as a conversation from the
+transcript the agent writes while it runs in its pane: your prompts as cards, each answer
+under the agent's name with its replies rendered as Markdown, and every run of tool calls
+in one card — a line per call with its result (✓, ✗, or ▶ while it runs) and the diff of
+every edit. It keeps to a readable column on wide windows; **Jump to latest** appears
+once you scroll away from the newest entry. Claude Code and omp report their transcript
+through Soprano's hooks, and OpenCode its session in OpenCode's database; Codex is found
+once its first reply arrives, or right away with the
+[Codex hooks](#agents-that-report-in) installed. Plain terminals and custom agents show
+their live terminal in a card instead, with theme-aware highlighting for
 prompts, diagnostics, paths, diffs, and fenced code. Under either view, the composer
 says what the agent is doing right now (the entry in the list repeats that line) above
 the reply field. Replies are available while the agent is working, ready, waiting for
@@ -461,7 +477,8 @@ one, and `Esc` steps back to the list and then closes the page. The editor asks 
 - **Precheck**: a shell command run in the folder before a scheduled run; the run is
   skipped unless it exits 0 (`gh pr list --json number -q '.[0].number'`). **Run Now**
   skips the precheck.
-- **Model**, passed to the CLI; left empty, the CLI's default.
+- **Model**, passed to the CLI; left empty, the CLI's default. OpenCode 2 takes it
+  through a private server for the run (`--standalone`); OpenCode 1.x through its config.
 
 A run opens its agent in a window of its own in a session named **Automations**,
 without switching to it, and the agent starts with the prompt and with its approval

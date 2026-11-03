@@ -315,4 +315,62 @@ struct AutomationControllerTests {
         #expect(fixture.agentManager.agent(paneId: resumed.paneId, tabId: resumed.tabId)?.conversation?.id
             == "01a186a9-695e-72bb-abf9-4646ac0bf7ea")
     }
+
+    @Test func onlyAnOpenCodeThatOffersAPrivateServerIsStartedWithOne() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func cli(_ name: String, help: String) throws -> String {
+            let url = directory.appendingPathComponent(name)
+            try "#!/bin/sh\nprintf '%s\\n' '\(help)'\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            return url.path
+        }
+        let current = try cli("opencode2", help: "  --standalone   Run with a private server instead of the background service")
+        let legacy = try cli("opencode1", help: "  -m, --model   model to use in the format of provider/model")
+
+        #expect(AutomationController.openCodeHasPrivateServer(command: current, folder: directory.path, shell: "/bin/sh"))
+        #expect(!AutomationController.openCodeHasPrivateServer(command: legacy, folder: directory.path, shell: "/bin/sh"))
+        #expect(AutomationController.openCodeHasPrivateServer(
+            command: directory.appendingPathComponent("missing").path, folder: directory.path, shell: "/bin/sh"
+        ))
+
+        let launch = AgentLaunch(prompt: "Audit", model: "anthropic/x", skipsApprovals: false)
+        #expect(TerminalConfig.launchArguments(profileId: "opencode", launch: launch, includingPrompt: true) == ["--prompt=Audit"])
+    }
+
+    @Test func aRunsModelIsPinnedOnEveryAgentASessionCanStartWithSoAnAgentsOwnModelCannotWin() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cli = directory.appendingPathComponent("opencode")
+        try """
+        #!/bin/sh
+        echo 'rc noise'
+        cat <<'EOF'
+        [{"id":"build","mode":"primary","hidden":false,"model":{"providerID":"a","id":"own"}},
+         {"id":"review","mode":"all"},
+         {"id":"compaction","mode":"primary","hidden":true},
+         {"id":"explore","mode":"subagent"}]
+        EOF
+        """.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
+
+        let agents = AutomationController.openCodePrimaryAgents(command: cli.path, folder: directory.path, shell: "/bin/sh")
+        #expect(agents == ["build", "review"])
+
+        let content = try #require(TerminalConfig.openCodeConfigContent(
+            pluginURL: URL(fileURLWithPath: "/Soprano/SopranoOpenCodePlugin.js"),
+            model: "b/requested",
+            modelAgents: agents,
+            environment: ["OPENCODE_CONFIG_CONTENT": #"{"agents":{"build":{"temperature":0.2}}}"#]
+        ))
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any])
+        let pinned = try #require(object["agents"] as? [String: [String: Any]])
+        #expect(object["model"] as? String == "b/requested")
+        #expect(pinned["build"]?["model"] as? String == "b/requested")
+        #expect(pinned["build"]?["temperature"] as? Double == 0.2)
+        #expect(pinned["review"]?["model"] as? String == "b/requested")
+        #expect(pinned["explore"] == nil)
+    }
 }

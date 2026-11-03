@@ -100,6 +100,12 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   agent list, keeping the typed reply.
 - A **Collapse All Windows** button next to `+` in the left sidebar's WINDOWS header
   folds every window group at once; it dims while all of them are already collapsed.
+- The Agent Dashboard shows OpenCode agents as a timeline read from OpenCode's own
+  session database, like Claude Code, Codex, and omp: prompts, replies, reasoning, one
+  line per tool call with its diff, and interruptions.
+- `opencode` typed into a Soprano terminal reports in too once
+  `./scripts/install-opencode-plugin.sh` links Soprano's plugin into
+  `~/.config/opencode/plugins`.
 
 ### Changed
 
@@ -175,6 +181,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- OpenCode 2 panes report `WORKING`, `NEEDS INPUT`, and errors again, notify for
+  approvals and questions quoting what is asked, and keep their conversation for
+  restart. OpenCode 2 runs every session in one shared background server that never
+  saw the pane's launch configuration, so Soprano now reports from OpenCode's terminal
+  UI; terminal plugins in your own `cli.json` keep loading.
+- An OpenCode 2 automation that names a model starts its own OpenCode server
+  (`--standalone`) and uses that model even where an agent sets its own; OpenCode 1.x
+  still gets the model without it.
 - A Claude Code pane no longer turns READY while it is still working, after Claude Code
   compacts its context mid-turn.
 - The editor's line-number gutter no longer paints its right-hand hairline up over the

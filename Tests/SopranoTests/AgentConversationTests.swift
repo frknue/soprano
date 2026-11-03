@@ -369,13 +369,49 @@ struct AgentConversationTests {
             #expect(config.env["SOPRANO_TAB_ID"] == "tab-2")
             if profile.id == "codex" { #expect(config.command?.contains("notify=") == true) }
             if profile.id == "claude-code" { #expect(config.command?.contains("'--settings'") == true) }
-            if profile.id == "opencode" { #expect(config.env["OPENCODE_CONFIG_CONTENT"]?.contains("SopranoOpenCodePlugin") == true) }
+            if profile.id == "opencode" {
+                #expect(config.env["OPENCODE_CONFIG_CONTENT"]?.contains("SopranoOpenCodePlugin") == true)
+                #expect(config.env["OPENCODE_CLI_CONFIG_CONTENT"]?.contains("SopranoOpenCode") == true)
+            }
             if profile.id == "omp" { #expect(config.command?.contains("'--extension'") == true) }
         }
         #expect(conversation.resumeArguments(profileId: "codex", arguments: ["resume", "--last", "--model", "chosen-model"]) == ["resume", "saved-chat", "--model", "chosen-model"])
         #expect(conversation.resumeArguments(profileId: "claude-code", arguments: ["--resume=old-chat", "--fork-session", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
         #expect(conversation.resumeArguments(profileId: "opencode", arguments: ["--continue", "--session", "old-chat", "--fork"]) == ["--session", "saved-chat"])
         #expect(conversation.resumeArguments(profileId: "omp", arguments: ["--continue", "--resume=old-chat", "--model", "chosen-model"]) == ["--resume", "saved-chat", "--model", "chosen-model"])
+    }
+
+    @Test func openCodeTerminalPluginsFromCliJsonKeepLoadingBesideSopranosAndAnInheritedOverrideWins() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let directory = home.appendingPathComponent(".config/opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try """
+        {
+          // Terminal-only plugins
+          "plugins": ["-opencode.notifications", "./plugins/status", {"package": "../shared/review", "options": {"compact": true}}],
+        }
+        """.write(to: directory.appendingPathComponent("cli.json"), atomically: true, encoding: .utf8)
+
+        func plugins(_ content: String?) throws -> [Any] {
+            let data = try #require(content?.data(using: .utf8))
+            let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            return try #require(object["plugins"] as? [Any])
+        }
+
+        let merged = try plugins(TerminalConfig.openCodeCLIConfigContent(pluginPath: "/Soprano/SopranoOpenCode", environment: [:], home: home))
+        #expect(merged.count == 4)
+        #expect(merged[0] as? String == "-opencode.notifications")
+        #expect(merged[1] as? String == directory.appendingPathComponent("plugins/status").path)
+        #expect((merged[2] as? [String: Any])?["package"] as? String == home.appendingPathComponent(".config/shared/review").path)
+        #expect(merged[3] as? String == "/Soprano/SopranoOpenCode")
+
+        let inherited = try plugins(TerminalConfig.openCodeCLIConfigContent(
+            pluginPath: "/Soprano/SopranoOpenCode",
+            environment: ["OPENCODE_CLI_CONFIG_CONTENT": #"{"plugins":["/Soprano/SopranoOpenCode"],"mouse":false}"#],
+            home: home
+        ))
+        #expect(inherited.compactMap { $0 as? String } == ["/Soprano/SopranoOpenCode"])
     }
 
     @Test func restoredOmpFindsExecutableAddedByInteractiveShell() throws {
@@ -459,6 +495,16 @@ struct AgentConversationTests {
             #expect(AgentConversation.fromPayload(payload) == nil)
         }
         #expect(AgentConversation.fromPayload(#"{"session_id":"valid","cwd":"relative/path"}"#)?.cwd == nil)
+    }
+
+    @Test func transcriptPathsMustBeAbsoluteJsonLinesFilesOrOpenCodesDatabase() {
+        func path(_ value: String) -> String? {
+            AgentConversation.fromPayload(#"{"sessionID":"ses_1","transcript_path":"\#(value)"}"#)?.transcriptPath
+        }
+        #expect(path("/home/.local/share/opencode/opencode.db") == "/home/.local/share/opencode/opencode.db")
+        #expect(path("/home/.claude/projects/x/ses_1.jsonl") == "/home/.claude/projects/x/ses_1.jsonl")
+        #expect(path("relative/opencode.db") == nil)
+        #expect(path("/etc/passwd") == nil)
     }
 
     @Test func aStoppedOrDifferentAgentCannotReplaceTheSavedConversation() throws {

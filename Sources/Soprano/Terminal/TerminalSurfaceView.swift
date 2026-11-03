@@ -54,13 +54,25 @@ struct TerminalConfig {
                 arguments.append(contentsOf: ["--settings", settings])
             }
         case "opencode":
+            // What the pane starts with: a profile's env wins over Soprano's own.
+            let paneEnvironment = ProcessInfo.processInfo.environment.merging(config.env) { _, profile in profile }
+            // OpenCode 1.x loads a server plugin from the pane's inline config.
             let pluginURL = SopranoResources.bundle.url(
                 forResource: "SopranoOpenCodePlugin",
                 withExtension: "js"
             )
             if let pluginURL,
-               let configContent = openCodeConfigContent(pluginURL: pluginURL, model: launch?.model) {
+               let configContent = openCodeConfigContent(
+                   pluginURL: pluginURL, model: launch?.model, modelAgents: launch?.modelAgents ?? [],
+                   environment: paneEnvironment
+               ) {
                 config.env["OPENCODE_CONFIG_CONTENT"] = configContent
+            }
+            // OpenCode 2 runs sessions in one shared background server that never
+            // sees this pane's environment, so it reports from the terminal UI.
+            if let tuiPlugin = SopranoResources.bundle.url(forResource: "SopranoOpenCode", withExtension: nil),
+               let cliContent = openCodeCLIConfigContent(pluginPath: tuiPlugin.path, environment: paneEnvironment) {
+                config.env["OPENCODE_CLI_CONFIG_CONTENT"] = cliContent
             }
         case "omp":
             if let extensionURL = SopranoResources.bundle.url(
@@ -144,7 +156,9 @@ struct TerminalConfig {
             if launch.skipsApprovals { arguments.append("--auto-approve") }
             if !prompt.isEmpty { arguments += ["--", prompt] }
         case "opencode":
-            // Its model goes into OPENCODE_CONFIG_CONTENT; there is no flag.
+            // Its model goes into OPENCODE_CONFIG_CONTENT; there is no flag. Only a
+            // private server reads that: OpenCode 2's shared one never sees the pane.
+            if launch.startsPrivateServer { arguments.append("--standalone") }
             if launch.skipsApprovals { arguments.append("--auto") }
             if !prompt.isEmpty { arguments.append("--prompt=\(prompt)") }
         default:
@@ -265,9 +279,16 @@ struct TerminalConfig {
         return String(data: data, encoding: .utf8)
     }
 
-    /// OpenCode has no model flag; a run's model goes into the inline config.
-    private static func openCodeConfigContent(pluginURL: URL, model: String? = nil) -> String? {
-        let inherited = ProcessInfo.processInfo.environment["OPENCODE_CONFIG_CONTENT"]
+    /// A run's model goes into the inline config, which OpenCode 1.x and
+    /// OpenCode 2's private `--standalone` server read. OpenCode 2 prefers an
+    /// agent's own model, so the model is also pinned on `modelAgents`.
+    static func openCodeConfigContent(
+        pluginURL: URL,
+        model: String?,
+        modelAgents: [String] = [],
+        environment: [String: String]
+    ) -> String? {
+        let inherited = environment["OPENCODE_CONFIG_CONTENT"]
         var content: [String: Any] = [:]
 
         if let inherited, !inherited.isEmpty {
@@ -285,10 +306,68 @@ struct TerminalConfig {
         content["plugin"] = plugins
         if let model {
             content["model"] = model
+            var agents = content["agents"] as? [String: Any] ?? [:]
+            for id in modelAgents {
+                var agent = agents[id] as? [String: Any] ?? [:]
+                agent["model"] = model
+                agents[id] = agent
+            }
+            if !agents.isEmpty { content["agents"] = agents }
         }
 
         guard let data = try? JSONSerialization.data(withJSONObject: content) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// OpenCode 2 merges OPENCODE_CLI_CONFIG_CONTENT over `cli.json` but lets its
+    /// arrays replace the file's, so the plugin list starts from the inherited
+    /// override or the user's own `cli.json`: their terminal plugins keep loading.
+    static func openCodeCLIConfigContent(
+        pluginPath: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> String? {
+        var content: [String: Any] = [:]
+        if let inherited = environment["OPENCODE_CLI_CONFIG_CONTENT"], !inherited.isEmpty {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(inherited.utf8)),
+                  let dictionary = object as? [String: Any]
+            else { return nil }
+            content = dictionary
+        }
+
+        var plugins = content["plugins"] as? [Any] ?? userOpenCodeCLIPlugins(environment: environment, home: home)
+        if !plugins.contains(where: { $0 as? String == pluginPath }) {
+            plugins.append(pluginPath)
+        }
+        content["plugins"] = plugins
+
+        guard let data = try? JSONSerialization.data(withJSONObject: content) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// The `plugins` of `$XDG_CONFIG_HOME/opencode/cli.json` (else
+    /// `~/.config/opencode/cli.json`), with relative paths made absolute: they
+    /// resolve against that file, which inline settings do not have.
+    private static func userOpenCodeCLIPlugins(environment: [String: String], home: URL) -> [Any] {
+        let configHome = environment["XDG_CONFIG_HOME"].flatMap { $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : nil }
+            ?? home.appendingPathComponent(".config", isDirectory: true)
+        let directory = configHome.appendingPathComponent("opencode", isDirectory: true)
+        guard let text = try? String(contentsOf: directory.appendingPathComponent("cli.json"), encoding: .utf8),
+              let data = try? JSONCText.strictJSONData(from: text),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let plugins = object["plugins"] as? [Any]
+        else { return [] }
+
+        func absolute(_ spec: String) -> String {
+            guard spec.hasPrefix("./") || spec.hasPrefix("../") else { return spec }
+            return directory.appendingPathComponent(spec).standardizedFileURL.path
+        }
+        return plugins.map { entry in
+            if let spec = entry as? String { return absolute(spec) }
+            guard var object = entry as? [String: Any], let spec = object["package"] as? String else { return entry }
+            object["package"] = absolute(spec)
+            return object
+        }
     }
 
     private static func shellQuoted(_ value: String) -> String {
