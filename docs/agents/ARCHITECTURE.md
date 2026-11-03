@@ -239,11 +239,14 @@ severity, advisor}]`) → `advisory` (one timeline row per note, never in the "W
 arriving after the turn ended joins the latest turn); compaction/retry → notices. In a completed
 turn that background work never woke (`Turn.wokenAt`, kept after the turn ends), an advisory or
 an auto-double-check notice right after an answer that follows the first final answer (no steer
-after it) starts the checks: `TimelineBuilder` keeps that first answer as the recap with the
-changed files, and one `checks` row under it (closed by default, `TimelineExpansion.checks`;
-open while Find has a query) names each check and up to four lines of the reply's opening prose
-(`openingProse`), hiding everything after the recap but errors and failed work after the last
-message. Subagents: `set_subagent_subscription {level:"events"}` after the
+after it) starts the checks: `TimelineBuilder` keeps that first answer as the answer, and one
+`checks` row under it (closed by default, `TimelineExpansion.checks`; open while Find has a query)
+names each check and up to four lines of the reply's opening prose (`openingProse`), hiding
+everything after the answer but errors and failed work after the last message. omp's final recap
+(the first final answer after the last `auto-recap` notice that got one) is the one exception: it stays visible
+below the `checks` row and carries the changed files (else the first answer does); reviews after
+it stay in the checks, but a final answer after it (a reply to a review once omp's two recaps are
+used) stays visible below it as the latest word, and no recap counts as a check's reply. Subagents: `set_subagent_subscription {level:"events"}` after the
 handshake (`try?`: older builds show none); `OmpSubagentMapper` folds `subagent_lifecycle`
 (status), `subagent_progress` (assignment, `lastIntent`, `resolvedModelIdentity`; repeats are
 dropped) and `subagent_event` (the subagent's own session events: `agent_start` opens a run,
@@ -618,8 +621,9 @@ adds and selects an omp thread whose turn yielded while a background job runs (f
 an advisor's Concern, "Background work still running…" row, Send instead of Stop);
 `--fixture answered` one whose final answer arrived while omp still wraps up the turn (Working,
 Stop, no "Thinking" row); `--fixture rechecked` a finished turn that answered three times (an
-advisor note, then omp's auto-double-check woke the agent): the recap with the changed files,
-then the closed "2 checks after this answer" row (`--perform timeline.expandAll` opens it);
+advisor note, then omp's auto-double-check woke the agent, then omp's final recap): the first
+answer, the closed "2 checks after this answer" row (`--perform timeline.expandAll` opens it),
+then the recap with the changed files;
 `--fixture stopping` the running thread after Stop was pressed ("Stopping…", dimmed Stop).
 `--fixture subagents` adds and selects a thread whose yielded turn started two subagents
 (running Reader, finished Scout: card disclosure "1/2" open, two subagent rows); `--fixture

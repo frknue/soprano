@@ -144,6 +144,10 @@ All notable changes to Soprano Agents are documented here. The format follows
   the turn and the recap sat above it among the other answers. Expand All Work opens the checks
   too, and Find in Thread searches them while it has a query. Stopped or failed turns, and turns
   a background job woke, keep every answer visible.
+- When omp writes a final recap after the checks (the `auto-double-check` extension's
+  `auto-recap` pass), that recap ends the turn below "2 checks after this answer" and carries the
+  changed files, so the last message reads as the turn's answer; before, it was hidden inside the
+  closed checks.
 - omp threads whose conversation holds a cut-off emoji or icon glyph no longer stall for a
   minute at the end of every turn: Stop ends the turn right away again, and replies to
   messages sent during that minute no longer go missing.

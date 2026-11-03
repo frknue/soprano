@@ -394,9 +394,10 @@ enum DemoFixtures {
         )
     }
 
-    /// A finished omp turn that answered three times ("rechecked" scenario only): an advisor's
-    /// note, then omp's auto-double-check woke the agent after its recap; the recap carries the
-    /// changed files and a closed "2 checks after this answer" row follows it.
+    /// A finished omp turn that answered three times, then recapped ("rechecked" scenario only):
+    /// an advisor's note, then omp's auto-double-check woke the agent after its first answer; a
+    /// closed "2 checks after this answer" row follows that answer, and omp's final recap below it
+    /// carries the changed files.
     static func recheckedThread(_ now: Date) -> AgentThread {
         func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
         let path = "Sources/Upload/UploadClient.swift"
@@ -412,7 +413,7 @@ enum DemoFixtures {
             turns: [Turn(
                 id: "turn-rechecked-1", ordinal: 1,
                 userMessage: UserMessage(text: "Tighten the retry delay in UploadClient.", createdAt: ago(500)),
-                modelSelection: omp, status: .completed, startedAt: ago(500), completedAt: ago(20),
+                modelSelection: omp, status: .completed, startedAt: ago(500), completedAt: ago(5),
                 items: [
                     TurnItem(id: "rc1", kind: .fileChange([FileChange(path: path, kind: .update)]), status: .completed, startedAt: ago(460), completedAt: ago(459)),
                     TurnItem(id: "rc2", kind: .assistantMessage(text: recap, isFinal: true), status: .completed, startedAt: ago(420), completedAt: ago(410)),
@@ -423,6 +424,8 @@ enum DemoFixtures {
                     TurnItem(id: "rc7", kind: .notice(text: "auto-double-check: second pass before finishing"), status: .completed, startedAt: ago(130), completedAt: ago(130)),
                     TurnItem(id: "rc8", kind: .command(CommandExecution(command: "swift test", cwd: "/Users/demo/code/app", output: "Executed 214 tests, with 0 failures\n", exitCode: 0, durationMs: 18_400)), status: .completed, startedAt: ago(90), completedAt: ago(72)),
                     TurnItem(id: "rc9", kind: .assistantMessage(text: "The second pass found no further problems. All 214 tests pass.\n\n| Requirement | Status |\n|---|---|\n| Delay starts at 250 ms | verified |", isFinal: true), status: .completed, startedAt: ago(40), completedAt: ago(20)),
+                    TurnItem(id: "rc10", kind: .notice(text: "auto-recap: final recap before finishing"), status: .completed, startedAt: ago(18), completedAt: ago(18)),
+                    TurnItem(id: "rc11", kind: .assistantMessage(text: "You asked to tighten the upload retry delay. It now starts at 250 ms and caps at 4 s, so a flaky upload gives up after about 8 s.\n\n- Changed `UploadClient.swift` and `UploadClientTests.swift`; all 214 tests pass.\n- A review caught a test that still expected the old 8 s cap; it is fixed.\n- Committed on `main`, not pushed. Next: push when you are ready.", isFinal: true), status: .completed, startedAt: ago(15), completedAt: ago(5)),
                 ],
                 checkpoint: TurnCheckpoint(ref: "refs/soprano-agents/checkpoints/\(ID.rechecked)/1", status: .ready, files: [
                     ChangedFileStat(path: path, additions: 4, deletions: 2),

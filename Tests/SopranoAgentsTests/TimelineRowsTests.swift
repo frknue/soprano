@@ -255,6 +255,133 @@ struct TimelineRowsTests {
         ])
     }
 
+    @Test func ompsFinalRecapFollowsTheClosedChecksAsTheTurnsLastAnswerWithItsChangedFiles() {
+        let recapped = turn(items: [
+            item("c1", .command(CommandExecution(command: "rg x"))),
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "The second pass found one bug. It is fixed.", isFinal: true)),
+            item("n2", .notice(text: "auto-recap: final recap before finishing")),
+            item("a3", .assistantMessage(text: "Old recap.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "The test still fails.", severity: .concern, advisor: "Final reviewer")])),
+            item("a4", .assistantMessage(text: "It passes now.", isFinal: true)),
+            item("n3", .notice(text: "auto-recap: final recap before finishing")),
+            item("r1", .reasoning(text: "Summing up.")),
+            item("a5", .assistantMessage(text: "You asked to fix it. It is fixed and tested.", isFinal: true)),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+
+        let rows = TimelineBuilder.rows(for: thread([recapped]))
+        #expect(ids(rows) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "assistant:a5"])
+        guard case let .assistant(answer) = rows[2].content, case let .assistant(recap) = rows[4].content else {
+            Issue.record("unexpected rows \(rows)")
+            return
+        }
+        #expect(answer.changedFiles == nil)
+        #expect(recap.showMeta)
+        #expect(recap.changedFiles?.files.map(\.path) == ["A.swift"])
+        // The earlier recap is no check's reply; the review after it is a pass of its own.
+        #expect(rows[3].content == .checks(ChecksRowModel(turnID: "t1", passes: [
+            CheckPassModel(sources: ["Double-check"], severity: nil, outcome: "The second pass found one bug. It is fixed.", note: nil),
+            CheckPassModel(sources: ["Final reviewer"], severity: .concern, outcome: "It passes now.", note: "The test still fails."),
+        ], expanded: false)))
+
+        let open = TimelineBuilder.rows(for: thread([recapped]), expansion: TimelineExpansion(checks: ["t1"]))
+        #expect(ids(open) == [
+            "user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "notice:n1", "assistant:a2", "notice:n2",
+            "assistant:a3", "advisory:v1:0", "assistant:a4", "notice:n3", "assistant:a5",
+        ])
+    }
+
+    @Test func checksAfterOmpsFinalRecapCloseUnderTheChecksRowButALaterCorrectionStaysTheLastWord() {
+        // A review the agent never answered, delivered after the recap.
+        let unanswered = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "No defects.", isFinal: true)),
+            item("n2", .notice(text: "auto-recap: final recap before finishing")),
+            item("a3", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Nit.", severity: .nit, advisor: "Final reviewer")])),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+        let rows = TimelineBuilder.rows(for: thread([unanswered]))
+        #expect(ids(rows) == ["user:m-t1", "assistant:a1", "checks:t1", "assistant:a3"])
+        guard case let .checks(model) = rows[2].content else {
+            Issue.record("expected a checks row")
+            return
+        }
+        #expect(model.passes.map(\.sources) == [["Double-check"], ["Final reviewer"]])
+
+        // Both recaps used: a reply to a later review corrects the recap, so it stays visible last.
+        let replied = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .concern, advisor: "Final reviewer")])),
+            item("a2", .assistantMessage(text: "Checked.", isFinal: true)),
+            item("n1", .notice(text: "auto-recap: final recap before finishing")),
+            item("a3", .assistantMessage(text: "Fixed and committed, not pushed.", isFinal: true)),
+            item("v2", .advisory([AdvisorNote(text: "Push it.", severity: .concern, advisor: "Final reviewer")])),
+            item("c1", .command(CommandExecution(command: "git push"))),
+            item("a4", .assistantMessage(text: "Pushed to origin/main.", isFinal: true)),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+        let replyRows = TimelineBuilder.rows(for: thread([replied]))
+        #expect(ids(replyRows) == ["user:m-t1", "fold:t1", "assistant:a1", "checks:t1", "assistant:a3", "assistant:a4"])
+        guard case let .assistant(recap) = replyRows[4].content, case let .assistant(last) = replyRows[5].content,
+              case let .checks(checks) = replyRows[3].content else {
+            Issue.record("unexpected rows \(replyRows)")
+            return
+        }
+        #expect(recap.changedFiles?.files.map(\.path) == ["A.swift"])
+        #expect(last.text == "Pushed to origin/main.")
+        #expect(last.showMeta)
+        #expect(checks.passes.map(\.outcome) == ["Checked.", "Pushed to origin/main."])
+    }
+
+    @Test func aRecapIsNeverACheckReplyAndOnlyTheLatestAnsweredRecapStaysOutOfTheChecks() {
+        // A manual double-check recaps before any review: the review after it still folds that recap.
+        let early = turn(items: [
+            item("a1", .assistantMessage(text: "Report.", isFinal: true)),
+            item("n1", .notice(text: "auto-recap: final recap before finishing")),
+            item("a2", .assistantMessage(text: "Recap 1.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .concern, advisor: "Final reviewer")])),
+            item("a3", .assistantMessage(text: "Checked.", isFinal: true)),
+            item("n2", .notice(text: "auto-recap: final recap before finishing")),
+            item("a4", .assistantMessage(text: "Recap 2.", isFinal: true)),
+        ])
+        #expect(ids(TimelineBuilder.rows(for: thread([early]))) == ["user:m-t1", "assistant:a1", "checks:t1", "assistant:a4"])
+
+        // A review between the recap notice and the recap is not answered by the recap.
+        let interleaved = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "No defects.", isFinal: true)),
+            item("n2", .notice(text: "auto-recap: final recap before finishing")),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .concern, advisor: "Final reviewer")])),
+            item("a3", .assistantMessage(text: "Recap.", isFinal: true)),
+        ])
+        let rows = TimelineBuilder.rows(for: thread([interleaved]))
+        #expect(ids(rows) == ["user:m-t1", "assistant:a1", "checks:t1", "assistant:a3"])
+        if case let .checks(model) = rows[2].content {
+            #expect(model.passes.map(\.outcome) == ["No defects.", nil])
+        } else {
+            Issue.record("expected a checks row")
+        }
+
+        // A recap notice nothing answered leaves the earlier recap and the reply after it visible.
+        let unanswered = turn(items: [
+            item("a1", .assistantMessage(text: "Done.", isFinal: true)),
+            item("n1", .notice(text: "auto-double-check: second pass before finishing")),
+            item("a2", .assistantMessage(text: "No defects.", isFinal: true)),
+            item("n2", .notice(text: "auto-recap: final recap before finishing")),
+            item("a3", .assistantMessage(text: "Recap.", isFinal: true)),
+            item("v1", .advisory([AdvisorNote(text: "Check it.", severity: .concern, advisor: "Final reviewer")])),
+            item("a4", .assistantMessage(text: "Checked, fixed.", isFinal: true)),
+            item("n3", .notice(text: "auto-recap: final recap before finishing")),
+        ], files: [ChangedFileStat(path: "A.swift", additions: 1, deletions: 0)])
+        let unansweredRows = TimelineBuilder.rows(for: thread([unanswered]))
+        #expect(ids(unansweredRows) == ["user:m-t1", "assistant:a1", "checks:t1", "assistant:a3", "assistant:a4"])
+        if case let .assistant(recap) = unansweredRows[3].content {
+            #expect(recap.changedFiles?.files.map(\.path) == ["A.swift"])
+        }
+    }
+
     @Test func onlyACheckThatWokeTheAgentWithoutTheUserCutsInClosesTheRest() {
         let compacted = turn(items: [
             item("a1", .assistantMessage(text: "Done.", isFinal: true), at: 1),

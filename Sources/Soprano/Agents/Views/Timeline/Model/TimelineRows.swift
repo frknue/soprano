@@ -216,10 +216,11 @@ struct TimelineRow: Hashable, Identifiable, Sendable {
 ///   "Background work still running…" note at its end.
 /// - A turn can answer more than once: an advisor review or omp's auto-double-check wakes the
 ///   agent after its answer. A completed turn that background work never woke keeps its first
-///   answer (the recap) as its answer, with the changed files under it, and closes everything
-///   after it behind one checks row that names each check and the opening prose of the agent's
-///   reply to it (errors and failed work after the last message stay out). Open, the checks show
-///   as while the turn ran: every final answer stays out of the fold.
+///   answer as its answer and closes everything after it behind one checks row that names each
+///   check and the opening prose of the agent's reply to it (errors and failed work after the last
+///   message stay out). omp's final recap, and any answer after it, stays below that row; the
+///   recap carries the changed files (else the first answer does). Open, the checks show as while
+///   the turn ran: every final answer stays out of the fold.
 /// - Consecutive tool items form a work group: one summary row ("Read 2 files and ran 1 command"),
 ///   or a single entry row when the group holds one tool call. A file change shows as one diff
 ///   row per file (`FileDiffRowModel`).
@@ -284,7 +285,7 @@ enum TimelineBuilder {
         let checksOpen = expansion.checks.contains(turn.id)
         var checkHidden: Set<String> = []
         if let checks, !checksOpen {
-            for index in turn.items.indices.dropFirst(checks.start) {
+            for index in turn.items.indices.dropFirst(checks.start) where !checks.shownIDs.contains(turn.items[index].id) {
                 let item = turn.items[index]
                 switch item.kind {
                 case .error: continue
@@ -397,8 +398,8 @@ enum TimelineBuilder {
                     let isTerminal = item.id == terminalID && !isRunning
                     let showMeta = isTerminal || (isFinal && !item.status.isActive)
                     var files: ChangedFilesModel?
-                    // With checks, the recap carries the turn's changed files.
-                    if item.id == (checks?.recapID ?? terminalID), !isRunning, let changedFiles {
+                    // With checks, the final recap (else the first answer) carries the turn's changed files.
+                    if item.id == (checks.map { $0.recapID ?? $0.answerID } ?? terminalID), !isRunning, let changedFiles {
                         files = changedFiles
                         placedChangedFiles = true
                     }
@@ -410,7 +411,7 @@ enum TimelineBuilder {
                         date: item.completedAt ?? item.startedAt,
                         changedFiles: files
                     ))))
-                    if let checks, item.id == checks.recapID {
+                    if let checks, item.id == checks.answerID {
                         rows.append(TimelineRow(id: "checks:\(turn.id)", content: .checks(ChecksRowModel(
                             turnID: turn.id, passes: checks.passes, expanded: checksOpen
                         ))))
@@ -507,29 +508,50 @@ enum TimelineBuilder {
 
     private struct CheckSection {
         /// The turn's first final answer.
-        var recapID: String
-        /// Index of the first item after the recap the checks row holds.
+        var answerID: String
+        /// Index of the first item after the answer the checks row holds.
         var start: Int
+        /// omp's final recap (the first final answer after the last auto-recap notice): shown below
+        /// the checks row as the turn's answer, while everything else after the answer stays in them.
+        var recapID: String?
+        /// The recap and every final answer after it: a reply to a review the recap could not
+        /// cover any more (omp writes at most two) corrects it, so it stays visible after it.
+        var shownIDs: Set<String> = []
         var passes: [CheckPassModel]
     }
 
     /// The checks after a turn's first final answer: from the first advisor review, or
-    /// auto-double-check notice right after an answer, that follows it. nil when the user steered
-    /// after the answer, the agent answered again unprompted, or nothing woke it to reply.
-    /// Triggers with no reply between them form one pass; other notices (compaction, retries)
-    /// are neither.
+    /// auto-double-check notice right after an answer, that follows it, omp's final recap aside.
+    /// nil when the user steered after the answer, the agent answered again unprompted, or nothing
+    /// woke it to reply. Triggers with no reply between them form one pass; other notices
+    /// (compaction, retries) are neither, and a recap is no pass's reply.
     private static func checkSection(of turn: Turn) -> CheckSection? {
-        guard let recapIndex = turn.items.firstIndex(where: {
+        guard let answerIndex = turn.items.firstIndex(where: {
             if case .assistantMessage(_, true) = $0.kind { true } else { false }
         }) else { return nil }
-        let recap = turn.items[recapIndex]
-        let answeredAt = recap.completedAt ?? recap.startedAt
+        let answer = turn.items[answerIndex]
+        let answeredAt = answer.completedAt ?? answer.startedAt
         guard !turn.steers.contains(where: { $0.createdAt >= answeredAt }) else { return nil }
+        // The recap: the first final answer after the last auto-recap notice that one answered.
+        var recapIndex: Int?
+        var noticePending = false
+        for index in turn.items.indices.dropFirst(answerIndex + 1) {
+            switch turn.items[index].kind {
+            case let .notice(text) where isFinalRecap(text): noticePending = true
+            case .assistantMessage(_, true) where noticePending:
+                recapIndex = index
+                noticePending = false
+            default: break
+            }
+        }
 
         var start: Int?
         var passes: [CheckPassModel] = []
         var current: CheckPassModel?
         var afterAnswer = true
+        // Inside a recap pass until its first final answer; a recap is no check's reply.
+        var awaitingRecap = false
+        var recapped = false
         func trigger(_ sources: [String], severity: AdvisorNote.Severity?, note: String? = nil, at index: Int) {
             if start == nil { start = index }
             if let pass = current, pass.outcome != nil {
@@ -542,7 +564,7 @@ enum TimelineBuilder {
             if pass.note == nil { pass.note = note }
             current = pass
         }
-        for index in turn.items.indices.dropFirst(recapIndex + 1) {
+        for index in turn.items.indices.dropFirst(answerIndex + 1) {
             let item = turn.items[index]
             switch item.kind {
             case let .advisory(notes):
@@ -550,8 +572,19 @@ enum TimelineBuilder {
                 trigger(notes.map { $0.advisor ?? "Advisor" }, severity: worst, note: notes.first.flatMap { openingProse($0.text) }, at: index)
             case let .notice(text) where afterAnswer && isDoubleCheck(text):
                 trigger(["Double-check"], severity: nil, at: index)
+            case let .notice(text) where isFinalRecap(text):
+                // A recap ends the pass before it and is folded with the checks around it.
+                if start == nil { start = index }
+                if let pass = current, pass.outcome != nil || pass.severity != nil { passes.append(pass) }
+                current = nil
+                awaitingRecap = true
             case let .assistantMessage(text, isFinal):
-                guard current != nil else { return nil }
+                if awaitingRecap {
+                    if isFinal { awaitingRecap = false; recapped = true }
+                    continue
+                }
+                // After a recap, an answer no check asked for keeps the checks (it shows anyway).
+                guard current != nil else { if recapped { continue } else { return nil } }
                 // The pass's final answer is its reply; commentary only stands in until one comes.
                 if isFinal || current?.outcome == nil, let prose = openingProse(text) { current?.outcome = prose }
                 afterAnswer = isFinal
@@ -563,7 +596,10 @@ enum TimelineBuilder {
         }
         if let pass = current, pass.outcome != nil || pass.severity != nil { passes.append(pass) }
         guard let start, !passes.isEmpty else { return nil }
-        return CheckSection(recapID: recap.id, start: start, passes: passes)
+        let shownIDs = recapIndex.map { recap in
+            Set(turn.items[recap...].filter { if case .assistantMessage(_, true) = $0.kind { true } else { false } }.map(\.id))
+        } ?? []
+        return CheckSection(answerID: answer.id, start: start, recapID: recapIndex.map { turn.items[$0].id }, shownIDs: shownIDs, passes: passes)
     }
 
     private static func severityRank(_ severity: AdvisorNote.Severity) -> Int {
@@ -577,6 +613,11 @@ enum TimelineBuilder {
     /// omp's auto-double-check notice ("auto-double-check: second pass before finishing").
     private static func isDoubleCheck(_ notice: String) -> Bool {
         notice.localizedCaseInsensitiveContains("double-check")
+    }
+
+    /// omp's final recap notice ("auto-recap: final recap before finishing").
+    private static func isFinalRecap(_ notice: String) -> Bool {
+        notice.localizedCaseInsensitiveContains("auto-recap")
     }
 
     /// About four lines of the checks row's reply column.
