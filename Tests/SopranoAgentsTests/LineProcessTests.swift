@@ -75,6 +75,24 @@ struct LineProcessTests {
         #expect(kill(child, 0) == -1)
     }
 
+    @Test func aChildIgnoringSigtermIsKilledAfterTheGraceEvenWhenTheLeaderHasAlreadyExited() async throws {
+        let process = LineProcess(Self.shell("(trap '' TERM; exec sleep 30 >/dev/null 2>&1) & echo $!; wait"))
+        try process.start()
+        var iterator = process.events.makeAsyncIterator()
+        guard case let .line(childLine)? = await iterator.next(), let child = Int32(childLine) else {
+            Issue.record("expected the child pid")
+            return
+        }
+        defer { kill(child, SIGKILL) }
+        process.terminate()
+        while await iterator.next() != nil {}
+        let deadline = ContinuousClock.now + .seconds(LineProcess.killGrace + 5)
+        while kill(child, 0) == 0, ContinuousClock.now < deadline {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        #expect(kill(child, 0) == -1)
+    }
+
     @Test func aMissingExecutableFailsToStart() {
         let process = LineProcess(LineProcess.Configuration(executable: "/nonexistent/omp", arguments: [], environment: [:]))
         #expect(throws: LineProcessError.self) { try process.start() }
@@ -88,6 +106,13 @@ struct LineProcessTests {
         await #expect(throws: ProviderError.timedOut("Sleep")) {
             _ = try await LineProcess.run(Self.shell("sleep 30"), timeout: 0.3, label: "Sleep")
         }
+    }
+
+    @Test func cancellingRunThrowsCancellationRatherThanATimeout() async throws {
+        let run = Task { try await LineProcess.run(Self.shell("sleep 30"), timeout: 30, label: "Sleep") }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        run.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await run.value }
     }
 
     @Test func runsInTheConfiguredDirectory() async throws {

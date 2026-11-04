@@ -197,6 +197,9 @@ struct OmpSessionLifecycleTests {
             if prompt: finish("aborted")
         elif "id" in msg:
             ok(msg, {})
+    if os.environ.get("FAKE_LINGER"):
+        # Slow to exit after stdin closes, like omp flushing a long session file.
+        time.sleep(2)
     """#
 
     private struct Fake {
@@ -224,14 +227,14 @@ struct OmpSessionLifecycleTests {
         }
     }
 
-    private func makeFake(rejectAskDialog: Bool = false) throws -> Fake {
+    private func makeFake(rejectAskDialog: Bool = false, lingerAfterEOF: Bool = false) throws -> Fake {
         let directory = EngineHarness.temporaryDirectory()
         let script = directory.appendingPathComponent("fakeomp.py")
         let log = directory.appendingPathComponent("launches.log").path
         try Self.fakeCLI.write(to: script, atomically: true, encoding: .utf8)
         let wrapper = directory.appendingPathComponent("omp")
-        let reject = rejectAskDialog ? "FAKE_REJECT_ASK=1 " : ""
-        try "#!/bin/sh\n\(reject)FAKE_OMP_LOG='\(log)' exec /usr/bin/env python3 '\(script.path)' \"$@\"\n".write(to: wrapper, atomically: true, encoding: .utf8)
+        let flags = (rejectAskDialog ? "FAKE_REJECT_ASK=1 " : "") + (lingerAfterEOF ? "FAKE_LINGER=1 " : "")
+        try "#!/bin/sh\n\(flags)FAKE_OMP_LOG='\(log)' exec /usr/bin/env python3 '\(script.path)' \"$@\"\n".write(to: wrapper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper.path)
         return Fake(executable: wrapper.path, log: log, directory: directory)
     }
@@ -677,6 +680,22 @@ struct OmpSessionLifecycleTests {
         #expect(launches.count == 2)
         #expect(launches.last?.contains("yolo") == true)
         #expect(launches.last?.suffix(2) == ["--resume", file])
+    }
+
+    @Test func closingWhileARestartWaitsForTheOldProcessStartsNoNewOne() async throws {
+        let fake = try makeFake(lingerAfterEOF: true)
+        let session = OmpSession(executablePath: { fake.executable })
+        let file = try await session.start(config(cwd: fake.directory.path))
+        try "{}\n".write(toFile: file, atomically: true, encoding: .utf8)
+
+        let turn = Task { try await session.startTurn(input("hello", runtime: .fullAccess)) }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        await session.close()
+        await #expect(throws: ProviderError.self) { _ = try await turn.value }
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        #expect(fake.launches().count == 1)
+        #expect(fake.received("prompt").isEmpty)
     }
 
     // MARK: - Engine over the fake
