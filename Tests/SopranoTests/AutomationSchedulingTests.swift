@@ -37,7 +37,7 @@ struct AutomationSchedulingTests {
     }
 
     private func state(for automation: Automation, nextRunAt: Date?) -> AutomationStore.ScheduleState {
-        .init(signature: AutomationScheduling.signature(of: automation), nextRunAt: nextRunAt)
+        .init(signature: AutomationScheduling.signature(of: automation, timeZone: calendar.timeZone), nextRunAt: nextRunAt)
     }
 
     @Test func aNewAutomationWaitsForItsNextTimeInsteadOfRunningOneThatAlreadyPassed() {
@@ -63,6 +63,22 @@ struct AutomationSchedulingTests {
 
         #expect(decision == .run(scheduledFor: date("2026-10-29 09:00")))
         #expect(state.nextRunAt == date("2026-10-30 09:00"))
+    }
+
+    @Test func movingToAnotherTimeZoneSetsTheNextRunForNineThereInsteadOfNineAtHome() {
+        let audit = automation()
+        let (berlinState, _) = AutomationScheduling.evaluate(
+            audit, state: nil, now: date("2026-10-29 08:00"), calendar: calendar
+        )
+        var newYork = Calendar(identifier: .gregorian)
+        newYork.timeZone = TimeZone(identifier: "America/New_York")!
+
+        let (state, decision) = AutomationScheduling.evaluate(
+            audit, state: berlinState, now: date("2026-10-29 08:00"), calendar: newYork
+        )
+
+        #expect(decision == nil)
+        #expect(state.nextRunAt == newYork.date(from: DateComponents(year: 2026, month: 10, day: 29, hour: 9)))
     }
 
     @Test func aMacThatSleptThroughSeveralRunsStartsOnlyTheLatest() {

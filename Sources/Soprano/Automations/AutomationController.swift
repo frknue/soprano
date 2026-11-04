@@ -49,6 +49,8 @@ final class AutomationController {
     private var waitingForDisplay: Set<String> = []
     private var observers: [String: () -> Void] = [:]
     private static let observerId = "AutomationController"
+    /// The restore of a saved session last seen; one replaces every tab.
+    private var workspaceRestoreGeneration: Int
 
     init(
         store: AutomationStore,
@@ -60,29 +62,24 @@ final class AutomationController {
         self.agentManager = agentManager
         self.configStore = configStore
         self.environment = environment
+        workspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
 
         // Their agents went with the Soprano that quit; a restored window
-        // resumes the conversation as an ordinary agent. Pane and tab ids
-        // start over, so no run keeps the ids it had: by now they may name
-        // someone else's tab, which Open or a reused session would take over.
-        for run in store.runs where run.target != nil || !run.status.isFinal {
-            store.update(run.id) {
-                if !$0.status.isFinal {
-                    $0.status = .failed
-                    $0.finishedAt = $0.finishedAt ?? environment.now()
-                    $0.message = "Soprano quit before the run finished."
-                }
-                $0.paneId = nil
-                $0.tabId = nil
-            }
-        }
+        // resumes the conversation as an ordinary agent.
+        forgetTabs(failingOpenRuns: "Soprano quit before the run finished.", evenUnopened: true)
 
         store.addObserver(id: Self.observerId) { [weak self] in
             self?.notifyObservers()
         }
         agentManager.addObserver(id: Self.observerId) { [weak self] change in
-            guard change == .model else { return }
-            self?.followRuns()
+            guard change == .model, let self else { return }
+            let generation = self.agentManager.workspaceRestoreGeneration
+            if generation != self.workspaceRestoreGeneration {
+                self.workspaceRestoreGeneration = generation
+                // A run still being prepared opens its window afterwards.
+                self.forgetTabs(failingOpenRuns: "A saved session replaced the run's window before it finished.", evenUnopened: false)
+            }
+            self.followRuns()
         }
         configStore.addObserver(id: Self.observerId) { [weak self] in
             self?.tick()
@@ -95,6 +92,26 @@ final class AutomationController {
         displayRetryTimer?.invalidate()
         if let wakeObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+    }
+
+    /// Pane and tab ids start over when a session is restored, at launch or
+    /// from a saved one, so no run keeps the ids it had: by now they may name
+    /// someone else's tab, which following the run, Open or a reused session
+    /// would take over. An open run's agent went with its tab.
+    private func forgetTabs(failingOpenRuns message: String, evenUnopened: Bool) {
+        let now = environment.now()
+        for run in store.runs where run.target != nil || evenUnopened && !run.status.isFinal {
+            waitingForDisplay.remove(run.id)
+            store.update(run.id) {
+                if !$0.status.isFinal {
+                    $0.status = .failed
+                    $0.finishedAt = $0.finishedAt ?? now
+                    $0.message = message
+                }
+                $0.paneId = nil
+                $0.tabId = nil
+            }
         }
     }
 
@@ -148,7 +165,7 @@ final class AutomationController {
     func nextRunDate(for automationId: String) -> Date? {
         guard let automation = automation(automationId), automation.enabled else { return nil }
         if let state = store.schedules[automationId],
-           state.signature == AutomationScheduling.signature(of: automation) {
+           state.signature == AutomationScheduling.signature(of: automation, timeZone: environment.calendar.timeZone) {
             return state.nextRunAt
         }
         return automation.schedule.nextOccurrence(after: environment.now(), calendar: environment.calendar)
@@ -348,26 +365,63 @@ final class AutomationController {
             return
         }
 
-        if automation.session == .reuse, let previous = reusableRun(for: automation, excluding: run.id),
-           let target = previous.target,
-           environment.submitPrompt(automation.prompt, target) {
-            store.update(previous.id) {
-                $0.paneId = nil
-                $0.tabId = nil
+        if automation.session == .reuse, reusableRun(for: automation, excluding: run.id) != nil {
+            // The precheck decides over a reused agent too; its answer
+            // arrives later, when the agent may be gone, busy or closed.
+            if trigger == .scheduled, let precheck = automation.precheck {
+                let timeout = TimeInterval(automation.precheckTimeoutSeconds)
+                let shell = environment.shell
+                let folder = automation.folder
+                let runId = run.id
+                workQueue.async {
+                    let outcome = AutomationPrecheck.run(precheck, in: folder, timeout: timeout, shell: shell)
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            guard outcome.passed else {
+                                self.finish(runId, status: .skipped, message: outcome.summary)
+                                return
+                            }
+                            // Its automation was deleted while the precheck ran.
+                            guard self.store.run(runId) != nil else { return }
+                            if !self.handOver(runId, of: automation) {
+                                self.prepare(runId, of: automation, precheck: nil)
+                            }
+                        }
+                    }
+                }
+                return
             }
-            store.update(run.id) {
-                $0.paneId = target.paneId
-                $0.tabId = target.tabId
-                $0.conversation = previous.conversation
-                $0.viewed = previous.viewed
-                $0.sawWork = true
-                $0.status = .running
-            }
-            agentManager.agent(paneId: target.paneId, tabId: target.tabId)?.automationRunId = run.id
-            return
+            if handOver(run.id, of: automation) { return }
         }
 
-        let precheck = trigger == .scheduled ? automation.precheck : nil
+        prepare(run.id, of: automation, precheck: trigger == .scheduled ? automation.precheck : nil)
+    }
+
+    /// Gives the run's prompt to the agent of the automation's last run,
+    /// which the run then follows. False when there is none to take it.
+    private func handOver(_ runId: String, of automation: Automation) -> Bool {
+        guard let previous = reusableRun(for: automation, excluding: runId),
+              let target = previous.target,
+              environment.submitPrompt(automation.prompt, target)
+        else { return false }
+        store.update(previous.id) {
+            $0.paneId = nil
+            $0.tabId = nil
+        }
+        store.update(runId) {
+            $0.paneId = target.paneId
+            $0.tabId = target.tabId
+            $0.conversation = previous.conversation
+            $0.viewed = previous.viewed
+            $0.sawWork = true
+            $0.status = .running
+        }
+        agentManager.agent(paneId: target.paneId, tabId: target.tabId)?.automationRunId = runId
+        return true
+    }
+
+    /// Runs the precheck, makes the worktree and opens the run's agent.
+    private func prepare(_ runId: String, of automation: Automation, precheck: String?) {
         let timeout = TimeInterval(automation.precheckTimeoutSeconds)
         let worktreeBase: String?? = {
             if case .worktree(let baseBranch) = automation.workspace { return .some(baseBranch) }
@@ -381,7 +435,6 @@ final class AutomationController {
         let shell = environment.shell
         let folder = automation.folder
         let automationId = automation.id
-        let runId = run.id
         workQueue.async {
             var preparation = Preparation()
             preparation.precheck = precheck.map {

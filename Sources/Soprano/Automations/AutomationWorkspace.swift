@@ -221,11 +221,17 @@ enum AutomationPrecheck {
         var timedOut = false
         if finished.wait(timeout: .now() + timeout) == .timedOut {
             timedOut = true
-            process.terminate()
-            if finished.wait(timeout: .now() + 2) == .timedOut {
-                kill(process.processIdentifier, SIGKILL)
-                finished.wait()
+            // The shell leads its own process group; what it started is in
+            // it too, and must not outlive it to pile up every tick.
+            let group = -process.processIdentifier
+            kill(group, SIGTERM)
+            let deadline = DispatchTime.now() + 2
+            let exited = finished.wait(timeout: deadline) == .success
+            while exited, kill(group, 0) == 0, DispatchTime.now() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
             }
+            kill(group, SIGKILL)
+            if !exited { finished.wait() }
         }
         // The output ends with the command unless something it started in
         // the background still holds the pipe; that is not waited for, or
@@ -315,14 +321,17 @@ enum ClaudeWorkspaceTrust {
             withJSONObject: config,
             options: [.prettyPrinted, .withoutEscapingSlashes]
         ) else { return false }
-        let permissions = (try? fileManager.attributesOfItem(atPath: configURL.path))?[.posixPermissions]
+        // An atomic write replaces the file it names: write the one a
+        // symlinked config (dotfiles) points to, not the link.
+        let target = URL(fileURLWithPath: resolved(configURL.path))
+        let permissions = (try? fileManager.attributesOfItem(atPath: target.path))?[.posixPermissions]
         do {
-            try updated.write(to: configURL, options: .atomic)
+            try updated.write(to: target, options: .atomic)
         } catch {
             return false
         }
         if let permissions {
-            try? fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: configURL.path)
+            try? fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
         }
         return true
     }
