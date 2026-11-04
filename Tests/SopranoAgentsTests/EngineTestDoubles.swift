@@ -165,6 +165,16 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     }
 }
 
+/// Opened by the test; awaited by a scripted provider or git call.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    func open() { lock.withLock { opened = true } }
+    func wait() async {
+        while !lock.withLock({ opened }) { try? await Task.sleep(for: .milliseconds(2)) }
+    }
+}
+
 /// In-memory git that records every call as a short string ("capture ref", "changed a..b").
 final class RecordingGit: GitService, @unchecked Sendable {
     private let lock = NSLock()
@@ -176,6 +186,9 @@ final class RecordingGit: GitService, @unchecked Sendable {
     var existingBranches: [String] = []
     var worktreeError: (any Error)?
     var restoreError: (any Error)?
+    /// Awaited by `captureCheckpoint` / `restoreCheckpoint` after recording the call (slow git).
+    var captureGate: (@Sendable () async -> Void)?
+    var restoreGate: (@Sendable () async -> Void)?
 
     var calls: [String] { lock.withLock { _calls } }
 
@@ -195,6 +208,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func captureCheckpoint(cwd: String, ref: String) async throws {
         record("capture \(ref)")
+        await captureGate?()
         lock.withLock { _ = refs.insert(ref) }
     }
 
@@ -216,6 +230,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func restoreCheckpoint(cwd: String, ref: String) async throws {
         record("restore \(ref)")
+        await restoreGate?()
         if let restoreError { throw restoreError }
     }
 

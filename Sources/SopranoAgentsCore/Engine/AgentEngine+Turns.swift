@@ -118,8 +118,12 @@ extension AgentEngine {
     /// `.steer`) or queues (`.queue`). A yielded turn (its answer final, background work still
     /// running) is ended first with its yielded outcome and the message starts a new turn.
     /// Captures the pre-turn checkpoint when missing. Exactly `/compact` compacts the
-    /// conversation instead (see `compact`).
+    /// conversation instead (see `compact`). A rewind in progress (`revert`) finishes first.
     public func send(_ threadID: String, text: String, attachments: [Attachment], mode: SendMode = .automatic) async throws {
+        if let reverting = runtime.existingThread(threadID)?.reverting {
+            await reverting.value
+            return try await send(threadID, text: text, attachments: attachments, mode: mode)
+        }
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { throw EngineError.emptyMessage }
@@ -196,8 +200,13 @@ extension AgentEngine {
 
     /// Starts the first queued message now (as a steer when a turn runs; after ending a yielded
     /// turn), or removes it. Nothing steers into or out of a compaction: a queued `/compact`, or
-    /// any message while a compaction runs, stays queued until the running turn ends.
+    /// any message while a compaction runs, stays queued until the running turn ends. A rewind in
+    /// progress (`revert`) finishes first.
     public func sendQueuedNow(_ threadID: String, messageID: String) async {
+        if let reverting = runtime.existingThread(threadID)?.reverting {
+            await reverting.value
+            return await sendQueuedNow(threadID, messageID: messageID)
+        }
         guard let thread = thread(threadID), let queued = thread.queue.first(where: { $0.id == messageID }) else { return }
         if let active = thread.activeTurn, Self.isCompaction(queued.message) || Self.isCompaction(active.userMessage) { return }
         if !thread.isRunning, thread.openTurn != nil {
@@ -225,8 +234,13 @@ extension AgentEngine {
     /// "Edit from here": rewinds the conversation to before turn `turnID` (provider rollback),
     /// optionally restores files to that turn's starting checkpoint, deletes later checkpoints,
     /// and returns the turn's user message so the composer can take it back. A yielded turn is
-    /// ended first.
+    /// ended first. While it rewinds, new turns wait (`send`, `sendQueuedNow`) and the queue
+    /// does not drain.
     public func revert(_ threadID: String, toBeforeTurn turnID: String, restoreFiles: Bool) async throws -> UserMessage {
+        if let reverting = runtime.existingThread(threadID)?.reverting {
+            await reverting.value
+            return try await revert(threadID, toBeforeTurn: turnID, restoreFiles: restoreFiles)
+        }
         guard let thread = thread(threadID) else { throw EngineError.unknownThread(threadID) }
         guard let turn = thread.turns.first(where: { $0.id == turnID }) else { throw EngineError.nothingToRevert }
         guard !thread.isRunning else { throw EngineError.turnRunning }
@@ -234,6 +248,18 @@ extension AgentEngine {
             await releaseYieldedTurn(threadID)
             return try await revert(threadID, toBeforeTurn: turnID, restoreFiles: restoreFiles)
         }
+        let rt = runtime.thread(threadID)
+        let work = Task { @MainActor [self] in try await rewind(thread, toBefore: turn, restoreFiles: restoreFiles) }
+        let reverting = Task { _ = await work.result }
+        rt.reverting = reverting
+        let result = await work.result
+        if rt.reverting == reverting { rt.reverting = nil }
+        return try result.get()
+    }
+
+    /// `revert`'s work on an idle thread that nothing else starts a turn on meanwhile.
+    private func rewind(_ thread: AgentThread, toBefore turn: Turn, restoreFiles: Bool) async throws -> UserMessage {
+        let threadID = thread.id
         let git = environment.git
         let cwd = workingDirectory(for: thread)
         let baseline = CheckpointRef.ref(threadID: threadID, ordinal: turn.ordinal - 1)
@@ -393,8 +419,10 @@ extension AgentEngine {
     }
 
     /// Ends every provider session (app quit). Running turns are interrupted; yielded ones end
-    /// with their yielded outcome.
+    /// with their yielded outcome. Queued messages stay queued, and the ended turns' checkpoints
+    /// are captured before the store's final flush.
     public func shutdown() async {
+        runtime.isShuttingDown = true
         for (threadID, rt) in runtime.allThreads {
             rt.launch?.cancel()
             let session = rt.session
@@ -414,6 +442,7 @@ extension AgentEngine {
         for assistant in environment.textAssistants.values {
             await assistant.close()
         }
+        await runtime.waitForQuitWork()
         environment.store.flush()
     }
 

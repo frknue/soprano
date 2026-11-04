@@ -152,17 +152,20 @@ extension AgentEngine {
         // A turn stopped before its provider turn started changed nothing worth a checkpoint.
         let capture = status == .completed || (status == .interrupted && ranAtProvider)
         let drain = status == .completed && !rt.holdQueue
-        runtime.track { [self] in
+        runtime.track(beforeQuit: capture) { [self] in
             if capture { await captureTurnCheckpoint(threadID, turnID) }
             if drain { await drainQueue(threadID) }
         }
     }
 
-    /// Starts the first queued message when the thread is idle (a yielded turn ends first).
+    /// Starts the first queued message when the thread is idle (a yielded turn ends first). While
+    /// the app quits or the thread is being rewound, the queue stays as it is.
     func drainQueue(_ threadID: String) async {
-        guard let thread = thread(threadID), !thread.isRunning, !thread.queue.isEmpty else { return }
+        guard !runtime.isShuttingDown, runtime.existingThread(threadID)?.reverting == nil,
+              let thread = thread(threadID), !thread.isRunning, !thread.queue.isEmpty else { return }
         await releaseYieldedTurn(threadID)
-        guard let thread = self.thread(threadID), thread.openTurn == nil, let next = thread.queue.first else { return }
+        guard !runtime.isShuttingDown, runtime.existingThread(threadID)?.reverting == nil,
+              let thread = self.thread(threadID), thread.openTurn == nil, let next = thread.queue.first else { return }
         updateThread(threadID) { $0.queue.removeAll { $0.id == next.id } }
         guard let turnID = beginTurn(threadID, message: next.message, selection: next.modelSelection) else { return }
         await runTurn(threadID, turnID)
@@ -189,7 +192,7 @@ extension AgentEngine {
             }
         }
         let drain = outcome == .completed && !runtime.thread(threadID).holdQueue && !thread.queue.isEmpty
-        runtime.track { [self] in
+        runtime.track(beforeQuit: true) { [self] in
             await captureTurnCheckpoint(threadID, turnID)
             if drain { await drainQueue(threadID) }
         }
