@@ -699,7 +699,9 @@ The full guide — every shortcut, the right panel, worktrees, statistics — is
 `~/Library/Application Support/Soprano Agents/` (`Soprano Agents Dev` for development
 builds), where the standalone Soprano Agents app kept them, so existing threads carry
 over. The first time the window opens, Soprano copies the standalone app's
-`~/.config/soprano-agents/settings.json` into `threads` and leaves that file alone.
+`~/.config/soprano-agents/settings.json` into `threads` and leaves that file alone. Quit the
+standalone app first: it uses the same thread folder, so Soprano will not open the window
+while it runs.
 
 ## omp web
 

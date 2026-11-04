@@ -29,6 +29,8 @@ page shows omp's version and health.
 
 ## Coming from the standalone app
 
+- Quit Soprano Agents.app first. Both keep their threads in the same folder, so Soprano
+  will not open the window (it says so) while the standalone app runs.
 - Threads, projects and attachments stay where the standalone app kept them, so every
   thread, its attachments and its checkpoints carry over.
 - The first time the window opens, Soprano copies `~/.config/soprano-agents/settings.json`

@@ -5,7 +5,9 @@ import SopranoAgentsCore
 /// and notifications.
 ///
 /// Nothing starts until the window first opens; then the engine runs until
-/// Soprano quits, so closing the window leaves its threads working.
+/// Soprano quits, so closing the window leaves its threads working. It never
+/// starts while the standalone Soprano Agents app runs: both keep their threads
+/// in the same folder, and two engines would overwrite each other's thread files.
 @MainActor
 final class AgentsAppController {
     /// Whether the window was open when Soprano last quit; it reopens on the next launch.
@@ -17,19 +19,49 @@ final class AgentsAppController {
     private var notifier: ThreadNotifier?
     private let menuBar: MenuBarSwitcher
     private let defaults: UserDefaults
+    private let standaloneIsRunning: @MainActor () -> Bool
+    private let reportStandaloneRunning: @MainActor () -> Void
     /// Brings Soprano's terminal window forward (Show Terminals).
     let showTerminals: () -> Void
 
-    init(menuBar: MenuBarSwitcher, defaults: UserDefaults = .standard, showTerminals: @escaping () -> Void) {
+    init(
+        menuBar: MenuBarSwitcher,
+        defaults: UserDefaults = .standard,
+        standaloneIsRunning: @escaping @MainActor () -> Bool = AgentsAppController.isStandaloneRunning,
+        reportStandaloneRunning: @escaping @MainActor () -> Void = AgentsAppController.alertStandaloneRunning,
+        showTerminals: @escaping () -> Void
+    ) {
         self.menuBar = menuBar
         self.defaults = defaults
+        self.standaloneIsRunning = standaloneIsRunning
+        self.reportStandaloneRunning = reportStandaloneRunning
         self.showTerminals = showTerminals
     }
 
-    /// Reopens the window behind `window` when it was open at the last quit.
+    /// The standalone app that shares this build's data folder (`AppPaths`):
+    /// installed Soprano pairs with `Soprano Agents.app`, every other build with
+    /// its development app.
+    nonisolated static func standaloneBundleIdentifier(for bundleIdentifier: String?) -> String {
+        bundleIdentifier == AppPaths.installedBundleIdentifier ? "com.soprano.agents" : "com.soprano.agents.dev"
+    }
+
+    static func isStandaloneRunning() -> Bool {
+        let identifier = standaloneBundleIdentifier(for: Bundle.main.bundleIdentifier)
+        return !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty
+    }
+
+    static func alertStandaloneRunning() {
+        let alert = NSAlert()
+        alert.messageText = "Quit Soprano Agents first"
+        alert.informativeText = "The Soprano Agents app is still running, and it keeps its threads in the same folder. Quit it, then open Soprano Agents here again (⇧⌘A)."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
+    /// Reopens the window behind `window` when it was open at the last quit. While
+    /// the standalone app runs it stays closed and is still restored next launch.
     func restoreIfNeeded(behind window: NSWindow?) {
-        guard defaults.bool(forKey: Self.windowOpenKey) else { return }
-        let controller = ensureWindow()
+        guard defaults.bool(forKey: Self.windowOpenKey), let controller = ensureWindow() else { return }
         controller.prepareToShow()
         if let window {
             controller.window?.order(.below, relativeTo: window.windowNumber)
@@ -40,7 +72,10 @@ final class AgentsAppController {
 
     /// Shows the window, starting the engine on first use, and makes it key.
     func showWindow() {
-        let controller = ensureWindow()
+        guard let controller = ensureWindow() else {
+            reportStandaloneRunning()
+            return
+        }
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -56,9 +91,11 @@ final class AgentsAppController {
     var needsShutdown: Bool { engine != nil }
 
     /// Remembers whether the window is open for the next launch; a minimized
-    /// window, or one hidden with Soprano, counts as open.
+    /// window, or one hidden with Soprano, counts as open. A window never built
+    /// this launch keeps the last answer.
     func recordWindowState() {
-        defaults.set(windowController?.isOpen == true, forKey: Self.windowOpenKey)
+        guard let windowController else { return }
+        defaults.set(windowController.isOpen, forKey: Self.windowOpenKey)
     }
 
     /// Stops every omp session.
@@ -74,8 +111,11 @@ final class AgentsAppController {
         return MenuBarSwitcher.rootWindow(of: keyWindow) === agentsWindow
     }
 
-    private func ensureWindow() -> AgentsWindowController {
+    /// The window, built with its engine on first use; nil while the standalone app
+    /// runs, before anything opens the shared thread store.
+    private func ensureWindow() -> AgentsWindowController? {
         if let windowController { return windowController }
+        guard !standaloneIsRunning() else { return nil }
 
         let settings = SettingsCenter.shared
         settings.importLegacySettings(defaults: defaults)
