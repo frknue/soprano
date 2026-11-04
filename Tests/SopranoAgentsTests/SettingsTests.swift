@@ -94,6 +94,20 @@ struct SettingsTests {
         #expect(resolved.keybindings == KeybindingSettings())
     }
 
+    @Test func aSopranoFileFreshFromTheTemplateStillTakesTheStandaloneAppsSettings() throws {
+        // Soprano writes its template, `threads` block included, before the Agents window ever
+        // opens; that block is the defaults, not the user's choice, so the import replaces it.
+        let template = ConfigFile.template(settings: .defaultSettings, keybindings: DefaultKeybindings.config)
+        let legacy = #"{ "chat": { "width": "wide" }, "worktrees": { "branchPrefix": "agents" } }"#
+
+        let imported = try #require(try SettingsFile.importing(legacyText: legacy, into: template))
+        let resolved = try SettingsResolver.resolve(text: SettingsFile.agentsDocument(fromSopranoText: imported))
+        #expect(resolved.settings.chatWidth == .wide)
+        #expect(resolved.settings.branchPrefix == "agents")
+        // Once imported, `threads` holds the user's choices and the import never runs again.
+        #expect(try SettingsFile.importing(legacyText: legacy, into: imported) == nil)
+    }
+
     @Test func engineSettingsRunEverythingOnOmp() {
         let defaults = AgentsSettings.defaults.engineSettings
         #expect(defaults.defaultModel == ModelSelection(provider: .omp, model: ModelSelection.ompDefaultModel))

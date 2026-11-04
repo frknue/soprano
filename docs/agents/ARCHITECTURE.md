@@ -480,6 +480,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | Command id | Title | Scope | Keys | Owner |
 |---|---|---|---|---|
 | `palette.open` | Command Palette | global | `cmd+k`, `cmd+p` | Shell |
+| `window.showTerminals` | Show Terminals (Soprano's terminal window) | global | `cmd+shift+t` | Shell |
 | `settings.open` | Settings | global | `cmd+,` | Shell |
 | `settings.openFile` | Open settings.json | global | — | Shell |
 | `view.toggleSidebar` | Toggle Sidebar | global | `cmd+e` | Shell |
@@ -550,9 +551,9 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 └────────────────────┴────────────────────────────────────────────────────┴─────────────────────────────┘
 ```
 
-- Colors only from `PaletteCenter.shared.palette`, which `Palette(soprano:)` derives from the
-  Soprano theme in force (`theme: "soprano"` by default, following Soprano's own theme and
-  appearance; `folio` follows macOS light/dark). Terminals (drawer and panel tabs) use the theme's terminal
+- Colors only from `PaletteCenter.shared.palette`, which `Palette(soprano:)` derives from
+  Soprano's theme in force (its `theme` and `appearance`; `folio` follows macOS light/dark,
+  `ThemeCenter.followSystemAppearance`). Terminals (drawer and panel tabs) use the theme's terminal
   palette, project monograms its accent hues. Views subclass `PaletteView` and re-color in
   `applyPalette(_:)`.
 - Fonts from `Typography`: system font (14 body, 13 detail rows, 12 meta/pills, 11 kbd), SF Mono
@@ -653,7 +654,7 @@ The command palette and Open Project… (`Views/Palette/`) are Soprano's `Comman
 (shared with the terminal window), one per window (`AgentsWindowController.palette`): a child panel under the titlebar
 over a scrim, rows of icon, title over `AppCommand.description`, keycaps; substring search on
 title, then description, then search text. `PaletteItems` builds the rows (commands, threads by
-last use, projects, settings rows; or projects, the subfolders of `projects.directories` that are
+last use, projects, settings rows; or projects, the subfolders of Soprano's `projectDirectories` that are
 no project yet, Choose Folder…); a chosen row runs after the panel closed. While it is key, only
 `palette.open` / `project.open` reach the menu (close, or switch to projects). The harness types
 into it with `--type` and sends it `--keys`.
@@ -661,7 +662,7 @@ into it with `--type` and sends it `--keys`.
 ## Tests
 
 swift-testing (`import Testing`, `@Test`, `#expect`), one `struct …Tests` per file, sentence-style
-names. Test files `import AppKit` (never `Foundation`) plus `@testable import SopranoAgents` /
+names. Test files `import AppKit` (never `Foundation`) plus `@testable import Soprano` /
 `SopranoAgentsCore`. Provider parsing is tested against the recorded traces in
 `Tests/SopranoAgentsTests/Fixtures/`; engine logic against a fake `ProviderDriver` and
 `FixtureGitService`-style fakes; git against real temp repositories with an isolated config

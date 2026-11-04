@@ -25,7 +25,7 @@ final class MenuBarSwitcher {
     private var agentsBar: Bar?
     private(set) var current: Owner = .soprano
     private let owner: (NSWindow) -> Owner?
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     /// `owner` names the window a root window belongs to, nil for neither.
     init(soprano: Bar, owner: @escaping (NSWindow) -> Owner?) {
@@ -36,16 +36,28 @@ final class MenuBarSwitcher {
     /// Installs Soprano's bar and follows the key window from here on.
     func start() {
         install(.soprano)
-        observer = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let window = notification.object as? NSWindow else { return }
-            MainActor.assumeIsolated {
-                self?.windowBecameKey(window)
-            }
-        }
+        observers = [
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let window = notification.object as? NSWindow else { return }
+                MainActor.assumeIsolated {
+                    self?.windowBecameKey(window)
+                }
+            },
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let window = notification.object as? NSWindow else { return }
+                MainActor.assumeIsolated {
+                    self?.windowWillClose(window)
+                }
+            },
+        ]
     }
 
     /// Replaces the Agents bar (it is rebuilt when its shortcuts change).
@@ -57,6 +69,14 @@ final class MenuBarSwitcher {
     func windowBecameKey(_ window: NSWindow) {
         guard let owner = owner(Self.rootWindow(of: window)), owner != current else { return }
         install(owner)
+    }
+
+    /// The Agents window closing hands the bar back to Soprano at once: when
+    /// Soprano's own window is minimized nothing becomes key afterwards, and the
+    /// Agents bar would keep acting on a closed window.
+    func windowWillClose(_ window: NSWindow) {
+        guard current == .agents, owner(window) == .agents else { return }
+        install(.soprano)
     }
 
     /// The window `window` hangs off: through child-window and sheet parents.

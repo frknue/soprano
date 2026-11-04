@@ -55,9 +55,10 @@ final class AgentsAppController {
     /// True while the engine may have omp sessions to stop before quitting.
     var needsShutdown: Bool { engine != nil }
 
-    /// Remembers whether the window is open for the next launch.
+    /// Remembers whether the window is open for the next launch; a minimized
+    /// window, or one hidden with Soprano, counts as open.
     func recordWindowState() {
-        defaults.set(windowController?.window?.isVisible == true, forKey: Self.windowOpenKey)
+        defaults.set(windowController?.isOpen == true, forKey: Self.windowOpenKey)
     }
 
     /// Stops every omp session.
@@ -80,6 +81,7 @@ final class AgentsAppController {
         settings.importLegacySettings()
         settings.start()
         PaletteCenter.shared.apply(setting: ThemeCenter.followSoprano)
+        ThemeCenter.shared.followSystemAppearance()
         AllCommands.registerAll()
         settings.reloadKeymap()
 

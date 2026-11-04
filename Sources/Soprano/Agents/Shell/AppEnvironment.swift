@@ -137,10 +137,11 @@ final class ThemeCenter {
         applyResolvedTheme()
     }
 
-    /// Lets the theme drive `NSApp.appearance` and follow macOS light/dark
-    /// changes. Called once by the app at launch; snapshots and tests never do.
-    func startDrivingApplicationAppearance() {
-        manager.startDrivingApplicationAppearance()
+    /// Re-resolves `folio` when macOS switches between light and dark. Only Soprano's
+    /// own `ThemeManager` drives `NSApp.appearance`; this one just follows it. Called
+    /// once when the Agents window is first built; snapshots and tests never do.
+    func followSystemAppearance() {
+        manager.followSystemAppearance()
     }
 
     /// The concrete palette id `setting` resolves to, given Soprano's settings

@@ -57,6 +57,15 @@ final class ThemeManager {
         isDrivingApplication = true
         applyApplicationAppearance()
         resolveAndNotify()
+        followSystemAppearance()
+    }
+
+    /// Re-resolves `folio` whenever the effective appearance changes, without
+    /// touching `NSApp.appearance`: a second manager (the Soprano Agents
+    /// window's) follows the one that drives it.
+    func followSystemAppearance() {
+        guard appearanceObservation == nil else { return }
+        resolveAndNotify()
         appearanceObservation = NSApplication.shared.observe(
             \.effectiveAppearance,
             options: [.new]

@@ -97,4 +97,16 @@ struct MenuBarSwitcherTests {
 
         #expect(NSApp.mainMenu === fixture.sopranoMenu)
     }
+
+    @Test func closingTheAgentsWindowHandsTheMenuBarBackEvenWhenNoWindowBecomesKey() {
+        // Soprano's own window may be minimized: then nothing becomes key after the close,
+        // and the Agents bar must not stay behind acting on a closed window.
+        let fixture = makeFixture()
+        fixture.switcher.windowBecameKey(fixture.agentsWindow)
+
+        fixture.switcher.windowWillClose(fixture.agentsWindow)
+
+        #expect(NSApp.mainMenu === fixture.sopranoMenu)
+        #expect(fixture.switcher.current == .soprano)
+    }
 }

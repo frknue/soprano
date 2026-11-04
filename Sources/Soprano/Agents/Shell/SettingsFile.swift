@@ -68,14 +68,16 @@ enum SettingsFile {
     // MARK: - Importing the standalone app's settings
 
     /// Soprano's document with the standalone app's settings moved in, or nil when
-    /// there is nothing to do because Soprano's document already has `threads` (the
-    /// import marker). The old object minus `theme` and `projects` becomes `threads`;
-    /// its `projects.directories` becomes Soprano's `projectDirectories` only when
-    /// Soprano has none. Soprano's comments and key order are kept.
+    /// there is nothing to do because Soprano's `threads` already holds the user's own
+    /// choices (the import marker). The `threads` block Soprano's template writes is
+    /// only the defaults, so it does not count. The old object minus `theme` and
+    /// `projects` becomes `threads`; its `projects.directories` becomes Soprano's
+    /// `projectDirectories` only when Soprano has none. Soprano's comments and key
+    /// order are kept.
     static func importing(legacyText: String, into sopranoText: String?) throws -> String? {
         let current = sopranoText ?? "{}"
         let soprano = try object(from: current)
-        guard soprano[namespace] == nil else { return nil }
+        if let threads = soprano[namespace], !isTemplateDefault(threads) { return nil }
 
         var legacy = try object(from: legacyText)
         let directories = (legacy["projects"] as? [String: Any])?["directories"] as? [Any]
@@ -98,8 +100,20 @@ enum SettingsFile {
         guard let legacy = try ConfigFile.read(at: legacyURL),
               let updated = try importing(legacyText: legacy, into: ConfigFile.read(at: url))
         else { return false }
+        // Old settings equal to the template's block produce the same text: nothing to write.
+        guard try updated != ConfigFile.read(at: url) else { return false }
         try ConfigFile.write(updated, to: url)
         return true
+    }
+
+    /// Whether `threads` is the block Soprano's template writes: the defaults, not a
+    /// user's choice.
+    private static func isTemplateDefault(_ threads: Any) -> Bool {
+        let template = ConfigFile.template(settings: .defaultSettings, keybindings: DefaultKeybindings.config)
+        guard let templateThreads = (try? object(from: template))?[namespace] as? NSDictionary,
+              let threads = threads as? NSDictionary
+        else { return false }
+        return threads.isEqual(templateThreads)
     }
 
     private static func object(from text: String) throws -> [String: Any] {

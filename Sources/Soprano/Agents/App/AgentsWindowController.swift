@@ -129,8 +129,13 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
         CommandRegistry.shared.perform(id, in: commandContext())
     }
 
+    /// Open from showing until closed, also while minimized or while Soprano is
+    /// hidden (when `isVisible` is false): what the next launch restores.
+    private(set) var isOpen = false
+
     /// Re-arms the keyboard after the window was closed; it reopens while Soprano runs.
     func prepareToShow() {
+        isOpen = true
         if let window { router.startMonitoring(window: window) }
     }
 
@@ -140,6 +145,7 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        isOpen = false
         router.stopMonitoring()
     }
 }
