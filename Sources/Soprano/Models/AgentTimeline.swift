@@ -106,7 +106,8 @@ struct AgentTranscriptEntry: Equatable, Sendable {
     var items: [AgentTimelineItem] = []
     /// Results keyed by the id of the tool call item they finish.
     var results: [String: AgentToolResult] = [:]
-    /// Provisional items this record supersedes.
+    /// Provisional items this record supersedes. An id that another record
+    /// rewrote with the finished item is kept.
     var droppedItemIds: [String] = []
 }
 
@@ -144,6 +145,9 @@ struct AgentTimeline: Equatable, Sendable {
         var items: [AgentTimelineItem] = []
         var indexById: [String: Int] = [:]
         var dropped = Set<String>()
+        // Ids a second record rewrote: the finished item now stands there, and
+        // Codex reuses the provisional call's id for it.
+        var replaced = Set<String>()
 
         for entry in visible {
             for item in entry.items {
@@ -156,6 +160,7 @@ struct AgentTimeline: Equatable, Sendable {
                 }
                 if let index = indexById[item.id] {
                     items[index] = item
+                    replaced.insert(item.id)
                 } else {
                     indexById[item.id] = items.count
                     items.append(item)
@@ -169,6 +174,7 @@ struct AgentTimeline: Equatable, Sendable {
             dropped.formUnion(entry.droppedItemIds)
         }
 
+        dropped.subtract(replaced)
         if !dropped.isEmpty {
             items.removeAll { dropped.contains($0.id) }
         }

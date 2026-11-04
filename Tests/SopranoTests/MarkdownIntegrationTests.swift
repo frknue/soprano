@@ -6,35 +6,35 @@ struct MarkdownIntegrationTests {
     @Test func markdownCommandResolvesCallerRelativePathsAndAcceptsTheShortAlias() throws {
         let request = try #require(try MarkdownCommandRequest.parse(
             ["soprano", "markdown", "--new", "docs/architecture.md"],
-            environment: ["PWD": "/tmp/soprano-project"]
+            environment: [:], currentDirectoryPath: "/tmp/soprano-project"
         ))
         #expect(request.fileURL.path == "/tmp/soprano-project/docs/architecture.md")
         #expect(request.opensNewPane)
 
         let short = try #require(try MarkdownCommandRequest.parse(
             ["soprano", "md", "README.md"],
-            environment: ["PWD": "/tmp/soprano-project"]
+            environment: [:], currentDirectoryPath: "/tmp/soprano-project"
         ))
         #expect(short.fileURL.path == "/tmp/soprano-project/README.md")
         #expect(!short.opensNewPane)
 
         let direct = try #require(try MarkdownCommandRequest.parse(
             ["soprano", "README.md"],
-            environment: ["PWD": "/tmp/soprano-project"]
+            environment: [:], currentDirectoryPath: "/tmp/soprano-project"
         ))
         #expect(direct.fileURL.path == "/tmp/soprano-project/README.md")
         #expect(!direct.opensNewPane)
 
         let directNew = try #require(try MarkdownCommandRequest.parse(
             ["soprano", "--new", "docs/design.MARKDOWN"],
-            environment: ["PWD": "/tmp/soprano-project"]
+            environment: [:], currentDirectoryPath: "/tmp/soprano-project"
         ))
         #expect(directNew.fileURL.path == "/tmp/soprano-project/docs/design.MARKDOWN")
         #expect(directNew.opensNewPane)
 
         #expect(try MarkdownCommandRequest.parse(
             ["soprano", "not-a-markdown-command"],
-            environment: ["PWD": "/tmp/soprano-project"]
+            environment: [:], currentDirectoryPath: "/tmp/soprano-project"
         ) == nil)
     }
 

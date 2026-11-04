@@ -193,6 +193,9 @@ final class TranscriptFollower: AgentTranscriptReader, @unchecked Sendable {
         while true {
             reset()
             let start = size > window ? size - window : 0
+            if start > 0 {
+                readHeader(of: handle, before: start)
+            }
             consume(read(handle, from: start, to: size), skippingFirstLine: start > 0)
             offset = size
             let prompts = entries.reduce(0) { count, entry in
@@ -202,6 +205,29 @@ final class TranscriptFollower: AgentTranscriptReader, @unchecked Sendable {
                 return
             }
             window *= 4
+        }
+    }
+
+    /// A tail skips the file's first line, which in omp and Codex files is the
+    /// session header the decoder takes the working directory from. The
+    /// decoder reads it for that state only; whatever entry it makes lies
+    /// outside the window.
+    private func readHeader(of handle: FileHandle, before end: UInt64) {
+        let limit = min(end, Self.initialWindow)
+        let chunkSize: UInt64 = 64 << 10
+        var header = Data()
+        var position: UInt64 = 0
+        while position < limit {
+            let chunkEnd = min(position + chunkSize, limit)
+            let chunk = read(handle, from: position, to: chunkEnd)
+            guard !chunk.isEmpty else { return }
+            if let newline = chunk.firstIndex(of: 0x0A) {
+                header.append(chunk[chunk.startIndex..<newline])
+                _ = decoder.entry(forLine: header)
+                return
+            }
+            header.append(chunk)
+            position = chunkEnd
         }
     }
 

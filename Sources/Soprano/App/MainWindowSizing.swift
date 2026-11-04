@@ -48,6 +48,24 @@ enum MainWindowSizing {
                 && intersection.height >= min(100, frame.height)
         }
     }
+
+    /// Fits a restorable frame into the visible frame it overlaps most, so a
+    /// frame saved on a larger display comes back inside the current one.
+    static func clamped(_ frame: NSRect, to visibleFrames: [NSRect]) -> NSRect {
+        func overlapArea(_ visibleFrame: NSRect) -> CGFloat {
+            let intersection = frame.intersection(visibleFrame)
+            return intersection.isNull ? 0 : intersection.width * intersection.height
+        }
+        guard let visibleFrame = visibleFrames.max(by: { overlapArea($0) < overlapArea($1) }),
+              overlapArea(visibleFrame) > 0
+        else { return frame }
+
+        let width = min(frame.width, max(visibleFrame.width, minimumFrameSize.width))
+        let height = min(frame.height, max(visibleFrame.height, minimumFrameSize.height))
+        let x = min(max(frame.minX, visibleFrame.minX), visibleFrame.maxX - width)
+        let y = min(max(frame.minY, visibleFrame.minY), visibleFrame.maxY - height)
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
 }
 
 enum MainWindowFrameStore {
@@ -61,7 +79,8 @@ enum MainWindowFrameStore {
     ) -> NSRect? {
         guard let storedFrame = defaults.string(forKey: key) else { return nil }
         let frame = NSRectFromString(storedFrame)
-        return MainWindowSizing.isRestorable(frame, on: visibleFrames) ? frame : nil
+        guard MainWindowSizing.isRestorable(frame, on: visibleFrames) else { return nil }
+        return MainWindowSizing.clamped(frame, to: visibleFrames)
     }
 
     static func save(

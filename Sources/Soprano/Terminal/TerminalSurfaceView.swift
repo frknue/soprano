@@ -399,6 +399,13 @@ private struct TerminalCopyModeGridMetrics {
     let originY: CGFloat
     let cellWidth: CGFloat
     let cellHeight: CGFloat
+    /// The ghostty grid these points were measured on: columns, rows and
+    /// cell size in pixels. Any change (resize, font size) invalidates them.
+    let grid: [UInt32]
+
+    static func grid(of size: ghostty_surface_size_s) -> [UInt32] {
+        [UInt32(size.columns), UInt32(size.rows), size.cell_width_px, size.cell_height_px]
+    }
 
     func topLeft(column: Int, row: Int) -> CGPoint {
         CGPoint(
@@ -713,10 +720,22 @@ final class TerminalSurfaceView: NSView {
         }
 
         performBindingAction(action)
+        endCopyModeIfGridChanged()
     }
 
     func resetFontSize() {
         performBindingAction("reset_font_size")
+        endCopyModeIfGridChanged()
+    }
+
+    /// Copy mode maps cells to points with the grid measured when it began;
+    /// once ghostty's grid changes, its cursor and selection would land on
+    /// the wrong cells, so it ends instead.
+    private func endCopyModeIfGridChanged() {
+        guard let metrics = copyModeGridMetrics, let surface,
+              metrics.grid != TerminalCopyModeGridMetrics.grid(of: ghostty_surface_size(surface))
+        else { return }
+        finishCopyMode(copySelection: false)
     }
 
     @discardableResult
@@ -760,7 +779,8 @@ final class TerminalSurfaceView: NSView {
             originX: originX,
             originY: originY,
             cellWidth: cellSize.width,
-            cellHeight: cellSize.height
+            cellHeight: cellSize.height,
+            grid: TerminalCopyModeGridMetrics.grid(of: surfaceSize)
         )
         copyModeSession = TerminalCopyModeSession(
             column: column,
@@ -816,6 +836,8 @@ final class TerminalSurfaceView: NSView {
     private func handleCopyModeKeyDown(_ event: NSEvent) -> Bool {
         guard var session = copyModeSession else { return false }
         suppressedCopyModeKeyUps.insert(event.keyCode)
+        endCopyModeIfGridChanged()
+        guard copyModeSession != nil else { return true }
 
         guard let command = session.command(for: TerminalCopyModeInput(event: event)) else {
             copyModeSession = session
@@ -1438,6 +1460,8 @@ final class TerminalSurfaceView: NSView {
         let scaleChanged = abs(xScale - lastXScale) > 0.001 || abs(yScale - lastYScale) > 0.001
         let sizeChanged = wpx != lastPixelWidth || hpx != lastPixelHeight
         guard scaleChanged || sizeChanged else { return }
+        // Copy mode's cell geometry was measured on the old grid.
+        finishCopyMode(copySelection: false)
 
         if scaleChanged {
             ghostty_surface_set_content_scale(surface, xScale, yScale)
@@ -1788,6 +1812,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     private func updateCopyModeMouseSelection(with event: NSEvent, surface: ghostty_surface_t) {
+        endCopyModeIfGridChanged()
         guard var session = copyModeSession, let metrics = copyModeGridMetrics else { return }
         let point = convert(event.locationInWindow, from: nil)
         let previousPhase = session.phase
