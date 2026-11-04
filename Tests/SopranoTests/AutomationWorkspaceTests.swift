@@ -132,4 +132,45 @@ struct AutomationWorkspaceTests {
         #expect(outcome.output == "started")
         #expect(Date().timeIntervalSince(started) < 5)
     }
+
+    @Test func aPrecheckThatTimesOutStopsTheCommandsItStartedAlongWithItsShell() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-precheck-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        // A command that shrugs off SIGTERM, the way one handling it would.
+        let outcome = AutomationPrecheck.run(
+            "trap '' TERM; sleep 30 & echo $! > child.pid; sleep 30", in: directory.path, timeout: 1, shell: "/bin/sh"
+        )
+
+        #expect(outcome.timedOut)
+        let text = try String(contentsOf: directory.appendingPathComponent("child.pid"), encoding: .utf8)
+        let child = try #require(pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+        let deadline = Date().addingTimeInterval(3)
+        while kill(child, 0) == 0, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        let alive = kill(child, 0) == 0
+        if alive { kill(child, SIGKILL) }
+        #expect(!alive)
+    }
+
+    @Test func trustingAFolderWritesThroughASymlinkedClaudeConfigInsteadOfReplacingTheLink() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-claude-trust-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let dotfile = directory.appendingPathComponent("dotfiles-claude.json")
+        try Data(#"{ "projects": {} }"#.utf8).write(to: dotfile)
+        let link = directory.appendingPathComponent(".claude.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: dotfile)
+
+        #expect(ClaudeWorkspaceTrust.trust("/tmp/soprano-trusted", configURL: link))
+
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == dotfile.path)
+        let config = try JSONSerialization.jsonObject(with: Data(contentsOf: dotfile)) as? [String: Any]
+        let project = (config?["projects"] as? [String: Any])?["/tmp/soprano-trusted"] as? [String: Any]
+        #expect(project?["hasTrustDialogAccepted"] as? Bool == true)
+    }
 }

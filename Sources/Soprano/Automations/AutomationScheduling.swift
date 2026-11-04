@@ -16,8 +16,10 @@ enum AutomationScheduling {
     /// looks every half minute, so a run due right at the edge is not lost.
     static let checkSlack: TimeInterval = 60
 
-    static func signature(of automation: Automation) -> String {
-        "\(automation.enabled ? "on" : "off") \(automation.schedule.expression)"
+    /// The next run is kept as an absolute time, so it counts from a move to
+    /// another time zone like an edit: 9:00 is 9:00 wherever the Mac is.
+    static func signature(of automation: Automation, timeZone: TimeZone) -> String {
+        "\(automation.enabled ? "on" : "off") \(automation.schedule.expression) \(timeZone.identifier)"
     }
 
     /// The state to keep after a check at `now`, and what to do. Only the
@@ -30,7 +32,7 @@ enum AutomationScheduling {
         now: Date,
         calendar: Calendar = .current
     ) -> (state: AutomationStore.ScheduleState, decision: Decision?) {
-        let signature = signature(of: automation)
+        let signature = signature(of: automation, timeZone: calendar.timeZone)
         func next() -> Date? {
             automation.enabled ? automation.schedule.nextOccurrence(after: now, calendar: calendar) : nil
         }
