@@ -165,7 +165,7 @@ enum ConfigFile {
 
           "keybindings": {
             // The tmux-style prefix is Ctrl+<prefixKey>.
-            "prefixKey": "\(keybindings.prefixKey)",
+            "prefixKey": \(jsonStringLiteral(keybindings.prefixKey)),
             "prefixTimeoutMs": \(keybindings.prefixTimeoutMs),
 
             // How much one prefix-resize step moves a split, in percent.
@@ -302,7 +302,7 @@ enum ConfigFile {
 
         guard !changed.isEmpty else { return "{}" }
         let entries = changed.map { binding in
-            "      \"\(binding.id)\": \"\(KeyChord(binding: binding).canonicalString)\""
+            "      \(jsonStringLiteral(binding.id)): \(jsonStringLiteral(KeyChord(binding: binding).canonicalString))"
         }
         return "{\n" + entries.joined(separator: ",\n") + "\n    }"
     }
@@ -440,6 +440,16 @@ final class ConfigFileWatcher: @unchecked Sendable {
         fileSource = source
     }
 
+    /// Whether the path no longer leads to the file being watched: there is
+    /// no watch yet, or the path (following symlinks) is now another inode.
+    private func pathLeftWatchedFile() -> Bool {
+        guard let fileSource else { return true }
+        var watched = stat()
+        var current = stat()
+        guard fstat(Int32(fileSource.handle), &watched) == 0, stat(url.path, &current) == 0 else { return true }
+        return watched.st_dev != current.st_dev || watched.st_ino != current.st_ino
+    }
+
     private func armDirectorySource() {
         directorySource?.cancel()
         directorySource = nil
@@ -468,9 +478,11 @@ final class ConfigFileWatcher: @unchecked Sendable {
                 // new one (a dotfiles checkout does exactly this).
                 self.armDirectorySource()
                 self.armFileSource()
-            } else if self.fileSource == nil {
+            } else if self.pathLeftWatchedFile() {
                 // A rename into the directory can create the file we never
-                // managed to open (first save, or `mv` from a template).
+                // managed to open (first save, or `mv` from a template), and
+                // `ln -sf` re-points a symlinked settings.json without
+                // touching the file we watch.
                 self.armFileSource()
             }
             self.scheduleChange()

@@ -676,6 +676,9 @@ enum JSONCText {
         var start = member.keyStart
         var end = member.value.end
 
+        // The comma that goes with the entry: the one after it, or — for the
+        // last entry — the one before it.
+        var precedingComma: Int?
         var forward = end
         while forward < stripped.count, isWhitespace(stripped[forward]) { forward += 1 }
         if forward < stripped.count, stripped[forward] == "," {
@@ -684,7 +687,7 @@ enum JSONCText {
             var backward = start - 1
             while backward >= 0, isWhitespace(stripped[backward]) { backward -= 1 }
             if backward >= 0, stripped[backward] == "," {
-                start = backward
+                precedingComma = backward
             }
         }
 
@@ -692,15 +695,29 @@ enum JSONCText {
         // including a trailing comment, which documented the entry being
         // removed. The prefix check reads the original text so a *leading*
         // comment on that line keeps the line alive.
+        var ownsLine = false
         let lineStart = lineStartIndex(of: start, in: source)
         if source[lineStart..<start].allSatisfy(isIndentCharacter) {
             let trailing = skippingTrailingFiller(from: end, stripped: stripped, isComment: isComment)
             if trailing < source.count, source[trailing].isNewline {
                 start = lineStart
                 end = trailing + 1
+                ownsLine = true
             }
         }
-        return Edit(start: start, end: end, text: "")
+
+        // Only the preceding comma goes: what sits between it and the entry —
+        // a comment documenting the entry before, the line break that ends
+        // that entry's line — stays.
+        guard let comma = precedingComma else { return Edit(start: start, end: end, text: "") }
+        let between = (comma + 1)..<start
+        if ownsLine {
+            return Edit(start: comma, end: end, text: String(source[between]))
+        }
+        guard between.contains(where: { isComment[$0] }) else { return Edit(start: comma, end: end, text: "") }
+        var kept = source[between]
+        while let last = kept.last, isWhitespace(last) { kept.removeLast() }
+        return Edit(start: comma, end: end, text: String(kept))
     }
 
     /// Builds the document for an empty (or comment-only) file, keeping

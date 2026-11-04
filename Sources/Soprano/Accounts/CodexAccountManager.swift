@@ -192,10 +192,14 @@ final class CodexAccountManager {
         try createHome(home, accountId: accountId)
         let authFile = home.appendingPathComponent("auth.json")
         let previous = try? Data(contentsOf: authFile)
+        let wasSignedOut = !FileManager.default.fileExists(atPath: authFile.path)
 
+        /// Puts back the login the home had — or none, for a signed-out account.
         func restorePrevious() {
             if let previous {
                 try? AccountFiles.write(previous, to: authFile, permissions: 0o600)
+            } else if wasSignedOut {
+                try? FileManager.default.removeItem(at: authFile)
             }
         }
 

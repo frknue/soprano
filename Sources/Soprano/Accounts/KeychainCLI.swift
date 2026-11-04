@@ -41,17 +41,33 @@ struct KeychainCLI: Sendable {
         return Self.decodedSecret(output)
     }
 
+    /// `security -i` reads each line into a 4096-byte buffer and cuts longer
+    /// ones; Claude Code switches to arguments above the same bound.
+    static let interactiveLineLimit = 4096 - 64
+
     /// Creates or replaces the item. The secret goes in on stdin through
     /// `security -i`, hex-encoded the way Claude Code writes it, so it never
-    /// shows up in a process listing.
+    /// shows up in a process listing — unless the line would be too long for
+    /// `security -i` (a Claude login with MCP tokens beside it). Then, like
+    /// Claude Code, it goes in as an argument, visible to `ps` while
+    /// `security` runs.
     func write(service: String, account: String, secret: String) async throws {
         let command = Self.addCommand(service: service, account: account, secret: secret)
-        let result = try await runner.run(
-            executable: executable,
-            arguments: ["-i"],
-            input: Data(command.utf8),
-            timeout: 15
-        )
+        let result: CommandResult
+        if command.utf8.count <= Self.interactiveLineLimit {
+            result = try await runner.run(
+                executable: executable,
+                arguments: ["-i"],
+                input: Data(command.utf8),
+                timeout: 15
+            )
+        } else {
+            result = try await runner.run(
+                executable: executable,
+                arguments: ["add-generic-password", "-U", "-a", account, "-s", service, "-X", Self.hex(secret)],
+                timeout: 15
+            )
+        }
         // `security -i` reports a failed command on stderr but can still exit
         // 0, so the only proof of a write is reading the item back.
         guard try await read(service: service, account: account) == secret else {
@@ -79,8 +95,11 @@ struct KeychainCLI: Sendable {
     /// contain a quote, so plain double-quoting is safe.
     static func addCommand(service: String, account: String, secret: String) -> String {
         precondition(!service.contains("\"") && !account.contains("\""))
-        let hex = Data(secret.utf8).map { String(format: "%02x", $0) }.joined()
-        return "add-generic-password -U -a \"\(account)\" -s \"\(service)\" -X \"\(hex)\"\n"
+        return "add-generic-password -U -a \"\(account)\" -s \"\(service)\" -X \"\(hex(secret))\"\n"
+    }
+
+    private static func hex(_ secret: String) -> String {
+        Data(secret.utf8).map { String(format: "%02x", $0) }.joined()
     }
 
     /// `security -w` prints a secret that is not plain printable ASCII — JSON

@@ -118,4 +118,49 @@ struct CodexAccountTests {
         #expect(FileManager.default.fileExists(atPath: own.path, isDirectory: &isDirectory) && isDirectory.boolValue)
         #expect(linkTarget(own) == nil)
     }
+
+    /// Re-authenticating a signed-out account through a stand-in login shell
+    /// whose `codex login` signs in to a stranger.
+    @Test @MainActor func aWrongSignInForASignedOutAccountLeavesItSignedOut() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-codex-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bin = root.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("home/.codex"),
+            withIntermediateDirectories: true
+        )
+        let stranger = #"{"tokens": {"id_token": "\#(jwt(["email": "stranger@else.dev"]))", "account_id": "ws-z"}}"#
+        let scripts = [
+            "shell": "#!/bin/bash\nexport PATH=\"\(bin.path):$PATH\"\nexec /bin/bash -c \"$2\"\n",
+            "bin/codex": "#!/bin/bash\nprintf '%s' '\(stranger)' > \"$CODEX_HOME/auth.json\"\n",
+        ]
+        for (name, text) in scripts {
+            let url = root.appendingPathComponent(name)
+            try Data(text.utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        let store = AccountStateStore(defaults: UserDefaults(suiteName: "soprano-codex-\(UUID().uuidString)")!)
+        store.update { state in
+            state.codexCLI.accounts = [ManagedAccountRecord(
+                id: "c1",
+                identity: AccountIdentity(email: "me@own.dev", organizationId: "ws-1"),
+                createdAt: Date(),
+                lastAuthenticatedAt: Date()
+            )]
+        }
+        let manager = CodexAccountManager(
+            store: store,
+            runner: CommandRunner(shell: root.appendingPathComponent("shell").path),
+            paths: AccountPaths(home: root.appendingPathComponent("home"), supportDirectory: root.appendingPathComponent("support"))
+        )
+
+        await #expect(throws: CodexAccountError.self) {
+            try await manager.reauthenticate("c1", onSignInURL: { _ in })
+        }
+
+        #expect(CodexAuth.read(home: manager.home(for: "c1")) == nil)
+        #expect(manager.list().accounts.first?.problem != nil)
+    }
 }
