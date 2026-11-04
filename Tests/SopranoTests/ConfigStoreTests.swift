@@ -317,6 +317,43 @@ struct ConfigStoreTests {
         #expect(changes.count > before)
     }
 
+    /// `ln -sf` re-points a dotfiles symlink without touching either target
+    /// file; only the config directory notices. Edits to the new target must
+    /// still be picked up, not the old one's.
+    @Test func editsReachTheWatchAfterTheSettingsSymlinkIsRepointed() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-watch-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let config = directory.appendingPathComponent("config", isDirectory: true)
+        let dotfiles = directory.appendingPathComponent("dotfiles", isDirectory: true)
+        try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+        let old = dotfiles.appendingPathComponent("old.json")
+        let new = dotfiles.appendingPathComponent("new.json")
+        try "{}".write(to: old, atomically: false, encoding: .utf8)
+        try "{}".write(to: new, atomically: false, encoding: .utf8)
+        let url = config.appendingPathComponent("settings.json")
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: old)
+
+        let changes = Changes()
+        let watcher = ConfigFileWatcher(url: url, debounceInterval: .milliseconds(20)) { changes.record() }
+        watcher.start()
+        defer { watcher.stop() }
+
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: new)
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let before = changes.count
+        try #"{ "theme": "catppuccin-mocha" }"#.write(to: new, atomically: false, encoding: .utf8)
+
+        let deadline = Date().addingTimeInterval(5)
+        while changes.count == before, Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(changes.count > before)
+    }
+
     /// Counts watcher callbacks, which arrive on the watcher's own queue.
     private final class Changes: @unchecked Sendable {
         private let lock = NSLock()

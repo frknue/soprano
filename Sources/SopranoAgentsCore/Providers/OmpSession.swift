@@ -335,7 +335,8 @@ public actor OmpSession: ProviderSession {
     // MARK: - Process
 
     private func spawn(resume: String?, selection: ModelSelection, runtime: RuntimeMode) async throws {
-        guard let config else { throw ProviderError.notStarted }
+        // `close()` can run while `restart` waits for the old process: start nothing then.
+        guard let config, !isClosing, !hasEnded else { throw ProviderError.notStarted }
         let mode = OmpProtocol.approvalMode(runtime)
         let model = OmpProtocol.modelSpec(selection.model) != nil ? selection.model : nil
         let arguments = OmpProtocol.sessionArguments(cwd: config.cwd, approvalMode: mode, model: model, thinking: selection.effort, resume: resume)

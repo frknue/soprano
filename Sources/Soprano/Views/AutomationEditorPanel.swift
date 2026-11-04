@@ -45,7 +45,7 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
 
     private var theme: AppTheme
     private let existing: Automation?
-    private let existingIds: Set<String>
+    private let takenIds: Set<String>
     private var folderChoices: [String]
     private var selectedFolder: String?
 
@@ -91,18 +91,20 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     /// - Parameters:
     ///   - automation: the automation to edit; nil creates one.
     ///   - template: a template card's prefill for a new automation.
-    ///   - automations: every automation, for unique ids and the folder list.
+    ///   - automations: every automation, for the folder list.
+    ///   - takenIds: every id in settings.json, valid or not, for a new id.
     ///   - projectDirectories: roots whose child folders the folder list offers.
     init(
         theme: AppTheme,
         automation: Automation?,
         template: AutomationTemplate?,
         automations: [Automation],
+        takenIds: Set<String>,
         projectDirectories: [String]
     ) {
         self.theme = theme
         existing = automation
-        existingIds = Set(automations.map(\.id))
+        self.takenIds = takenIds
         folderChoices = Self.folderChoices(automations: automations, projectDirectories: projectDirectories)
         selectedFolder = automation?.folder
         promptSurface = ChromeFieldView(theme: theme)
@@ -837,7 +839,7 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         let name = optional(nameField.stringValue) ?? "Untitled automation"
         let workspace: Automation.Workspace = isWorktree ? .worktree(baseBranch: optional(baseBranchField.stringValue)) : .folder
         let automation = Automation(
-            id: existing?.id ?? Automation.makeId(from: name, existing: existingIds),
+            id: existing?.id ?? Automation.makeId(from: name, existing: takenIds),
             name: name,
             agentId: agentId,
             folder: folder,

@@ -21,7 +21,8 @@ struct DialogButton: Equatable {
 /// The only modal UI. Every call presents an alert dialog over `window` (a child window
 /// with a dimmed backdrop and a centered card) and resolves when the user answers. Return picks
 /// the last button, Escape or a click outside cancels. Without a window it falls back to the
-/// app's main window, then to a plain `NSAlert`. Shell owns the presentation; other modules call these.
+/// app's main window; when that window is not on screen (closed, minimized, hidden), to a plain
+/// `NSAlert`. Shell owns the presentation; other modules call these.
 @MainActor
 enum Dialogs {
     /// Two-button confirm ("Delete thread "X"?"). Returns true on confirm.
@@ -66,11 +67,13 @@ enum Dialogs {
 
     // MARK: - Presentation
 
-    private static func host(for window: NSWindow?) -> NSWindow? {
+    /// The window to present over; nil (a plain `NSAlert`) when it is closed, minimized or
+    /// hidden, so a dialog raised late never pops up a backdrop of its own.
+    static func host(for window: NSWindow?) -> NSWindow? {
         let candidate = window ?? NSApp.mainWindow ?? NSApp.windows.first { $0 is AgentsWindow && $0.isVisible }
         // Present over the main window even when called with one of its overlays.
-        if let overlay = candidate as? OverlayWindow { return overlay.parent ?? overlay }
-        return candidate
+        let host = (candidate as? OverlayWindow).map { $0.parent ?? $0 } ?? candidate
+        return host?.isVisible == true ? host : nil
     }
 
     private static func present(_ content: DialogContent, over parent: NSWindow) async -> DialogResult {

@@ -298,6 +298,26 @@ struct SettingsTests {
         #expect(center.issues.first?.line == nil)
     }
 
+    @Test func aFileThatCouldNotBeReadClearsItsErrorWhenItsOldTextComesBack() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        let text = #"{ "threads": { "chat": { "followUp": "queue" } } }"#
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        center.start(watching: false)
+
+        // Not UTF-8, so the read itself fails.
+        try Data([0xFF, 0xFE, 0xFD]).write(to: url)
+        center.reloadFromDisk()
+        #expect(center.issues.first?.severity == .error)
+
+        try text.write(to: url, atomically: true, encoding: .utf8)
+        center.reloadFromDisk()
+        #expect(center.issues.isEmpty)
+        #expect(center.settings.followUp == .queue)
+    }
+
     @Test func liveEditsToTheFileReachObservers() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

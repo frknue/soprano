@@ -738,6 +738,11 @@ final class SidebarView: NSView {
             return
         }
         agentManager.closeSession(session.id)
+        // An editor's unsaved-changes prompt can still cancel the close; the
+        // selector then shows the session again instead of "Close Session…".
+        if agentManager.activeSessionId == session.id {
+            rebuildSessionSelector()
+        }
     }
 
     private func promptToRenameWindow(_ windowId: String) {
@@ -904,7 +909,9 @@ private class SidebarRowView: NSView {
     func isInteractiveSubview(_ view: NSView?) -> Bool {
         var current = view
         while let candidate = current, candidate !== self {
-            if candidate is NSControl {
+            // A control that acts on clicks; labels (also `NSControl`s) pass
+            // theirs on and still select the row.
+            if let control = candidate as? NSControl, control.action != nil {
                 return true
             }
             current = candidate.superview
@@ -1108,8 +1115,8 @@ private final class SidebarWindowRowView: SidebarRowView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if isInteractiveSubview(hitTest(point)) {
+        // `hitTest` takes a point in the superview's coordinates.
+        if let superview, isInteractiveSubview(hitTest(superview.convert(event.locationInWindow, from: nil))) {
             super.mouseDown(with: event)
             return
         }
@@ -1294,8 +1301,7 @@ private final class SidebarPaneRowView: SidebarRowView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if isInteractiveSubview(hitTest(point)) {
+        if let superview, isInteractiveSubview(hitTest(superview.convert(event.locationInWindow, from: nil))) {
             super.mouseDown(with: event)
             return
         }

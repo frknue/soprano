@@ -599,6 +599,8 @@ private enum DiffLoader {
             return message("This diff is too large to show.", location)
         case .noChanges:
             return message(staged ? "No staged changes" : "No changes", location)
+        case .emptyFile(let isNew):
+            return message(isNew ? "Empty file added" : "Empty file deleted", location)
         case .unavailable:
             return message("Could not read this diff.", location)
         }

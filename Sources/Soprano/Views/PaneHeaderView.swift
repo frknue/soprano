@@ -138,8 +138,8 @@ final class PaneHeaderView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if isInteractiveSubview(hitTest(point)) {
+        // `hitTest` takes a point in the superview's coordinates.
+        if let superview, isInteractiveSubview(hitTest(superview.convert(event.locationInWindow, from: nil))) {
             super.mouseDown(with: event)
             return
         }
@@ -350,7 +350,9 @@ final class PaneHeaderView: NSView {
     private func isInteractiveSubview(_ view: NSView?) -> Bool {
         var current = view
         while let candidate = current, candidate !== self {
-            if candidate is NSControl {
+            // A control that acts on clicks; labels (also `NSControl`s) pass
+            // theirs on and still focus the pane.
+            if let control = candidate as? NSControl, control.action != nil {
                 return true
             }
             current = candidate.superview
@@ -390,11 +392,12 @@ private final class PaneTabButton: NSButton {
     init(tabId: String, target: AnyObject, action: Selector, onClose: @escaping () -> Void) {
         self.onClose = onClose
         super.init(frame: .zero)
+        // The title sits in a rect that leaves the close button its corner.
+        // Swapping the cell drops target and action, so it goes first.
+        cell = TabPillButtonCell()
         self.target = target
         self.action = action
         identifier = NSUserInterfaceItemIdentifier("pane-tab-\(tabId)")
-        // The title sits in a rect that leaves the close button its corner.
-        cell = TabPillButtonCell()
         isBordered = false
         refusesFirstResponder = true
         setButtonType(.momentaryChange)

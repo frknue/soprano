@@ -10,6 +10,7 @@ struct AutomationControllerTests {
     private final class Recorder {
         var started: [TerminalTarget] = []
         var banners: [(title: String, body: String)] = []
+        var prompts: [(prompt: String, target: TerminalTarget)] = []
     }
 
     private struct Fixture {
@@ -19,7 +20,11 @@ struct AutomationControllerTests {
         let directory: URL
     }
 
-    private func makeFixture(automation: String, now: @escaping () -> Date = Date.init) throws -> Fixture {
+    private func makeFixture(
+        automation: String,
+        now: @escaping () -> Date = Date.init,
+        acceptsPrompts: Bool = false
+    ) throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("soprano-automation-controller-\(UUID().uuidString)", isDirectory: true)
         let folder = directory.appendingPathComponent("repo", isDirectory: true)
@@ -41,7 +46,11 @@ struct AutomationControllerTests {
                     recorder.started.append(target)
                     return true
                 },
-                submitPrompt: { _, _ in false },
+                submitPrompt: { prompt, target in
+                    guard acceptsPrompts else { return false }
+                    recorder.prompts.append((prompt, target))
+                    return true
+                },
                 visibleText: { _ in nil },
                 notify: { title, body, _ in recorder.banners.append((title, body)) },
                 displayIsAwake: { true },
@@ -64,6 +73,15 @@ struct AutomationControllerTests {
     }
 
     private let omp = #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER", "prompt": "Audit the repo.", "schedule": "0 9 * * *" }"#
+
+    @Test func aNewAutomationNeverTakesTheIdOfAnEntryTheFileRejected() throws {
+        // No prompt: the entry is reported and left out, but stays in the file.
+        let fixture = try makeFixture(automation: #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER" }"#)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        #expect(fixture.controller.automations.isEmpty)
+        #expect(Automation.makeId(from: "Audit", existing: fixture.controller.takenIds) == "audit-2")
+    }
 
     @Test func aManualRunOpensItsAgentInTheAutomationsSessionWithoutSwitchingToIt() async throws {
         let fixture = try makeFixture(automation: omp)
@@ -143,7 +161,7 @@ struct AutomationControllerTests {
         defer { try? FileManager.default.removeItem(at: fixture.directory) }
         let automation = try #require(fixture.controller.automation("audit"))
         fixture.controller.store.setSchedule(
-            .init(signature: AutomationScheduling.signature(of: automation), nextRunAt: due),
+            .init(signature: AutomationScheduling.signature(of: automation, timeZone: .current), nextRunAt: due),
             for: "audit"
         )
 
@@ -168,7 +186,7 @@ struct AutomationControllerTests {
         try await waitUntil { fixture.controller.lastRun(for: "audit")?.target != nil }
         let automation = try #require(fixture.controller.automation("audit"))
         fixture.controller.store.setSchedule(
-            .init(signature: AutomationScheduling.signature(of: automation), nextRunAt: due),
+            .init(signature: AutomationScheduling.signature(of: automation, timeZone: .current), nextRunAt: due),
             for: "audit"
         )
 
@@ -236,6 +254,87 @@ struct AutomationControllerTests {
         #expect(store.run("run-1")?.target == nil)
         #expect(!controller.openRun("run-1"))
         #expect(prompts.isEmpty)
+    }
+
+    /// A reuse automation whose first run finished with its window left open,
+    /// and its next run due now.
+    private func makeReuseFixture(precheck: String) async throws -> (fixture: Fixture, first: AutomationRun) {
+        let calendar = Calendar.current
+        let due = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: Date())!
+        let fixture = try makeFixture(
+            automation: #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER", "prompt": "Audit.", "schedule": "0 9 * * *", "session": "reuse", "precheck": "\#(precheck)" }"#,
+            now: { due.addingTimeInterval(30) },
+            acceptsPrompts: true
+        )
+        let controller = fixture.controller
+        controller.runNow("audit")
+        try await waitUntil { controller.lastRun(for: "audit")?.target != nil }
+        let first = try #require(controller.lastRun(for: "audit"))
+        finishTurn(try #require(first.target), in: fixture)
+        #expect(controller.run(first.id)?.status == .completed)
+        let automation = try #require(controller.automation("audit"))
+        controller.store.setSchedule(
+            .init(signature: AutomationScheduling.signature(of: automation, timeZone: .current), nextRunAt: due),
+            for: "audit"
+        )
+        return (fixture, first)
+    }
+
+    @Test func aScheduledReuseRunWhosePrecheckFailsIsSkippedWithoutPromptingThePreviousAgent() async throws {
+        let (fixture, first) = try await makeReuseFixture(precheck: "exit 4")
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let controller = fixture.controller
+
+        controller.tick()
+        try await waitUntil { controller.lastRun(for: "audit")?.status.isFinal == true }
+
+        let run = try #require(controller.lastRun(for: "audit"))
+        #expect(run.id != first.id)
+        #expect(run.status == .skipped)
+        #expect(run.message == "The precheck exited with code 4.")
+        #expect(fixture.recorder.prompts.isEmpty)
+        #expect(controller.run(first.id)?.target != nil)
+    }
+
+    @Test func aScheduledReuseRunWhosePrecheckPassesHandsThePromptToThePreviousAgent() async throws {
+        let (fixture, first) = try await makeReuseFixture(precheck: "true")
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let controller = fixture.controller
+        let target = try #require(first.target)
+
+        controller.tick()
+        try await waitUntil { controller.lastRun(for: "audit")?.status == .running }
+
+        let run = try #require(controller.lastRun(for: "audit"))
+        #expect(run.id != first.id)
+        #expect(run.target == target)
+        #expect(fixture.recorder.prompts.map(\.prompt) == ["Audit."])
+        #expect(fixture.recorder.prompts.map(\.target) == [target])
+        #expect(controller.run(first.id)?.target == nil)
+        #expect(fixture.recorder.started.count == 1)
+    }
+
+    @Test func loadingASavedSessionFailsOpenRunsInsteadOfFollowingTheTabsThatTakeTheirIds() async throws {
+        let fixture = try makeFixture(automation: omp)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+        let controller = fixture.controller
+        controller.runNow("audit")
+        try await waitUntil { controller.lastRun(for: "audit")?.target != nil }
+        let run = try #require(controller.lastRun(for: "audit"))
+        let target = try #require(run.target)
+
+        // The saved session has a tab under the ids the run's tab has now.
+        fixture.agentManager.restoreWorkspace(fixture.agentManager.snapshotWorkspace())
+        #expect(fixture.agentManager.agent(paneId: target.paneId, tabId: target.tabId) != nil)
+        fixture.agentManager.agent(paneId: target.paneId, tabId: target.tabId)?.lastMessage = "Someone else's reply."
+        finishTurn(target, in: fixture)
+
+        let after = try #require(controller.run(run.id))
+        #expect(after.status == .failed)
+        #expect(after.output == nil)
+        #expect(after.target == nil)
+        #expect(fixture.agentManager.panes[target.paneId] != nil)
+        #expect(fixture.agentManager.agent(paneId: target.paneId, tabId: target.tabId)?.automationRunId == nil)
     }
 
     /// A repository with one commit in the fixture's automation folder.

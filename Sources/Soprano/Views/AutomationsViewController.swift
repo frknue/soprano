@@ -402,6 +402,7 @@ final class AutomationsViewController: NSViewController {
             automation: automation,
             template: template,
             automations: controller.automations,
+            takenIds: controller.takenIds,
             projectDirectories: ConfigStore.shared.settings.projectDirectories
         )
         panel.onSave = { [weak self] automation in

@@ -35,6 +35,24 @@ struct LayoutTabBarTests {
         #expect(bar.hitTest(NSPoint(x: addButton.frame.midX, y: addButton.frame.midY)) === addButton)
     }
 
+    @Test func aBackgroundTabChangingWidthLeavesAScrolledStripWhereTheUserPutIt() throws {
+        let manager = AgentManager()
+        for _ in 1...12 { _ = try #require(manager.createLayoutTab()) }
+        let bar = makeBar(manager: manager)
+        bar.setFrameSize(NSSize(width: 360, height: LayoutTabBarView.height))
+        tabs(in: bar)[0].performClick(nil)
+        bar.layoutSubtreeIfNeeded()
+        let scrollView = try #require(descendants(in: bar).compactMap { $0 as? NSScrollView }.first)
+        scrollView.contentView.scroll(to: NSPoint(x: 200, y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        let backgroundPaneId = try #require(manager.windows[manager.activeWindowId]?.tabs[6].activePaneId)
+        rename(backgroundPaneId, to: "a much longer title that widens the tab", in: manager)
+        bar.layoutSubtreeIfNeeded()
+
+        #expect(scrollView.documentVisibleRect.minX == 200)
+    }
+
     @Test func clickingSelectsClosesAndAddsTabs() throws {
         let manager = AgentManager()
         let firstPaneId = manager.activePaneId

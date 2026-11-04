@@ -32,7 +32,21 @@ if [[ -o 'interactive' ]]; then
     precmd_functions+=(_soprano_startup_finished)
 fi
 
-# Zsh treats an unset ZDOTDIR as HOME and ignores unreadable rc files.
-'builtin' 'typeset' _soprano_file=${ZDOTDIR-$HOME}"/.zshenv"
-[[ ! -r "$_soprano_file" ]] || 'builtin' 'source' '--' "$_soprano_file"
-'builtin' 'unset' '_soprano_file'
+# Ghostty loaded its shell integration (prompt marks, working directory) into
+# the shell it started, not into this one; load it the way Ghostty's own
+# .zshenv does, after the user's .zshenv, which may set fpath it needs.
+{
+    # Zsh treats an unset ZDOTDIR as HOME and ignores unreadable rc files.
+    'builtin' 'typeset' _soprano_file=${ZDOTDIR-$HOME}"/.zshenv"
+    [[ ! -r "$_soprano_file" ]] || 'builtin' 'source' '--' "$_soprano_file"
+} always {
+    if [[ -o 'interactive' && -n "${GHOSTTY_RESOURCES_DIR-}" ]]; then
+        'builtin' 'typeset' _soprano_file="$GHOSTTY_RESOURCES_DIR"/shell-integration/zsh/ghostty-integration
+        if [[ -r "$_soprano_file" ]]; then
+            'builtin' 'autoload' '-Uz' '--' "$_soprano_file"
+            "${_soprano_file:t}"
+            'builtin' 'unfunction' '--' "${_soprano_file:t}"
+        fi
+    fi
+    'builtin' 'unset' '_soprano_file'
+}

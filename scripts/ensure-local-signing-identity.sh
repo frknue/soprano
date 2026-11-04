@@ -59,7 +59,7 @@ add_keychain_to_search_list() {
     if [[ "$found" == false ]]; then
         "$security_bin" list-keychains \
             -d user \
-            -s "$keychain_path" "${keychains[@]}" ||
+            -s "$keychain_path" ${keychains[@]+"${keychains[@]}"} ||
             fail "could not add the managed keychain to the user search list."
     fi
 }

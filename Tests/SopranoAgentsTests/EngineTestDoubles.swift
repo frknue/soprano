@@ -165,6 +165,17 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     }
 }
 
+/// Opened by the test; awaited by a scripted provider or git call.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    func open() { lock.withLock { opened = true } }
+    var isOpen: Bool { lock.withLock { opened } }
+    func wait() async {
+        while !lock.withLock({ opened }) { try? await Task.sleep(for: .milliseconds(2)) }
+    }
+}
+
 /// In-memory git that records every call as a short string ("capture ref", "changed a..b").
 final class RecordingGit: GitService, @unchecked Sendable {
     private let lock = NSLock()
@@ -176,6 +187,15 @@ final class RecordingGit: GitService, @unchecked Sendable {
     var existingBranches: [String] = []
     var worktreeError: (any Error)?
     var restoreError: (any Error)?
+    /// Awaited by `captureCheckpoint` / `restoreCheckpoint` after recording the call (slow git).
+    var captureGate: (@Sendable () async -> Void)?
+    var restoreGate: (@Sendable () async -> Void)?
+    /// Awaited by `status` (a slow status read).
+    var statusGate: (@Sendable () async -> Void)?
+    /// Awaited by `createWorktree` after recording the call (slow setup, or its rollback).
+    var worktreeGate: (@Sendable () async throws -> Void)?
+    /// `workingTreeDiff`'s answer.
+    var workingPatch = ""
 
     var calls: [String] { lock.withLock { _calls } }
 
@@ -195,6 +215,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func captureCheckpoint(cwd: String, ref: String) async throws {
         record("capture \(ref)")
+        await captureGate?()
         lock.withLock { _ = refs.insert(ref) }
     }
 
@@ -212,10 +233,11 @@ final class RecordingGit: GitService, @unchecked Sendable {
         return "diff"
     }
 
-    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { "" }
+    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { workingPatch }
 
     func restoreCheckpoint(cwd: String, ref: String) async throws {
         record("restore \(ref)")
+        await restoreGate?()
         if let restoreError { throw restoreError }
     }
 
@@ -225,7 +247,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     }
 
     func status(cwd: String) async throws -> GitStatusSummary {
-        GitStatusSummary(isRepository: isRepo, branch: isRepo ? currentBranch : nil)
+        await statusGate?()
+        return GitStatusSummary(isRepository: isRepo, branch: isRepo ? currentBranch : nil)
     }
 
     func branches(cwd: String) async throws -> [GitBranchRef] {
@@ -241,6 +264,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func createWorktree(projectRoot: String, baseBranch: String, newBranch: String, directory: String) async throws -> String {
         record("worktree \(baseBranch) \(newBranch)")
+        try await worktreeGate?()
         if let worktreeError { throw worktreeError }
         let path = "\(directory)/repo/\(newBranch.replacingOccurrences(of: "/", with: "-"))"
         try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)

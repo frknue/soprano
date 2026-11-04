@@ -191,6 +191,8 @@ enum GitFileDiff: Equatable, Sendable {
     /// Both sides have the same text: only the mode changed, or the change
     /// was reverted since it was listed.
     case noChanges
+    /// An empty file was added or deleted: git lists it without a hunk.
+    case emptyFile(isNew: Bool)
     /// More output than `GitStatusReader.maximumDiffBytes`.
     case tooLarge
     /// git is missing or failed.
@@ -207,6 +209,8 @@ enum GitFileDiff: Equatable, Sendable {
         var newNumber = 0
         var inHunk = false
         var hasChanges = false
+        // From the "new file mode" / "deleted file mode" header.
+        var isNewFile: Bool?
 
         for raw in rawLines {
             var bytes = raw
@@ -223,6 +227,11 @@ enum GitFileDiff: Equatable, Sendable {
             guard inHunk else {
                 if bytes.starts(with: "Binary files ".utf8) || bytes.starts(with: "GIT binary patch".utf8) {
                     return .binary
+                }
+                if bytes.starts(with: "new file mode ".utf8) {
+                    isNewFile = true
+                } else if bytes.starts(with: "deleted file mode ".utf8) {
+                    isNewFile = false
                 }
                 continue
             }
@@ -249,7 +258,9 @@ enum GitFileDiff: Equatable, Sendable {
                 inHunk = false
             }
         }
-        return hasChanges ? .text(lines) : .noChanges
+        if hasChanges { return .text(lines) }
+        // A file with content is all + or − lines; one without has no hunk.
+        return isNewFile.map { .emptyFile(isNew: $0) } ?? .noChanges
     }
 
     /// "@@ -12,3 +12,4 @@ …" → (12, 12).

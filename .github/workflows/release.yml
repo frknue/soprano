@@ -142,6 +142,9 @@ jobs:
     steps:
       - name: Check out Soprano
         uses: actions/checkout@v7
+        with:
+          # npm ci runs install scripts; the token reaches only `gh` below.
+          persist-credentials: false
 
       - name: Install Node.js for the editable web app
         uses: actions/setup-node@v6

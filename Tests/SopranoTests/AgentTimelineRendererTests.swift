@@ -75,6 +75,27 @@ struct AgentTimelineRendererTests {
         #expect(box.radius == Chrome.Radius.control)
     }
 
+    @Test func diffAnnotationsAndCarriageReturnLinesDoNotThrowTheGutterNumbersOff() throws {
+        let call = AgentToolCall(
+            name: "Edit",
+            summary: "App.swift",
+            state: .succeeded,
+            diff: "@@ -10,2 +10,2 @@\r\n-old line\r\n\\ No newline at end of file\r\n+new line\r\n context\r\n⋯ 3 more lines ⋯"
+        )
+        let timeline = AgentTimeline(entries: [
+            AgentTranscriptEntry(items: [AgentTimelineItem(id: "c1", kind: .tool(call))]),
+        ])
+
+        let text = AgentTimelineRenderer(colors: colors).render(timeline, detailed: true, isAgentActive: true).text
+
+        #expect(text.string.contains("\t10\t−\told line\n"))
+        #expect(text.string.contains("\t\t\t\\ No newline at end of file\n"))
+        #expect(text.string.contains("\t10\t+\tnew line\n"))
+        #expect(text.string.contains("\t11\t\tcontext\n"))
+        #expect(text.string.contains("\t\t\t⋯ 3 more lines ⋯\n"))
+        #expect(!text.string.contains("\r"))
+    }
+
     @Test func anAnswerIsHeadedByTheAgentAndKeepsEachRunOfToolCallsInOneCard() throws {
         let timeline = AgentTimeline(entries: [
             AgentTranscriptEntry(items: [AgentTimelineItem(id: "p1", kind: .prompt("Fix the build"))]),

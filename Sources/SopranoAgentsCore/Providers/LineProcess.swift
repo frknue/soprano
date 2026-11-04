@@ -107,27 +107,28 @@ public final class LineProcess: @unchecked Sendable {
 
     /// Writes `line` plus a newline to stdin. Throws when the process is not running.
     public func send(_ line: String) throws {
-        let fd = try lock.withLock { () throws -> Int32 in
-            guard state == .running, stdinFD >= 0 else { throw LineProcessError.notRunning }
-            return stdinFD
-        }
         var data = Data(line.utf8)
         data.append(0x0A)
-        writeQueue.async { [data] in Self.writeAll(data, to: fd) }
+        // Enqueued under the lock, so a concurrent `closeInput` queues its close after this write.
+        try lock.withLock {
+            guard state == .running, stdinFD >= 0 else { throw LineProcessError.notRunning }
+            let fd = stdinFD
+            writeQueue.async { [data] in Self.writeAll(data, to: fd) }
+        }
     }
 
     /// Closes stdin after every queued write (EOF for the child).
     public func closeInput() {
-        let fd = lock.withLock { () -> Int32 in
+        lock.withLock {
             let fd = stdinFD
             stdinFD = -1
-            return fd
+            guard fd >= 0 else { return }
+            writeQueue.async { Darwin.close(fd) }
         }
-        guard fd >= 0 else { return }
-        writeQueue.async { Darwin.close(fd) }
     }
 
-    /// Closes stdin, sends SIGTERM to the process group, SIGKILL after `killGrace`. Idempotent.
+    /// Closes stdin, sends SIGTERM to the process group, SIGKILL after `killGrace` (also to
+    /// children that outlive the leader). Idempotent.
     public func terminate() {
         let target = lock.withLock { () -> pid_t? in
             guard state == .running, !isTerminating else { return nil }
@@ -138,9 +139,10 @@ public final class LineProcess: @unchecked Sendable {
         closeInput()
         kill(-target, SIGTERM)
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.killGrace) { [self] in
-            if lock.withLock({ state == .running }) {
-                kill(-target, SIGKILL)
-            }
+            // The group id cannot be reused while a member is left; once the leader is reaped,
+            // a live process with its pid means the group is gone and that id is someone else's.
+            if lock.withLock({ state == .exited }), kill(target, 0) == 0 || errno != ESRCH { return }
+            kill(-target, SIGKILL)
         }
     }
 
@@ -274,6 +276,8 @@ public final class LineProcess: @unchecked Sendable {
             while waitpid(childPID, &status, 0) == -1, errno == EINTR {}
             let exitStatus = Self.decode(waitStatus: status)
             lock.withLock { state = .exited }
+            // Nobody reads stdin any more; a caller that never terminates must not leak it.
+            closeInput()
             if stdoutClosed.wait(timeout: .now() + 1) == .timedOut {
                 // Children still hold stdout open: end them so the reader finishes.
                 kill(-childPID, SIGTERM)
@@ -350,6 +354,8 @@ extension LineProcess {
                     return Output(stdout: lines.joined(separator: "\n"), stderr: stderr, status: status)
                 }
             }
+            // The stream also ends early when the calling task is cancelled.
+            try Task.checkCancellation()
             throw ProviderError.timedOut(label)
         } onCancel: {
             process.terminate()

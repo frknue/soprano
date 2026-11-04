@@ -247,46 +247,77 @@ final class ClaudeCodeAccountManager {
     // MARK: - Live login
 
     /// What Claude Code is signed in with now. `blob` is the whole Keychain
-    /// item, so a switch can keep everything but `claudeAiOauth`.
+    /// item, so a switch can keep everything but `claudeAiOauth`;
+    /// `keychainSecret` is that item as stored, nil when there is none.
     struct LiveLogin {
         var blob: [String: Any]
         var oauthAccount: [String: Any]?
+        var keychainSecret: String?
         var oauth: [String: Any]? { blob["claudeAiOauth"] as? [String: Any] }
     }
 
     private func readLive() async throws -> LiveLogin {
         var blob: [String: Any] = [:]
-        if let secret = try await keychain.read(service: Self.liveService, account: Self.keychainUser) {
+        let secret = try await keychain.read(service: Self.liveService, account: Self.keychainUser)
+        if let secret {
             blob = AccountFiles.jsonObject(secret) ?? [:]
         } else if let fileBlob = try AccountFiles.jsonObject(at: credentialsFile) {
             blob = fileBlob
         }
         let config = try AccountFiles.jsonObject(at: paths.claudeGlobalConfigFile)
-        return LiveLogin(blob: blob, oauthAccount: config?["oauthAccount"] as? [String: Any])
+        return LiveLogin(blob: blob, oauthAccount: config?["oauthAccount"] as? [String: Any], keychainSecret: secret)
     }
 
     /// Puts `oauth` (nil: signed out) and `oauthAccount` where Claude Code reads them.
+    ///
+    /// All or nothing: `oauthAccount` is how `reconcile` tells whose tokens
+    /// are live, so a failure after the Keychain item changed puts the old
+    /// stores back — else the next read-back would file the new account's
+    /// tokens under the old one and lose its refresh token.
     private func writeLive(oauth: [String: Any]?, oauthAccount: [String: Any]?, over live: LiveLogin) async throws {
         let user = Self.keychainUser
         let secret = try AccountFiles.jsonString(Self.replacingOauth(in: live.blob, with: oauth))
-        try await keychain.write(service: Self.liveService, account: user, secret: secret)
-
         // Claude Code reads a config-scoped item instead when CLAUDE_CONFIG_DIR
         // is set; keep the one for ~/.claude current when it exists.
         let scoped = Self.scopedService(configDirectory: paths.claudeConfigDirectory.path)
-        if let scopedSecret = try await keychain.read(service: scoped, account: user) {
-            let scopedBlob = AccountFiles.jsonObject(scopedSecret) ?? [:]
-            let updated = try AccountFiles.jsonString(Self.replacingOauth(in: scopedBlob, with: oauth))
-            try await keychain.write(service: scoped, account: user, secret: updated)
-        }
-
+        let scopedSecret = try await keychain.read(service: scoped, account: user)
         // The plaintext copy Claude Code falls back to without a Keychain.
-        if let fileBlob = try AccountFiles.jsonObject(at: credentialsFile) {
-            let data = try AccountFiles.jsonData(Self.replacingOauth(in: fileBlob, with: oauth))
-            try AccountFiles.write(data, to: credentialsFile, permissions: 0o600)
-        }
+        let fileBlob = try AccountFiles.jsonObject(at: credentialsFile)
+        let fileData = fileBlob == nil ? nil : try Data(contentsOf: credentialsFile)
 
-        try writeOauthAccount(oauthAccount)
+        let liveService = Self.liveService
+        do {
+            try await keychain.write(service: liveService, account: user, secret: secret)
+            if let scopedSecret {
+                let scopedBlob = AccountFiles.jsonObject(scopedSecret) ?? [:]
+                let updated = try AccountFiles.jsonString(Self.replacingOauth(in: scopedBlob, with: oauth))
+                try await keychain.write(service: scoped, account: user, secret: updated)
+            }
+            if let fileBlob {
+                let data = try AccountFiles.jsonData(Self.replacingOauth(in: fileBlob, with: oauth))
+                try AccountFiles.write(data, to: credentialsFile, permissions: 0o600)
+            }
+            try writeOauthAccount(oauthAccount)
+        } catch {
+            // Outside this task: a Cancel that stopped the switch must not
+            // stop putting the old login back.
+            let keychain = self.keychain
+            let previous = live.keychainSecret
+            await Task.detached {
+                if let previous {
+                    try? await keychain.write(service: liveService, account: user, secret: previous)
+                } else {
+                    try? await keychain.delete(service: liveService, account: user)
+                }
+                if let scopedSecret {
+                    try? await keychain.write(service: scoped, account: user, secret: scopedSecret)
+                }
+            }.value
+            if let fileData {
+                try? AccountFiles.write(fileData, to: credentialsFile, permissions: 0o600)
+            }
+            throw error
+        }
     }
 
     private func writeOauthAccount(_ oauthAccount: [String: Any]?) throws {
@@ -422,8 +453,14 @@ final class ClaudeCodeAccountManager {
             "CLAUDE_SECURESTORAGE_CONFIG_DIR": configDirectory,
         ]
 
+        // Runs outside the sign-in's task: after Cancel that task is
+        // cancelled, and `security` would never start to delete the item.
+        let keychain = self.keychain
+        let user = Self.keychainUser
         func cleanUp() async {
-            try? await keychain.delete(service: scoped, account: Self.keychainUser)
+            await Task.detached {
+                try? await keychain.delete(service: scoped, account: user)
+            }.value
             try? fileManager.removeItem(at: directory)
         }
 

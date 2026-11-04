@@ -7,7 +7,8 @@ struct BrowserCommandRequest: Equatable {
 
     static func parse(
         _ commandLine: [String],
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        currentDirectoryPath: String = FileManager.default.currentDirectoryPath
     ) throws -> BrowserCommandRequest? {
         guard commandLine.count >= 2, commandLine[1] == "browser" else { return nil }
 
@@ -16,18 +17,15 @@ struct BrowserCommandRequest: Equatable {
             return BrowserCommandRequest(command: "help", arguments: [], targetPaneId: nil)
         }
 
+        // `--pane` is only an option immediately after `browser`; later tokens
+        // belong to the command (`fill #q --pane` types the literal text).
         var targetPaneId: String?
-        var index = 0
-        while index < tokens.count {
-            if tokens[index] == "--pane" {
-                guard index + 1 < tokens.count else {
-                    throw BrowserAutomationError.invalidArguments("--pane requires a pane ID")
-                }
-                targetPaneId = tokens[index + 1]
-                tokens.removeSubrange(index...(index + 1))
-                continue
+        if tokens.first == "--pane" {
+            guard tokens.count >= 2 else {
+                throw BrowserAutomationError.invalidArguments("--pane requires a pane ID")
             }
-            index += 1
+            targetPaneId = tokens[1]
+            tokens.removeFirst(2)
         }
 
         guard let command = tokens.first else {
@@ -36,7 +34,10 @@ struct BrowserCommandRequest: Equatable {
         var arguments = Array(tokens.dropFirst())
 
         if command == "screenshot", let path = arguments.first, !path.hasPrefix("/") {
-            let workingDirectory = environment["PWD"] ?? FileManager.default.currentDirectoryPath
+            let workingDirectory = CallerWorkingDirectory.resolve(
+                environment: environment,
+                currentDirectoryPath: currentDirectoryPath
+            )
             arguments[0] = URL(
                 fileURLWithPath: workingDirectory,
                 isDirectory: true

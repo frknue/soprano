@@ -175,13 +175,19 @@ final class ComposerPopoverWindow: NSWindow {
     override var canBecomeMain: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, keyHandler?(event) == true { return }
+        if event.type == .keyDown, !isComposingText, keyHandler?(event) == true { return }
         super.sendEvent(event)
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if keyHandler?(event) == true { return true }
+        if !isComposingText, keyHandler?(event) == true { return true }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// An input method composes marked text in the focused field: its keys (↑/↓ candidates,
+    /// Return commits, Escape cancels) go to the input method, not the content.
+    private var isComposingText: Bool {
+        (firstResponder as? NSTextView)?.hasMarkedText() == true
     }
 }
 

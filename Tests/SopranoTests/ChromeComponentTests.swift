@@ -120,6 +120,34 @@ struct ChromeComponentTests {
         }
     }
 
+    @Test func holdingSpaceTogglesOnceInsteadOfFlickering() throws {
+        for make in toggleFactories {
+            let receiver = ActionReceiver()
+            let toggle = make(receiver)
+            func space(repeating: Bool) throws -> NSEvent {
+                try #require(NSEvent.keyEvent(
+                    with: .keyDown,
+                    location: .zero,
+                    modifierFlags: [],
+                    timestamp: 0,
+                    windowNumber: 0,
+                    context: nil,
+                    characters: " ",
+                    charactersIgnoringModifiers: " ",
+                    isARepeat: repeating,
+                    keyCode: 49
+                ))
+            }
+
+            toggle.keyDown(with: try space(repeating: false))
+            toggle.keyDown(with: try space(repeating: true))
+            toggle.keyDown(with: try space(repeating: true))
+
+            #expect(receiver.count == 1)
+            #expect(toggle.state == .on)
+        }
+    }
+
     @Test func aKeycapSequenceIsReadOnceAsAWhole() {
         let group = ChromeKeycapGroupView(caps: ["⌃A", "P"], theme: .folioInk)
         #expect(group.isAccessibilityElement())

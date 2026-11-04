@@ -8,6 +8,10 @@ final class EngineRuntime {
     /// All checkpoint and diff git operations on one working directory run one at a time.
     let git = KeyedSerialQueue()
     private var background: [UUID: Task<Void, Never>] = [:]
+    /// Tracked work `shutdown` finishes before the store's final flush (turn checkpoints).
+    private var quitWork: Set<UUID> = []
+    /// Set by `shutdown` (app quit): queued messages stay queued.
+    var isShuttingDown = false
     /// Delay before the first retry of a failed initial title generation (doubles per retry).
     var titleRetryDelay: Duration = .seconds(2)
     /// How long ending a yielded turn waits for the session's report before ending it locally.
@@ -37,16 +41,24 @@ final class EngineRuntime {
         threads.map { (id: $0.key, runtime: $0.value) }
     }
 
-    /// Runs `operation` as tracked background work.
+    /// Runs `operation` as tracked background work; `beforeQuit` work is awaited by `shutdown`.
     @discardableResult
-    func track(_ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+    func track(beforeQuit: Bool = false, _ operation: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
         let id = UUID()
         let task = Task { @MainActor in
             await operation()
             self.background[id] = nil
+            self.quitWork.remove(id)
         }
         background[id] = task
+        if beforeQuit { quitWork.insert(id) }
         return task
+    }
+
+    /// Makes `shutdown` (and `waitForBackgroundWork`) wait for `task`: work whose cleanup must
+    /// finish before the app exits, such as worktree setup rolling itself back.
+    func finishBeforeQuit<Success: Sendable>(_ task: Task<Success, any Error>) {
+        track(beforeQuit: true) { _ = await task.result }
     }
 
     /// Waits until no tracked background work is left, including work started meanwhile.
@@ -54,6 +66,16 @@ final class EngineRuntime {
         while let (id, task) = background.first {
             await task.value
             background[id] = nil
+            quitWork.remove(id)
+        }
+    }
+
+    /// Waits until no `beforeQuit` work is left, including work started meanwhile.
+    func waitForQuitWork() async {
+        while let id = quitWork.first {
+            await background[id]?.value
+            background[id] = nil
+            quitWork.remove(id)
         }
     }
 }
@@ -71,6 +93,8 @@ final class ThreadRuntime {
     var liveTurnID: String?
     /// Set by interrupt: the queue does not drain when the interrupted turn ends.
     var holdQueue = false
+    /// An "Edit from here" rewind in progress: new turns wait for it (AgentEngine+Turns.swift).
+    var reverting: Task<Void, Never>?
     /// Latest title request; older ones finishing later are ignored.
     var titleRequest: UUID?
     /// The live session's command list.

@@ -17,6 +17,12 @@ final class ThreadDetailsCardController: NSViewController {
     private(set) var gitStatus: GitStatusSummary?
     private var statusGeneration = 0
     private var refreshTimer: Timer?
+    /// Whether the 30 s git-status refresh is running.
+    var isPollingStatus: Bool { refreshTimer != nil }
+    /// False while the Agents window is closed: the refresh pauses, the card's visibility stays.
+    var isWindowOpen = true {
+        didSet { if isWindowOpen != oldValue, isViewLoaded { visibilityChanged() } }
+    }
     private var wasRunning: [String: Bool] = [:]
     private var installedEditors: [InstalledEditor] = []
 
@@ -25,7 +31,9 @@ final class ThreadDetailsCardController: NSViewController {
     private var progressTimer: Timer?
     private var success: (title: String, detail: String?, url: String?, threadID: String)?
     private var successDismiss: DispatchWorkItem?
-    var isGitActionRunning: Bool { progress != nil }
+    /// From the click until the action finished or was cancelled, including the status read and
+    /// the default-branch confirmation before the progress row shows.
+    private(set) var isGitActionRunning = false
 
     // Views
     private let card = ThreadDetailsCardView()
@@ -164,7 +172,7 @@ final class ThreadDetailsCardController: NSViewController {
     // MARK: - Updates
 
     private func visibilityChanged() {
-        let visible = state.isThreadDetailsVisible
+        let visible = state.isThreadDetailsVisible && isWindowOpen
         if visible {
             if refreshTimer == nil {
                 installedEditors = EditorCatalog.installedOnThisMac()
@@ -553,22 +561,20 @@ final class ThreadDetailsCardController: NSViewController {
     /// "Commit" from the git menu or `git.commit`: the "Commit changes" dialog.
     func openCommitDialog() {
         guard let window = view.window, thread != nil else { return }
-        let show: (GitStatusSummary) -> Void = { [weak self] status in
+        // Read the status fresh: from the palette the card may be hidden with a stale status,
+        // and the dialog's file list is what the commit takes.
+        guard let cwd = workingDirectory else { return }
+        Task { [weak self] in
             guard let self else { return }
+            let status = await loadStatus(cwd: cwd)
+            // The user may have moved to another thread or closed the window meanwhile: this
+            // status, and a commit from it, belong to the folder that was selected.
+            guard workingDirectory == cwd, window.isVisible else { return }
+            gitStatus = status
+            render()
             CommitDialog.present(status: status, in: window) { [weak self] result in
                 guard let self, let result else { return }
                 run(.commit, commitMessage: result.message, filePaths: result.filePaths, featureBranch: result.featureBranch)
-            }
-        }
-        if let status = gitStatus {
-            show(status)
-        } else if let cwd = workingDirectory {
-            Task { [weak self] in
-                guard let self else { return }
-                let status = await loadStatus(cwd: cwd)
-                gitStatus = status
-                render()
-                show(status)
             }
         }
     }
@@ -578,8 +584,14 @@ final class ThreadDetailsCardController: NSViewController {
     func run(_ action: GitStackedAction, commitMessage: String? = nil, filePaths: [String]? = nil, featureBranch: Bool = false) {
         guard let thread, !isGitActionRunning else { return }
         let threadID = thread.id
+        isGitActionRunning = true
+        render()
         Task { @MainActor [weak self] in
             guard let self else { return }
+            defer {
+                isGitActionRunning = false
+                render()
+            }
             var featureBranch = featureBranch
             var status = gitStatus
             if let cwd = workingDirectory {

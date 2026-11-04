@@ -401,6 +401,27 @@ struct FileExplorerTests {
         }
     }
 
+    @Test func aFolderCannotBeCopiedIntoItself() throws {
+        try withTemporaryDirectory { root in
+            let operations = FileExplorerOperations()
+            let folder = root.appendingPathComponent("folder")
+            let child = folder.appendingPathComponent("child")
+            try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+
+            #expect(throws: FileExplorerOperationError.copyIntoItself("folder")) {
+                try operations.copy([folder], into: child)
+            }
+            #expect(try FileManager.default.contentsOfDirectory(atPath: child.path).isEmpty)
+        }
+    }
+
+    @Test func filterPathsAreRelativeToTheVolumeRootToo() {
+        #expect(FileExplorerView.relativePath(of: "/etc/hosts", under: "/") == "etc/hosts")
+        #expect(FileExplorerView.relativePath(of: "/src/app/main.swift", under: "/src/app") == "main.swift")
+        #expect(FileExplorerView.relativePath(of: "/src/application", under: "/src/app") == nil)
+        #expect(FileExplorerView.relativePath(of: "/", under: "/") == nil)
+    }
+
     @Test func undoWalksMovesBackAndRedoReappliesThem() throws {
         try withTemporaryDirectory { root in
             let operations = FileExplorerOperations()
@@ -515,6 +536,54 @@ struct FileExplorerTests {
         try Data().write(to: root.appendingPathComponent("Sources/generated.swift"))
         try await waitUntil { outline.numberOfRows == 4 }
         #expect((outline.item(atRow: 2) as? FileExplorerNode)?.relativePath == "Sources/generated.swift")
+    }
+
+    @Test func anOpenFolderStaysOpenThroughRenameUndoAndRedo() async throws {
+        guard GitStatusReader.executableURL != nil else { return }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-explorer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("Sources"),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(["init", "-q"], in: root)
+        try Data().write(to: root.appendingPathComponent("Sources/app.swift"))
+
+        let agentManager = AgentManager()
+        let paneId = agentManager.activePaneId
+        let tabId = try #require(agentManager.panes[paneId]?.activeTab?.id)
+        agentManager.updateWorkingDirectory(paneId: paneId, tabId: tabId, to: root.path)
+        let suiteName = "soprano-explorer-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let explorer = FileExplorerView(
+            agentManager: agentManager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark"),
+            defaults: defaults
+        )
+        explorer.frame = NSRect(x: 0, y: 0, width: 280, height: 600)
+        explorer.setActive(true)
+        defer { explorer.setActive(false) }
+        let outline = explorer.outlineView
+        func shown() -> [String] {
+            (0..<outline.numberOfRows).compactMap { (outline.item(atRow: $0) as? FileExplorerNode)?.relativePath }
+        }
+        try await waitUntil { outline.numberOfRows == 1 }
+        outline.expandItem(outline.item(atRow: 0))
+        try await waitUntil { shown() == ["Sources", "Sources/app.swift"] }
+
+        try explorer.operations.rename(root.appendingPathComponent("Sources"), to: "Lib")
+        try await waitUntil { shown() == ["Lib", "Lib/app.swift"] }
+        #expect(shown() == ["Lib", "Lib/app.swift"])
+
+        explorer.operations.undoManager.undo()
+        try await waitUntil { shown() == ["Sources", "Sources/app.swift"] }
+        #expect(shown() == ["Sources", "Sources/app.swift"])
+
+        explorer.operations.undoManager.redo()
+        try await waitUntil { shown() == ["Lib", "Lib/app.swift"] }
+        #expect(shown() == ["Lib", "Lib/app.swift"])
     }
 
     // MARK: - Helpers

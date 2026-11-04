@@ -22,6 +22,26 @@ struct BrowserIntegrationTests {
         )
     }
 
+    @Test func browserAddressesWithAPortButNoSchemeLoadOverHTTPS() throws {
+        #expect(
+            BrowserAddressResolver.resolve("myapp.test:3000")?.absoluteString
+                == "https://myapp.test:3000"
+        )
+        #expect(
+            BrowserAddressResolver.resolve("example.com:8443/docs")?.absoluteString
+                == "https://example.com:8443/docs"
+        )
+        #expect(
+            BrowserAddressResolver.resolve("file:///tmp/index.html")?.absoluteString
+                == "file:///tmp/index.html"
+        )
+        #expect(BrowserAddressResolver.resolve("about:blank")?.absoluteString == "about:blank")
+        #expect(
+            BrowserAddressResolver.resolve("http://example.com")?.absoluteString
+                == "http://example.com"
+        )
+    }
+
     @Test func browserCommandParserAcceptsPaneTargetAndNormalizesScreenshotPath() throws {
         let targeted = try #require(try BrowserCommandRequest.parse(
             ["soprano", "browser", "--pane", "pane-8", "click", "@e2"]
@@ -34,9 +54,18 @@ struct BrowserIntegrationTests {
 
         let screenshot = try #require(try BrowserCommandRequest.parse(
             ["soprano", "browser", "screenshot", "artifacts/page.png"],
-            environment: ["PWD": "/tmp/browser-project"]
+            environment: [:], currentDirectoryPath: "/tmp/browser-project"
         ))
         #expect(screenshot.arguments == ["/tmp/browser-project/artifacts/page.png"])
+
+        let literal = try #require(try BrowserCommandRequest.parse(
+            ["soprano", "browser", "fill", "#q", "--pane"]
+        ))
+        #expect(literal == BrowserCommandRequest(
+            command: "fill",
+            arguments: ["#q", "--pane"],
+            targetPaneId: nil
+        ))
     }
 
     @Test func browserPaneSpawnsToTheRightAndPreservesItsURLWhenSplit() throws {

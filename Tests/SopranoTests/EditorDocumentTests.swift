@@ -223,6 +223,23 @@ struct EditorDocumentTests {
         }
     }
 
+    @Test func savingAfterTheWatcherNoticedAnotherProgramsChangeStillAsksFirst() throws {
+        try withTemporaryDirectory { root in
+            let store = EditorDocumentStore()
+            store.askToOverwrite = { _ in false }
+            let url = root.appendingPathComponent("notes.md")
+            try Data("mine".utf8).write(to: url)
+            let document = store.document(for: url)
+            document.textStorage.replaceCharacters(in: NSRange(location: 4, length: 0), with: "!")
+            try Data("theirs".utf8).write(to: url)
+            document.diskDidChange()
+            #expect(document.diskState == .changed)
+
+            #expect(!store.save(document))
+            #expect(try String(contentsOf: url, encoding: .utf8) == "theirs")
+        }
+    }
+
     @Test func renamingAFolderMovesTheDocumentsInsideIt() throws {
         try withTemporaryDirectory { root in
             let store = EditorDocumentStore()

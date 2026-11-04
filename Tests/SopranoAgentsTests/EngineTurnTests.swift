@@ -374,4 +374,43 @@ struct EngineTurnTests {
         #expect(thread.queue.isEmpty)
         #expect(driver.session?.turns.map(\.text) == ["one", "two"])
     }
+
+    @Test func quittingStoresTheInterruptedTurnsCheckpointBeforeItReturns() async throws {
+        let driver = ScriptedDriver()
+        let git = RecordingGit()
+        let store = InMemoryThreadStore()
+        let engine = EngineHarness.engine(driver: driver, git: git, store: store)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "one", attachments: [])
+        // The baseline is in place; git is slow to capture the turn's own checkpoint.
+        git.captureGate = { try? await Task.sleep(for: .milliseconds(200)) }
+
+        await engine.shutdown()
+
+        let saved = try #require(try store.load().threads.first { $0.id == threadID })
+        #expect(saved.turns.last?.status == .interrupted)
+        #expect(saved.turns.last?.checkpoint?.status == .ready)
+    }
+
+    @Test func aQueuedMessageDoesNotStartWhileTheAppQuits() async throws {
+        let driver = ScriptedDriver()
+        let git = RecordingGit()
+        let engine = EngineHarness.engine(driver: driver, git: git)
+        let threadID = EngineHarness.idleThread(in: engine)
+        try await engine.send(threadID, text: "one", attachments: [])
+        try await engine.send(threadID, text: "two", attachments: [], mode: .queue)
+        // The queue drains once the completed turn's checkpoint is captured: during the quit.
+        git.captureGate = { try? await Task.sleep(for: .milliseconds(200)) }
+        driver.session?.emit(.turnCompleted(outcome: .completed, error: nil))
+        #expect(await EngineHarness.eventually { engine.thread(threadID)?.turns.last?.status == .completed })
+
+        await engine.shutdown()
+        await engine.runtime.waitForBackgroundWork()
+
+        let thread = try #require(engine.thread(threadID))
+        #expect(thread.turns.map(\.userMessage.text) == ["one"])
+        #expect(thread.turns.last?.checkpoint?.status == .ready)
+        #expect(thread.queue.map(\.message.text) == ["two"])
+        #expect(driver.sessions.count == 1)
+    }
 }

@@ -146,6 +146,7 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
     func prepareToShow() {
         isOpen = true
         if let window { router.startMonitoring(window: window) }
+        workspace.chat.details.isWindowOpen = true
     }
 
     override func showWindow(_ sender: Any?) {
@@ -153,11 +154,27 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
         super.showWindow(sender)
     }
 
+    /// What takes the keyboard when the window comes forward: the dialog, settings screen or
+    /// Commit dialog still open over it, so its keys never reach the views it covers, else the
+    /// window.
+    var keyTarget: NSWindow? {
+        OverlayWindow.topmost(over: window)
+            ?? window?.childWindows?.last { $0 is CommitDialogPanel && $0.isVisible }
+            ?? window
+    }
+
+    /// Shows the window and makes `keyTarget` key.
+    func showAndMakeKey() {
+        showWindow(nil)
+        keyTarget?.makeKeyAndOrderFront(nil)
+    }
+
     func windowWillClose(_ notification: Notification) {
         isOpen = false
         router.stopMonitoring()
-        // The Terminal Agents board's dashboard polls transcripts and terminals every second;
-        // a closed window must not keep it running.
+        // The Terminal Agents board's dashboard polls transcripts and terminals every second,
+        // and the details card git status every 30 s; a closed window must not keep them running.
         state.setTerminalAgentsVisible(false)
+        workspace.chat.details.isWindowOpen = false
     }
 }

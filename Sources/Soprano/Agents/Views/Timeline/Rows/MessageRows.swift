@@ -280,7 +280,7 @@ final class AssistantRowView: TimelineRowView {
         super.configure(row)
         guard case let .assistant(model) = row.content else { return }
         self.model = model
-        markdown.apply(MarkdownRenderer.render(model.text, style: .assistant))
+        markdown.apply(MarkdownRenderer.render(model.text, style: .assistant, streaming: model.isStreaming))
         emptyLabel.isHidden = !(model.text.isEmpty && !model.isStreaming)
         card.isHidden = model.changedFiles == nil
         if let files = model.changedFiles { card.configure(files) }

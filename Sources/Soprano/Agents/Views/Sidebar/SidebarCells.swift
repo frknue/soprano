@@ -237,7 +237,9 @@ final class SidebarCardCell: SidebarThreadCell {
         diffLabel.isHidden = row.diff == nil
         subagentsButton.isHidden = row.subagents == nil
         if let summary = row.subagents { subagentsButton.configure(summary) }
-        settleButton.isHidden = row.isPinned
+        // Search lists settled threads as cards too; Settle would do nothing there (un-settle
+        // stays in the More menu).
+        settleButton.isHidden = row.isPinned || row.isSettled
         super.configure(row, now: now)
         refreshStatus()
     }
@@ -265,7 +267,7 @@ final class SidebarCardCell: SidebarThreadCell {
 
     private func updateHoverSlot() {
         let hovering = isHovered
-        settleButton.isHidden = !hovering || (row?.isPinned ?? true)
+        settleButton.isHidden = !hovering || (row.map { $0.isPinned || $0.isSettled } ?? true)
         moreButton.isHidden = !hovering
         if hovering {
             statusIcon.isHidden = true

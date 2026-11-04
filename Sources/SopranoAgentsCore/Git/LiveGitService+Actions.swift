@@ -178,7 +178,9 @@ extension LiveGitService {
                 try await git(["add", "-A", "--"] + filePaths.map(GitOutput.topLiteral), in: directory)
             }
         } else {
-            try await git(["add", "-A"], in: directory)
+            // Same staging as the commit context: an untracked nested repository without commits
+            // makes a bare `add -A` fail.
+            try await stageAll(in: directory, pathspec: nil, environment: [:])
         }
         var arguments = ["commit", "-m", message.subject]
         if !message.body.isEmpty { arguments += ["-m", message.body] }

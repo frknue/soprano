@@ -314,6 +314,31 @@ struct JSONCTextTests {
         #expect(try JSONCText.removing(at: ["a", "deep"], in: text) == text)
     }
 
+    @Test func removingTheLastKeyKeepsTheCommentDocumentingTheEntryBeforeIt() throws {
+        let text = """
+        {
+          "a": 1, // about a
+          "b": 2
+        }
+        """
+
+        #expect(try JSONCText.removing(at: ["b"], in: text) == """
+        {
+          "a": 1 // about a
+        }
+        """)
+        #expect(try JSONCText.removing(at: ["b"], in: #"{ "a": 1, /* about a */ "b": 2 }"#) == #"{ "a": 1 /* about a */ }"#)
+    }
+
+    @Test func removingALastKeyThatSharesItsLineWithTheBraceKeepsTheLineCommentBeforeItClosed() throws {
+        let text = "{ \"a\": 1, // note\n  \"b\": 2 }"
+
+        let result = try JSONCText.removing(at: ["b"], in: text)
+
+        #expect(result == "{ \"a\": 1 // note\n }")
+        #expect(try JSONCText.decode([String: Int].self, from: result) == ["a": 1])
+    }
+
     // MARK: - Round trip
 
     @Test func applyingSeveralSettingsToARealisticFileKeepsItParseableAndCommented() throws {

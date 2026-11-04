@@ -269,6 +269,68 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 - omp started by hand in a pane whose launched agent had exited (for example after
   quitting a restored session) shows its status in the sidebar and the Agent Dashboard
   again.
+- Saving in the editor after another program changed the file asks before overwriting it,
+  also once the pane already shows "Changed on disk".
+- Clicking an inactive pane tab switches to it again.
+- The browser pane loads `host:port` addresses, and its address bar, Back and Forward follow
+  single-page apps; `soprano browser fill`/`check` reach React forms, `--pane` is only read
+  right after `browser`, and `soprano browser snapshot` never prints password values.
+- A bare or unknown `soprano` call (also `soprano --help`) prints usage instead of starting
+  a second Soprano.
+- Finished Codex commands, MCP calls and file edits stay in the Agent Dashboard timeline.
+- Scheduled automations that reuse their agent run the precheck first; loading a saved
+  session while runs are open no longer lets a run close or take over your restored tabs;
+  a time-zone change moves the next run to the new local time; a timed-out precheck stops
+  the commands it started; trusting a folder for Claude Code keeps a symlinked
+  `~/.claude.json`; a new automation never takes the id of an entry `settings.json`
+  rejected.
+- Claude account switching: a switch that fails halfway puts the previous login back
+  instead of saving one account's tokens into another, logins with MCP tokens longer than
+  4 KB switch, and cancelling a sign-in removes its temporary Keychain item. Re-authenticating
+  a signed-out Codex account with the wrong login leaves it signed out.
+- `settings.json`: removing the last key keeps the comment after the entry before it, the
+  first-run file stays valid with a `\` or `"` prefix key, edits keep reloading after a
+  symlinked file is re-pointed, and a folder like `/Users/you2` is no longer saved as `~2`.
+- Copy mode ends when the pane is resized or zoomed instead of copying the wrong cells; a
+  saved window larger than the current screen is fitted to it; `#rgb` and `#rrggbbaa` agent
+  colors work; relative paths in `soprano markdown` and `soprano browser screenshot` use the
+  real working directory.
+- The command palette and the prefix-key recorder get their `⌃` keys; a shifted symbol is
+  no longer accepted as the prefix key; holding Space no longer flips a switch repeatedly;
+  Esc in another field no longer closes the Agent Dashboard; adding a project folder keeps
+  your place in Settings; the layout tab strip no longer jumps back to the active tab.
+- The Explorer filter works at `/`, a folder can't be copied into itself, undoing a folder
+  rename keeps it open, side-by-side diffs stay aligned with CR or Unicode line separators,
+  and empty added or deleted files say so.
+- The shell left after an agent exits gets Ghostty's shell integration (prompt marks and
+  working directory) again.
+- **Soprano Agents:**
+  - Committing works with an untracked nested repository that has no commits yet, a
+    worktree whose submodules fail is removed again, and the commit dialog always lists
+    the current changes; a double click no longer starts a git action twice.
+  - Quitting keeps the checkpoint of a turn the quit interrupted and never starts a queued
+    message; a message sent during Edit from here waits for the rewind instead of being
+    deleted.
+  - Closing a thread while its omp restarts no longer leaves an omp running, closed
+    terminals no longer leave zombie shells, and helper processes no longer leak file
+    descriptors.
+  - The timeline lets you scroll away from a streaming answer, keeps an opened fold in
+    view, keeps the work shimmer running, no longer keeps every streamed copy of a message
+    in memory, and keeps your text selection while a message streams.
+  - The `/` menu keeps your highlighted command while the agent works; input-method
+    composition keeps its keys in the `/` menu and popovers; dropped folders are no longer
+    copied as attachments; a question no longer auto-advances on another thread.
+  - Reopening the window with a dialog or Settings open gives the dialog the keyboard; a
+    dialog raised after the window closed shows as a normal alert; the details card stops
+    polling git while the window is closed.
+  - The diff no longer jumps back to a file you opened from a changed-files card.
+  - Return in an untouched settings field writes nothing, settled threads in search no
+    longer offer Settle, and statistics read `1M` rather than `1000k`.
+
+### Security
+- Links in agent output (Agent Dashboard and Soprano Agents) open only `http`, `https`
+  and `mailto`; Markdown links to scripts, apps or executables in the Markdown pane reveal
+  them in Finder instead of running them.
 
 ## [0.6.0] - 2026-07-31
 

@@ -289,6 +289,8 @@ final class SettingsCenter {
         do {
             text = try ConfigFile.read(at: fileURL)
         } catch {
+            // Whatever comes back next, even the text read last, must replace this error.
+            lastText = nil
             fileIssues = [ConfigIssue(severity: .error, message: "Could not read \(displayPath): \(error.localizedDescription)")]
             logIssues()
             if notify { observers.notify(()) }

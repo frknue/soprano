@@ -1990,6 +1990,9 @@ private final class AgentDashboardRootView: NSView {
         if let editor = window?.firstResponder as? NSTextView,
            editor.isFieldEditor
         {
+            // Esc in a field elsewhere in the window (sidebar search, a
+            // rename) belongs to that field, not to the dashboard.
+            guard let field = editor.delegate as? NSView, field.isDescendant(of: self) else { return nil }
             return event.keyCode == 53 ? .dismiss : nil
         }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

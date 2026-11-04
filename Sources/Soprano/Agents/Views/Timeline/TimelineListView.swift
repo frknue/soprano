@@ -41,12 +41,18 @@ final class TimelineListView: NSView {
     }
 
     private var heightCache: [HeightKey: CGFloat] = [:]
+    /// The key each row id was last measured under: a streamed row's earlier versions leave the
+    /// cache instead of each keeping a copy of the growing text.
+    private var heightKeys: [String: HeightKey] = [:]
     private var visibleViews: [String: TimelineRowView] = [:]
     private var configuredRows: [String: (row: TimelineRow, width: CGFloat)] = [:]
     private var pool: [String: [TimelineRowView]] = [:]
     private var viewKinds: [ObjectIdentifier: String] = [:]
     private var sizers: [String: TimelineRowView] = [:]
     private var isScrollingProgrammatically = false
+    /// The clip view's top and sizes at the last scroll, to tell the user's upward scrolls apart.
+    private var lastScrollTop: CGFloat = 0
+    private var lastScrollSize: (document: CGFloat, clip: CGFloat) = (0, 0)
 
     var findHighlights: [String: [FindHighlight]] = [:] {
         didSet {
@@ -174,8 +180,13 @@ final class TimelineListView: NSView {
         }()
         sizer.configure(row)
         let height = ceil(sizer.layoutRow(width: width))
-        if heightCache.count > 5000 { heightCache.removeAll() }
+        if heightCache.count > 5000 {
+            heightCache.removeAll()
+            heightKeys.removeAll()
+        }
+        if let earlier = heightKeys[row.id], earlier.row != row { heightCache[earlier] = nil }
         heightCache[key] = height
+        heightKeys[row.id] = key
         return height
     }
 
@@ -348,13 +359,26 @@ final class TimelineListView: NSView {
     /// The clip view scrolled: retile, and track whether the user left the bottom.
     func didScroll() {
         if !isScrollingProgrammatically { updatePinnedFromScroll() }
+        recordScrollPosition()
         tile()
     }
 
+    /// Any upward scroll of the user's leaves the end, however small (a slow trackpad scroll moves
+    /// a few points per event); back within 8 pt of the end, the timeline follows it again. Not
+    /// upward scrolls: the rubber band settling back from past the end, and AppKit clamping the
+    /// clip view when the document or clip height changed.
     private func updatePinnedFromScroll() {
         guard let clip = clipView else { return }
-        let distance = frame.height - clip.bounds.maxY
-        setPinned(distance <= 8)
+        let end = frame.height - clip.bounds.height
+        let resized = abs(frame.height - lastScrollSize.document) > 0.5 || abs(clip.bounds.height - lastScrollSize.clip) > 0.5
+        let movedUp = !resized && lastScrollTop <= end + 0.5 && clip.bounds.minY < lastScrollTop - 0.5
+        setPinned(!movedUp && end - clip.bounds.minY <= 8)
+    }
+
+    private func recordScrollPosition() {
+        guard let clip = clipView else { return }
+        lastScrollTop = clip.bounds.minY
+        lastScrollSize = (frame.height, clip.bounds.height)
     }
 
     private func setPinned(_ pinned: Bool) {
@@ -416,7 +440,7 @@ enum TimelineFind {
     static func units(of row: TimelineRow) -> [String] {
         switch row.content {
         case let .user(model): MarkdownRenderer.render(model.message.text, style: .user).searchableTexts
-        case let .assistant(model): MarkdownRenderer.render(model.text, style: .assistant).searchableTexts
+        case let .assistant(model): MarkdownRenderer.render(model.text, style: .assistant, streaming: model.isStreaming).searchableTexts
         case let .advisory(model): MarkdownRenderer.render(model.note.text, style: .thought).searchableTexts
         default: []
         }

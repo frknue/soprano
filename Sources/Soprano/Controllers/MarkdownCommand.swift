@@ -6,7 +6,8 @@ struct MarkdownCommandRequest: Equatable {
 
     static func parse(
         _ commandLine: [String],
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        currentDirectoryPath: String = FileManager.default.currentDirectoryPath
     ) throws -> MarkdownCommandRequest? {
         guard commandLine.count >= 2 else { return nil }
 
@@ -55,8 +56,10 @@ struct MarkdownCommandRequest: Equatable {
         if expanded.hasPrefix("/") {
             fileURL = URL(fileURLWithPath: expanded)
         } else {
-            let workingDirectory = environment["PWD"]
-                ?? FileManager.default.currentDirectoryPath
+            let workingDirectory = CallerWorkingDirectory.resolve(
+                environment: environment,
+                currentDirectoryPath: currentDirectoryPath
+            )
             fileURL = URL(
                 fileURLWithPath: workingDirectory,
                 isDirectory: true

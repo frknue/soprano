@@ -13,8 +13,11 @@ final class ShimmerLabel: NSView {
     private let highlight = NSTextField.timelineLabel()
     private var animatedWidth: CGFloat = -1
 
+    /// Setting the same value again (every streamed update re-configures the row) keeps the
+    /// running sweep instead of restarting it.
     var isShimmering = false {
         didSet {
+            guard isShimmering != oldValue else { return }
             sweep.isHidden = !isShimmering
             animatedWidth = -1
             needsLayout = true
@@ -38,12 +41,13 @@ final class ShimmerLabel: NSView {
     override var isFlipped: Bool { true }
 
     func set(_ text: String, font: NSFont, color: NSColor, highlightColor: NSColor) {
+        base.textColor = color
+        highlight.textColor = highlightColor
+        guard text != base.stringValue || font != base.font else { return }
         for field in [base, highlight] {
             field.font = font
             field.stringValue = text
         }
-        base.textColor = color
-        highlight.textColor = highlightColor
         animatedWidth = -1
         needsLayout = true
     }
@@ -416,6 +420,11 @@ final class WorkEntryRowView: ClickableRowView {
     override func configure(_ row: TimelineRow) {
         super.configure(row)
         guard case let .workEntry(model) = row.content else { return }
+        if model.entry.id != self.model?.entry.id {
+            // Reused for another entry: its output starts at the top.
+            bodyScroll.contentView.scroll(to: .zero)
+            bodyScroll.reflectScrolledClipView(bodyScroll.contentView)
+        }
         self.model = model
         let entry = model.entry
         line.icon.setSymbol(entry.icon, size: 13)
@@ -434,7 +443,7 @@ final class WorkEntryRowView: ClickableRowView {
         bodyMarkdown.isHidden = !expanded || !entry.bodyIsMarkdown
         if expanded {
             if entry.bodyIsMarkdown {
-                bodyMarkdown.apply(MarkdownRenderer.render(entry.body ?? "", style: .thought))
+                bodyMarkdown.apply(MarkdownRenderer.render(entry.body ?? "", style: .thought, streaming: entry.isActive))
             } else {
                 bodyString = Self.bodyText(entry.body ?? "", palette: palette)
                 bodyText.setText(bodyString)
