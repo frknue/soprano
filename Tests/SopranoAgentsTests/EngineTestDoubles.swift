@@ -189,6 +189,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     /// Awaited by `captureCheckpoint` / `restoreCheckpoint` after recording the call (slow git).
     var captureGate: (@Sendable () async -> Void)?
     var restoreGate: (@Sendable () async -> Void)?
+    /// `workingTreeDiff`'s answer.
+    var workingPatch = ""
 
     var calls: [String] { lock.withLock { _calls } }
 
@@ -226,7 +228,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
         return "diff"
     }
 
-    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { "" }
+    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { workingPatch }
 
     func restoreCheckpoint(cwd: String, ref: String) async throws {
         record("restore \(ref)")

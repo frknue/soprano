@@ -72,7 +72,7 @@ final class WorkspaceState {
     /// Right-panel tabs per `WorkspaceRef.key` (`draftPanelKey` for a projectless draft).
     private var panelTabs: [String: RightPanelTabs] = [:]
     private(set) var diffScope: DiffScope = .thread
-    /// File the diff surface scrolls to (from a changed-files card click).
+    /// File the diff surface scrolls to (from a changed-files card click), until it takes it.
     private(set) var diffFocusPath: String?
     /// Empty = all projects.
     private(set) var projectFilter: Set<String> = []
@@ -308,6 +308,13 @@ final class WorkspaceState {
         isRightPanelVisible = true
         _ = closeOverlays()
         observers.notify(.panels)
+    }
+
+    /// The diff surface takes the pending focus path (once): later panel changes and reloads
+    /// keep the user's scroll position and collapsed files.
+    func takeDiffFocusPath() -> String? {
+        defer { diffFocusPath = nil }
+        return diffFocusPath
     }
 
     /// Puts `message` back into the composer of the selected thread (appended to any draft).
