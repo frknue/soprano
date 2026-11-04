@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to Soprano Agents are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Changes of the standalone Soprano Agents app, before it became part of Soprano. Later changes
+are in Soprano's [CHANGELOG.md](../../CHANGELOG.md). The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 

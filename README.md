@@ -297,6 +297,7 @@ key; `Esc` keeps the current one.
 |---|---|
 | `⌘P` | Command palette; `Esc` or a click on the dimmed window behind it closes it |
 | `⇧⌘D` | Open the Agent Dashboard |
+| `⇧⌘A` | Show the [Soprano Agents](#soprano-agents) window |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
@@ -675,6 +676,31 @@ The toolbar navigates between linked documents, reloads on demand, reveals the s
 Finder, and opens it in the default editor. Web links open in a regular Soprano browser
 pane. Source-provided HTML is displayed as source rather than executed.
 
+## Soprano Agents
+
+Soprano Agents is Soprano's chat window for `omp`: a thread inbox on the left, a chat
+lane with a floating composer, approvals and questions inline, per-turn diffs from
+hidden git checkpoints, worktrees, a terminal drawer and a right panel with Diff, Files
+and terminals. It talks to `omp --mode rpc-ui` directly, so omp's tool approvals and its
+`ask` tool show up as cards instead of terminal prompts.
+
+Open it with **`⇧⌘A`**, **Commands ▸ Soprano Agents**, or `⌘P` → *Soprano Agents*. It
+is a second window of the same app: `⇧⌘T` in it (or **Window ▸ Terminals**) brings the
+terminal window back, and `` ⌘` `` cycles between them. While it is in front it has its
+own menu bar and its own shortcuts, so `⌘D` toggles its diff there and still opens a
+terminal in the terminal window. Its engine starts the first time the window opens and
+keeps running until you quit Soprano, so closing the window leaves threads working;
+their notifications open the thread. A window that was open when you quit reopens on the
+next launch.
+
+The full guide — every shortcut, the right panel, worktrees, statistics — is
+[docs/agents/README.md](docs/agents/README.md). Its settings live in Soprano's
+[`settings.json`](#settings) under `threads`; threads, projects and attachments stay in
+`~/Library/Application Support/Soprano Agents/` (`Soprano Agents Dev` for development
+builds), where the standalone Soprano Agents app kept them, so existing threads carry
+over. The first time the window opens, Soprano copies the standalone app's
+`~/.config/soprano-agents/settings.json` into `threads` and leaves that file alone.
+
 ## omp web
 
 `omp web` runs Soprano's editable fork of
@@ -916,6 +942,13 @@ default.
       "precheckTimeoutSeconds": 60,     // 5–600
       "model": "sonnet"
     }
+  },
+
+  // Soprano Agents (⇧⌘A); the full list is in docs/agents/README.md.
+  "threads": {
+    "agents": { "defaultRuntimeMode": "full-access" },
+    "worktrees": { "directory": "~/.soprano-agents/worktrees", "branchPrefix": "soprano" },
+    "chat": { "followUp": "steer", "width": "normal", "workLog": "detailed" }
   }
 }
 ```

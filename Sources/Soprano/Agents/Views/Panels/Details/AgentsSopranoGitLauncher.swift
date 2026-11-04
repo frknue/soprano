@@ -5,7 +5,7 @@ import SopranoAgentsCore
 /// Prefix → G: the repository root goes over the way Finder and `open -a` hand folders to it, and a
 /// repository Soprano Git already shows just gets its tab selected there.
 @MainActor
-enum SopranoGitLauncher {
+enum AgentsSopranoGitLauncher {
     static let bundleIdentifier = "com.soprano.git"
     private static let title = "Open in Soprano Git"
 

@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 @MainActor
 struct KeymapTests {
@@ -17,7 +17,7 @@ struct KeymapTests {
         ]
     }
 
-    private func resolve(_ overrides: [String: BindingOverride], commands: [AppCommand]? = nil) -> Keymap {
+    private func resolve(_ overrides: [String: AgentsBindingOverride], commands: [AppCommand]? = nil) -> Keymap {
         Keymap.resolve(commands: commands ?? self.commands, settings: KeybindingSettings(overrides: overrides))
     }
 
@@ -89,6 +89,7 @@ struct KeymapTests {
     @Test func shellCommandsCarryTheDocumentedDefaultKeys() {
         let expected: [String: [String]] = [
             "palette.open": ["cmd+k", "cmd+p"],
+            "window.showTerminals": ["cmd+shift+t"],
             "settings.open": ["cmd+,"],
             "settings.openFile": [],
             "view.toggleSidebar": ["cmd+e"],
@@ -196,7 +197,7 @@ struct KeymapTests {
         registry.register(commands)
         let center = SettingsCenter(fileURL: directory.appendingPathComponent("settings.json"), registry: registry)
         center.apply(text: """
-        { "keybindings": { "prefixKey": "b", "bindings": { "palette.open": ["prefix+shift+k", "cmd+k"], "view.toggleSidebar": null } } }
+        { "threads": { "keybindings": { "prefixKey": "b", "bindings": { "palette.open": ["prefix+shift+k", "cmd+k"], "view.toggleSidebar": null } } } }
         """)
 
         #expect(center.shortcutText(for: "palette.open") == "Prefix → Shift+K")

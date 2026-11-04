@@ -2,8 +2,8 @@ import AppKit
 import OSLog
 import SopranoAgentsCore
 
-/// Resolved user settings (from ~/.config/soprano-agents/settings.json).
-struct AppSettings: Equatable, Sendable {
+/// Resolved user settings (the `threads` object of Soprano's settings.json).
+struct AgentsSettings: Equatable, Sendable {
     /// What sending while a turn runs does by default (⌘↩ does the other).
     enum FollowUp: String, Equatable, Sendable, CaseIterable {
         case steer
@@ -32,9 +32,6 @@ struct AppSettings: Equatable, Sendable {
         case minimal
     }
 
-    /// "soprano" (follow Soprano's own theme and appearance) or an id from `AppTheme.options`.
-    var theme: String = "soprano"
-
     /// nil = omp's own configured model (`ModelSelection.ompDefaultModel`).
     var defaultModel: String?
     var defaultRuntimeMode: RuntimeMode = .fullAccess
@@ -61,7 +58,7 @@ struct AppSettings: Equatable, Sendable {
     /// Open-in-editor target id (`cursor`, `vscode`, `zed`, `xcode`, `finder`, …); nil = first installed.
     var editorApp: String?
 
-    static let defaults = AppSettings()
+    static let defaults = AgentsSettings()
 
     /// The engine's view of these settings.
     var engineSettings: EngineSettings {
@@ -81,21 +78,13 @@ struct AppSettings: Equatable, Sendable {
 
 private let settingsLog = Logger(subsystem: "com.soprano.agents", category: "settings")
 
-/// How `folio` picks Paper or Ink. Mirrors the `appearance` key of Soprano's
-/// settings.json: follow macOS, or pin light (Paper) or dark (Ink).
-enum AppearancePreference: String, Codable, CaseIterable, Sendable {
-    case system
-    case light
-    case dark
-}
-
 /// The live theme. Views read `theme` when they build and re-style in their
 /// observer when it changes.
 ///
-/// `theme: "soprano"` follows the `theme` and `appearance` keys of Soprano's
-/// settings.json (watched live); Folio when that file, key or id is missing or
+/// The app follows the `theme` and `appearance` keys of Soprano's settings.json
+/// (`followSoprano`, watched live); Folio when that file, key or id is missing or
 /// unknown. `folio` resolves to Folio Paper or Folio Ink by appearance, so a
-/// macOS light/dark flip changes the theme too.
+/// macOS light/dark flip changes the theme too. Snapshots pin a theme id instead.
 @MainActor
 final class ThemeCenter {
     static let shared = ThemeCenter()
@@ -106,10 +95,13 @@ final class ThemeCenter {
 
     var theme: AppTheme { manager.currentTheme }
 
+    /// The setting that follows Soprano's own `theme` and `appearance`.
+    nonisolated static let followSoprano = "soprano"
+
     /// Soprano's settings.json, read when following Soprano.
     let sopranoSettingsURL: URL
-    /// The `theme` setting currently applied ("soprano" or a theme id).
-    private(set) var setting = "soprano"
+    /// The setting currently applied (`followSoprano` or a theme id).
+    private(set) var setting = ThemeCenter.followSoprano
     /// Forced appearance (snapshot `--appearance`); wins over macOS and Soprano's `appearance`.
     /// Folio then resolves to Paper or Ink; single-appearance themes keep their palette.
     var forcedAppearance: AppTheme.Appearance? {
@@ -120,7 +112,7 @@ final class ThemeCenter {
     private var sopranoWatcher: ConfigFileWatcher?
     private var watchesSoprano = false
 
-    init(sopranoSettingsURL: URL = SettingsFile.sopranoURL()) {
+    init(sopranoSettingsURL: URL = SettingsFile.url()) {
         self.sopranoSettingsURL = sopranoSettingsURL
         manager.onThemeChanged = { [weak self] theme in
             self?.observers.notify(theme)
@@ -132,10 +124,10 @@ final class ThemeCenter {
         observers.add(owner, handler)
     }
 
-    /// Applies the `theme` setting. `watch` keeps following Soprano's file live.
+    /// Applies `followSoprano` or a theme id. `watch` keeps following Soprano's file live.
     func apply(setting: String, watch: Bool = true) {
         self.setting = setting
-        watchesSoprano = watch && setting == "soprano"
+        watchesSoprano = watch && setting == Self.followSoprano
         updateSopranoWatcher()
         applyResolvedTheme()
     }
@@ -168,13 +160,13 @@ final class ThemeCenter {
     }
 
     /// The theme id and appearance preference handed to the manager: Soprano's
-    /// `theme` + `appearance` for "soprano", otherwise the own id under the
+    /// `theme` + `appearance` for `followSoprano`, otherwise the own id under the
     /// system appearance. Unknown ids become `folio`.
     private nonisolated static func themeSource(
         setting: String,
         sopranoSettingsText: String?
     ) -> (themeId: String, appearance: AppearancePreference) {
-        guard setting == "soprano" else {
+        guard setting == followSoprano else {
             return (AppTheme.isKnownId(setting) ? setting : AppTheme.folioId, .system)
         }
         guard let text = sopranoSettingsText,
@@ -191,7 +183,7 @@ final class ThemeCenter {
     /// Hands the resolved source to the manager, which notifies observers
     /// (through `onThemeChanged`) only when the concrete palette changes.
     private func applyResolvedTheme() {
-        let text = setting == "soprano" ? (try? SettingsFile.read(at: sopranoSettingsURL)) ?? nil : nil
+        let text = setting == Self.followSoprano ? (try? ConfigFile.read(at: sopranoSettingsURL)) ?? nil : nil
         let source = Self.themeSource(setting: setting, sopranoSettingsText: text)
         let appearance: AppearancePreference = switch forcedAppearance {
         case .light: .light
@@ -218,7 +210,8 @@ final class ThemeCenter {
     }
 }
 
-/// Settings and key bindings, live-reloaded from settings.json.
+/// Settings and key bindings, live-reloaded from the `threads` object of Soprano's
+/// settings.json (`SettingsFile`).
 ///
 /// A syntax error keeps the last good settings running and is reported as an
 /// error issue; bad values become warnings (logged), never launch failures.
@@ -230,7 +223,7 @@ final class SettingsCenter {
     /// Commands the keymap resolves against.
     let registry: CommandRegistry
 
-    private(set) var settings = AppSettings.defaults
+    private(set) var settings = AgentsSettings.defaults
     private(set) var keybindingSettings = KeybindingSettings()
     /// Problems reading the file (syntax errors); the last good resolution stays.
     private(set) var fileIssues: [ConfigIssue] = []
@@ -239,6 +232,7 @@ final class SettingsCenter {
 
     private var cachedKeymap: Keymap?
     private var cachedKeymapCommandCount = -1
+    /// Soprano's whole document as last read or written.
     private var lastText: String?
     private var watcher: ConfigFileWatcher?
     private let observers = ObserverList<Void>()
@@ -248,18 +242,22 @@ final class SettingsCenter {
         self.registry = registry ?? .shared
     }
 
-    var displayPath: String { SettingsFile.displayPath(for: fileURL) }
+    var displayPath: String { ConfigFile.displayPath(for: fileURL) }
 
-    /// Creates the file from the template when missing (unless `createIfMissing`
-    /// is false, e.g. snapshots), loads it, and starts watching it.
-    func start(createIfMissing: Bool = true, watching: Bool = true) {
-        if createIfMissing {
-            do {
-                try SettingsFile.createIfMissing(at: fileURL)
-            } catch {
-                settingsLog.error("Could not create \(self.displayPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+    /// Moves the standalone app's settings file into Soprano's once (see
+    /// `SettingsFile.importLegacySettings`); call before `start`.
+    func importLegacySettings(from legacyURL: URL = SettingsFile.legacyURL()) {
+        do {
+            if try SettingsFile.importLegacySettings(into: fileURL, from: legacyURL) {
+                settingsLog.info("Imported \(ConfigFile.displayPath(for: legacyURL), privacy: .public) into \(self.displayPath, privacy: .public)")
             }
+        } catch {
+            settingsLog.error("Could not import \(ConfigFile.displayPath(for: legacyURL), privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Loads the file (Soprano creates it) and starts watching it.
+    func start(watching: Bool = true) {
         reloadFromDisk(notify: false)
         if watching, watcher == nil {
             let watcher = ConfigFileWatcher(url: fileURL) { [weak self] in
@@ -280,7 +278,7 @@ final class SettingsCenter {
     func reloadFromDisk(notify: Bool = true) {
         let text: String?
         do {
-            text = try SettingsFile.read(at: fileURL)
+            text = try ConfigFile.read(at: fileURL)
         } catch {
             fileIssues = [ConfigIssue(severity: .error, message: "Could not read \(displayPath): \(error.localizedDescription)")]
             logIssues()
@@ -292,14 +290,15 @@ final class SettingsCenter {
         apply(text: text ?? "{}", notify: notify)
     }
 
-    /// Applies a document. A syntax error keeps the last good settings.
+    /// Applies Soprano's whole document. A syntax error keeps the last good settings.
     func apply(text: String, notify: Bool = true) {
         do {
-            let resolved = try SettingsResolver.resolve(text: text)
+            let resolved = try SettingsResolver.resolve(text: SettingsFile.agentsDocument(fromSopranoText: text))
             fileIssues = []
             settings = resolved.settings
             keybindingSettings = resolved.keybindings
-            settingsIssues = resolved.issues
+            // Resolver lines would point into the derived document, not the file.
+            settingsIssues = resolved.issues.map { ConfigIssue(severity: $0.severity, message: $0.message) }
             cachedKeymap = nil
         } catch let error as JSONCText.ParseError {
             fileIssues = [ConfigIssue(severity: .error, message: "\(displayPath): \(error.message)", line: error.line)]
@@ -350,43 +349,44 @@ final class SettingsCenter {
         observers.add(owner) { _ in handler() }
     }
 
-    /// The value at `path` exactly as settings.json writes it (unexpanded
-    /// paths, unknown keys included); nil when absent or unreadable.
+    /// The value of the Agents setting at `path` exactly as settings.json writes it
+    /// (unexpanded paths, unknown keys included); nil when absent or unreadable.
+    /// Paths map into Soprano's document through `SettingsFile.documentPath(for:)`.
     func configuredValue(at path: [String]) -> Any? {
         guard let text = lastText,
               let data = try? JSONCText.strictJSONData(from: text),
               var value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         else { return nil }
-        for key in path {
+        for key in SettingsFile.documentPath(for: path) {
             guard let object = value as? [String: Any], let child = object[key] else { return nil }
             value = child
         }
         return value
     }
 
-    /// Sets one key in settings.json, keeping comments, key order and
+    /// Sets one Agents setting in settings.json, keeping comments, key order and
     /// indentation, and applies the result. Missing parent objects are created.
     /// Returns false when the file could not be edited (the error becomes an issue).
     @discardableResult
     func write(_ value: Any, at path: [String]) -> Bool {
-        edit { try JSONCText.setting(value, at: path, in: $0) }
+        edit { try JSONCText.setting(value, at: SettingsFile.documentPath(for: path), in: $0) }
     }
 
-    /// Removes one key so its built-in default applies again.
+    /// Removes one Agents setting so its built-in default applies again.
     @discardableResult
     func remove(at path: [String]) -> Bool {
-        edit { try JSONCText.removing(at: path, in: $0) }
+        edit { try JSONCText.removing(at: SettingsFile.documentPath(for: path), in: $0) }
     }
 
     private func edit(_ change: (String) throws -> String) -> Bool {
         do {
             // Edit what is on disk now, not the last text read: the watcher is
             // debounced, so a hand edit may not have arrived yet.
-            let existing = try SettingsFile.read(at: fileURL)
-            let current = existing ?? SettingsFile.template
+            let existing = try ConfigFile.read(at: fileURL)
+            let current = existing ?? "{}"
             let updated = try change(current)
-            if updated != current || existing == nil {
-                try SettingsFile.write(updated, to: fileURL)
+            if updated != current {
+                try ConfigFile.write(updated, to: fileURL)
             }
             lastText = updated
             apply(text: updated)
@@ -401,9 +401,8 @@ final class SettingsCenter {
         return false
     }
 
-    /// Opens settings.json in the user's editor, creating it first if needed.
+    /// Opens settings.json in the user's editor.
     func openInEditor() {
-        _ = try? SettingsFile.createIfMissing(at: fileURL)
         let workspace = NSWorkspace.shared
         if let editor = workspace.urlForApplication(toOpen: fileURL) {
             workspace.open([fileURL], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())
@@ -412,9 +411,8 @@ final class SettingsCenter {
         }
     }
 
-    /// Shows settings.json in Finder, creating it first if needed.
+    /// Shows settings.json in Finder.
     func revealInFinder() {
-        _ = try? SettingsFile.createIfMissing(at: fileURL)
         NSWorkspace.shared.activateFileViewerSelecting([fileURL])
     }
 

@@ -102,7 +102,7 @@ enum ThreadActions {
         menu.autoenablesItems = false
 
         if state.selectedThreadID == threadID,
-           let controller = window?.windowController as? MainWindowController,
+           let controller = window?.windowController as? AgentsWindowController,
            CommandRegistry.shared.command("chat.find") != nil {
             menu.addItem(ActionMenuItem("Find in thread", symbol: SidebarSymbol.textSearch) {
                 controller.perform("chat.find")

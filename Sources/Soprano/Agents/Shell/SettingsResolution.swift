@@ -1,26 +1,8 @@
 import Foundation
 import SopranoAgentsCore
 
-/// A problem found while resolving settings.json. Issues never block startup:
-/// a bad value keeps its default and is logged (Soprano's `ConfigIssue`).
-struct ConfigIssue: Equatable, Identifiable, Sendable {
-    enum Severity: Equatable, Sendable {
-        /// The document could not be read at all; the last good settings stay in force.
-        case error
-        /// One key was ignored; everything else applied.
-        case warning
-    }
-
-    let severity: Severity
-    let message: String
-    /// 1-based line in settings.json, when the problem has a position.
-    var line: Int?
-
-    var id: String { "\(severity)-\(line ?? 0)-\(message)" }
-}
-
 /// A `keybindings.bindings` value: one chord, several, or `null` to unbind.
-enum BindingOverride: Equatable, Sendable {
+enum AgentsBindingOverride: Equatable, Sendable {
     case chords([String])
     case disabled
 }
@@ -29,12 +11,12 @@ enum BindingOverride: Equatable, Sendable {
 struct KeybindingSettings: Equatable, Sendable {
     var prefixKey = "a"
     var prefixTimeoutMs = 1500
-    var overrides: [String: BindingOverride] = [:]
+    var overrides: [String: AgentsBindingOverride] = [:]
 }
 
 /// settings.json applied on top of the defaults.
 struct ResolvedSettings: Equatable, Sendable {
-    var settings = AppSettings.defaults
+    var settings = AgentsSettings.defaults
     var keybindings = KeybindingSettings()
     var issues: [ConfigIssue] = []
 
@@ -64,18 +46,9 @@ enum SettingsResolver {
             issues.append(ConfigIssue(severity: .warning, message: message))
         }
 
-        let knownTopLevel: Set<String> = ["theme", "agents", "providers", "textGeneration", "worktrees", "projects", "chat", "notifications", "editor", "keybindings"]
+        let knownTopLevel: Set<String> = ["agents", "providers", "textGeneration", "worktrees", "projects", "chat", "notifications", "editor", "keybindings"]
         for key in root.keys.sorted() where !knownTopLevel.contains(key) {
             warn("Unknown setting \"\(key)\".")
-        }
-
-        if let value = root["theme"] {
-            if let theme = value as? String, theme == "soprano" || AppTheme.isKnownId(theme) {
-                result.settings.theme = theme
-            } else {
-                let known = (["soprano"] + AppTheme.options.map(\.id)).joined(separator: ", ")
-                warn("Unknown theme \(describe(value)). Known themes: \(known).")
-            }
         }
 
         if let agents = section("agents", in: root, warn: warn) {
@@ -175,21 +148,21 @@ enum SettingsResolver {
                 warn("Unknown setting \"chat.\(key)\".")
             }
             if let value = chat["followUp"] {
-                if let raw = value as? String, let mode = AppSettings.FollowUp(rawValue: raw) {
+                if let raw = value as? String, let mode = AgentsSettings.FollowUp(rawValue: raw) {
                     result.settings.followUp = mode
                 } else {
                     warn("chat.followUp must be \"steer\" or \"queue\".")
                 }
             }
             if let value = chat["width"] {
-                if let raw = value as? String, let width = AppSettings.ChatWidth(rawValue: raw) {
+                if let raw = value as? String, let width = AgentsSettings.ChatWidth(rawValue: raw) {
                     result.settings.chatWidth = width
                 } else {
                     warn("chat.width must be \"normal\", \"wide\" or \"full\".")
                 }
             }
             if let value = chat["workLog"] {
-                if let raw = value as? String, let workLog = AppSettings.WorkLog(rawValue: raw) {
+                if let raw = value as? String, let workLog = AgentsSettings.WorkLog(rawValue: raw) {
                     result.settings.workLog = workLog
                 } else {
                     warn("chat.workLog must be \"detailed\" or \"minimal\".")
@@ -308,10 +281,5 @@ enum SettingsResolver {
 
     private static func expandingTilde(_ path: String) -> String {
         NSString(string: path).expandingTildeInPath
-    }
-
-    private static func describe(_ value: Any) -> String {
-        if let string = value as? String { return "\"\(string)\"" }
-        return String(describing: value)
     }
 }

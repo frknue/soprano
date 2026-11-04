@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 /// Markdown file tabs: where links lead, and what the document rendering gives the reader
 /// (heading anchors, image blocks).

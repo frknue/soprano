@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 struct MarkdownDocumentTests {
     @Test func fencedCodeKeepsItsLanguageAndLosesTheClosingNewline() {

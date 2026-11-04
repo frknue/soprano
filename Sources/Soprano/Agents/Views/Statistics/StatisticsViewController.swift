@@ -50,7 +50,7 @@ final class StatisticsViewController: NSViewController {
         header.onRefresh = { [weak self] in self?.load(sync: true) }
         header.onClose = { [weak self] in self?.state.setStatisticsVisible(false) }
         header.onToggleSidebar = { [weak self] in
-            (self?.view.window?.windowController as? MainWindowController)?.perform("view.toggleSidebar")
+            (self?.view.window?.windowController as? AgentsWindowController)?.perform("view.toggleSidebar")
         }
 
         scrollView.drawsBackground = false

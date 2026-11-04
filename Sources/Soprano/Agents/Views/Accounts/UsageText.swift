@@ -2,7 +2,7 @@ import AppKit
 
 /// How close a usage figure is to its limit; the sidebar account button, the usage card and
 /// Settings → Accounts turn a limit warning-colored from 70 % and error-colored from 90 %.
-enum UsageSeverity: Comparable {
+enum AgentsUsageSeverity: Comparable {
     case normal
     case warning
     case critical
@@ -43,7 +43,7 @@ struct UsageHeadline: Equatable {
     var usage: AccountUsage
     var window: UsageWindow
 
-    var severity: UsageSeverity { UsageSeverity(fraction: window.usedFraction) }
+    var severity: AgentsUsageSeverity { AgentsUsageSeverity(fraction: window.usedFraction) }
 }
 
 /// Text for the sidebar account button, the usage card and Settings → Accounts.
@@ -61,7 +61,7 @@ enum UsageText {
 
     /// The tightest headline's severity, which tints the sidebar account button; `.normal`
     /// while no provider has usage.
-    static func severity(_ snapshot: AccountsSnapshot) -> UsageSeverity {
+    static func severity(_ snapshot: AccountsSnapshot) -> AgentsUsageSeverity {
         headlines(snapshot).map(\.severity).max() ?? .normal
     }
 

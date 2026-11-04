@@ -67,7 +67,7 @@ enum Dialogs {
     // MARK: - Presentation
 
     private static func host(for window: NSWindow?) -> NSWindow? {
-        let candidate = window ?? NSApp.mainWindow ?? NSApp.windows.first { $0 is MainWindow && $0.isVisible }
+        let candidate = window ?? NSApp.mainWindow ?? NSApp.windows.first { $0 is AgentsWindow && $0.isVisible }
         // Present over the main window even when called with one of its overlays.
         if let overlay = candidate as? OverlayWindow { return overlay.parent ?? overlay }
         return candidate

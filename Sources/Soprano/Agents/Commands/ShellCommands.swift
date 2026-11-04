@@ -18,6 +18,16 @@ enum ShellCommands {
                 CommandPalette.toggle(in: context)
             },
             AppCommand(
+                id: "window.showTerminals",
+                title: "Show Terminals",
+                description: "Bring Soprano's terminal window forward",
+                category: .app,
+                defaultKeys: ["cmd+shift+t"],
+                icon: "terminal"
+            ) { context in
+                (context.window?.windowController as? AgentsWindowController)?.showTerminals?()
+            },
+            AppCommand(
                 id: "settings.open",
                 title: "Settings",
                 description: "Open the settings screen",

@@ -60,7 +60,7 @@ final class AccountMarkView: PaletteView {
 }
 
 /// A 4 pt usage bar: a muted track filled to `fraction` (capped at full) in the severity color.
-final class UsageBarView: PaletteView {
+final class AgentsUsageBarView: PaletteView {
     static let width: CGFloat = 64
 
     private let fraction: Double
@@ -85,7 +85,7 @@ final class UsageBarView: PaletteView {
         guard share > 0 else { return }
         var filled = rect
         filled.size.width = max(4, round(rect.width * share))
-        UsageSeverity(fraction: fraction).barColor(in: palette).setFill()
+        AgentsUsageSeverity(fraction: fraction).barColor(in: palette).setFill()
         NSBezierPath(roundedRect: filled, xRadius: 2, yRadius: 2).fill()
     }
 

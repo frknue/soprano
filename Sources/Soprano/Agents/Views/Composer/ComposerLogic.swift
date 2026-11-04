@@ -22,7 +22,7 @@ enum ComposerPrimaryAction: Equatable {
         isRunning: Bool,
         hasContent: Bool,
         isAwaitingApproval: Bool,
-        followUp: AppSettings.FollowUp,
+        followUp: AgentsSettings.FollowUp,
         alternate: Bool
     ) -> ComposerPrimaryAction {
         guard isRunning else { return hasContent ? .send : .sendDisabled }
@@ -43,7 +43,7 @@ enum ComposerPrimaryAction: Equatable {
     }
 
     /// Tooltip and accessibility label.
-    func tooltip(followUp: AppSettings.FollowUp) -> String {
+    func tooltip(followUp: AgentsSettings.FollowUp) -> String {
         switch self {
         case .send, .sendDisabled: "Submit message"
         case .stop: "Interrupt"

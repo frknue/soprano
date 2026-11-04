@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 @testable import SopranoAgentsCore
 
 @MainActor
@@ -23,7 +23,7 @@ struct SettingsScreenTests {
         let center = SettingsCenter(fileURL: directory.appendingPathComponent("settings.json"), registry: registry)
         center.start(watching: false)
         let router = KeyboardRouter(registry: registry, keymap: { center.keymap }, context: { nil })
-        let parent = MainWindow(contentRect: NSRect(x: -30000, y: -30000, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
+        let parent = AgentsWindow(contentRect: NSRect(x: -30000, y: -30000, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false)
         parent.allowsOffscreenFrame = true
         parent.isReleasedWhenClosed = false
         let engine = try DemoFixtures.build("empty").engine

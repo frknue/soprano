@@ -805,7 +805,7 @@ final class SidebarEmptyCell: PaletteView {
         applyPalette(palette)
     }
 
-    func configure(_ state: SidebarEmptyState) {
+    func configure(_ state: ThreadSidebarEmptyState) {
         label.stringValue = state.message
         addProjectButton.isHidden = state != .noProjects
         needsLayout = true

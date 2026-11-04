@@ -207,7 +207,7 @@ enum PanelCommands {
             ) { context in
                 guard let engine = context.engine, let ref = context.state?.workspace else { return }
                 let window = context.window
-                Task { await SopranoGitLauncher.open(ref, engine: engine, window: window) }
+                Task { await AgentsSopranoGitLauncher.open(ref, engine: engine, window: window) }
             },
             AppCommand(
                 id: "git.commit",

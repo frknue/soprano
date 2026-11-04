@@ -75,7 +75,7 @@ enum SidebarItem: Equatable {
     case showMore(Int)
     /// Flexible gap that pushes the Settled shelf to the bottom of the list (`mt-auto`).
     case spacer
-    case empty(SidebarEmptyState)
+    case empty(ThreadSidebarEmptyState)
 
     var thread: SidebarThreadRow? {
         switch self {
@@ -98,7 +98,7 @@ enum SidebarItem: Equatable {
     }
 }
 
-enum SidebarEmptyState: Equatable {
+enum ThreadSidebarEmptyState: Equatable {
     /// "No projects yet" + "Add project".
     case noProjects
     case noThreads(String)
@@ -337,7 +337,7 @@ enum SidebarListModel {
         return thread.queue.contains { has($0.message.text) }
     }
 
-    static func emptyState(projects: [Project], filter: Set<String>) -> SidebarEmptyState {
+    static func emptyState(projects: [Project], filter: Set<String>) -> ThreadSidebarEmptyState {
         if projects.isEmpty { return .noProjects }
         let scoped = projects.filter { filter.contains($0.id) }
         if scoped.count > 1 { return .noThreads("No threads in these projects yet") }

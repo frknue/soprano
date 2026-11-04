@@ -167,9 +167,9 @@ final class UsageCardContent: ComposerPopoverContent {
     /// One window: its label, a bar filled to the share used, the percentage in the severity
     /// color, and the time until it resets.
     private func makeUsageLine(_ window: UsageWindow, now: Date) -> NSView {
-        let severity = UsageSeverity(fraction: window.usedFraction)
+        let severity = AgentsUsageSeverity(fraction: window.usedFraction)
         let label = ThemedLabel(window.label, size: Typography.smallSize) { $0.mutedForeground }
-        let bar = UsageBarView(fraction: window.usedFraction)
+        let bar = AgentsUsageBarView(fraction: window.usedFraction)
         let percent = ThemedLabel(UsageFormat.percent(window.usedFraction), size: Typography.smallSize, weight: .medium) { severity.color(in: $0) }
         percent.font = Typography.tabular(Typography.smallSize, weight: .medium)
         percent.alignment = .right

@@ -60,7 +60,7 @@ enum TimelineCommands {
                 icon: "text.line.magnify",
                 perform: { _ in
                     let detailed = SettingsCenter.shared.settings.workLog == .detailed
-                    let next: AppSettings.WorkLog = detailed ? .minimal : .detailed
+                    let next: AgentsSettings.WorkLog = detailed ? .minimal : .detailed
                     SettingsCenter.shared.write(next.rawValue, at: ["chat", "workLog"])
                 }
             ),

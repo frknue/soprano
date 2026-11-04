@@ -64,6 +64,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "launch-opencode", label: "Launch OpenCode", description: "Launch OpenCode agent", category: .agents, defaultKeys: "⌘3", mode: .direct, key: "3", meta: true),
             KeyBinding(id: "launch-omp", label: "Launch omp", description: "Launch Oh My Pi agent", category: .agents, defaultKeys: "⌘4", mode: .direct, key: "4", meta: true),
             KeyBinding(id: "agent-dashboard", label: "Agent Dashboard", description: "Monitor and control agents across all windows", category: .agents, defaultKeys: "⇧⌘D", mode: .direct, key: "d", meta: true, shift: true),
+            KeyBinding(id: "open-agents", label: "Soprano Agents", description: "Show the Soprano Agents window: omp threads with diffs, worktrees and approvals", category: .agents, defaultKeys: "⇧⌘A", mode: .direct, key: "a", meta: true, shift: true),
 
             // General (direct)
             KeyBinding(id: "command-palette", label: "Commands", description: "Open the command palette", category: .general, defaultKeys: "⌘P", mode: .direct, key: "p", meta: true),

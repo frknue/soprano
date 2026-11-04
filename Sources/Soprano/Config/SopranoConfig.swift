@@ -98,8 +98,8 @@ extension BindingOverride: Codable {
 /// A problem found while resolving the config file. Issues never block startup:
 /// a bad value falls back to the default and is reported in **Settings**, so a
 /// typo can't leave the user without a running app.
-struct ConfigIssue: Equatable, Identifiable {
-    enum Severity: Equatable {
+struct ConfigIssue: Equatable, Identifiable, Sendable {
+    enum Severity: Equatable, Sendable {
         /// The document could not be read at all; defaults are in force.
         case error
         /// One key was ignored; everything else applied.

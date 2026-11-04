@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 @testable import SopranoAgentsCore
 
 /// Markdown file tabs in the file viewer: links between files land on the linked heading.

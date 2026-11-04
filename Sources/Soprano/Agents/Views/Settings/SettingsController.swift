@@ -26,7 +26,7 @@ final class SettingsController: NSObject {
     private let window = OverlayWindow()
     private let card = OverlayCardView()
     private let nav = SettingsNavView()
-    private let header = SettingsHeaderView()
+    private let header = AgentsSettingsHeaderView()
     private let scrollView = NSScrollView()
     private let document = FlippedStackDocument()
 
@@ -56,7 +56,7 @@ final class SettingsController: NSObject {
             open.show(page)
             return open
         }
-        let router = (window.windowController as? MainWindowController)?.router
+        let router = (window.windowController as? AgentsWindowController)?.router
         let controller = SettingsController(engine: engine, parent: window, router: router)
         controller.page = page
         controller.open()
@@ -510,7 +510,7 @@ final class SettingsNavItem: InteractiveView {
 }
 
 /// The page header: breadcrumb "Settings › Page" and a close button, `border-b`.
-final class SettingsHeaderView: PaletteView {
+final class AgentsSettingsHeaderView: PaletteView {
     var onClose: (() -> Void)?
     private let root = ThemedLabel("Settings", size: Typography.bodySize) { $0.mutedForeground }
     private let chevron = NSImageView()

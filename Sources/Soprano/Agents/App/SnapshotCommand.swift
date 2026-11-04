@@ -1,7 +1,7 @@
 import AppKit
 import SopranoAgentsCore
 
-/// `SopranoAgents snapshot --out <png> [--fixture demo] [--size 1440x900] [--appearance light|dark]
+/// `Soprano agents-snapshot --out <png> [--fixture demo] [--size 1440x900] [--appearance light|dark]
 /// [--theme <id>] [--hide-sidebar] [--details] [--terminal] [--right-panel]
 /// [--diff thread|turn:<n>|uncommitted] [--perform <command id>]… [--type "<text>"] [--keys "<chord> …"]
 /// [--hover <accessibility label>] [--click <accessibility label>]… [--settings <page>] [--dialog confirm|choose|prompt|alert]
@@ -38,12 +38,12 @@ enum SnapshotCommand {
         /// The `AccountFixtures` snapshot the account button, usage card and Settings → Accounts show.
         var accounts = "none"
         /// Overrides `chat.workLog` in memory (settings.json stays untouched).
-        var workLog: AppSettings.WorkLog?
+        var workLog: AgentsSettings.WorkLog?
         var wait: Double = 0.4
     }
 
     static let usage = """
-    usage: SopranoAgents snapshot --out <png> [--fixture \(DemoFixtures.scenarios.joined(separator: "|"))]
+    usage: Soprano agents-snapshot --out <png> [--fixture \(DemoFixtures.scenarios.joined(separator: "|"))]
                                   [--size WxH] [--appearance light|dark] [--theme <id>]
                                   [--hide-sidebar] [--details] [--terminal] [--right-panel]
                                   [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
@@ -110,7 +110,7 @@ enum SnapshotCommand {
                 options.accounts = raw
             case "--work-log":
                 let raw = try value(option)
-                guard let workLog = AppSettings.WorkLog(rawValue: raw) else { throw CaptureError(description: "--work-log must be detailed or minimal") }
+                guard let workLog = AgentsSettings.WorkLog(rawValue: raw) else { throw CaptureError(description: "--work-log must be detailed or minimal") }
                 options.workLog = workLog
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             default: throw CaptureError(description: "unknown option \(option)")
@@ -147,10 +147,11 @@ enum SnapshotCommand {
 
     static func capture(_ options: Options) async throws {
         let settings = SettingsCenter.shared
-        settings.start(createIfMissing: false, watching: false)
+        settings.start(watching: false)
         if let workLog = options.workLog {
-            let text = (try? SettingsFile.read(at: settings.fileURL)) ?? nil
-            settings.apply(text: try JSONCText.setting(workLog.rawValue, at: ["chat", "workLog"], in: text ?? "{}"), notify: false)
+            let text = (try? ConfigFile.read(at: settings.fileURL)) ?? nil
+            let path = SettingsFile.documentPath(for: ["chat", "workLog"])
+            settings.apply(text: try JSONCText.setting(workLog.rawValue, at: path, in: text ?? "{}"), notify: false)
         }
         ThemeCenter.shared.forcedAppearance = options.dark ? .dark : .light
         PaletteCenter.shared.apply(setting: options.theme ?? AppTheme.folioId)
@@ -179,7 +180,7 @@ enum SnapshotCommand {
         // Far outside every display: real window-server backing, never seen.
         let frame = NSRect(x: -30000, y: -30000, width: options.size.width, height: options.size.height)
         let defaults = UserDefaults(suiteName: "SopranoAgentsSnapshot-\(UUID().uuidString)") ?? .standard
-        let controller = MainWindowController(engine: built.engine, state: state, defaults: defaults, persistsFrame: false, frame: frame)
+        let controller = AgentsWindowController(engine: built.engine, state: state, defaults: defaults, persistsFrame: false, frame: frame)
         guard let window = controller.mainWindow else { throw CaptureError(description: "no window") }
         window.allowsOffscreenFrame = true
         window.rendersAsKey = true
@@ -359,7 +360,7 @@ enum SnapshotCommand {
     }
 
     /// The key child window (palette, popover) takes keys while shown; else the router, then the window.
-    static func deliver(_ event: NSEvent, controller: MainWindowController, window: NSWindow) {
+    static func deliver(_ event: NSEvent, controller: AgentsWindowController, window: NSWindow) {
         if let child = window.childWindows?.last(where: { $0.isVisible && $0.canBecomeKey }) {
             child.sendEvent(event)
             return

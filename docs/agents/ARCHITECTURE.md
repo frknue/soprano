@@ -1,18 +1,19 @@
 # Soprano Agents architecture
 
-Soprano Agents is a native macOS GUI for the `omp` coding agent (oh-my-pi) in the Soprano family,
-colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a floating
+Soprano Agents is Soprano's window for the `omp` coding agent (oh-my-pi), part of the Soprano app and
+colored by Soprano's theme: a thread inbox on the left, a centered chat lane with a floating
 composer, collapsible work logs, per-turn diffs from hidden git checkpoints, a terminal drawer and
 a right panel. Swift 6 + programmatic AppKit (no SwiftUI, no storyboards), SPM, macOS 14+. The app
 talks to the `omp` CLI directly; there is no server process.
 
 ## Toolchain
 
+Soprano's toolchain (root `AGENTS.md` → Commands):
+
 ```bash
-export DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH="/opt/homebrew/opt/swift/bin:$PATH"
 swift build
 swift test
-.build/debug/SopranoAgents snapshot --out /tmp/shot.png --fixture demo [--appearance dark]
+.build/debug/Soprano agents-snapshot --out /tmp/shot.png --fixture demo [--appearance dark]
 ```
 
 `ld: warning: building for macOS-14.0 …` link warnings are expected.
@@ -31,16 +32,16 @@ swift test
 | `Sources/SopranoAgentsCore/Store/` | Engine | `JSONFileThreadStore`. |
 | `Sources/SopranoAgentsCore/Git/GitService.swift` | Contract | `GitService`, `SourceControlWriter`, status/branch/action value types. |
 | `Sources/SopranoAgentsCore/Git/` (rest) | Git | `GitRunner` (the only place that spawns git), `LiveGitService` (checkpoints, diffs, status, branches, worktrees, commit/push/PR via `gh`), parsers. |
-| `Sources/SopranoAgents/Theme/` | Shared kit | `Palette` + `PaletteCenter`, `Typography`, `Metrics`, `Radius`, `Icon`, `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`, `KbdView`. |
-| `Sources/SopranoAgents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
-| `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox (with subagent rows under their thread's card, `SubagentActions`), chat header + title-bar toggles. |
-| `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
-| `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
-| `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
-| `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar account button, usage card, Settings → Accounts, account fixtures. |
-| `Sources/SopranoAgents/Views/Statistics/`, `Commands/StatisticsCommands.swift`, `Fixtures/FixtureUsageStatistics.swift` | Statistics | Statistics board (header, periods, Cost/Tokens, tiles, stacked chart, model/project/agent breakdowns), `StatisticsFormat`, fixture usage history. |
-| `Sources/SopranoAgents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
-| `Sources/SopranoAgents/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`, including `Vendored/Accounts/` (Soprano's accounts layer: `AccountsController` and its account managers, `AccountLaunchState`, `UsageAPI`). **Never edit.** |
+| `Sources/Soprano/Agents/Theme/` | Shared kit | `Palette` + `PaletteCenter`, `Typography`, `Metrics`, `Radius`, `Icon`, `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`, `KbdView`. |
+| `Sources/Soprano/Agents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | `AgentsAppController` (built by Soprano's `AppDelegate`), menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
+| `Sources/Soprano/Agents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox (with subagent rows under their thread's card, `SubagentActions`), chat header + title-bar toggles. |
+| `Sources/Soprano/Agents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
+| `Sources/Soprano/Agents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
+| `Sources/Soprano/Agents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
+| `Sources/Soprano/Agents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar account button, usage card, Settings → Accounts, account fixtures. |
+| `Sources/Soprano/Agents/Views/Statistics/`, `Commands/StatisticsCommands.swift`, `Fixtures/FixtureUsageStatistics.swift` | Statistics | Statistics board (header, periods, Cost/Tokens, tiles, stacked chart, model/project/agent breakdowns), `StatisticsFormat`, fixture usage history. |
+| `Sources/Soprano/Agents/Fixtures/` | Shell | `DemoFixtures` scenarios + `FixtureGitService` and `FixtureWorkspaceFiles` for snapshots and UI tests. |
+| Soprano's `Views/Chrome.swift`, `Config/Theme.swift`, `KeyChord`, `JSONCText`, `CommandPalettePanel`, `CodeSyntaxHighlighter`, `Accounts/` | — | Shared with the terminal window in the same module (the standalone app vendored copies). |
 
 Modules talk only through the contracts: views read `AgentEngine` state and call its methods;
 UI state goes through `WorkspaceState`; commands through `CommandRegistry`. A view never talks to
@@ -286,9 +287,9 @@ Text generation: `omp -p --no-session --no-tools --no-extensions --no-skills --n
 --no-context-files --no-lsp [--model <provider/id>] --thinking low` (prompt plus schema on stdin,
 first JSON object of stdout). 180 s timeout.
 
-### Accounts (`Vendored/Accounts`, `Views/Accounts`)
-Soprano's accounts layer is vendored unchanged. `AccountsController.shared.start()` runs only in
-`AppDelegate`, before the engine is built: it writes omp's preference overlay into
+### Accounts (Soprano's `Accounts/`, `Views/Accounts`)
+Soprano's accounts layer is shared with the terminal window. `AccountsController.shared.start()` runs
+once, in Soprano's `AppDelegate` at launch, before any omp process: it writes omp's preference overlay into
 `AccountLaunchState`. The app lists only omp's Claude and Codex logins (`AccountListID.ompClaude`,
 `.ompCodex`, in that order); the controller's other lists stay unused. Views read and act only
 through `AccountsCenter.source` (`AccountsSource`: snapshot, observers, refresh, add,
@@ -455,11 +456,15 @@ buttons, and the snapshot harness runs them with `--perform <id>`. `CommandConte
 `engine`, `state`, `workspace`, `window`, `focus`, `isTextInput`, and `thread` (selected).
 
 ### Settings (`Shell/AppEnvironment.swift`, `SettingsResolution.swift`, `SettingsFile.swift`)
-`~/.config/soprano-agents/settings.json` (JSONC, `SOPRANO_AGENTS_CONFIG` overrides), live
-reloaded; bad values become warnings. Keys: `theme`, `agents.{defaultModel, defaultRuntimeMode}`,
-`providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`, `projects.directories`,
+The `threads` object of Soprano's `~/.config/soprano/settings.json` (`ConfigFile.url`; JSONC), live
+reloaded; bad values become warnings. `SettingsFile.documentPath(for:)` maps the two exceptions: the
+theme is Soprano's top-level `theme`/`appearance` and `projects.directories` is Soprano's
+`projectDirectories`. The first time the window opens, the standalone app's
+`~/.config/soprano-agents/settings.json` is copied into `threads` (once; the old file stays). Keys under
+`threads`: `agents.{defaultModel, defaultRuntimeMode}`,
+`providers.ompPath`, `textGeneration.{model, titles}`, `worktrees.{directory, branchPrefix}`,
 `chat.{followUp, width, workLog}`, `notifications.{enabled, sound}`, `editor.app`,
-`keybindings.{prefixKey, prefixTimeoutMs, bindings}`. `AppSettings.engineSettings` feeds
+`keybindings.{prefixKey, prefixTimeoutMs, bindings}`. `AgentsSettings.engineSettings` feeds
 `AgentEngine.settings`. Window geometry, panel
 widths and per-thread UI state stay in `UserDefaults`.
 
@@ -593,7 +598,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 
 ## Verification harness
 
-`SopranoAgents snapshot --out <png> [--fixture demo|running|stopping|editing|approval|input|failed|background|answered|rechecked|subagents|subagent|draft|empty]
+`Soprano agents-snapshot --out <png> [--fixture demo|running|stopping|editing|approval|input|failed|background|answered|rechecked|subagents|subagent|draft|empty]
 [--size 1440x900] [--appearance light|dark] [--theme <id>] [--hide-sidebar] [--details]
 [--terminal] [--right-panel] [--diff thread|turn:<n>|uncommitted] [--open-file <path>]… [--perform <command id>]…
 [--settings general|providers|accounts|text-generation|worktrees|notifications|keybindings|archive|about]
@@ -645,7 +650,7 @@ go to the overlay's `keyHandler` before menus and fields; while the settings scr
 shortcut it routes every key through `KeyboardRouter.capture`.
 
 The command palette and Open Project… (`Views/Palette/`) are Soprano's `CommandPalettePanel`
-(vendored), one per window (`MainWindowController.palette`): a child panel under the titlebar
+(shared with the terminal window), one per window (`AgentsWindowController.palette`): a child panel under the titlebar
 over a scrim, rows of icon, title over `AppCommand.description`, keycaps; substring search on
 title, then description, then search text. `PaletteItems` builds the rows (commands, threads by
 last use, projects, settings rows; or projects, the subfolders of `projects.directories` that are

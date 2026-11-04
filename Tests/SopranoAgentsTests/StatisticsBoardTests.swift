@@ -1,19 +1,19 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 @MainActor
 struct StatisticsBoardTests {
-    private func window() throws -> (MainWindowController, WorkspaceState) {
+    private func window() throws -> (AgentsWindowController, WorkspaceState) {
         let built = try DemoFixtures.build("demo")
         let state = WorkspaceState()
         state.select(built.selection)
-        let controller = MainWindowController(engine: built.engine, state: state, defaults: UserDefaults(suiteName: UUID().uuidString)!, persistsFrame: false)
+        let controller = AgentsWindowController(engine: built.engine, state: state, defaults: UserDefaults(suiteName: UUID().uuidString)!, persistsFrame: false)
         _ = controller.window
         return (controller, state)
     }
 
-    private func run(_ id: String, _ controller: MainWindowController) throws {
+    private func run(_ id: String, _ controller: AgentsWindowController) throws {
         let command = try #require((ShellCommands.all + PanelCommands.all + ComposerCommands.all).first { $0.id == id })
         command.perform(controller.commandContext())
     }

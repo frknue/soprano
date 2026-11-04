@@ -355,8 +355,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let identifier = NSUserInterfaceItemIdentifier("sidebar.row")
-        if let reused = tableView.makeView(withIdentifier: identifier, owner: nil) as? SidebarRowView { return reused }
-        let rowView = SidebarRowView()
+        if let reused = tableView.makeView(withIdentifier: identifier, owner: nil) as? ThreadSidebarRowView { return reused }
+        let rowView = ThreadSidebarRowView()
         rowView.identifier = identifier
         return rowView
     }
@@ -562,7 +562,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     }
 
     private func perform(_ id: String) {
-        (view.window?.windowController as? MainWindowController)?.perform(id)
+        (view.window?.windowController as? AgentsWindowController)?.perform(id)
     }
 
     // MARK: Live times and jump hints
@@ -641,7 +641,7 @@ final class SidebarRootView: PaletteView {
 }
 
 /// Row container without selection drawing (rows draw their own surfaces).
-final class SidebarRowView: NSTableRowView {
+final class ThreadSidebarRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override func drawBackground(in dirtyRect: NSRect) {}
     override var isEmphasized: Bool {

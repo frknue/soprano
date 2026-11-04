@@ -1,14 +1,22 @@
 import AppKit
 import SopranoAgentsCore
 
-/// Where the app keeps its data. Dev and installed builds use their bundle name, so they never
-/// share threads; `SOPRANO_AGENTS_DATA_DIR` (absolute) overrides it.
+/// Where Soprano Agents keeps its data. The folder keeps the name the standalone app used,
+/// because threads store absolute attachment and scratch paths (also written into omp's own
+/// session files): installed Soprano (`com.soprano.app`) uses "Soprano Agents", every other
+/// build "Soprano Agents Dev", so dev builds never touch real threads.
+/// `SOPRANO_AGENTS_DATA_DIR` (absolute) overrides it.
 enum AppPaths {
-    static func dataDirectory(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    static let installedBundleIdentifier = "com.soprano.app"
+
+    static func dataDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> URL {
         if let override = environment["SOPRANO_AGENTS_DATA_DIR"], override.hasPrefix("/") {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
-        let name = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "Soprano Agents"
+        let name = bundleIdentifier == installedBundleIdentifier ? "Soprano Agents" : "Soprano Agents Dev"
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return support.appendingPathComponent(name, isDirectory: true)

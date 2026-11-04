@@ -1,16 +1,20 @@
 # Soprano Agents
 
-**A native macOS app for coding agents, in the Soprano family.**
+**Soprano's chat window for coding agents.**
 
-Soprano Agents gives the `omp` CLI (oh-my-pi) a native home in the Soprano family,
-colored by Soprano's themes: a thread inbox on the left, a centered chat lane with a floating
+Soprano Agents gives the `omp` CLI (oh-my-pi) a native home inside Soprano, colored by
+Soprano's theme: a thread inbox on the left, a centered chat lane with a floating
 composer, collapsible work logs, approvals and questions inline, per-turn diffs
-from hidden git checkpoints, worktrees, a terminal drawer and a diff panel on the right. It is a
-Swift 6 / AppKit app, not a web view, and it talks to `omp` directly: there is no server.
+from hidden git checkpoints, worktrees, a terminal drawer and a diff panel on the right. It is
+part of the Soprano app, Swift 6 / AppKit rather than a web view, and it talks to `omp`
+directly: there is no server.
+
+Open it in Soprano with `⇧⌘A`, **Commands ▸ Soprano Agents** or `⌘P` → *Soprano Agents*;
+`⇧⌘T` (**Window ▸ Terminals**) goes back to the terminal window. It used to be a separate app,
+*Soprano Agents.app*; see [Coming from the standalone app](#coming-from-the-standalone-app).
 
 ## Requirements
 
-- macOS 14 or later.
 - The `omp` CLI ([oh-my-pi](https://github.com/can1357/oh-my-pi)) with at least one model
   provider logged in (`omp login`). Soprano Agents runs `omp --mode rpc-ui`, omp's host-UI
   protocol, so omp's tool approvals and its `ask` tool show up inline. Every model omp knows (its
@@ -20,21 +24,20 @@ Swift 6 / AppKit app, not a web view, and it talks to `omp` directly: there is n
 
 Apps started from the Dock get a minimal `PATH`, so Soprano Agents also looks in
 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.bun/bin` and `~/.cargo/bin`. If `omp`
-lives elsewhere, set its path in **Settings › Providers** (`providers.ompPath`). The same page
-shows omp's version and health.
+lives elsewhere, set its path in **Settings › Providers** (`threads.providers.ompPath`). The same
+page shows omp's version and health.
 
-## Install and build
+## Coming from the standalone app
 
-Homebrew Swift with the Command Line Tools SDK:
-
-```bash
-export DEVELOPER_DIR=/Library/Developer/CommandLineTools PATH="/opt/homebrew/opt/swift/bin:$PATH"
-./scripts/install.sh            # release build → /Applications/Soprano Agents.app
-swift build && swift test       # development
-./scripts/dev.sh --build-only   # .build/debug/Soprano Agents Dev.app (separate data)
-```
-
-The installer never restarts a running Soprano Agents; the update applies on the next launch.
+- Threads, projects and attachments stay where the standalone app kept them, so every
+  thread, its attachments and its checkpoints carry over.
+- The first time the window opens, Soprano copies `~/.config/soprano-agents/settings.json`
+  into the `threads` object of Soprano's settings.json (its project folders into Soprano's
+  `projectDirectories` when Soprano has none) and leaves the old file alone.
+- Accounts are Soprano's: the account button and **Settings › Accounts** show the same
+  logins as the terminal window.
+- `/Applications/Soprano Agents.app` is no longer updated; delete it once Soprano has your
+  threads.
 
 ## Using it
 
@@ -73,12 +76,14 @@ waiting threads post a notification, and the Dock icon counts threads waiting fo
 ## Keyboard shortcuts
 
 Every shortcut can be changed in **Settings › Keybindings** (Record, Off, Reset) or in
-`settings.json`. Shortcuts marked *not terminal* don't fire while a terminal (in the drawer or a
-right-panel tab) has focus.
+`settings.json` under `threads.keybindings`. They apply while the Soprano Agents window is in
+front; the terminal window keeps its own. Shortcuts marked *not terminal* don't fire while a
+terminal (in the drawer or a right-panel tab) has focus.
 
 | Action | Shortcut | Where |
 |---|---|---|
 | Command Palette | `⌘K`, `⌘P` | everywhere |
+| Show Terminals (Soprano's terminal window) | `⇧⌘T` | everywhere |
 | Open Project… | `⇧⌘K` | everywhere |
 | Settings | `⌘,` | everywhere |
 | Toggle Sidebar | `⌘E` | everywhere |
@@ -128,22 +133,21 @@ them.
 
 ## Settings
 
-Settings live in `~/.config/soprano-agents/settings.json` (JSON with comments; honors
-`XDG_CONFIG_HOME`, and `SOPRANO_AGENTS_CONFIG` overrides the full path). The file is created with
-every key commented on first launch, saved changes apply immediately, and bad values are ignored
-with a warning shown on **Settings › General**. The settings screen (`⌘,`) writes the same file,
-keeping your comments.
+Settings live in Soprano's `~/.config/soprano/settings.json` (JSON with comments; honors
+`XDG_CONFIG_HOME`, and `SOPRANO_CONFIG` overrides the full path), in the object under `threads`.
+Saved changes apply immediately, and bad values are ignored with a warning shown on
+**Settings › General**. The settings screen (`⌘,`) writes the same file, keeping your comments.
+Two settings are Soprano's own: the theme (`theme` and `appearance`, shared by every window) and
+the project folders (`projectDirectories`, also used by Soprano's Open Project…).
 
-| Key | Default | |
+| Key under `threads` | Default | |
 |---|---|---|
-| `theme` | `"soprano"` | `soprano` (follow Soprano's theme and appearance) or a Soprano theme id (`folio` follows macOS, `folio-paper`, `folio-ink`, `nord`, …) |
 | `agents.defaultModel` | omp's configured model | model id `provider/id`, e.g. `anthropic/claude-opus-5-5` |
 | `agents.defaultRuntimeMode` | `"full-access"` | `approval-required`, `auto-accept-edits`, `auto`, `full-access` |
 | `providers.ompPath` | found on `PATH` | path to the `omp` executable |
 | `textGeneration.model` / `.titles` | omp's configured model / `true` | titles, commit messages, branch names, generated with omp |
 | `worktrees.directory` | `~/.soprano-agents/worktrees` | new worktrees go to `<directory>/<repo>/<branch>` |
 | `worktrees.branchPrefix` | `"soprano"` | `soprano/fix-login-error` |
-| `projects.directories` | `[]` | folders whose subfolders Open Project… (`⇧⌘K`) lists, e.g. `["~/git/private", "~/git/work"]` |
 | `chat.followUp` | `"steer"` | `steer` or `queue` |
 | `chat.width` | `"normal"` | `normal`, `wide`, `full` |
 | `chat.workLog` | `"detailed"` | `detailed` (every step, edits as diffs, code as it is written) or `minimal`; `⇧⌘D` toggles |
@@ -156,16 +160,18 @@ keeping your comments.
 
 - Threads, projects and attachments: `~/Library/Application Support/Soprano Agents/`
   (`threads/`, `projects.json`, `attachments/`, and `scratch/<thread>` as the working folder of
-  threads without a project). The dev build uses `Soprano Agents Dev`;
-  `SOPRANO_AGENTS_DATA_DIR` overrides the location.
+  threads without a project), the folder the standalone app used. Threads store attachment
+  and scratch paths absolutely, so the folder keeps that name. Development builds of Soprano use
+  `Soprano Agents Dev`; `SOPRANO_AGENTS_DATA_DIR` overrides the location.
 - Checkpoints: hidden refs `refs/soprano-agents/checkpoints/<thread>/<turn>` in each project's
   repository. They never touch your index, HEAD or branches.
 - Worktrees: `~/.soprano-agents/worktrees/<repository>/<branch>` unless configured otherwise.
 - An agent, terminal or project script only ever runs in its thread's folder. If that folder is
   gone (a deleted worktree, a moved project), it refuses with "Workspace not found" instead of
   running anywhere else.
-- Window size and panel widths: the app's `UserDefaults`.
+- Window size and panel widths: Soprano's `UserDefaults`; whether the window was open when
+  Soprano quit, so it reopens on the next launch.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](../../LICENSE).

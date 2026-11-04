@@ -14,9 +14,9 @@ final class CommandPalette {
 
     private(set) lazy var panel = CommandPalettePanel(themeManager: ThemeCenter.shared.manager)
     private(set) var mode: Mode?
-    private weak var controller: MainWindowController?
+    private weak var controller: AgentsWindowController?
 
-    init(controller: MainWindowController) {
+    init(controller: AgentsWindowController) {
         self.controller = controller
     }
 
@@ -43,7 +43,7 @@ final class CommandPalette {
     }
 
     private static func palette(for context: CommandContext) -> CommandPalette? {
-        (context.window?.windowController as? MainWindowController)?.palette
+        (context.window?.windowController as? AgentsWindowController)?.palette
     }
 
     func dismiss() {

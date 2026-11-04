@@ -1,12 +1,12 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 @MainActor
 struct DialogsTests {
     private func makeWindow() -> NSWindow {
         _ = NSApplication.shared
-        let window = MainWindow(contentRect: NSRect(x: -30000, y: -30000, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = AgentsWindow(contentRect: NSRect(x: -30000, y: -30000, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         window.allowsOffscreenFrame = true
         window.isReleasedWhenClosed = false
         return window

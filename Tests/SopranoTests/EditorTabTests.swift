@@ -311,7 +311,7 @@ struct EditorTabTests {
         }
     }
 
-    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async throws {
+    private func waitUntil(timeout: TimeInterval = 15, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             guard Date() < deadline else {

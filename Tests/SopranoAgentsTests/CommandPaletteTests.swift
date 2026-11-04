@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 @testable import SopranoAgentsCore
 
 @MainActor
@@ -106,7 +106,7 @@ struct CommandPaletteTests {
 
     @Test func pickingAFolderAddsItAsAProjectOnceAndStartsAThreadInIt() throws {
         let built = try DemoFixtures.build("demo")
-        let controller = MainWindowController(engine: built.engine, state: WorkspaceState(), defaults: UserDefaults(suiteName: UUID().uuidString)!, persistsFrame: false)
+        let controller = AgentsWindowController(engine: built.engine, state: WorkspaceState(), defaults: UserDefaults(suiteName: UUID().uuidString)!, persistsFrame: false)
         let path = EngineHarness.temporaryDirectory().standardizedFileURL.path
         let before = built.engine.projects.count
 

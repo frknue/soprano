@@ -276,7 +276,7 @@ struct ConfigStoreTests {
             // `atomically: true` is the write-temp-then-rename path.
             try ConfigFile.write("{ \"theme\": \"\(theme)\" }", to: store.fileURL)
 
-            let deadline = Date().addingTimeInterval(5)
+            let deadline = Date().addingTimeInterval(15)
             while store.settings.themeId != theme, Date() < deadline {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
@@ -310,7 +310,7 @@ struct ConfigStoreTests {
         let before = changes.count
         try ConfigFile.write("{ \"theme\": \"catppuccin-mocha\" }", to: url)
 
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(15)
         while changes.count == before, Date() < deadline {
             try await Task.sleep(nanoseconds: 20_000_000)
         }

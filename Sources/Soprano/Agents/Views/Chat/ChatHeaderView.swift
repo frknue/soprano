@@ -303,8 +303,8 @@ final class ChatHeaderView: PaletteView {
 
     // MARK: Commands
 
-    private var windowController: MainWindowController? {
-        window?.windowController as? MainWindowController
+    private var windowController: AgentsWindowController? {
+        window?.windowController as? AgentsWindowController
     }
 
     private func perform(_ id: String) {

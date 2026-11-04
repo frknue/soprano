@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 @MainActor
 struct UsageTextTests {
@@ -41,11 +41,11 @@ struct UsageTextTests {
     }
 
     @Test func severityTurnsWarningAtSeventyAndCriticalAtNinetyPercent() {
-        #expect(UsageSeverity(fraction: 0.69) == .normal)
-        #expect(UsageSeverity(fraction: 0.7) == .warning)
-        #expect(UsageSeverity(fraction: 0.89) == .warning)
-        #expect(UsageSeverity(fraction: 0.9) == .critical)
-        #expect(UsageSeverity(fraction: 1.4) == .critical)
+        #expect(AgentsUsageSeverity(fraction: 0.69) == .normal)
+        #expect(AgentsUsageSeverity(fraction: 0.7) == .warning)
+        #expect(AgentsUsageSeverity(fraction: 0.89) == .warning)
+        #expect(AgentsUsageSeverity(fraction: 0.9) == .critical)
+        #expect(AgentsUsageSeverity(fraction: 1.4) == .critical)
     }
 
     @Test func theTooltipListsEveryWindowWithItsReset() {

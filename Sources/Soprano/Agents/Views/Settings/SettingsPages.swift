@@ -18,8 +18,8 @@ extension SettingsController {
         }
     }
 
-    private var settings: AppSettings { center.settings }
-    private var defaults: AppSettings { .defaults }
+    private var settings: AgentsSettings { center.settings }
+    private var defaults: AgentsSettings { .defaults }
 
     /// Reset action for `path` when its value differs from the default, else nil.
     private func reset(_ path: [String], isDefault: Bool) -> (() -> Void)? {
@@ -28,12 +28,9 @@ extension SettingsController {
 
     // MARK: General
 
+    /// Soprano's themes; the row edits Soprano's own `theme` key.
     static func themeOptions() -> [SelectOption] {
-        var options = [SelectOption(title: "Follow Soprano", value: "soprano")]
-        for (index, theme) in AppTheme.options.enumerated() {
-            options.append(SelectOption(title: theme.name, value: theme.id, separatorBefore: index == 0))
-        }
-        return options
+        AppTheme.options.map { SelectOption(title: $0.name, value: $0.id) }
     }
 
     private func generalPage(_ form: SettingsForm) -> [NSView] {
@@ -50,20 +47,21 @@ extension SettingsController {
             }))
         }
 
-        let theme = form.select(Self.themeOptions(), selected: settings.theme, width: 224, label: "Theme") { [weak self] value in
+        let configuredTheme = (center.configuredValue(at: ["theme"]) as? String).flatMap { AppTheme.isKnownId($0) ? $0 : nil } ?? AppTheme.folioId
+        let theme = form.select(Self.themeOptions(), selected: configuredTheme, width: 224, label: "Theme") { [weak self] value in
             self?.write(value, at: ["theme"])
         }
         let widths = [
-            SelectOption(title: "Comfortable (default)", value: AppSettings.ChatWidth.normal.rawValue),
-            SelectOption(title: "Wide", value: AppSettings.ChatWidth.wide.rawValue),
-            SelectOption(title: "Full", value: AppSettings.ChatWidth.full.rawValue),
+            SelectOption(title: "Comfortable (default)", value: AgentsSettings.ChatWidth.normal.rawValue),
+            SelectOption(title: "Wide", value: AgentsSettings.ChatWidth.wide.rawValue),
+            SelectOption(title: "Full", value: AgentsSettings.ChatWidth.full.rawValue),
         ]
         let width = form.select(widths, selected: settings.chatWidth.rawValue, width: 192, label: "Chat width") { [weak self] value in
             self?.write(value, at: ["chat", "width"])
         }
         let workLogs = [
-            SelectOption(title: "Detailed (default)", value: AppSettings.WorkLog.detailed.rawValue),
-            SelectOption(title: "Minimal", value: AppSettings.WorkLog.minimal.rawValue),
+            SelectOption(title: "Detailed (default)", value: AgentsSettings.WorkLog.detailed.rawValue),
+            SelectOption(title: "Minimal", value: AgentsSettings.WorkLog.minimal.rawValue),
         ]
         let workLog = form.select(workLogs, selected: settings.workLog.rawValue, width: 192, label: "Work log") { [weak self] value in
             self?.write(value, at: ["chat", "workLog"])
@@ -72,8 +70,8 @@ extension SettingsController {
         sections.append(form.section("Appearance", [
             form.row(
                 "Theme",
-                description: "Follow Soprano uses Soprano's theme and appearance. Folio follows the macOS appearance; the other themes pin one.",
-                reset: reset(["theme"], isDefault: settings.theme == defaults.theme),
+                description: "Soprano's theme, shared by every window. Folio follows the macOS appearance; the other themes pin one.",
+                reset: reset(["theme"], isDefault: configuredTheme == AppTheme.folioId),
                 control: theme
             ),
             form.row(
@@ -250,7 +248,7 @@ extension SettingsController {
 
     private func worktreesPage(_ form: SettingsForm) -> [NSView] {
         let configured = center.configuredValue(at: ["worktrees", "directory"]) as? String
-        let shown = configured ?? SettingsFile.displayPath(for: URL(fileURLWithPath: defaults.worktreesDirectory))
+        let shown = configured ?? ConfigFile.displayPath(for: URL(fileURLWithPath: defaults.worktreesDirectory))
         let location = form.field(shown, placeholder: "~/.soprano-agents/worktrees", width: 288, identifier: "worktrees.directory", mono: true) { [weak self] value in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty { self?.remove(["worktrees", "directory"]) } else { self?.write(trimmed, at: ["worktrees", "directory"]) }
@@ -485,7 +483,7 @@ extension SettingsController {
             ),
             form.row(
                 "App data",
-                description: SettingsFile.displayPath(for: data),
+                description: ConfigFile.displayPath(for: data),
                 mono: true,
                 control: form.button("Show in Finder", variant: .ghost) {
                     NSWorkspace.shared.activateFileViewerSelecting([data])

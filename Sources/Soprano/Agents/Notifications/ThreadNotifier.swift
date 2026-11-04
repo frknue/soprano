@@ -51,7 +51,7 @@ protocol ThreadNotificationPosting: AnyObject {
 @MainActor
 final class ThreadNotifier {
     private let engine: AgentEngine
-    private let settings: () -> AppSettings
+    private let settings: () -> AgentsSettings
     private let isAppActive: () -> Bool
     private let poster: ThreadNotificationPosting?
     private let setBadge: @MainActor (Int) -> Void
@@ -60,7 +60,7 @@ final class ThreadNotifier {
 
     init(
         engine: AgentEngine,
-        settings: @escaping () -> AppSettings = { SettingsCenter.shared.settings },
+        settings: @escaping () -> AgentsSettings = { SettingsCenter.shared.settings },
         isAppActive: @escaping () -> Bool = { NSApp.isActive },
         poster: ThreadNotificationPosting?,
         setBadge: @escaping @MainActor (Int) -> Void = ThreadNotifier.setDockBadge
@@ -118,26 +118,24 @@ final class ThreadNotifier {
 
 /// `UNUserNotificationCenter` delivery. Authorization is requested on the first notification.
 /// Unbundled runs (`swift run`, the snapshot harness) have no notification center; `make`
-/// returns nil there so nothing touches it.
+/// returns nil there so nothing touches it. Clicks arrive at Soprano's single notification
+/// delegate (`AgentNotificationManager`), which hands `threadIDKey` notifications to
+/// `AgentsAppController.openThread`.
 @MainActor
-final class UserNotificationPoster: NSObject, ThreadNotificationPosting, UNUserNotificationCenterDelegate {
+final class UserNotificationPoster: ThreadNotificationPosting {
     nonisolated static let threadIDKey = "threadID"
 
     private let center: UNUserNotificationCenter
     private var authorization: Task<Bool, Never>?
-    private let onOpen: (String) -> Void
 
-    private init(center: UNUserNotificationCenter, onOpen: @escaping (String) -> Void) {
+    private init(center: UNUserNotificationCenter) {
         self.center = center
-        self.onOpen = onOpen
-        super.init()
-        center.delegate = self
     }
 
     /// The live poster, or nil when the process is not a bundled app.
-    static func make(onOpen: @escaping (String) -> Void) -> UserNotificationPoster? {
+    static func make() -> UserNotificationPoster? {
         guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return nil }
-        return UserNotificationPoster(center: .current(), onOpen: onOpen)
+        return UserNotificationPoster(center: .current())
     }
 
     func post(threadID: String, alert: ThreadAlert, body: String, sound: Bool) {
@@ -164,27 +162,5 @@ final class UserNotificationPoster: NSObject, ThreadNotificationPosting, UNUserN
         }
         authorization = task
         return task
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
-        let threadID = response.notification.request.content.userInfo[Self.threadIDKey] as? String
-        nonisolated(unsafe) let completion = completionHandler
-        Task { @MainActor in
-            if let threadID { self.onOpen(threadID) }
-            completion()
-        }
-    }
-
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        // The app only notifies in the background; a late one while active stays silent.
-        completionHandler([])
     }
 }

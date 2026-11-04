@@ -254,9 +254,10 @@ enum EngineHarness {
         return thread.id
     }
 
-    /// Polls `condition` on the main actor until it holds or `timeout` passes. Views that load
-    /// files through the engine wait longer: the full parallel suite can stall a hop for seconds.
-    static func eventually(timeout: Duration = .seconds(2), _ condition: () -> Bool) async -> Bool {
+    /// Polls `condition` on the main actor until it holds or `timeout` passes. `swift test` runs
+    /// Soprano's and Soprano Agents' suites in one process, where a main-actor hop can stall for
+    /// seconds; a passing condition returns at once, so only a real failure waits this long.
+    static func eventually(timeout: Duration = .seconds(15), _ condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + timeout
         while !condition() {
             if ContinuousClock.now > deadline { return false }

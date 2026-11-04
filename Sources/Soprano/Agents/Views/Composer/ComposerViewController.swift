@@ -323,7 +323,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         !editorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
     }
 
-    private var followUp: AppSettings.FollowUp { SettingsCenter.shared.settings.followUp }
+    private var followUp: AgentsSettings.FollowUp { SettingsCenter.shared.settings.followUp }
 
     private var draftKey: String { state.draftProjectID ?? "" }
 
@@ -1043,7 +1043,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     }
 
     private func perform(_ commandID: String) {
-        (view.window?.windowController as? MainWindowController)?.perform(commandID)
+        (view.window?.windowController as? AgentsWindowController)?.perform(commandID)
     }
 
     // MARK: Context meter and compaction

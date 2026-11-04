@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 @testable import SopranoAgentsCore
 
 @MainActor
@@ -81,7 +81,7 @@ struct ThreadNotifierTests {
         let engine = engine([runningThread("t1", title: "A"), runningThread("t2", title: "B")])
         let recorder = Recorder()
         var active = true
-        var settings = AppSettings.defaults
+        var settings = AgentsSettings.defaults
         let notifier = ThreadNotifier(engine: engine, settings: { settings }, isAppActive: { active }, poster: recorder, setBadge: { _ in })
 
         finish(engine, "t1", .completed)
@@ -97,7 +97,7 @@ struct ThreadNotifierTests {
     @Test func soundFollowsTheSetting() {
         let engine = engine([runningThread("t1", title: "A")])
         let recorder = Recorder()
-        var settings = AppSettings.defaults
+        var settings = AgentsSettings.defaults
         settings.notificationSound = false
         let notifier = ThreadNotifier(engine: engine, settings: { settings }, isAppActive: { false }, poster: recorder, setBadge: { _ in })
 

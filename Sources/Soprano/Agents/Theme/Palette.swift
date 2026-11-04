@@ -1,9 +1,9 @@
 import AppKit
 
 /// Color tokens of the app. Every view colors itself only from the current `Palette`, which is
-/// always derived from a Soprano theme (`Palette(soprano:)`): `theme: "soprano"` follows
-/// Soprano's own theme and appearance, any other value is a Soprano theme id (`folio` follows
-/// macOS light/dark, `folio-paper`, `folio-ink`, `nord`, …).
+/// always derived from a Soprano theme (`Palette(soprano:)`): the app follows Soprano's own
+/// theme and appearance (`ThemeCenter.followSoprano`); snapshots pin a Soprano theme id
+/// (`folio` follows macOS light/dark, `folio-paper`, `folio-ink`, `nord`, …).
 struct Palette: Equatable {
     var isDark: Bool
 
@@ -163,8 +163,8 @@ extension Palette {
 }
 
 /// The live palette. Views read `PaletteCenter.shared.palette` when they build and re-color
-/// in their observer. It follows `ThemeCenter` (the `theme` setting, Soprano's own theme for
-/// "soprano", and the snapshot harness's forced appearance).
+/// in their observer. It follows `ThemeCenter` (Soprano's own theme, or the snapshot
+/// harness's pinned theme and forced appearance).
 @MainActor
 final class PaletteCenter {
     static let shared = PaletteCenter()
@@ -183,7 +183,7 @@ final class PaletteCenter {
         observers.add(owner, handler)
     }
 
-    /// Applies the `theme` setting: "soprano" or a Soprano theme id.
+    /// Applies `ThemeCenter.followSoprano` or a Soprano theme id.
     func apply(setting: String) {
         ThemeCenter.shared.apply(setting: setting)
         resolve()

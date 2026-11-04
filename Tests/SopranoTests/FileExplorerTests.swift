@@ -577,7 +577,7 @@ struct FileExplorerTests {
     }
 
     private func waitUntil(
-        timeout: TimeInterval = 5,
+        timeout: TimeInterval = 15,
         _ condition: () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)

@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// The app window: hidden-inset title bar (traffic lights over the sidebar), full-size content, the workspace as content.
-final class MainWindow: NSWindow {
+final class AgentsWindow: NSWindow {
     /// Draw as key even when offscreen (snapshot harness) so focus marks render.
     var rendersAsKey = false
     /// Keep a frame outside every screen (snapshot harness renders offscreen).
@@ -18,7 +18,7 @@ final class MainWindow: NSWindow {
 }
 
 @MainActor
-final class MainWindowController: NSWindowController, NSWindowDelegate {
+final class AgentsWindowController: NSWindowController, NSWindowDelegate {
     let engine: AgentEngine
     let state: WorkspaceState
     let workspace: WorkspaceViewController
@@ -29,10 +29,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     /// The command palette and Open Project… of this window.
     private(set) lazy var palette = CommandPalette(controller: self)
     private let persistsFrame: Bool
+    /// Brings Soprano's terminal window forward; set by `AgentsAppController`.
+    var showTerminals: (() -> Void)?
 
     private static let frameAutosaveName = "SopranoAgentsMainWindow"
 
-    var mainWindow: MainWindow? { window as? MainWindow }
+    var mainWindow: AgentsWindow? { window as? AgentsWindow }
 
     init(engine: AgentEngine, state: WorkspaceState = WorkspaceState(), defaults: UserDefaults = .standard, persistsFrame: Bool = true, frame: NSRect? = nil) {
         self.engine = engine
@@ -41,7 +43,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         workspace = WorkspaceViewController(engine: engine, state: state, defaults: defaults)
 
         let initialFrame = frame ?? NSRect(origin: .zero, size: Metrics.windowDefaultSize)
-        let window = MainWindow(
+        let window = AgentsWindow(
             contentRect: initialFrame,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -125,6 +127,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     @discardableResult
     func perform(_ id: String) -> Bool {
         CommandRegistry.shared.perform(id, in: commandContext())
+    }
+
+    /// Re-arms the keyboard after the window was closed; it reopens while Soprano runs.
+    func prepareToShow() {
+        if let window { router.startMonitoring(window: window) }
+    }
+
+    override func showWindow(_ sender: Any?) {
+        prepareToShow()
+        super.showWindow(sender)
     }
 
     func windowWillClose(_ notification: Notification) {

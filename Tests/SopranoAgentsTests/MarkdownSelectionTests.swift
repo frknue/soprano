@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 
 /// The selection highlight of rendered prose, drawn by the real text view offscreen.
 @MainActor

@@ -1,39 +1,47 @@
 import AppKit
 
-/// The menu bar, built from the command registry: titles and ⌘ key equivalents follow the live
-/// keymap and are rebuilt on settings changes. Command items validate against the main window's
-/// command context. Commands a module has not registered show disabled with a fallback title.
+/// The Agents window's menu bar, built from the command registry: titles and ⌘ key equivalents
+/// follow the live keymap and are rebuilt on settings changes. Command items validate against the
+/// window's command context. Commands a module has not registered show disabled with a fallback
+/// title. `install` hands the bar to Soprano's `MenuBarSwitcher`, which shows it while the Agents
+/// window is key.
 @MainActor
 final class MainMenuController: NSObject, NSMenuItemValidation {
-    var windowController: () -> MainWindowController?
+    var windowController: () -> AgentsWindowController?
     private let registry: CommandRegistry
+    private let installBar: (MenuBarSwitcher.Bar) -> Void
 
-    init(registry: CommandRegistry = .shared, windowController: @escaping () -> MainWindowController?) {
+    init(
+        registry: CommandRegistry = .shared,
+        windowController: @escaping () -> AgentsWindowController?,
+        install: @escaping (MenuBarSwitcher.Bar) -> Void
+    ) {
         self.registry = registry
         self.windowController = windowController
+        installBar = install
         super.init()
     }
 
     func install() {
-        NSApp.mainMenu = buildMenu()
+        installBar(buildBar())
     }
 
-    func buildMenu() -> NSMenu {
+    func buildBar() -> MenuBarSwitcher.Bar {
         let main = NSMenu()
 
-        let appMenu = NSMenu(title: "Soprano Agents")
-        appMenu.addItem(withTitle: "About Soprano Agents", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let appMenu = NSMenu(title: "Soprano")
+        appMenu.addItem(withTitle: "About Soprano", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(commandItem("settings.open", title: "Settings…"))
         appMenu.addItem(commandItem("settings.openFile"))
         appMenu.addItem(commandItem("accounts.manage"))
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Soprano Agents", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Soprano", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthers.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Soprano Agents", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Soprano", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         add(appMenu, to: main)
 
         let fileMenu = NSMenu(title: "File")
@@ -121,15 +129,15 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
+        windowMenu.addItem(commandItem("window.showTerminals", title: "Terminals"))
+        windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         add(windowMenu, to: main)
-        NSApp.windowsMenu = windowMenu
 
         let helpMenu = NSMenu(title: "Help")
         add(helpMenu, to: main)
-        NSApp.helpMenu = helpMenu
 
-        return main
+        return MenuBarSwitcher.Bar(menu: main, windowsMenu: windowMenu, helpMenu: helpMenu)
     }
 
     private func add(_ submenu: NSMenu, to main: NSMenu) {
@@ -164,7 +172,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         guard let id = menuItem.representedObject as? String, let command = registry.command(id) else { return false }
         // While a dialog or the palette has the keyboard, commands wait; the palette's own
         // shortcuts still close it or switch it to the projects.
-        if let key = NSApp.keyWindow, !(key is MainWindow) {
+        if let key = NSApp.keyWindow, !(key is AgentsWindow) {
             return key is CommandPalettePanel && ["palette.open", "project.open"].contains(id)
         }
         guard let controller = windowController() else { return false }

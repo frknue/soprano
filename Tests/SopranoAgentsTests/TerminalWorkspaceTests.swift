@@ -1,7 +1,7 @@
 import AppKit
 import SwiftTerm
 import Testing
-@testable import SopranoAgents
+@testable import Soprano
 @testable import SopranoAgentsCore
 
 @MainActor
