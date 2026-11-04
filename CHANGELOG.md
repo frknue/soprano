@@ -10,18 +10,6 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
-- **Soprano Agents** is now part of Soprano: `⇧⌘A`, **Commands ▸ Soprano Agents**, or
-  `⌘P` → *Soprano Agents* opens its chat window for omp threads — approvals and questions
-  inline, per-turn diffs, worktrees, a terminal drawer and the Diff and Files panel — and
-  `⇧⌘A` there closes it again and brings the terminal window back (`⇧⌘T` shows the terminal
-  window without closing it). It lists the agents running in your terminal panes under
-  **Terminals** in its sidebar; clicking one opens that agent in the main area, to read
-  along, reply, stop or restart. Side questions (`/btw`, `⇧⌘I`) and omp's typing aids come
-  along. The window keeps its own shortcuts and menu bar while it is in front (Permissions
-  moves to `⇧⌘R` there), its threads keep working after it closes, and it reopens on the
-  next launch if it was open when you quit. Threads and attachments carry over from the
-  standalone Soprano Agents app, and its settings move into `settings.json` under `threads`
-  the first time the window opens.
 - **Automations**, like Orca's: the top of the sidebar, **Commands ▸ Automations**, or
   `⌘P` → *Automations* lists prompts an agent (omp, Claude Code, Codex, or OpenCode) runs
   on a schedule — hourly, daily, weekdays, weekly, or any cron expression — in a folder or
@@ -297,38 +285,16 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   real working directory.
 - The command palette and the prefix-key recorder get their `⌃` keys; a shifted symbol is
   no longer accepted as the prefix key; holding Space no longer flips a switch repeatedly;
-  Esc in another field no longer closes the Agent Dashboard; adding a project folder keeps
-  your place in Settings; the layout tab strip no longer jumps back to the active tab.
+  adding a project folder keeps your place in Settings; the layout tab strip no longer jumps
+  back to the active tab.
 - The Explorer filter works at `/`, a folder can't be copied into itself, undoing a folder
   rename keeps it open, side-by-side diffs stay aligned with CR or Unicode line separators,
   and empty added or deleted files say so.
 - The shell left after an agent exits gets Ghostty's shell integration (prompt marks and
   working directory) again.
-- **Soprano Agents:**
-  - Committing works with an untracked nested repository that has no commits yet, a
-    worktree whose submodules fail is removed again, and the commit dialog always lists
-    the current changes; a double click no longer starts a git action twice.
-  - Quitting keeps the checkpoint of a turn the quit interrupted and never starts a queued
-    message; a message sent during Edit from here waits for the rewind instead of being
-    deleted.
-  - Closing a thread while its omp restarts no longer leaves an omp running, closed
-    terminals no longer leave zombie shells, and helper processes no longer leak file
-    descriptors.
-  - The timeline lets you scroll away from a streaming answer, keeps an opened fold in
-    view, keeps the work shimmer running, no longer keeps every streamed copy of a message
-    in memory, and keeps your text selection while a message streams.
-  - The `/` menu keeps your highlighted command while the agent works; input-method
-    composition keeps its keys in the `/` menu and popovers; dropped folders are no longer
-    copied as attachments; a question no longer auto-advances on another thread.
-  - Reopening the window with a dialog or Settings open gives the dialog the keyboard; a
-    dialog raised after the window closed shows as a normal alert; the details card stops
-    polling git while the window is closed.
-  - The diff no longer jumps back to a file you opened from a changed-files card.
-  - Return in an untouched settings field writes nothing, settled threads in search no
-    longer offer Settle, and statistics read `1M` rather than `1000k`.
 
 ### Security
-- Links in agent output (Agent Dashboard and Soprano Agents) open only `http`, `https`
+- Links in agent output in the Agent Dashboard open only `http`, `https`
   and `mailto`; Markdown links to scripts, apps or executables in the Markdown pane reveal
   them in Finder instead of running them.
 

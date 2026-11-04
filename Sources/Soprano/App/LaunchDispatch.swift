@@ -17,7 +17,6 @@ enum LaunchDispatch: Equatable {
       soprano navigate-pane left|right|up|down
       soprano navigation-passthrough enable|disable <source>
       soprano agent-event <state> [options]
-      soprano agents-snapshot --out <png> ...
 
     Subcommands drive the Soprano instance that owns the calling terminal.
     Start the app itself from Finder, Spotlight, or `open -a Soprano`.

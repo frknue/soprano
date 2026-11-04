@@ -1,14 +1,11 @@
 import AppKit
 
-@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
     private var agentNotificationManager: AgentNotificationManager?
     private var browserAutomationController: BrowserAutomationController?
     private var markdownCommandController: MarkdownCommandController?
     private var automationController: AutomationController?
-    private var menuBar: MenuBarSwitcher?
-    private var agentsController: AgentsAppController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -45,44 +42,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentManager.restoreWorkspace(workspace)
         }
 
-        guard let menuBar else { preconditionFailure("The menu bar is installed in applicationWillFinishLaunching") }
         let controller = MainWindowController(
             agentManager: agentManager,
             sessionManager: sessionManager,
             themeManager: themeManager,
             gitBranchMonitor: gitBranchMonitor,
-            settings: settings,
-            mainMenu: menuBar.sopranoBar.menu
+            settings: settings
         )
         controller.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         mainWindowController = controller
         self.agentNotificationManager = agentNotificationManager
-
-        let showTerminals: @MainActor @Sendable () -> Void = { [weak controller] in
-            controller?.showWindow(nil)
-            controller?.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        let terminalAgents = TerminalAgentsSource(
-            agentManager: agentManager,
-            makeDashboard: { [weak controller] theme in
-                controller?.contentController?.makeAgentDashboard(themeManager: theme, title: "Terminal Agents")
-                    ?? AgentDashboardViewController(agentManager: agentManager, themeManager: theme, title: "Terminal Agents")
-            },
-            openInTerminal: { [weak controller] target in
-                controller?.contentController?.focusAgent(target)
-                showTerminals()
-            }
-        )
-        let agentsController = AgentsAppController(menuBar: menuBar, showTerminals: showTerminals, terminalAgents: terminalAgents)
-        controller.openAgentsWindow = { [weak agentsController] in agentsController?.showWindow() }
-        agentNotificationManager.showSopranoWindow = showTerminals
-        agentNotificationManager.openAgentsThread = { [weak agentsController] threadID in
-            agentsController?.openThread(threadID)
-        }
-        agentsController.restoreIfNeeded(behind: controller.window)
-        self.agentsController = agentsController
         browserAutomationController = BrowserAutomationController(agentManager: agentManager)
         markdownCommandController = MarkdownCommandController(agentManager: agentManager)
 
@@ -114,16 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard EditorDocumentStore.shared.confirmClosingAll() else { return .terminateCancel }
-        guard let agentsController else { return .terminateNow }
-        agentsController.recordWindowState()
-        guard agentsController.needsShutdown else { return .terminateNow }
-        // Soprano Agents stops its omp sessions first, so none is cut off mid-write.
-        Task { @MainActor in
-            await agentsController.shutdown()
-            NSApp.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
+        EditorDocumentStore.shared.confirmClosingAll() ? .terminateNow : .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -139,8 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Soprano's menu bar, handed to `MenuBarSwitcher`, which swaps in the
-    /// Agents window's own bar while that window is key.
     private func installApplicationMenu() {
         MainActor.assumeIsolated {
             let mainMenu = NSMenu()
@@ -192,24 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             editMenuItem.submenu = editMenu
 
-            let windowMenuItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
-            mainMenu.addItem(windowMenuItem)
-            let windowMenu = NSMenu(title: "Window")
-            windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "")
-            windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
-            windowMenu.addItem(.separator())
-            windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
-            windowMenuItem.submenu = windowMenu
-
-            let menuBar = MenuBarSwitcher(
-                soprano: MenuBarSwitcher.Bar(menu: mainMenu, windowsMenu: windowMenu)
-            ) { window in
-                if window is AgentsWindow { return .agents }
-                if window is MainWindow { return .soprano }
-                return nil
-            }
-            menuBar.start()
-            self.menuBar = menuBar
+            NSApp.mainMenu = mainMenu
         }
     }
 }
