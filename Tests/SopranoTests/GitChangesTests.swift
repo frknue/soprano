@@ -116,6 +116,14 @@ struct GitChangesTests {
         #expect(GitFileDiff.parse(patch: Data()) == .noChanges)
     }
 
+    @Test func anEmptyFileAddedOrDeletedIsNamedAsSuchRatherThanUnchanged() {
+        let added = "diff --git a/empty b/empty\nnew file mode 100644\nindex 0000000..e69de29\n"
+        let deleted = "diff --git a/empty b/empty\ndeleted file mode 100644\nindex e69de29..0000000\n"
+
+        #expect(GitFileDiff.parse(patch: Data(added.utf8)) == .emptyFile(isNew: true))
+        #expect(GitFileDiff.parse(patch: Data(deleted.utf8)) == .emptyFile(isNew: false))
+    }
+
     @Test func aBlankContextLineWithoutItsSpaceStaysALine() {
         // `diff.suppressBlankEmpty` drops the space before empty context lines.
         let patch = "@@ -1,3 +1,3 @@\n a\n\n-b\n+c\n"
@@ -187,6 +195,34 @@ struct GitChangesTests {
         #expect(highlights.new[0].isEmpty)
         #expect(highlights.new[1].first?.kind == .keyword)
         #expect(!highlights.new[2].contains { $0.kind == .comment })
+    }
+
+    @Test func charactersThatBreakALineStayOnTheirRowSoBothSidesKeepFacingEachOther() {
+        let lines = [
+            GitDiffLine(kind: .removed, oldNumber: 1, newNumber: nil, text: "a\rb\u{2028}c\u{0C}d"),
+            GitDiffLine(kind: .added, oldNumber: nil, newNumber: 1, text: "a\u{2029}b\u{85}c"),
+            GitDiffLine(kind: .context, oldNumber: 2, newNumber: 2, text: "end"),
+        ]
+
+        let rendering = DiffRendering(lines: lines, language: nil)
+
+        for side in [rendering.inline, rendering.old, rendering.new] {
+            let storage = NSTextStorage(string: side.text)
+            let layoutManager = NSLayoutManager()
+            let container = NSTextContainer(size: NSSize(width: 10_000, height: 10_000))
+            layoutManager.addTextContainer(container)
+            storage.addLayoutManager(layoutManager)
+            var fragments = 0
+            layoutManager.enumerateLineFragments(
+                forGlyphRange: layoutManager.glyphRange(for: container)
+            ) { _, _, _, _, _ in
+                fragments += 1
+            }
+            #expect(fragments == side.rows.count)
+            let text = side.text as NSString
+            // Same length, so syntax tokens and emphasis keep their offsets.
+            #expect(text.length == side.rowStarts.last.map { $0 + 4 })
+        }
     }
 
     // MARK: - Real Repository

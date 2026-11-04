@@ -4,6 +4,7 @@ enum FileExplorerOperationError: LocalizedError, Equatable {
     case alreadyExists(String)
     case invalidName(String)
     case moveIntoItself(String)
+    case copyIntoItself(String)
     case trashFailed(String)
     case failed(String)
 
@@ -15,6 +16,8 @@ enum FileExplorerOperationError: LocalizedError, Equatable {
             "'\(name)' is not a valid file or folder name"
         case .moveIntoItself(let name):
             "Cannot move '\(name)' into itself"
+        case .copyIntoItself(let name):
+            "Cannot copy '\(name)' into itself"
         case .trashFailed(let name):
             "Failed to move to Trash '\(name)'."
         case .failed(let message):
@@ -125,10 +128,19 @@ final class FileExplorerOperations {
         return moved
     }
 
-    /// Copies items dropped from outside the explorer into `folder`, naming
-    /// any that collide the way Duplicate does.
+    /// Copies items dropped from outside the explorer, or ⌥-dragged inside
+    /// it, into `folder`, naming any that collide the way Duplicate does; a
+    /// folder cannot be copied into itself or one of its descendants.
     @discardableResult
     func copy(_ urls: [URL], into folder: URL) throws -> [URL] {
+        let folderPath = folder.standardizedFileURL.path
+        let sources = Self.outermost(urls)
+        for url in sources {
+            let sourcePath = url.standardizedFileURL.path
+            if folderPath == sourcePath || folderPath.hasPrefix(sourcePath + "/") {
+                throw FileExplorerOperationError.copyIntoItself(url.lastPathComponent)
+            }
+        }
         var inverse: [Step] = []
         var copied: [URL] = []
         defer {
@@ -136,7 +148,7 @@ final class FileExplorerOperations {
                 record(Array(inverse.reversed()), actionName: "Copy", changed: [folder])
             }
         }
-        for url in Self.outermost(urls) {
+        for url in sources {
             var name = url.lastPathComponent
             if exists(folder.appendingPathComponent(name)) {
                 name = FileExplorerNaming.duplicateName(for: name) {
