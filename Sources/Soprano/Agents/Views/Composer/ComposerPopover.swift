@@ -1,0 +1,699 @@
+import AppKit
+import SopranoAgentsCore
+
+/// Content of a composer popover (model picker, traits menu, branch picker, …). Subclasses lay
+/// themselves out with Auto Layout (fixed width, fitting height) and handle keys first.
+class ComposerPopoverContent: PaletteView {
+    /// Set by the popover; content calls it to dismiss itself.
+    var requestClose: (() -> Void)?
+    /// Set by the popover; content calls it after its fitting size changed (search filtered).
+    var requestResize: (() -> Void)?
+
+    /// The view that takes keyboard focus when the popover opens.
+    var initialFocus: NSView? { nil }
+
+    /// Keys reach the content before the focused field. Return true when handled.
+    /// The default closes on Escape.
+    func handleKey(_ event: NSEvent) -> Bool {
+        if event.keyCode == 53 {
+            requestClose?()
+            return true
+        }
+        return false
+    }
+}
+
+/// A floating surface of the composer: a borderless child window of the main window holding a
+/// glass dropdown card (r8, popover fill, 10% outline, menu shadow). It closes on
+/// Escape, on a click elsewhere, and when the composer closes it. A passive popover (the `/`
+/// command menu) never takes key focus, so the editor keeps typing, and clicks on its anchor
+/// pass through without closing it.
+@MainActor
+final class ComposerPopover {
+    enum Side {
+        case above
+        case below
+    }
+
+    enum Alignment {
+        case leading
+        case center
+        case trailing
+    }
+
+    /// Room around the card for its shadow.
+    static let margin: CGFloat = 24
+    static let gap: CGFloat = 6
+
+    let content: ComposerPopoverContent
+    /// The child window holding the card.
+    let window: ComposerPopoverWindow
+    private let card: ComposerPopoverCard
+    private weak var anchor: NSView?
+    private weak var parent: NSWindow?
+    private var side: Side = .above
+    private var alignment: Alignment = .leading
+    private var mouseMonitor: Any?
+    private var isClosing = false
+
+    /// Called once after the popover closed (by Escape, outside click, selection or `close()`).
+    var onClose: (() -> Void)?
+
+    var isShown: Bool { window.isVisible }
+
+    let isPassive: Bool
+
+    init(content: ComposerPopoverContent, passive: Bool = false) {
+        self.content = content
+        isPassive = passive
+        card = ComposerPopoverCard(content: content)
+        window = ComposerPopoverWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        window.acceptsKey = !passive
+        let root = ComposerPopoverShadow(frame: window.contentLayoutRect)
+        root.addSubview(card)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: Self.margin),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.margin),
+            card.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.margin),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.margin),
+        ])
+        window.contentView = root
+        window.keyHandler = { [weak content] event in content?.handleKey(event) ?? false }
+        content.requestClose = { [weak self] in self?.close() }
+        content.requestResize = { [weak self] in self?.reposition() }
+    }
+
+    func show(anchoredTo anchor: NSView, side: Side, alignment: Alignment) {
+        guard let parent = anchor.window else { return }
+        self.anchor = anchor
+        self.parent = parent
+        self.side = side
+        self.alignment = alignment
+        window.appearance = PaletteCenter.shared.palette.appearance
+        reposition()
+        parent.addChildWindow(window, ordered: .above)
+        window.orderFront(nil)
+        if !isPassive {
+            window.makeKey()
+            if let focus = content.initialFocus {
+                window.makeFirstResponder(focus)
+            }
+        }
+        // An outside click closes the popover. A click on the control that opened it is consumed
+        // too, so that control toggles the popover closed instead of reopening it on mouse up.
+        // A passive popover lets clicks on its anchor through and stays open for them.
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            nonisolated(unsafe) let incoming = event
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, incoming.window !== self.window else { return false }
+                let onAnchor = self.anchor.map { anchor in
+                    incoming.window === anchor.window && anchor.bounds.contains(anchor.convert(incoming.locationInWindow, from: nil))
+                } ?? false
+                if self.isPassive, onAnchor { return false }
+                self.close()
+                return !self.isPassive && onAnchor && incoming.type == .leftMouseDown
+            }
+            return consumed ? nil : incoming
+        }
+    }
+
+    /// Sizes the card to its content and places it next to the anchor, inside the parent window.
+    func reposition() {
+        guard let anchor, let parent, anchor.window === parent else { return }
+        content.layoutSubtreeIfNeeded()
+        let size = content.fittingSize
+        let anchorRect = parent.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        var x: CGFloat = switch alignment {
+        case .leading: anchorRect.minX
+        case .center: anchorRect.midX - size.width / 2
+        case .trailing: anchorRect.maxX - size.width
+        }
+        x = min(max(x, parent.frame.minX + 8), parent.frame.maxX - size.width - 8)
+        let y: CGFloat = switch side {
+        case .above: anchorRect.maxY + Self.gap
+        case .below: anchorRect.minY - Self.gap - size.height
+        }
+        let frame = NSRect(x: x - Self.margin, y: y - Self.margin, width: size.width + Self.margin * 2, height: size.height + Self.margin * 2)
+        window.setFrame(frame, display: true)
+    }
+
+    func close() {
+        guard !isClosing, window.isVisible || window.parent != nil else { return }
+        isClosing = true
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+        }
+        mouseMonitor = nil
+        let parent = window.parent ?? self.parent
+        parent?.removeChildWindow(window)
+        window.orderOut(nil)
+        // A passive popover never took the keyboard, so it gives nothing back: making the parent
+        // key here would steal focus from the window that just closed it (the command palette).
+        if !isPassive { parent?.makeKey() }
+        onClose?()
+        onClose = nil
+    }
+}
+
+/// Borderless child window that can take keys (unless passive); keys reach the popover content first.
+final class ComposerPopoverWindow: NSWindow {
+    var keyHandler: ((NSEvent) -> Bool)?
+    var acceptsKey = true
+
+    override var canBecomeKey: Bool { acceptsKey }
+    override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, keyHandler?(event) == true { return }
+        super.sendEvent(event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if keyHandler?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// The visible card: rounded popover fill and 10% outline; clips its content.
+private final class ComposerPopoverCard: PaletteView {
+    private let clip = PaletteView()
+
+    init(content: NSView) {
+        super.init(frame: .zero)
+        clip.layer?.cornerRadius = Radius.lg
+        clip.layer?.masksToBounds = true
+        clip.layer?.borderWidth = 1
+        clip.translatesAutoresizingMaskIntoConstraints = false
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(clip)
+        clip.addSubview(content)
+        NSLayoutConstraint.activate([
+            clip.leadingAnchor.constraint(equalTo: leadingAnchor),
+            clip.trailingAnchor.constraint(equalTo: trailingAnchor),
+            clip.topAnchor.constraint(equalTo: topAnchor),
+            clip.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+            content.topAnchor.constraint(equalTo: clip.topAnchor),
+            content.bottomAnchor.constraint(equalTo: clip.bottomAnchor),
+        ])
+        layer?.cornerRadius = Radius.lg
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = palette.popover.cgColor
+        clip.layer?.backgroundColor = palette.popover.cgColor
+        clip.layer?.borderColor = palette.foreground.withAlphaComponent(0.1).cgColor
+    }
+}
+
+/// The popover window's content: draws the menu shadow (`0 16px 40px -18px` black 55%,
+/// 80% dark) under the card, inside the window's margin.
+private final class ComposerPopoverShadow: PaletteView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        applyPalette(palette)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let card = bounds.insetBy(dx: ComposerPopover.margin, dy: ComposerPopover.margin)
+        guard card.width > 0, card.height > 0 else { return }
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(palette.isDark ? 0.8 : 0.4)
+        shadow.shadowBlurRadius = 24
+        // The view is flipped: positive height moves the shadow down.
+        shadow.shadowOffset = NSSize(width: 0, height: 10)
+        NSGraphicsContext.saveGraphicsState()
+        shadow.set()
+        NSColor.black.setFill()
+        NSBezierPath(roundedRect: card.insetBy(dx: 10, dy: 6), xRadius: Radius.lg, yRadius: Radius.lg).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsDisplay = true
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        needsDisplay = true
+    }
+}
+
+/// A combobox search input: magnifier, borderless 14 pt field, `border/70` underline.
+final class ComposerSearchField: PaletteView, NSTextFieldDelegate {
+    let field = NSTextField()
+    private let icon = NSImageView()
+    private let underline = ComposerDivider()
+    var onChange: ((String) -> Void)?
+
+    var text: String { field.stringValue }
+
+    init(placeholder: String) {
+        super.init(frame: .zero)
+        icon.image = NSImage.symbol(Icon.search, size: 13)
+        icon.imageScaling = .scaleNone
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = Typography.ui(Typography.bodySize)
+        field.delegate = self
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.placeholderString = placeholder
+        for view in [icon, field, underline] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            icon.centerYAnchor.constraint(equalTo: field.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 4),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            field.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            field.heightAnchor.constraint(equalToConstant: 20),
+            underline.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            underline.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            underline.topAnchor.constraint(equalTo: field.bottomAnchor, constant: 6),
+            underline.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        applyPalette(palette)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        onChange?(field.stringValue)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        icon.contentTintColor = palette.mutedForeground.withAlphaComponent(0.55)
+        field.textColor = palette.foreground
+        if let placeholder = field.placeholderString {
+            field.placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
+                .foregroundColor: palette.placeholder,
+                .font: Typography.ui(Typography.bodySize),
+            ])
+        }
+    }
+}
+
+/// One row of a composer popover list (`ComboboxItem` / `MenuItem`): min height 28, r4, px 8,
+/// 14 pt; the current value has a 6% foreground fill, the highlighted row 9%.
+final class ComposerListRow: InteractiveView {
+    struct Model {
+        var title: String
+        var subtitle: String?
+        /// Muted text right after the title (a command's argument hint).
+        var titleNote: String?
+        var image: NSImage?
+        var tintsImage = true
+        /// Small muted text at the end (branch badges).
+        var trailingNote: String?
+        /// Outline badge after the title ("Default").
+        var badge: String?
+        var kbd: String?
+        var showsCheck = false
+        var isChecked = false
+        var isCurrent = false
+        var isDisabled = false
+        var toolTip: String?
+        var titleFont: NSFont = Typography.ui(Typography.bodySize)
+        /// Lines the subtitle may wrap to before it truncates.
+        var subtitleLines = 3
+    }
+
+    private(set) var model: Model
+    private let imageView = NSImageView()
+    private let titleLabel = NSTextField.label()
+    private let subtitleLabel = ComposerWrappingLabel.make(size: Typography.smallSize, maximumLines: 3)
+    private let noteLabel = NSTextField.label("", size: 10)
+    private let titleNoteLabel = NSTextField.label("", size: Typography.rowSize)
+    private let checkView = NSImageView()
+    private var badgeView: ComposerBadge?
+    private var kbdView: KbdView?
+
+    var isHighlighted = false {
+        didSet { applyPalette(palette) }
+    }
+
+    /// Hovering a row highlights it (keyboard and mouse share one highlight).
+    var onHover: (() -> Void)?
+
+    init(_ model: Model) {
+        self.model = model
+        super.init(frame: .zero)
+        layer?.cornerRadius = Radius.sm
+        imageView.imageScaling = .scaleNone
+        imageView.image = model.image
+        imageView.isHidden = model.image == nil
+        titleLabel.font = model.titleFont
+        titleLabel.stringValue = model.title
+        titleLabel.lineBreakMode = .byTruncatingMiddle
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subtitleLabel.stringValue = model.subtitle ?? ""
+        subtitleLabel.isHidden = model.subtitle == nil
+        if model.subtitleLines != 3 {
+            subtitleLabel.maximumNumberOfLines = model.subtitleLines
+            if model.subtitleLines == 1 { subtitleLabel.lineBreakMode = .byTruncatingTail }
+        }
+        titleNoteLabel.stringValue = model.titleNote ?? ""
+        titleNoteLabel.lineBreakMode = .byTruncatingTail
+        titleNoteLabel.setContentCompressionResistancePriority(.init(2), for: .horizontal)
+        noteLabel.stringValue = model.trailingNote ?? ""
+        noteLabel.isHidden = model.trailingNote == nil
+        checkView.image = NSImage.symbol(Icon.check, size: 12, weight: .medium)
+        checkView.imageScaling = .scaleNone
+        checkView.isHidden = !model.showsCheck
+        checkView.alphaValue = model.isChecked ? 1 : 0
+
+        let titleRow = NSStackView()
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 4
+        titleRow.addArrangedSubview(titleLabel)
+        if model.titleNote != nil {
+            titleRow.addArrangedSubview(titleNoteLabel)
+        }
+        if let badge = model.badge {
+            let badgeView = ComposerBadge(badge)
+            titleRow.addArrangedSubview(badgeView)
+            self.badgeView = badgeView
+        }
+        let texts = ComposerColumn([titleRow, subtitleLabel], spacing: 2)
+        texts.setContentHuggingPriority(.init(1), for: .horizontal)
+        texts.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+
+        let trailing = NSStackView()
+        trailing.orientation = .horizontal
+        trailing.alignment = .centerY
+        trailing.spacing = 6
+        trailing.addArrangedSubview(noteLabel)
+        if let kbd = model.kbd {
+            let kbdView = KbdView(kbd)
+            trailing.addArrangedSubview(kbdView)
+            self.kbdView = kbdView
+        }
+        trailing.addArrangedSubview(checkView)
+        trailing.setHuggingPriority(.required, for: .horizontal)
+        trailing.setClippingResistancePriority(.required, for: .horizontal)
+
+        let row = NSStackView(views: [imageView, texts, trailing])
+        row.orientation = .horizontal
+        row.alignment = model.subtitle == nil ? .centerY : .top
+        row.spacing = 8
+        row.fillsWidth()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
+            imageView.widthAnchor.constraint(equalToConstant: model.image == nil ? 0 : 16),
+        ])
+        isEnabled = !model.isDisabled
+        toolTip = model.toolTip
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(model.title)
+        applyPalette(palette)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        if isEnabled { onHover?() }
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        let fill: NSColor = if isEnabled && (isHighlighted || isHovered) {
+            palette.foreground.withAlphaComponent(0.09)
+        } else if model.isCurrent {
+            palette.foreground.withAlphaComponent(0.06)
+        } else {
+            .clear
+        }
+        layer?.backgroundColor = fill.cgColor
+        alphaValue = isEnabled ? 1 : 0.64
+        titleLabel.textColor = palette.foreground
+        subtitleLabel.textColor = palette.mutedForeground.withAlphaComponent(0.8)
+        titleNoteLabel.textColor = palette.mutedForeground
+        noteLabel.textColor = palette.mutedForeground.withAlphaComponent(0.45)
+        imageView.contentTintColor = model.tintsImage ? palette.mutedForeground : nil
+        checkView.contentTintColor = palette.foreground
+    }
+}
+
+/// A list of `ComposerListRow`s with one keyboard/mouse highlight, scrolling past `maxHeight`.
+/// A view-based table builds only the rows on screen, so long lists (omp's 140+ commands and
+/// skills) open and filter without laying out every row. Row heights are measured at the list's
+/// width and cached by row shape; only rows whose subtitle wraps are measured per text.
+final class ComposerListView: PaletteView, NSTableViewDataSource, NSTableViewDelegate {
+    private let scrollView = NSScrollView()
+    private let tableView = NSTableView()
+    private var heightConstraint: NSLayoutConstraint?
+    private var models: [ComposerListRow.Model] = []
+    private var actions: [() -> Void] = []
+    let maxHeight: CGFloat
+    private let insets: NSEdgeInsets
+    private static let rowSpacing: CGFloat = 2
+    private var heights: [RowHeightKey: CGFloat] = [:]
+    /// The row width the table's heights were last given for.
+    private var measuredWidth: CGFloat = 0
+
+    private(set) var highlightedIndex: Int?
+
+    init(maxHeight: CGFloat, insets: NSEdgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)) {
+        self.maxHeight = maxHeight
+        self.insets = insets
+        super.init(frame: .zero)
+        tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row")))
+        tableView.headerView = nil
+        tableView.style = .plain
+        // The gap between rows is part of each cell (`ComposerListCell`), so the list's insets
+        // are exactly its top and bottom padding.
+        tableView.intercellSpacing = .zero
+        tableView.selectionHighlightStyle = .none
+        tableView.backgroundColor = .clear
+        tableView.gridStyleMask = []
+        tableView.focusRingType = .none
+        tableView.refusesFirstResponder = true
+        tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        tableView.dataSource = self
+        tableView.delegate = self
+        scrollView.documentView = tableView
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets(top: insets.top, left: 0, bottom: insets.bottom, right: 0)
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scrollView)
+        let height = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        heightConstraint = height
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            height,
+        ])
+    }
+
+    /// Replaces the rows. `actions[i]` runs when row i is chosen.
+    func setRows(_ models: [ComposerListRow.Model], actions: [() -> Void], highlight: Int?) {
+        self.models = models
+        self.actions = actions
+        highlightedIndex = nil
+        measuredWidth = rowWidth
+        tableView.reloadData()
+        heightConstraint?.constant = contentHeight()
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: -insets.top))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        setHighlight(highlight)
+    }
+
+    override func layout() {
+        super.layout()
+        // Wrapping subtitles change height with the width: re-measure once it is known or changes.
+        guard abs(rowWidth - measuredWidth) > 0.5 else { return }
+        measuredWidth = rowWidth
+        if models.contains(where: RowHeightKey.wraps) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<models.count))
+            }
+        }
+    }
+
+    /// The width rows get (0 before the first layout).
+    private var rowWidth: CGFloat {
+        max(0, bounds.width - insets.left - insets.right)
+    }
+
+    /// The list's height up to `maxHeight`, from the rows' heights until they fill it.
+    private func contentHeight() -> CGFloat {
+        guard !models.isEmpty else { return 0 }
+        var height = insets.top + insets.bottom
+        for index in models.indices {
+            height += cellHeight(index)
+            if height >= maxHeight { return maxHeight }
+        }
+        return height
+    }
+
+    /// Row `index`'s height plus the gap below it (none below the last row).
+    private func cellHeight(_ index: Int) -> CGFloat {
+        rowHeight(models[index]) + (index < models.count - 1 ? Self.rowSpacing : 0)
+    }
+
+    private func rowHeight(_ model: ComposerListRow.Model) -> CGFloat {
+        let width = measuredWidth
+        let key = RowHeightKey(model, width: width)
+        if let height = heights[key] { return height }
+        let row = ComposerListRow(model)
+        if width > 0 {
+            // Lay the row out at its width first so a wrapping subtitle learns where to wrap.
+            row.frame = NSRect(x: 0, y: 0, width: width, height: 1000)
+            row.layoutSubtreeIfNeeded()
+            row.widthAnchor.constraint(equalToConstant: width).isActive = true
+        }
+        let height = row.fittingSize.height
+        heights[key] = height
+        return height
+    }
+
+    var isEmpty: Bool { models.isEmpty }
+
+    func setHighlight(_ index: Int?) {
+        let valid = index.flatMap { models.indices.contains($0) && !models[$0].isDisabled ? $0 : nil }
+        if let old = highlightedIndex { shownRow(old)?.isHighlighted = false }
+        highlightedIndex = valid
+        if let valid {
+            shownRow(valid)?.isHighlighted = true
+            tableView.scrollRowToVisible(valid)
+        }
+    }
+
+    /// Moves the highlight by `delta`, skipping disabled rows.
+    func moveHighlight(by delta: Int) {
+        guard !models.isEmpty else { return }
+        var index = highlightedIndex ?? (delta > 0 ? -1 : models.count)
+        for _ in models.indices {
+            index += delta
+            guard models.indices.contains(index) else { return }
+            if !models[index].isDisabled {
+                setHighlight(index)
+                return
+            }
+        }
+    }
+
+    func chooseHighlighted() -> Bool {
+        guard let highlightedIndex else { return false }
+        choose(highlightedIndex)
+        return true
+    }
+
+    func choose(_ index: Int) {
+        guard models.indices.contains(index), !models[index].isDisabled else { return }
+        actions[index]()
+    }
+
+    /// The row view for `index` when the table has built it (it is on screen).
+    private func shownRow(_ index: Int) -> ComposerListRow? {
+        guard index < tableView.numberOfRows else { return nil }
+        return (tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? ComposerListCell)?.row
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { models.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        models.indices.contains(row) ? cellHeight(row) : 0
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
+        let row = ComposerListRow(models[index])
+        row.isHighlighted = index == highlightedIndex
+        row.onClick = { [weak self] in self?.choose(index) }
+        row.onHover = { [weak self] in self?.setHighlight(index) }
+        return ComposerListCell(row, insets: insets, gapBelow: index < models.count - 1 ? Self.rowSpacing : 0)
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+}
+
+/// What a list row's height depends on: its chrome, and its text and width only when its
+/// subtitle may wrap (titles, notes and one-line subtitles truncate instead).
+private struct RowHeightKey: Hashable {
+    var font: NSFont
+    var imageHeight: CGFloat?
+    var hasSubtitle: Bool
+    var wrappingSubtitle: String?
+    var subtitleLines: Int
+    var width: CGFloat
+    var hasTitleNote: Bool
+    var hasTrailingNote: Bool
+    var hasBadge: Bool
+    var hasKbd: Bool
+    var showsCheck: Bool
+
+    static func wraps(_ model: ComposerListRow.Model) -> Bool {
+        model.subtitle != nil && model.subtitleLines != 1
+    }
+
+    init(_ model: ComposerListRow.Model, width: CGFloat) {
+        let wraps = Self.wraps(model)
+        font = model.titleFont
+        imageHeight = model.image?.size.height
+        hasSubtitle = model.subtitle != nil
+        wrappingSubtitle = wraps ? model.subtitle : nil
+        subtitleLines = model.subtitleLines
+        self.width = wraps ? width : 0
+        hasTitleNote = model.titleNote != nil
+        hasTrailingNote = model.trailingNote != nil
+        hasBadge = model.badge != nil
+        hasKbd = model.kbd != nil
+        showsCheck = model.showsCheck
+    }
+}
+
+/// A table cell holding one `ComposerListRow`, inset by the list's horizontal insets, with the
+/// gap to the next row below it.
+private final class ComposerListCell: NSView {
+    let row: ComposerListRow
+
+    init(_ row: ComposerListRow, insets: NSEdgeInsets, gapBelow: CGFloat) {
+        self.row = row
+        super.init(frame: .zero)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: insets.left),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -insets.right),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -gapBelow),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// Small muted group label in menus ("Reasoning", "Permissions", "Workspace").
+@MainActor
+func composerMenuLabel(_ text: String) -> NSTextField {
+    NSTextField.label(text, size: Typography.smallSize, weight: .medium)
+}
