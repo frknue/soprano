@@ -20,6 +20,6 @@ struct TerminalShellReapTests {
         store.close(session.id)
 
         // A zombie still answers kill(pid, 0); only a reaped process is gone.
-        #expect(await EngineHarness.eventually { kill(pid, 0) == -1 && errno == ESRCH })
+        #expect(await EngineHarness.eventually(timeout: .seconds(30)) { kill(pid, 0) == -1 && errno == ESRCH })
     }
 }

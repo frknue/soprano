@@ -165,7 +165,9 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
     private nonisolated static func reap(_ pid: pid_t) {
         let exit = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global(qos: .utility))
         exit.setEventHandler {
-            waitpid(pid, nil, WNOHANG)
+            // Blocking: the exit event can arrive a moment before the process is waitable, and
+            // WNOHANG would then leave the zombie behind. It has exited, so this returns at once.
+            while waitpid(pid, nil, 0) == -1, errno == EINTR {}
             exit.cancel()
         }
         exit.resume()

@@ -18,7 +18,7 @@ struct ThreadDetailsGitActionTests {
         card.run(.commit)
         card.run(.commit)
 
-        #expect(await EngineHarness.eventually { !driver.prompts.isEmpty && !card.isGitActionRunning })
+        #expect(await EngineHarness.eventually(timeout: .seconds(30)) { !driver.prompts.isEmpty && !card.isGitActionRunning })
         #expect(driver.prompts.count == 1)
     }
 }

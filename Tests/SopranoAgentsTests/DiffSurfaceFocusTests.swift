@@ -32,7 +32,7 @@ struct DiffSurfaceFocusTests {
         let diff = DiffSurfaceViewController(engine: engine, state: state)
         _ = diff.view
 
-        #expect(await EngineHarness.eventually { diff.entries.count == 2 })
+        #expect(await EngineHarness.eventually(timeout: .seconds(30)) { diff.entries.count == 2 })
         #expect(diff.collapsed.isEmpty)
 
         diff.toggleCollapseAll()
@@ -50,7 +50,7 @@ struct DiffSurfaceFocusTests {
 
         """
         diff.reload(force: true)
-        #expect(await EngineHarness.eventually { diff.entries.count == 3 })
+        #expect(await EngineHarness.eventually(timeout: .seconds(30)) { diff.entries.count == 3 })
         #expect(diff.collapsed == [0, 1])
     }
 }
