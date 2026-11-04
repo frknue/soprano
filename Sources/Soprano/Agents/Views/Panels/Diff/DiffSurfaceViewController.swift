@@ -153,7 +153,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         state.addObserver(self) { [weak self] change in
             switch change {
             case .panels, .selection: self?.stateChanged()
-            case .filter, .composerRestore: break
+            case .filter, .composerRestore, .terminalAgent: break
             }
         }
         engine.addObserver(self) { [weak self] event in

@@ -129,10 +129,13 @@ struct TerminalAgentsBoardTests {
         })
     }
 
-    @Test func theToggleCommandNeedsTerminalAgents() throws {
+    @Test func theToggleCommandNeedsPaneAgents() throws {
         let command = try #require(SidebarCommands.all.first { $0.id == "terminals.toggle" })
         let (without, _) = try window(source: nil)
         #expect(!command.isEnabled(without.commandContext()))
+
+        let (idle, _) = try window(source: Self.source(over: AgentManager()))
+        #expect(!command.isEnabled(idle.commandContext()))
 
         let (controller, state) = try window()
         #expect(command.isEnabled(controller.commandContext()))
@@ -140,6 +143,80 @@ struct TerminalAgentsBoardTests {
         #expect(state.isTerminalAgentsVisible)
         command.perform(controller.commandContext())
         #expect(!state.isTerminalAgentsVisible)
+    }
+
+    private static func source(over manager: AgentManager) -> TerminalAgentsSource {
+        TerminalAgentsSource(
+            agentManager: manager,
+            makeDashboard: { AgentDashboardViewController(agentManager: manager, themeManager: $0) },
+            openInTerminal: { _ in }
+        )
+    }
+
+    /// The sidebar rows drawn selected: pane agents by entry id, threads by thread id.
+    private func selectedRows(_ controller: AgentsWindowController) -> [String] {
+        controller.workspace.sidebar.items.compactMap { item in
+            switch item {
+            case let .terminalAgent(row): row.isSelected ? row.entryID : nil
+            case let .card(row), let .slim(row): row.isSelected ? row.threadID : nil
+            default: nil
+            }
+        }
+    }
+
+    @Test func theSidebarMarksTheAgentTheBoardShowsInsteadOfTheThread() throws {
+        let (controller, state) = try window()
+        let entries = try #require(controller.workspace.terminalAgents.source?.entries)
+        let thread = try #require(state.selectedThreadID)
+        #expect(selectedRows(controller) == [thread])
+
+        // Opened without a row: the board shows the first agent.
+        state.setTerminalAgentsVisible(true)
+        #expect(state.shownTerminalAgentID == entries[0].id)
+        #expect(selectedRows(controller) == [entries[0].id])
+
+        // A row click while it is open switches the agent.
+        controller.workspace.sidebar.openTerminalAgent(entries[2].id)
+        #expect(state.shownTerminalAgentID == entries[2].id)
+        #expect(selectedRows(controller) == [entries[2].id])
+
+        state.setTerminalAgentsVisible(false)
+        #expect(state.shownTerminalAgentID == nil)
+        #expect(selectedRows(controller) == [thread])
+    }
+
+    @Test func whenTheShownAgentGoesTheSidebarMarksTheOneTheBoardShowsNext() throws {
+        let manager = AgentManager()
+        var panes: [String] = []
+        for folder in ["/tmp/one", "/tmp/two"] {
+            let pane = try #require(manager.spawnAgent("codex", cwd: folder))
+            let tab = try #require(manager.panes[pane]?.activeTab?.id)
+            manager.updateAgentStatus(paneId: pane, tabId: tab, status: .running)
+            panes.append(pane)
+        }
+        let (controller, state) = try window(source: Self.source(over: manager))
+        let entries = try #require(controller.workspace.terminalAgents.source?.entries)
+        controller.workspace.sidebar.openTerminalAgent(entries[0].id)
+        #expect(state.shownTerminalAgentID == entries[0].id)
+
+        manager.closePane(entries[0].paneId)
+
+        #expect(state.shownTerminalAgentID == entries[1].id)
+    }
+
+    @Test func withTheSidebarHiddenTheBoardOffersTheSidebarToggle() throws {
+        let (controller, state) = try window()
+        let board = controller.workspace.terminalAgents
+        state.setTerminalAgentsVisible(true)
+        #expect(board.sidebarToggle.isHidden)
+
+        state.setSidebarVisible(false)
+        #expect(!board.sidebarToggle.isHidden)
+        // Over the dashboard, in the empty band above the agent.
+        #expect(board.view.subviews.last === board.sidebarToggle)
+
+        state.setSidebarVisible(true)
+        #expect(board.sidebarToggle.isHidden)
     }
 
     @Test func closingTheWindowClosesTheBoardSoItsDashboardStopsWorking() throws {

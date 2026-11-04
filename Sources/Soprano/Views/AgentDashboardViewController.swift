@@ -26,6 +26,9 @@ final class AgentDashboardViewController: NSViewController {
     /// list: the Soprano Agents window lists the agents in its own sidebar and picks one with
     /// `selectEntry`. Set before the view loads.
     var showsAgentList = true
+    /// The selected agent (`AgentDashboardEntry.id`) changed: a row, a key, `selectEntry`, or a
+    /// refresh that picked another agent because the selected one is gone. Nil: none listed.
+    var onSelectionChange: ((String?) -> Void)?
 
     private let terminalStateProvider: TerminalStateProvider
     private let promptSender: PromptSender
@@ -43,7 +46,11 @@ final class AgentDashboardViewController: NSViewController {
     private var sectionHeaders: [AgentDashboardSection: AgentDashboardSectionHeaderView] = [:]
     private var emptyStateView: NSView?
     private var entriesById: [String: AgentDashboardEntry] = [:]
-    private var selectedEntryId: String?
+    private var selectedEntryId: String? {
+        didSet {
+            if selectedEntryId != oldValue { onSelectionChange?(selectedEntryId) }
+        }
+    }
     /// Whether the keyboard is on the agent list, which marks its selected
     /// row with the pencil tick.
     private var isListFocused = false
@@ -99,6 +106,7 @@ final class AgentDashboardViewController: NSViewController {
         let colors = theme.colors
         let root = AgentDashboardRootView()
         root.identifier = NSUserInterfaceItemIdentifier("agent-dashboard")
+        root.movesSelection = showsAgentList
         root.onEscape = { [weak self] in
             self?.onDismiss?()
         }
@@ -1926,6 +1934,8 @@ private final class AgentDashboardRootView: NSView {
     /// Whether the dashboard itself, which drives the agent list, has the
     /// keyboard.
     var onFocusChange: ((Bool) -> Void)?
+    /// ↑/↓ and J/K move between agents; false (no list shown) leaves them to the focused text.
+    var movesSelection = true
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -1992,9 +2002,9 @@ private final class AgentDashboardRootView: NSView {
         case 53:
             return .dismiss
         case 125:
-            return .move(1)
+            return movesSelection ? .move(1) : nil
         case 126:
-            return .move(-1)
+            return movesSelection ? .move(-1) : nil
         case 36, 76:
             return .activate
         case 48:
@@ -2012,9 +2022,9 @@ private final class AgentDashboardRootView: NSView {
         let shifted = flags.contains(.shift)
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "j":
-            return shifted ? .scroll(.lines(1)) : .move(1)
+            return shifted ? .scroll(.lines(1)) : movesSelection ? .move(1) : nil
         case "k":
-            return shifted ? .scroll(.lines(-1)) : .move(-1)
+            return shifted ? .scroll(.lines(-1)) : movesSelection ? .move(-1) : nil
         case "r":
             return .focusReply
         case " ":

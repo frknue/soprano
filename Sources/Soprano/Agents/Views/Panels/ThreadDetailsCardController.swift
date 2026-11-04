@@ -72,7 +72,7 @@ final class ThreadDetailsCardController: NSViewController {
                 self?.selectionChanged()
             case .panels:
                 self?.visibilityChanged()
-            case .filter, .composerRestore: break
+            case .filter, .composerRestore, .terminalAgent: break
             }
         }
         engine.addObserver(self) { [weak self] event in

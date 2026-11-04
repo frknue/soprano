@@ -2,7 +2,8 @@ import AppKit
 
 /// A pane agent in the Terminals section (44 pt): status glyph, its task (or its name before it
 /// has one) with the status word on the right, and `Codex · window` underneath. Agents that
-/// wait for the user carry a tinted wash. Clicking opens the Terminal Agents board on it.
+/// wait for the user get an emphasized status word and glyph; the agent the Terminal Agents
+/// board shows gets the selected fill. Clicking opens the board on it.
 final class SidebarTerminalCell: InteractiveView {
     private(set) var row: SidebarTerminalRow?
     private let surface = NSView()
@@ -33,6 +34,7 @@ final class SidebarTerminalCell: InteractiveView {
         titleLabel.stringValue = row.title ?? row.name
         metaLabel.stringValue = row.title == nil ? row.windowTitle : "\(row.name) · \(row.windowTitle)"
         setAccessibilityLabel("\(row.name)\(row.title.map { " · \($0)" } ?? ""), \(row.status.label), \(row.windowTitle)")
+        setAccessibilitySelected(row.isSelected)
         toolTip = "Open \(row.name) in Terminal Agents"
         applyPalette(palette)
         needsLayout = true
@@ -80,18 +82,21 @@ final class SidebarTerminalCell: InteractiveView {
 
     override func applyPalette(_ palette: Palette) {
         guard let row else { return }
-        let tone = palette.color(for: Self.tone(row.status))
-        let fill: NSColor = if isHovered {
-            palette.sidebarRowHover
-        } else if row.status.needsAttention {
-            tone.alphaScaled(by: 0.1)
-        } else {
-            .clear
-        }
+        // Selection is the only fill besides hover, as on thread rows; attention shows in the
+        // status word and glyph alone.
+        let fill: NSColor = row.isSelected ? palette.sidebarRowActive : isHovered ? palette.sidebarRowHover : .clear
         surface.layer?.backgroundColor = fill.cgColor
-        statusIcon.contentTintColor = tone
-        statusLabel.textColor = row.status.needsAttention ? tone : palette.secondaryLabel
-        statusLabel.font = Typography.ui(Typography.smallSize, weight: row.status.needsAttention ? .semibold : .medium)
+        surface.layer?.borderWidth = row.isSelected && !palette.isDark ? 1 : 0
+        surface.layer?.borderColor = palette.sidebarBorder.alphaScaled(by: 0.7).cgColor
+        let tone: ThreadStatusTone = switch (row.needsAttention, row.status) {
+        case (true, .failed): .failed
+        case (true, _): .input
+        case (false, let status): Self.tone(status)
+        }
+        let toneColor = palette.color(for: tone)
+        statusIcon.contentTintColor = toneColor
+        statusLabel.textColor = row.needsAttention ? toneColor : palette.secondaryLabel
+        statusLabel.font = Typography.ui(Typography.smallSize, weight: row.needsAttention ? .semibold : .medium)
         titleLabel.textColor = row.status == .stopped ? palette.mutedForeground : palette.sidebarForeground
         metaLabel.textColor = palette.mutedForeground
     }

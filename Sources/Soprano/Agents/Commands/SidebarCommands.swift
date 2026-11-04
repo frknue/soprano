@@ -188,7 +188,11 @@ enum SidebarCommands {
                 description: "Show the agents running in Soprano's terminal panes and reply to them",
                 category: .view,
                 icon: Icon.terminal,
-                isEnabled: { $0.workspace?.terminalAgents.source != nil }
+                // Opening needs an agent to show; closing an open board always works.
+                isEnabled: { context in
+                    guard let source = context.workspace?.terminalAgents.source else { return false }
+                    return context.state?.isTerminalAgentsVisible == true || !source.entries.isEmpty
+                }
             ) { context in
                 guard let state = context.state else { return }
                 state.setTerminalAgentsVisible(!state.isTerminalAgentsVisible)

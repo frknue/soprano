@@ -125,7 +125,7 @@ final class RightPanelViewController: NSViewController, FocusRegionController {
         state.addObserver(self) { [weak self] change in
             switch change {
             case .panels, .selection: self?.update()
-            case .filter, .composerRestore: break
+            case .filter, .composerRestore, .terminalAgent: break
             }
         }
         terminals.addObserver(self) { [weak self] change in

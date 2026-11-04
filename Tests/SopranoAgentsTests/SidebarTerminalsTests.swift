@@ -106,22 +106,43 @@ struct SidebarTerminalsTests {
         #expect(SidebarTerminalRow(entry: Self.entry("codex")).title == nil)
     }
 
-    @Test func statusWordsFollowWhatTheAgentWaitsFor() {
-        let cases: [(AgentStatus, Bool, SidebarTerminalStatus, String)] = [
-            (.running, false, .working, "Working"),
-            (.starting, false, .starting, "Starting"),
-            (.waiting, false, .needsInput, "Needs input"),
-            (.idle, true, .needsInput, "Needs input"),
-            (.error, false, .failed, "Error"),
-            (.idle, false, .ready, "Ready"),
-            (.stopped, false, .stopped, "Stopped"),
-        ]
-        for (status, attention, expected, label) in cases {
-            let row = SidebarTerminalRow(entry: Self.entry("p", status: status, needsAttention: attention))
-            #expect(row.status == expected, "\(status)")
-            #expect(row.status.label == label, "\(status)")
+    @Test func statusWordsAreTheBoardsWordsForEveryStatusWithOrWithoutAttention() {
+        let statuses: [AgentStatus] = [.idle, .starting, .running, .waiting, .error, .stopped]
+        for status in statuses {
+            for attention in [false, true] {
+                let row = SidebarTerminalRow(entry: Self.entry("p", status: status, needsAttention: attention))
+                // The board's detail header shows `status.chromeStatus.label` ("NEEDS INPUT").
+                #expect(row.status.label.uppercased() == status.chromeStatus.label, "\(status) attention: \(attention)")
+            }
         }
-        #expect(SidebarTerminalStatus.needsInput.needsAttention)
-        #expect(!SidebarTerminalStatus.working.needsAttention)
+    }
+
+    @Test func attentionEmphasizesTheStatusWordWithoutChangingIt() {
+        let asked = SidebarTerminalRow(entry: Self.entry("p", status: .idle, needsAttention: true))
+        #expect(asked.status == .ready)
+        #expect(asked.needsAttention)
+        #expect(SidebarTerminalRow(entry: Self.entry("p", status: .waiting)).needsAttention)
+        #expect(SidebarTerminalRow(entry: Self.entry("p", status: .error)).needsAttention)
+        #expect(!SidebarTerminalRow(entry: Self.entry("p", status: .running)).needsAttention)
+    }
+
+    @Test func theAgentTheBoardShowsIsTheOnlySelectedRow() {
+        var options = SidebarListOptions()
+        options.selectedThreadID = "a"
+        let entries = [Self.entry("claude"), Self.entry("codex")]
+        func selected(_ items: [SidebarItem]) -> [String] {
+            items.compactMap { item in
+                switch item {
+                case let .terminalAgent(row): row.isSelected ? row.entryID : nil
+                case let .card(row), let .slim(row): row.isSelected ? row.threadID : nil
+                default: nil
+                }
+            }
+        }
+
+        #expect(selected(SidebarListModel.build(threads: [Self.thread("a")], projects: [Self.project], options: options, terminals: entries)) == ["a"])
+
+        options.shownTerminalAgentID = "codex:tab"
+        #expect(selected(SidebarListModel.build(threads: [Self.thread("a")], projects: [Self.project], options: options, terminals: entries)) == ["codex:tab"])
     }
 }

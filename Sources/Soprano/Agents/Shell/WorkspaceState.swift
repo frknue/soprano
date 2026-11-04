@@ -13,6 +13,8 @@ final class WorkspaceState {
         case filter
         /// Someone handed the composer a message to take back ("Edit from here").
         case composerRestore
+        /// The pane agent the Terminal Agents board shows changed (`shownTerminalAgentID`).
+        case terminalAgent
     }
 
     /// What the chat column shows.
@@ -89,6 +91,9 @@ final class WorkspaceState {
     private(set) var isTerminalAgentsVisible = false
     /// The pane agent (`AgentDashboardEntry.id`) the board should select when it shows next.
     private(set) var pendingTerminalAgentSelection: String?
+    /// The pane agent (`AgentDashboardEntry.id`) the open board shows; nil while it is closed.
+    /// The sidebar marks its row instead of the selected thread.
+    private(set) var shownTerminalAgentID: String?
 
     /// A board covers the chat column and the right panel.
     var isOverlayVisible: Bool { isStatisticsVisible || isTerminalAgentsVisible }
@@ -202,6 +207,13 @@ final class WorkspaceState {
     func takeTerminalAgentSelection() -> String? {
         defer { pendingTerminalAgentSelection = nil }
         return pendingTerminalAgentSelection
+    }
+
+    /// The board reports the agent it shows (nil when it closes).
+    func setShownTerminalAgent(_ entryID: String?) {
+        guard entryID != shownTerminalAgentID else { return }
+        shownTerminalAgentID = entryID
+        observers.notify(.terminalAgent)
     }
 
     /// Hides both boards; whether one was showing.

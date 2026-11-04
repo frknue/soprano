@@ -69,21 +69,28 @@ struct SidebarTerminalRow: Equatable {
     /// What it works on (its tab's task title); nil while that is just its name.
     let title: String?
     let status: SidebarTerminalStatus
+    /// Waits for the user (it asked for attention, waits for input, or failed): the status word
+    /// and glyph take the emphasis color. The word itself stays the board's.
+    let needsAttention: Bool
+    /// The Terminal Agents board shows it: the row takes the selected fill.
+    let isSelected: Bool
     /// The Soprano window it runs in.
     let windowTitle: String
 
-    init(entry: AgentDashboardEntry) {
+    init(entry: AgentDashboardEntry, isSelected: Bool = false) {
         entryID = entry.id
         name = entry.profileName
         let title = entry.title
         self.title = title.isEmpty || title == entry.profileName ? nil : title
-        status = SidebarTerminalStatus(entry: entry)
+        status = SidebarTerminalStatus(entry.status.chromeStatus)
+        needsAttention = entry.needsAttention || status == .needsInput || status == .failed
+        self.isSelected = isSelected
         windowTitle = entry.windowTitle
     }
 }
 
-/// A pane agent's status word in the Terminals section: the Agent Dashboard's words, so the
-/// sidebar row and the agent it opens never disagree.
+/// A pane agent's status word in the Terminals section: the word the Terminal Agents board
+/// shows for it (`AgentStatus.chromeStatus`), so the row and the agent it opens never disagree.
 enum SidebarTerminalStatus: Equatable {
     case needsInput
     case failed
@@ -92,17 +99,13 @@ enum SidebarTerminalStatus: Equatable {
     case ready
     case stopped
 
-    init(entry: AgentDashboardEntry) {
-        if entry.needsAttention {
-            self = entry.status == .error ? .failed : .needsInput
-            return
-        }
-        switch entry.status {
-        case .waiting: self = .needsInput
+    init(_ status: ChromeStatus) {
+        switch status {
+        case .needsInput: self = .needsInput
         case .error: self = .failed
         case .starting: self = .starting
-        case .running: self = .working
-        case .idle: self = .ready
+        case .working, .running: self = .working
+        case .ready, .idle: self = .ready
         case .stopped: self = .stopped
         }
     }
@@ -117,9 +120,6 @@ enum SidebarTerminalStatus: Equatable {
         case .stopped: "Stopped"
         }
     }
-
-    /// Waits for the user: the row stands out.
-    var needsAttention: Bool { self == .needsInput || self == .failed }
 }
 
 /// A row of the sidebar list, top to bottom.
@@ -225,6 +225,9 @@ struct SidebarListOptions: Equatable {
     var subagentDisclosure: [String: Bool] = [:]
     /// The Terminals section is open.
     var terminalsExpanded = true
+    /// The pane agent the Terminal Agents board shows: its row is the selected one, and no
+    /// thread or subagent row is.
+    var shownTerminalAgentID: String?
 }
 
 /// Builds the sidebar rows: Soprano's pane agents under Terminals first, then one collapsible
@@ -266,7 +269,7 @@ enum SidebarListModel {
             guard let section = InboxSection.of(thread) else { continue }
             groups[section, default: []].append(thread)
         }
-        let terminalItems = terminalRows(terminals, expanded: options.terminalsExpanded)
+        let terminalItems = terminalRows(terminals, expanded: options.terminalsExpanded, shown: options.shownTerminalAgentID)
         guard !groups.isEmpty else {
             return terminalItems + [.empty(emptyState(projects: projects, filter: options.projectFilter))]
         }
@@ -315,12 +318,13 @@ enum SidebarListModel {
         return items
     }
 
-    /// The Terminals header and, while it is open, a row per pane agent in the given order.
-    static func terminalRows(_ entries: [AgentDashboardEntry], expanded: Bool) -> [SidebarItem] {
+    /// The Terminals header and, while it is open, a row per pane agent in the given order; a
+    /// closed section still lists the agent the board shows (`shown`).
+    static func terminalRows(_ entries: [AgentDashboardEntry], expanded: Bool, shown: String? = nil) -> [SidebarItem] {
         guard !entries.isEmpty else { return [] }
         let header = SidebarItem.terminalsShelf(count: entries.count, expanded: expanded)
-        guard expanded else { return [header] }
-        return [header] + entries.map { .terminalAgent(SidebarTerminalRow(entry: $0)) }
+        let listed = expanded ? entries : entries.filter { $0.id == shown }
+        return [header] + listed.map { .terminalAgent(SidebarTerminalRow(entry: $0, isSelected: $0.id == shown)) }
     }
 
     /// Thread ids in list order (previous/next and ⌃1…⌃9 follow it).
@@ -330,7 +334,7 @@ enum SidebarListModel {
 
     static func row(for thread: AgentThread, projects: [String: Project], options: SidebarListOptions) -> SidebarThreadRow {
         let status = ThreadStatus.of(thread)
-        let selected = thread.id == options.selectedThreadID && options.selectedSubagentID == nil
+        let selected = thread.id == options.selectedThreadID && options.selectedSubagentID == nil && options.shownTerminalAgentID == nil
         let checkpoint = thread.turns.last?.checkpoint
         let diff: SidebarThreadRow.DiffStat? = checkpoint.flatMap { checkpoint in
             guard checkpoint.status == .ready, checkpoint.additions + checkpoint.deletions > 0 else { return nil }
@@ -386,7 +390,7 @@ enum SidebarListModel {
                 detail: detail.map(firstLine),
                 status: subagent.status,
                 since: subagent.turns.last?.startedAt ?? subagent.startedAt,
-                isSelected: subagent.id == selectedID,
+                isSelected: subagent.id == selectedID && options.shownTerminalAgentID == nil,
                 isLast: index == shown.count - 1
             ))
         }

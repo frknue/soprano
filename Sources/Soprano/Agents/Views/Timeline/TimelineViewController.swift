@@ -107,7 +107,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
                 reload(scrollToEnd: true)
             case .panels:
                 layoutOverlays()
-            case .filter, .composerRestore:
+            case .filter, .composerRestore, .terminalAgent:
                 break
             }
         }

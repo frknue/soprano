@@ -168,6 +168,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
                 reload()
             case .panels:
                 statisticsButton.isOn = state.isStatisticsVisible
+            case .terminalAgent:
+                reload()
             case .composerRestore:
                 break
             }
@@ -252,7 +254,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             expandedShelves: expandedShelves,
             settledLimit: settledLimit,
             subagentDisclosure: subagentDisclosure,
-            terminalsExpanded: terminalsExpanded
+            terminalsExpanded: terminalsExpanded,
+            shownTerminalAgentID: state.shownTerminalAgentID
         )
     }
 

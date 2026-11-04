@@ -246,6 +246,40 @@ struct AgentDashboardViewTests {
         #expect(title.convert(title.bounds, to: controller.view).minX < 80)
     }
 
+    @Test func withoutItsListTheArrowsAndJKStayWithTheTextAndTheSelectionHolds() throws {
+        let manager = AgentManager()
+        for folder in ["/tmp/one", "/tmp/two"] {
+            let paneId = try #require(manager.spawnAgent("codex", cwd: folder))
+            let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+            manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        }
+        for showsList in [true, false] {
+            let controller = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
+            controller.showsAgentList = showsList
+            var selections: [String?] = []
+            controller.onSelectionChange = { selections.append($0) }
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
+                styleMask: [.titled, .resizable],
+                backing: .buffered, defer: false
+            )
+            window.contentViewController = controller
+            controller.view.layoutSubtreeIfNeeded()
+            #expect(selections.count == 1)
+
+            let keys = [
+                try #require(keyEvent(character: "j", keyCode: 38, window: window)),
+                try #require(keyEvent(character: "k", keyCode: 40, window: window)),
+                try #require(keyEvent(character: "\u{F701}", keyCode: 125, window: window)),
+                try #require(keyEvent(character: "\u{F700}", keyCode: 126, window: window)),
+            ]
+            let handled = keys.map { controller.view.performKeyEquivalent(with: $0) }
+
+            #expect(handled == [showsList, showsList, showsList, showsList], "list shown: \(showsList)")
+            #expect(selections.count == (showsList ? 5 : 1), "list shown: \(showsList)")
+        }
+    }
+
     @Test func rowsShowTheTaskOverTheAgentAndFolderAndFollowRenamesAndDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))

@@ -93,7 +93,7 @@ final class TerminalDrawerViewController: NSViewController, FocusRegionControlle
         state.addObserver(self) { [weak self] change in
             switch change {
             case .selection, .panels: self?.update()
-            case .filter, .composerRestore: break
+            case .filter, .composerRestore, .terminalAgent: break
             }
         }
         store.addObserver(self) { [weak self] change in

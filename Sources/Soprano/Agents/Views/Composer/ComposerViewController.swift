@@ -300,7 +300,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             switch change {
             case .selection: self?.selectionChanged()
             case .composerRestore: self?.takeRestore()
-            case .panels, .filter: break
+            case .panels, .filter, .terminalAgent: break
             }
         }
         engine.addObserver(self) { [weak self] event in

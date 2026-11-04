@@ -403,11 +403,14 @@ terminal drawer, right panel, statistics board), the right-panel tabs per worksp
 `closeRightPanelTab(_:key:)`, `pruneRightPanelTabs(keeping:)`, `moveDraftTabs(projectID:to:)`),
 diff scope + focused path, sidebar project filter and search text, and `restoreComposer(with:)` /
 `takeComposerRestore()` ("Edit from here" hands the user message back to the composer). Observe
-`Change` (`.selection`, `.panels`, `.filter`, `.composerRestore`); a selection switch changes the
-active tab too. Two boards cover the chat column and the right panel, never both at once:
-`isStatisticsVisible` (`setStatisticsVisible`) and `isTerminalAgentsVisible`
+`Change` (`.selection`, `.panels`, `.filter`, `.composerRestore`, `.terminalAgent`); a selection
+switch changes the active tab too. Two boards cover the chat column and the right panel, never
+both at once: `isStatisticsVisible` (`setStatisticsVisible`) and `isTerminalAgentsVisible`
 (`setTerminalAgentsVisible`, `showTerminalAgents(selecting:)`, read once with
-`takeTerminalAgentSelection()`); `isOverlayVisible` is either. A board closes on `select` (also of
+`takeTerminalAgentSelection()`); `isOverlayVisible` is either. `shownTerminalAgentID`
+(`setShownTerminalAgent(_:)`, `.terminalAgent`) is the agent the terminal agents board shows, as
+its dashboard reports it through `onSelectionChange`; the sidebar marks that row instead of the
+selected thread. A board closes on `select` (also of
 the selected thread; selections the app makes itself, a launched draft becoming its thread or a
 removed thread or project falling back to a draft, pass `closingOverlays: false`) and whenever
 the terminal, right panel, a diff or the thread details open. Toggle commands for a surface
@@ -533,9 +536,10 @@ sidebar's Terminals section) embeds Soprano's own `AgentDashboardViewController`
 `showsAgentList = false`, built when the board opens and released when it closes: one agent from
 Soprano's terminal panes (Codex, Claude Code, OpenCode, omp's TUI), full width, with transcript,
 live terminal text, a reply field that types into the agent's terminal (Tab), Stop, Restart, and
-Open (focus the pane in the terminal window). The sidebar is the list (no J/K inside the board);
-with the sidebar hidden the board starts below the title bar, clear of the window buttons. Esc
-closes it. The Agents code reaches Soprano only
+Open (focus the pane in the terminal window). The sidebar is the list: ↑/↓ and J/K stay with the
+board's text. With the sidebar hidden the board starts below the title bar, clear of the window
+buttons, and that band holds the sidebar toggle (as on the statistics board). Esc closes it. The
+Agents code reaches Soprano only
 through `TerminalAgentsSource` (`Agents/Shell/`): `entries` (Soprano's `AgentDashboardEntry`),
 change observers, `makeDashboard(themeManager:)` and `openInTerminal(_:)`. `AppDelegate` builds the
 live source from `AgentManager` and the terminal window's split tree
@@ -543,8 +547,9 @@ live source from `AgentManager` and the terminal window's split tree
 (a working Codex, a Claude Code waiting for input, a ready omp; every scenario but `empty`).
 The sidebar's Terminals section (top of the list, collapsible, hidden while searching, only
 when a pane agent exists) shows one `SidebarTerminalCell` per agent: task or agent name, status
-word (the dashboard's: Starting, Working, Needs input, Error, Ready, Stopped; tinted when it needs
-you) and "agent · window".
+word (`chromeStatus`'s word, the one the board shows: Starting, Working, Needs input, Error, Ready,
+Stopped; needs-attention only colors it) and "agent · window". The agent the board shows has the
+thread cards' selected fill.
 
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's
@@ -631,7 +636,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `accounts.manage` | Manage Accounts… | global | — | Accounts |
 | `usage.refresh` | Refresh Usage | global | — | Accounts |
 | `statistics.toggle` | Statistics | global | `cmd+shift+u` | Statistics |
-| `terminals.toggle` | Terminal Agents (Soprano's terminal-pane agents) | global | — | Sidebar |
+| `terminals.toggle` | Terminal Agents (Soprano's terminal-pane agents; needs one running) | global | — | Sidebar |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
 router as global). A right-panel terminal tab is focus region `terminal`, like the drawer.

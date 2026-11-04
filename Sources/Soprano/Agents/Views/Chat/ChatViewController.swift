@@ -123,7 +123,7 @@ final class ChatViewController: NSViewController {
             switch change {
             case .panels: self?.updatePanels()
             case .selection: self?.updateComposerPlacement()
-            case .filter, .composerRestore: break
+            case .filter, .composerRestore, .terminalAgent: break
             }
         }
         SettingsCenter.shared.addObserver(self) { [weak self] in

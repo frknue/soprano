@@ -14,6 +14,9 @@ final class TerminalAgentsViewController: NSViewController {
     let state: WorkspaceState
     let source: TerminalAgentsSource?
     private(set) var dashboard: AgentDashboardViewController?
+    /// Brings the sidebar (the list of agents) back while it is hidden, in the empty title-bar
+    /// band above the agent, like the statistics board's.
+    let sidebarToggle = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘E)")
 
     init(state: WorkspaceState, source: TerminalAgentsSource?) {
         self.state = state
@@ -28,12 +31,22 @@ final class TerminalAgentsViewController: NSViewController {
         view = WorkspaceRootView(frame: NSRect(x: 0, y: 0, width: Metrics.mainMinWidth, height: 600))
         // Hidden until the board opens, so the first show builds the dashboard.
         view.isHidden = true
+        sidebarToggle.onClick = { [weak self] in
+            (self?.view.window?.windowController as? AgentsWindowController)?.perform("view.toggleSidebar")
+        }
+        sidebarToggle.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(sidebarToggle)
+        NSLayoutConstraint.activate([
+            sidebarToggle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Metrics.windowControlsInset + 1),
+            sidebarToggle.centerYAnchor.constraint(equalTo: view.topAnchor, constant: Metrics.topbarHeight / 2),
+        ])
         ThemeCenter.shared.addObserver(self) { [weak self] theme in
             self?.dashboard?.apply(theme: theme)
         }
         state.addObserver(self) { [weak self] change in
-            if change == .panels { self?.updateContentTop() }
+            if change == .panels { self?.updateSidebarState() }
         }
+        updateSidebarState()
     }
 
     var hasFocus: Bool {
@@ -58,10 +71,14 @@ final class TerminalAgentsViewController: NSViewController {
         dashboard.onAgentSelected = { [weak self] paneId, tabId in
             self?.source?.openInTerminal(TerminalTarget(paneId: paneId, tabId: tabId))
         }
+        // The sidebar marks the agent shown here, whoever picked it.
+        dashboard.onSelectionChange = { [weak self] entryID in
+            self?.state.setShownTerminalAgent(entryID)
+        }
         addChild(dashboard)
         let content = dashboard.view
         content.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(content)
+        view.addSubview(content, positioned: .below, relativeTo: sidebarToggle)
         let top = content.topAnchor.constraint(equalTo: view.topAnchor)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -71,15 +88,16 @@ final class TerminalAgentsViewController: NSViewController {
         ])
         contentTop = top
         self.dashboard = dashboard
-        updateContentTop()
+        updateSidebarState()
     }
 
     private var contentTop: NSLayoutConstraint?
 
     /// With the sidebar hidden, the window's traffic lights sit over the board's corner: the
-    /// agent starts below the title bar instead.
-    private func updateContentTop() {
+    /// agent starts below the title bar, and the band offers the sidebar toggle.
+    private func updateSidebarState() {
         contentTop?.constant = state.isSidebarVisible ? 0 : Metrics.topbarHeight
+        sidebarToggle.isHidden = state.isSidebarVisible
     }
 
     /// Selects the agent a sidebar row asked for, once.
@@ -95,5 +113,6 @@ final class TerminalAgentsViewController: NSViewController {
         dashboard.view.removeFromSuperview()
         dashboard.removeFromParent()
         self.dashboard = nil
+        state.setShownTerminalAgent(nil)
     }
 }
