@@ -22,6 +22,26 @@ struct BrowserIntegrationTests {
         )
     }
 
+    @Test func browserAddressesWithAPortButNoSchemeLoadOverHTTPS() throws {
+        #expect(
+            BrowserAddressResolver.resolve("myapp.test:3000")?.absoluteString
+                == "https://myapp.test:3000"
+        )
+        #expect(
+            BrowserAddressResolver.resolve("example.com:8443/docs")?.absoluteString
+                == "https://example.com:8443/docs"
+        )
+        #expect(
+            BrowserAddressResolver.resolve("file:///tmp/index.html")?.absoluteString
+                == "file:///tmp/index.html"
+        )
+        #expect(BrowserAddressResolver.resolve("about:blank")?.absoluteString == "about:blank")
+        #expect(
+            BrowserAddressResolver.resolve("http://example.com")?.absoluteString
+                == "http://example.com"
+        )
+    }
+
     @Test func browserCommandParserAcceptsPaneTargetAndNormalizesScreenshotPath() throws {
         let targeted = try #require(try BrowserCommandRequest.parse(
             ["soprano", "browser", "--pane", "pane-8", "click", "@e2"]

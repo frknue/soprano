@@ -488,7 +488,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
                     recordHistory: true
                 )
             } else {
-                NSWorkspace.shared.open(localURL)
+                openLinkedFile(localURL)
             }
             return
         }
@@ -504,12 +504,36 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             if MarkdownFilePicker.isMarkdown(url) {
                 openDocument(url, fragment: url.fragment, recordHistory: true)
             } else {
-                NSWorkspace.shared.open(url)
+                openLinkedFile(url)
             }
             return
         }
 
         decisionHandler(.cancel)
+    }
+
+    /// A linked document a viewer only displays (an image, a PDF, plain text)
+    /// opens; anything else — an app, a script, a `.command` — could run code
+    /// from an untrusted checkout, so it is only revealed in Finder.
+    private func openLinkedFile(_ url: URL) {
+        if Self.opensLinkedFile(url) {
+            NSWorkspace.shared.open(url)
+        } else {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    static func opensLinkedFile(_ url: URL) -> Bool {
+        let resolved = url.resolvingSymlinksInPath()
+        guard let values = try? resolved.resourceValues(
+            forKeys: [.isRegularFileKey, .contentTypeKey]
+        ),
+            values.isRegularFile == true,
+            let type = values.contentType,
+            !type.conforms(to: .script),
+            !type.conforms(to: .executable)
+        else { return false }
+        return [.image, .pdf, .audiovisualContent, .plainText].contains { type.conforms(to: $0) }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -533,7 +557,7 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     }
 }
 
-private final class MarkdownSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
+final class MarkdownSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
     static let scheme = "soprano-markdown"
     private static let documentName = "__soprano_document__.html"
 
@@ -567,9 +591,9 @@ private final class MarkdownSchemeHandler: NSObject, WKURLSchemeHandler, @unchec
               !isDocumentPage(url)
         else { return nil }
 
-        let candidate = URL(
-            fileURLWithPath: url.path.removingPercentEncoding ?? url.path
-        ).standardizedFileURL
+        // `path` is already percent-decoded; decoding again would turn a link
+        // to `a%2520b.md` (the file `a%20b.md`) into `a b.md`.
+        let candidate = URL(fileURLWithPath: url.path).standardizedFileURL
         lock.lock()
         let root = accessRoot
         lock.unlock()
