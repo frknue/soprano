@@ -83,7 +83,8 @@ final class MarkdownRendering {
 }
 
 /// Block model → attributed segments, colored from the palette.
-/// Results are cached per text and style; the cache empties when the palette changes.
+/// Results are cached per text and style; the cache empties when the palette changes. A streaming
+/// message keeps only its latest rendering (each delta is a new, longer text).
 @MainActor
 enum MarkdownRenderer {
     private struct Key: Hashable {
@@ -92,21 +93,28 @@ enum MarkdownRenderer {
     }
 
     private static var cache: [Key: MarkdownRendering] = [:]
+    private static var streamingCache: (key: Key, rendering: MarkdownRendering)?
     private static var cachedPalette: Palette?
 
-    static func render(_ text: String, style: MarkdownStyle) -> MarkdownRendering {
+    static func render(_ text: String, style: MarkdownStyle, streaming: Bool = false) -> MarkdownRendering {
         let palette = PaletteCenter.shared.palette
         if cachedPalette != palette {
             cache.removeAll()
+            streamingCache = nil
             cachedPalette = palette
         }
         let key = Key(text: text, style: style)
         if let cached = cache[key] { return cached }
-        if cache.count > 600 { cache.removeAll() }
+        if streaming, let latest = streamingCache, latest.key == key { return latest.rendering }
         var builder = Builder(style: style, palette: palette)
         builder.renderBlocks(MarkdownDocument.parse(text, lineBreaks: style.lineBreaks), context: Builder.Context())
         let rendering = MarkdownRendering(pieces: builder.finish(), style: style)
-        cache[key] = rendering
+        if streaming {
+            streamingCache = (key, rendering)
+        } else {
+            if cache.count > 600 { cache.removeAll() }
+            cache[key] = rendering
+        }
         return rendering
     }
 

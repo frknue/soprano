@@ -237,10 +237,17 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     func collapseAll() {
         guard let thread = selectedThread else { return }
         let turnIDs = thread.turns.map(\.id)
-        // Every fold and checks row open, so the work inside them is listed too.
+        // Every fold, checks row and work group open, so the work inside them is listed too.
         var everything = expansion
         for id in turnIDs { everything.set(id, open: true, in: \.turns) }
         everything.checks.formUnion(turnIDs)
+        for row in TimelineBuilder.rows(for: thread, expansion: everything) {
+            switch row.content {
+            case let .workGroup(model): everything.set(model.groupID, open: true, in: \.groups)
+            case let .liveWork(model): everything.set(model.groupID, open: true, in: \.groups)
+            default: break
+            }
+        }
         let rows = TimelineBuilder.rows(for: thread, expansion: everything)
         for id in turnIDs { expansion.set(id, open: false, in: \.turns) }
         expansion.checks.subtract(turnIDs)
@@ -263,6 +270,25 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
             expansion[keyPath: keyPath].insert(id)
         }
         reload()
+        // A pinned timeline follows its end; keep an opened row's header in view instead.
+        if let rowID = openedRowID(id, in: keyPath) {
+            list.reveal(rowID: rowID, rect: NSRect(x: 0, y: 0, width: 1, height: 24))
+        }
+    }
+
+    /// The row that `id` opened, if toggling it opened one.
+    private func openedRowID(_ id: String, in keyPath: WritableKeyPath<TimelineExpansion, Set<String>>) -> String? {
+        list.rows.first { row in
+            switch row.content {
+            case let .fold(model): keyPath == \.turns && model.turnID == id && model.expanded
+            case let .workGroup(model): keyPath == \.groups && model.groupID == id && model.expanded
+            case let .liveWork(model): keyPath == \.groups && model.groupID == id && model.expanded
+            case let .workEntry(model): keyPath == \.entries && model.entry.id == id && model.expanded
+            case let .fileDiff(model): keyPath == \.diffs && model.id == id && model.expanded
+            case let .user(model): keyPath == \.messages && model.message.id == id && model.expanded
+            default: false
+            }
+        }?.id
     }
 
     // MARK: TimelineRowDelegate
@@ -394,7 +420,8 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
     }
 
     private func refreshFind(keepIndex: Bool, reveal: Bool) {
-        let units = list.rows.map { (id: $0.id, units: TimelineFind.units(of: $0)) }
+        // No query, no matches: don't render every row's Markdown to search it.
+        let units = isSearching ? list.rows.map { (id: $0.id, units: TimelineFind.units(of: $0)) } : []
         findMatches = TimelineFind.matches(of: findQuery, in: units)
         if !keepIndex { findIndex = 0 }
         findIndex = findMatches.isEmpty ? 0 : min(findIndex, findMatches.count - 1)
