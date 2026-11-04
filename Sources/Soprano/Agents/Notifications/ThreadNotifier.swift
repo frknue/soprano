@@ -38,8 +38,9 @@ protocol ThreadNotificationPosting: AnyObject {
 
 /// Posts thread notifications and keeps the Dock badge:
 ///
-/// - When a thread's status turns into Done, Failed, Approval or Input while the app is not
-///   active, it posts "Thread completed" / "Thread failed" / "Approval needed" / "Input needed"
+/// - When a thread's status turns into Done, Failed, Approval or Input while the user is not
+///   watching the Agents window (`isWatching`; Soprano's terminal window in front does not
+///   count), it posts "Thread completed" / "Thread failed" / "Approval needed" / "Input needed"
 ///   with the thread title as body (one notification per thread, replacing the last), with
 ///   sound per `notifications.sound`, unless `notifications.enabled` is off. Threads seen for
 ///   the first time (launch) and archived threads never notify.
@@ -52,7 +53,7 @@ protocol ThreadNotificationPosting: AnyObject {
 final class ThreadNotifier {
     private let engine: AgentEngine
     private let settings: () -> AgentsSettings
-    private let isAppActive: () -> Bool
+    private let isWatching: () -> Bool
     private let poster: ThreadNotificationPosting?
     private let setBadge: @MainActor (Int) -> Void
     private var alerts: [String: ThreadAlert?] = [:]
@@ -61,13 +62,13 @@ final class ThreadNotifier {
     init(
         engine: AgentEngine,
         settings: @escaping () -> AgentsSettings = { SettingsCenter.shared.settings },
-        isAppActive: @escaping () -> Bool = { NSApp.isActive },
+        isWatching: @escaping () -> Bool,
         poster: ThreadNotificationPosting?,
         setBadge: @escaping @MainActor (Int) -> Void = ThreadNotifier.setDockBadge
     ) {
         self.engine = engine
         self.settings = settings
-        self.isAppActive = isAppActive
+        self.isWatching = isWatching
         self.poster = poster
         self.setBadge = setBadge
         for thread in engine.threads where thread.archivedAt == nil {
@@ -87,12 +88,12 @@ final class ThreadNotifier {
     func engineChanged() {
         var current: [String: ThreadAlert?] = [:]
         let preferences = settings()
-        let active = isAppActive()
+        let watching = isWatching()
         for thread in engine.threads where thread.archivedAt == nil {
             let alert = ThreadAlert(ThreadStatus.of(thread))
             current.updateValue(alert, forKey: thread.id)
             guard let alert, let previous = alerts[thread.id], previous != alert else { continue }
-            if !active, preferences.notificationsEnabled {
+            if !watching, preferences.notificationsEnabled {
                 poster?.post(threadID: thread.id, alert: alert, body: thread.title, sound: preferences.notificationSound)
             }
         }

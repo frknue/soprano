@@ -258,7 +258,7 @@ enum ConfigFile {
             },
 
             "notifications": {
-              // Notify when a thread finishes or needs you while the app is in the background.
+              // Notify when a thread finishes or needs you while the Agents window is not in front.
               "enabled": true,
               "sound": true
             },

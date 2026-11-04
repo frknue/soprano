@@ -70,8 +70,9 @@ page shows omp's version and health.
    omp's own usage records (`omp stats`), so every omp session on this Mac counts.
 
 `⌘K` (or `⌘P`) opens the command palette, Soprano's own: every action with its shortcut, threads,
-projects and settings pages. When the app is in the background, finished, failed and
-waiting threads post a notification, and the Dock icon counts threads waiting for you.
+projects and settings pages. When the Agents window is not in front (Soprano in the background, or
+its terminal window in front), finished, failed and waiting threads post a notification, and the
+Dock icon counts threads waiting for you.
 
 ## Keyboard shortcuts
 

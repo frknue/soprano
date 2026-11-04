@@ -852,10 +852,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // Soprano Agents only notifies in the background; a late one while
-        // Soprano is active stays silent.
-        let isThread = notification.request.content.userInfo[UserNotificationPoster.threadIDKey] != nil
-        completionHandler(isThread ? [] : [.banner, .sound])
+        // Soprano is often active while a notification arrives: panes post only
+        // for unfocused targets, and Soprano Agents only while its window is not
+        // the one in front, so every banner that gets here is wanted.
+        completionHandler([.banner, .sound])
     }
 
     func userNotificationCenter(

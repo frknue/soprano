@@ -285,7 +285,7 @@ extension SettingsController {
         return [form.section("Notifications", [
             form.row(
                 "Thread notifications",
-                description: "Notify when a thread finishes, fails, or needs input or approval while Soprano Agents is in the background. The Dock icon counts threads waiting for you.",
+                description: "Notify when a thread finishes, fails, or needs input or approval while you are not looking at this window, including while you work in Soprano's terminal window. The Dock icon counts threads waiting for you.",
                 reset: reset(["notifications", "enabled"], isDefault: settings.notificationsEnabled == defaults.notificationsEnabled),
                 control: enabled
             ),

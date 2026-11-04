@@ -65,6 +65,14 @@ final class AgentsAppController {
         await engine?.shutdown()
     }
 
+    /// Whether the user is looking at the Agents window: Soprano is active and the
+    /// key window is that window or a panel hanging off it. The terminal window in
+    /// front does not count, so threads still notify while you work there.
+    static func isWatching(agentsWindow: NSWindow?, keyWindow: NSWindow?, isActive: Bool) -> Bool {
+        guard isActive, let agentsWindow, let keyWindow else { return false }
+        return MenuBarSwitcher.rootWindow(of: keyWindow) === agentsWindow
+    }
+
     private func ensureWindow() -> AgentsWindowController {
         if let windowController { return windowController }
 
@@ -100,7 +108,13 @@ final class AgentsAppController {
         controller.showTerminals = showTerminals
         windowController = controller
 
-        notifier = ThreadNotifier(engine: engine, poster: UserNotificationPoster.make())
+        notifier = ThreadNotifier(
+            engine: engine,
+            isWatching: { [weak controller] in
+                Self.isWatching(agentsWindow: controller?.window, keyWindow: NSApp.keyWindow, isActive: NSApp.isActive)
+            },
+            poster: UserNotificationPoster.make()
+        )
 
         Task { await engine.refreshProviders() }
         return controller

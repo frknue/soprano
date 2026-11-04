@@ -51,7 +51,7 @@ struct ThreadNotifierTests {
         let engine = engine([runningThread("t1", title: "Fix login")])
         let recorder = Recorder()
         var badges: [Int] = []
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { false }, poster: recorder, setBadge: { badges.append($0) })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { false }, poster: recorder, setBadge: { badges.append($0) })
 
         finish(engine, "t1", .completed)
 
@@ -66,7 +66,7 @@ struct ThreadNotifierTests {
     @Test func failuresApprovalsAndQuestionsPostTheirOwnTitles() {
         let engine = engine([runningThread("t1", title: "A"), runningThread("t2", title: "B")])
         let recorder = Recorder()
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { false }, poster: recorder, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { false }, poster: recorder, setBadge: { _ in })
 
         requestApproval(engine, "t1")
         finish(engine, "t2", .failed)
@@ -77,12 +77,12 @@ struct ThreadNotifierTests {
         #expect(notifier.badgeCount == 2)
     }
 
-    @Test func nothingIsPostedWhileTheAppIsActiveOrNotificationsAreOff() {
+    @Test func nothingIsPostedWhileTheAgentsWindowIsWatchedOrNotificationsAreOff() {
         let engine = engine([runningThread("t1", title: "A"), runningThread("t2", title: "B")])
         let recorder = Recorder()
         var active = true
         var settings = AgentsSettings.defaults
-        let notifier = ThreadNotifier(engine: engine, settings: { settings }, isAppActive: { active }, poster: recorder, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { settings }, isWatching: { active }, poster: recorder, setBadge: { _ in })
 
         finish(engine, "t1", .completed)
         active = false
@@ -94,12 +94,47 @@ struct ThreadNotifierTests {
         #expect(notifier.badgeCount == 2)
     }
 
+    private static func window() -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: 200, height: 200), styleMask: [.titled], backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        return window
+    }
+
+    @Test func anApprovalArrivingWhileSopranosTerminalWindowIsKeyStillNotifies() {
+        let agentsWindow = Self.window()
+        let terminalWindow = Self.window()
+        let engine = engine([runningThread("t1", title: "Deploy check")])
+        let recorder = Recorder()
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: {
+            AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: terminalWindow, isActive: true)
+        }, poster: recorder, setBadge: { _ in })
+
+        requestApproval(engine, "t1")
+
+        #expect(recorder.posted.map(\.alert) == [.approval])
+        #expect(recorder.posted.first?.body == "Deploy check")
+        #expect(notifier.badgeCount == 1)
+    }
+
+    @Test func onlyTheAgentsWindowOrAPanelHangingOffItCountsAsWatching() {
+        let agentsWindow = Self.window()
+        let palette = Self.window()
+        agentsWindow.addChildWindow(palette, ordered: .above)
+        defer { agentsWindow.removeChildWindow(palette) }
+
+        #expect(AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: agentsWindow, isActive: true))
+        #expect(AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: palette, isActive: true))
+        #expect(!AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: Self.window(), isActive: true))
+        #expect(!AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: agentsWindow, isActive: false))
+        #expect(!AgentsAppController.isWatching(agentsWindow: agentsWindow, keyWindow: nil, isActive: true))
+    }
+
     @Test func soundFollowsTheSetting() {
         let engine = engine([runningThread("t1", title: "A")])
         let recorder = Recorder()
         var settings = AgentsSettings.defaults
         settings.notificationSound = false
-        let notifier = ThreadNotifier(engine: engine, settings: { settings }, isAppActive: { false }, poster: recorder, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { settings }, isWatching: { false }, poster: recorder, setBadge: { _ in })
 
         finish(engine, "t1", .completed)
 
@@ -114,7 +149,7 @@ struct ThreadNotifierTests {
         let engine = engine([done, runningThread("t2", title: "New")])
         let recorder = Recorder()
         var badges: [Int] = []
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { false }, poster: recorder, setBadge: { badges.append($0) })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { false }, poster: recorder, setBadge: { badges.append($0) })
 
         engine.rename("t1", title: "Old, renamed")
 
@@ -126,7 +161,7 @@ struct ThreadNotifierTests {
     @Test func visitingAThreadClearsItFromTheBadgeAndArchivedThreadsDoNotCount() {
         let engine = engine([runningThread("t1", title: "A"), runningThread("t2", title: "B")])
         var badges: [Int] = []
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { badges.append($0) })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { true }, poster: nil, setBadge: { badges.append($0) })
 
         finish(engine, "t1", .completed)
         finish(engine, "t2", .failed)
@@ -144,7 +179,7 @@ struct ThreadNotifierTests {
         settledAtLaunch.settledAt = now.addingTimeInterval(-30)
         let engine = engine([settledAtLaunch, runningThread("t2", title: "B")])
         var badges: [Int] = []
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { badges.append($0) })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { true }, poster: nil, setBadge: { badges.append($0) })
 
         finish(engine, "t2", .completed)
         engine.setSettled("t2", true)
@@ -156,7 +191,7 @@ struct ThreadNotifierTests {
 
     @Test func aSettledThreadWaitingOnApprovalStillCountsOnTheBadge() {
         let engine = engine([runningThread("t1", title: "A")])
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { true }, poster: nil, setBadge: { _ in })
 
         engine.setSettled("t1", true)
         requestApproval(engine, "t1")
@@ -166,7 +201,7 @@ struct ThreadNotifierTests {
 
     @Test func aPinnedThreadCountsEvenWhenAlsoSettled() {
         let engine = engine([runningThread("t1", title: "A")])
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { true }, poster: nil, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { true }, poster: nil, setBadge: { _ in })
 
         finish(engine, "t1", .completed)
         engine.setSettled("t1", true)
@@ -178,7 +213,7 @@ struct ThreadNotifierTests {
     @Test func theSameAlertIsNotPostedTwice() {
         let engine = engine([runningThread("t1", title: "A")])
         let recorder = Recorder()
-        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isAppActive: { false }, poster: recorder, setBadge: { _ in })
+        let notifier = ThreadNotifier(engine: engine, settings: { .defaults }, isWatching: { false }, poster: recorder, setBadge: { _ in })
 
         finish(engine, "t1", .completed)
         engine.rename("t1", title: "A2")
