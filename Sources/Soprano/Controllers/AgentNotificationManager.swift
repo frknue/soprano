@@ -362,11 +362,6 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     private var deliveredNotificationIds: [Target: Set<String>] = [:]
     private var recentEvents: [Target: (fingerprint: EventFingerprint, date: Date)] = [:]
     private let observerId = "AgentNotificationManager"
-    /// Brings Soprano's terminal window forward; set by the app delegate.
-    var showSopranoWindow: (@MainActor () -> Void)?
-    /// Opens the Soprano Agents thread whose notification was clicked. A process
-    /// has one notification delegate, so Agents' clicks arrive here too.
-    var openAgentsThread: (@MainActor (String) -> Void)?
 
     init(agentManager: AgentManager) {
         self.agentManager = agentManager
@@ -852,9 +847,6 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        // Soprano is often active while a notification arrives: panes post only
-        // for unfocused targets, and Soprano Agents only while its window is not
-        // the one in front, so every banner that gets here is wanted.
         completionHandler([.banner, .sound])
     }
 
@@ -864,17 +856,10 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let info = response.notification.request.content.userInfo
-        if let threadID = info[UserNotificationPoster.threadIDKey] as? String {
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.openAgentsThread?(threadID)
-                }
-            }
-        } else if let runId = info["automationRunId"] as? String {
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.showSopranoWindow?()
-                }
+        if let runId = info["automationRunId"] as? String {
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first(where: \.canBecomeKey)?.makeKeyAndOrderFront(nil)
                 NotificationCenter.default.post(
                     name: .sopranoOpenAutomationRun,
                     object: nil,
@@ -884,9 +869,8 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         } else if let paneId = info["paneId"] as? String,
                   let tabId = info["tabId"] as? String {
             DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.showSopranoWindow?()
-                }
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first(where: \.canBecomeKey)?.makeKeyAndOrderFront(nil)
                 self?.agentManager.focusTab(paneId: paneId, tabId: tabId)
             }
         }

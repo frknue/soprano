@@ -77,7 +77,6 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingRenameWindow()
     func keybindingOpenSettings()
     func keybindingOpenAgentDashboard()
-    func keybindingOpenAgentsWindow()
     func keybindingOpenCommandPalette()
     func keybindingFindWindow()
     func keybindingOpenProjectSearch()
@@ -116,9 +115,6 @@ final class KeybindingManager: @unchecked Sendable {
     var stateChangeHandler: (@MainActor (KeybindingState) -> Void)?
     var controlKeyStateChangeHandler: (@MainActor (Bool) -> Void)?
     var paneHintChangeHandler: (@MainActor (String) -> Void)?
-    /// Windows that keep their own keymap (the Soprano Agents window and the
-    /// panels hanging off it): their key events pass through untouched.
-    var ignoresWindow: (@MainActor (NSWindow) -> Bool)?
 
     /// The config is injected rather than loaded here: `settings.json` is the
     /// source of truth for keybindings, and `ConfigStore` is main-actor
@@ -174,10 +170,6 @@ final class KeybindingManager: @unchecked Sendable {
             // must only cover the self-is-gone case — otherwise it would
             // resurrect events handleKeyDown intentionally swallowed.
             guard let self else { return event }
-            if let window = event.window, let ignoresWindow = self.ignoresWindow,
-               MainActor.assumeIsolated({ ignoresWindow(window) }) {
-                return event
-            }
             if event.type == .flagsChanged {
                 self.setControlKeyHeld(event.modifierFlags.contains(.control))
                 return event
@@ -673,8 +665,6 @@ final class KeybindingManager: @unchecked Sendable {
             invokeDelegate { $0.keybindingOpenSettings() }
         case "agent-dashboard":
             invokeDelegate { $0.keybindingOpenAgentDashboard() }
-        case "open-agents":
-            invokeDelegate { $0.keybindingOpenAgentsWindow() }
         case "zoom-in":
             invokeDelegate { $0.keybindingZoom(delta: 1) }
         case "zoom-out":

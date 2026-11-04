@@ -189,97 +189,6 @@ struct AgentDashboardSnapshotTests {
 
 @MainActor
 struct AgentDashboardViewTests {
-    @Test func aSecondDashboardKeepsFollowingTheAgentsAfterTheFirstOneCloses() throws {
-        // The terminal window's dashboard and the Agents window's board watch the same panes.
-        let manager = AgentManager()
-        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
-        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
-        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .waiting)
-        var first: AgentDashboardViewController? = AgentDashboardViewController(
-            agentManager: manager,
-            themeManager: ThemeManager(themeId: "gruvbox-dark")
-        )
-        _ = first?.view
-        let second = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
-            styleMask: [.titled, .resizable],
-            backing: .buffered, defer: false
-        )
-        window.contentViewController = second
-        second.view.layoutSubtreeIfNeeded()
-
-        first = nil
-        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
-
-        let status = try #require(allSubviews(in: second.view).compactMap { $0 as? NSTextField }.first {
-            $0.identifier?.rawValue == "agent-dashboard-status"
-        })
-        #expect(first == nil)
-        #expect(status.stringValue == "WORKING")
-    }
-
-    @Test func withoutItsListTheDashboardShowsOnlyTheSelectedAgentAcrossTheWholeWidth() throws {
-        // The Soprano Agents window lists the agents in its own sidebar.
-        let manager = AgentManager()
-        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
-        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
-        let controller = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
-        controller.showsAgentList = false
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
-            styleMask: [.titled, .resizable],
-            backing: .buffered, defer: false
-        )
-        window.contentViewController = controller
-        controller.selectEntry("\(paneId):\(tabId)")
-        controller.view.layoutSubtreeIfNeeded()
-
-        let rows = allSubviews(in: controller.view).filter { $0.identifier?.rawValue == "agent-dashboard-row" }
-        let visibleRows = rows.filter { !$0.isHiddenOrHasHiddenAncestor }
-        #expect(!rows.isEmpty)
-        #expect(visibleRows.isEmpty)
-        let title = try #require(allSubviews(in: controller.view).compactMap { $0 as? NSTextField }.first {
-            $0.identifier?.rawValue == "agent-dashboard-detail-title"
-        })
-        #expect(!title.isHiddenOrHasHiddenAncestor)
-        #expect(title.convert(title.bounds, to: controller.view).minX < 80)
-    }
-
-    @Test func withoutItsListTheArrowsAndJKStayWithTheTextAndTheSelectionHolds() throws {
-        let manager = AgentManager()
-        for folder in ["/tmp/one", "/tmp/two"] {
-            let paneId = try #require(manager.spawnAgent("codex", cwd: folder))
-            let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
-            manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
-        }
-        for showsList in [true, false] {
-            let controller = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
-            controller.showsAgentList = showsList
-            var selections: [String?] = []
-            controller.onSelectionChange = { selections.append($0) }
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
-                styleMask: [.titled, .resizable],
-                backing: .buffered, defer: false
-            )
-            window.contentViewController = controller
-            controller.view.layoutSubtreeIfNeeded()
-            #expect(selections.count == 1)
-
-            let keys = [
-                try #require(keyEvent(character: "j", keyCode: 38, window: window)),
-                try #require(keyEvent(character: "k", keyCode: 40, window: window)),
-                try #require(keyEvent(character: "\u{F701}", keyCode: 125, window: window)),
-                try #require(keyEvent(character: "\u{F700}", keyCode: 126, window: window)),
-            ]
-            let handled = keys.map { controller.view.performKeyEquivalent(with: $0) }
-
-            #expect(handled == [showsList, showsList, showsList, showsList], "list shown: \(showsList)")
-            #expect(selections.count == (showsList ? 5 : 1), "list shown: \(showsList)")
-        }
-    }
-
     @Test func rowsShowTheTaskOverTheAgentAndFolderAndFollowRenamesAndDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
@@ -484,40 +393,6 @@ struct AgentDashboardViewTests {
 
         #expect(window.frame == originalFrame)
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
-    }
-
-    /// Embedded in the Agents window (no header or list of its own), the
-    /// dashboard shares the window with that window's search and rename fields.
-    @Test func escInATextFieldOutsideTheDashboardDoesNotDismissIt() throws {
-        let controller = AgentDashboardViewController(
-            agentManager: AgentManager(),
-            themeManager: ThemeManager(themeId: "gruvbox-dark")
-        )
-        controller.showsAgentList = false
-        var dismissals = 0
-        controller.onDismiss = { dismissals += 1 }
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
-            styleMask: [.titled, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
-        window.contentView = container
-        controller.view.frame = NSRect(x: 200, y: 0, width: 700, height: 600)
-        container.addSubview(controller.view)
-        let sidebarSearch = NSTextField(frame: NSRect(x: 10, y: 10, width: 150, height: 22))
-        container.addSubview(sidebarSearch)
-        #expect(window.makeFirstResponder(sidebarSearch))
-        #expect((window.firstResponder as? NSTextView)?.isFieldEditor == true)
-        let escape = try #require(keyEvent(character: "\u{1b}", keyCode: 53, window: window))
-
-        #expect(!controller.view.performKeyEquivalent(with: escape))
-        #expect(dismissals == 0)
-
-        window.makeFirstResponder(controller.view)
-        #expect(controller.view.performKeyEquivalent(with: escape))
-        #expect(dismissals == 1)
     }
 
     @Test func jAndKMoveTheSelectionAndReturnFocusesTheChosenAgent() throws {

@@ -603,12 +603,28 @@ final class MainContentViewController: NSViewController {
         guard dashboardViewController == nil else { return }
 
         preservingWindowFrame {
-            let controller = makeAgentDashboard(themeManager: themeManager)
+            let controller = AgentDashboardViewController(
+                agentManager: agentManager,
+                themeManager: themeManager,
+                terminalStateProvider: { [weak splitTreeView] target in
+                    splitTreeView?.terminalInteractionState(for: target)
+                        ?? .unavailable
+                },
+                promptSender: { [weak splitTreeView] target, prompt in
+                    splitTreeView?.submitAgentPrompt(prompt, to: target) ?? false
+                },
+                branchProvider: { [gitBranchMonitor] cwd in
+                    gitBranchMonitor.notableBranch(for: cwd)
+                }
+            )
             controller.onDismiss = { [weak self] in
                 self?.closeDashboard()
             }
             controller.onAgentSelected = { [weak self] paneId, tabId in
-                self?.focusAgent(TerminalTarget(paneId: paneId, tabId: tabId))
+                guard let self else { return }
+                self.closeDashboard(restoreKeyboardFocus: false)
+                self.agentManager.focusTab(paneId: paneId, tabId: tabId, revealInSidebar: true)
+                self.splitTreeView.restoreKeyboardFocus()
             }
             addChild(controller)
             controller.view.translatesAutoresizingMaskIntoConstraints = false
@@ -639,42 +655,6 @@ final class MainContentViewController: NSViewController {
         if restoreKeyboardFocus {
             splitTreeView.restoreKeyboardFocus()
         }
-    }
-
-    /// An Agent Dashboard over this window's agents: its live terminals, replies typed into
-    /// them, and notable branches. The dashboard overlay here and Soprano Agents' Terminal
-    /// Agents board (with the Agents theme) both use it.
-    func makeAgentDashboard(themeManager: ThemeManager, title: String = "Agent Dashboard") -> AgentDashboardViewController {
-        AgentDashboardViewController(
-            agentManager: agentManager,
-            themeManager: themeManager,
-            title: title,
-            terminalStateProvider: { [weak splitTreeView] target in
-                splitTreeView?.terminalInteractionState(for: target)
-                    ?? .unavailable
-            },
-            promptSender: { [weak splitTreeView] target, prompt in
-                splitTreeView?.submitAgentPrompt(prompt, to: target) ?? false
-            },
-            branchProvider: { [gitBranchMonitor] cwd in
-                gitBranchMonitor.notableBranch(for: cwd)
-            }
-        )
-    }
-
-    /// Shows the agent's pane: closes whatever page covers the workspace (dashboard,
-    /// Automations, Settings), activates its window and tab, and gives it the keyboard.
-    func focusAgent(_ target: TerminalTarget) {
-        loadViewIfNeeded()
-        closeDashboard(restoreKeyboardFocus: false)
-        if automationsViewController != nil {
-            closeAutomations(restoreKeyboardFocus: false)
-        }
-        if !settingsContainerView.isHidden {
-            closeSettings()
-        }
-        agentManager.focusTab(paneId: target.paneId, tabId: target.tabId, revealInSidebar: true)
-        splitTreeView.restoreKeyboardFocus()
     }
 
     // MARK: - Automations
