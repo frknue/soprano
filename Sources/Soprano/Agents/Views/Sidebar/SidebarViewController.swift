@@ -147,7 +147,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             switch event {
             case .projectsChanged, .threadListChanged, .subagentListChanged: self?.reload()
             case let .threadChanged(threadID): self?.refreshRow(of: threadID)
-            case .itemChanged, .subagentChanged, .providersChanged, .commandsChanged: break
+            case .itemChanged, .subagentChanged, .providersChanged, .commandsChanged, .sideQuestionsChanged: break
             }
         }
         state.addObserver(self) { [weak self] change in

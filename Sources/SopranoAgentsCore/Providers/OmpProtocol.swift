@@ -231,6 +231,40 @@ public enum OmpProtocol {
         return TokenUsage(usedTokens: tokens, contextWindow: usage["contextWindow"]?.intValue)
     }
 
+    // MARK: - Side questions
+
+    /// A `BtwHistoryRecord` (`btw_record`, the `btw` response, `get_btw_history`): `{id,
+    /// question, answer, status, createdAt, updatedAt (epoch ms), error?, followUps?[turns]}`.
+    /// Status `error` is `.failed`; an unknown status reads as `.interrupted`. nil without an id.
+    public static func sideQuestion(_ record: JSONValue?) -> SideQuestion? {
+        guard let record, let id = record["id"]?.nonEmptyString, let first = sideQuestionExchange(record) else { return nil }
+        let followUps = (record["followUps"]?.arrayValue ?? []).compactMap(sideQuestionExchange)
+        return SideQuestion(id: id, first: first, followUps: followUps)
+    }
+
+    private static func sideQuestionExchange(_ turn: JSONValue) -> SideQuestionExchange? {
+        guard let question = turn["question"]?.stringValue else { return nil }
+        let status: SideQuestionStatus = switch turn["status"]?.stringValue {
+        case "running": .running
+        case "complete": .complete
+        case "cancelled": .cancelled
+        case "error": .failed
+        default: .interrupted
+        }
+        func date(_ key: String) -> Date? {
+            turn[key]?.doubleValue.map { Date(timeIntervalSince1970: $0 / 1000) }
+        }
+        let created = date("createdAt") ?? Date()
+        return SideQuestionExchange(
+            question: question,
+            answer: turn["answer"]?.stringValue ?? "",
+            status: status,
+            createdAt: created,
+            updatedAt: date("updatedAt") ?? created,
+            error: turn["error"]?.nonEmptyString
+        )
+    }
+
     // MARK: - Rollback
 
     /// `get_entries`' `data.entries` on the current branch, root first: the path from `leafId`

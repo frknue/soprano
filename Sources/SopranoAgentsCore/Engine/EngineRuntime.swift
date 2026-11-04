@@ -75,6 +75,15 @@ final class ThreadRuntime {
     var titleRequest: UUID?
     /// The live session's command list.
     var commands: [ProviderCommand]?
+    /// Side questions the provider reported this run, newest first (AgentEngine+SideQuestions.swift).
+    var sideQuestions: [SideQuestion] = []
+    /// `sideQuestions` holds the conversation's history (read from the provider, or restored),
+    /// not only what was asked this run.
+    var sideQuestionsLoaded = false
+    /// An ask is starting (session start, or the provider has not reported the topic yet).
+    var isAskingSideQuestion = false
+    /// Stop was pressed while `isAskingSideQuestion`.
+    var sideQuestionCancelRequested = false
 
     func dropSession() {
         consumer?.cancel()

@@ -95,7 +95,7 @@ final class TimelineViewController: NSViewController, FocusRegionController, Tim
                 if threadID == state.selectedThreadID, subagentID == state.selectedSubagentID { scheduleReload() }
             case .threadListChanged:
                 scheduleReload()
-            case .projectsChanged, .providersChanged, .commandsChanged, .subagentListChanged:
+            case .projectsChanged, .providersChanged, .commandsChanged, .subagentListChanged, .sideQuestionsChanged:
                 break
             }
         }

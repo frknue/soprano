@@ -37,6 +37,10 @@ import Foundation
 /// `steer_subagent {subagentId, message}` and `cancel_subagent {subagentId}` act on one. A
 /// restart (new approval mode) or the process's end stops them: they are reported aborted.
 ///
+/// Side questions (`/btw`): `btw {question, recordId?}` (answered once omp checkpointed the
+/// topic as running), `btw_cancel`, `get_btw_history`; `btw_record` frames become
+/// `sideQuestion`, `btw_delta` frames `sideQuestionDelta`. They run beside any prompt.
+///
 /// Commands: `get_available_commands` after the handshake, then every pushed
 /// `available_commands_update` (`commands` events). Context: when a turn ends, `get_state`'s
 /// `contextUsage` is reported as `tokenUsage`. Compaction (`compact()`): the `compact` command,
@@ -91,6 +95,9 @@ public actor OmpSession: ProviderSession {
     private var interruptRequested = false
     /// Settlement, Stop or a release is ending the held prompt (`endHeldPrompt`).
     private var isEndingHeldPrompt = false
+    /// The side question omp is answering, with the answer streamed so far: a restart or the
+    /// process's end reports it interrupted.
+    private var runningSideQuestion: SideQuestion?
     private var nextPrompt = 1
     private var isClosing = false
     private var hasEnded = false
@@ -292,6 +299,30 @@ public actor OmpSession: ProviderSession {
         _ = try await client.request("cancel_subagent", ["subagentId": .string(id)])
     }
 
+    public func askSideQuestion(_ question: String, topicID: String?) async throws -> SideQuestion {
+        guard let client else { throw ProviderError.notStarted }
+        var fields: [String: JSONValue] = ["question": .string(question)]
+        if let topicID { fields["recordId"] = .string(topicID) }
+        let data = try await client.request("btw", fields)
+        guard let record = OmpProtocol.sideQuestion(data["record"]) else {
+            throw ProviderError.invalidOutput("omp did not report the side question.")
+        }
+        return record
+    }
+
+    public func cancelSideQuestion() async -> Bool {
+        guard let client else { return false }
+        return (try? await client.request("btw_cancel"))?["cancelled"]?.boolValue ?? false
+    }
+
+    public func sideQuestions() async throws -> [SideQuestion] {
+        guard let client else { throw ProviderError.notStarted }
+        let data = try await withProviderTimeout(Self.requestTimeout, label: "omp get_btw_history") {
+            try await client.request("get_btw_history")
+        }
+        return (data["records"]?.arrayValue ?? []).compactMap(OmpProtocol.sideQuestion)
+    }
+
     public func close() async {
         guard !isClosing else { return }
         isClosing = true
@@ -418,6 +449,7 @@ public actor OmpSession: ProviderSession {
         }
         retire()
         for event in subagents.abortAll() { continuation.yield(event) }
+        interruptSideQuestion()
         do {
             try await spawn(resume: resume, selection: selection, runtime: runtime)
         } catch {
@@ -498,6 +530,20 @@ public actor OmpSession: ProviderSession {
             return
         case "subagent_lifecycle", "subagent_progress", "subagent_event":
             for event in subagents.map(frame) { continuation.yield(event) }
+            return
+        case "btw_record":
+            guard let record = OmpProtocol.sideQuestion(frame["record"]) else { return }
+            if record.isRunning {
+                runningSideQuestion = record
+            } else if runningSideQuestion?.id == record.id {
+                runningSideQuestion = nil
+            }
+            continuation.yield(.sideQuestion(record))
+            return
+        case "btw_delta":
+            guard let id = frame["recordId"]?.nonEmptyString, let delta = frame["delta"]?.stringValue, !delta.isEmpty else { return }
+            if runningSideQuestion?.id == id { runningSideQuestion?.latest.answer += delta }
+            continuation.yield(.sideQuestionDelta(id: id, delta: delta))
             return
         default:
             break
@@ -626,7 +672,15 @@ public actor OmpSession: ProviderSession {
         activePromptID = nil
         compactionID = nil
         for event in subagents.abortAll() { continuation.yield(event) }
+        interruptSideQuestion()
         continuation.yield(.sessionEnded(error: error))
         continuation.finish()
+    }
+
+    private func interruptSideQuestion() {
+        guard var record = runningSideQuestion else { return }
+        runningSideQuestion = nil
+        record.latest.status = .interrupted
+        continuation.yield(.sideQuestion(record))
     }
 }

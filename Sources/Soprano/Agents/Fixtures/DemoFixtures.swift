@@ -38,6 +38,7 @@ enum DemoFixtures {
             dataDirectory: dataDirectory,
             files: FixtureWorkspaceFiles(),
             usage: FixtureUsageStatistics(now: now),
+            textAssistants: [.omp: FixtureTextAssistant()],
             now: { now }
         )
         let engine = AgentEngine(environment: environment)
@@ -45,6 +46,10 @@ enum DemoFixtures {
         // The `/` menu's list for omp in the demo thread's worktree and in the app project (drafts).
         for directory in [demoWorktree, "/Users/demo/code/app"] {
             engine.rememberCommands(ompCommands, provider: .omp, workingDirectory: directory)
+        }
+        if scenario != "empty" {
+            engine.restoreSideQuestions(demoSideQuestions(now), threadID: ID.demo)
+            engine.restoreSideQuestions(runningSideQuestions(now), threadID: ID.running)
         }
         let selection: WorkspaceState.Selection = switch scenario {
         case "running", "stopping": .thread(ID.running)
@@ -77,6 +82,57 @@ enum DemoFixtures {
         ProviderCommand(name: "skill:pr", kind: .skill, description: "Write pull request descriptions and commit messages", source: "Skill", insertText: "/skill:pr "),
         ProviderCommand(name: "skill:refactor", kind: .skill, description: "Restructure code without changing behavior, one safe step at a time", source: "Skill", insertText: "/skill:refactor "),
     ]
+
+    /// The demo thread's side questions (omp `/btw` history): one with a follow-up, one plain.
+    static func demoSideQuestions(_ now: Date) -> [SideQuestion] {
+        func ago(_ seconds: TimeInterval) -> Date { now.addingTimeInterval(-seconds) }
+        return [
+            SideQuestion(
+                id: "btw-cookie",
+                first: SideQuestionExchange(
+                    question: "Why does the redirect loop only happen with SSO?",
+                    answer: "SSO logins come back through `/auth/callback`, which sets the session cookie with `SameSite=Strict`. The browser drops a strict cookie on that cross-site redirect, so `requireSession` sees no session and sends the user back to the identity provider.\n\nPassword logins never leave the site, so their cookie survives.",
+                    status: .complete,
+                    createdAt: ago(900),
+                    updatedAt: ago(880)
+                ),
+                followUps: [
+                    SideQuestionExchange(
+                        question: "Is Lax safe enough here?",
+                        answer: "Yes for this cookie: `Lax` still blocks it on cross-site `POST`s and subresource requests, and the session endpoints only change state on `POST`.",
+                        status: .complete,
+                        createdAt: ago(840),
+                        updatedAt: ago(830)
+                    ),
+                ]
+            ),
+            SideQuestion(
+                id: "btw-tests",
+                first: SideQuestionExchange(
+                    question: "Which test covers the callback today?",
+                    answer: "`AuthCallbackTests.testStoresSession` — it checks the cookie value but not its attributes.",
+                    status: .complete,
+                    createdAt: ago(600),
+                    updatedAt: ago(590)
+                )
+            ),
+        ]
+    }
+
+    /// The running thread's side question, still being answered.
+    static func runningSideQuestions(_ now: Date) -> [SideQuestion] {
+        [
+            SideQuestion(
+                id: "btw-tokens",
+                first: SideQuestionExchange(
+                    question: "Which colors still come from the old palette?",
+                    answer: "So far the sidebar badges and the diff gutter read",
+                    status: .running,
+                    createdAt: now.addingTimeInterval(-8)
+                )
+            ),
+        ]
+    }
 
     struct FixtureError: Error, CustomStringConvertible {
         let message: String

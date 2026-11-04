@@ -2,11 +2,13 @@ import AppKit
 import SopranoAgentsCore
 
 /// Composer slice: the floating composer (editor, attachments, model/effort/permissions chips,
-/// context meter, send/stop), the `/` command menu and the draft context strip.
+/// context meter, send/stop), the `/` command menu, the side-question panel and the draft
+/// context strip.
 ///
 /// ```
 /// [draft hero: What should we build in <project>? / or start without a project]
 /// [/ menu: passive list above the composer while the caret is in a line-start /command token]
+/// [side-question panel: /btw or ⇧⌘I; the thread's topics, or one topic's answers + follow-up]
 /// ┌ surface r16 glass ──────────────────────────────────────────────────────┐
 /// │ [approval: Command approval · detail        Decline  Approve  …]         │
 /// │ [question: header chip · question · options]                             │
@@ -85,7 +87,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     }
 
     private enum PopoverKind {
-        case model, traits, permissions, workspace, branch, project, context
+        case model, traits, permissions, workspace, branch, project, context, sideQuestion
     }
 
     private var target: Target = .draft(nil)
@@ -110,6 +112,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     private weak var contextCard: ContextMeterCardContent?
     /// Threads whose compaction this composer started and that has not finished yet.
     private var compacting: Set<String> = []
+    /// The side-question panel, while it shows, and the thread it shows.
+    private weak var sideQuestionContent: SideQuestionPanelContent?
+    private var sideQuestionThreadID: String?
+    /// Threads whose side-question history is being read.
+    private var loadingSideQuestions: Set<String> = []
     /// The `/` command menu, while it shows.
     private var slashMenu: ComposerPopover?
     private weak var slashContent: SlashCommandMenuContent?
@@ -117,6 +124,8 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     /// Escape (or a programmatic text change) hid the menu until the caret leaves the token.
     private var slashDismissed = false
     private var slashKeyObserver: NSObjectProtocol?
+    /// Ghost-text word completion in the editor.
+    private lazy var wordCompletion = ComposerWordCompletion(textView: editor.textView, engine: engine)
 
     init(engine: AgentEngine, state: WorkspaceState) {
         self.engine = engine
@@ -218,6 +227,10 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             slashContent.setWidth(surface.frame.width)
             slashMenu.reposition()
         }
+        if let sideQuestionContent {
+            sideQuestionContent.setWidth(surface.frame.width)
+            popover?.reposition()
+        }
         let height = view.frame.height
         guard abs(height - lastHeight) > 0.5 else { return }
         lastHeight = height
@@ -234,7 +247,10 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         textView.onImageData = { [weak self] data in self?.importImageData(data) }
         textView.onDragHighlight = { [weak self] on in self?.surface.isDragHighlighted = on }
         textView.menuKeyHandler = { [weak self] event in self?.handleSlashKey(event) ?? false }
-        textView.onResignFocus = { [weak self] in self?.closeSlashMenu() }
+        textView.onResignFocus = { [weak self] in
+            self?.closeSlashMenu()
+            self?.wordCompletion.clear()
+        }
         contextMeter.onClick = { [weak self] in self?.toggleContextCard() }
         surface.onFiles = { [weak self] urls in self?.importFiles(urls) }
         surface.onImageData = { [weak self] data in self?.importImageData(data) }
@@ -255,6 +271,28 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         hero.onAddProject = { [weak self] in self?.perform("project.open") }
         contextStrip.workspaceChip.onClick = { [weak self] in self?.toggleWorkspaceMenu() }
         contextStrip.branchChip.onClick = { [weak self] in self?.toggleBranchPicker() }
+        wordCompletion.provider = { [weak self] in self?.selection.provider ?? .omp }
+        wordCompletion.isSuppressed = { [weak self] in self?.slashMenu != nil }
+        refreshTextAssist()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(applicationDidBecomeActive), name: NSApplication.didBecomeActiveNotification, object: nil
+        )
+    }
+
+    /// Re-reads the provider's typing-aid settings: at start and whenever the app becomes active,
+    /// so a change made in omp's settings applies.
+    private func refreshTextAssist() {
+        let provider = selection.provider
+        Task { [weak self] in
+            guard let self else { return }
+            let preferences = await engine.textAssistPreferences(provider)
+            editor.textView.applyTextAssist(preferences)
+            wordCompletion.isEnabled = preferences.wordCompletion
+        }
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        refreshTextAssist()
     }
 
     private func observe() {
@@ -281,7 +319,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             case let .subagentListChanged(threadID) where threadID == state.selectedThreadID && state.selectedSubagentID != nil:
                 // The selected subagent may have started or stopped running.
                 refresh()
-            case .threadChanged, .itemChanged, .subagentChanged, .subagentListChanged:
+            case let .sideQuestionsChanged(threadID) where threadID == sideQuestionThreadID:
+                refreshSideQuestions()
+            case .threadChanged, .itemChanged, .subagentChanged, .subagentListChanged, .sideQuestionsChanged:
                 break
             }
         }
@@ -577,10 +617,12 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
         updatePrimary()
         syncSlashMenu()
+        wordCompletion.textChanged()
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
         syncSlashMenu()
+        wordCompletion.selectionChanged()
     }
 
     private func recallHistory(up: Bool) -> Bool {
@@ -609,6 +651,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
 
     /// Enter / the send button. `alternate` (⌘) swaps steer and queue while a turn runs.
     func submit(alternate: Bool) {
+        // A side question never answers the agent's question or steers the turn.
+        if let command = SideQuestionCommand.parse(editorText) {
+            sideQuestionTyped(command)
+            return
+        }
         if questionRequestID != nil {
             advanceQuestion()
             return
@@ -1098,6 +1145,109 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
     }
 
+    // MARK: Side questions
+
+    /// A thread is selected (also through one of its subagents): side questions ask about it.
+    var canAskSideQuestion: Bool { !state.isDraft && currentThread != nil }
+
+    /// `thread.sideQuestion`: opens the panel on the thread's side questions (Escape or × closes
+    /// it; while it has the keyboard the window's shortcuts don't reach it).
+    func showSideQuestions() {
+        openSideQuestions()
+    }
+
+    /// `/btw <question>` asks it in the panel, `/btw` opens the panel. The editor's text goes
+    /// (attachments stay); a draft has no conversation to ask about.
+    private func sideQuestionTyped(_ command: SideQuestionCommand) {
+        guard canAskSideQuestion else {
+            Task { [weak self] in
+                await Dialogs.alert(title: "Nothing to ask about yet", message: "A side question asks about a thread’s conversation. Send the first message, then ask with /btw.", in: self?.view.window)
+            }
+            return
+        }
+        editor.textView.setText("")
+        history.reset()
+        updatePrimary()
+        switch command {
+        case .open: openSideQuestions()
+        case let .ask(question): openSideQuestions(asking: question)
+        }
+    }
+
+    /// Shows the panel above the composer (newest topics, or the running one) and reads the
+    /// thread's history; `question` is asked as a new topic right away.
+    private func openSideQuestions(asking question: String? = nil) {
+        guard canAskSideQuestion, let thread = currentThread else { return }
+        if popoverKind != .sideQuestion || sideQuestionThreadID != thread.id {
+            let content = SideQuestionPanelContent(width: surface.frame.width)
+            content.onAsk = { [weak self] question, topicID in self?.askSideQuestion(question, topicID: topicID) }
+            content.onCancel = { [weak self] in self?.cancelSideQuestion() }
+            sideQuestionContent = content
+            sideQuestionThreadID = thread.id
+            refreshSideQuestions()
+            if question == nil, let running = engine.sideQuestions(thread.id).first(where: \.isRunning) {
+                content.select(running.id)
+            }
+            present(.sideQuestion, content: content, anchor: surface, side: .above, alignment: .leading) { [weak self, weak content] open in
+                guard !open, let self, sideQuestionContent === content || sideQuestionContent == nil else { return }
+                sideQuestionThreadID = nil
+            }
+            loadSideQuestions(thread.id)
+        }
+        if let question {
+            sideQuestionContent?.select(nil)
+            askSideQuestion(question, topicID: nil)
+        }
+    }
+
+    private func refreshSideQuestions() {
+        guard let threadID = sideQuestionThreadID else { return }
+        sideQuestionContent?.update(engine.sideQuestions(threadID), isLoading: loadingSideQuestions.contains(threadID), isStarting: engine.isStartingSideQuestion(threadID))
+    }
+
+    private func loadSideQuestions(_ threadID: String) {
+        loadingSideQuestions.insert(threadID)
+        refreshSideQuestions()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await engine.loadSideQuestions(threadID)
+            } catch where sideQuestionThreadID == threadID {
+                sideQuestionContent?.showError("Couldn’t read earlier side questions: \(error.localizedDescription)")
+            } catch {}
+            loadingSideQuestions.remove(threadID)
+            refreshSideQuestions()
+        }
+    }
+
+    private func askSideQuestion(_ question: String, topicID: String?) {
+        guard let threadID = sideQuestionThreadID else { return }
+        sideQuestionContent?.setPending(question)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let id = try await engine.askSideQuestion(threadID, question: question, topicID: topicID)
+                if sideQuestionThreadID == threadID { sideQuestionContent?.select(id) }
+            } catch is CancellationError {
+                // Stopped before omp took it up: nothing was asked.
+                if sideQuestionThreadID == threadID { sideQuestionContent?.setPending(nil) }
+            } catch {
+                guard sideQuestionThreadID == threadID, let content = sideQuestionContent else {
+                    await Dialogs.alert(title: "Couldn’t ask the side question", message: error.localizedDescription, in: view.window)
+                    return
+                }
+                content.setPending(nil)
+                content.showError(error.localizedDescription)
+                content.restore(question)
+            }
+        }
+    }
+
+    private func cancelSideQuestion() {
+        guard let threadID = sideQuestionThreadID else { return }
+        Task { await engine.cancelSideQuestion(threadID) }
+    }
+
     // MARK: Slash commands
 
     /// Opens, filters or closes the `/` menu for the token at the caret.
@@ -1134,7 +1284,11 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         if commands.isEmpty {
             if let thread { engine.loadCommands(forThread: thread.id) } else { engine.loadCommands(forDraft: selection.provider, projectID: state.draftProjectID) }
         }
-        let candidates = SlashCommandFilter.candidates(commands, includeCompact: thread.map { engine.canCompact($0.id) } ?? false)
+        let candidates = SlashCommandFilter.candidates(
+            commands,
+            includeCompact: thread.map { engine.canCompact($0.id) } ?? false,
+            includeSideQuestion: canAskSideQuestion
+        )
         let matches = SlashCommandFilter.matching(candidates, query: token.query)
         let emptyText = SlashCommandFilter.emptyText(hasCandidates: !candidates.isEmpty, query: token.query)
         if slashMenu != nil, let slashContent {

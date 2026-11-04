@@ -22,6 +22,8 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
     private var _closed = false
     var conversationID = "conv-1"
     var startTurnError: (any Error)?
+    /// Awaited by `start` (a slow process start).
+    var startGate: (@Sendable () async -> Void)?
 
     init(kind: ProviderKind) {
         self.kind = kind
@@ -44,6 +46,7 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
 
     func start(_ config: SessionConfig) async throws -> String {
         lock.withLock { _configs.append(config) }
+        await startGate?()
         return conversationID
     }
 
@@ -82,6 +85,36 @@ final class ScriptedSession: ProviderSession, @unchecked Sendable {
         lock.withLock { _subagentCancels.append(id) }
     }
 
+    /// What `askSideQuestion` answers (the topic omp reports started; it may emit events
+    /// first); nil = the question as a new running topic "btw-<n>".
+    var sideQuestionAnswer: (@Sendable (String, String?) async throws -> SideQuestion)?
+    var sideQuestionHistory: [SideQuestion] = []
+    private var _sideQuestions: [(question: String, topicID: String?)] = []
+    private var _sideQuestionCancels = 0
+    private var _historyReads = 0
+    var askedSideQuestions: [(question: String, topicID: String?)] { lock.withLock { _sideQuestions } }
+    var sideQuestionCancels: Int { lock.withLock { _sideQuestionCancels } }
+    var historyReads: Int { lock.withLock { _historyReads } }
+
+    func askSideQuestion(_ question: String, topicID: String?) async throws -> SideQuestion {
+        let count = lock.withLock {
+            _sideQuestions.append((question, topicID))
+            return _sideQuestions.count
+        }
+        if let sideQuestionAnswer { return try await sideQuestionAnswer(question, topicID) }
+        return SideQuestion(id: "btw-\(count)", first: SideQuestionExchange(question: question, status: .running, createdAt: Date(timeIntervalSince1970: TimeInterval(count))))
+    }
+
+    func cancelSideQuestion() async -> Bool {
+        lock.withLock { _sideQuestionCancels += 1 }
+        return true
+    }
+
+    func sideQuestions() async throws -> [SideQuestion] {
+        lock.withLock { _historyReads += 1 }
+        return sideQuestionHistory
+    }
+
     func close() async {
         lock.withLock { _closed = true }
         continuation.finish()
@@ -99,6 +132,8 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
     var listedCommands: [ProviderCommand]?
     private var _commandDirectories: [String] = []
     var commandDirectories: [String] { lock.withLock { _commandDirectories } }
+    /// Given to every new session (`ScriptedSession.startGate`).
+    var sessionStartGate: (@Sendable () async -> Void)?
 
     init(kind: ProviderKind = .omp) {
         self.kind = kind
@@ -114,6 +149,7 @@ final class ScriptedDriver: ProviderDriver, @unchecked Sendable {
 
     func makeSession() -> any ProviderSession {
         let session = ScriptedSession(kind: kind)
+        session.startGate = sessionStartGate
         lock.withLock { _sessions.append(session) }
         return session
     }

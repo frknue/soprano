@@ -411,6 +411,9 @@ extension AgentEngine {
                 endAtShutdown(thread.id, turn)
             }
         }
+        for assistant in environment.textAssistants.values {
+            await assistant.close()
+        }
         environment.store.flush()
     }
 

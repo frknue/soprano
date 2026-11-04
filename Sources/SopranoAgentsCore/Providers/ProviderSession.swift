@@ -81,6 +81,10 @@ public enum ProviderEvent: Sendable, Hashable {
     case sessionEnded(error: String?)
     /// One of the conversation's subagents changed (omp `subagent_*` frames).
     case subagent(id: String, SubagentEvent)
+    /// A side question was asked, or its status changed: the whole topic as the provider has it.
+    case sideQuestion(SideQuestion)
+    /// Append streamed answer text to topic `id`'s latest exchange.
+    case sideQuestionDelta(id: String, delta: String)
 }
 
 /// What a subagent's provider reports; the engine folds it into `AgentThread.subagents`.
@@ -181,6 +185,18 @@ public protocol ProviderSession: AnyObject, Sendable {
 
     /// Stops a running subagent without stopping the thread's turn.
     func cancelSubagent(_ id: String) async throws
+
+    /// Asks a side question about the conversation (a new topic, or a follow-up in `topicID`):
+    /// answered beside any running turn, never added to the conversation. Returns the topic once
+    /// the provider started it; the answer streams as `sideQuestionDelta` and the topic's status
+    /// changes as `sideQuestion` events. One side question runs at a time.
+    func askSideQuestion(_ question: String, topicID: String?) async throws -> SideQuestion
+
+    /// Cancels the running side question. False when none ran.
+    func cancelSideQuestion() async -> Bool
+
+    /// The conversation's side questions as the provider keeps them, newest first.
+    func sideQuestions() async throws -> [SideQuestion]
 
     /// Terminates the process. Safe to call twice.
     func close() async

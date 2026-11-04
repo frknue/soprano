@@ -17,6 +17,9 @@ public enum EngineEvent: Sendable, Hashable {
     case subagentChanged(threadID: String, subagentID: String)
     /// A thread's subagents were added, or one's status or activity line changed (the sidebar).
     case subagentListChanged(threadID: String)
+    /// A thread's side questions changed (asked, streaming, finished, history read): re-read
+    /// `sideQuestions(_:)`.
+    case sideQuestionsChanged(threadID: String)
 }
 
 /// Where a new thread works.
@@ -235,6 +238,8 @@ public struct EngineEnvironment: Sendable {
     public var files: any WorkspaceFileService
     /// The agent's recorded usage history for the statistics board.
     public var usage: any UsageStatisticsService
+    /// The composer's typing aids per provider (word completion, spelling preferences).
+    public var textAssistants: [ProviderKind: any TextAssistant]
     public var now: @Sendable () -> Date
 
     public init(
@@ -244,6 +249,7 @@ public struct EngineEnvironment: Sendable {
         dataDirectory: URL,
         files: any WorkspaceFileService = LiveWorkspaceFileService(),
         usage: any UsageStatisticsService = OmpUsageStatistics(),
+        textAssistants: [ProviderKind: any TextAssistant] = [:],
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.drivers = drivers
@@ -252,6 +258,7 @@ public struct EngineEnvironment: Sendable {
         self.dataDirectory = dataDirectory
         self.files = files
         self.usage = usage
+        self.textAssistants = textAssistants
         self.now = now
     }
 }
