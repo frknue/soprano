@@ -219,6 +219,33 @@ struct AgentDashboardViewTests {
         #expect(status.stringValue == "WORKING")
     }
 
+    @Test func withoutItsListTheDashboardShowsOnlyTheSelectedAgentAcrossTheWholeWidth() throws {
+        // The Soprano Agents window lists the agents in its own sidebar.
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let controller = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
+        controller.showsAgentList = false
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
+            styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false
+        )
+        window.contentViewController = controller
+        controller.selectEntry("\(paneId):\(tabId)")
+        controller.view.layoutSubtreeIfNeeded()
+
+        let rows = allSubviews(in: controller.view).filter { $0.identifier?.rawValue == "agent-dashboard-row" }
+        let visibleRows = rows.filter { !$0.isHiddenOrHasHiddenAncestor }
+        #expect(!rows.isEmpty)
+        #expect(visibleRows.isEmpty)
+        let title = try #require(allSubviews(in: controller.view).compactMap { $0 as? NSTextField }.first {
+            $0.identifier?.rawValue == "agent-dashboard-detail-title"
+        })
+        #expect(!title.isHiddenOrHasHiddenAncestor)
+        #expect(title.convert(title.bounds, to: controller.view).minX < 80)
+    }
+
     @Test func rowsShowTheTaskOverTheAgentAndFolderAndFollowRenamesAndDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))

@@ -42,7 +42,7 @@ final class SidebarTerminalCell: InteractiveView {
         switch status {
         case .needsInput: Icon.messageQuestion
         case .failed: Icon.circleAlert
-        case .working: Icon.circleDashed
+        case .starting, .working: Icon.circleDashed
         case .ready: Icon.circleCheck
         case .stopped: Icon.circleStop
         }
@@ -52,7 +52,7 @@ final class SidebarTerminalCell: InteractiveView {
         switch status {
         case .needsInput: .input
         case .failed: .failed
-        case .working: .working
+        case .starting, .working: .working
         case .ready: .done
         case .stopped: .muted
         }

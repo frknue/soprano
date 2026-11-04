@@ -15,7 +15,7 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   inline, per-turn diffs, worktrees, a terminal drawer and the Diff and Files panel — and
   `⇧⌘A` there closes it again and brings the terminal window back (`⇧⌘T` shows the terminal
   window without closing it). It lists the agents running in your terminal panes under
-  **Terminals** in its sidebar; clicking one opens them in the Agent Dashboard there, to read
+  **Terminals** in its sidebar; clicking one opens that agent in the main area, to read
   along, reply, stop or restart. Side questions (`/btw`, `⇧⌘I`) and omp's typing aids come
   along. The window keeps its own shortcuts and menu bar while it is in front (Permissions
   moves to `⇧⌘R` there), its threads keep working after it closes, and it reopens on the

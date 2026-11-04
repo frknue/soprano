@@ -1,10 +1,11 @@
 import AppKit
 
-/// The Terminal Agents board: Soprano's Agent Dashboard over the agents in Soprano's terminal
-/// panes, covering the chat column and the right panel while
-/// `WorkspaceState.isTerminalAgentsVisible`. It keeps the dashboard's list, detail and reply
-/// field (replies type into the agent's terminal); Esc or the close button hides the board, Open
-/// (↵, double-click, the toolbar's Open) shows the agent's pane in Soprano's terminal window.
+/// The Terminal Agents board: one agent from Soprano's terminal panes, covering the chat column
+/// and the right panel while `WorkspaceState.isTerminalAgentsVisible`. The sidebar's Terminals
+/// section is the list; the board is Soprano's Agent Dashboard without its own list and header:
+/// the agent's transcript or live terminal text and the reply field (replies type into the
+/// agent's terminal). Esc hides the board, Open (↵, the toolbar's Open) shows the agent's pane in
+/// Soprano's terminal window.
 ///
 /// The dashboard is built when the board opens and dropped when it closes, so its timers,
 /// transcript reading and key handling never run behind the chat.
@@ -30,6 +31,9 @@ final class TerminalAgentsViewController: NSViewController {
         ThemeCenter.shared.addObserver(self) { [weak self] theme in
             self?.dashboard?.apply(theme: theme)
         }
+        state.addObserver(self) { [weak self] change in
+            if change == .panels { self?.updateContentTop() }
+        }
     }
 
     var hasFocus: Bool {
@@ -37,7 +41,7 @@ final class TerminalAgentsViewController: NSViewController {
         return responder.isDescendant(of: view)
     }
 
-    /// The dashboard's agent list takes the keyboard (J/K, ↵, Tab to reply).
+    /// The dashboard takes the keyboard (↵ opens the pane, Tab replies, Esc closes).
     func takeFocus() {
         guard let dashboard else { return }
         view.window?.makeFirstResponder(dashboard.view)
@@ -47,6 +51,7 @@ final class TerminalAgentsViewController: NSViewController {
     func didOpen() {
         guard dashboard == nil, let source else { return }
         let dashboard = source.makeDashboard(themeManager: ThemeCenter.shared.manager)
+        dashboard.showsAgentList = false
         dashboard.onDismiss = { [weak self] in
             self?.state.setTerminalAgentsVisible(false)
         }
@@ -57,13 +62,24 @@ final class TerminalAgentsViewController: NSViewController {
         let content = dashboard.view
         content.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(content)
+        let top = content.topAnchor.constraint(equalTo: view.topAnchor)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            content.topAnchor.constraint(equalTo: view.topAnchor),
+            top,
             content.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        contentTop = top
         self.dashboard = dashboard
+        updateContentTop()
+    }
+
+    private var contentTop: NSLayoutConstraint?
+
+    /// With the sidebar hidden, the window's traffic lights sit over the board's corner: the
+    /// agent starts below the title bar instead.
+    private func updateContentTop() {
+        contentTop?.constant = state.isSidebarVisible ? 0 : Metrics.topbarHeight
     }
 
     /// Selects the agent a sidebar row asked for, once.

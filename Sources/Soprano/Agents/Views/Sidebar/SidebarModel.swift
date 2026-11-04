@@ -82,10 +82,12 @@ struct SidebarTerminalRow: Equatable {
     }
 }
 
-/// A pane agent's status word in the Terminals section.
+/// A pane agent's status word in the Terminals section: the Agent Dashboard's words, so the
+/// sidebar row and the agent it opens never disagree.
 enum SidebarTerminalStatus: Equatable {
     case needsInput
     case failed
+    case starting
     case working
     case ready
     case stopped
@@ -98,7 +100,8 @@ enum SidebarTerminalStatus: Equatable {
         switch entry.status {
         case .waiting: self = .needsInput
         case .error: self = .failed
-        case .running, .starting: self = .working
+        case .starting: self = .starting
+        case .running: self = .working
         case .idle: self = .ready
         case .stopped: self = .stopped
         }
@@ -108,6 +111,7 @@ enum SidebarTerminalStatus: Equatable {
         switch self {
         case .needsInput: "Needs input"
         case .failed: "Error"
+        case .starting: "Starting"
         case .working: "Working"
         case .ready: "Ready"
         case .stopped: "Stopped"

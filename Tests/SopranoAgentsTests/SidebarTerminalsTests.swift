@@ -109,7 +109,7 @@ struct SidebarTerminalsTests {
     @Test func statusWordsFollowWhatTheAgentWaitsFor() {
         let cases: [(AgentStatus, Bool, SidebarTerminalStatus, String)] = [
             (.running, false, .working, "Working"),
-            (.starting, false, .working, "Working"),
+            (.starting, false, .starting, "Starting"),
             (.waiting, false, .needsInput, "Needs input"),
             (.idle, true, .needsInput, "Needs input"),
             (.error, false, .failed, "Error"),

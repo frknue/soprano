@@ -687,9 +687,9 @@ steering the agent with `/btw` (`⇧⌘I`); the composer underlines typos and sh
 prediction as ghost text.
 
 It also shows the agents running in your terminal panes: they are listed under
-**Terminals** at the top of its sidebar with their status, and clicking one opens them in
-the Agent Dashboard over the chat, where you can read along, reply into the agent's
-terminal, stop or restart it, or jump to its pane.
+**Terminals** at the top of its sidebar with their status, and clicking one opens that
+agent in the main area, where you can read along, reply into the agent's terminal, stop or
+restart it, or jump to its pane.
 
 Open it with **`⇧⌘A`**, **Commands ▸ Soprano Agents**, or `⌘P` → *Soprano Agents*, and
 press `⇧⌘A` in it to close it and go back to the terminal window. It is a second window of

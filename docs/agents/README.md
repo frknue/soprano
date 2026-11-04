@@ -79,11 +79,11 @@ page shows omp's version and health.
    hour, day, week or month and breakdowns by model (click one to filter), project and agent. It reads
    omp's own usage records (`omp stats`), so every omp session on this Mac counts.
 11. The agents running in Soprano's terminal panes (Codex, Claude Code, OpenCode, omp's terminal
-   UI) are listed under **Terminals** at the top of the sidebar, with their status (Working, Needs
-   input, Ready, Stopped). Click one, or run *Terminal Agents* from `⌘K` or the View menu, to open
-   them over the chat: J/K to pick an agent, its transcript or live terminal text, Tab to reply
-   (typed into its terminal), Stop, Restart, Return to open it in the terminal window, Esc to
-   close.
+   UI) are listed under **Terminals** at the top of the sidebar, with their status (Starting,
+   Working, Needs input, Ready, Stopped). Click one to open it in the main area: its transcript or
+   live terminal text, Tab to reply (typed into its terminal), Stop, Restart, Return to open it in
+   the terminal window, Esc to close. *Terminal Agents* in `⌘K` or the View menu opens the most
+   urgent one.
 
 `⌘K` (or `⌘P`) opens the command palette, Soprano's own: every action with its shortcut, threads,
 projects and settings pages. When the Agents window is not in front (Soprano in the background, or

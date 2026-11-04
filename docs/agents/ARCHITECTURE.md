@@ -529,11 +529,13 @@ last data of the same period (another period's data is dropped); a failed sync s
 above what was recorded before it.
 
 The terminal agents board (`TerminalAgentsViewController`, `terminals.toggle` or a row of the
-sidebar's Terminals section) embeds Soprano's own `AgentDashboardViewController`, built when the
-board opens and released when it closes: the agents running in Soprano's terminal panes (Codex,
-Claude Code, OpenCode, omp's TUI), grouped Needs you / Working / Ready / Stopped, with transcript,
+sidebar's Terminals section) embeds Soprano's own `AgentDashboardViewController` with
+`showsAgentList = false`, built when the board opens and released when it closes: one agent from
+Soprano's terminal panes (Codex, Claude Code, OpenCode, omp's TUI), full width, with transcript,
 live terminal text, a reply field that types into the agent's terminal (Tab), Stop, Restart, and
-Open (focus the pane in the terminal window). Esc closes it. The Agents code reaches Soprano only
+Open (focus the pane in the terminal window). The sidebar is the list (no J/K inside the board);
+with the sidebar hidden the board starts below the title bar, clear of the window buttons. Esc
+closes it. The Agents code reaches Soprano only
 through `TerminalAgentsSource` (`Agents/Shell/`): `entries` (Soprano's `AgentDashboardEntry`),
 change observers, `makeDashboard(themeManager:)` and `openInTerminal(_:)`. `AppDelegate` builds the
 live source from `AgentManager` and the terminal window's split tree
@@ -541,7 +543,8 @@ live source from `AgentManager` and the terminal window's split tree
 (a working Codex, a Claude Code waiting for input, a ready omp; every scenario but `empty`).
 The sidebar's Terminals section (top of the list, collapsible, hidden while searching, only
 when a pane agent exists) shows one `SidebarTerminalCell` per agent: task or agent name, status
-word (Working, Needs input, Error, Ready, Stopped; tinted when it needs you) and "agent · window".
+word (the dashboard's: Starting, Working, Needs input, Error, Ready, Stopped; tinted when it needs
+you) and "agent · window".
 
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's

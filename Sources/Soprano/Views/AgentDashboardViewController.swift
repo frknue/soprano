@@ -22,6 +22,10 @@ final class AgentDashboardViewController: NSViewController {
 
     var onDismiss: (() -> Void)?
     var onAgentSelected: ((String, String) -> Void)?
+    /// False shows only the selected agent, full width, without the header and the agent
+    /// list: the Soprano Agents window lists the agents in its own sidebar and picks one with
+    /// `selectEntry`. Set before the view loads.
+    var showsAgentList = true
 
     private let terminalStateProvider: TerminalStateProvider
     private let promptSender: PromptSender
@@ -178,11 +182,22 @@ final class AgentDashboardViewController: NSViewController {
             listPanel.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             listPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
-            detailView.leadingAnchor.constraint(equalTo: listPanel.trailingAnchor),
             detailView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            detailView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             detailView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
+        if showsAgentList {
+            NSLayoutConstraint.activate([
+                detailView.leadingAnchor.constraint(equalTo: listPanel.trailingAnchor),
+                detailView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            ])
+        } else {
+            headerView.isHidden = true
+            listPanel.isHidden = true
+            NSLayoutConstraint.activate([
+                detailView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                detailView.topAnchor.constraint(equalTo: root.topAnchor),
+            ])
+        }
 
         self.view = root
         refresh()
@@ -426,7 +441,7 @@ final class AgentDashboardViewController: NSViewController {
     }
 
     private func moveSelection(by delta: Int) {
-        guard !agentRows.isEmpty else { return }
+        guard showsAgentList, !agentRows.isEmpty else { return }
         let currentIndex = selectedEntryId.flatMap { selectedId in
             agentRows.firstIndex { $0.entry.id == selectedId }
         } ?? 0
