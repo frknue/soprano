@@ -44,7 +44,9 @@ The installer never restarts a running Soprano Agents; the update applies on the
 2. Pick a model (`⇧⌘M`), permissions (`⇧⌘A`) and workspace (`⇧⌘X`: current checkout or a
    new worktree), type, and press Return.
 3. While the agent works, sending again steers the running turn (or queues, per
-   **Settings › General › Follow-up behavior**); `⌘↩` does the other one.
+   **Settings › General › Follow-up behavior**); `⌘↩` does the other one. To ask something
+   without steering it, send `/btw <question>` or press `⇧⌘I`: the answer appears in a panel
+   above the composer, takes follow-ups, and never joins the conversation (omp's `/btw`).
 4. Approve or decline commands and file changes inline; answer the agent's questions in the
    composer.
 5. Open a turn's diff from its changed-files card, or the whole thread's with `⌘D`. "Edit from
@@ -58,10 +60,15 @@ The installer never restarts a running Soprano Agents; the update applies on the
 7. The ring next to Send shows how full the context window is; click it to compact the
    conversation (or send `/compact`). Type `/` at the start of a line for omp's commands and
    skills: ↑/↓ choose, Enter or Tab insert, Esc closes.
-8. Several Claude and Codex accounts for omp, as in Soprano: the account button at the bottom of
+8. The composer has omp's typing aids: misspellings and grammar problems are underlined (code,
+   paths and identifiers are left alone; right-click for corrections), and omp predicts the word
+   you are typing as grey ghost text — Tab accepts it with a space, → without. They follow omp's
+   `spelling.typoDetection`, `spelling.autocorrect` and `spelling.autocomplete` settings
+   (`omp config set …`), picked up when you switch back to the app.
+9. Several Claude and Codex accounts for omp, as in Soprano: the account button at the bottom of
    the sidebar (tinted near a limit; `⌘U` for details) and **Settings › Accounts** to add logins
    and let omp prefer one or balance across them.
-9. Statistics (`⇧⌘U`, or the chart button next to Settings), as in T3 Code's Usage page: omp's
+10. Statistics (`⇧⌘U`, or the chart button next to Settings), as in T3 Code's Usage page: omp's
    tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all time, with a chart per
    hour, day, week or month and breakdowns by model (click one to filter), project and agent. It reads
    omp's own usage records (`omp stats`), so every omp session on this Mac counts.
@@ -103,6 +110,7 @@ right-panel tab) has focus.
 | Permissions | `⇧⌘A` | not terminal |
 | Workspace | `⇧⌘X` | not terminal |
 | Branch | `⇧⌘G` | not terminal |
+| Ask a Side Question (`/btw`) | `⇧⌘I` | not terminal |
 | Steer or Queue (the other one) | `⌘↩` | composer |
 | Toggle Diff | `⌘D` | not terminal |
 | Toggle Files | `⇧⌘F` | not terminal |

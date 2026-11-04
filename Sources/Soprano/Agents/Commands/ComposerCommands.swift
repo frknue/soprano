@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// Composer module: model picker, effort, permissions, workspace, branch, send alternate, stop,
-/// compaction.
+/// compaction, side questions.
 @MainActor
 enum ComposerCommands {
     /// `!terminalFocus`.
@@ -122,6 +122,18 @@ enum ComposerCommands {
                 isEnabled: { composer($0)?.canCompact ?? false }
             ) { context in
                 revealedComposer(context)?.compactConversation()
+            },
+            AppCommand(
+                id: "thread.sideQuestion",
+                title: "Ask a Side Question",
+                description: "Ask about the thread without steering it (/btw)",
+                category: .thread,
+                scopes: notTerminal,
+                defaultKeys: ["cmd+shift+i"],
+                icon: "bubble.left.and.text.bubble.right",
+                isEnabled: { composer($0)?.canAskSideQuestion ?? false }
+            ) { context in
+                revealedComposer(context)?.showSideQuestions()
             },
         ]
     }

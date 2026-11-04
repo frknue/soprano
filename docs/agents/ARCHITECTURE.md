@@ -35,7 +35,7 @@ swift test
 | `Sources/SopranoAgents/Shell/`, `App/`, `Views/Palette/`, `Views/Settings/`, `Notifications/`, `Commands/AppCommand.swift`, `ShellCommands.swift` | Shell | App delegate, menus, window, workspace layout, `WorkspaceState`, settings (`SettingsCenter`, resolver, template), keymap + router, `Dialogs`, command palette, settings screen, notifications, snapshot harness. |
 | `Sources/SopranoAgents/Views/Sidebar/`, `Views/Chat/ChatHeaderView.swift`, `SidebarCommands.swift` | Sidebar | Thread inbox (with subagent rows under their thread's card, `SubagentActions`), chat header + title-bar toggles. |
 | `Sources/SopranoAgents/Views/Timeline/`, `TimelineCommands.swift` | Timeline | Message timeline, Markdown renderer, work log, cards. |
-| `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, draft hero + context strip. |
+| `Sources/SopranoAgents/Views/Composer/`, `ComposerCommands.swift` | Composer | Composer, pickers, context meter + card, `/` command menu, side-question panel, draft hero + context strip. |
 | `Sources/SopranoAgents/Views/Panels/`, `PanelCommands.swift` | Panels | Right panel (tabs, launcher; Diff, Files explorer, file viewer and terminal surfaces), terminal drawer, `ThreadTerminalStore` (every terminal of the window), Thread details card (editor, scripts, branch, git actions). |
 | `Sources/SopranoAgents/Views/Accounts/`, `Views/Settings/SettingsAccountsPage.swift`, `Commands/AccountCommands.swift`, `Fixtures/AccountFixtures.swift` | Accounts | `AccountsSource` / `AccountsCenter` (the UI's only door to accounts), sidebar account button, usage card, Settings → Accounts, account fixtures. |
 | `Sources/SopranoAgents/Views/Statistics/`, `Commands/StatisticsCommands.swift`, `Fixtures/FixtureUsageStatistics.swift` | Statistics | Statistics board (header, periods, Cost/Tokens, tiles, stacked chart, model/project/agent breakdowns), `StatisticsFormat`, fixture usage history. |
@@ -60,22 +60,24 @@ Views read `projects`, `threads`, `thread(_:)`, `project(_:)`, `status(of:)`, `s
   (streaming deltas: re-render just that row), `.providersChanged`, `.commandsChanged` (re-read
   the command lists), `.subagentChanged(threadID:subagentID:)` (a subagent's runs or items,
   streaming too), `.subagentListChanged(threadID:)` (a subagent added, or its status or activity
-  line changed: the sidebar).
+  line changed: the sidebar), `.sideQuestionsChanged(threadID:)` (a side question asked,
+  streaming, finished, or the history read).
 - Mutations: `addProject`, `removeProject`, `rename`, `setPinned`, `setSettled`, `setArchived`,
   `markVisited`, `markUnread`, `setModelSelection`, `setRuntimeMode`,
   `launchThread`, `send`, `interrupt`, `respond`, `answer`, `dismissUserInput`, `sendQueuedNow`,
   `cancelQueued`, `revert`, `turnDiff`, `regenerateTitle`, `deleteThread`, `gitStatus`,
   `runGitAction`, `importAttachment`, `refreshProviders`, `shutdown`, `canCompact`, `compact`,
   `rememberCommands`, `loadCommands(forThread:)`, `loadCommands(forDraft:projectID:)`,
-  `steerSubagent`, `cancelSubagent`. Reads: `subagent(_:_:)`,
+  `steerSubagent`, `cancelSubagent`, `askSideQuestion`, `cancelSideQuestion`,
+  `loadSideQuestions`, `restoreSideQuestions`. Reads: `subagent(_:_:)`, `sideQuestions(_:)`,
   `workingDirectory(of:)`, `workspaceKeys`, `workspaceLocation`,
   `workspaceFiles`, `readWorkspaceFile`, `workspaceFileURL` (all by `WorkspaceRef`: `.thread(id)`
   or `.draft(projectID:)`, the project root a "Current checkout" thread will use; `key` is the
   UI's per-workspace dictionary key), `commands(forThread:)`, `commands(forDraft:projectID:)`,
   `usageHistory(_:sync:)`, `usageFolderTitles()`.
   Contracts in the doc comments of `AgentEngine.swift`, `AgentEngine+Turns.swift`,
-  `AgentEngine+Files.swift`, `AgentEngine+Workspace.swift`, `AgentEngine+Commands.swift` and
-  `AgentEngine+Usage.swift`.
+  `AgentEngine+Files.swift`, `AgentEngine+Workspace.swift`, `AgentEngine+Commands.swift`,
+  `AgentEngine+SideQuestions.swift` and `AgentEngine+Usage.swift`.
 
 Engine behavior:
 - Workspace: an agent only ever runs in the thread's working directory. Projectless threads get
@@ -159,6 +161,42 @@ Engine behavior:
   the known one; then it gets a new entry (`Subagent.id` "Reader#2", `providerID` "Reader").
   Views select and address subagents by `id`; messages and Stop reach omp by `name`. "Edit from
   here" drops the subagents its rewound turns started.
+- Side questions (`AgentEngine+SideQuestions.swift`, omp's `/btw`): `askSideQuestion(thread,
+  question:, topicID:)` asks about the thread's conversation (a new topic, or a follow-up in
+  one) beside any running turn; the answer never joins the conversation or the timeline. It needs
+  a conversation (a live session or one to resume, which it starts like `send`) and refuses while
+  another side question runs or starts. `cancelSideQuestion` also stops one still starting
+  (`ThreadRuntime.isAskingSideQuestion`): before the session is up or omp took it, the ask throws
+  `CancellationError` and nothing is asked; a topic omp started after a cancel that found nothing
+  is cancelled right away. Never the thread's turn. Topics (`SideQuestion`: first exchange plus follow-ups, each with
+  question, streamed answer, status, error) live in `ThreadRuntime.sideQuestions` (newest first,
+  not persisted: omp keeps the history beside the session). `ProviderEvent.sideQuestion`
+  replaces a topic, `.sideQuestionDelta` appends to a running topic's latest answer; the ask's
+  own answer only adds a topic or follow-up not reported yet, so it never rolls back streamed
+  text. `loadSideQuestions` reads the provider's history (resuming the session for a thread with
+  a conversation and none this run; read once without a live session, again with one unless a
+  side question runs); `restoreSideQuestions` merges the read into the list without rolling a
+  known topic back (the read may predate events: a topic it lacks stays; the known copy wins with
+  more follow-ups, when finished where the read still runs, or when it streamed further) and
+  seeds the snapshot fixtures. `isStartingSideQuestion` reports an ask not reported yet (its
+  changes announce `.sideQuestionsChanged`). The session's end marks a running topic
+  interrupted; a new conversation id (a rewind's fork or new session) forgets the list.
+- Typing aids (`AgentEngine+TextAssist.swift`, `EngineEnvironment.textAssistants`, one
+  `TextAssistant` per provider for the whole run, closed at shutdown): `textAssistPreferences`
+  (`TextAssistPreferences`: typo detection, autocorrect, word completion; no assistant = marks on,
+  the rest off), `predictWord(provider, text:, cursor:)` (ghost-text suffix for the word ending at
+  the UTF-16 `cursor`, nil when nothing applies; cancelling the caller abandons it) and
+  `reportWordCompletion(…, accepted:)`. They work without a conversation, so drafts have them.
+  `OmpTextAssistant` (built in `EngineFactory`) reads omp's `spelling.typoDetection`,
+  `spelling.autocorrect` and `spelling.autocomplete` from `omp config list --json` (about 60 ms,
+  fresh per call) and predicts with `predict_word {text, cursor}` → `{suffix}` /
+  `predict_word_feedback {text, cursor, suggestion, accepted}` on one long-lived helper
+  `omp --mode rpc --no-session --no-extensions --no-skills --no-rules --no-lsp` in the home folder,
+  started by the first prediction (about 0.7 s cold, then under a millisecond; omp's text-predict
+  daemon does the work, honors `spelling.autocomplete`, answers one request at a time and a
+  superseded waiting one null; a request waits up to 155 s, omp's own budget for a cold daemon,
+  unless the next keystroke cancels it). A helper that exits restarts with the next prediction, one that
+  fails to start is not retried for 30 s, one idle for 10 minutes is stopped; feedback never starts it.
 
 ### Providers (Core/Providers)
 `ProviderDriver` creates `ProviderSession`s, probes the CLI (`probe()` → version, health,
@@ -257,7 +295,14 @@ messages get a synthesized `messageId`
 since subagent events carry none, then go through a per-subagent `OmpEventMapper`; tool
 updates after a tool's end are dropped; `agent_end` ends the run, `stopReason` aborted →
 interrupted, error → failed). `steer_subagent {subagentId, message}`, `cancel_subagent
-{subagentId}`. A restart or the process's end reports running subagents aborted. Rollback before a turn: `get_entries`, the
+{subagentId}`. A restart or the process's end reports running subagents aborted. Side questions:
+`btw {question, recordId?}` (a follow-up names its topic; omp writes the started `btw_record`
+before the response, then `btw_delta {recordId, delta}` frames and the finished `btw_record`),
+`btw_cancel`, `get_btw_history` (`records`, newest first); a `BtwHistoryRecord` (`id`,
+`question`, `answer`, `status` running/complete/cancelled/error/interrupted, `createdAt`/`updatedAt`
+in epoch ms, `error?`, `followUps?`) becomes a `SideQuestion` (`OmpProtocol.sideQuestion`). omp's
+command list has no `btw` under RPC. A restart or the process's end reports the running topic
+interrupted with the answer streamed so far. Rollback before a turn: `get_entries`, the
 turn's entry (its `providerTurnID`; turns recorded as `prompt-N` count user-authored, non-steering
 user messages), then `fork {entryId}` of the last `message` entry before it on the current
 branch, or `new_session` when none; the new `sessionFile` becomes the conversation id.
@@ -424,7 +469,39 @@ replace the token with `insertText` (keeping what follows), Escape hides the men
 leaves the token, Enter never sends while it shows (with nothing to pick it closes the menu). It
 closes on send, focus loss, thread switch and when another of the app's windows becomes key
 (palette, dialog, settings); app deactivation keeps it. Text the composer sets itself never opens
-it; the editor has inline predictions and text completion off.
+it; the editor has the system's inline predictions and text completion off.
+
+Typing aids (`ComposerTextAssist.swift`), read from `engine.textAssistPreferences` at start and
+whenever the app becomes active, as omp's terminal composer has them: with typo detection the
+editor marks misspellings and grammar problems with the macOS dictionaries (continuous spelling
+and grammar checking; the right-click menu offers corrections), except in code — inline `code`,
+``` and ~~~ fences, and words that read as code or references (`ComposerProse`: `/`, `\`, `.`, `_`, `:`,
+brackets and other symbols inside, digits, an inner capital after a lowercase letter, a leading
+`-`, `/`, `@`, `#`, `$` or `~`; `*emphasis*` stays prose); a grammar mark touching such a word goes too. Autocorrect follows
+`spelling.autocorrect`. Word completion (`ComposerWordCompletion`) asks
+`engine.predictWord` on every edit while nothing is selected, a letter precedes the caret and
+nothing follows it on its line (not while the `/` menu shows or text is being composed), and
+draws the suffix after the caret in the placeholder color (`ComposerTextView.ghostText`). Tab
+inserts it plus a space, → inserts it alone (both report it accepted); typing letters that
+follow it keeps showing the rest until the provider answers again, typing that diverges reports
+it typed past. Moving the caret, losing focus or text the composer sets clears it.
+
+The side-question panel (`SideQuestionPanelContent`, omp's `/btw`) is a key-taking
+`ComposerPopover` above the composer at its width, for the selected thread (also while one of
+its subagents is selected; never a draft, which gets an alert). `thread.sideQuestion` (⇧⌘I)
+opens it (Escape or × closes it), a message that is `/btw` opens it and `/btw <question>` asks right away (the `/`
+menu lists the app's `/btw` row for threads; attachments stay in the composer). Without a
+selected topic it lists the thread's topics newest first (question, status or the answer's
+first line, "N questions", relative time; ↑/↓, Enter or a click opens one) or a hint, and the
+field asks a new question; a topic shows each question with its answer as assistant Markdown
+("Thinking…" until text streams, Cancelled / Interrupted / Failed lines) and the field asks a
+follow-up; ‹ goes back to the list. Stop (and Escape) cancels a running answer, else Escape
+closes; Copy copies the topic's latest answer. Opening it reads the history
+(`engine.loadSideQuestions`; errors show in the panel), and a question that fails shows its
+error there and goes back into the field. The transcript scrolls past 360 pt and follows the
+stream while scrolled to its end. Closing the panel never cancels the answer; a panel opened
+again shows Stop while a question from the earlier one is still starting. `/btw` also works while
+the agent asks a question: it is never sent as the answer.
 
 The sidebar footer ends with the account button after the gear and the statistics button
 (`AccountButton`, `person.crop.circle`): muted while every headline Claude and Codex login's
@@ -507,6 +584,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `composer.sendAlternate` | Steer or Queue (opposite) | composer | `cmd+enter` | Composer |
 | `thread.stop` | Interrupt | global | — | Composer |
 | `thread.compact` | Compact Conversation | — | — | Composer |
+| `thread.sideQuestion` | Ask a Side Question (`/btw`) | not terminal | `cmd+shift+i` | Composer |
 | `diff.toggle` | Toggle Diff | not terminal | `cmd+d` | Panels |
 | `files.toggle` | Toggle Files | not terminal | `cmd+shift+f` | Panels |
 | `files.search` | Search Files | — | — | Panels |
@@ -588,7 +666,7 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 - Motion: opacity/scale fades ≤ 200 ms, none under Reduce Motion; streaming text appears without
   animation.
 - Floating surfaces that must appear in snapshots (palette, model picker, menus of the composer,
-  branch picker, thread details popovers, context card, `/` command menu, usage card) are child windows of the main window
+  branch picker, thread details popovers, context card, `/` command menu, side-question panel, usage card) are child windows of the main window
   (`window.addChildWindow(_:ordered:)`), not `NSPopover`. Context menus are native `NSMenu`.
 
 ## Verification harness
@@ -603,8 +681,9 @@ router as global). A right-panel terminal tab is focus region `terminal`, like t
 of it and its child windows. `--perform` runs any registered command (open the palette, the model
 picker, `files.toggle`, `files.search`, `rightPanel.newTerminal`, …); `--open-file` opens a
 workspace-relative file tab; `--settings` opens the settings screen on a page; `--dialog` presents a sample
-`Dialogs` dialog; `--type` inserts text into the first responder (of the topmost overlay when one
-shows); `--keys` replays chords through the router (or into the topmost overlay); `--hover` sets
+`Dialogs` dialog; `--type` inserts text into the first responder (of the topmost overlay, else
+of a key-taking child window such as the palette or the side-question panel, when one shows);
+`--keys` replays chords through the router (or into the topmost overlay or key-taking child window); `--hover` sets
 the hover state of the `InteractiveView` with that accessibility label or tooltip; `--click` sends
 a real mouse down/up at its center through the window, so whatever the window hit-tests there
 (including a view drawn over the control) gets the click, as it would live. Clicks in the
@@ -616,7 +695,13 @@ fixture is a running turn with an applied edit and a write whose code is still s
 The demo fixture's thread reports 124k of 200k context tokens and the engine remembers an omp
 command list for it and the `app` project: `--perform composer.focus --type "/re"` opens the
 filtered `/` menu, `--click "Context: 124k / 200k tokens (62%)"` the context card, and
-`--fixture failed --perform composer.focus --type "/"` the empty state. `--fixture background`
+`--fixture failed --perform composer.focus --type "/"` the empty state. Every fixture's typing
+aids are `FixtureTextAssistant` (omp's default preferences; words from a fixed vocabulary):
+`--perform composer.focus --type "fix the login redi" --wait 1` shows the ghost "rect", adding
+`--keys tab` accepts it; misspellings typed with `--wait 3` show their marks. The demo thread has two
+side questions (one with a follow-up) and the running thread one still answering:
+`--perform thread.sideQuestion` opens the list (`--keys "down enter"` the follow-up topic;
+`--fixture running` shows the running one with Stop). `--fixture background`
 adds and selects an omp thread whose turn yielded while a background job runs (finished turn,
 an advisor's Concern, "Background work still running…" row, Send instead of Stop);
 `--fixture answered` one whose final answer arrived while omp still wraps up the turn (Working,

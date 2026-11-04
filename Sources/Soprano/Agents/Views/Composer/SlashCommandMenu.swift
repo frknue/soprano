@@ -69,12 +69,26 @@ enum SlashCommandFilter {
         insertText: "/compact "
     )
 
+    /// The app's own `/btw` row (side questions, `SideQuestionCommand`), listed for threads.
+    static let sideQuestionCommand = ProviderCommand(
+        name: "btw",
+        kind: .command,
+        description: "Ask a side question without steering the thread",
+        argumentHint: "<question>",
+        source: "App",
+        insertText: "/btw "
+    )
+
     /// The provider's `/` commands, plus the app's `/compact` row when `includeCompact` and the
-    /// provider has none of its own.
-    static func candidates(_ commands: [ProviderCommand], includeCompact: Bool) -> [ProviderCommand] {
+    /// provider has none of its own, and the app's `/btw` row when `includeSideQuestion`.
+    static func candidates(_ commands: [ProviderCommand], includeCompact: Bool, includeSideQuestion: Bool = false) -> [ProviderCommand] {
         var result = commands.filter { $0.insertText.first == "/" }
         if includeCompact, !result.contains(where: { $0.insertText.trimmingCharacters(in: .whitespaces) == "/compact" }) {
             result.append(compactCommand)
+        }
+        if includeSideQuestion {
+            result.removeAll { $0.insertText.trimmingCharacters(in: .whitespaces) == SideQuestionCommand.prefix }
+            result.append(sideQuestionCommand)
         }
         return result
     }

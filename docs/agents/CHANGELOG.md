@@ -101,6 +101,14 @@ All notable changes to Soprano Agents are documented here. The format follows
   click to toggle the thread details (⇧⌘B).
 - Open in Soprano Git (⌃A then G, as in Soprano; also File menu and palette): opens the thread's
   or new thread's repository in Soprano Git, or selects its tab there if already open.
+- Side questions (omp's `/btw`): send `/btw <question>` or press ⇧⌘I to ask about a thread
+  without steering it, even while the agent works. The answer streams into a panel above the
+  composer and never joins the conversation; a topic takes follow-ups, Stop or Esc cancels a
+  running answer, Copy copies it, and the panel lists the thread's earlier side questions,
+  including ones asked in omp's terminal UI.
+- omp's typing aids in the composer: misspellings and grammar problems are underlined (code,
+  paths and identifiers are left alone), and omp predicts the word you are typing as ghost text —
+  Tab accepts it with a space, → without. Both follow omp's `spelling.*` settings.
 
 ### Changed
 

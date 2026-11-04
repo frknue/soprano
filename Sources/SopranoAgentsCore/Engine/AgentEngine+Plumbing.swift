@@ -329,6 +329,7 @@ extension AgentEngine {
             }
         }
         abortSubagents(threadID)
+        interruptSideQuestions(threadID)
         if let session {
             Task { await session.close() }
         }
@@ -339,6 +340,7 @@ extension AgentEngine {
     func apply(_ event: ProviderEvent, threadID: String) {
         switch event {
         case let .conversationID(id):
+            if let previous = thread(threadID)?.providerThreadID, previous != id { forgetSideQuestions(threadID) }
             updateThread(threadID) { $0.providerThreadID = id }
         case let .turnStarted(providerTurnID):
             guard let turnID = thread(threadID)?.openTurn?.id else { return }
@@ -402,6 +404,10 @@ extension AgentEngine {
             sessionEnded(threadID, error: error)
         case let .subagent(id, event):
             applySubagent(id, event, threadID: threadID)
+        case let .sideQuestion(record):
+            upsertSideQuestion(record, threadID: threadID)
+        case let .sideQuestionDelta(id, delta):
+            appendSideQuestionAnswer(id, delta: delta, threadID: threadID)
         }
     }
 

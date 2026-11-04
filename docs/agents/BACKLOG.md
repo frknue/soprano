@@ -64,8 +64,9 @@ bewusst nicht gebaut wird; ein Eintrag, der gestrichen wird, wandert dorthin.
 - Gewünscht am 2026-10-29. Gibt es in der Codex-App, Claude Desktop und Conductor.
 
 ### 7. Nebenfrage (M)
-- [ ] Dem laufenden Thread eine Frage stellen, ohne ihn zu steuern: `btw`, `btw_cancel`,
-  `get_btw_history`, Events `btw_delta`, `btw_record`. Antwort in einem Popover zeigen.
+- [x] Dem laufenden Thread eine Frage stellen, ohne ihn zu steuern: `btw`, `btw_cancel`,
+  `get_btw_history`, Events `btw_delta`, `btw_record`. Antwort in einem Panel über dem Composer
+  (`/btw <Frage>`, ⇧⌘I), mit Folgefragen und Verlauf.
 
 ### 8. omps eigene Warteschlange (M)
 - [ ] Mit `prompt.streamingBehavior:"followUp"` / `follow_up` statt der App-Warteschlange

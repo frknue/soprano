@@ -10,7 +10,7 @@ import SopranoAgentsCore
 /// Builds the real main window offscreen (no Dock icon, never shown, no persisted state) on a
 /// `DemoFixtures` scenario, applies the panel flags, runs commands by id (`--perform palette.open`),
 /// opens the settings screen on a page, presents a sample dialog, types text into the first
-/// responder (of the topmost overlay when one shows), replays keys through the keyboard router,
+/// responder (of the topmost overlay or key-taking child window when one shows), replays keys through the keyboard router,
 /// clicks controls (`--click`, in order, after the keys), sets a hover state, waits for async
 /// work, and writes a PNG of the window plus its child windows (palette, popovers, dialogs) rendered
 /// through Core Animation. Agents verify UI with it and read the PNG; they never launch the GUI.
@@ -203,8 +203,9 @@ enum SnapshotCommand {
             await settle(0.25)
         }
         if let text = options.type {
-            let palette = window.childWindows?.last { $0 is CommandPalettePanel && $0.isVisible }
-            let target = OverlayWindow.topmost(over: window) ?? palette ?? window
+            // The palette or a key-taking composer popover (the side-question panel).
+            let child = window.childWindows?.last { $0.isVisible && $0.canBecomeKey }
+            let target = OverlayWindow.topmost(over: window) ?? child ?? window
             guard let responder = target.firstResponder as? NSTextView else {
                 throw CaptureError(description: "--type: the first responder is not a text view")
             }

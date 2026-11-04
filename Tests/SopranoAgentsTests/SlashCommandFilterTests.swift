@@ -44,6 +44,23 @@ struct SlashCommandFilterTests {
         #expect(SlashCommandFilter.candidates(bare, includeCompact: false).isEmpty)
     }
 
+    @Test func threadsListTheAppsBtwRowOnceEvenWhenTheProviderHasOne() {
+        let providerBtw = ProviderCommand(name: "btw", kind: .command, insertText: "/btw ")
+        let list = SlashCommandFilter.candidates(commands + [providerBtw], includeCompact: false, includeSideQuestion: true)
+        #expect(list == commands + [SlashCommandFilter.sideQuestionCommand])
+        #expect(!SlashCommandFilter.candidates(commands, includeCompact: false, includeSideQuestion: false).contains(SlashCommandFilter.sideQuestionCommand))
+    }
+
+    @Test func btwAsksTheRestAsASideQuestionAndAloneOpensThePanel() {
+        #expect(SideQuestionCommand.parse("/btw why a lock?") == .ask("why a lock?"))
+        #expect(SideQuestionCommand.parse("  /btw\n  two\nlines  ") == .ask("two\nlines"))
+        #expect(SideQuestionCommand.parse("/btw") == .open)
+        #expect(SideQuestionCommand.parse("/btw   ") == .open)
+        #expect(SideQuestionCommand.parse("/btwx why") == nil)
+        #expect(SideQuestionCommand.parse("so /btw why") == nil)
+        #expect(SideQuestionCommand.parse("/compact") == nil)
+    }
+
     @Test func theEmptyRowSaysCommandsAreLoadingOrNamesTheUnmatchedQuery() {
         #expect(SlashCommandFilter.emptyText(hasCandidates: false, query: "") == "No commands from omp yet — they load once the session starts.")
         #expect(SlashCommandFilter.emptyText(hasCandidates: true, query: "zz") == "No commands match “/zz”")

@@ -1,10 +1,13 @@
 import AppKit
+import SopranoAgentsCore
 
 /// The prompt editor: plain text at 14 pt with relaxed leading (1.625), at least two
 /// lines + 8 pt, growing to 208 pt and then scrolling. Enter sends, Shift+Enter adds a newline,
 /// Up/Down in an empty editor walk the message history, Escape closes open pickers. While the
 /// `/` command menu shows, `menuKeyHandler` takes its keys
-/// first. Pasted or dropped files and images become attachments.
+/// first. Pasted or dropped files and images become attachments. Spelling and grammar marks
+/// skip code (`ComposerProse`); a word completion shows as ghost text after the caret, Tab
+/// accepts it with a space and → without (`ComposerWordCompletion`).
 final class ComposerTextView: NSTextView {
     static let font = Typography.ui(Typography.bodySize)
     static let lineHeight: CGFloat = (Typography.bodySize * 1.625).rounded()
@@ -17,6 +20,12 @@ final class ComposerTextView: NSTextView {
 
     var placeholderColor: NSColor = .placeholderTextColor {
         didSet { needsDisplay = true }
+    }
+
+    /// Ghost-text completion of the word before the caret, drawn in the placeholder color. Shows
+    /// only while the caret sits at the end of its line with nothing selected.
+    var ghostText: String? {
+        didSet { if ghostText != oldValue { needsDisplay = true } }
     }
 
     /// Enter (alternate = ⌘↩).
@@ -32,6 +41,10 @@ final class ComposerTextView: NSTextView {
     var menuKeyHandler: ((NSEvent) -> Bool)?
     /// The editor stopped being the first responder.
     var onResignFocus: (() -> Void)?
+    /// Tab (`space` true) or → while ghost text shows. Returns true when it inserted the completion.
+    var onAcceptGhost: ((_ space: Bool) -> Bool)?
+    /// The user is about to replace `range` with `text` (typing, paste, deletion, undo).
+    var onWillChangeText: ((_ range: NSRange, _ text: String) -> Void)?
     /// True while `setText` replaces the text: a programmatic change, not typing.
     private(set) var isSettingText = false
 
@@ -77,9 +90,14 @@ final class ComposerTextView: NSTextView {
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextReplacementEnabled = false
-        isContinuousSpellCheckingEnabled = false
+        // Spelling and grammar marks follow the provider's typo-detection setting
+        // (`applyTextAssist`); autocorrect is off until that setting turns it on.
+        isContinuousSpellCheckingEnabled = true
+        isGrammarCheckingEnabled = true
+        isAutomaticSpellingCorrectionEnabled = false
         // No system completions or inline predictive text: their ghost text lands in the message
-        // ("/reThe") and Tab would accept them instead of picking from the `/` menu.
+        // ("/reThe") and Tab would accept them instead of picking from the `/` menu. Word
+        // completion is the provider's (`ghostText`).
         isAutomaticTextCompletionEnabled = false
         inlinePredictionType = .no
         textContainerInset = .zero
@@ -92,6 +110,23 @@ final class ComposerTextView: NSTextView {
         maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         registerForDraggedTypes([.fileURL, .png, .tiff])
         setAccessibilityLabel("Message")
+    }
+
+    /// Spelling and grammar marks and autocorrect as the provider's settings have them.
+    func applyTextAssist(_ preferences: TextAssistPreferences) {
+        if isContinuousSpellCheckingEnabled != preferences.typoDetection {
+            isContinuousSpellCheckingEnabled = preferences.typoDetection
+        }
+        if isGrammarCheckingEnabled != preferences.typoDetection {
+            isGrammarCheckingEnabled = preferences.typoDetection
+        }
+        isAutomaticSpellingCorrectionEnabled = preferences.autocorrect
+    }
+
+    /// Code, paths and identifiers keep no spelling or grammar mark.
+    override func setSpellingState(_ value: Int, range charRange: NSRange) {
+        let keep = value == 0 || ComposerProse.isProse(string as NSString, range: charRange)
+        super.setSpellingState(keep ? value : 0, range: charRange)
     }
 
     /// Replaces the text, keeping the editor's attributes.
@@ -108,12 +143,30 @@ final class ComposerTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard string.isEmpty, !placeholder.isEmpty else { return }
-        var attributes = Self.textAttributes
-        attributes[.foregroundColor] = placeholderColor
+        if string.isEmpty, !placeholder.isEmpty {
+            var attributes = Self.textAttributes
+            attributes[.foregroundColor] = placeholderColor
+            let origin = textContainerOrigin
+            let rect = NSRect(x: origin.x, y: origin.y, width: bounds.width - origin.x, height: bounds.height - origin.y)
+            NSAttributedString(string: placeholder, attributes: attributes).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
+        if let ghostText, let rect = ghostRect() {
+            var attributes = Self.textAttributes
+            attributes[.foregroundColor] = placeholderColor
+            NSAttributedString(string: ghostText, attributes: attributes).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        }
+    }
+
+    /// The line box from the caret to the view's right edge, while ghost text may show there.
+    private func ghostRect() -> NSRect? {
+        guard let layoutManager, let textContainer,
+              let cursor = ComposerWordCompletion.cursor(in: string as NSString, selection: selectedRange()) else { return nil }
+        let glyph = layoutManager.glyphIndexForCharacter(at: cursor - 1)
+        let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let previous = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: textContainer)
         let origin = textContainerOrigin
-        let rect = NSRect(x: origin.x, y: origin.y, width: bounds.width - origin.x, height: bounds.height - origin.y)
-        NSAttributedString(string: placeholder, attributes: attributes).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        let x = origin.x + previous.maxX
+        return NSRect(x: x, y: origin.y + line.minY, width: max(0, bounds.width - x), height: line.height)
     }
 
     // MARK: Keys
@@ -131,8 +184,17 @@ final class ComposerTextView: NSTextView {
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        if resigned { onResignFocus?() }
+        if resigned {
+            ghostText = nil
+            onResignFocus?()
+        }
         return resigned
+    }
+
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        guard super.shouldChangeText(in: affectedCharRange, replacementString: replacementString) else { return false }
+        onWillChangeText?(affectedCharRange, replacementString ?? "")
+        return true
     }
 
     override func doCommand(by selector: Selector) {
@@ -150,6 +212,10 @@ final class ComposerTextView: NSTextView {
         case #selector(cancelOperation(_:)):
             // Escape closes an open picker; it never opens NSTextView's completion list.
             onEscape?()
+        case #selector(insertTab(_:)):
+            if onAcceptGhost?(true) != true { super.doCommand(by: selector) }
+        case #selector(moveRight(_:)):
+            if onAcceptGhost?(false) != true { super.doCommand(by: selector) }
         default:
             super.doCommand(by: selector)
         }
