@@ -153,7 +153,6 @@ final class LayoutTabBarView: NSView {
         number: Int,
         theme: AppTheme
     ) {
-        let previousWidth = button.tabWidth
         let panes = (tab.layout?.orderedLeafIds ?? []).compactMap { agentManager.panes[$0] }
         let agents = panes
             .flatMap(\.tabs)
@@ -170,9 +169,6 @@ final class LayoutTabBarView: NSView {
             runningCommands: runningCommands,
             theme: theme
         )
-        if button.tabWidth != previousWidth {
-            revealActiveTab = true
-        }
     }
 
     override func layout() {

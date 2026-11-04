@@ -88,6 +88,13 @@ protocol KeybindingDelegate: AnyObject {
     func keybindingFocusedContent() -> KeybindingFocusedContent
 }
 
+/// A responder that takes every key itself while `capturesKeys`, such as the
+/// Prefix key recorder: `KeybindingManager` leaves its keys alone.
+@MainActor
+protocol KeyCapturingResponder: AnyObject {
+    var capturesKeys: Bool { get }
+}
+
 final class KeybindingManager: @unchecked Sendable {
     let agentManager: AgentManager
     weak var delegate: KeybindingDelegate?
@@ -175,8 +182,21 @@ final class KeybindingManager: @unchecked Sendable {
                 self.setControlKeyHeld(event.modifierFlags.contains(.control))
                 return event
             }
+            if let window = event.window,
+               MainActor.assumeIsolated({ Self.leavesKeysAlone(in: window) }) {
+                return event
+            }
             return self.handleKeyDown(event: event)
         }
+    }
+
+    /// The command palette (a child panel of the main window) and a
+    /// recording shortcut field take every key themselves: a chord there
+    /// must not act on the panes behind them.
+    @MainActor
+    static func leavesKeysAlone(in window: NSWindow) -> Bool {
+        window is CommandPalettePanel
+            || (window.firstResponder as? KeyCapturingResponder)?.capturesKeys == true
     }
 
     private func observeApplicationDeactivation() {

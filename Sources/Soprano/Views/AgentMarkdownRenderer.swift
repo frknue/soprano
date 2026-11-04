@@ -445,8 +445,13 @@ private struct Renderer {
             target.append(NSAttributedString(string: code.code, attributes: attributes(inner)))
         case let link as Link:
             var inner = style
-            if let destination = link.destination, !destination.isEmpty {
-                inner.link = URL(string: destination) ?? destination
+            // Clicks open straight through NSWorkspace, so only schemes that
+            // land in a browser or mail client may become live links.
+            if let destination = link.destination,
+               let url = URL(string: destination),
+               let scheme = url.scheme?.lowercased(),
+               ["http", "https", "mailto"].contains(scheme) {
+                inner.link = url
             }
             appendInlines(of: link, style: inner, to: target)
         case let image as Image:

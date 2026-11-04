@@ -1500,10 +1500,16 @@ class ChromeToggleControl: NSControl {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard isEnabled, event.charactersIgnoringModifiers == " " else {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard isEnabled,
+              event.charactersIgnoringModifiers == " ",
+              flags.isDisjoint(with: [.command, .control, .option])
+        else {
             super.keyDown(with: event)
             return
         }
+        // Holding Space toggles once, like a native checkbox.
+        guard !event.isARepeat else { return }
         toggle()
     }
 

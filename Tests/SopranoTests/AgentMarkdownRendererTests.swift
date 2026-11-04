@@ -106,6 +106,19 @@ struct AgentMarkdownRendererTests {
         #expect(attribute(.link, of: "See", in: rendered) == nil)
     }
 
+    @Test func onlyWebAndMailLinksBecomeClickableSoAnAgentCannotLinkALocalExecutable() {
+        let rendered = AgentMarkdownRenderer.render(
+            "[run](file:///tmp/x.command) [app](x-apple.systempreferences:foo) [rel](docs/a.md) [mail](mailto:a@b.c)",
+            colors: colors
+        )
+
+        #expect(rendered.string == "run app rel mail")
+        #expect(attribute(.link, of: "run", in: rendered) == nil)
+        #expect(attribute(.link, of: "app", in: rendered) == nil)
+        #expect(attribute(.link, of: "rel", in: rendered) == nil)
+        #expect(attribute(.link, of: "mail", in: rendered) as? URL == URL(string: "mailto:a@b.c"))
+    }
+
     @Test func rawHTMLIsShownLiterallyInsteadOfInterpreted() {
         let markdown = #"""
         <script>alert("x")</script>

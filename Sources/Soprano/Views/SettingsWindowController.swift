@@ -1318,6 +1318,9 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         }
 
         directories.append(ConfigFile.abbreviatingHome(path))
+        // Adopt the change before the store echoes it back, so `update` sees
+        // nothing new and leaves the page (and its scroll position) alone.
+        settings.projectDirectories.append(path)
         writeProjectDirectories(directories)
         projectDirectoryInput?.stringValue = ""
         rebuildProjectDirectoriesList()
@@ -1326,7 +1329,10 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     @objc private func removeProjectDirectory(_ sender: NSButton) {
         var directories = configuredProjectDirectories
         guard sender.tag >= 0, sender.tag < directories.count else { return }
-        directories.remove(at: sender.tag)
+        let removed = SopranoConfig.expandPath(directories.remove(at: sender.tag))
+        if !directories.contains(where: { SopranoConfig.expandPath($0) == removed }) {
+            settings.projectDirectories.removeAll { $0 == removed }
+        }
         writeProjectDirectories(directories)
         rebuildProjectDirectoriesList()
     }
@@ -2346,7 +2352,7 @@ private final class SettingsSegmentButton: NSButton {
 /// The Prefix key control: the configured prefix as an accent field keycap
 /// (`⌃A`). Click it (or press Space) and type a key to make Control plus that
 /// key the prefix.
-private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl {
+private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl, KeyCapturingResponder {
     private let cap: ChromeKeycapView
     private(set) var key: String
     private var isRecording = false {
@@ -2354,6 +2360,9 @@ private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl 
     }
 
     var consumesEscape: Bool { isRecording }
+    /// ⌃A, ⌃L, ⌃1… are exactly the keys a recording wants, so Soprano's
+    /// chords step aside while it runs.
+    var capturesKeys: Bool { isRecording }
 
     init(key: String, theme: AppTheme, target: AnyObject, action: Selector) {
         self.key = key
@@ -2446,13 +2455,18 @@ private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl 
             endRecording()
             return
         }
-        guard let typed = event.charactersIgnoringModifiers?.lowercased(),
+        guard let raw = event.charactersIgnoringModifiers,
+              case let typed = raw.lowercased(),
               typed.count == 1,
               let scalar = typed.unicodeScalars.first,
               !CharacterSet.whitespacesAndNewlines.contains(scalar),
               !CharacterSet.controlCharacters.contains(scalar),
               // Function keys (arrows, F-keys) live in the private-use range.
-              !(0xF700...0xF8FF).contains(scalar.value)
+              !(0xF700...0xF8FF).contains(scalar.value),
+              // The prefix matches Control alone, so a character that needs
+              // Shift (⇧1 is "!") could never be typed. A shifted letter is
+              // still that letter.
+              !event.modifierFlags.contains(.shift) || typed != raw
         else {
             NSSound.beep()
             return

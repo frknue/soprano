@@ -486,6 +486,40 @@ struct AgentDashboardViewTests {
         #expect(labels(in: contentViewController.view).contains("Agent Dashboard") == false)
     }
 
+    /// Embedded in the Agents window (no header or list of its own), the
+    /// dashboard shares the window with that window's search and rename fields.
+    @Test func escInATextFieldOutsideTheDashboardDoesNotDismissIt() throws {
+        let controller = AgentDashboardViewController(
+            agentManager: AgentManager(),
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        controller.showsAgentList = false
+        var dismissals = 0
+        controller.onDismiss = { dismissals += 1 }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        window.contentView = container
+        controller.view.frame = NSRect(x: 200, y: 0, width: 700, height: 600)
+        container.addSubview(controller.view)
+        let sidebarSearch = NSTextField(frame: NSRect(x: 10, y: 10, width: 150, height: 22))
+        container.addSubview(sidebarSearch)
+        #expect(window.makeFirstResponder(sidebarSearch))
+        #expect((window.firstResponder as? NSTextView)?.isFieldEditor == true)
+        let escape = try #require(keyEvent(character: "\u{1b}", keyCode: 53, window: window))
+
+        #expect(!controller.view.performKeyEquivalent(with: escape))
+        #expect(dismissals == 0)
+
+        window.makeFirstResponder(controller.view)
+        #expect(controller.view.performKeyEquivalent(with: escape))
+        #expect(dismissals == 1)
+    }
+
     @Test func jAndKMoveTheSelectionAndReturnFocusesTheChosenAgent() throws {
         let suiteName = "AgentDashboardKeyboardTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
