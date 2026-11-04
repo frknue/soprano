@@ -404,11 +404,14 @@ terminal drawer, right panel, statistics board), the right-panel tabs per worksp
 diff scope + focused path, sidebar project filter and search text, and `restoreComposer(with:)` /
 `takeComposerRestore()` ("Edit from here" hands the user message back to the composer). Observe
 `Change` (`.selection`, `.panels`, `.filter`, `.composerRestore`); a selection switch changes the
-active tab too. `isStatisticsVisible` (`setStatisticsVisible`) closes on `select` (also of the
-selected thread; selections the app makes itself, a launched draft becoming its thread or a
-removed thread or project falling back to a draft, pass `closingStatistics: false`) and whenever
+active tab too. Two boards cover the chat column and the right panel, never both at once:
+`isStatisticsVisible` (`setStatisticsVisible`) and `isTerminalAgentsVisible`
+(`setTerminalAgentsVisible`, `showTerminalAgents(selecting:)`, read once with
+`takeTerminalAgentSelection()`); `isOverlayVisible` is either. A board closes on `select` (also of
+the selected thread; selections the app makes itself, a launched draft becoming its thread or a
+removed thread or project falling back to a draft, pass `closingOverlays: false`) and whenever
 the terminal, right panel, a diff or the thread details open. Toggle commands for a surface
-under the board (⌘J, ⌘L, ⇧⌘B, ⌘D, ⇧⌘F, Maximize) show it instead of hiding it
+under a board (⌘J, ⌘L, ⇧⌘B, ⌘D, ⇧⌘F, Maximize) show it instead of hiding it
 (`toggledVisibility`). Composer and timeline commands that show or focus something in the chat
 column (Focus Composer, the pickers, Compact, Find in Thread, Jump to Latest, Expand / Collapse
 All) get it through `WorkspaceViewController.revealChat()`, which closes the board first. A board
@@ -525,6 +528,21 @@ only reads (or takes over a running sync). A failed read shows an error with Ret
 last data of the same period (another period's data is dropped); a failed sync shows a notice
 above what was recorded before it.
 
+The terminal agents board (`TerminalAgentsViewController`, `terminals.toggle` or a row of the
+sidebar's Terminals section) embeds Soprano's own `AgentDashboardViewController`, built when the
+board opens and released when it closes: the agents running in Soprano's terminal panes (Codex,
+Claude Code, OpenCode, omp's TUI), grouped Needs you / Working / Ready / Stopped, with transcript,
+live terminal text, a reply field that types into the agent's terminal (Tab), Stop, Restart, and
+Open (focus the pane in the terminal window). Esc closes it. The Agents code reaches Soprano only
+through `TerminalAgentsSource` (`Agents/Shell/`): `entries` (Soprano's `AgentDashboardEntry`),
+change observers, `makeDashboard(themeManager:)` and `openInTerminal(_:)`. `AppDelegate` builds the
+live source from `AgentManager` and the terminal window's split tree
+(`AgentManager+TerminalAgentsSource.swift`); snapshots and tests use `TerminalAgentFixtures`
+(a working Codex, a Claude Code waiting for input, a ready omp; every scenario but `empty`).
+The sidebar's Terminals section (top of the list, collapsible, hidden while searching, only
+when a pane agent exists) shows one `SidebarTerminalCell` per agent: task or agent name, status
+word (Working, Needs input, Error, Ready, Stopped; tinted when it needs you) and "agent · window".
+
 ### Commands (`Commands/AppCommand.swift`)
 Every user action is an `AppCommand` registered once at launch from its module's
 `…Commands.all` (`ShellCommands`, `SidebarCommands`, `TimelineCommands`, `ComposerCommands`,
@@ -558,6 +576,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 |---|---|---|---|---|
 | `palette.open` | Command Palette | global | `cmd+k`, `cmd+p` | Shell |
 | `window.showTerminals` | Show Terminals (Soprano's terminal window) | global | `cmd+shift+t` | Shell |
+| `window.close` | Close Soprano Agents (close the window, show the terminal window) | global | `cmd+shift+a` | Shell |
 | `settings.open` | Settings | global | `cmd+,` | Shell |
 | `settings.openFile` | Open settings.json | global | — | Shell |
 | `view.toggleSidebar` | Toggle Sidebar | global | `cmd+e` | Shell |
@@ -584,7 +603,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `composer.focus` | Focus Composer | global | `cmd+shift+l` | Composer |
 | `modelPicker.toggle` | Model Picker | not terminal | `cmd+shift+m` | Composer |
 | `composer.effort` | Reasoning Effort | not terminal | `cmd+shift+e` | Composer |
-| `composer.mode` | Permissions | not terminal | `cmd+shift+a` | Composer |
+| `composer.mode` | Permissions | not terminal | `cmd+shift+r` | Composer |
 | `composer.workspace` | Workspace | not terminal | `cmd+shift+x` | Composer |
 | `composer.branch` | Branch | not terminal | `cmd+shift+g` | Composer |
 | `composer.sendAlternate` | Steer or Queue (opposite) | composer | `cmd+enter` | Composer |
@@ -609,6 +628,7 @@ binding beats a global one. Shortcuts that would need ⌥ use ⌃⌘ instead.
 | `accounts.manage` | Manage Accounts… | global | — | Accounts |
 | `usage.refresh` | Refresh Usage | global | — | Accounts |
 | `statistics.toggle` | Statistics | global | `cmd+shift+u` | Statistics |
+| `terminals.toggle` | Terminal Agents (Soprano's terminal-pane agents) | global | — | Sidebar |
 
 "not terminal" = scopes `[sidebar, timeline, composer, rightPanel]` (plus nil focus handled by the
 router as global). A right-panel terminal tab is focus region `terminal`, like the drawer.

@@ -3,7 +3,8 @@ import SopranoAgentsCore
 
 /// The window content: sidebar | chat column | right panel. The sidebar and the right panel are
 /// resizable by dragging their inner edge; double-clicking the sidebar rail resets its width.
-/// The statistics board, while open, covers the chat column and the right panel.
+/// The statistics board or the Terminal Agents board, while open, covers the chat column and the
+/// right panel.
 @MainActor
 final class WorkspaceViewController: NSViewController {
     let engine: AgentEngine
@@ -13,6 +14,7 @@ final class WorkspaceViewController: NSViewController {
     let chat: ChatViewController
     let rightPanel: RightPanelViewController
     let statistics: StatisticsViewController
+    let terminalAgents: TerminalAgentsViewController
 
     private var sidebarWidth: NSLayoutConstraint?
     private var rightPanelWidth: NSLayoutConstraint?
@@ -21,24 +23,29 @@ final class WorkspaceViewController: NSViewController {
     private static let sidebarWidthKey = "SidebarWidth"
     private static let rightPanelWidthKey = "RightPanelWidth"
 
-    init(engine: AgentEngine, state: WorkspaceState, defaults: UserDefaults = .standard) {
+    init(engine: AgentEngine, state: WorkspaceState, defaults: UserDefaults = .standard, terminalAgentsSource: TerminalAgentsSource? = nil) {
         self.engine = engine
         self.state = state
         self.defaults = defaults
-        sidebar = SidebarViewController(engine: engine, state: state)
+        sidebar = SidebarViewController(engine: engine, state: state, terminalAgents: terminalAgentsSource)
         chat = ChatViewController(engine: engine, state: state)
         // The panel's terminal tabs live in the drawer's store: one numbering, one set of shells.
         rightPanel = RightPanelViewController(engine: engine, state: state, terminals: chat.terminal.store)
         statistics = StatisticsViewController(engine: engine, state: state)
+        terminalAgents = TerminalAgentsViewController(state: state, source: terminalAgentsSource)
         super.init(nibName: nil, bundle: nil)
     }
 
-    /// The chat column for a command that acts in it (composer, pickers, find): closes the
-    /// statistics board first and lays out, so nothing lands in a hidden view.
+    /// The chat column for a command that acts in it (composer, pickers, find): closes an open
+    /// board first and lays out, so nothing lands in a hidden view.
     @discardableResult
     func revealChat() -> ChatViewController {
         if state.isStatisticsVisible {
             state.setStatisticsVisible(false)
+            view.layoutSubtreeIfNeeded()
+        }
+        if state.isTerminalAgentsVisible {
+            state.setTerminalAgentsVisible(false)
             view.layoutSubtreeIfNeeded()
         }
         return chat
@@ -50,7 +57,7 @@ final class WorkspaceViewController: NSViewController {
     override func loadView() {
         let root = WorkspaceRootView(frame: NSRect(origin: .zero, size: Metrics.windowDefaultSize))
         view = root
-        for child in [sidebar, chat, rightPanel, statistics] as [NSViewController] {
+        for child in [sidebar, chat, rightPanel, statistics, terminalAgents] as [NSViewController] {
             addChild(child)
         }
 
@@ -58,11 +65,12 @@ final class WorkspaceViewController: NSViewController {
         let chatView = chat.view
         let panelView = rightPanel.view
         let statisticsView = statistics.view
+        let terminalAgentsView = terminalAgents.view
         let sidebarRail = ResizeRail(axis: .vertical)
         let panelRail = ResizeRail(axis: .vertical)
         let sidebarEdge = HairlineView()
         let panelEdge = HairlineView()
-        for subview in [sidebarView, chatView, panelView, sidebarEdge, panelEdge, statisticsView, sidebarRail, panelRail] {
+        for subview in [sidebarView, chatView, panelView, sidebarEdge, panelEdge, statisticsView, terminalAgentsView, sidebarRail, panelRail] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -119,6 +127,11 @@ final class WorkspaceViewController: NSViewController {
             statisticsView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             statisticsView.topAnchor.constraint(equalTo: root.topAnchor),
             statisticsView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+
+            terminalAgentsView.leadingAnchor.constraint(equalTo: sidebarEdge.trailingAnchor),
+            terminalAgentsView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            terminalAgentsView.topAnchor.constraint(equalTo: root.topAnchor),
+            terminalAgentsView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         self.chatMinWidth = chatMinWidth
         self.chatTrailing = chatTrailing
@@ -191,19 +204,31 @@ final class WorkspaceViewController: NSViewController {
 
         let showStatistics = state.isStatisticsVisible
         let wasShowingStatistics = !statistics.view.isHidden
-        // Before hiding it: a hidden first responder hands the keyboard to the window.
-        let statisticsHadFocus = statistics.hasFocus
+        let showTerminalAgents = state.isTerminalAgentsVisible
+        let wasShowingTerminalAgents = !terminalAgents.view.isHidden
+        // Before hiding them: a hidden first responder hands the keyboard to the window.
+        let boardHadFocus = (wasShowingStatistics && statistics.hasFocus) || (wasShowingTerminalAgents && terminalAgents.hasFocus)
         statistics.view.isHidden = !showStatistics
-        if showStatistics {
+        terminalAgents.view.isHidden = !showTerminalAgents
+        if showStatistics || showTerminalAgents {
             chat.view.isHidden = true
             rightPanel.view.isHidden = true
             panelEdgeView?.isHidden = true
             panelRailView?.isHidden = true
         }
+        if !showTerminalAgents, wasShowingTerminalAgents {
+            terminalAgents.didClose()
+        }
         if showStatistics, !wasShowingStatistics {
             statistics.didOpen()
             statistics.takeFocus()
-        } else if !showStatistics, wasShowingStatistics, statisticsHadFocus {
+        } else if showTerminalAgents {
+            if !wasShowingTerminalAgents {
+                terminalAgents.didOpen()
+                terminalAgents.takeFocus()
+            }
+            terminalAgents.applyPendingSelection()
+        } else if wasShowingStatistics || wasShowingTerminalAgents, boardHadFocus {
             // Focus goes where the user can see it: a maximized panel hides the composer.
             if maximized {
                 rightPanel.takeFocus()

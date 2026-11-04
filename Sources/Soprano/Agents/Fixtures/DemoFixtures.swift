@@ -11,6 +11,8 @@ enum DemoFixtures {
     struct Built {
         let engine: AgentEngine
         let selection: WorkspaceState.Selection
+        /// Sample agents in Soprano's terminal panes; nil in the `empty` scenario.
+        let terminalAgents: TerminalAgentsSource?
     }
 
     static func build(_ scenario: String, now: Date = Date()) throws -> Built {
@@ -66,7 +68,8 @@ enum DemoFixtures {
         case "empty": .draft(projectID: nil)
         default: .thread(ID.demo)
         }
-        return Built(engine: engine, selection: selection)
+        let terminalAgents = scenario == "empty" ? nil : TerminalAgentFixtures.source()
+        return Built(engine: engine, selection: selection, terminalAgents: terminalAgents)
     }
 
     static let demoWorktree = "/Users/demo/.soprano-agents/worktrees/app/soprano-fix-login-redirect"

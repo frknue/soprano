@@ -2,7 +2,7 @@ import AppKit
 import SopranoAgentsCore
 
 /// Sidebar module: new thread, thread navigation (⇧⌘[ ⇧⌘] ⌃1–9), settle, pin, rename, archive,
-/// delete, copy reference, add project, search, project filter.
+/// delete, copy reference, add project, search, project filter, the Terminal Agents board.
 @MainActor
 enum SidebarCommands {
     /// `!terminalFocus`.
@@ -181,6 +181,17 @@ enum SidebarCommands {
                 workspace.state.setSidebarVisible(true)
                 workspace.view.layoutSubtreeIfNeeded()
                 workspace.sidebar.toggleProjectFilter()
+            },
+            AppCommand(
+                id: "terminals.toggle",
+                title: "Terminal Agents",
+                description: "Show the agents running in Soprano's terminal panes and reply to them",
+                category: .view,
+                icon: Icon.terminal,
+                isEnabled: { $0.workspace?.terminalAgents.source != nil }
+            ) { context in
+                guard let state = context.state else { return }
+                state.setTerminalAgentsVisible(!state.isTerminalAgentsVisible)
             },
         ]
         for position in 1...9 {

@@ -17,13 +17,16 @@ enum SidebarLayout {
     static let emptyHeight: CGFloat = 64
     static let emptyWithButtonHeight: CGFloat = 92
     static let subagentHeight: CGFloat = 30
+    /// A pane agent: name and task over its window, `gap-px`.
+    static let terminalHeight: CGFloat = 45
 
     static func height(of item: SidebarItem) -> CGFloat {
         switch item {
         case let .card(row): row.hasMetaLine ? cardHeight : compactCardHeight
         case .slim: slimHeight
         case .subagent: subagentHeight
-        case .shelf: shelfHeight
+        case .terminalAgent: terminalHeight
+        case .shelf, .terminalsShelf: shelfHeight
         case .showMore: showMoreHeight
         case .spacer: 0
         case let .empty(state): state == .noProjects ? emptyWithButtonHeight : emptyHeight
@@ -703,31 +706,27 @@ final class SidebarSubagentCell: InteractiveView {
 // MARK: - Shelf header, show more, empty state, spacer
 
 /// `CollapsibleSectionHeader` of a shelf: "Working  2 ⌄" (chevron points right while closed).
+/// Thread sections and the Terminals section share it.
 final class SidebarShelfCell: InteractiveView {
     private let titleLabel = NSTextField.label("", size: Typography.smallSize, weight: .medium)
     private let countLabel = NSTextField.label("", size: Typography.smallSize)
     private let chevron = NSImageView()
-    private(set) var section: InboxSection = .settled
-    var onToggle: ((InboxSection) -> Void)?
+    var onToggle: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         countLabel.font = Typography.tabular(Typography.smallSize)
         for view in [titleLabel, countLabel, chevron] as [NSView] { addSubview(view) }
         setAccessibilityRole(.button)
-        onClick = { [weak self] in
-            guard let self else { return }
-            onToggle?(section)
-        }
+        onClick = { [weak self] in self?.onToggle?() }
         applyPalette(palette)
     }
 
-    func configure(section: InboxSection, count: Int, expanded: Bool) {
-        self.section = section
-        titleLabel.stringValue = section.title
+    func configure(title: String, count: Int, expanded: Bool) {
+        titleLabel.stringValue = title
         countLabel.stringValue = "\(count)"
         chevron.image = NSImage.symbol(expanded ? Icon.chevronDown : Icon.chevronRight, size: 9, weight: .semibold)
-        setAccessibilityLabel("\(section.title) \(count)")
+        setAccessibilityLabel("\(title) \(count)")
         setAccessibilityExpanded(expanded)
         needsLayout = true
     }

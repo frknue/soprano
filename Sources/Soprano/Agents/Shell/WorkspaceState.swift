@@ -82,8 +82,16 @@ final class WorkspaceState {
     private(set) var isRightPanelMaximized = false
     /// The statistics board covers the chat column and the right panel. Choosing a thread or a
     /// draft (even the selected one) and opening the terminal, right panel or thread details
-    /// close it.
+    /// close it, and so does opening the Terminal Agents board.
     private(set) var isStatisticsVisible = false
+    /// The Terminal Agents board (Soprano's pane agents) covers the chat column and the right
+    /// panel like the statistics board, closes on the same occasions, and never shows with it.
+    private(set) var isTerminalAgentsVisible = false
+    /// The pane agent (`AgentDashboardEntry.id`) the board should select when it shows next.
+    private(set) var pendingTerminalAgentSelection: String?
+
+    /// A board covers the chat column and the right panel.
+    var isOverlayVisible: Bool { isStatisticsVisible || isTerminalAgentsVisible }
 
     private let observers = ObserverList<Change>()
 
@@ -124,17 +132,17 @@ final class WorkspaceState {
         }
     }
 
-    /// `closingStatistics` false: a selection the app makes on its own (a launched draft becoming
-    /// its thread, a deleted thread falling back to a draft) leaves the statistics board open.
-    func select(_ selection: Selection, closingStatistics: Bool = true) {
-        let closedStatistics = closingStatistics && closeStatistics()
+    /// `closingOverlays` false: a selection the app makes on its own (a launched draft becoming
+    /// its thread, a deleted thread falling back to a draft) leaves an open board open.
+    func select(_ selection: Selection, closingOverlays: Bool = true) {
+        let closedOverlay = closingOverlays && closeOverlays()
         guard selection != self.selection else {
-            if closedStatistics { observers.notify(.panels) }
+            if closedOverlay { observers.notify(.panels) }
             return
         }
         self.selection = selection
         diffFocusPath = nil
-        if closedStatistics { observers.notify(.panels) }
+        if closedOverlay { observers.notify(.panels) }
         observers.notify(.selection)
     }
 
@@ -145,44 +153,69 @@ final class WorkspaceState {
     }
 
     func setThreadDetailsVisible(_ visible: Bool) {
-        let closedStatistics = visible && closeStatistics()
-        guard visible != isThreadDetailsVisible || closedStatistics else { return }
+        let closedOverlay = visible && closeOverlays()
+        guard visible != isThreadDetailsVisible || closedOverlay else { return }
         isThreadDetailsVisible = visible
         observers.notify(.panels)
     }
 
     func setTerminalVisible(_ visible: Bool) {
-        let closedStatistics = visible && closeStatistics()
-        guard visible != isTerminalVisible || closedStatistics else { return }
+        let closedOverlay = visible && closeOverlays()
+        guard visible != isTerminalVisible || closedOverlay else { return }
         isTerminalVisible = visible
         observers.notify(.panels)
     }
 
     func setRightPanelVisible(_ visible: Bool) {
-        let closedStatistics = visible && closeStatistics()
-        guard visible != isRightPanelVisible || closedStatistics else { return }
+        let closedOverlay = visible && closeOverlays()
+        guard visible != isRightPanelVisible || closedOverlay else { return }
         isRightPanelVisible = visible
         if !visible { isRightPanelMaximized = false }
         observers.notify(.panels)
     }
 
+    /// Showing the statistics board closes the Terminal Agents board.
     func setStatisticsVisible(_ visible: Bool) {
         guard visible != isStatisticsVisible else { return }
         isStatisticsVisible = visible
+        if visible { isTerminalAgentsVisible = false }
         observers.notify(.panels)
     }
 
-    /// Hides the statistics board; whether it was showing.
-    private func closeStatistics() -> Bool {
-        guard isStatisticsVisible else { return false }
+    /// Showing the Terminal Agents board closes the statistics board.
+    func setTerminalAgentsVisible(_ visible: Bool) {
+        guard visible != isTerminalAgentsVisible else { return }
+        isTerminalAgentsVisible = visible
+        if visible { isStatisticsVisible = false }
+        observers.notify(.panels)
+    }
+
+    /// Shows the Terminal Agents board on the pane agent `entryID` (a sidebar row's click).
+    func showTerminalAgents(selecting entryID: String) {
+        pendingTerminalAgentSelection = entryID
         isStatisticsVisible = false
+        isTerminalAgentsVisible = true
+        observers.notify(.panels)
+    }
+
+    /// The board takes the pending selection (once).
+    func takeTerminalAgentSelection() -> String? {
+        defer { pendingTerminalAgentSelection = nil }
+        return pendingTerminalAgentSelection
+    }
+
+    /// Hides both boards; whether one was showing.
+    private func closeOverlays() -> Bool {
+        guard isOverlayVisible else { return false }
+        isStatisticsVisible = false
+        isTerminalAgentsVisible = false
         return true
     }
 
-    /// What a toggle command sets a surface to: shown while the statistics board covers it (the
-    /// board closes), else the opposite of `isVisible`.
+    /// What a toggle command sets a surface to: shown while a board covers it (the board
+    /// closes), else the opposite of `isVisible`.
     func toggledVisibility(_ isVisible: Bool) -> Bool {
-        isStatisticsVisible || !isVisible
+        isOverlayVisible || !isVisible
     }
 
     /// Maximizes the open right panel over the chat column, or restores its width.
@@ -222,7 +255,7 @@ final class WorkspaceState {
         tabs.active = surface
         panelTabs[panelKey] = tabs
         isRightPanelVisible = true
-        if closeStatistics() || changed { observers.notify(.panels) }
+        if closeOverlays() || changed { observers.notify(.panels) }
     }
 
     /// Removes a tab of the workspace `key` (default: the selected one). The neighbour that takes
@@ -261,7 +294,7 @@ final class WorkspaceState {
         tabs.active = .diff
         panelTabs[panelKey] = tabs
         isRightPanelVisible = true
-        _ = closeStatistics()
+        _ = closeOverlays()
         observers.notify(.panels)
     }
 

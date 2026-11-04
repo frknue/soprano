@@ -41,7 +41,7 @@ enum ThreadActions {
     /// stays).
     private static func leave(_ thread: AgentThread, state: WorkspaceState) {
         guard state.selectedThreadID == thread.id else { return }
-        state.select(.draft(projectID: thread.projectID), closingStatistics: false)
+        state.select(.draft(projectID: thread.projectID), closingOverlays: false)
     }
 
     static func archive(_ threadID: String, engine: AgentEngine, state: WorkspaceState) {

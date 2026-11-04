@@ -149,7 +149,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
     /// Moves keyboard focus into the editor; never while the statistics board covers it (commands
     /// that want the composer close the board first, `WorkspaceViewController.revealChat()`).
     func focusEditor() {
-        guard !state.isStatisticsVisible else { return }
+        guard !state.isOverlayVisible else { return }
         view.window?.makeFirstResponder(editor.textView)
     }
 
@@ -751,7 +751,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
             do {
                 let threadID = try await engine.launchThread(draft, text: text, attachments: files)
                 onDraftLaunched?(draft, threadID)
-                state.select(.thread(threadID), closingStatistics: false)
+                state.select(.thread(threadID), closingOverlays: false)
             } catch {
                 restoreUnsent(text: text, attachments: files, to: sentFrom)
                 await Dialogs.alert(title: "Couldn’t start a new thread", message: error.localizedDescription, in: view.window)

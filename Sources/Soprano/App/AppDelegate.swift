@@ -64,7 +64,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
-        let agentsController = AgentsAppController(menuBar: menuBar, showTerminals: showTerminals)
+        let terminalAgents = TerminalAgentsSource(
+            agentManager: agentManager,
+            makeDashboard: { [weak controller] theme in
+                controller?.contentController?.makeAgentDashboard(themeManager: theme, title: "Terminal Agents")
+                    ?? AgentDashboardViewController(agentManager: agentManager, themeManager: theme, title: "Terminal Agents")
+            },
+            openInTerminal: { [weak controller] target in
+                controller?.contentController?.focusAgent(target)
+                showTerminals()
+            }
+        )
+        let agentsController = AgentsAppController(menuBar: menuBar, showTerminals: showTerminals, terminalAgents: terminalAgents)
         controller.openAgentsWindow = { [weak agentsController] in agentsController?.showWindow() }
         agentNotificationManager.showSopranoWindow = showTerminals
         agentNotificationManager.openAgentsThread = { [weak agentsController] threadID in

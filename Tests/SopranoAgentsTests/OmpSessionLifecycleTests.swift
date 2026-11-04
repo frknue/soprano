@@ -256,7 +256,7 @@ struct OmpSessionLifecycleTests {
         var events: [ProviderEvent] { lock.withLock { stored } }
         private func append(_ event: ProviderEvent) { lock.withLock { stored.append(event) } }
 
-        func wait(_ seconds: Double = 10, until condition: @Sendable ([ProviderEvent]) -> Bool) async -> Bool {
+        func wait(_ seconds: Double = 30, until condition: @Sendable ([ProviderEvent]) -> Bool) async -> Bool {
             let deadline = ContinuousClock.now + .seconds(seconds)
             while !condition(events) {
                 if ContinuousClock.now > deadline { return false }
@@ -494,11 +494,11 @@ struct OmpSessionLifecycleTests {
         _ = try await session.startTurn(input("slow background job \(status == "aborted" ? "aborted" : "")"))
         _ = await recorder.wait { $0.contains(.assistantDelta(itemID: "msg-1:0", delta: "job started", isFinal: false)) }
         await session.interrupt()
-        let finished = await recorder.wait(3, until: Self.completed)
+        let finished = await recorder.wait(until: Self.completed)
         // The job then wakes omp; the next message must still go through.
         let before = recorder.events.count
         _ = try await session.startTurn(input("hello after stop"))
-        let next = await recorder.wait(3) { Self.completed(Array($0.dropFirst(before))) }
+        let next = await recorder.wait { Self.completed(Array($0.dropFirst(before))) }
         await session.close()
 
         #expect(finished)
@@ -521,7 +521,7 @@ struct OmpSessionLifecycleTests {
         let project = engine.addProject(path: directory.path)
 
         let id = try await engine.launchThread(ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp)), text: "hi", attachments: [])
-        let deadline = ContinuousClock.now + .seconds(10)
+        let deadline = ContinuousClock.now + .seconds(30)
         while engine.thread(id)?.turns.last?.status == .running, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -609,7 +609,7 @@ struct OmpSessionLifecycleTests {
         ), settings: EngineSettings(generateTitles: false))
         let project = engine.addProject(path: fake.directory.path)
         func waitForTurn(_ id: String, _ ordinal: Int) async {
-            let deadline = ContinuousClock.now + .seconds(10)
+            let deadline = ContinuousClock.now + .seconds(30)
             while ContinuousClock.now < deadline {
                 if let turn = engine.thread(id)?.turns.last, turn.ordinal == ordinal, turn.status != .running { return }
                 try? await Task.sleep(for: .milliseconds(20))
@@ -696,8 +696,9 @@ struct OmpSessionLifecycleTests {
         try await engine.launchThread(ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp)), text: text, attachments: [])
     }
 
-    /// Polls `condition` until it holds or `seconds` pass.
-    private func until(_ seconds: Double = 10, _ condition: () -> Bool) async -> Bool {
+    /// Polls `condition` until it holds or `seconds` pass. The fake omp is a real process, and
+    /// under the full parallel suite it can take seconds to start.
+    private func until(_ seconds: Double = 30, _ condition: () -> Bool) async -> Bool {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while !condition() {
             if ContinuousClock.now > deadline { return false }

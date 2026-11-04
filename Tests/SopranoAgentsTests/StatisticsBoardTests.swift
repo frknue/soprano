@@ -79,7 +79,7 @@ struct StatisticsBoardTests {
         state.setStatisticsVisible(true)
         #expect(workspace.statistics.hasFocus)
 
-        state.select(.thread(other.id), closingStatistics: false)
+        state.select(.thread(other.id), closingOverlays: false)
 
         #expect(state.isStatisticsVisible)
         #expect(state.selectedThreadID == other.id)

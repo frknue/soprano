@@ -36,11 +36,20 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
 
     var mainWindow: AgentsWindow? { window as? AgentsWindow }
 
-    init(engine: AgentEngine, state: WorkspaceState = WorkspaceState(), defaults: UserDefaults = .standard, persistsFrame: Bool = true, frame: NSRect? = nil) {
+    /// `terminalAgents`: Soprano's pane agents for the sidebar's Terminals section and the
+    /// Terminal Agents board; nil leaves both out.
+    init(
+        engine: AgentEngine,
+        state: WorkspaceState = WorkspaceState(),
+        defaults: UserDefaults = .standard,
+        persistsFrame: Bool = true,
+        frame: NSRect? = nil,
+        terminalAgents: TerminalAgentsSource? = nil
+    ) {
         self.engine = engine
         self.state = state
         self.persistsFrame = persistsFrame
-        workspace = WorkspaceViewController(engine: engine, state: state, defaults: defaults)
+        workspace = WorkspaceViewController(engine: engine, state: state, defaults: defaults, terminalAgentsSource: terminalAgents)
 
         let initialFrame = frame ?? NSRect(origin: .zero, size: Metrics.windowDefaultSize)
         let window = AgentsWindow(

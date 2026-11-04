@@ -180,7 +180,14 @@ enum SnapshotCommand {
         // Far outside every display: real window-server backing, never seen.
         let frame = NSRect(x: -30000, y: -30000, width: options.size.width, height: options.size.height)
         let defaults = UserDefaults(suiteName: "SopranoAgentsSnapshot-\(UUID().uuidString)") ?? .standard
-        let controller = AgentsWindowController(engine: built.engine, state: state, defaults: defaults, persistsFrame: false, frame: frame)
+        let controller = AgentsWindowController(
+            engine: built.engine,
+            state: state,
+            defaults: defaults,
+            persistsFrame: false,
+            frame: frame,
+            terminalAgents: built.terminalAgents
+        )
         guard let window = controller.mainWindow else { throw CaptureError(description: "no window") }
         window.allowsOffscreenFrame = true
         window.rendersAsKey = true

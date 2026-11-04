@@ -46,7 +46,7 @@ struct KeymapTests {
             ("composer.focus", [], ["cmd+shift+l"]),
             ("modelPicker.toggle", notTerminal, ["cmd+shift+m"]),
             ("composer.effort", notTerminal, ["cmd+shift+e"]),
-            ("composer.mode", notTerminal, ["cmd+shift+a"]),
+            ("composer.mode", notTerminal, ["cmd+shift+r"]),
             ("composer.workspace", notTerminal, ["cmd+shift+x"]),
             ("composer.branch", notTerminal, ["cmd+shift+g"]),
             ("composer.sendAlternate", [.composer], ["cmd+enter"]),
@@ -90,6 +90,7 @@ struct KeymapTests {
         let expected: [String: [String]] = [
             "palette.open": ["cmd+k", "cmd+p"],
             "window.showTerminals": ["cmd+shift+t"],
+            "window.close": ["cmd+shift+a"],
             "settings.open": ["cmd+,"],
             "settings.openFile": [],
             "view.toggleSidebar": ["cmd+e"],

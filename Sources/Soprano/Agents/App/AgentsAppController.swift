@@ -23,19 +23,23 @@ final class AgentsAppController {
     private let reportStandaloneRunning: @MainActor () -> Void
     /// Brings Soprano's terminal window forward (Show Terminals).
     let showTerminals: () -> Void
+    /// The agents in Soprano's terminal panes, shown in the sidebar and the Terminal Agents board.
+    let terminalAgents: TerminalAgentsSource?
 
     init(
         menuBar: MenuBarSwitcher,
         defaults: UserDefaults = .standard,
         standaloneIsRunning: @escaping @MainActor () -> Bool = AgentsAppController.isStandaloneRunning,
         reportStandaloneRunning: @escaping @MainActor () -> Void = AgentsAppController.alertStandaloneRunning,
-        showTerminals: @escaping () -> Void
+        showTerminals: @escaping () -> Void,
+        terminalAgents: TerminalAgentsSource? = nil
     ) {
         self.menuBar = menuBar
         self.defaults = defaults
         self.standaloneIsRunning = standaloneIsRunning
         self.reportStandaloneRunning = reportStandaloneRunning
         self.showTerminals = showTerminals
+        self.terminalAgents = terminalAgents
     }
 
     /// The standalone app that shares this build's data folder (`AppPaths`):
@@ -146,7 +150,7 @@ final class AgentsAppController {
             self?.menuController?.install()
         }
 
-        let controller = AgentsWindowController(engine: engine)
+        let controller = AgentsWindowController(engine: engine, terminalAgents: terminalAgents)
         controller.showTerminals = showTerminals
         windowController = controller
 

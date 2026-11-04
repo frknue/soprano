@@ -60,6 +60,64 @@ struct SidebarSubagentRow: Equatable {
     let isLast: Bool
 }
 
+/// An agent in one of Soprano's terminal panes, in the sidebar's Terminals section.
+struct SidebarTerminalRow: Equatable {
+    /// `AgentDashboardEntry.id`.
+    let entryID: String
+    /// The agent's name ("Codex").
+    let name: String
+    /// What it works on (its tab's task title); nil while that is just its name.
+    let title: String?
+    let status: SidebarTerminalStatus
+    /// The Soprano window it runs in.
+    let windowTitle: String
+
+    init(entry: AgentDashboardEntry) {
+        entryID = entry.id
+        name = entry.profileName
+        let title = entry.title
+        self.title = title.isEmpty || title == entry.profileName ? nil : title
+        status = SidebarTerminalStatus(entry: entry)
+        windowTitle = entry.windowTitle
+    }
+}
+
+/// A pane agent's status word in the Terminals section.
+enum SidebarTerminalStatus: Equatable {
+    case needsInput
+    case failed
+    case working
+    case ready
+    case stopped
+
+    init(entry: AgentDashboardEntry) {
+        if entry.needsAttention {
+            self = entry.status == .error ? .failed : .needsInput
+            return
+        }
+        switch entry.status {
+        case .waiting: self = .needsInput
+        case .error: self = .failed
+        case .running, .starting: self = .working
+        case .idle: self = .ready
+        case .stopped: self = .stopped
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .needsInput: "Needs input"
+        case .failed: "Error"
+        case .working: "Working"
+        case .ready: "Ready"
+        case .stopped: "Stopped"
+        }
+    }
+
+    /// Waits for the user: the row stands out.
+    var needsAttention: Bool { self == .needsInput || self == .failed }
+}
+
 /// A row of the sidebar list, top to bottom.
 enum SidebarItem: Equatable {
     /// Pinned and status-group threads (78 pt cards).
@@ -69,6 +127,10 @@ enum SidebarItem: Equatable {
     /// A thread's subagent, listed under its card while the card's disclosure is open (the
     /// selected subagent always).
     case subagent(SidebarSubagentRow)
+    /// "Terminals 3 ⌄": the header of Soprano's pane agents, above the thread sections.
+    case terminalsShelf(count: Int, expanded: Bool)
+    /// A pane agent under the Terminals header.
+    case terminalAgent(SidebarTerminalRow)
     /// "Working 2 ⌄" / "Settled 43 ›" section header.
     case shelf(InboxSection, count: Int, expanded: Bool)
     /// "Show 25 more" under the visible part of the Settled shelf.
@@ -91,6 +153,8 @@ enum SidebarItem: Equatable {
         case let .slim(row): "slim:\(row.threadID)"
         case let .shelf(section, _, _): "shelf:\(section.rawValue)"
         case let .subagent(row): "subagent:\(row.threadID):\(row.subagentID)"
+        case .terminalsShelf: "terminals"
+        case let .terminalAgent(row): "terminal:\(row.entryID)"
         case .showMore: "more"
         case .spacer: "spacer"
         case let .empty(state): "empty:\(state.message)"
@@ -155,18 +219,26 @@ struct SidebarListOptions: Equatable {
     /// Subagent disclosures the user opened (true) or closed (false) per thread; others are open
     /// while a subagent runs.
     var subagentDisclosure: [String: Bool] = [:]
+    /// The Terminals section is open.
+    var terminalsExpanded = true
 }
 
-/// Builds the sidebar rows: one collapsible section per non-empty group (Pinned, Working,
-/// Blocked, Failed, Done, Idle) at the top, the Settled shelf pushed to the bottom. Searching
-/// replaces the list with matches.
+/// Builds the sidebar rows: Soprano's pane agents under Terminals first, then one collapsible
+/// section per non-empty group (Pinned, Working, Blocked, Failed, Done, Idle), the Settled shelf
+/// pushed to the bottom. Searching replaces the list with matching threads.
 enum SidebarListModel {
     static let settledInitialCount = 10
     static let settledPageCount = 25
     /// Every section starts open except Settled.
     static let defaultExpandedShelves = Set(InboxSection.allCases).subtracting([.settled])
 
-    static func build(threads: [AgentThread], projects: [Project], options: SidebarListOptions) -> [SidebarItem] {
+    /// `terminals`: the pane agents, most urgent first; none leaves the section out.
+    static func build(
+        threads: [AgentThread],
+        projects: [Project],
+        options: SidebarListOptions,
+        terminals: [AgentDashboardEntry] = []
+    ) -> [SidebarItem] {
         let projectsByID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let scoped = threads.filter { thread in
             guard InboxSection.of(thread) != nil else { return false }
@@ -190,8 +262,9 @@ enum SidebarListModel {
             guard let section = InboxSection.of(thread) else { continue }
             groups[section, default: []].append(thread)
         }
+        let terminalItems = terminalRows(terminals, expanded: options.terminalsExpanded)
         guard !groups.isEmpty else {
-            return [.empty(emptyState(projects: projects, filter: options.projectFilter))]
+            return terminalItems + [.empty(emptyState(projects: projects, filter: options.projectFilter))]
         }
 
         func sorted(_ threads: [AgentThread], in section: InboxSection) -> [AgentThread] {
@@ -209,7 +282,7 @@ enum SidebarListModel {
             [.slim(row(for: thread, projects: projectsByID, options: options))] + subagentRows(of: thread, options: options)
         }
 
-        var items: [SidebarItem] = []
+        var items: [SidebarItem] = terminalItems
         for section in InboxSection.allCases where section != .settled {
             guard let threads = groups[section] else { continue }
             let expanded = options.expandedShelves.contains(section)
@@ -236,6 +309,14 @@ enum SidebarListModel {
             items += settled.filter { $0.id == options.selectedThreadID }.flatMap(slim)
         }
         return items
+    }
+
+    /// The Terminals header and, while it is open, a row per pane agent in the given order.
+    static func terminalRows(_ entries: [AgentDashboardEntry], expanded: Bool) -> [SidebarItem] {
+        guard !entries.isEmpty else { return [] }
+        let header = SidebarItem.terminalsShelf(count: entries.count, expanded: expanded)
+        guard expanded else { return [header] }
+        return [header] + entries.map { .terminalAgent(SidebarTerminalRow(entry: $0)) }
     }
 
     /// Thread ids in list order (previous/next and ⌃1…⌃9 follow it).

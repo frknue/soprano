@@ -61,6 +61,8 @@ struct SidebarModelTests {
             case let .slim(row): "slim \(row.threadID)"
             case let .subagent(row): "subagent \(row.threadID)/\(row.subagentID)\(row.isSelected ? " selected" : "")"
             case let .shelf(section, count, expanded): "\(section.title) \(count)\(expanded ? " open" : "")"
+            case let .terminalsShelf(count, expanded): "Terminals \(count)\(expanded ? " open" : "")"
+            case let .terminalAgent(row): "terminal \(row.entryID)"
             case let .showMore(count): "more \(count)"
             case .spacer: "spacer"
             case let .empty(state): "empty \(state.message)"

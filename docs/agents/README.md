@@ -10,7 +10,8 @@ part of the Soprano app, Swift 6 / AppKit rather than a web view, and it talks t
 directly: there is no server.
 
 Open it in Soprano with `⇧⌘A`, **Commands ▸ Soprano Agents** or `⌘P` → *Soprano Agents*;
-`⇧⌘T` (**Window ▸ Terminals**) goes back to the terminal window. It used to be a separate app,
+`⇧⌘A` again closes it and goes back to the terminal window (threads keep working), and `⇧⌘T`
+(**Window ▸ Terminals**) shows the terminal window without closing it. It used to be a separate app,
 *Soprano Agents.app*; see [Coming from the standalone app](#coming-from-the-standalone-app).
 
 ## Requirements
@@ -46,7 +47,7 @@ page shows omp's version and health.
 1. Open a project (`⇧⌘K`: your projects plus the subfolders of the project folders in
    **Settings › General**, e.g. `~/git/private`; **Choose Folder…** for any other) or start
    without one (`⌃⌘N`).
-2. Pick a model (`⇧⌘M`), permissions (`⇧⌘A`) and workspace (`⇧⌘X`: current checkout or a
+2. Pick a model (`⇧⌘M`), permissions (`⇧⌘R`) and workspace (`⇧⌘X`: current checkout or a
    new worktree), type, and press Return.
 3. While the agent works, sending again steers the running turn (or queues, per
    **Settings › General › Follow-up behavior**); `⌘↩` does the other one. To ask something
@@ -77,6 +78,12 @@ page shows omp's version and health.
    tokens and estimated API-equivalent cost over 24h, 7d, 30d, 90d or all time, with a chart per
    hour, day, week or month and breakdowns by model (click one to filter), project and agent. It reads
    omp's own usage records (`omp stats`), so every omp session on this Mac counts.
+11. The agents running in Soprano's terminal panes (Codex, Claude Code, OpenCode, omp's terminal
+   UI) are listed under **Terminals** at the top of the sidebar, with their status (Working, Needs
+   input, Ready, Stopped). Click one, or run *Terminal Agents* from `⌘K` or the View menu, to open
+   them over the chat: J/K to pick an agent, its transcript or live terminal text, Tab to reply
+   (typed into its terminal), Stop, Restart, Return to open it in the terminal window, Esc to
+   close.
 
 `⌘K` (or `⌘P`) opens the command palette, Soprano's own: every action with its shortcut, threads,
 projects and settings pages. When the Agents window is not in front (Soprano in the background, or
@@ -94,6 +101,7 @@ terminal (in the drawer or a right-panel tab) has focus.
 |---|---|---|
 | Command Palette | `⌘K`, `⌘P` | everywhere |
 | Show Terminals (Soprano's terminal window) | `⇧⌘T` | everywhere |
+| Close Soprano Agents (back to the terminal window) | `⇧⌘A` | everywhere |
 | Open Project… | `⇧⌘K` | everywhere |
 | Settings | `⌘,` | everywhere |
 | Toggle Sidebar | `⌘E` | everywhere |
@@ -115,7 +123,7 @@ terminal (in the drawer or a right-panel tab) has focus.
 | Focus Composer | `⇧⌘L` | everywhere |
 | Model Picker | `⇧⌘M` | not terminal |
 | Reasoning Effort | `⇧⌘E` | not terminal |
-| Permissions | `⇧⌘A` | not terminal |
+| Permissions | `⇧⌘R` | not terminal |
 | Workspace | `⇧⌘X` | not terminal |
 | Branch | `⇧⌘G` | not terminal |
 | Ask a Side Question (`/btw`) | `⇧⌘I` | not terminal |

@@ -27,6 +27,7 @@ final class AgentDashboardViewController: NSViewController {
     private let promptSender: PromptSender
     private let branchProvider: BranchProvider
     private let transcriptStore: AgentTranscriptStore
+    private let headerTitle: String
     private var headerView: SettingsHeaderView!
     private var listPanel: NSView!
     private var listRule: ChromeRuleView!
@@ -48,6 +49,7 @@ final class AgentDashboardViewController: NSViewController {
     init(
         agentManager: AgentManager,
         themeManager: ThemeManager,
+        title: String = "Agent Dashboard",
         terminalStateProvider: @escaping TerminalStateProvider = { _ in .unavailable },
         promptSender: @escaping PromptSender = { _, _ in false },
         branchProvider: @escaping BranchProvider = { _ in nil },
@@ -55,6 +57,7 @@ final class AgentDashboardViewController: NSViewController {
     ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        self.headerTitle = title
         self.terminalStateProvider = terminalStateProvider
         self.promptSender = promptSender
         self.branchProvider = branchProvider
@@ -123,7 +126,7 @@ final class AgentDashboardViewController: NSViewController {
         root.wantsLayer = true
         root.layer?.backgroundColor = colors.bgBase.cgColor
 
-        headerView = SettingsHeaderView(title: "Agent Dashboard", theme: theme)
+        headerView = SettingsHeaderView(title: headerTitle, theme: theme)
         headerView.onClose = { [weak self] in
             self?.onDismiss?()
         }
@@ -410,10 +413,13 @@ final class AgentDashboardViewController: NSViewController {
         return panel
     }
 
-    private func selectEntry(_ entryId: String) {
+    /// Shows the agent `entryId` (`AgentDashboardEntry.id`), scrolled into view; an id that is
+    /// not listed keeps the selection.
+    func selectEntry(_ entryId: String, scrollIntoView: Bool = false) {
+        loadViewIfNeeded()
         guard entriesById[entryId] != nil else { return }
         selectedEntryId = entryId
-        updateRowSelection(scrollIntoView: false)
+        updateRowSelection(scrollIntoView: scrollIntoView)
         updateDetail()
     }
 

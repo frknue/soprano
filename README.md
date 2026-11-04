@@ -682,11 +682,19 @@ Soprano Agents is Soprano's chat window for `omp`: a thread inbox on the left, a
 lane with a floating composer, approvals and questions inline, per-turn diffs from
 hidden git checkpoints, worktrees, a terminal drawer and a right panel with Diff, Files
 and terminals. It talks to `omp --mode rpc-ui` directly, so omp's tool approvals and its
-`ask` tool show up as cards instead of terminal prompts.
+`ask` tool show up as cards instead of terminal prompts. Ask a side question without
+steering the agent with `/btw` (`⇧⌘I`); the composer underlines typos and shows omp's word
+prediction as ghost text.
 
-Open it with **`⇧⌘A`**, **Commands ▸ Soprano Agents**, or `⌘P` → *Soprano Agents*. It
-is a second window of the same app: `⇧⌘T` in it (or **Window ▸ Terminals**) brings the
-terminal window back, and `` ⌘` `` cycles between them. While it is in front it has its
+It also shows the agents running in your terminal panes: they are listed under
+**Terminals** at the top of its sidebar with their status, and clicking one opens them in
+the Agent Dashboard over the chat, where you can read along, reply into the agent's
+terminal, stop or restart it, or jump to its pane.
+
+Open it with **`⇧⌘A`**, **Commands ▸ Soprano Agents**, or `⌘P` → *Soprano Agents*, and
+press `⇧⌘A` in it to close it and go back to the terminal window. It is a second window of
+the same app: `⇧⌘T` in it (or **Window ▸ Terminals**) shows the terminal window without
+closing it, and `` ⌘` `` cycles between them. While it is in front it has its
 own menu bar and its own shortcuts, so `⌘D` toggles its diff there and still opens a
 terminal in the terminal window. Its engine starts the first time the window opens and
 keeps running until you quit Soprano, so closing the window leaves threads working;

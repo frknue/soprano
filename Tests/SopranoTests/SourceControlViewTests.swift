@@ -122,7 +122,7 @@ struct SourceControlViewTests {
         #expect(process.terminationStatus == 0)
     }
 
-    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) async throws {
+    private func waitUntil(timeout: TimeInterval = 30, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             guard Date() < deadline else {

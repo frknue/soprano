@@ -61,7 +61,7 @@ enum ComposerCommands {
                 description: "Choose what the agent may do without asking",
                 category: .composer,
                 scopes: notTerminal,
-                defaultKeys: ["cmd+shift+a"],
+                defaultKeys: ["cmd+shift+r"],
                 icon: "lock",
                 isEnabled: { composer($0)?.showsThreadSettings ?? false }
             ) { context in

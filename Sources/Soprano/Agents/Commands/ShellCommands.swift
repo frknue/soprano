@@ -28,6 +28,18 @@ enum ShellCommands {
                 (context.window?.windowController as? AgentsWindowController)?.showTerminals?()
             },
             AppCommand(
+                id: "window.close",
+                title: "Close Soprano Agents",
+                description: "Close this window and go back to the terminals; threads keep working, and ⇧⌘A there opens it again",
+                category: .app,
+                defaultKeys: ["cmd+shift+a"],
+                icon: "xmark.rectangle"
+            ) { context in
+                guard let controller = context.window?.windowController as? AgentsWindowController else { return }
+                controller.close()
+                controller.showTerminals?()
+            },
+            AppCommand(
                 id: "settings.open",
                 title: "Settings",
                 description: "Open the settings screen",

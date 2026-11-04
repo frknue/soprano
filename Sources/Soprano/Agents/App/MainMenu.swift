@@ -98,6 +98,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         viewMenu.addItem(commandItem("sidebar.search", title: "Search Threads"))
         viewMenu.addItem(commandItem("usage.open"))
         viewMenu.addItem(commandItem("statistics.toggle"))
+        viewMenu.addItem(commandItem("terminals.toggle", title: "Terminal Agents"))
         viewMenu.addItem(.separator())
         let fullScreen = viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
         fullScreen.keyEquivalentModifierMask = [.command, .control]
@@ -130,6 +131,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation {
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
         windowMenu.addItem(commandItem("window.showTerminals", title: "Terminals"))
+        windowMenu.addItem(commandItem("window.close", title: "Close Soprano Agents"))
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         add(windowMenu, to: main)

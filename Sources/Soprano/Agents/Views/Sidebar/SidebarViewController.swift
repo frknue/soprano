@@ -2,14 +2,17 @@ import AppKit
 import SopranoAgentsCore
 
 /// The thread inbox: 52 pt header with the brand, the search row with
-/// the project filter / add project / new thread buttons, the list (collapsible Pinned, Working,
-/// Blocked, Failed, Done and Idle sections of cards, then the Settled shelf pushed to the bottom)
-/// and the footer with Settings, the Statistics board toggle and the account button.
+/// the project filter / add project / new thread buttons, the list (Soprano's pane agents under
+/// Terminals, collapsible Pinned, Working, Blocked, Failed, Done and Idle sections of cards, then
+/// the Settled shelf pushed to the bottom) and the footer with Settings, the Statistics board
+/// toggle and the account button.
 /// The list is an `NSTableView` of reused cells, so hundreds of threads stay cheap.
 @MainActor
 final class SidebarViewController: NSViewController, FocusRegionController, NSTableViewDataSource, NSTableViewDelegate {
     let engine: AgentEngine
     let state: WorkspaceState
+    /// Soprano's pane agents for the Terminals section; nil leaves it out.
+    let terminalAgents: TerminalAgentsSource?
 
     private let toggleButton = GhostIconButton(symbol: Icon.sidebarLeft, symbolSize: 14, toolTip: "Toggle sidebar (⌘E)")
     private let brandLabel = NSTextField.label("", size: Typography.bodySize, weight: .medium)
@@ -34,6 +37,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private var settledLimit = SidebarListModel.settledInitialCount
     /// Subagent disclosures the user toggled, per thread (`SidebarListOptions.subagentDisclosure`).
     private var subagentDisclosure: [String: Bool] = [:]
+    private var terminalsExpanded = true
     private var renamingThreadID: String?
     private var reloadAfterRename = false
     private var showsJumpHints = false
@@ -43,9 +47,10 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
     private var timerInterval: TimeInterval = 0
     private weak var observedWindow: NSWindow?
 
-    init(engine: AgentEngine, state: WorkspaceState) {
+    init(engine: AgentEngine, state: WorkspaceState, terminalAgents: TerminalAgentsSource? = nil) {
         self.engine = engine
         self.state = state
+        self.terminalAgents = terminalAgents
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -150,6 +155,7 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             case .itemChanged, .subagentChanged, .providersChanged, .commandsChanged, .sideQuestionsChanged: break
             }
         }
+        terminalAgents?.addObserver(self) { [weak self] in self?.reload() }
         state.addObserver(self) { [weak self] change in
             guard let self else { return }
             switch change {
@@ -245,7 +251,8 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             searchText: state.searchText,
             expandedShelves: expandedShelves,
             settledLimit: settledLimit,
-            subagentDisclosure: subagentDisclosure
+            subagentDisclosure: subagentDisclosure,
+            terminalsExpanded: terminalsExpanded
         )
     }
 
@@ -260,7 +267,12 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             return
         }
         markSelectedVisitedIfSeen()
-        let next = SidebarListModel.build(threads: engine.threads, projects: engine.projects, options: listOptions)
+        let next = SidebarListModel.build(
+            threads: engine.threads,
+            projects: engine.projects,
+            options: listOptions,
+            terminals: terminalAgents?.entries ?? []
+        )
         updateHeaderButtons()
         if next.map(\.identity) == items.map(\.identity) {
             let changed = IndexSet(next.indices.filter { next[$0] != items[$0] })
@@ -385,8 +397,18 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
             return cell
         case let .shelf(section, count, expanded):
             let cell = reuse("shelf") { SidebarShelfCell(frame: .zero) }
-            cell.configure(section: section, count: count, expanded: expanded)
-            cell.onToggle = { [weak self] section in self?.toggleShelf(section) }
+            cell.configure(title: section.title, count: count, expanded: expanded)
+            cell.onToggle = { [weak self] in self?.toggleShelf(section) }
+            return cell
+        case let .terminalsShelf(count, expanded):
+            let cell = reuse("shelf") { SidebarShelfCell(frame: .zero) }
+            cell.configure(title: "Terminals", count: count, expanded: expanded)
+            cell.onToggle = { [weak self] in self?.toggleTerminals() }
+            return cell
+        case let .terminalAgent(model):
+            let cell = reuse("terminal") { SidebarTerminalCell(frame: .zero) }
+            cell.configure(model)
+            cell.onClick = { [weak self] in self?.openTerminalAgent(model.entryID) }
             return cell
         case let .showMore(count):
             let cell = reuse("more") { SidebarShowMoreCell(frame: .zero) }
@@ -449,6 +471,11 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         guard let thread = engine.thread(threadID) else { return }
         subagentDisclosure[threadID] = !SidebarListModel.subagentsExpanded(thread, options: listOptions)
         reload()
+    }
+
+    /// A Terminals row: the Terminal Agents board on that pane agent.
+    func openTerminalAgent(_ entryID: String) {
+        state.showTerminalAgents(selecting: entryID)
     }
 
     /// Moves the selection `delta` rows in list order (wrapping), like ⇧⌘[ / ⇧⌘].
@@ -528,6 +555,11 @@ final class SidebarViewController: NSViewController, FocusRegionController, NSTa
         } else {
             expandedShelves.insert(section)
         }
+        reload()
+    }
+
+    private func toggleTerminals() {
+        terminalsExpanded.toggle()
         reload()
     }
 
