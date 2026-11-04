@@ -154,8 +154,11 @@ final class SlashCommandMenuContent: ComposerPopoverContent {
         requestResize?()
     }
 
-    /// Shows `commands`, or one muted `emptyText` row when there are none.
-    func show(_ commands: [ProviderCommand], emptyText: String) {
+    /// Shows `commands`, or one muted `emptyText` row when there are none. `keepingHighlight`
+    /// (a re-list for the same query) keeps the highlighted command where it still shows;
+    /// otherwise the first row is highlighted.
+    func show(_ commands: [ProviderCommand], emptyText: String, keepingHighlight: Bool = false) {
+        let kept = keepingHighlight ? list.highlightedIndex.flatMap { shown.indices.contains($0) ? shown[$0].insertText : nil } : nil
         shown = commands
         if commands.isEmpty {
             list.setRows([ComposerListRow.Model(title: emptyText, isDisabled: true, titleFont: Typography.ui(Typography.rowSize))], actions: [{}], highlight: nil)
@@ -172,7 +175,7 @@ final class SlashCommandMenuContent: ComposerPopoverContent {
                 )
             }
             let actions: [() -> Void] = commands.map { command in { [weak self] in self?.onPick(command) } }
-            list.setRows(rows, actions: actions, highlight: 0)
+            list.setRows(rows, actions: actions, highlight: kept.flatMap { text in commands.firstIndex { $0.insertText == text } } ?? 0)
         }
         requestResize?()
     }

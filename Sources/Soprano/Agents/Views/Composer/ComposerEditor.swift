@@ -172,7 +172,9 @@ final class ComposerTextView: NSTextView {
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
-        if menuKeyHandler?(event) == true { return }
+        // While an input method composes marked text, its keys (↑/↓ candidates, Return commits,
+        // Escape cancels) are the input method's, not the open menu's.
+        if !hasMarkedText(), menuKeyHandler?(event) == true { return }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // ⌘↩ is `composer.sendAlternate`, which the keyboard router runs before this view sees the
         // key; unbound, it is just a newline-free no-op here like any other ⌘ chord.
@@ -231,7 +233,8 @@ final class ComposerTextView: NSTextView {
     /// Files (file URLs) or raw image data on the pasteboard become attachments.
     @discardableResult
     func consumeAttachments(from pasteboard: NSPasteboard) -> Bool {
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+        let urls = Self.attachableFiles(on: pasteboard)
+        if !urls.isEmpty {
             onFiles?(urls)
             return true
         }
@@ -244,8 +247,15 @@ final class ComposerTextView: NSTextView {
     }
 
     static func carriesAttachments(_ pasteboard: NSPasteboard) -> Bool {
-        pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
+        !attachableFiles(on: pasteboard).isEmpty
             || (pasteboard.availableType(from: [.string]) == nil && pasteboard.availableType(from: [.png, .tiff]) != nil)
+    }
+
+    /// The file URLs on the pasteboard that can be attached: folders and packages (apps,
+    /// bundles) are skipped, as the Attach panel refuses them, rather than copied whole.
+    static func attachableFiles(on pasteboard: NSPasteboard) -> [URL] {
+        let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true }
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
