@@ -326,7 +326,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         let key = requestKey()
         if needsReload || key != loadedKey {
             reload(force: false)
-        } else if let path = state.diffFocusPath {
+        } else if !entries.isEmpty, let path = state.takeDiffFocusPath() {
             focus(path: path)
         }
     }
@@ -472,7 +472,7 @@ final class DiffSurfaceViewController: NSViewController, NSTableViewDataSource, 
         treeView.update(items: DiffTreeItem.build(paths: newEntries.map(\.path)), entries: newEntries, palette: style.palette)
         rebuildList()
         updateToolbar()
-        if let path = state.diffFocusPath {
+        if let path = state.takeDiffFocusPath() {
             focus(path: path)
         } else if !keepsCollapse {
             scrollView.contentView.scroll(to: .zero)

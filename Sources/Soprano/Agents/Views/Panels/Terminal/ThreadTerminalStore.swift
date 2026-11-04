@@ -128,8 +128,14 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
 
     /// Ends the session's process and forgets it.
     func close(_ sessionID: String) {
+        close(sessionID, reaped: false)
+    }
+
+    /// `reaped`: the shell already exited and SwiftTerm waited for it, so its pid is no longer
+    /// ours to signal.
+    private func close(_ sessionID: String, reaped: Bool) {
         guard let key = sessions.locate(sessionID)?.key, sessions.close(sessionID, in: key) else { return }
-        end(sessionID)
+        end(sessionID, reaped: reaped)
         notify(.sessions(key: key))
     }
 
@@ -141,13 +147,30 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
         notify(.moved(from: draftKey, to: threadID))
     }
 
-    private func end(_ sessionID: String) {
+    private func end(_ sessionID: String, reaped: Bool = false) {
         guard let terminal = terminals.removeValue(forKey: sessionID) else { return }
         terminal.processDelegate = nil
-        let pid = terminal.process?.shellPid ?? 0
-        if pid > 0 { kill(pid, SIGHUP) }
-        terminal.terminate()
+        if !reaped {
+            let process = terminal.process
+            let pid = process?.shellPid ?? 0
+            if pid > 0, process?.running == true { kill(pid, SIGHUP) }
+            terminal.terminate()
+            if pid > 0 { Self.reap(pid) }
+        }
         terminal.removeFromSuperview()
+    }
+
+    /// Waits for the ended shell so it does not stay a zombie: SwiftTerm's `terminate()` cancels
+    /// its exit monitor, the only `waitpid` it makes.
+    private nonisolated static func reap(_ pid: pid_t) {
+        let exit = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global(qos: .utility))
+        exit.setEventHandler {
+            waitpid(pid, nil, WNOHANG)
+            exit.cancel()
+        }
+        exit.resume()
+        // Exited before the source was armed: reap it now.
+        if waitpid(pid, nil, WNOHANG) != 0 { exit.cancel() }
     }
 
     private func pruneDeletedWorkspaces() {
@@ -199,13 +222,20 @@ final class ThreadTerminalStore: NSObject, LocalProcessTerminalViewDelegate {
 
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
-    /// The shell exited: its session closes.
+    /// The shell exited: its session closes. SwiftTerm reaped it right before this call on the
+    /// main queue; closing in the same call leaves no window in which a user's close would
+    /// signal the reaped pid.
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         let identifier = ObjectIdentifier(source)
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            guard let (sessionID, _) = terminals.first(where: { ObjectIdentifier($0.value) == identifier }) else { return }
-            close(sessionID)
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { shellExited(identifier) }
+        } else {
+            Task { @MainActor [weak self] in self?.shellExited(identifier) }
         }
+    }
+
+    private func shellExited(_ identifier: ObjectIdentifier) {
+        guard let (sessionID, _) = terminals.first(where: { ObjectIdentifier($0.value) == identifier }) else { return }
+        close(sessionID, reaped: true)
     }
 }

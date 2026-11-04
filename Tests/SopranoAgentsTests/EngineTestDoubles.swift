@@ -176,6 +176,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     var existingBranches: [String] = []
     var worktreeError: (any Error)?
     var restoreError: (any Error)?
+    /// `workingTreeDiff`'s answer.
+    var workingPatch = ""
 
     var calls: [String] { lock.withLock { _calls } }
 
@@ -212,7 +214,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
         return "diff"
     }
 
-    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { "" }
+    func workingTreeDiff(cwd: String, ignoreWhitespace: Bool) async throws -> String { workingPatch }
 
     func restoreCheckpoint(cwd: String, ref: String) async throws {
         record("restore \(ref)")
