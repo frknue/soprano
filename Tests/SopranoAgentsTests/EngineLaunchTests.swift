@@ -120,6 +120,33 @@ struct EngineLaunchTests {
         #expect(git.calls.isEmpty)
     }
 
+    @Test func quittingDuringWorktreeSetupWaitsForItsRollbackBeforeReturning() async throws {
+        let git = RecordingGit()
+        let entered = Gate()
+        let cleanup = Gate()
+        let rolledBack = Gate()
+        // Like `LiveGitService`: cancelled setup removes what it made before it returns.
+        git.worktreeGate = {
+            entered.open()
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(2)) }
+            await cleanup.wait()
+            rolledBack.open()
+            throw CancellationError()
+        }
+        let engine = EngineHarness.engine(git: git)
+        let project = engine.addProject(path: Self.repository())
+        let draft = ThreadDraft(projectID: project.id, modelSelection: .default(for: .omp), workspace: .newWorktree(baseBranch: "main"))
+        _ = try await engine.launchThread(draft, text: "Do it", attachments: [])
+        await entered.wait()
+
+        // What the app sees when `shutdown` returns and it approves termination.
+        let quit = Task { await engine.shutdown(); return rolledBack.isOpen }
+        try await Task.sleep(for: .milliseconds(200))
+        cleanup.open()
+
+        #expect(await quit.value)
+    }
+
     @Test func theGeneratedTitleReplacesTheSeedWhileTheUserHasNotRenamedTheThread() async throws {
         let driver = ScriptedDriver()
         driver.generate = { _ in .object(["title": .string("'Login Redirect Loop'"), "needsRefinement": .bool(false)]) }

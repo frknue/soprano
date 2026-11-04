@@ -170,6 +170,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var opened = false
     func open() { lock.withLock { opened = true } }
+    var isOpen: Bool { lock.withLock { opened } }
     func wait() async {
         while !lock.withLock({ opened }) { try? await Task.sleep(for: .milliseconds(2)) }
     }
@@ -191,6 +192,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     var restoreGate: (@Sendable () async -> Void)?
     /// Awaited by `status` (a slow status read).
     var statusGate: (@Sendable () async -> Void)?
+    /// Awaited by `createWorktree` after recording the call (slow setup, or its rollback).
+    var worktreeGate: (@Sendable () async throws -> Void)?
     /// `workingTreeDiff`'s answer.
     var workingPatch = ""
 
@@ -261,6 +264,7 @@ final class RecordingGit: GitService, @unchecked Sendable {
 
     func createWorktree(projectRoot: String, baseBranch: String, newBranch: String, directory: String) async throws -> String {
         record("worktree \(baseBranch) \(newBranch)")
+        try await worktreeGate?()
         if let worktreeError { throw worktreeError }
         let path = "\(directory)/repo/\(newBranch.replacingOccurrences(of: "/", with: "-"))"
         try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)

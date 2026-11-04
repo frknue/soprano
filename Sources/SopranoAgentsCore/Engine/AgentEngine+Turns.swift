@@ -92,13 +92,25 @@ extension AgentEngine {
             guard isTurnRunning(threadID, turn.id) else { return }
             if let worktree {
                 let path: String
-                do {
-                    path = try await environment.git.createWorktree(
+                let git = environment.git
+                let directory = settings.worktreesDirectory
+                // Its own task, awaited by `shutdown`: cancelled at quit, setup removes the half
+                // made worktree and branch, and the app must not exit before that is done.
+                let creation = Task {
+                    try await git.createWorktree(
                         projectRoot: worktree.project.path,
                         baseBranch: worktree.baseBranch,
                         newBranch: worktree.branch,
-                        directory: settings.worktreesDirectory
+                        directory: directory
                     )
+                }
+                runtime.finishBeforeQuit(creation)
+                do {
+                    path = try await withTaskCancellationHandler {
+                        try await creation.value
+                    } onCancel: {
+                        creation.cancel()
+                    }
                 } catch {
                     finishTurn(threadID, turn.id, status: .failed, error: Self.describe(error))
                     return

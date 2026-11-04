@@ -55,6 +55,12 @@ final class EngineRuntime {
         return task
     }
 
+    /// Makes `shutdown` (and `waitForBackgroundWork`) wait for `task`: work whose cleanup must
+    /// finish before the app exits, such as worktree setup rolling itself back.
+    func finishBeforeQuit<Success: Sendable>(_ task: Task<Success, any Error>) {
+        track(beforeQuit: true) { _ = await task.result }
+    }
+
     /// Waits until no tracked background work is left, including work started meanwhile.
     func waitForBackgroundWork() async {
         while let (id, task) = background.first {
