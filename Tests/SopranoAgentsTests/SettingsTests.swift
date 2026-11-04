@@ -190,8 +190,9 @@ struct SettingsTests {
         try ConfigFile.write(soprano, to: url)
         try ConfigFile.write(legacy, to: legacyURL)
         let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        let defaults = try #require(UserDefaults(suiteName: "SettingsTests-\(UUID().uuidString)"))
 
-        center.importLegacySettings(from: legacyURL)
+        center.importLegacySettings(from: legacyURL, defaults: defaults)
         center.start(watching: false)
 
         let text = try String(contentsOf: url, encoding: .utf8)
@@ -209,6 +210,26 @@ struct SettingsTests {
         try ConfigFile.write(text.replacingOccurrences(of: #""full""#, with: #""wide""#), to: url)
         #expect(try !SettingsFile.importLegacySettings(into: url, from: legacyURL))
         #expect(try String(contentsOf: url, encoding: .utf8).contains(#""wide""#))
+    }
+
+    @Test func theImportRunsOnceEvenAfterTheSettingsGoBackToTheTemplatesDefaults() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("soprano/settings.json")
+        let legacyURL = directory.appendingPathComponent("soprano-agents/settings.json")
+        let template = ConfigFile.template(settings: .defaultSettings, keybindings: DefaultKeybindings.config)
+        try ConfigFile.write(template, to: url)
+        try ConfigFile.write(#"{ "chat": { "width": "wide" } }"#, to: legacyURL)
+        let defaults = try #require(UserDefaults(suiteName: "SettingsTests-\(UUID().uuidString)"))
+
+        SettingsCenter(fileURL: url, registry: CommandRegistry()).importLegacySettings(from: legacyURL, defaults: defaults)
+        #expect(try ConfigFile.read(at: url) != template)
+
+        // The user puts every Agents setting back to its default, then relaunches.
+        try ConfigFile.write(template, to: url)
+        SettingsCenter(fileURL: url, registry: CommandRegistry()).importLegacySettings(from: legacyURL, defaults: defaults)
+
+        #expect(try ConfigFile.read(at: url) == template)
     }
 
     @Test func importingIsSkippedWhenSopranoAlreadyHasThreadsOrTheOldFileIsMissing() throws {

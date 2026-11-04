@@ -78,7 +78,7 @@ final class AgentsAppController {
         if let windowController { return windowController }
 
         let settings = SettingsCenter.shared
-        settings.importLegacySettings()
+        settings.importLegacySettings(defaults: defaults)
         settings.start()
         PaletteCenter.shared.apply(setting: ThemeCenter.followSoprano)
         ThemeCenter.shared.followSystemAppearance()

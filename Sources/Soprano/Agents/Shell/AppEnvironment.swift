@@ -245,13 +245,21 @@ final class SettingsCenter {
 
     var displayPath: String { ConfigFile.displayPath(for: fileURL) }
 
-    /// Moves the standalone app's settings file into Soprano's once (see
-    /// `SettingsFile.importLegacySettings`); call before `start`.
-    func importLegacySettings(from legacyURL: URL = SettingsFile.legacyURL()) {
+    /// Set once the standalone app's settings were looked at, imported or not.
+    static let legacyImportDoneKey = "soprano-agents-settings-imported"
+
+    /// Moves the standalone app's settings file into Soprano's, once ever (see
+    /// `SettingsFile.importLegacySettings`); call before `start`. Completion is kept in
+    /// `defaults`, not read from the settings: values the user later sets back to the
+    /// template's defaults must not bring the old file back. A failed attempt (a syntax
+    /// error in either file) is retried on the next launch.
+    func importLegacySettings(from legacyURL: URL = SettingsFile.legacyURL(), defaults: UserDefaults) {
+        guard !defaults.bool(forKey: Self.legacyImportDoneKey) else { return }
         do {
             if try SettingsFile.importLegacySettings(into: fileURL, from: legacyURL) {
                 settingsLog.info("Imported \(ConfigFile.displayPath(for: legacyURL), privacy: .public) into \(self.displayPath, privacy: .public)")
             }
+            defaults.set(true, forKey: Self.legacyImportDoneKey)
         } catch {
             settingsLog.error("Could not import \(ConfigFile.displayPath(for: legacyURL), privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
