@@ -23,15 +23,20 @@ enum LaunchDispatch: Equatable {
     Start the app itself from Finder, Spotlight, or `open -a Soprano`.
     """
 
-    /// Decides for an invocation that no subcommand handled.
-    static func decide(arguments: [String], environment: [String: String]) -> LaunchDispatch {
+    /// Decides for an invocation that no subcommand handled. `runsOwningApp`: this binary is the
+    /// one of the app that owns the calling terminal (see `runsOwningApp(executablePath:environment:)`).
+    static func decide(
+        arguments: [String],
+        environment: [String: String],
+        runsOwningApp: Bool = true
+    ) -> LaunchDispatch {
         let firstArgument = arguments.dropFirst().first
         if let firstArgument, ["--help", "-h", "help"].contains(firstArgument) {
             return .help
         }
-        // Inside a Soprano terminal every invocation is a CLI call; the owning
-        // app is already running.
-        if let appProcessId = environment["SOPRANO_APP_PID"], !appProcessId.isEmpty {
+        // Inside a Soprano terminal a call of that app's own binary is a CLI call: the app is
+        // already running. Another build (`.build/debug/Soprano`) starts as it would outside.
+        if runsOwningApp, let appProcessId = environment["SOPRANO_APP_PID"], !appProcessId.isEmpty {
             return .usageError
         }
         guard let firstArgument else { return .startApp }
@@ -41,5 +46,16 @@ enum LaunchDispatch: Equatable {
             return .startApp
         }
         return .usageError
+    }
+
+    /// Whether `executablePath` is the binary of the app owning the calling terminal, which
+    /// exports it as `SOPRANO_BIN` (panes call it through the `soprano` symlink). Without a
+    /// recorded binary a call from a pane counts as the owning app's.
+    static func runsOwningApp(executablePath: String?, environment: [String: String]) -> Bool {
+        guard let owner = environment["SOPRANO_BIN"], !owner.isEmpty, let executablePath else { return true }
+        func resolved(_ path: String) -> String {
+            URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        return resolved(executablePath) == resolved(owner)
     }
 }

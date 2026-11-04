@@ -549,7 +549,9 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
     private func updateLocation(from webView: WKWebView) {
         guard let value = webView.url?.absoluteString, !value.isEmpty else { return }
         hasLoadedLocation = true
-        addressField.stringValue = value
+        // Pages rewrite their URL (replaceState, #fragments) at any time; never under the user's
+        // typing. The saved URL still follows.
+        if addressField.currentEditor() == nil { addressField.stringValue = value }
         onURLChanged?(value)
     }
 

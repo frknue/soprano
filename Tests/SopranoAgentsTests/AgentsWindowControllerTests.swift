@@ -1,4 +1,5 @@
 import AppKit
+import SopranoAgentsCore
 import Testing
 @testable import Soprano
 
@@ -37,6 +38,21 @@ struct AgentsWindowControllerTests {
         // status itself is not observable here.
         #expect(overlay.isVisible)
         #expect(controller.keyTarget === overlay)
+    }
+
+    @Test func reopeningTheWindowGivesTheKeyboardBackToTheCommitDialogStillOpenOverIt() throws {
+        let controller = try controller()
+        let window = try #require(controller.window)
+        controller.showWindow(nil)
+        defer { window.close() }
+        CommitDialog.present(status: GitStatusSummary(isRepository: true, branch: "main"), in: window) { _ in }
+        let panel = try #require(window.childWindows?.first { $0 is CommitDialogPanel })
+        defer { panel.cancelOperation(nil) }
+
+        window.close()
+        controller.showAndMakeKey()
+
+        #expect(controller.keyTarget === panel)
     }
 
     @Test func theDetailsCardStopsPollingGitWhileTheWindowIsClosedAndStaysOpenForTheReopen() throws {

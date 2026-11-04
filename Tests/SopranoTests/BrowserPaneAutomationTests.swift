@@ -54,6 +54,21 @@ struct BrowserPaneAutomationTests {
         }
     }
 
+    @Test func aSameDocumentNavigationLeavesAnAddressBeingTypedAlone() async throws {
+        try await withPage { browser in
+            var urls: [String] = []
+            browser.onURLChanged = { urls.append($0) }
+            browser.focusAddressBar()
+            let editor = try #require(browser.window?.firstResponder as? NSTextView)
+            editor.string = "localhost:30"
+
+            _ = try await run(browser, "eval", ["history.replaceState({}, '', '#scrolled'); location.href"])
+            try await waitUntil { urls.last?.hasSuffix("#scrolled") == true }
+
+            #expect(editor.string == "localhost:30")
+        }
+    }
+
     // MARK: - Helpers
 
     private func withPage(_ body: @MainActor (BrowserPaneView) async throws -> Void) async throws {

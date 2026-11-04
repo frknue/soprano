@@ -567,6 +567,9 @@ final class ThreadDetailsCardController: NSViewController {
         Task { [weak self] in
             guard let self else { return }
             let status = await loadStatus(cwd: cwd)
+            // The user may have moved to another thread or closed the window meanwhile: this
+            // status, and a commit from it, belong to the folder that was selected.
+            guard workingDirectory == cwd, window.isVisible else { return }
             gitStatus = status
             render()
             CommitDialog.present(status: status, in: window) { [weak self] result in

@@ -189,6 +189,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     /// Awaited by `captureCheckpoint` / `restoreCheckpoint` after recording the call (slow git).
     var captureGate: (@Sendable () async -> Void)?
     var restoreGate: (@Sendable () async -> Void)?
+    /// Awaited by `status` (a slow status read).
+    var statusGate: (@Sendable () async -> Void)?
     /// `workingTreeDiff`'s answer.
     var workingPatch = ""
 
@@ -242,7 +244,8 @@ final class RecordingGit: GitService, @unchecked Sendable {
     }
 
     func status(cwd: String) async throws -> GitStatusSummary {
-        GitStatusSummary(isRepository: isRepo, branch: isRepo ? currentBranch : nil)
+        await statusGate?()
+        return GitStatusSummary(isRepository: isRepo, branch: isRepo ? currentBranch : nil)
     }
 
     func branches(cwd: String) async throws -> [GitBranchRef] {

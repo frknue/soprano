@@ -11,9 +11,13 @@ if let markdownCommandExitCode = MarkdownCommand.run() {
 } else if let browserCommandExitCode = BrowserCommand.run() {
     exit(browserCommandExitCode)
 } else if !AgentEventCommand.handle() && !PaneNavigationCommand.handle() {
+    let environment = ProcessInfo.processInfo.environment
     switch LaunchDispatch.decide(
         arguments: launchArguments,
-        environment: ProcessInfo.processInfo.environment
+        environment: environment,
+        runsOwningApp: LaunchDispatch.runsOwningApp(
+            executablePath: Bundle.main.executableURL?.path, environment: environment
+        )
     ) {
     case .help:
         FileHandle.standardOutput.write(Data((LaunchDispatch.usage + "\n").utf8))

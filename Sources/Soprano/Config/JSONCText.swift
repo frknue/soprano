@@ -716,7 +716,9 @@ enum JSONCText {
         }
         guard between.contains(where: { isComment[$0] }) else { return Edit(start: comma, end: end, text: "") }
         var kept = source[between]
-        while let last = kept.last, isWhitespace(last) { kept.removeLast() }
+        // Spaces only: the line break after a `//` comment ends it, and the closing brace may
+        // follow on the same line as the removed entry.
+        while let last = kept.last, isIndentCharacter(last) { kept.removeLast() }
         return Edit(start: comma, end: end, text: String(kept))
     }
 

@@ -36,11 +36,14 @@ enum AutomationScheduling {
         func next() -> Date? {
             automation.enabled ? automation.schedule.nextOccurrence(after: now, calendar: calendar) : nil
         }
-        guard let state, state.signature == signature else {
+        // Builds before the time zone joined the signature saved "<on|off> <cron>": that is the
+        // same schedule, so a run that came due before the update still starts.
+        let legacySignature = "\(automation.enabled ? "on" : "off") \(automation.schedule.expression)"
+        guard let state, state.signature == signature || state.signature == legacySignature else {
             return (.init(signature: signature, nextRunAt: next()), nil)
         }
         guard automation.enabled, let due = state.nextRunAt, due <= now else {
-            return (state, nil)
+            return (.init(signature: signature, nextRunAt: state.nextRunAt), nil)
         }
         let latest = automation.schedule.latestOccurrence(from: due, through: now, calendar: calendar) ?? due
         let lateness = now.timeIntervalSince(latest)

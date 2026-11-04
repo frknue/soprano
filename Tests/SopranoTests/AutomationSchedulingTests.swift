@@ -65,6 +65,19 @@ struct AutomationSchedulingTests {
         #expect(state.nextRunAt == date("2026-10-30 09:00"))
     }
 
+    @Test func aRunThatCameDueUnderAnOlderBuildsSavedScheduleStillStartsAfterTheUpdate() {
+        let audit = automation()
+        // Builds before the time zone joined the signature saved "<on|off> <cron>".
+        let saved = AutomationStore.ScheduleState(signature: "on 0 9 * * *", nextRunAt: date("2026-10-29 09:00"))
+
+        let (state, decision) = AutomationScheduling.evaluate(
+            audit, state: saved, now: date("2026-10-29 09:20"), calendar: calendar
+        )
+
+        #expect(decision == .run(scheduledFor: date("2026-10-29 09:00")))
+        #expect(state == self.state(for: audit, nextRunAt: date("2026-10-30 09:00")))
+    }
+
     @Test func movingToAnotherTimeZoneSetsTheNextRunForNineThereInsteadOfNineAtHome() {
         let audit = automation()
         let (berlinState, _) = AutomationScheduling.evaluate(

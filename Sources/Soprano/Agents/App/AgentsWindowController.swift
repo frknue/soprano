@@ -154,9 +154,14 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
         super.showWindow(sender)
     }
 
-    /// What takes the keyboard when the window comes forward: the dialog or settings screen
-    /// still open over it, so its keys never reach the views it covers, else the window.
-    var keyTarget: NSWindow? { OverlayWindow.topmost(over: window) ?? window }
+    /// What takes the keyboard when the window comes forward: the dialog, settings screen or
+    /// Commit dialog still open over it, so its keys never reach the views it covers, else the
+    /// window.
+    var keyTarget: NSWindow? {
+        OverlayWindow.topmost(over: window)
+            ?? window?.childWindows?.last { $0 is CommitDialogPanel && $0.isVisible }
+            ?? window
+    }
 
     /// Shows the window and makes `keyTarget` key.
     func showAndMakeKey() {
