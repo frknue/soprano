@@ -255,7 +255,7 @@ extension LiveGitService {
         do {
             try await git(["worktree", "add", "--", path, newBranch], in: root)
         } catch {
-            _ = try? await git(["branch", "-D", "--", newBranch], in: root)
+            await rollBackWorktree(path: path, branch: newBranch, in: root)
             throw error
         }
         _ = try? await git(["config", "branch.\(newBranch).soprano-agents-merge-base", baseBranch], in: root)
@@ -266,12 +266,23 @@ extension LiveGitService {
                 try await git(["submodule", "update", "--init", "--recursive"], in: worktree)
             } catch {
                 // A half-set-up worktree must not exist: a later turn would run the agent in it.
-                _ = try? await git(["worktree", "remove", "--force", "--", path], in: root)
-                _ = try? await git(["branch", "-D", "--", newBranch], in: root)
+                await rollBackWorktree(path: path, branch: newBranch, in: root)
                 throw error
             }
         }
         return path
+    }
+
+    /// Removes a worktree `createWorktree` left half set up, and its branch. Runs in a task of its
+    /// own: Stop or quit cancels the setup task, and git refuses to start in a cancelled one.
+    private func rollBackWorktree(path: String, branch: String, in root: URL) async {
+        await Task.detached { [self] in
+            if FileManager.default.fileExists(atPath: path) {
+                _ = try? await git(["worktree", "remove", "--force", "--", path], in: root)
+            }
+            _ = try? await git(["worktree", "prune"], in: root)
+            _ = try? await git(["branch", "-D", "--", branch], in: root)
+        }.value
     }
 
     public func removeWorktree(projectRoot: String, path: String, force: Bool) async throws {

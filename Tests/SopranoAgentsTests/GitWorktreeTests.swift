@@ -43,6 +43,41 @@ struct GitWorktreeTests {
         #expect(try await repo.output("branch", "--list", "soprano/broken").isEmpty)
     }
 
+    @Test func stoppingDuringSubmoduleSetupStillRemovesTheWorktreeAndBranch() async throws {
+        let sandbox = try GitSandbox()
+        defer { sandbox.remove() }
+        let repo = try await sandbox.repository("app")
+        try await repo.commit("base", ["a.txt": "a\n"])
+        let base = try await repo.output("rev-parse", "HEAD")
+        // A submodule remote that never answers, so `submodule update` hangs until cancelled.
+        let config = sandbox.url("gitconfig")
+        try (String(contentsOf: config, encoding: .utf8) + "[protocol \"ext\"]\n\tallow = always\n")
+            .write(to: config, atomically: true, encoding: .utf8)
+        try repo.write(".gitmodules", "[submodule \"lib\"]\n\tpath = lib\n\turl = ext::sleep 30\n")
+        try await repo.git("add", ".gitmodules")
+        try await repo.git("update-index", "--add", "--cacheinfo", "160000,\(base),lib")
+        try await repo.git("commit", "-m", "add submodule")
+        let branch = try await repo.output("symbolic-ref", "--short", "HEAD")
+        let worktrees = sandbox.url("worktrees").path
+        let folder = "\(worktrees)/app/soprano-stopped"
+
+        let setup = Task {
+            try await sandbox.service.createWorktree(
+                projectRoot: repo.path, baseBranch: branch, newBranch: "soprano/stopped", directory: worktrees
+            )
+        }
+        let deadline = Date().addingTimeInterval(15)
+        while !FileManager.default.fileExists(atPath: "\(folder)/.gitmodules"), Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        setup.cancel()
+        _ = await setup.result
+
+        #expect(!FileManager.default.fileExists(atPath: folder))
+        #expect(try await repo.output("branch", "--list", "soprano/stopped").isEmpty)
+    }
+
     @Test func creatingAWorktreeBranchesFromTheBaseAndChecksItOutAtTheRulePath() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }
