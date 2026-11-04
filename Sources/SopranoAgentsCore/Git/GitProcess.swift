@@ -235,13 +235,14 @@ final class GitProcess: @unchecked Sendable {
         }
     }
 
-    /// SIGTERM, then SIGKILL for a process that ignores it.
+    /// SIGTERM, then SIGKILL for a process that ignores it. Only while the process still runs:
+    /// once Foundation reaped it, its pid may already belong to another process.
     private func terminate() {
-        let processIdentifier = process.processIdentifier
+        let process = process
         process.terminate()
         DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
-            if kill(processIdentifier, 0) == 0 {
-                kill(processIdentifier, SIGKILL)
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
             }
         }
     }

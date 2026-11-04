@@ -19,6 +19,30 @@ struct GitWorktreeTests {
         #expect(URL(fileURLWithPath: path).lastPathComponent.count == 40)
     }
 
+    @Test func aWorktreeWhoseSubmodulesFailToCheckOutLeavesNoFolderOrBranchBehind() async throws {
+        let sandbox = try GitSandbox()
+        defer { sandbox.remove() }
+        let repo = try await sandbox.repository("app")
+        try await repo.commit("base", ["a.txt": "a\n"])
+        let base = try await repo.output("rev-parse", "HEAD")
+        // A submodule whose URL does not exist: `submodule update` fails after the worktree exists.
+        try repo.write(".gitmodules", "[submodule \"lib\"]\n\tpath = lib\n\turl = \(sandbox.url("missing-remote").path)\n")
+        try await repo.git("add", ".gitmodules")
+        try await repo.git("update-index", "--add", "--cacheinfo", "160000,\(base),lib")
+        try await repo.git("commit", "-m", "add submodule")
+        let branch = try await repo.output("symbolic-ref", "--short", "HEAD")
+        let worktrees = sandbox.url("worktrees").path
+
+        await #expect(throws: (any Error).self) {
+            try await sandbox.service.createWorktree(
+                projectRoot: repo.path, baseBranch: branch, newBranch: "soprano/broken", directory: worktrees
+            )
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: "\(worktrees)/app/soprano-broken"))
+        #expect(try await repo.output("branch", "--list", "soprano/broken").isEmpty)
+    }
+
     @Test func creatingAWorktreeBranchesFromTheBaseAndChecksItOutAtTheRulePath() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }

@@ -155,6 +155,14 @@ struct StatisticsBoardTests {
         #expect(StatisticsFormat.tokens(3_000_000_000) == "3B")
     }
 
+    @Test func aTotalThatRoundsUpToTheNextUnitShowsInThatUnit() {
+        #expect(StatisticsFormat.tokens(999_949) == "999.9k")
+        #expect(StatisticsFormat.tokens(999_960) == "1M")
+        #expect(StatisticsFormat.tokens(999_960_000) == "1B")
+        #expect(StatisticsFormat.cost(999.99) == "$999.99")
+        #expect(StatisticsFormat.cost(999.996) == "$1,000")
+    }
+
     @Test func costsKeepCentsUntilAThousandAndFlagTinyAmounts() {
         #expect(StatisticsFormat.cost(0) == "$0")
         #expect(StatisticsFormat.cost(0.004) == "<$0.01")

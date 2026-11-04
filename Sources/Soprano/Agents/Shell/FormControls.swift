@@ -35,6 +35,8 @@ final class InputField: PaletteView, NSTextFieldDelegate {
             heightAnchor.constraint(equalToConstant: height),
         ])
         self.placeholder = placeholder
+        // Return in an untouched field must not write the shown (often default) value.
+        valueAtBeginEditing = value
         applyPalette(palette)
     }
 
@@ -44,7 +46,10 @@ final class InputField: PaletteView, NSTextFieldDelegate {
 
     var stringValue: String {
         get { field.stringValue }
-        set { field.stringValue = newValue }
+        set {
+            field.stringValue = newValue
+            valueAtBeginEditing = newValue
+        }
     }
 
     override func applyPalette(_ palette: Palette) {

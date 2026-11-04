@@ -48,6 +48,23 @@ struct GitActionTests {
         #expect(try await repo.output("log", "-1", "--format=%s%n%b") == "Update the a file\n- details")
     }
 
+    @Test func committingEverythingSkipsAnUntrackedNestedRepositoryWithoutCommits() async throws {
+        let sandbox = try GitSandbox()
+        defer { sandbox.remove() }
+        let repo = try await sandbox.repository()
+        try await repo.commit("initial", ["a.txt": "a\n"])
+        let nested = try await sandbox.repository("repo/scratch")
+        try nested.write("inner.txt", "inner\n")
+        try repo.write("b.txt", "b\n")
+
+        _ = try await sandbox.service.runAction(
+            GitActionRequest(action: .commit, cwd: repo.path, commitMessage: "Add b"),
+            writer: FakeSourceControlWriter(subject: "unused"), progress: ProgressLog().record
+        )
+
+        #expect(try await repo.output("ls-tree", "-r", "--name-only", "HEAD") == "a.txt\nb.txt")
+    }
+
     @Test func committingSelectedFilesLeavesTheOthersUncommitted() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }

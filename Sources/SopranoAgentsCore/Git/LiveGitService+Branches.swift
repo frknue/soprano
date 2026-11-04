@@ -261,8 +261,15 @@ extension LiveGitService {
         _ = try? await git(["config", "branch.\(newBranch).soprano-agents-merge-base", baseBranch], in: root)
         let worktree = URL(fileURLWithPath: path)
         if FileManager.default.fileExists(atPath: worktree.appendingPathComponent(".gitmodules").path) {
-            try await git(["submodule", "init"], in: worktree)
-            try await git(["submodule", "update", "--init", "--recursive"], in: worktree)
+            do {
+                try await git(["submodule", "init"], in: worktree)
+                try await git(["submodule", "update", "--init", "--recursive"], in: worktree)
+            } catch {
+                // A half-set-up worktree must not exist: a later turn would run the agent in it.
+                _ = try? await git(["worktree", "remove", "--force", "--", path], in: root)
+                _ = try? await git(["branch", "-D", "--", newBranch], in: root)
+                throw error
+            }
         }
         return path
     }

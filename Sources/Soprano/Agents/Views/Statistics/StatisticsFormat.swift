@@ -7,11 +7,12 @@ enum StatisticsFormat {
     static func cost(_ value: Double) -> String {
         if value <= 0 { return "$0" }
         if value < 0.01 { return "<$0.01" }
-        if value < 1000 { return String(format: "$%.2f", value) }
+        // Rounded first: $999.996 shows as $1,000, not $1000.00.
+        if (value * 100).rounded() < 100_000 { return String(format: "$%.2f", value) }
         return "$" + grouped(Int(value.rounded()))
     }
 
-    /// `950`, `62.4k`, `5.1M`, `1.78B`.
+    /// `950`, `62.4k`, `5.1M`, `1.78B`. The unit follows the rounded value: 999,960 is `1M`.
     static func tokens(_ count: Int) -> String {
         func scaled(_ value: Double, _ suffix: String, decimals: Int) -> String {
             var text = String(format: "%.\(decimals)f", value)
@@ -19,9 +20,17 @@ enum StatisticsFormat {
             if text.hasSuffix(".") { text.removeLast() }
             return text + suffix
         }
+        func rounded(_ value: Double, decimals: Int) -> Double {
+            let factor = pow(10, Double(decimals))
+            return (value * factor).rounded() / factor
+        }
         let value = Double(count)
-        if count >= 1_000_000_000 { return scaled(value / 1_000_000_000, "B", decimals: 2) }
-        if count >= 1_000_000 { return scaled(value / 1_000_000, "M", decimals: 1) }
+        if count >= 1_000_000_000 || rounded(value / 1_000_000, decimals: 1) >= 1000 {
+            return scaled(value / 1_000_000_000, "B", decimals: 2)
+        }
+        if count >= 1_000_000 || rounded(value / 1000, decimals: 1) >= 1000 {
+            return scaled(value / 1_000_000, "M", decimals: 1)
+        }
         if count >= 1000 { return scaled(value / 1000, "k", decimals: 1) }
         return String(count)
     }
