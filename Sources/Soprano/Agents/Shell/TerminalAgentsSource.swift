@@ -11,6 +11,7 @@ final class TerminalAgentsSource {
     private let buildDashboard: (ThemeManager) -> AgentDashboardViewController
     private let focusInTerminal: (TerminalTarget) -> Void
     private let observers = ObserverList<Void>()
+    private var isChangePending = false
 
     /// - Parameters:
     ///   - entries: every pane agent, most urgent first (`AgentDashboardSnapshot` order).
@@ -43,8 +44,17 @@ final class TerminalAgentsSource {
         observers.add(owner) { _ in handler() }
     }
 
-    /// The agents changed; the backing model calls this.
+    /// The agents changed; the backing model calls this. A burst (busy agents retitle their tabs
+    /// several times a second) reaches observers once, on the next turn of the main queue.
     func notifyChange() {
-        observers.notify(())
+        guard !isChangePending else { return }
+        isChangePending = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.isChangePending = false
+                self.observers.notify(())
+            }
+        }
     }
 }

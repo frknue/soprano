@@ -13,9 +13,14 @@ extension TerminalAgentsSource {
             makeDashboard: makeDashboard,
             openInTerminal: openInTerminal
         )
-        agentManager.addObserver(id: "TerminalAgentsSource-\(ObjectIdentifier(self).hashValue)") { [weak self] change in
+        agentManager.addObserver(id: "TerminalAgentsSource-\(ObjectIdentifier(self).hashValue)") { [weak self, weak agentManager] change in
             switch change {
-            case .model, .tabTitle, .tabWorkingDirectory:
+            case .model:
+                self?.notifyChange()
+            case let .tabTitle(target), let .tabWorkingDirectory(target):
+                // Shells, browsers and editors retitle constantly; only agent tabs are listed.
+                guard agentManager?.panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId })?.agent != nil
+                else { return }
                 self?.notifyChange()
             case .browserURL, .document:
                 break

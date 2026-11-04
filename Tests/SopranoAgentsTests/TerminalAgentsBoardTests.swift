@@ -103,7 +103,7 @@ struct TerminalAgentsBoardTests {
         #expect(responder.isDescendant(of: controller.workspace.chat.composer.view))
     }
 
-    @Test func theTerminalsSectionFollowsThePaneAgents() throws {
+    @Test func theTerminalsSectionFollowsThePaneAgents() async throws {
         let built = try DemoFixtures.build("demo")
         let manager = AgentManager()
         let source = TerminalAgentsSource(
@@ -117,16 +117,16 @@ struct TerminalAgentsBoardTests {
         _ = sidebar.view
         #expect(!sidebar.items.contains(.terminalsShelf(count: 1, expanded: true)))
 
+        // Changes reach the sidebar on the next turn of the main queue, a burst once.
         let pane = try #require(manager.spawnAgent("codex", cwd: "/tmp/app"))
-        #expect(sidebar.items.first == .terminalsShelf(count: 1, expanded: true))
+        #expect(await EngineHarness.eventually { sidebar.items.first == .terminalsShelf(count: 1, expanded: true) })
 
         let tab = try #require(manager.panes[pane]?.activeTab?.id)
         manager.updateAgentStatus(paneId: pane, tabId: tab, status: .waiting)
-        guard case let .terminalAgent(row) = sidebar.items[1] else {
-            Issue.record("no agent row")
-            return
-        }
-        #expect(row.status == .needsInput)
+        #expect(await EngineHarness.eventually {
+            guard sidebar.items.count > 1, case let .terminalAgent(row) = sidebar.items[1] else { return false }
+            return row.status == .needsInput
+        })
     }
 
     @Test func theToggleCommandNeedsTerminalAgents() throws {
@@ -140,5 +140,40 @@ struct TerminalAgentsBoardTests {
         #expect(state.isTerminalAgentsVisible)
         command.perform(controller.commandContext())
         #expect(!state.isTerminalAgentsVisible)
+    }
+
+    @Test func closingTheWindowClosesTheBoardSoItsDashboardStopsWorking() throws {
+        let (controller, state) = try window()
+        state.setTerminalAgentsVisible(true)
+
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+
+        #expect(!state.isTerminalAgentsVisible)
+    }
+
+    @Test func retitledPlainTerminalsAreIgnoredAndAnAgentsBurstOfTitlesArrivesOnce() async throws {
+        let manager = AgentManager()
+        let agentPane = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        let agentTab = try #require(manager.panes[agentPane]?.activeTab?.id)
+        let shellPane = try #require(manager.spawnTerminal(cwd: "/tmp/projects/storefront"))
+        let shellTab = try #require(manager.panes[shellPane]?.activeTab?.id)
+        let source = TerminalAgentsSource(agentManager: manager, makeDashboard: { _ in
+            AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: AppTheme.folioId))
+        }, openInTerminal: { _ in })
+        let owner = NSObject()
+        var changes = 0
+        source.addObserver(owner) { changes += 1 }
+
+        for title in ["⠋ npm test", "⠙ npm test", "⠹ npm test"] {
+            manager.renameTab(shellPane, tabId: shellTab, to: title)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(changes == 0)
+
+        for title in ["⠋ Fix the checkout", "⠙ Fix the checkout", "⠹ Fix the checkout"] {
+            manager.renameTab(agentPane, tabId: agentTab, to: title)
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(changes == 1)
     }
 }

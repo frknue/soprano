@@ -156,5 +156,8 @@ final class AgentsWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         isOpen = false
         router.stopMonitoring()
+        // The Terminal Agents board's dashboard polls transcripts and terminals every second;
+        // a closed window must not keep it running.
+        state.setTerminalAgentsVisible(false)
     }
 }
