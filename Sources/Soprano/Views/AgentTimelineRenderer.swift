@@ -499,7 +499,8 @@ final class AgentTimelineRenderer {
         in group: RoundedTextBlock,
         to output: NSMutableAttributedString
     ) {
-        var lines = diff.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        // `isNewline` also splits CRLF, a single `Character` that `"\n"` misses.
+        var lines = diff.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
         var elided = 0
         if !detailed, lines.count > Self.compactDiffLines {
             elided = lines.count - Self.compactDiffLines
@@ -544,10 +545,14 @@ final class AgentTimelineRenderer {
                 text.append(diffRow(gutter: oldLine, marker: "−", code: code, markerColor: colors.danger,
                                     wash: colors.diffDelete, blocks: blocks))
                 oldLine = oldLine.map { $0 + 1 }
-            default:
-                text.append(diffRow(gutter: newLine, marker: "", code: marker == " " ? code : line, blocks: blocks))
+            case " ", "":
+                text.append(diffRow(gutter: newLine, marker: "", code: code, blocks: blocks))
                 oldLine = oldLine.map { $0 + 1 }
                 newLine = newLine.map { $0 + 1 }
+            default:
+                // Not a file line: `\ No newline at end of file`, an elision
+                // marker. Shown as is, without a number.
+                text.append(diffRow(gutter: nil, marker: "", code: line, blocks: blocks))
             }
         }
         if elided > 0 {

@@ -92,6 +92,25 @@ struct PaneHeaderCloseButtonTests {
         #expect(manager.panes[paneId]?.activeTab?.id == secondTabId)
     }
 
+    @Test func clickingAnInactivePaneTabSwitchesThePaneToThatTab() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let firstTabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        _ = try #require(manager.addTabToPane(paneId, type: .terminal))
+        let header = PaneHeaderView(
+            paneId: paneId,
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        let firstTab = try #require(descendants(of: header, as: NSButton.self).first {
+            $0.identifier?.rawValue == "pane-tab-\(firstTabId)"
+        })
+
+        firstTab.performClick(nil)
+
+        #expect(manager.panes[paneId]?.activeTab?.id == firstTabId)
+    }
+
     @Test func closingAMarkdownPreviewClearsTheEditorsEyeHoverTint() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaneHeaderCloseButtonTests-\(UUID().uuidString)")

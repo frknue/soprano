@@ -50,6 +50,38 @@ struct SidebarLayoutTabTests {
         #expect(SidebarView.windowGap > SidebarView.tabGap)
     }
 
+    @Test func aClickOnARowsTitleSelectsItAndOneOnItsButtonDoesNotWhereverTheRowSits() throws {
+        let manager = AgentManager()
+        let firstPaneId = manager.activePaneId
+        let sidebar = makeSidebar(manager)
+        _ = try #require(manager.createLayoutTab())
+        let secondPaneId = manager.activePaneId
+        let thirdPaneId = try #require(manager.splitPane(direction: .horizontal, paneId: secondPaneId))
+        sidebar.layoutSubtreeIfNeeded()
+
+        // Both rows sit away from their superview's origin.
+        for paneId in [firstPaneId, thirdPaneId] {
+            let row = try row("sidebar-pane-\(paneId)", in: sidebar)
+            #expect(row.frame.origin != .zero)
+            let title = try #require(descendants(of: row, as: NSTextField.self).first { !$0.isHidden && !$0.stringValue.isEmpty })
+            let center = NSPoint(x: title.bounds.midX, y: title.bounds.midY)
+            let event = try click(at: center, in: title)
+            let target = try #require(sidebar.hitTest(event.locationInWindow))
+            target.mouseDown(with: event)
+            #expect(manager.activePaneId == paneId)
+        }
+
+        // A click the disclosure button passes on is the button's, not a row select.
+        let windowId = try #require(manager.createWindow())
+        manager.activatePreviousWindow()
+        sidebar.layoutSubtreeIfNeeded()
+        let windowRow = try row("sidebar-window-\(windowId)", in: sidebar)
+        #expect(windowRow.frame.origin != .zero)
+        let disclosure = try #require(descendants(of: windowRow, as: NSButton.self).first { !($0 is ChromeIconButton) })
+        windowRow.mouseDown(with: try click(at: NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY), in: disclosure))
+        #expect(manager.activeWindowId != windowId)
+    }
+
     private func row(_ identifier: String, in sidebar: NSView) throws -> NSView {
         try #require(descendants(of: sidebar, as: NSView.self).first { $0.identifier?.rawValue == identifier })
     }

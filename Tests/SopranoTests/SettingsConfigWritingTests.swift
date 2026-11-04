@@ -177,6 +177,39 @@ struct SettingsConfigWritingTests {
         #expect(fileText(store).contains("\"prefixKey\": \"b\""))
     }
 
+    @Test func aPrefixKeyThatNeedsShiftIsRefusedBecauseControlAloneCouldNeverTypeIt() throws {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = makeController(store)
+        let prefix = try #require(
+            controls(NSControl.self, in: controller.view)
+                .first { $0.accessibilityLabel() == "Prefix key" }
+        )
+        func shifted(_ character: String, keyCode: UInt16) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: .shift,
+                timestamp: 0,
+                windowNumber: 0,
+                context: nil,
+                characters: character,
+                charactersIgnoringModifiers: character,
+                isARepeat: false,
+                keyCode: keyCode
+            ))
+        }
+
+        #expect(prefix.accessibilityPerformPress())
+        prefix.keyDown(with: try shifted("!", keyCode: 18))
+        #expect(store.keybindings.prefixKey == "a")
+
+        // A shifted letter is still that letter: ⌃B types it without Shift.
+        prefix.keyDown(with: try shifted("B", keyCode: 11))
+        #expect(store.keybindings.prefixKey == "b")
+    }
+
     @Test func addingAProjectDirectoryWritesItHomeRelativeAndResolvesItBack() {
         let (store, directory) = makeStore()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -193,6 +226,36 @@ struct SettingsConfigWritingTests {
         // Written as "~", read back as the absolute path the app can use.
         #expect(fileText(store).contains("\"~\""))
         #expect(store.settings.projectDirectories == [home.standardizedFileURL.path])
+    }
+
+    @Test func addingOrRemovingAProjectDirectoryKeepsThePageInsteadOfRebuildingIt() async throws {
+        let (store, directory) = makeStore()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let folder = directory.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let controller = makeController(store)
+        let input = try #require(controls(NSTextField.self, in: controller.view)
+            .first { $0.placeholderAttributedString?.string == "Folder path" })
+        func settle() async throws {
+            // The screen adopts the store's change like the main window does;
+            // a rebuild would land once the main queue gets a turn.
+            controller.update(settings: store.settings, keybindingConfig: store.keybindings)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+
+        input.stringValue = folder.path
+        send(input)
+        try await settle()
+        #expect(store.settings.projectDirectories.contains(folder.standardizedFileURL.path))
+        #expect(input.isDescendant(of: controller.view))
+
+        let remove = try #require(controls(NSButton.self, in: controller.view)
+            .first { $0.title == "Remove" || $0.accessibilityLabel() == "Remove" })
+        send(remove)
+        try await settle()
+        #expect(store.settings.projectDirectories.isEmpty)
+        #expect(input.isDescendant(of: controller.view))
     }
 
     @Test func editingThePrefixTimeoutClampsAndWritesTheNestedKey() {

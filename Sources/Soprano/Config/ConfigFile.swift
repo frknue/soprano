@@ -331,7 +331,7 @@ enum ConfigFile {
     /// would have typed them.
     static func abbreviatingHome(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        guard path.hasPrefix(home) else { return path }
+        guard path == home || path.hasPrefix(home + "/") else { return path }
         return "~" + path.dropFirst(home.count)
     }
 }
