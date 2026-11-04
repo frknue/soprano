@@ -17,7 +17,8 @@ extension Palette {
 // MARK: - Measuring
 
 /// TextKit 1 heights of attributed text at a width, with the same container setup the text views
-/// use (no padding, no inset). Cached per string instance and width.
+/// use (no padding, no inset). Cached per string instance and width, while the string lives (the
+/// cache does not keep a streamed message's every version alive).
 @MainActor
 enum TextMeasure {
     private static let storage = NSTextStorage()
@@ -34,7 +35,7 @@ enum TextMeasure {
     }()
 
     private struct Entry {
-        let text: NSAttributedString
+        weak var text: NSAttributedString?
         var heights: [CGFloat: CGFloat]
     }
 
@@ -80,7 +81,9 @@ final class MarkdownLayoutManager: NSLayoutManager {
             super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
             return
         }
-        let origin = firstTextView?.textContainerOrigin ?? .zero
+        // Called from the text view's drawing, on the main thread.
+        let textView = firstTextView
+        let origin = MainActor.assumeIsolated { textView?.textContainerOrigin } ?? .zero
         var bands: [(line: ClosedRange<CGFloat>, glyphs: ClosedRange<CGFloat>)] = []
         enumerateLineFragments(forGlyphRange: glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)) { fragment, _, _, lineGlyphs, _ in
             let lineChars = self.characterRange(forGlyphRange: lineGlyphs, actualGlyphRange: nil)
@@ -148,8 +151,14 @@ final class MarkdownLayoutManager: NSLayoutManager {
 /// `linkHandler` takes them.
 final class MarkdownTextView: NSTextView {
     let markdownLayoutManager = MarkdownLayoutManager()
-    /// Link clicks go here first; true = handled, else the URL opens in its default app.
+    /// Link clicks go here first; true = handled, else a web or mail link opens in its default app
+    /// (`opensExternally`) and any other does nothing.
     var linkHandler: ((URL) -> Bool)?
+
+    /// The schemes a click hands to their default app: never `file:`, an app or a custom scheme.
+    nonisolated static func opensExternally(_ url: URL) -> Bool {
+        ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "")
+    }
 
     init() {
         let storage = NSTextStorage()
@@ -185,8 +194,10 @@ final class MarkdownTextView: NSTextView {
 
     override func clicked(onLink link: Any, at charIndex: Int) {
         let url = (link as? URL) ?? (link as? String).flatMap { URL(string: $0) }
-        if let url, linkHandler?(url) == true { return }
-        super.clicked(onLink: link, at: charIndex)
+        guard let url else { return }
+        if linkHandler?(url) == true { return }
+        guard Self.opensExternally(url) else { return }
+        super.clicked(onLink: url, at: charIndex)
     }
 
     func setWidth(_ width: CGFloat, height: CGFloat) {
@@ -538,36 +549,44 @@ final class MarkdownView: PaletteView {
     var images: [String: NSImage] = [:] {
         didSet { configureImages() }
     }
-    /// Link clicks of the text and table cells; true = handled, else the URL opens in its default app.
+    /// Link clicks of the text and table cells; true = handled, else a web or mail link opens in
+    /// its default app.
     var linkHandler: ((URL) -> Bool)? {
         didSet { applyLinkHandler() }
     }
 
+    /// Shows `rendering`, reusing the segment views of the same kind at the same place, so a
+    /// streamed update keeps the views (and the selection) of the text above its end.
     func apply(_ rendering: MarkdownRendering) {
         guard rendering !== self.rendering else { return }
         self.rendering = rendering
-        segmentViews.forEach { $0.removeFromSuperview() }
-        segmentViews = rendering.pieces.map { piece in
+        let previous = segmentViews
+        segmentViews = rendering.pieces.enumerated().map { index, piece -> NSView in
+            let existing = index < previous.count ? previous[index] : nil
             switch piece.segment {
             case let .text(text):
-                let view = MarkdownTextView()
+                let view = existing as? MarkdownTextView ?? MarkdownTextView()
+                // Other text, not more of the same: the old selection means nothing in it.
+                let continues = text.string.hasPrefix(view.string)
                 view.setText(text)
+                if !continues { view.setSelectedRange(NSRange(location: 0, length: 0)) }
                 return view
             case let .code(language, code, highlighted, _):
-                let view = CodeBlockView(frame: .zero)
+                let view = existing as? CodeBlockView ?? CodeBlockView(frame: .zero)
                 view.configure(language: language, code: code, highlighted: highlighted)
                 return view
             case let .table(table, _):
-                let view = MarkdownTableView(frame: .zero)
+                let view = existing as? MarkdownTableView ?? MarkdownTableView(frame: .zero)
                 view.configure(table)
                 return view
             case .rule:
-                return MarkdownRuleView(frame: .zero)
+                return existing as? MarkdownRuleView ?? MarkdownRuleView(frame: .zero)
             case .image:
-                return MarkdownImageView(frame: .zero)
+                return existing as? MarkdownImageView ?? MarkdownImageView(frame: .zero)
             }
         }
-        segmentViews.forEach(addSubview)
+        for view in previous where !segmentViews.contains(where: { $0 === view }) { view.removeFromSuperview() }
+        for view in segmentViews where view.superview !== self { addSubview(view) }
         configureImages()
         applyLinkHandler()
         applyPalette(palette)

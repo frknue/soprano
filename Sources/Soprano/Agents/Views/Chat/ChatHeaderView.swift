@@ -28,6 +28,8 @@ final class ChatHeaderView: PaletteView {
     private let rightPanelButton = GhostIconButton(symbol: Icon.panelRight, symbolSize: 14, toolTip: "Toggle right panel (⌘L)")
     private var renameField: InlineRenameField?
     private var pendingMenu: DispatchWorkItem?
+    /// The last single click on the title opened the thread from a subagent.
+    private var openedThreadFromSubagent = false
 
     init(engine: AgentEngine, state: WorkspaceState) {
         self.engine = engine
@@ -49,13 +51,20 @@ final class ChatHeaderView: PaletteView {
         titleButton.onSingleClick = { [weak self] in
             guard let self else { return }
             if let threadID = state.selectedThreadID, state.selectedSubagentID != nil {
+                openedThreadFromSubagent = true
                 ThreadActions.open(threadID, engine: engine, state: state)
             } else {
+                openedThreadFromSubagent = false
                 scheduleTitleMenu()
             }
         }
         titleButton.onDoubleClick = { [weak self] in
             guard let self, state.selectedSubagentID == nil else { return }
+            // The first click of this double-click left a subagent for its thread: that was the action.
+            guard !openedThreadFromSubagent else {
+                openedThreadFromSubagent = false
+                return
+            }
             pendingMenu?.cancel()
             beginRename()
         }

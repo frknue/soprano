@@ -15,8 +15,8 @@ enum MarkdownReaderLink: Equatable {
     /// `destination` relative to the folder of `documentPath`; a leading "/" means the workspace
     /// root. ".." may not climb above the root.
     static func resolve(_ url: URL, from documentPath: String) -> MarkdownReaderLink {
-        if let scheme = url.scheme?.lowercased() {
-            return ["http", "https", "mailto"].contains(scheme) ? .external : .blocked
+        if url.scheme != nil {
+            return MarkdownTextView.opensExternally(url) ? .external : .blocked
         }
         let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let path = components?.percentEncodedPath.removingPercentEncoding ?? url.relativePath
