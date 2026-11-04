@@ -139,4 +139,16 @@ struct CodexRolloutDecoderTests {
         #expect(finished.first?.id == "c1")
         #expect(finished.first?.toolCall?.state == .succeeded)
     }
+
+    @Test func aFinishedCommandSharingItsCallIdWithTheProvisionalCallSurvivesTheCallOutput() {
+        let result = items([
+            #"{"timestamp":"2026-10-12T09:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"git status\"}","call_id":"call_1"}}"#,
+            completed(#"{"type":"CommandExecution","id":"call_1","command":["/bin/zsh","-lc","git status"],"parsed_cmd":[{"type":"unknown","cmd":"git status"}],"status":"completed","exit_code":0,"aggregated_output":"clean"}"#),
+            #"{"timestamp":"2026-10-12T09:00:06.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"clean"}}"#,
+        ])
+        #expect(result.count == 1)
+        #expect(result.first?.id == "call_1")
+        #expect(result.first?.toolCall?.state == .succeeded)
+        #expect(result.first?.toolCall?.output == "clean")
+    }
 }

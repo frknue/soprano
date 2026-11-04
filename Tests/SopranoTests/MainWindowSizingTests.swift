@@ -74,6 +74,21 @@ struct MainWindowSizingTests {
             visibleFrames: [visibleFrame]
         ) == nil)
     }
+
+    @Test func frameStoreFitsAFrameSavedOnALargerDisplayIntoTheScreenItOverlapsMost() throws {
+        let suiteName = "MainWindowSizingTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let laptop = NSRect(x: 0, y: 0, width: 1440, height: 875)
+        let side = NSRect(x: 1440, y: 0, width: 1920, height: 1055)
+
+        MainWindowFrameStore.save(NSRect(x: 200, y: 50, width: 3000, height: 1300), to: defaults)
+
+        #expect(MainWindowFrameStore.load(
+            from: defaults,
+            visibleFrames: [laptop, side]
+        ) == NSRect(x: 1440, y: 0, width: 1920, height: 1055))
+    }
 }
 
 @MainActor

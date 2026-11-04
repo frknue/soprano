@@ -34,9 +34,18 @@ struct BrowserIntegrationTests {
 
         let screenshot = try #require(try BrowserCommandRequest.parse(
             ["soprano", "browser", "screenshot", "artifacts/page.png"],
-            environment: ["PWD": "/tmp/browser-project"]
+            environment: [:], currentDirectoryPath: "/tmp/browser-project"
         ))
         #expect(screenshot.arguments == ["/tmp/browser-project/artifacts/page.png"])
+
+        let literal = try #require(try BrowserCommandRequest.parse(
+            ["soprano", "browser", "fill", "#q", "--pane"]
+        ))
+        #expect(literal == BrowserCommandRequest(
+            command: "fill",
+            arguments: ["#q", "--pane"],
+            targetPaneId: nil
+        ))
     }
 
     @Test func browserPaneSpawnsToTheRightAndPreservesItsURLWhenSplit() throws {
