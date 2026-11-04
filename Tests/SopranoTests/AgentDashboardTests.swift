@@ -189,6 +189,36 @@ struct AgentDashboardSnapshotTests {
 
 @MainActor
 struct AgentDashboardViewTests {
+    @Test func aSecondDashboardKeepsFollowingTheAgentsAfterTheFirstOneCloses() throws {
+        // The terminal window's dashboard and the Agents window's board watch the same panes.
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .waiting)
+        var first: AgentDashboardViewController? = AgentDashboardViewController(
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        _ = first?.view
+        let second = AgentDashboardViewController(agentManager: manager, themeManager: ThemeManager(themeId: "gruvbox-dark"))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 700),
+            styleMask: [.titled, .resizable],
+            backing: .buffered, defer: false
+        )
+        window.contentViewController = second
+        second.view.layoutSubtreeIfNeeded()
+
+        first = nil
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+
+        let status = try #require(allSubviews(in: second.view).compactMap { $0 as? NSTextField }.first {
+            $0.identifier?.rawValue == "agent-dashboard-status"
+        })
+        #expect(first == nil)
+        #expect(status.stringValue == "WORKING")
+    }
+
     @Test func rowsShowTheTaskOverTheAgentAndFolderAndFollowRenamesAndDirectoryChanges() throws {
         let manager = AgentManager()
         let paneId = try #require(manager.spawnAgent("codex", cwd: "/tmp/projects/storefront"))

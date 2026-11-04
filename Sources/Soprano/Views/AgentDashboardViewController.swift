@@ -44,7 +44,9 @@ final class AgentDashboardViewController: NSViewController {
     /// row with the pencil tick.
     private var isListFocused = false
     nonisolated(unsafe) private var elapsedTimer: Timer?
-    private let observerId = "AgentDashboardViewController"
+    /// One per dashboard: the terminal window's and the Agents window's watch the same
+    /// `AgentManager`, which keeps one observer per id.
+    private let observerId = "AgentDashboardViewController-\(UUID().uuidString)"
 
     init(
         agentManager: AgentManager,
