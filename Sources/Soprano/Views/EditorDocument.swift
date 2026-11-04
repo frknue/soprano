@@ -363,7 +363,10 @@ final class EditorDocument {
     /// Whether another program wrote a different version since the file was
     /// last read or saved here. A deleted file has nothing to overwrite.
     var diskChangedSinceLastSync: Bool {
-        guard let signature = Self.signature(of: url), signature != diskSignature else { return false }
+        guard let signature = Self.signature(of: url) else { return false }
+        // The watcher already saw a different version and kept the edits.
+        if diskState == .changed { return true }
+        guard signature != diskSignature else { return false }
         // A different size is a different file; only an equal size needs the bytes.
         guard let diskData, Int64(diskData.count) == signature.size,
               let current = try? Data(contentsOf: url)

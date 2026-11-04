@@ -276,6 +276,52 @@ struct MarkdownIntegrationTests {
         #expect(manager.layout == originalLayout)
     }
 
+    @MainActor
+    @Test func markdownLinksToPercentEncodedFileNamesAreDecodedOnce() throws {
+        let root = URL(fileURLWithPath: "/tmp/soprano-markdown-links", isDirectory: true)
+        let handler = MarkdownSchemeHandler()
+        let page = handler.update(
+            html: "",
+            documentURL: root.appendingPathComponent("README.md"),
+            accessRoot: root
+        )
+        let link = try #require(URL(string: "a%2520b.md", relativeTo: page))
+        #expect(handler.fileURL(for: link)?.path == "/tmp/soprano-markdown-links/a%20b.md")
+        let spaced = try #require(URL(string: "a%20b.md", relativeTo: page))
+        #expect(handler.fileURL(for: spaced)?.path == "/tmp/soprano-markdown-links/a b.md")
+    }
+
+    @MainActor
+    @Test func markdownLinksOpenViewableFilesButNeverRunScriptsOrApps() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("soprano-markdown-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func file(_ name: String, executable: Bool = false) throws -> URL {
+            let url = root.appendingPathComponent(name)
+            try Data("#!/bin/sh\necho hi\n".utf8).write(to: url)
+            if executable {
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+            }
+            return url
+        }
+        let app = root.appendingPathComponent("Tool.app/Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let disguised = root.appendingPathComponent("diagram.png")
+        try FileManager.default.createSymbolicLink(
+            at: disguised,
+            withDestinationURL: try file("setup.command", executable: true)
+        )
+
+        #expect(MarkdownPaneView.opensLinkedFile(try file("diagram.pdf")))
+        #expect(MarkdownPaneView.opensLinkedFile(try file("notes.txt")))
+        #expect(!MarkdownPaneView.opensLinkedFile(root.appendingPathComponent("setup.command")))
+        #expect(!MarkdownPaneView.opensLinkedFile(try file("install.sh", executable: true)))
+        #expect(!MarkdownPaneView.opensLinkedFile(try file("run", executable: true)))
+        #expect(!MarkdownPaneView.opensLinkedFile(root.appendingPathComponent("Tool.app")))
+        #expect(!MarkdownPaneView.opensLinkedFile(disguised))
+    }
+
     @Test func olderSavedBrowserTabsDecodeWithoutMarkdownMetadata() throws {
         let data = Data(
             #"{"id":"tab-4","type":"browser","url":"https://example.com"}"#.utf8

@@ -24,7 +24,11 @@ enum BrowserAddressResolver {
             return URL(string: "http://\(trimmed)")
         }
 
-        if let url = URL(string: trimmed), url.scheme != nil {
+        // `myapp.test:3000` parses as the scheme `myapp.test`; only an
+        // explicit `scheme://` or a known scheme without slashes is one.
+        if let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+           trimmed.contains("://") || schemesWithoutSlashes.contains(scheme)
+        {
             return url
         }
 
@@ -38,6 +42,8 @@ enum BrowserAddressResolver {
         components?.queryItems = [URLQueryItem(name: "q", value: trimmed)]
         return components?.url
     }
+
+    private static let schemesWithoutSlashes: Set<String> = ["about", "data", "mailto"]
 }
 
 @MainActor
@@ -115,6 +121,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
     private var reloadButton: ChromeIconButton!
     private let progressIndicator = NSProgressIndicator()
     private var hasLoadedLocation = false
+    private var webViewObservations: [NSKeyValueObservation] = []
 
     init(
         target: BrowserTarget,
@@ -133,6 +140,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         addressFrame = ChromeFieldView(theme: themeManager.currentTheme)
         super.init(frame: .zero)
         setupViews()
+        observeWebView()
         BrowserPaneRegistry.shared.register(self)
 
         if let initialURL, let url = BrowserAddressResolver.resolve(initialURL) {
@@ -522,6 +530,22 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         return nil
     }
 
+    /// Same-document navigations (`history.pushState`, fragment jumps) never
+    /// reach the navigation delegate; the web view's own properties do change.
+    private func observeWebView() {
+        webViewObservations = [
+            webView.observe(\.url) { [weak self] webView, _ in
+                MainActor.assumeIsolated { self?.updateLocation(from: webView) }
+            },
+            webView.observe(\.canGoBack) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.updateNavigationControls() }
+            },
+            webView.observe(\.canGoForward) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.updateNavigationControls() }
+            },
+        ]
+    }
+
     private func updateLocation(from webView: WKWebView) {
         guard let value = webView.url?.absoluteString, !value.isEmpty else { return }
         hasLoadedLocation = true
@@ -699,6 +723,35 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         """
     }
 
+    /// Assigns through the element's prototype setter. Frameworks such as
+    /// React shadow `value`/`checked` on the element itself to track the last
+    /// value they set, and ignore an `input` event that does not change it.
+    private static let nativeSetterPrelude = """
+    const setNative = (target, property, value) => {
+      for (let proto = Object.getPrototypeOf(target); proto; proto = Object.getPrototypeOf(proto)) {
+        const setter = Object.getOwnPropertyDescriptor(proto, property)?.set;
+        if (setter) { setter.call(target, value); return; }
+      }
+      target[property] = value;
+    };
+    """
+
+    /// A real click toggles the box the way a user does (React listens for
+    /// `click` on checkboxes); the native setter covers a click that did not
+    /// land, such as unchecking a radio button.
+    private static func checkedAction(_ checked: Bool) -> String {
+        """
+        if (!('checked' in element)) return {ok: false, error: 'Element is not checkable'};
+        if (element.checked !== \(checked)) element.click();
+        if (element.checked !== \(checked)) {
+          \(nativeSetterPrelude)
+          setNative(element, 'checked', \(checked));
+          element.dispatchEvent(new Event('input', {bubbles: true}));
+          element.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+        """
+    }
+
     private static func elementActionScript(command: String, selector: String) -> String {
         let action: String
         switch command {
@@ -716,19 +769,9 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             element.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false, view: window}));
             """
         case "check":
-            action = """
-            if (!('checked' in element)) return {ok: false, error: 'Element is not checkable'};
-            element.checked = true;
-            element.dispatchEvent(new Event('input', {bubbles: true}));
-            element.dispatchEvent(new Event('change', {bubbles: true}));
-            """
+            action = checkedAction(true)
         case "uncheck":
-            action = """
-            if (!('checked' in element)) return {ok: false, error: 'Element is not checkable'};
-            element.checked = false;
-            element.dispatchEvent(new Event('input', {bubbles: true}));
-            element.dispatchEvent(new Event('change', {bubbles: true}));
-            """
+            action = checkedAction(false)
         case "scroll-into-view":
             action = "element.scrollIntoView({block: 'center', inline: 'center'});"
         default:
@@ -747,12 +790,13 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
 
     private static func textActionScript(command: String, selector: String, text: String) -> String {
         let assignment = command == "fill"
-            ? "element.value = text;"
-            : "element.value = String(element.value || '') + text;"
+            ? "setNative(element, 'value', text);"
+            : "setNative(element, 'value', String(element.value || '') + text);"
         return """
         (() => {
           \(resolverPrelude(selector: selector))
           const text = \(literal(text));
+          \(nativeSetterPrelude)
           element.focus();
           if (element.isContentEditable) {
             element.textContent = \(command == "fill" ? "text" : "String(element.textContent || '') + text");
@@ -772,6 +816,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         """
         (() => {
           const element = document.activeElement || document.body;
+          \(nativeSetterPrelude)
           const key = \(literal(key));
           const aliases = {Enter: 'Enter', Escape: 'Escape', Tab: 'Tab', Space: ' '};
           const resolved = aliases[key] || key;
@@ -780,7 +825,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             if (element.form?.requestSubmit) element.form.requestSubmit();
             else if (element.click) element.click();
           } else if (resolved.length === 1 && 'value' in element) {
-            element.value = String(element.value || '') + resolved;
+            setNative(element, 'value', String(element.value || '') + resolved);
             element.dispatchEvent(new InputEvent('input', {bubbles: true, data: resolved}));
           }
           element.dispatchEvent(new KeyboardEvent('keyup', {key: resolved, bubbles: true, cancelable: true}));
@@ -906,7 +951,7 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
               element.getAttribute('alt') ||
               element.getAttribute('title') ||
               element.getAttribute('placeholder') ||
-              element.value ||
+              (element.type === 'password' ? '' : element.value) ||
               element.innerText ||
               element.textContent ||
               ''
