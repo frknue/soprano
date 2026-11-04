@@ -189,6 +189,24 @@ struct SopranoConfigTests {
         })
     }
 
+    @Test func aFirstRunTemplateSeededWithABackslashPrefixAndAQuoteChordStillParses() throws {
+        var keybindings = DefaultKeybindings.config
+        keybindings.prefixKey = "\\"
+        let index = try #require(keybindings.bindings.firstIndex { $0.id == "split-vertical" })
+        let old = keybindings.bindings[index]
+        keybindings.bindings[index] = KeyBinding(
+            id: old.id, label: old.label, description: old.description, category: old.category,
+            defaultKeys: old.defaultKeys, mode: .prefix, key: "\"", shift: true
+        )
+
+        let template = ConfigFile.template(settings: .defaultSettings, keybindings: keybindings)
+        let resolved = try JSONCText.decode(SopranoConfig.self, from: template).resolved()
+
+        #expect(resolved.keybindings.prefixKey == "\\")
+        let binding = resolved.keybindings.bindings.first { $0.id == "split-vertical" }
+        #expect(binding.map(KeyChord.init(binding:)) == KeyChord(binding: keybindings.bindings[index]))
+    }
+
     // MARK: - Agents
 
     @Test func aNewAgentJoinsTheCatalogWithDefaultsFilledIn() {
