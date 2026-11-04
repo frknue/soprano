@@ -102,4 +102,26 @@ struct EngineRevertTests {
         #expect(driver.sessions.isEmpty)
         #expect(engine.thread(thread.id)?.turns.map(\.userMessage.text) == ["t1"])
     }
+
+    @Test func aMessageSentWhileRevertingStartsItsTurnOnceTheRewindIsDone() async throws {
+        let (engine, threadID, driver, git) = try await threadWithTurns(["one", "two"], worktreePath: EngineHarness.temporaryDirectory().path)
+        let second = try #require(engine.thread(threadID)?.turns[1])
+        let gate = Gate()
+        git.restoreGate = { await gate.wait() }
+
+        let revert = Task { try await engine.revert(threadID, toBeforeTurn: second.id, restoreFiles: true) }
+        #expect(await EngineHarness.eventually { git.calls.contains { $0.hasPrefix("restore") } })
+        let send = Task { try await engine.send(threadID, text: "three", attachments: []) }
+        try await Task.sleep(for: .milliseconds(20))
+        gate.open()
+        let message = try await revert.value
+        try await send.value
+
+        #expect(message.text == "two")
+        let thread = try #require(engine.thread(threadID))
+        #expect(thread.turns.map(\.userMessage.text) == ["one", "three"])
+        #expect(thread.turns.map(\.ordinal) == [1, 2])
+        #expect(thread.activeTurn?.userMessage.text == "three")
+        #expect(driver.session?.turns.map(\.text) == ["one", "two", "three"])
+    }
 }

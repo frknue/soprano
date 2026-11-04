@@ -180,16 +180,6 @@ struct EngineSideQuestionTests {
         #expect(!engine.isStartingSideQuestion(threadID))
     }
 
-    /// Opened by the test; awaited by a scripted session start.
-    private final class Gate: @unchecked Sendable {
-        private let lock = NSLock()
-        private var opened = false
-        func open() { lock.withLock { opened = true } }
-        func wait() async {
-            while !lock.withLock({ opened }) { try? await Task.sleep(for: .milliseconds(2)) }
-        }
-    }
-
     private nonisolated static func waitForCancel(_ session: ScriptedSession) async {
         while session.sideQuestionCancels == 0 { try? await Task.sleep(for: .milliseconds(2)) }
     }
