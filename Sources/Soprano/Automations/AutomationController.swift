@@ -127,6 +127,12 @@ final class AutomationController {
 
     var automations: [Automation] { configStore.resolved.automations }
 
+    /// Every id under `automations` in settings.json, including entries the
+    /// file rejected, so a new automation never takes over one of them.
+    var takenIds: Set<String> {
+        Set((configStore.config.automations ?? [:]).keys)
+    }
+
     func automation(_ id: String) -> Automation? {
         automations.first { $0.id == id }
     }

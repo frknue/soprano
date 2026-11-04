@@ -144,7 +144,7 @@ build_status=0
         -Dxcframework-target=native \
         -Demit-macos-app=false \
         -Doptimize=ReleaseFast \
-        "${version_arguments[@]}"
+        ${version_arguments[@]+"${version_arguments[@]}"}
 ) || build_status=$?
 
 xcframework_dir="$ghostty_dir/macos/GhosttyKit.xcframework"

@@ -667,7 +667,7 @@ final class FileExplorerView: NSView {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsPackageDescendants]
         ) else { return [] }
-        let prefixLength = rootURL.standardizedFileURL.path.count + 1
+        let rootPath = rootURL.standardizedFileURL.path
         var files: [String] = []
         while let url = enumerator.nextObject() as? URL, files.count < limit {
             if FileExplorerListing.alwaysHiddenNames.contains(url.lastPathComponent) {
@@ -675,11 +675,18 @@ final class FileExplorerView: NSView {
                 continue
             }
             guard (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory != true else { continue }
-            let path = url.standardizedFileURL.path
-            guard path.count > prefixLength else { continue }
-            files.append(String(path.dropFirst(prefixLength)))
+            guard let path = relativePath(of: url.standardizedFileURL.path, under: rootPath) else { continue }
+            files.append(path)
         }
         return files
+    }
+
+    /// `path` relative to the folder `root`, which may be the volume root;
+    /// nil for the root itself and anything outside it.
+    nonisolated static func relativePath(of path: String, under root: String) -> String? {
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        guard path.hasPrefix(prefix), path.count > prefix.count else { return nil }
+        return String(path.dropFirst(prefix.count))
     }
 
     private func rebuildFilterTree() {
@@ -1050,9 +1057,14 @@ final class FileExplorerView: NSView {
             self?.showError(error)
         }
         operations.onItemMoved = { [weak self] from, to in
+            guard let self else { return }
+            // Rename, move, undo and redo alike: an open folder stays open.
+            if let oldPath = self.relativePath(of: from), let newPath = self.relativePath(of: to) {
+                self.moveExpandedPaths(from: oldPath, to: newPath)
+            }
             // Tabs first: the documents then re-title them, keeping the ● of
             // unsaved changes.
-            self?.agentManager.relocateFileTabs(from: from, to: to)
+            self.agentManager.relocateFileTabs(from: from, to: to)
             EditorDocumentStore.shared.relocate(from: from, to: to)
         }
     }
@@ -1193,9 +1205,6 @@ final class FileExplorerView: NSView {
                 do {
                     let url = try operations.rename(node.url, to: name)
                     let newPath = (node.parent ?? node).childRelativePath(url.lastPathComponent)
-                    if node.isDirectory {
-                        moveExpandedPaths(from: node.relativePath, to: newPath)
-                    }
                     pendingSelectionPaths = [newPath]
                 } catch {
                     showError(error)
@@ -1712,19 +1721,21 @@ extension FileExplorerView: NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let urls = Self.fileURLs(from: info.draggingPasteboard)
         guard !urls.isEmpty else { return [] }
+        // Neither a move nor an ⌥ or outside copy can put a folder inside itself.
+        let folderPath = folder.url.standardizedFileURL.path
+        let entersItself = urls.contains { url in
+            let source = url.standardizedFileURL.path
+            return folderPath == source || folderPath.hasPrefix(source + "/")
+        }
+        guard !entersItself else { return [] }
         guard (info.draggingSource as? NSOutlineView) === outlineView else { return .copy }
         if NSEvent.modifierFlags.contains(.option) {
             return .copy
         }
-        let folderPath = folder.url.standardizedFileURL.path
-        let movesIntoItself = urls.contains { url in
-            let source = url.standardizedFileURL.path
-            return folderPath == source || folderPath.hasPrefix(source + "/")
-        }
         let movesAnything = urls.contains { url in
             url.deletingLastPathComponent().standardizedFileURL.path != folderPath
         }
-        return !movesIntoItself && movesAnything ? .move : []
+        return movesAnything ? .move : []
     }
 
     func outlineView(
@@ -1743,13 +1754,6 @@ extension FileExplorerView: NSOutlineViewDataSource, NSOutlineViewDelegate {
             let results: [(source: URL, target: URL)] = isInternalMove
                 ? try operations.move(urls, into: folder.url)
                 : try operations.copy(urls, into: folder.url).map { (source: $0, target: $0) }
-            if isInternalMove {
-                for (source, target) in results {
-                    if let oldPath = relativePath(of: source), let newPath = relativePath(of: target) {
-                        moveExpandedPaths(from: oldPath, to: newPath)
-                    }
-                }
-            }
             pendingSelectionPaths = results.compactMap { relativePath(of: $0.target) }
             if folder !== root, !outlineView.isItemExpanded(folder) {
                 outlineView.expandItem(folder)

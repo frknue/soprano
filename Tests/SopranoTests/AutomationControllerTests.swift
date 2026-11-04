@@ -65,6 +65,15 @@ struct AutomationControllerTests {
 
     private let omp = #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER", "prompt": "Audit the repo.", "schedule": "0 9 * * *" }"#
 
+    @Test func aNewAutomationNeverTakesTheIdOfAnEntryTheFileRejected() throws {
+        // No prompt: the entry is reported and left out, but stays in the file.
+        let fixture = try makeFixture(automation: #"{ "name": "Audit", "agent": "omp", "folder": "$FOLDER" }"#)
+        defer { try? FileManager.default.removeItem(at: fixture.directory) }
+
+        #expect(fixture.controller.automations.isEmpty)
+        #expect(Automation.makeId(from: "Audit", existing: fixture.controller.takenIds) == "audit-2")
+    }
+
     @Test func aManualRunOpensItsAgentInTheAutomationsSessionWithoutSwitchingToIt() async throws {
         let fixture = try makeFixture(automation: omp)
         defer { try? FileManager.default.removeItem(at: fixture.directory) }

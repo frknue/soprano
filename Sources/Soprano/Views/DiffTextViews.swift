@@ -95,7 +95,7 @@ struct DiffRenderedSide: Sendable {
             case .new:
                 largestNumber = max(largestNumber, line.newNumber ?? 0)
             }
-            text += line.text
+            text += Self.displayText(line.text)
             text += "\n"
             offset += length + 1
         }
@@ -111,6 +111,27 @@ struct DiffRenderedSide: Sendable {
         self.changeStarts = layout.changeStarts
         self.largestNumber = largestNumber
     }
+
+    /// One git line is one row: characters the text system would break the
+    /// line at show as visible symbols of the same UTF-16 length, so token
+    /// and emphasis offsets still apply.
+    private static func displayText(_ text: String) -> String {
+        guard text.unicodeScalars.contains(where: { lineBreakSymbols[$0] != nil }) else { return text }
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            scalars.append(lineBreakSymbols[scalar] ?? scalar)
+        }
+        return String(scalars)
+    }
+
+    private static let lineBreakSymbols: [Unicode.Scalar: Unicode.Scalar] = [
+        "\r": "\u{240D}", // ␍
+        "\u{0B}": "\u{240B}", // ␋ vertical tab
+        "\u{0C}": "\u{240C}", // ␌ form feed
+        "\u{85}": "\u{2424}", // ␤ next line
+        "\u{2028}": "\u{2424}", // ␤ line separator
+        "\u{2029}": "\u{00B6}", // ¶ paragraph separator
+    ]
 }
 
 /// Both layouts of one text diff, so switching between them needs no reload.
