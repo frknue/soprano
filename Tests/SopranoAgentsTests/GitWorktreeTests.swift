@@ -78,6 +78,31 @@ struct GitWorktreeTests {
         #expect(try await repo.output("branch", "--list", "soprano/stopped").isEmpty)
     }
 
+    @Test func aBranchWhoseFolderBelongsToAnotherWorktreeFailsWithoutTouchingThatWorktree() async throws {
+        let sandbox = try GitSandbox()
+        defer { sandbox.remove() }
+        let repo = try await sandbox.repository("app")
+        try await repo.commit("base", ["a.txt": "a\n"])
+        let branch = try await repo.output("symbolic-ref", "--short", "HEAD")
+        let worktrees = sandbox.url("worktrees").path
+        // "feature/a" and "feature-a" both map to the folder "feature-a".
+        let first = try await sandbox.service.createWorktree(
+            projectRoot: repo.path, baseBranch: branch, newBranch: "feature/a", directory: worktrees
+        )
+        try "unsaved work\n".write(toFile: first + "/notes.txt", atomically: true, encoding: .utf8)
+
+        await #expect(throws: (any Error).self) {
+            try await sandbox.service.createWorktree(
+                projectRoot: repo.path, baseBranch: branch, newBranch: "feature-a", directory: worktrees
+            )
+        }
+
+        #expect(FileManager.default.fileExists(atPath: first + "/notes.txt"))
+        let worktree = GitScript(root: URL(fileURLWithPath: first), runner: sandbox.runner)
+        #expect(try await worktree.output("symbolic-ref", "--short", "HEAD") == "feature/a")
+        #expect(try await repo.output("branch", "--list", "feature-a").isEmpty)
+    }
+
     @Test func creatingAWorktreeBranchesFromTheBaseAndChecksItOutAtTheRulePath() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }
