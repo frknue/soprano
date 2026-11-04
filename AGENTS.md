@@ -2,8 +2,9 @@
 
 Native macOS tiling terminal multiplexer for AI coding agents: Swift 6 + AppKit
 (fully programmatic, no storyboards/xibs) rendering terminals through
-[libghostty](https://github.com/ghostty-org/ghostty)'s C API. Built with SPM,
-shipped as a hand-packaged `.app` bundle via `scripts/package-app.sh`.
+[libghostty](https://github.com/ghostty-org/ghostty)'s C API, plus **Soprano
+Agents**, a second window that drives `omp --mode rpc-ui` as a chat UI. Built
+with SPM, shipped as a hand-packaged `.app` bundle via `scripts/package-app.sh`.
 
 ## Commands
 
@@ -25,8 +26,9 @@ Then:
 ```bash
 swift build                       # debug build / type-check
 swift build -c release
-swift test
+swift test                        # SopranoTests and SopranoAgentsTests, one process
 swift test --filter SplitNodeTests
+.build/debug/Soprano agents-snapshot --out /tmp/shot.png --fixture demo [--appearance dark] [--perform palette.open]
 ./scripts/dev.sh [--build-only]   # package + launch isolated Soprano Dev.app (user-driven only)
 ./scripts/install.sh              # release build → /Applications/Soprano.app
 bash Tests/Signing/LocalCodeSigningTests.sh   # signing-identity helper tests (mutates user keychain list)
@@ -43,6 +45,13 @@ There is no linter or formatter configured. Match surrounding style.
   anything a test covers. Do not launch the Soprano GUI during automated
   verification; launching terminal panes can trigger macOS permission prompts
   through the user's shell startup files.
+- Soprano Agents UI: render the window offscreen with `agents-snapshot` on a
+  `DemoFixtures` scenario and read the PNG, light and dark (options in
+  `docs/agents/ARCHITECTURE.md` → Verification harness). Its tests never start a
+  real agent CLI or touch the user's repositories, settings or app data; provider
+  parsing is tested against the traces in `Tests/SopranoAgentsTests/Fixtures/`.
+  A live provider smoke test (a real `omp --mode rpc-ui` turn in a throwaway repo
+  under `/tmp`) is fine for provider changes; keep prompts tiny.
 - `./scripts/dev.sh` builds, packages, and launches the isolated `Soprano Dev.app` with
   bundle identifier `com.soprano.dev`. It is for user-driven GUI testing. Agents
   must not run it unless the user explicitly requests a launch. Use
@@ -130,12 +139,17 @@ Scale for this app:
 
 ## Architecture
 
-`Sources/Soprano/` — single executable target:
+`Sources/Soprano/` — the executable target (Soprano and the Soprano Agents UI);
+`Sources/SopranoAgentsCore/` — Soprano Agents' engine library:
 
 - `main.swift` — dispatches CLI subcommands **before** starting `NSApplication`.
   `BrowserCommand`, `AgentEventCommand`, and `PaneNavigationCommand` each claim
-  the invocation and exit. The app binary doubles as the `$SOPRANO_BIN` CLI that
-  panes use to drive the running instance, so new subcommands hook in here.
+  the invocation and exit; `agents-snapshot` renders the Agents window offscreen.
+  The app binary doubles as the `$SOPRANO_BIN` CLI that panes use to drive the
+  running instance, so new subcommands hook in here.
+- `App/` — `AppDelegate` owns both windows. `MenuBarSwitcher` swaps in the menu
+  bar of whichever window is key (each window has its own); Soprano's Commands
+  menu is rebuilt into `sopranoBar`, never into `NSApp.mainMenu`.
 - `Models/` — plain `Codable` value types. `SplitNode` is the recursive layout
   tree (every pane geometry question is answered here, not in views);
   `WorkspaceSession` / `WorkspaceWindowState` are the persistence formats.
@@ -167,6 +181,18 @@ Scale for this app:
 - `Sources/GhosttyKit/` — modulemap + `ghostty.h` only, both tracked so a clone can
   compile before anyone builds libghostty. Regenerate the header with
   `scripts/build-ghostty.sh`; never hand-edit it and never copy it in on its own.
+- `Agents/` — the Soprano Agents window. `AgentsAppController` builds it on first
+  use and owns its `AgentEngine`, menu bar and notifications until quit;
+  `docs/agents/ARCHITECTURE.md` is the contract for this subtree (module
+  ownership, seams, provider wire protocol, keyboard model, binding table,
+  visual spec, snapshot harness). Keep it current when a seam, binding, or
+  harness option changes. It keeps its own keymap (`KeyboardRouter` + the
+  `AppCommand` registry, scoped to its window); Soprano's `KeybindingManager`
+  ignores events from that window.
+- `Sources/SopranoAgentsCore/` — Foundation only: domain models, `AgentEngine`
+  (state owner), the omp driver/session, git (`GitRunner`, `LiveGitService`:
+  checkpoints, diffs, worktrees, commit/push/PR), JSON-file thread store. No
+  singletons; everything comes in through `EngineEnvironment`.
 
 `Support/Info.plist` and `Support/AgentHooks/*.json` are copied into the bundle
 by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
@@ -215,7 +241,17 @@ they are app state, not configuration.
 - Motion is opacity-only fades of 150 ms or less, and none under Reduce Motion.
 - Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`), not XCTest,
   with long sentence-style test names. One `struct …Tests` per file in
-  `Tests/SopranoTests/`.
+  `Tests/SopranoTests/` or `Tests/SopranoAgentsTests/`.
+- Soprano Agents code (`Sources/Soprano/Agents/`) follows its own subtree rules:
+  colors only from `PaletteCenter.shared.palette` (derived from Soprano's theme),
+  `Typography` roles, `Radius`, `Metrics`, SF Symbols via `Icon`; views subclass
+  `PaletteView` and re-color in `applyPalette(_:)`. Views never spawn processes,
+  run git or talk to providers — everything goes through `AgentEngine`; UI state
+  goes through `WorkspaceState`. Every action is an `AppCommand` in its module's
+  `…Commands.all`, with its row in the binding table of
+  `docs/agents/ARCHITECTURE.md` and `docs/agents/README.md`. Floating surfaces
+  that must show in snapshots are child windows of the Agents window, not
+  `NSPopover`.
 - Types that persist state accept an injectable `UserDefaults` (`init(defaults:
   UserDefaults = .standard)`) so tests never touch real preferences. Follow this
   when adding persisted state.
@@ -229,6 +265,20 @@ they are app state, not configuration.
 
 ## Gotchas
 
+- `swift test` runs both test targets in one process, so a main-actor hop can
+  stall for seconds under the full parallel load. Wait for async results with
+  the polling helpers (`EngineHarness.eventually`, the suites' `waitUntil`),
+  whose generous timeouts only cost time when a test really fails.
+- Soprano Agents keeps its data in `~/Library/Application Support/Soprano Agents/`
+  (`Soprano Agents Dev` for every non-installed build, `AppPaths`), the folder
+  the standalone app used: threads store absolute attachment and scratch paths,
+  and those paths are also written into omp's own session files. Never rename
+  or move it without rewriting them. The same goes for the
+  `refs/soprano-agents/checkpoints/*` refs and `~/.soprano-agents/worktrees`.
+- omp's RPC (`omp://rpc.md` in an omp session) is JSONL, not JSON-RPC; after
+  `negotiate_protocol` v2, big responses (the model list) arrive as base64
+  `rpc_chunk` frames. Never pass `--no-ui` with `rpc-ui`: approvals would then
+  fail closed instead of reaching the app.
 - `lib/libghostty.a` is **gitignored** (141 MB, over GitHub's file limit). A fresh
   clone must build it with `scripts/build-ghostty.sh`, which needs **full Xcode**
   for the Metal toolchain — Command Line Tools alone cannot build it — plus Zig

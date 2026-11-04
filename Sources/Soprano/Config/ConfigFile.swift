@@ -218,7 +218,70 @@ enum ConfigFile {
           //     "precheckTimeoutSeconds": 60,
           //     "model": "sonnet"                // the CLI's default when left out
           //   }
-          "automations": {}
+          "automations": {},
+
+          // Soprano Agents (the omp chat window). Its project folders are
+          // "projectDirectories" above and it always follows "theme" and "appearance".
+          "threads": {
+            "agents": {
+              // omp model id ("provider/id"); omit for omp's own configured model.
+              // "defaultModel": "anthropic/claude-sonnet-5-5",
+              // "approval-required" (Supervised), "auto-accept-edits", "auto", or "full-access".
+              "defaultRuntimeMode": "full-access"
+            },
+
+            "providers": {
+              // The omp executable; omit to find it on PATH.
+              // "ompPath": "~/.bun/bin/omp"
+            },
+
+            "textGeneration": {
+              // Thread titles, commit messages and branch names. omp model id; omit for omp's own model.
+              // "model": "anthropic/claude-haiku-5-5",
+              "titles": true
+            },
+
+            "worktrees": {
+              // New worktrees go to <directory>/<repository>/<branch>.
+              "directory": "~/.soprano-agents/worktrees",
+              // Prefix of new worktree branches (soprano/fix-login-error).
+              "branchPrefix": "soprano"
+            },
+
+            "chat": {
+              // Sending while the agent works: "steer" the running turn or "queue" after it. ⌘↩ does the other.
+              "followUp": "steer",
+              // Chat lane: "normal" (736 pt), "wide", or "full".
+              "width": "normal",
+              // The agent's work: "detailed" (every step, edits as diffs, code as it is written) or "minimal".
+              "workLog": "detailed"
+            },
+
+            "notifications": {
+              // Notify when a thread finishes or needs you while the Agents window is not in front.
+              "enabled": true,
+              "sound": true
+            },
+
+            "editor": {
+              // Open in editor: "cursor", "vscode", "zed", "xcode", "finder", … Omit for the first installed.
+              // "app": "cursor"
+            },
+
+            "keybindings": {
+              // Ctrl + this key starts a prefix chord (default Ctrl+A).
+              "prefixKey": "a",
+              // How long the prefix waits for the next key (300–5000 ms).
+              "prefixTimeoutMs": 1500,
+              // "<command id>": "chord" | ["chord", …] | null (unbind).
+              // Chords: "cmd+shift+p", "ctrl+tab", "j", "shift+r", "prefix+p", "enter", "escape".
+              // Command ids are listed in the Agents window's Settings › Keybindings.
+              "bindings": {
+                // "thread.settle": "cmd+shift+s",
+                // "diff.toggle": null
+              }
+            }
+          }
         }
 
         """
@@ -321,12 +384,14 @@ final class ConfigFileWatcher: @unchecked Sendable {
         pendingWork?.cancel()
     }
 
+    /// Arms both watches before returning, so a save made right after `start()`
+    /// is seen. Arming asynchronously lost that save whenever the dispatch pool
+    /// was busy: the file was replaced before its first descriptor was opened.
     func start() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.isStopped = false
-            self.armDirectorySource()
-            self.armFileSource()
+        queue.sync {
+            isStopped = false
+            armDirectorySource()
+            armFileSource()
         }
     }
 

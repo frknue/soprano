@@ -45,6 +45,11 @@ final class MainWindowController: NSWindowController {
     let themeManager: ThemeManager
     let gitBranchMonitor: GitBranchMonitor
     var settings: AppSettings
+    /// Soprano's own menu bar (`MenuBarSwitcher.sopranoBar`); the Commands menu
+    /// is rebuilt into it, never into whichever bar `NSApp.mainMenu` shows now.
+    private let mainMenu: NSMenu
+    /// Shows the Soprano Agents window; set by the app delegate.
+    var openAgentsWindow: (() -> Void)?
 
     private var mainContentVC: MainContentViewController?
     private var keybindingManager: KeybindingManager?
@@ -55,13 +60,15 @@ final class MainWindowController: NSWindowController {
         sessionManager: SessionManager,
         themeManager: ThemeManager,
         gitBranchMonitor: GitBranchMonitor,
-        settings: AppSettings
+        settings: AppSettings,
+        mainMenu: NSMenu
     ) {
         self.agentManager = agentManager
         self.sessionManager = sessionManager
         self.themeManager = themeManager
         self.gitBranchMonitor = gitBranchMonitor
         self.settings = settings
+        self.mainMenu = mainMenu
 
         let mainVisibleFrame =
             NSScreen.main?.visibleFrame ?? MainWindowSizing.fallbackVisibleFrame
@@ -117,6 +124,8 @@ final class MainWindowController: NSWindowController {
             contentVC?.setTypedPaneHint(typed)
         }
         contentVC.setControlKeyHeld(keybindingManager.isControlKeyHeld)
+        // The Agents window routes its own keys (its `KeyboardRouter`).
+        keybindingManager.ignoresWindow = { MenuBarSwitcher.rootWindow(of: $0) is AgentsWindow }
         self.keybindingManager = keybindingManager
 
         themeManager.onThemeChanged = { [weak self] theme in
@@ -612,6 +621,19 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "open-agents",
+                icon: "bubble.left.and.text.bubble.right",
+                label: "Soprano Agents",
+                description: "omp threads with diffs, worktrees and approvals",
+                shortcut: commandShortcut(for: "open-agents"),
+                searchText: "agents threads chat omp worktree",
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.keybindingOpenAgentsWindow()
+                    }
+                }
+            ),
+            CommandItem(
                 id: "automations",
                 icon: "calendar.badge.clock",
                 label: "Automations",
@@ -718,7 +740,9 @@ extension MainWindowController: NSWindowDelegate {
         saveWindowFrame()
     }
 
-    /// Closing the window quits Soprano, so unsaved editors are asked about first.
+    /// Closing the window quits Soprano unless the Soprano Agents window is open
+    /// (its terminals then keep running until ⇧⌘T in that window brings it back),
+    /// so unsaved editors are asked about first either way.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         EditorDocumentStore.shared.confirmClosingAll()
     }
@@ -814,6 +838,10 @@ extension MainWindowController: KeybindingDelegate {
 
     func keybindingOpenAgentDashboard() {
         mainContentVC?.showDashboard()
+    }
+
+    func keybindingOpenAgentsWindow() {
+        openAgentsWindow?()
     }
 
     func keybindingOpenCommandPalette() {
@@ -1000,8 +1028,6 @@ private extension MainWindowController {
     }
 
     func installCommandsMenu() {
-        guard let mainMenu = NSApp.mainMenu else { return }
-
         if let existingItem = mainMenu.items.first(where: {
             $0.identifier == Self.commandsMenuIdentifier
         }) {
@@ -1054,6 +1080,13 @@ private extension MainWindowController {
             bindingId: "agent-dashboard"
         )
         commandsMenu.addItem(dashboardItem)
+
+        let agentsItem = makeCommandsMenuItem(
+            title: "Soprano Agents",
+            action: #selector(openAgentsMenuItemSelected),
+            bindingId: "open-agents"
+        )
+        commandsMenu.addItem(agentsItem)
 
         let automationsItem = NSMenuItem(
             title: "Automations",
@@ -1145,6 +1178,10 @@ private extension MainWindowController {
 
     @objc func openDashboardMenuItemSelected() {
         keybindingOpenAgentDashboard()
+    }
+
+    @objc func openAgentsMenuItemSelected() {
+        keybindingOpenAgentsWindow()
     }
 
     @objc func openAutomationsMenuItemSelected() {

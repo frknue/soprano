@@ -22,11 +22,19 @@ final class AgentDashboardViewController: NSViewController {
 
     var onDismiss: (() -> Void)?
     var onAgentSelected: ((String, String) -> Void)?
+    /// False shows only the selected agent, full width, without the header and the agent
+    /// list: the Soprano Agents window lists the agents in its own sidebar and picks one with
+    /// `selectEntry`. Set before the view loads.
+    var showsAgentList = true
+    /// The selected agent (`AgentDashboardEntry.id`) changed: a row, a key, `selectEntry`, or a
+    /// refresh that picked another agent because the selected one is gone. Nil: none listed.
+    var onSelectionChange: ((String?) -> Void)?
 
     private let terminalStateProvider: TerminalStateProvider
     private let promptSender: PromptSender
     private let branchProvider: BranchProvider
     private let transcriptStore: AgentTranscriptStore
+    private let headerTitle: String
     private var headerView: SettingsHeaderView!
     private var listPanel: NSView!
     private var listRule: ChromeRuleView!
@@ -38,16 +46,23 @@ final class AgentDashboardViewController: NSViewController {
     private var sectionHeaders: [AgentDashboardSection: AgentDashboardSectionHeaderView] = [:]
     private var emptyStateView: NSView?
     private var entriesById: [String: AgentDashboardEntry] = [:]
-    private var selectedEntryId: String?
+    private var selectedEntryId: String? {
+        didSet {
+            if selectedEntryId != oldValue { onSelectionChange?(selectedEntryId) }
+        }
+    }
     /// Whether the keyboard is on the agent list, which marks its selected
     /// row with the pencil tick.
     private var isListFocused = false
     nonisolated(unsafe) private var elapsedTimer: Timer?
-    private let observerId = "AgentDashboardViewController"
+    /// One per dashboard: the terminal window's and the Agents window's watch the same
+    /// `AgentManager`, which keeps one observer per id.
+    private let observerId = "AgentDashboardViewController-\(UUID().uuidString)"
 
     init(
         agentManager: AgentManager,
         themeManager: ThemeManager,
+        title: String = "Agent Dashboard",
         terminalStateProvider: @escaping TerminalStateProvider = { _ in .unavailable },
         promptSender: @escaping PromptSender = { _, _ in false },
         branchProvider: @escaping BranchProvider = { _ in nil },
@@ -55,6 +70,7 @@ final class AgentDashboardViewController: NSViewController {
     ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
+        self.headerTitle = title
         self.terminalStateProvider = terminalStateProvider
         self.promptSender = promptSender
         self.branchProvider = branchProvider
@@ -90,6 +106,7 @@ final class AgentDashboardViewController: NSViewController {
         let colors = theme.colors
         let root = AgentDashboardRootView()
         root.identifier = NSUserInterfaceItemIdentifier("agent-dashboard")
+        root.movesSelection = showsAgentList
         root.onEscape = { [weak self] in
             self?.onDismiss?()
         }
@@ -123,7 +140,7 @@ final class AgentDashboardViewController: NSViewController {
         root.wantsLayer = true
         root.layer?.backgroundColor = colors.bgBase.cgColor
 
-        headerView = SettingsHeaderView(title: "Agent Dashboard", theme: theme)
+        headerView = SettingsHeaderView(title: headerTitle, theme: theme)
         headerView.onClose = { [weak self] in
             self?.onDismiss?()
         }
@@ -173,11 +190,22 @@ final class AgentDashboardViewController: NSViewController {
             listPanel.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             listPanel.bottomAnchor.constraint(equalTo: root.bottomAnchor),
 
-            detailView.leadingAnchor.constraint(equalTo: listPanel.trailingAnchor),
             detailView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            detailView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
             detailView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
+        if showsAgentList {
+            NSLayoutConstraint.activate([
+                detailView.leadingAnchor.constraint(equalTo: listPanel.trailingAnchor),
+                detailView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            ])
+        } else {
+            headerView.isHidden = true
+            listPanel.isHidden = true
+            NSLayoutConstraint.activate([
+                detailView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+                detailView.topAnchor.constraint(equalTo: root.topAnchor),
+            ])
+        }
 
         self.view = root
         refresh()
@@ -410,15 +438,18 @@ final class AgentDashboardViewController: NSViewController {
         return panel
     }
 
-    private func selectEntry(_ entryId: String) {
+    /// Shows the agent `entryId` (`AgentDashboardEntry.id`), scrolled into view; an id that is
+    /// not listed keeps the selection.
+    func selectEntry(_ entryId: String, scrollIntoView: Bool = false) {
+        loadViewIfNeeded()
         guard entriesById[entryId] != nil else { return }
         selectedEntryId = entryId
-        updateRowSelection(scrollIntoView: false)
+        updateRowSelection(scrollIntoView: scrollIntoView)
         updateDetail()
     }
 
     private func moveSelection(by delta: Int) {
-        guard !agentRows.isEmpty else { return }
+        guard showsAgentList, !agentRows.isEmpty else { return }
         let currentIndex = selectedEntryId.flatMap { selectedId in
             agentRows.firstIndex { $0.entry.id == selectedId }
         } ?? 0
@@ -1903,6 +1934,8 @@ private final class AgentDashboardRootView: NSView {
     /// Whether the dashboard itself, which drives the agent list, has the
     /// keyboard.
     var onFocusChange: ((Bool) -> Void)?
+    /// ↑/↓ and J/K move between agents; false (no list shown) leaves them to the focused text.
+    var movesSelection = true
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -1969,9 +2002,9 @@ private final class AgentDashboardRootView: NSView {
         case 53:
             return .dismiss
         case 125:
-            return .move(1)
+            return movesSelection ? .move(1) : nil
         case 126:
-            return .move(-1)
+            return movesSelection ? .move(-1) : nil
         case 36, 76:
             return .activate
         case 48:
@@ -1989,9 +2022,9 @@ private final class AgentDashboardRootView: NSView {
         let shifted = flags.contains(.shift)
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "j":
-            return shifted ? .scroll(.lines(1)) : .move(1)
+            return shifted ? .scroll(.lines(1)) : movesSelection ? .move(1) : nil
         case "k":
-            return shifted ? .scroll(.lines(-1)) : .move(-1)
+            return shifted ? .scroll(.lines(-1)) : movesSelection ? .move(-1) : nil
         case "r":
             return .focusReply
         case " ":
