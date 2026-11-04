@@ -73,7 +73,8 @@ final class ComposerSurfaceView: PaletteView {
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
         isDragHighlighted = false
         let pasteboard = sender.draggingPasteboard
-        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+        let urls = ComposerTextView.attachableFiles(on: pasteboard)
+        if !urls.isEmpty {
             onFiles?(urls)
             return true
         }

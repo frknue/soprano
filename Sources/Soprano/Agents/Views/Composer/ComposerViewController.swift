@@ -277,6 +277,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         NotificationCenter.default.addObserver(
             self, selector: #selector(applicationDidBecomeActive), name: NSApplication.didBecomeActiveNotification, object: nil
         )
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(applicationDidResignActive), name: NSApplication.didResignActiveNotification, object: nil
+        )
     }
 
     /// Re-reads the provider's typing-aid settings: at start and whenever the app becomes active,
@@ -291,8 +294,15 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         }
     }
 
+    /// ⌘ changes while another app is active never reach the flags monitor: resync on return.
     @objc private func applicationDidBecomeActive() {
         refreshTextAssist()
+        setAlternateHeld(NSEvent.modifierFlags.contains(.command))
+    }
+
+    /// ⌘ held while switching away (⌘⇥) is released elsewhere: show the plain action meanwhile.
+    @objc private func applicationDidResignActive() {
+        setAlternateHeld(false)
     }
 
     private func observe() {
@@ -311,9 +321,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
                     history = ComposerHistory(entries: ComposerHistory.entries(of: currentThread))
                 }
                 refresh()
-                if slashMenu != nil { showSlashMenu() }
+                if slashMenu != nil { showSlashMenu(keepingHighlight: true) }
             case .commandsChanged:
-                if slashMenu != nil { showSlashMenu() }
+                if slashMenu != nil { showSlashMenu(keepingHighlight: true) }
             case .providersChanged, .projectsChanged, .threadListChanged:
                 refresh()
             case let .subagentListChanged(threadID) where threadID == state.selectedThreadID && state.selectedSubagentID != nil:
@@ -867,10 +877,12 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         refresh()
         guard !question.allowsMultiple, draft.index < request.questions.count - 1 else { return }
         autoAdvance?.cancel()
+        let requestID = request.id
         autoAdvance = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }
-            self?.advanceQuestion()
+            // Another thread (or a later request) selected meanwhile keeps its own question.
+            guard !Task.isCancelled, let self, pendingInput?.id == requestID else { return }
+            advanceQuestion()
         }
     }
 
@@ -1273,8 +1285,9 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         showSlashMenu()
     }
 
-    /// Shows the menu for `slashToken`, or re-lists it in place when it already shows.
-    private func showSlashMenu() {
+    /// Shows the menu for `slashToken`, or re-lists it in place when it already shows;
+    /// `keepingHighlight` (an update, the query unchanged) keeps the highlighted command.
+    private func showSlashMenu(keepingHighlight: Bool = false) {
         guard let token = slashToken else { return }
         let thread = currentThread
         let commands = thread.map { engine.commands(forThread: $0.id) }
@@ -1292,7 +1305,7 @@ final class ComposerViewController: NSViewController, FocusRegionController, NST
         let matches = SlashCommandFilter.matching(candidates, query: token.query)
         let emptyText = SlashCommandFilter.emptyText(hasCandidates: !candidates.isEmpty, query: token.query)
         if slashMenu != nil, let slashContent {
-            slashContent.show(matches, emptyText: emptyText)
+            slashContent.show(matches, emptyText: emptyText, keepingHighlight: keepingHighlight)
             return
         }
         guard let window = surface.window else { return }
