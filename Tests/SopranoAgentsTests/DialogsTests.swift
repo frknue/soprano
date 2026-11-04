@@ -9,6 +9,7 @@ struct DialogsTests {
         let window = AgentsWindow(contentRect: NSRect(x: -30000, y: -30000, width: 900, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         window.allowsOffscreenFrame = true
         window.isReleasedWhenClosed = false
+        window.orderFrontRegardless()
         return window
     }
 
@@ -34,6 +35,19 @@ struct DialogsTests {
             if let field = textField(in: subview) { return field }
         }
         return nil
+    }
+
+    @Test func aDialogRaisedAfterItsWindowClosedFallsBackToAPlainAlert() {
+        let window = makeWindow()
+        let overlay = OverlayWindow()
+        overlay.present(over: window)
+        #expect(Dialogs.host(for: window) === window)
+        #expect(Dialogs.host(for: overlay) === window)
+        overlay.dismiss()
+
+        window.close()
+
+        #expect(Dialogs.host(for: window) == nil)
     }
 
     @Test func returnChoosesTheLastButtonAndClosesTheDialog() async throws {

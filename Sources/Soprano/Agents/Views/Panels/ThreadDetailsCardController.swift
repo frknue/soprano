@@ -17,6 +17,12 @@ final class ThreadDetailsCardController: NSViewController {
     private(set) var gitStatus: GitStatusSummary?
     private var statusGeneration = 0
     private var refreshTimer: Timer?
+    /// Whether the 30 s git-status refresh is running.
+    var isPollingStatus: Bool { refreshTimer != nil }
+    /// False while the Agents window is closed: the refresh pauses, the card's visibility stays.
+    var isWindowOpen = true {
+        didSet { if isWindowOpen != oldValue, isViewLoaded { visibilityChanged() } }
+    }
     private var wasRunning: [String: Bool] = [:]
     private var installedEditors: [InstalledEditor] = []
 
@@ -164,7 +170,7 @@ final class ThreadDetailsCardController: NSViewController {
     // MARK: - Updates
 
     private func visibilityChanged() {
-        let visible = state.isThreadDetailsVisible
+        let visible = state.isThreadDetailsVisible && isWindowOpen
         if visible {
             if refreshTimer == nil {
                 installedEditors = EditorCatalog.installedOnThisMac()

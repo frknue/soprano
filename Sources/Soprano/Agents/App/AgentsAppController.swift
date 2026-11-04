@@ -74,14 +74,14 @@ final class AgentsAppController {
         }
     }
 
-    /// Shows the window, starting the engine on first use, and makes it key.
+    /// Shows the window, starting the engine on first use, and makes it (or the dialog
+    /// open over it) key.
     func showWindow() {
         guard let controller = ensureWindow() else {
             reportStandaloneRunning()
             return
         }
-        controller.showWindow(nil)
-        controller.window?.makeKeyAndOrderFront(nil)
+        controller.showAndMakeKey()
         NSApp.activate(ignoringOtherApps: true)
     }
 
