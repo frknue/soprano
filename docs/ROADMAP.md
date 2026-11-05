@@ -1,45 +1,46 @@
 # Roadmap
 
-Planned work that is not built yet.
+Geplante Arbeit, die noch nicht gebaut ist.
 
 ## Linux (Omarchy)
 
-Furkan moves to Omarchy (Arch Linux, Hyprland, Wayland) later. Every app in the family is
-macOS-only today: programmatic AppKit, `platforms: [.macOS(...)]` in `Package.swift`, macOS
-frameworks, `.app` packaging and signing. Each repo has its own Linux task (see the table).
+Furkan wechselt später auf Omarchy (Arch Linux, Hyprland, Wayland). Jede App der Familie läuft
+heute nur auf macOS: programmatisches AppKit, `platforms: [.macOS(...)]` in `Package.swift`,
+macOS-Frameworks, `.app`-Paketierung und Signatur. Jedes Repo hat eine eigene Linux-Aufgabe
+(siehe Tabelle).
 
-### Family-wide decision first
+### Zuerst eine Entscheidung für die ganze Familie
 
-- [ ] Pick the Linux UI toolkit once for the whole family (GTK 4 through a Swift binding, or
-  another). Every app syncs its chrome and theme from Soprano (`scripts/sync-soprano-chrome.sh`),
-  so the Linux chrome layer starts here and the sync script learns to carry it.
-- [ ] Swift toolchain on Arch through `swiftly`; a Linux CI job per repo once its core builds.
-- [ ] Order: the Foundation-only cores first (cheap, testable on Linux), then the UIs.
+- [ ] Das Linux-UI-Toolkit einmal für die ganze Familie wählen (GTK 4 über eine Swift-Bindung oder
+  etwas anderes). Jede App synct Chrome und Theme aus Soprano (`scripts/sync-soprano-chrome.sh`),
+  also beginnt die Linux-Chrome-Schicht hier, und das Sync-Skript muss sie mitnehmen.
+- [ ] Swift-Toolchain auf Arch über `swiftly`; ein Linux-CI-Job pro Repo, sobald sein Core baut.
+- [ ] Reihenfolge: zuerst die reinen Foundation-Cores (günstig, auf Linux testbar), dann die UIs.
 
-### Soprano itself
+### Soprano selbst
 
-About 54,000 lines, almost all AppKit; no separate core target.
+Etwa 54.000 Zeilen, fast alles AppKit; kein eigenes Core-Target.
 
-- [ ] Terminal: GhosttyKit (`ghostty_surface_*`, `ghostty_app_*`) renders with Metal and
-  IOSurface. Ghostty runs on Linux as its own GTK app; check first whether libghostty's
-  embedding API supports a non-macOS host (OpenGL) or whether the Linux port embeds Ghostty
-  differently.
-- [ ] `WKWebView` (19 uses): WebKitGTK.
-- [ ] `UNUserNotificationCenter`: freedesktop notifications (mako on Omarchy).
-- [ ] Carbon, CoreServices, UniformTypeIdentifiers, CryptoKit (→ swift-crypto), `Darwin`
-  imports: replace or put behind `#if canImport`.
-- [ ] Global hotkeys: binds in `hyprland.conf` calling a `soprano` command (Wayland lets no
-  app grab keys).
+- [ ] Terminal: GhosttyKit (`ghostty_surface_*`, `ghostty_app_*`) rendert mit Metal und
+  IOSurface. Ghostty läuft auf Linux als eigene GTK-App; zuerst prüfen, ob libghosttys
+  Embedding-API einen Nicht-macOS-Host (OpenGL) unterstützt oder ob der Linux-Port Ghostty
+  anders einbettet.
+- [ ] `WKWebView` (19 Stellen): WebKitGTK.
+- [ ] `UNUserNotificationCenter`: freedesktop-Notifications (mako auf Omarchy).
+- [ ] Carbon, CoreServices, UniformTypeIdentifiers, CryptoKit (→ swift-crypto), `Darwin`-Importe:
+  ersetzen oder hinter `#if canImport` legen.
+- [ ] Globale Hotkeys: Bindings in `hyprland.conf`, die einen `soprano`-Befehl aufrufen (unter
+  Wayland darf keine App Tasten abgreifen).
 
-### Per repo
+### Pro Repo
 
-| Repo | Task | Short version |
+| Repo | Aufgabe | Kurzfassung |
 |---|---|---|
-| soprano-agents | `docs/BACKLOG.md` #11 | Core nearly portable (`os.Logger`, `posix_spawn`, `URLSession.bytes`); UI rewrite |
-| soprano-cast | `docs/ROADMAP.md` → Linux | Port or extend Walker; hotkeys via Hyprland binds, `.desktop` search, Hyprland IPC |
-| soprano-desktop | `docs/ROADMAP.md` → Linux | Becomes Omarchy themes; reuse the Ghostty/VS Code/bat/Neovim/fzf generators |
-| soprano-files | `docs/ROADMAP.md` → Linux | inotify, own previews, `xdg-open`, freedesktop trash; default folder viewer via `xdg-mime` |
-| soprano-git | `docs/ROADMAP.md` → Linux | Core (git CLI) builds nearly as is; UI rewrite |
-| soprano-mix | `docs/ROADMAP.md` → Linux | CoreAudio → PipeWire (per-app streams native); Waybar module |
-| soprano-tab | `docs/ROADMAP.md` → Linux | Hyprland IPC, toplevel-export thumbnails, layer-shell switcher |
-| soprano-web | `docs/ROADMAP.md` → Linux | WebKitGTK; no `WKWebExtension`, so passwords need a new plan |
+| soprano-agents | `docs/BACKLOG.md` #11 | Core fast portabel (`os.Logger`, `posix_spawn`, `URLSession.bytes`); UI neu bauen |
+| soprano-cast | `docs/ROADMAP.md` → Linux | Portieren oder Walker erweitern; Hotkeys über Hyprland-Bindings, `.desktop`-Suche, Hyprland-IPC |
+| soprano-desktop | `docs/ROADMAP.md` → Linux | Wird zu Omarchy-Themes; Generatoren für Ghostty/VS Code/bat/Neovim/fzf wiederverwenden |
+| soprano-files | `docs/ROADMAP.md` → Linux | inotify, eigene Vorschauen, `xdg-open`, freedesktop-Papierkorb; Standard-Ordneransicht über `xdg-mime` |
+| soprano-git | `docs/ROADMAP.md` → Linux | Core (git-CLI) baut fast unverändert; UI neu bauen |
+| soprano-mix | `docs/ROADMAP.md` → Linux | CoreAudio → PipeWire (Streams pro App eingebaut); Waybar-Modul |
+| soprano-tab | `docs/ROADMAP.md` → Linux | Hyprland-IPC, Vorschaubilder per Toplevel-Export, Switcher als Layer-Shell-Fläche |
+| soprano-web | `docs/ROADMAP.md` → Linux | WebKitGTK; kein `WKWebExtension`, Passwörter brauchen einen neuen Plan |
