@@ -48,14 +48,14 @@ struct AgentWaitingReasonTests {
         #expect(userInfo(["soprano", "agent-event", "running", "--reason", "question"])?["reason"] == nil)
     }
 
-    @Test func theAgentsWholeMessageTravelsBesideTheOneLineBanner() {
+    @Test func theAgentsWholeMessageTravelsBesideTheBannersStaticBody() {
         let reply = "## Findings\n\n" + String(repeating: "A long paragraph. ", count: 40)
         let payload = "{\"message\":\(String(decoding: try! JSONEncoder().encode(reply), as: UTF8.self))}"
 
         let info = userInfo(["soprano", "agent-event", "needs-input", "--message-json", payload])
 
         #expect(info?["message"] == reply.trimmingCharacters(in: .whitespacesAndNewlines))
-        #expect(info?["body"]?.hasSuffix("…") == true)
+        #expect(info?["body"] == "Input required")
     }
 
     @Test func aPromptThatStartsLikeAnOptionIsPassedAfterTheEndOfOptions() {

@@ -2,9 +2,9 @@ import AppKit
 import Testing
 @testable import Soprano
 
-/// The banner exists to say what an agent is asking, not that it asked
-/// something. Each agent hands the payload over differently — Claude Code pipes
-/// JSON to the hook, Codex appends it as a trailing argument, OpenCode passes it
+/// What an agent said reaches the app with its event, for the agent's record.
+/// Each agent hands the payload over differently — Claude Code pipes JSON to
+/// the hook, Codex appends it as a trailing argument, OpenCode passes it
 /// through `--message-json` — so each route is covered here.
 struct AgentMessageForwardingTests {
     private let environment = [
@@ -13,40 +13,48 @@ struct AgentMessageForwardingTests {
         "SOPRANO_TAB_ID": "tab-2",
     ]
 
-    private func body(
+    private func userInfo(
         arguments: [String],
         standardInput: String? = nil
-    ) -> String? {
+    ) -> [String: String]? {
         AgentEventCommand.notificationEnvelope(
             arguments: arguments,
             environment: environment,
             standardInput: { standardInput.map { Data($0.utf8) } }
-        )?.userInfo["body"]
+        )?.userInfo
     }
 
-    @Test func claudeCodeHookPayloadOnStandardInputBecomesTheBody() {
+    private func message(arguments: [String], standardInput: String? = nil) -> String? {
+        userInfo(arguments: arguments, standardInput: standardInput)?["message"]
+    }
+
+    private func body(arguments: [String], standardInput: String? = nil) -> String? {
+        userInfo(arguments: arguments, standardInput: standardInput)?["body"]
+    }
+
+    @Test func claudeCodeHookPayloadOnStandardInputBecomesTheMessage() {
         let payload = #"{"hook_event_name":"Notification","message":"Drop the legacy column? [y/n]"}"#
 
         #expect(
-            body(
+            message(
                 arguments: [
                     "soprano", "agent-event", "needs-input",
                     "--notify", "--message-from-stdin", "--body", "Approval or input required",
                 ],
                 standardInput: payload
-            ) == "Needs input — Drop the legacy column? [y/n]"
+            ) == "Drop the legacy column? [y/n]"
         )
     }
 
-    @Test func codexAppendsItsPayloadAsATrailingArgumentAndItStillReachesTheBanner() {
+    @Test func codexAppendsItsPayloadAsATrailingArgumentAndItStillReachesTheApp() {
         let payload = #"{"type":"agent-turn-complete","last-assistant-message":"Migration applied."}"#
 
         #expect(
-            body(arguments: [
+            message(arguments: [
                 "soprano", "agent-event", "needs-input",
                 "--notify", "--title", "Codex", "--body", "Response ready",
                 payload,
-            ]) == "Needs input — Migration applied."
+            ]) == "Migration applied."
         )
     }
 
@@ -54,10 +62,10 @@ struct AgentMessageForwardingTests {
         let payload = #"{"description":"Allow writing to Package.swift?"}"#
 
         #expect(
-            body(arguments: [
+            message(arguments: [
                 "soprano", "agent-event", "needs-input",
                 "--notify", "--message-json", payload, "--body", "Approval required",
-            ]) == "Needs input — Allow writing to Package.swift?"
+            ]) == "Allow writing to Package.swift?"
         )
     }
 
@@ -65,14 +73,14 @@ struct AgentMessageForwardingTests {
         let payload = #"{"notification_type":"idle_prompt","cwd":"/tmp"}"#
 
         #expect(
-            body(
+            message(
                 arguments: ["soprano", "agent-event", "needs-input", "--notify", "--message-from-stdin"],
                 standardInput: payload
-            ) == "Needs input — Waiting for your next prompt"
+            ) == "Waiting for your next prompt"
         )
     }
 
-    @Test func theStaticBodySurvivesWhenThePayloadCarriesNoReadableMessage() {
+    @Test func theStaticBodyStaysWhenThePayloadCarriesNoReadableMessage() {
         #expect(
             body(
                 arguments: [
@@ -119,9 +127,18 @@ struct AgentMessageForwardingTests {
         #expect(AgentEventCommand.agentMessage(fromPayload: #"{"message":"   "}"#) == nil)
     }
 
-    @Test func everyStateCarriesTheLabelABannerPrefixesItsMessageWith() {
-        #expect(AgentEventCommand.label(for: .needsInput) == "Needs input")
-        #expect(AgentEventCommand.label(for: .error) == "Error")
-        #expect(AgentEventCommand.label(for: .ready) == "Ready")
+    @Test func theBodyNoLongerQuotesTheAgentSoTheBannerStaysOneCleanLine() {
+        #expect(
+            body(
+                arguments: ["soprano", "agent-event", "needs-input", "--notify", "--message-from-stdin", "--body", "Response ready"],
+                standardInput: #"{"hook_event_name":"Stop","last_assistant_message":"Done.\n\nRan tests."}"#
+            ) == "Response ready"
+        )
+    }
+
+    @Test func codexPermissionRequestHookWaitsForApproval() {
+        #expect(
+            AgentEventCommand.waitingReason(fromPayload: #"{"hook_event_name":"PermissionRequest"}"#) == .approval
+        )
     }
 }
