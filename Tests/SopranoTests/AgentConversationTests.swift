@@ -96,7 +96,8 @@ struct AgentConversationTests {
             "--message-json", #"{"message":"Please confirm the deployment"}"#
         ])
         #expect(notification["notify"] == "1")
-        #expect(notification["body"] == "Needs input — Please confirm the deployment")
+        #expect(notification["body"] == "Response ready")
+        #expect(notification["message"] == "Please confirm the deployment")
         #expect(notification["title"] == "omp")
         #expect(AgentNotificationManager.locationSubtitle(
             windowTitle: manager.window(containingPane: paneId)?.title,

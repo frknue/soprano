@@ -50,8 +50,8 @@ right now?*
 
 - **Panes report their own status.** `STARTING` · `WORKING` · `READY` · `NEEDS INPUT` ·
   `ERROR` · `STOPPED`, driven by real agent lifecycle hooks rather than output scraping.
-- **Notifications name the location.** Subtitled `window ▸ pane`; clicking one activates
-  Soprano and focuses that exact tab.
+- **Notifications say what happened, and where.** `Claude Code needs approval` over the
+  conversation's name; clicking one activates Soprano and focuses that exact tab.
 - **A real terminal.** Every pane is a [libghostty](https://github.com/ghostty-org/ghostty)
   surface hosted in AppKit. No Electron, no web view, no reimplemented VT parser.
 - **Tabs.** Every window holds a row of tabs, each with its own split layout, so one
@@ -150,7 +150,7 @@ Launch Soprano, then:
 | `⌃A` then `C` | Create a window inside the current session; `P` / `N` moves between its windows |
 | `⌃A` then `S` | Switch sessions while their terminals keep running |
 | *hold* `⌃` | The sidebar reveals its window and pane jump hints |
-| *switch away, let an agent finish* | macOS notification subtitled `session ▸ window ▸ pane`, plus a blue unread ring on the pane |
+| *switch away, let an agent finish* | macOS notification such as `Claude Code finished`, plus a blue unread ring on the pane |
 | `⌘P` | Command palette for everything above |
 
 ## Agents that report in
@@ -170,11 +170,13 @@ launchers configure those hooks per launch, without changing your global configu
   Soprano runs its interactive terminal client, not the Bun-only SDK.
 
 When a background agent finishes, macOS shows a notification and the pane gets a blue
-unread ring. The notification is subtitled `session ▸ window ▸ pane` so it names the location that
-wants attention, and its body quotes the agent itself — `Needs input — Drop the legacy
-column? [y/n]` — rather than a generic phrase, so you can often answer without switching
-at all. A pane's banners group together rather than stacking. Clicking one
-activates Soprano and focuses that tab. The pane header and status bar expose
+unread ring. The notification is two short lines: what the agent wants — `Claude Code
+finished`, `Codex needs approval`, `omp needs input`, `OpenCode failed` — over the tab's
+title, which agents set to the conversation's name (the window or session stands in while
+the tab is still named after the agent). Each tab keeps one banner, so a new one replaces
+the last instead of stacking. Plain terminals that post their own notifications keep
+their title and body, subtitled `session ▸ window ▸ pane`. Clicking one activates
+Soprano and focuses that tab. The pane header and status bar expose
 `STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED`. Focusing the
 relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPUT` until
 the next prompt is submitted.

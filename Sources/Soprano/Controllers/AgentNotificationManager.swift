@@ -151,12 +151,9 @@ enum AgentEventCommand {
             payloads.append(String(decoding: data, as: UTF8.self))
         }
 
-        // The agent's own words beat the caller's static description: a banner
-        // saying what was asked is the whole point of notifying at all.
+        // Kept for the agent's record (an automation run's reply), not for the
+        // banner: that names the alert and the conversation, nothing more.
         let message = payloads.lazy.compactMap(agentMessageText(fromPayload:)).first
-        if let summary = message.flatMap(summarize) {
-            body = "\(label(for: state)) — \(summary)"
-        }
 
         var userInfo: [String: String] = [
             "paneId": paneId,
@@ -197,17 +194,6 @@ enum AgentEventCommand {
         case .running: return "Working"
         case .needsInput: return "Input required"
         case .error: return "The agent stopped with an error"
-        case .stopped: return "Stopped"
-        }
-    }
-
-    /// Short prefix so a banner reads `Needs input — <what was asked>`.
-    static func label(for state: AgentEventState) -> String {
-        switch state {
-        case .ready: return "Ready"
-        case .running: return "Working"
-        case .needsInput: return "Needs input"
-        case .error: return "Error"
         case .stopped: return "Stopped"
         }
     }
@@ -285,6 +271,9 @@ enum AgentEventCommand {
         if json["hook_event_name"] as? String == "Stop" || json["type"] as? String == "agent-turn-complete" {
             return .turnEnded
         }
+        if json["hook_event_name"] as? String == "PermissionRequest" {
+            return .approval
+        }
         return nil
     }
 
@@ -335,6 +324,70 @@ enum AgentEventCommand {
             String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
         }
         return (info.kp_eproc.e_ppid, name)
+    }
+}
+
+/// Why an agent wants the user, as its banner says it: a short status title
+/// over one line naming the conversation, like Soprano Agents' thread alerts.
+enum AgentAlert: Equatable {
+    case completed
+    case failed
+    case approval
+    case input
+
+    /// The alert an event stands for; nil for states that never notify.
+    /// A needs-input event that does not say why reads as a question.
+    init?(state: AgentEventState, reason: AgentWaitingReason?) {
+        switch state {
+        case .ready: self = .completed
+        case .error: self = .failed
+        case .needsInput:
+            switch reason {
+            case .turnEnded: self = .completed
+            case .approval: self = .approval
+            case .question, nil: self = .input
+            }
+        case .running, .stopped: return nil
+        }
+    }
+
+    func title(agentName: String) -> String {
+        switch self {
+        case .completed: return "\(agentName) finished"
+        case .failed: return "\(agentName) failed"
+        case .approval: return "\(agentName) needs approval"
+        case .input: return "\(agentName) needs input"
+        }
+    }
+
+    /// The banner's one-line body: the tab title, which agents set to their
+    /// conversation's name, without the spinner or status glyph in front of
+    /// it. A tab still named after the agent says nothing the title doesn't,
+    /// so the window, then the session, names it instead.
+    static func body(
+        agentName: String,
+        tabTitle: String?,
+        windowTitle: String?,
+        sessionName: String?
+    ) -> String {
+        let tab = tabTitle.map(strippingStatusGlyphs)
+        let candidates = [tab.flatMap { $0 == agentName ? nil : $0 }, windowTitle, sessionName]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? agentName
+    }
+
+    /// Drops the leading spinner (Braille), dingbat, or symbol an agent puts in
+    /// its terminal title, such as Claude Code's `✳` or `⠐`.
+    static func strippingStatusGlyphs(_ title: String) -> String {
+        let scalars = title.unicodeScalars.drop { scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar)
+                || (0x2190...0x2BFF).contains(scalar.value)
+                || scalar.properties.isEmojiPresentation
+                || scalar.value == 0xFE0F
+        }
+        return String(String.UnicodeScalarView(scalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -501,12 +554,17 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             || combined.contains("permission") ? .approval : .question
 
         if profileId == nil {
-            let isFocused = MainActor.assumeIsolated {
-                isFocusedSurface(paneId: paneId, tabId: tabId)
+            // A plain terminal's program wrote the title and body itself; only
+            // the location says which pane it came from.
+            let (isFocused, location) = MainActor.assumeIsolated {
+                (
+                    isFocusedSurface(paneId: paneId, tabId: tabId),
+                    locationSubtitle(paneId: paneId, tabId: tabId)
+                )
             }
             guard !isFocused
             else { return }
-            deliverNotification(title: title, body: body, paneId: paneId, tabId: tabId)
+            deliverNotification(title: title, body: body, subtitle: location, paneId: paneId, tabId: tabId)
             return
         }
 
@@ -602,19 +660,48 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         // it has the run's outcome; a banner for its pane would name a window
         // nobody opened.
         if needsAttention, agent.automationRunId == nil {
+            let banner = MainActor.assumeIsolated {
+                agentBanner(for: event, profileId: agent.profileId)
+            }
             deliverNotification(
-                title: event.title,
-                body: event.body,
+                title: banner.title,
+                body: banner.body,
+                subtitle: nil,
                 paneId: event.paneId,
                 tabId: event.tabId
             )
         }
     }
 
+    @MainActor
+    private func agentBanner(for event: AgentEventPayload, profileId: String) -> (title: String, body: String) {
+        let agentName = AgentCatalog.profile(for: profileId)?.name ?? event.title
+        guard let alert = AgentAlert(state: event.state, reason: event.waitingReason) else {
+            return (event.title, event.body)
+        }
+        let terminalWindow = agentManager.window(containingPane: event.paneId)
+        return (
+            alert.title(agentName: agentName),
+            AgentAlert.body(
+                agentName: agentName,
+                tabTitle: agentManager.panes[event.paneId]?.tabs.first { $0.id == event.tabId }?.title,
+                windowTitle: terminalWindow?.title,
+                sessionName: terminalWindow.flatMap { agentManager.terminalSessions[$0.sessionId]?.name }
+            )
+        )
+    }
+
     /// A banner for an automation run; clicking it opens the run in
     /// Automations rather than its terminal, which may already be closed.
     func deliverAutomationNotification(title: String, body: String, runId: String) {
-        deliverNotification(title: title, body: body, paneId: "automation-\(runId)", tabId: runId, runId: runId)
+        deliverNotification(
+            title: title,
+            body: body,
+            subtitle: AgentManager.automationSessionName,
+            paneId: "automation-\(runId)",
+            tabId: runId,
+            runId: runId
+        )
     }
 
     private func agentName(for profileId: String?) -> String {
@@ -646,22 +733,19 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
     private func deliverNotification(
         title: String,
         body: String,
+        subtitle: String?,
         paneId: String,
         tabId: String,
         runId: String? = nil
     ) {
         guard let notificationCenter else { return }
 
-        // Both are main-actor state, read here rather than inside the
-        // background completion below, so a settings.json edit applies to the
-        // very next banner without a restart.
-        let (location, playsSound) = MainActor.assumeIsolated {
-            (
-                locationSubtitle(paneId: paneId, tabId: tabId),
-                ConfigStore.shared.settings.notificationSound
-            )
+        // Main-actor state, read here rather than inside the background
+        // completion below, so a settings.json edit applies to the very next
+        // banner without a restart.
+        let playsSound = MainActor.assumeIsolated {
+            ConfigStore.shared.settings.notificationSound
         }
-        let subtitle = runId == nil ? location : AgentManager.automationSessionName
 
         notificationCenter.getNotificationSettings { [weak self] settings in
             guard let self else { return }
@@ -785,13 +869,14 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
         if playsSound {
             content.sound = .default
         }
-        // Groups a pane's banners together instead of stacking one per event.
         content.threadIdentifier = paneId
         var userInfo = ["paneId": paneId, "tabId": tabId]
         userInfo["automationRunId"] = runId
         content.userInfo = userInfo
 
-        let identifier = UUID().uuidString
+        // One banner per tab: the next one replaces it instead of stacking a
+        // history of every turn in Notification Center.
+        let identifier = "soprano-\(paneId)-\(tabId)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         notificationCenter.add(request) { [weak self] error in
             if let error {

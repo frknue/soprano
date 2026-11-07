@@ -109,6 +109,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Agent notifications are cleaner, like Soprano Agents': a short title saying what the
+  agent wants (`Claude Code finished`, `Codex needs approval`, `omp needs input`) over
+  the conversation's name, with no location subtitle or quoted reply. Each tab keeps one
+  banner, so a new one replaces the last instead of piling up in Notification Center.
 - The Agent Dashboard is laid out like a mail client instead of a stack of terminals: a
   sidebar groups agents under **Needs you**, **Working**, **Ready**, and **Stopped** in
   place of the four summary figures, and the selected agent gets a toolbar
