@@ -1054,16 +1054,22 @@ final class AgentManager: @unchecked Sendable {
         }
     }
 
-    /// Ghostty also reports commands run by an ordinary shell. Only detach an
-    /// attached agent when its own reported process is gone; a prior command's
-    /// delayed completion must not hide an agent that is still running.
+    /// Ghostty also reports commands run by an ordinary shell. An agent whose
+    /// process is known detaches only once that process is gone, so a prior
+    /// command's delayed completion cannot hide one that still runs. An agent
+    /// reported from the shell itself (a `codex` wrapper's `agent-event ready`)
+    /// names no process until its first turn ends; it ran as the shell's
+    /// foreground command, so the prompt returning means it quit.
     func agentCommandDidFinish(target: TerminalTarget, exitCode: Int32?) {
         guard let tab = panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
               let agent = tab.agent else { return }
         if tab.type == .agent {
             agentReturnedToShell(target: target, exitCode: exitCode)
-        } else if let processId = agent.processId,
-                  kill(processId, 0) == -1, errno == ESRCH {
+        } else if let processId = agent.processId {
+            if kill(processId, 0) == -1, errno == ESRCH {
+                agentProcessDidExit(target: target, exitCode: exitCode)
+            }
+        } else {
             agentProcessDidExit(target: target, exitCode: exitCode)
         }
     }

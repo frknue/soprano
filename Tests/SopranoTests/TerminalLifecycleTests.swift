@@ -142,6 +142,39 @@ struct TerminalLifecycleTests {
         #expect(secondAgent !== firstAgent)
     }
 
+    /// A wrapper that reports the agent from the user's shell (`agent-event ready`
+    /// before `command codex`) gives the app no agent process; quitting the agent
+    /// before its first turn ends must still detach it when the prompt returns.
+    @Test func anAgentReportedWithoutAProcessDetachesWhenItsShellCommandReturns() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.renameTab(paneId, tabId: tabId, to: "Terminal")
+        let agent = try #require(manager.attachAgentIfNeeded(paneId: paneId, tabId: tabId, profileId: "codex"))
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+        #expect(agent.processId == nil)
+
+        manager.agentCommandDidFinish(target: TerminalTarget(paneId: paneId, tabId: tabId), exitCode: 130)
+
+        #expect(agent.status == .stopped)
+        #expect(manager.agent(paneId: paneId, tabId: tabId) == nil)
+        #expect(manager.panes[paneId]?.activeTab?.title == "Terminal")
+    }
+
+    @Test func anAgentWhoseReportedProcessStillRunsStaysAttachedWhenAShellCommandFinishes() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        let agent = try #require(manager.attachAgentIfNeeded(paneId: paneId, tabId: tabId, profileId: "codex"))
+        agent.processId = getpid()
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .running)
+
+        manager.agentCommandDidFinish(target: TerminalTarget(paneId: paneId, tabId: tabId), exitCode: 0)
+
+        #expect(manager.agent(paneId: paneId, tabId: tabId) === agent)
+        #expect(agent.status == .running)
+    }
+
     @Test func finishedDedicatedAgentBecomesStoppedWithoutStoppingItsSurfaceAgain() throws {
         let manager = AgentManager()
         let paneId = manager.activePaneId

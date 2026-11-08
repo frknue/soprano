@@ -79,16 +79,19 @@ struct AgentConversationTests {
             return envelope.userInfo
         }
 
-        _ = try deliver("ready")
+        // Like Soprano's omp extension, every event names omp's process.
+        let omp = ["--pid", String(getpid())]
+        _ = try deliver("ready", options: omp)
         #expect(manager.panes[paneId]?.tabs.first { $0.id == tabId }?.type == .terminal)
         #expect(manager.agentDashboardSnapshot().entries.first?.profileName == "omp")
         #expect(manager.agentDashboardSnapshot().entries.first?.status == .idle)
         #expect(manager.agent(paneId: paneId, tabId: tabId)?.conversation?.id == "0199-aaaa")
-        // Shell command-completion events are not proof that omp has exited.
+        // Shell command-completion events are not proof that omp has exited
+        // while the process it named still runs.
         try #require(terminalView).terminalCommandDidFinish(exitCode: 0)
         #expect(manager.agentDashboardSnapshot().entries.first?.profileName == "omp")
 
-        _ = try deliver("running")
+        _ = try deliver("running", options: omp)
         #expect(manager.agentDashboardSnapshot().workingCount == 1)
 
         let notification = try deliver("needs-input", options: [

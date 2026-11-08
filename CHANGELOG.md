@@ -216,6 +216,10 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- An agent started by typing it into a terminal (such as `codex` through a shell
+  wrapper) and quit with `Ctrl+C` before its first reply no longer stays in the sidebar
+  and Agent Dashboard as a working agent; the tab turns back into its terminal once the
+  prompt returns.
 - Opening an agent from the **Agent Dashboard** unfolds its window group in the sidebar
   when it was collapsed, so the agent's pane row is visible.
 - OpenCode 2 panes report `WORKING`, `NEEDS INPUT`, and errors again, notify for
