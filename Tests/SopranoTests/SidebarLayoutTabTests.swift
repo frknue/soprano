@@ -77,7 +77,9 @@ struct SidebarLayoutTabTests {
         sidebar.layoutSubtreeIfNeeded()
         let windowRow = try row("sidebar-window-\(windowId)", in: sidebar)
         #expect(windowRow.frame.origin != .zero)
-        let disclosure = try #require(descendants(of: windowRow, as: NSButton.self).first { !($0 is ChromeIconButton) })
+        let disclosure = try #require(descendants(of: windowRow, as: NSButton.self).first {
+            ["Collapse Window", "Expand Window"].contains($0.accessibilityLabel() ?? "")
+        })
         windowRow.mouseDown(with: try click(at: NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY), in: disclosure))
         #expect(manager.activeWindowId != windowId)
     }

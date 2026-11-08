@@ -1,11 +1,20 @@
 import AppKit
 
-/// Persistent sidebar showing collapsible logical windows and their panes.
+/// Persistent sidebar showing collapsible logical windows and their panes,
+/// drawn in Soprano Agents' sidebar language: a title row with the sidebar
+/// toggle and the session switcher (in the title bar strip, clear of the
+/// traffic lights), the Search row with ghost icon buttons, Automations,
+/// windows as collapsible section headers ("soprano 2 ⌄"), agent panes as
+/// cards (project monogram and folder, status pill, title, meta line) and
+/// other panes as slim rows, and a footer of ghost icon buttons.
 final class SidebarView: NSView {
-    /// The session popup's header and the WINDOWS heading are 32 pt each.
+    /// The title row: as tall as the window tab row beside it, or the title
+    /// bar strip when that is taller.
     static let headerHeight: CGFloat = 32
-    /// The Automations entry between them, a 28 pt row like a window row.
-    static let navRowHeight: CGFloat = 28
+    /// The Search row and the Automations entry.
+    static let searchRowHeight: CGFloat = 32
+    static let navRowHeight: CGFloat = 32
+    static let footerHeight: CGFloat = 40
     /// Rows sit 1 pt apart. Panes that share a tab stay that close, a new tab
     /// starts a little further down, and a new window further still, so the
     /// list groups itself without a label on every row.
@@ -26,23 +35,28 @@ final class SidebarView: NSView {
     /// A window or pane row was clicked, so whatever page covers the
     /// workspace makes way.
     var onWorkspaceRowSelected: (() -> Void)?
+    /// The title row's sidebar toggle was clicked.
+    var onToggleSidebarRequested: (() -> Void)?
 
     private var contentWidthConstraint: NSLayoutConstraint!
+    private var titleRowHeightConstraint: NSLayoutConstraint!
+    private var toggleLeadingConstraint: NSLayoutConstraint!
     private var contentContainer: NSView!
-    private var headerView: ChromeEyebrowView!
+    private var titleRow: SidebarTitleRowView!
+    private var toggleButton: ShellGhostButton!
+    private var sessionButton: SidebarSessionButton!
+    private var searchButton: SidebarSearchButton!
     private var automationsRow: SidebarNavRowView!
-    private var sessionSelector: NSPopUpButton!
     private var scrollView: NSScrollView!
     private var listContentView: SidebarListView!
     private var rowsStack: NSStackView!
     private var footerView: NSView!
-    private var footerSeparator: ChromeRuleView!
-    private var trailingBorder: ChromeRuleView!
-    private var settingsButton: ChromeIconButton!
-    private var dashboardButton: ChromeIconButton!
-    private var plusButton: ChromeIconButton!
-    private var collapseAllButton: ChromeIconButton!
-    private var sessionsButton: ChromeIconButton!
+    private var trailingBorder: NSView!
+    private var settingsButton: ShellGhostButton!
+    private var dashboardButton: ShellGhostButton!
+    private var plusButton: ShellGhostButton!
+    private var collapseAllButton: ShellGhostButton!
+    private var sessionsButton: ShellGhostButton!
     private var isResizeHighlighted = false
     private var isControlKeyHeld = false
     private var typedPaneHint = ""
@@ -50,6 +64,7 @@ final class SidebarView: NSView {
     private var paneRows: [String: SidebarPaneRowView] = [:]
     private var displayedWindowId: String?
     private var needsActiveWindowReveal = false
+    private var clockTimer: Timer?
 
     init(
         agentManager: AgentManager,
@@ -74,6 +89,9 @@ final class SidebarView: NSView {
         gitBranchMonitor.onChange = { [weak self] in
             self?.refresh()
         }
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in
+            self?.refreshTheme()
+        }
         refresh()
     }
 
@@ -90,6 +108,7 @@ final class SidebarView: NSView {
 
     override func layout() {
         super.layout()
+        updateTitleRowGeometry()
         guard needsActiveWindowReveal,
               scrollView.contentSize.height > 0,
               let row = windowRows[agentManager.activeWindowId]
@@ -98,6 +117,27 @@ final class SidebarView: NSView {
         listContentView.layoutSubtreeIfNeeded()
         needsActiveWindowReveal = false
         row.scrollToVisible(row.bounds)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateClock()
+        needsLayout = true
+    }
+
+    /// The title row fills the title bar strip (when the window has one) and
+    /// starts right of the traffic lights.
+    private func updateTitleRowGeometry() {
+        let height = max(Self.headerHeight, ShellTitlebar.stripHeight(for: self))
+        if titleRowHeightConstraint.constant != height {
+            titleRowHeightConstraint.constant = height
+        }
+        // The sidebar's own frame is final here; its title row's may not be yet.
+        let inset = ShellTitlebar.trafficLightInset(for: self)
+        let leading = inset > 0 ? inset : ShellSidebarMetrics.contentInset
+        if toggleLeadingConstraint.constant != leading {
+            toggleLeadingConstraint.constant = leading
+        }
     }
 
     private func setupViews() {
@@ -111,53 +151,70 @@ final class SidebarView: NSView {
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentContainer)
 
-        sessionSelector = NSPopUpButton(frame: .zero, pullsDown: false)
-        sessionSelector.identifier = NSUserInterfaceItemIdentifier("session-selector")
-        sessionSelector.setAccessibilityLabel("Current Session")
-        sessionSelector.font = ChromeFont.labelStrong
-        // Borderless, like the rows under it: the bezel made the session
-        // name the heaviest thing in the sidebar.
-        sessionSelector.isBordered = false
-        sessionSelector.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        sessionSelector.target = self
-        sessionSelector.action = #selector(sessionSelected(_:))
-        sessionSelector.translatesAutoresizingMaskIntoConstraints = false
-        contentContainer.addSubview(sessionSelector)
+        // Title row: sidebar toggle and the session switcher.
+        titleRow = SidebarTitleRowView()
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(titleRow)
 
-        headerView = ChromeEyebrowView(title: "WINDOWS", theme: themeManager.currentTheme)
-
-        automationsRow = SidebarNavRowView(
-            title: "Automations",
-            symbolName: "calendar.badge.clock",
-            theme: themeManager.currentTheme
+        toggleButton = ShellGhostButton(
+            symbol: Icon.sidebarLeft,
+            label: "Toggle Sidebar",
+            target: self,
+            action: #selector(toggleSidebarClicked)
         )
+        toggleButton.translatesAutoresizingMaskIntoConstraints = false
+        titleRow.addSubview(toggleButton)
+
+        sessionButton = SidebarSessionButton()
+        sessionButton.identifier = NSUserInterfaceItemIdentifier("session-selector")
+        sessionButton.translatesAutoresizingMaskIntoConstraints = false
+        sessionButton.onClick = { [weak self] in
+            self?.showSessionMenu()
+        }
+        titleRow.addSubview(sessionButton)
+
+        // Search row: Search opens the command palette; Collapse All and New
+        // sit at its end like Agents' filter / add project / new thread.
+        searchButton = SidebarSearchButton()
+        searchButton.translatesAutoresizingMaskIntoConstraints = false
+        searchButton.onClick = { [weak self] in
+            self?.openCommandPalette()
+        }
+        contentContainer.addSubview(searchButton)
+
+        collapseAllButton = ShellGhostButton(
+            symbol: "rectangle.compress.vertical",
+            label: "Collapse All Windows",
+            variant: .sidebar,
+            target: self,
+            action: #selector(collapseAllClicked)
+        )
+        collapseAllButton.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(collapseAllButton)
+
+        plusButton = ShellGhostButton(
+            symbol: Icon.squarePen,
+            label: "New Window or Pane",
+            variant: .sidebar,
+            target: self,
+            action: #selector(plusClicked)
+        )
+        plusButton.translatesAutoresizingMaskIntoConstraints = false
+        contentContainer.addSubview(plusButton)
+
+        automationsRow = SidebarNavRowView(title: "Automations", symbolName: "calendar.badge.clock")
         automationsRow.identifier = NSUserInterfaceItemIdentifier("sidebar-automations")
         automationsRow.onClick = { [weak self] in
             self?.onAutomationsRequested?()
         }
         contentContainer.addSubview(automationsRow)
-        contentContainer.addSubview(headerView)
-
-        plusButton = makeIconButton(
-            symbolName: "plus",
-            accessibilityLabel: "New Window or Pane",
-            action: #selector(plusClicked)
-        )
-        contentContainer.addSubview(plusButton)
-
-        collapseAllButton = ChromeIconButton(
-            symbolName: "rectangle.compress.vertical",
-            accessibilityLabel: "Collapse All Windows",
-            pointSize: 12,
-            target: self,
-            action: #selector(collapseAllClicked)
-        )
-        contentContainer.addSubview(collapseAllButton)
 
         scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(scrollView)
 
@@ -178,36 +235,28 @@ final class SidebarView: NSView {
         footerView.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.addSubview(footerView)
 
-        footerSeparator = ChromeRuleView(axis: .horizontal)
-        footerView.addSubview(footerSeparator)
-
-        settingsButton = makeIconButton(
-            symbolName: "gearshape",
-            accessibilityLabel: "Settings",
-            action: #selector(settingsClicked)
-        )
-        footerView.addSubview(settingsButton)
-
-        sessionsButton = makeIconButton(
-            symbolName: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-            accessibilityLabel: "Saved Workspaces",
+        settingsButton = makeFooterButton(symbol: Icon.settings, label: "Settings", action: #selector(settingsClicked))
+        dashboardButton = makeFooterButton(symbol: Icon.statistics, label: "Agent Dashboard", action: #selector(dashboardClicked))
+        sessionsButton = makeFooterButton(
+            symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+            label: "Saved Workspaces",
             action: #selector(sessionsClicked)
         )
-        footerView.addSubview(sessionsButton)
 
-        dashboardButton = makeIconButton(
-            symbolName: "chart.xyaxis.line",
-            accessibilityLabel: "Agent Dashboard",
-            action: #selector(dashboardClicked)
-        )
-        footerView.addSubview(dashboardButton)
-
-        trailingBorder = ChromeRuleView(axis: .vertical)
+        trailingBorder = NSView()
+        trailingBorder.wantsLayer = true
+        trailingBorder.translatesAutoresizingMaskIntoConstraints = false
         addSubview(trailingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
             equalToConstant: SidebarWidthStore.left.defaultWidth
         )
+        titleRowHeightConstraint = titleRow.heightAnchor.constraint(equalToConstant: Self.headerHeight)
+        toggleLeadingConstraint = toggleButton.leadingAnchor.constraint(
+            equalTo: titleRow.leadingAnchor,
+            constant: ShellSidebarMetrics.contentInset
+        )
+        let inset = ShellSidebarMetrics.contentInset
 
         NSLayoutConstraint.activate([
             contentContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -215,30 +264,32 @@ final class SidebarView: NSView {
             contentContainer.bottomAnchor.constraint(equalTo: bottomAnchor),
             contentWidthConstraint,
 
-            // Sidebar header (32): the session popup.
-            sessionSelector.centerYAnchor.constraint(
-                equalTo: contentContainer.topAnchor,
-                constant: Self.headerHeight / 2
-            ),
-            sessionSelector.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 8),
-            sessionSelector.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -8),
-            // Automations (28): the page entry under the popup.
-            automationsRow.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: Self.headerHeight),
+            titleRow.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+            titleRow.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+            titleRow.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+            titleRowHeightConstraint,
+
+            toggleLeadingConstraint,
+            toggleButton.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
+            sessionButton.leadingAnchor.constraint(equalTo: toggleButton.trailingAnchor, constant: 6),
+            sessionButton.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
+            sessionButton.trailingAnchor.constraint(lessThanOrEqualTo: titleRow.trailingAnchor, constant: -inset),
+
+            searchButton.topAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: inset),
+            searchButton.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: inset),
+            searchButton.heightAnchor.constraint(equalToConstant: Self.searchRowHeight),
+            searchButton.trailingAnchor.constraint(equalTo: collapseAllButton.leadingAnchor, constant: -4),
+            collapseAllButton.centerYAnchor.constraint(equalTo: searchButton.centerYAnchor),
+            collapseAllButton.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor),
+            plusButton.centerYAnchor.constraint(equalTo: searchButton.centerYAnchor),
+            plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -inset),
+
+            automationsRow.topAnchor.constraint(equalTo: searchButton.bottomAnchor, constant: 2),
             automationsRow.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             automationsRow.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             automationsRow.heightAnchor.constraint(equalToConstant: Self.navRowHeight),
-            // Section heading (32): WINDOWS, Collapse All and New on the right.
-            headerView.centerYAnchor.constraint(
-                equalTo: contentContainer.topAnchor,
-                constant: Self.headerHeight * 1.5 + Self.navRowHeight
-            ),
-            headerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 12),
-            headerView.trailingAnchor.constraint(equalTo: collapseAllButton.leadingAnchor, constant: -6),
 
-            scrollView.topAnchor.constraint(
-                equalTo: contentContainer.topAnchor,
-                constant: Self.headerHeight * 2 + Self.navRowHeight
-            ),
+            scrollView.topAnchor.constraint(equalTo: automationsRow.bottomAnchor, constant: 4),
             scrollView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
@@ -257,46 +308,36 @@ final class SidebarView: NSView {
             footerView.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
             footerView.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
             footerView.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
-            footerView.heightAnchor.constraint(equalToConstant: 36),
+            footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
 
-            footerSeparator.topAnchor.constraint(equalTo: footerView.topAnchor),
-            footerSeparator.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
-            footerSeparator.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
-            footerSeparator.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            settingsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -8),
+            // Agents' footer: Settings, then the board toggle, then the rest.
+            settingsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: inset),
             settingsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-
-            plusButton.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -6),
-            plusButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-
-            collapseAllButton.trailingAnchor.constraint(equalTo: plusButton.leadingAnchor, constant: -2),
-            collapseAllButton.centerYAnchor.constraint(equalTo: headerView.centerYAnchor),
-
-            sessionsButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: 8),
-            sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-
-            dashboardButton.leadingAnchor.constraint(equalTo: sessionsButton.trailingAnchor, constant: 2),
+            dashboardButton.leadingAnchor.constraint(equalTo: settingsButton.trailingAnchor, constant: 2),
             dashboardButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+            sessionsButton.leadingAnchor.constraint(equalTo: dashboardButton.trailingAnchor, constant: 2),
+            sessionsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
 
             trailingBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
             trailingBorder.topAnchor.constraint(equalTo: topAnchor),
             trailingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            trailingBorder.widthAnchor.constraint(equalToConstant: Chrome.hairline),
+            trailingBorder.widthAnchor.constraint(equalToConstant: 1),
         ])
     }
 
-    private func makeIconButton(
-        symbolName: String,
-        accessibilityLabel: String,
-        action: Selector
-    ) -> ChromeIconButton {
-        ChromeIconButton(
-            symbolName: symbolName,
-            accessibilityLabel: accessibilityLabel,
+    private func makeFooterButton(symbol: String, label: String, action: Selector) -> ShellGhostButton {
+        let button = ShellGhostButton(
+            symbol: symbol,
+            label: label,
+            size: 32,
+            symbolSize: 15,
+            variant: .sidebar,
             target: self,
             action: action
         )
+        button.translatesAutoresizingMaskIntoConstraints = false
+        footerView.addSubview(button)
+        return button
     }
 
     /// Width of the sidebar's content. Kept in step with the view's own width so
@@ -305,24 +346,22 @@ final class SidebarView: NSView {
         contentWidthConstraint.constant = width
     }
 
-    /// Darkens the trailing border to the splitter color while the resize
-    /// handle is hovered or dragged, so the draggable edge is visible before
-    /// the mouse goes down.
+    /// Darkens the trailing border while the resize handle is hovered or
+    /// dragged, so the draggable edge is visible before the mouse goes down.
     func setResizeHighlighted(_ isHighlighted: Bool) {
         isResizeHighlighted = isHighlighted
-        applyTrailingBorderColor(theme: themeManager.currentTheme)
+        applyTrailingBorderColor()
     }
 
-    private func applyTrailingBorderColor(theme: AppTheme) {
-        trailingBorder.color = isResizeHighlighted
-            ? theme.colors.borderStrong
-            : theme.colors.borderSubtle
+    private func applyTrailingBorderColor() {
+        let palette = PaletteCenter.shared.palette
+        trailingBorder.layer?.backgroundColor = (isResizeHighlighted ? palette.input : palette.sidebarBorder).cgColor
     }
 
     func setControlKeyHeld(_ isHeld: Bool) {
         guard isControlKeyHeld != isHeld else { return }
         isControlKeyHeld = isHeld
-        rebuildRows(theme: themeManager.currentTheme)
+        rebuildRows()
     }
 
     /// Letters of a longer pane hint typed so far. The hints stay up, even
@@ -330,7 +369,11 @@ final class SidebarView: NSView {
     func setTypedPaneHint(_ typed: String) {
         guard typedPaneHint != typed else { return }
         typedPaneHint = typed
-        rebuildRows(theme: themeManager.currentTheme)
+        rebuildRows()
+    }
+
+    @objc private func toggleSidebarClicked() {
+        onToggleSidebarRequested?()
     }
 
     @objc private func settingsClicked() {
@@ -350,6 +393,11 @@ final class SidebarView: NSView {
         agentManager.collapseAllSidebarWindows()
     }
 
+    /// The window controller's command palette, through the responder chain.
+    private func openCommandPalette() {
+        NSApp.sendAction(Selector(("commandPaletteMenuItemSelected")), to: nil, from: self)
+    }
+
     // MARK: - Menus
 
     @objc private func plusClicked() {
@@ -366,6 +414,16 @@ final class SidebarView: NSView {
             let item = NSMenuItem(
                 title: "New \(profile.name) Pane",
                 action: #selector(spawnMenuItemClicked(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = profile.id
+            menu.addItem(item)
+        }
+        for profile in AgentChatLaunch.chatProfiles {
+            let item = NSMenuItem(
+                title: "New \(profile.name) Chat Pane",
+                action: #selector(spawnChatMenuItemClicked(_:)),
                 keyEquivalent: ""
             )
             item.target = self
@@ -395,7 +453,7 @@ final class SidebarView: NSView {
         )
         markdownItem.target = self
         menu.addItem(markdownItem)
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -2), in: plusButton)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: plusButton.bounds.maxY + 4), in: plusButton)
     }
 
     @objc private func newWindowClicked() {
@@ -405,6 +463,11 @@ final class SidebarView: NSView {
     @objc private func spawnMenuItemClicked(_ sender: NSMenuItem) {
         guard let profileId = sender.representedObject as? String else { return }
         _ = agentManager.spawnAgent(profileId)
+    }
+
+    @objc private func spawnChatMenuItemClicked(_ sender: NSMenuItem) {
+        guard let profileId = sender.representedObject as? String else { return }
+        _ = agentManager.spawnAgent(profileId, chat: true)
     }
 
     @objc private func spawnBrowserMenuItemClicked() {
@@ -457,47 +520,67 @@ final class SidebarView: NSView {
     }
 
     func saveSessionAs() {
-        let alert = NSAlert()
-        alert.messageText = "Save Workspace"
-        alert.informativeText = "Save a snapshot of all sessions and their window layouts:"
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
-        field.placeholderString = "Workspace name"
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        sessionManager.saveSession(name: name)
+        ShellDialogs.prompt(
+            title: "Save Workspace",
+            message: "Save a snapshot of all sessions and their window layouts:",
+            placeholder: "Workspace name",
+            confirmTitle: "Save",
+            in: window
+        ) { [weak self] name in
+            guard let self, let name else { return }
+            sessionManager.saveSession(name: name)
+        }
+    }
+
+    /// The session switcher: every session (the active one checked), then
+    /// New / Rename / Close.
+    func makeSessionMenu() -> NSMenu {
+        let menu = NSMenu()
+        for session in agentManager.orderedSessions {
+            let item = NSMenuItem(title: session.name, action: #selector(sessionMenuItemSelected(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = session.id
+            item.state = session.id == agentManager.activeSessionId ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        for (title, action) in [
+            ("New Session…", #selector(promptToCreateSession)),
+            ("Rename Session…", #selector(promptToRenameSession)),
+            ("Close Session…", #selector(promptToCloseSession)),
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    private func showSessionMenu() {
+        makeSessionMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: sessionButton.bounds.maxY + 4), in: sessionButton)
+    }
+
+    @objc private func sessionMenuItemSelected(_ sender: NSMenuItem) {
+        guard let sessionId = sender.representedObject as? String else { return }
+        agentManager.activateSession(sessionId)
     }
 
     // MARK: - Refresh
 
     func refreshTheme() {
-        // Rows take their colors when they are built.
-        rowsStack.setArrangedSubviews([])
-        windowRows.removeAll()
-        paneRows.removeAll()
         refresh()
     }
 
     private func refresh() {
-        let theme = themeManager.currentTheme
-        layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        headerView.apply(theme: theme)
-        footerSeparator.color = theme.colors.borderSubtle
-        applyTrailingBorderColor(theme: theme)
-        for button in [settingsButton, dashboardButton, plusButton, collapseAllButton, sessionsButton] {
-            button?.apply(theme: theme)
-        }
-        automationsRow.apply(theme: theme)
-        rebuildSessionSelector()
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.sidebar.cgColor
+        applyTrailingBorderColor()
+        sessionButton.title = agentManager.activeSession?.name ?? "Session"
         collapseAllButton.isEnabled = agentManager.activeSessionWindows.contains { !$0.isSidebarCollapsed }
 
         // Reconcile watchers first so rows read freshly-invalidated caches.
         gitBranchMonitor.setWatchedPaths(watchedCwds())
-        rebuildRows(theme: theme)
+        rebuildRows()
     }
 
     private func handleAgentChange(_ change: AgentManagerChange) {
@@ -521,6 +604,7 @@ final class SidebarView: NSView {
             let title = sidebarTitle(for: pane)
             paneRows[target.paneId]?.setTitle(title)
             paneRows[target.paneId]?.setMeta(meta(for: pane, title: title))
+            paneRows[target.paneId]?.setProject(projectName(for: pane))
 
         case .browserURL:
             break
@@ -536,12 +620,13 @@ final class SidebarView: NSView {
     /// Brings the rows up to date with the workspace. This runs on every model
     /// change, so rows that stay are reconfigured in place: building a row's
     /// buttons costs far more than configuring one.
-    private func rebuildRows(theme: AppTheme) {
+    private func rebuildRows() {
         let paneShortcutKeysById = Dictionary(
             uniqueKeysWithValues: agentManager.paneShortcutAssignments.map {
                 ($0.paneId, $0.key)
             }
         )
+        let now = Date()
         // Holding ⌃ shows the hints; a started hint keeps them up.
         let showsHints = isControlKeyHeld || !typedPaneHint.isEmpty
         var rows: [NSView] = []
@@ -555,7 +640,7 @@ final class SidebarView: NSView {
                 || !terminalWindow.isSidebarCollapsed
             let paneIds = terminalWindow.paneIds
             let windowRow = windowRows[terminalWindow.id] ?? {
-                let row = SidebarWindowRowView(theme: theme)
+                let row = SidebarWindowRowView()
                 row.identifier = NSUserInterfaceItemIdentifier("sidebar-window-\(terminalWindow.id)")
                 return row
             }()
@@ -605,22 +690,29 @@ final class SidebarView: NSView {
                 for paneId in paneIds {
                     guard let pane = agentManager.panes[paneId] else { continue }
                     let row = paneRows[pane.id] ?? {
-                        let row = SidebarPaneRowView(theme: theme)
+                        let row = SidebarPaneRowView()
                         row.identifier = NSUserInterfaceItemIdentifier("sidebar-pane-\(pane.id)")
                         return row
                     }()
                     let title = sidebarTitle(for: pane)
+                    let tab = pane.activeTab
+                    let agent = tab?.agent
+                    let pill = ShellStatusPill.of(agent: agent, runsCommand: paneRunsCommand(pane), now: now)
                     row.configure(
+                        kind: Self.rowKind(for: tab),
                         title: title,
+                        project: projectName(for: pane),
                         meta: meta(for: pane, title: title),
-                        status: paneStatus(for: pane),
-                        statusWord: paneStatusWord(for: pane),
+                        pill: pill,
+                        idleSince: agent.map { ShellStatusClock.shared.since($0, now: now) },
+                        recedes: agent.map { [.running, .starting, .idle, .stopped].contains($0.status) } ?? false,
                         shortcutCaps: paneShortcutKeysById[pane.id].flatMap {
                             Self.paneHintCaps(for: $0, typed: typedPaneHint)
                         },
                         showShortcutHint: showsHints,
                         highlighted: isActiveWindow && pane.id == agentManager.activePaneId,
                         inActiveWindow: isActiveWindow,
+                        now: now,
                         onSelect: { [weak self] in
                             self?.onWorkspaceRowSelected?()
                             self?.agentManager.focusPane(pane.id)
@@ -651,6 +743,44 @@ final class SidebarView: NSView {
         }
         // Rows that moved under a resting pointer hand the hover on.
         listContentView.needsLayout = true
+        updateClock()
+    }
+
+    /// Ticks live durations ("Working 2m", "5m") once a second while a row
+    /// shows one and the sidebar is in a window.
+    private func updateClock() {
+        let needsClock = window != nil && paneRows.values.contains { $0.hasLiveTime }
+        if !needsClock {
+            clockTimer?.invalidate()
+            clockTimer = nil
+            return
+        }
+        guard clockTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            MainActor.assumeIsolated {
+                let now = Date()
+                for row in self.paneRows.values { row.refreshTime(now) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        clockTimer = timer
+    }
+
+    /// Agent and chat panes are cards; shells, browsers and documents slim
+    /// rows with their kind's symbol (Agents' tab symbols: a diff's
+    /// `plus.forwardslash.minus`, a file's or Markdown file's `doc.text`).
+    /// Documents are browser-type tabs, so they are told apart first.
+    private static func rowKind(for tab: PaneTab?) -> SidebarPaneRowView.Kind {
+        guard let tab else { return .slim(symbol: Icon.terminal) }
+        if tab.agent != nil || tab.isChat { return .card }
+        if tab.isDiff { return .slim(symbol: "plus.forwardslash.minus") }
+        if tab.isMarkdown || tab.isEditor || tab.isFilePreview { return .slim(symbol: Icon.fileText) }
+        if tab.type == .browser { return .slim(symbol: Icon.globe) }
+        return .slim(symbol: Icon.terminal)
     }
 
     /// K1 caps for what is left of a pane hint after `typed`, or nil when the
@@ -666,101 +796,61 @@ final class SidebarView: NSView {
         promptToRenameWindow(agentManager.activeWindowId)
     }
 
-    private func rebuildSessionSelector() {
-        sessionSelector.removeAllItems()
-        for session in agentManager.orderedSessions {
-            let item = NSMenuItem(title: session.name, action: nil, keyEquivalent: "")
-            item.representedObject = session.id
-            sessionSelector.menu?.addItem(item)
-            if session.id == agentManager.activeSessionId {
-                sessionSelector.select(item)
-            }
-        }
-        sessionSelector.menu?.addItem(.separator())
-        for (title, action) in [
-            ("New Session…", #selector(promptToCreateSession)),
-            ("Rename Session…", #selector(promptToRenameSession)),
-            ("Close Session…", #selector(promptToCloseSession)),
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            sessionSelector.menu?.addItem(item)
-        }
-    }
-
-    @objc private func sessionSelected(_ sender: NSPopUpButton) {
-        guard let sessionId = sender.selectedItem?.representedObject as? String else { return }
-        agentManager.activateSession(sessionId)
-    }
-
     @objc func promptToCreateSession() {
-        guard let name = promptForSessionName(title: "New Session", initialName: "") else {
-            rebuildSessionSelector()
-            return
+        promptForSessionName(title: "New Session", initialName: "") { [weak self] name in
+            _ = self?.agentManager.createSession(name: name)
         }
-        _ = agentManager.createSession(name: name)
     }
 
     @objc func promptToRenameSession() {
         guard let session = agentManager.activeSession else { return }
-        guard let name = promptForSessionName(title: "Rename Session", initialName: session.name) else {
-            rebuildSessionSelector()
-            return
+        let sessionId = session.id
+        promptForSessionName(title: "Rename Session", initialName: session.name) { [weak self] name in
+            self?.agentManager.renameSession(sessionId, to: name)
         }
-        agentManager.renameSession(session.id, to: name)
     }
 
-    private func promptForSessionName(title: String, initialName: String) -> String? {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = "Name this group of windows."
-        alert.addButton(withTitle: initialName.isEmpty ? "Create" : "Rename")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        field.placeholderString = "Session name"
-        field.stringValue = initialName
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? nil : name
+    private func promptForSessionName(title: String, initialName: String, completion: @escaping (String) -> Void) {
+        ShellDialogs.prompt(
+            title: title,
+            message: "Name this group of windows.",
+            placeholder: "Session name",
+            initialValue: initialName,
+            confirmTitle: initialName.isEmpty ? "Create" : "Rename",
+            in: window
+        ) { name in
+            guard let name else { return }
+            completion(name)
+        }
     }
 
     @objc func promptToCloseSession() {
         guard let session = agentManager.activeSession else { return }
-        let alert = NSAlert()
-        alert.messageText = "Close \"\(session.name)\"?"
-        alert.informativeText = "All windows and running terminals in this session will close."
-        alert.addButton(withTitle: "Close Session")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            rebuildSessionSelector()
-            return
-        }
-        agentManager.closeSession(session.id)
-        // An editor's unsaved-changes prompt can still cancel the close; the
-        // selector then shows the session again instead of "Close Session…".
-        if agentManager.activeSessionId == session.id {
-            rebuildSessionSelector()
+        let sessionId = session.id
+        ShellDialogs.confirm(
+            title: "Close \"\(session.name)\"?",
+            message: "All windows and running terminals in this session will close.",
+            confirmTitle: "Close Session",
+            isDestructive: true,
+            in: window
+        ) { [weak self] confirmed in
+            guard confirmed else { return }
+            self?.agentManager.closeSession(sessionId)
         }
     }
 
     private func promptToRenameWindow(_ windowId: String) {
         guard let terminalWindow = agentManager.windows[windowId] else { return }
-        let alert = NSAlert()
-        alert.messageText = "Rename Window"
-        alert.informativeText = "Choose a stable name for this window."
-        alert.addButton(withTitle: "Rename")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        field.stringValue = terminalWindow.title
-        field.selectText(nil)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        agentManager.renameWindow(windowId, to: field.stringValue)
+        ShellDialogs.prompt(
+            title: "Rename Window",
+            message: "Choose a stable name for this window.",
+            initialValue: terminalWindow.title,
+            confirmTitle: "Rename",
+            in: window
+        ) { [weak self] name in
+            guard let name else { return }
+            self?.agentManager.renameWindow(windowId, to: name)
+        }
     }
 
     // MARK: - Row Content
@@ -781,15 +871,30 @@ final class SidebarView: NSView {
         )
     }
 
-    /// The second line under `title`; see `PaneContextLine`.
+    /// A card's project line: the folder its agent works in.
+    private func projectName(for pane: PaneState) -> String? {
+        pane.activeTab?.effectiveWorkingDirectory.map { TerminalTitle.folderName($0) }
+    }
+
+    /// The meta line under `title`; see `PaneContextLine`. A card names its
+    /// folder on the project line, so its meta line leaves the folder out.
     private func meta(for pane: PaneState, title: String) -> PaneContextLine {
         guard let tab = pane.activeTab else { return PaneContextLine() }
         let cwd = tab.effectiveWorkingDirectory
+        let agentName = tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name }
+        let branch = cwd.flatMap { gitBranchMonitor.notableBranch(for: $0) }
+        if case .card = Self.rowKind(for: tab) {
+            return PaneContextLine(
+                context: agentName.map { $0 == title ? [] : [$0] } ?? [],
+                branch: branch,
+                tabCount: pane.tabs.count
+            )
+        }
         return PaneContextLine(
             title: title,
-            agentName: tab.agent.flatMap { AgentCatalog.profile(for: $0.profileId)?.name },
+            agentName: agentName,
             workingDirectory: cwd,
-            branch: cwd.flatMap { gitBranchMonitor.notableBranch(for: $0) },
+            branch: branch,
             tabCount: pane.tabs.count
         )
     }
@@ -800,40 +905,124 @@ final class SidebarView: NSView {
         }
     }
 
-    // MARK: - Status
-
-    /// The pane's mark: the active tab's agent speaks for the pane; without
-    /// one, a command running in any of its tabs shows RUNNING. A plain shell
-    /// is `.idle`, which its row draws as no mark at all.
-    private func paneStatus(for pane: PaneState) -> ChromeStatus {
-        if let agent = pane.activeTab?.agent {
-            return agent.status.chromeStatus
-        }
-        return paneRunsCommand(pane) ? .running : .idle
-    }
-
-    /// The status word beside the title; nil for plain shells.
-    private func paneStatusWord(for pane: PaneState) -> String? {
-        if let agent = pane.activeTab?.agent {
-            return agent.status.displayLabel
-        }
-        return paneRunsCommand(pane) ? AgentManager.runningCommandLabel : nil
-    }
-
     private func paneRunsCommand(_ pane: PaneState) -> Bool {
         pane.tabs.contains { agentManager.isRunningCommand($0, in: pane.id) }
+    }
+}
+
+// MARK: - Title Row
+
+/// The title row lives in the title bar strip: its empty space moves the
+/// window like a title bar.
+private final class SidebarTitleRowView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        ShellTitlebar.handleMouseDown(event, in: self)
+    }
+}
+
+/// The session name in Agents' brand style (14 medium) with a chevron; a
+/// click opens the session switcher.
+private final class SidebarSessionButton: InteractiveView {
+    private let label = NSTextField.label("", size: Typography.bodySize, weight: .medium)
+    private let chevron = NSImageView()
+
+    var title = "" {
+        didSet {
+            guard title != oldValue else { return }
+            label.stringValue = title
+            setAccessibilityValue(title)
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer?.cornerRadius = Radius.md
+        chevron.image = NSImage.symbol(Icon.chevronDown, size: 9, weight: .semibold)
+        chevron.imageScaling = .scaleNone
+        for view in [label, chevron] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 26),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+        ])
+        setAccessibilityRole(.popUpButton)
+        setAccessibilityLabel("Current Session")
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = (isHovered ? palette.sidebarRowHover : .clear).cgColor
+        label.textColor = palette.sidebarForeground
+        chevron.contentTintColor = isHovered ? palette.sidebarForeground : palette.sidebarMutedForeground
+        setAccessibilityValue(label.stringValue)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
+    }
+}
+
+/// Agents' sidebar search row (`h-8 rounded-md px-2 text-sm font-medium`,
+/// magnifier, "Search"). Soprano searches through the command palette, so the
+/// row opens it.
+private final class SidebarSearchButton: InteractiveView {
+    private let icon = NSImageView()
+    private let label = NSTextField.label("Search", size: Typography.bodySize, weight: .medium)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer?.cornerRadius = Radius.md
+        icon.image = NSImage.symbol(Icon.search, size: 13)
+        icon.imageScaling = .scaleNone
+        for view in [icon, label] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+        ])
+        toolTip = "Search panes and commands"
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Search")
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = (isHovered ? palette.sidebarRowHover : .clear).cgColor
+        icon.contentTintColor = palette.sidebarMutedForeground
+        label.textColor = isHovered ? palette.sidebarForeground : palette.sidebarMutedForeground
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onClick?()
+        return true
     }
 }
 
 // MARK: - Row Chrome
 
 /// Key-window tracking shared by the sidebar rows. The row shows its close
-/// button and the hover pill only while `isHovered`, which the list sets for
-/// the row under the pointer, and the focused row's pencil tick only while
+/// button and the hover fill only while `isHovered`, which the list sets for
+/// the row under the pointer, and the focused row's active fill only while
 /// its window is key.
 private class SidebarRowView: NSView {
-    let theme: AppTheme
-    let background: ChromeRowBackgroundView
+    let background = ShellRowSurfaceView()
     var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
@@ -841,9 +1030,7 @@ private class SidebarRowView: NSView {
         }
     }
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        background = ChromeRowBackgroundView(theme: theme)
+    init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         background.identifier = NSUserInterfaceItemIdentifier("sidebar-row-background")
@@ -854,8 +1041,8 @@ private class SidebarRowView: NSView {
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        // The palette, an alert or another app taking the keyboard drops the
-        // pencil tick, like the pane header's focus rule.
+        // The palette, an alert or another app taking the keyboard mutes
+        // the open row's fill, like the pane header's focus.
         for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
             NotificationCenter.default.addObserver(
                 self,
@@ -870,6 +1057,8 @@ private class SidebarRowView: NSView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
+
+    override var isFlipped: Bool { true }
 
     /// Re-applies the row's state after the pointer, the key window or the
     /// row's configuration changes.
@@ -919,31 +1108,41 @@ private class SidebarRowView: NSView {
         return false
     }
 
-    static func makeCloseButton(accessibilityLabel: String) -> ChromeIconButton {
-        ChromeIconButton(
-            symbolName: "xmark",
-            accessibilityLabel: accessibilityLabel,
-            pointSize: 9,
-            size: 18,
-            target: nil,
-            action: nil
+    static func makeCloseButton(accessibilityLabel: String) -> ShellGhostButton {
+        let button = ShellGhostButton(
+            symbol: "xmark",
+            label: accessibilityLabel,
+            size: 20,
+            symbolSize: 9,
+            weight: .semibold,
+            variant: .sidebar
         )
+        button.translatesAutoresizingMaskIntoConstraints = true
+        return button
     }
 }
 
 // MARK: - Window Row
 
-/// `⌄ storefront   3 · 1!`: a 28 pt row with the disclosure chevron, the title
-/// (ink in the active window, muted elsewhere) and the pane count with the
-/// panes that need you in the attention color. Holding ⌃ swaps the count for
-/// the window's accent jump keycap; the pointer swaps it for a close button.
+/// `soprano  2 ⌄`: an Agents section header for a window — the title (13 pt
+/// semibold, ink in the active window, muted elsewhere), the muted pane count
+/// with the panes that need you in the warning tone, and the disclosure
+/// chevron. Holding ⌃ swaps the count for the window's jump hint; the pointer
+/// swaps it for a close button.
 private final class SidebarWindowRowView: SidebarRowView {
-    static let height: CGFloat = 28
+    static let height: CGFloat = 32
 
-    private let disclosureButton = NSButton(title: "", target: nil, action: nil)
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let countLabel = NSTextField(labelWithString: "")
-    private let shortcutCap: ChromeKeycapView
+    private let disclosureButton = ShellGhostButton(
+        symbol: Icon.chevronDown,
+        label: "Collapse Window",
+        size: 20,
+        symbolSize: 9,
+        weight: .semibold,
+        variant: .sidebar
+    )
+    private let titleLabel = NSTextField.label("", size: 13, weight: .semibold)
+    private let countLabel = NSTextField.label("", size: Typography.smallSize)
+    private let jumpBadge = ShellJumpHintBadge()
     private let closeButton = SidebarRowView.makeCloseButton(accessibilityLabel: "Close Window")
     private var onToggle: (() -> Void)?
     private var onSelect: (() -> Void)?
@@ -951,67 +1150,22 @@ private final class SidebarWindowRowView: SidebarRowView {
     private var onResetTitle: (() -> Void)?
     private var onClose: (() -> Void)?
     private var showsShortcut = false
+    private var highlighted = false
 
-    override init(theme: AppTheme) {
-        shortcutCap = ChromeKeycapView(legend: "", theme: theme, style: .small, tone: .accent)
-        super.init(theme: theme)
-        setup()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    private func setup() {
+    override init() {
+        super.init()
+        jumpBadge.identifier = NSUserInterfaceItemIdentifier("sidebar-jump-window")
         disclosureButton.target = self
         disclosureButton.action = #selector(handleToggle)
-        disclosureButton.isBordered = false
-        disclosureButton.imagePosition = .imageOnly
-        disclosureButton.contentTintColor = theme.colors.textMuted
-        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(disclosureButton)
-
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
-
-        countLabel.alignment = .right
-        countLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(countLabel)
-
-        addSubview(shortcutCap)
-
+        disclosureButton.translatesAutoresizingMaskIntoConstraints = true
         closeButton.target = self
         closeButton.action = #selector(handleClose)
-        closeButton.apply(theme: theme)
-        addSubview(closeButton)
-
-        let trailingInset = Chrome.pillInset + 8
-        NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: Self.height),
-
-            disclosureButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4),
-            disclosureButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            disclosureButton.widthAnchor.constraint(equalToConstant: 18),
-            disclosureButton.heightAnchor.constraint(equalToConstant: 18),
-
-            titleLabel.leadingAnchor.constraint(equalTo: disclosureButton.trailingAnchor, constant: 4),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: countLabel.leadingAnchor, constant: -8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCap.leadingAnchor, constant: -8),
-
-            countLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
-            countLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            shortcutCap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
-            shortcutCap.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 4)),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        countLabel.alignment = .right
+        for view in [titleLabel, countLabel, jumpBadge, closeButton, disclosureButton] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
     }
 
     func configure(
@@ -1034,29 +1188,27 @@ private final class SidebarWindowRowView: SidebarRowView {
         self.onRename = onRename
         self.onResetTitle = onResetTitle
         self.onClose = onClose
-        let colors = theme.colors
+        self.highlighted = highlighted
+        let palette = PaletteCenter.shared.palette
 
         let accessibilityLabel = expanded ? "Collapse Window" : "Expand Window"
-        disclosureButton.image = NSImage(
-            systemSymbolName: expanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: accessibilityLabel
-        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+        disclosureButton.setSymbol(expanded ? Icon.chevronDown : Icon.chevronRight, size: 9, weight: .semibold)
         disclosureButton.setAccessibilityLabel(accessibilityLabel)
         disclosureButton.toolTip = accessibilityLabel
-        titleLabel.setChromeText(
-            title,
-            font: ChromeFont.labelStrong,
-            color: highlighted ? colors.textPrimary : colors.textMuted
-        )
+        titleLabel.stringValue = title
 
-        let counts = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            "\(paneCount)",
-            font: ChromeFont.count,
-            color: colors.textMuted
-        ))
+        let countFont = Typography.tabular(Typography.smallSize)
+        let counts = NSMutableAttributedString(string: "\(paneCount)", attributes: [
+            .font: countFont, .foregroundColor: palette.sidebarMutedForeground,
+        ])
         if attentionCount > 0 {
-            counts.append(ChromeText.attributed(" · ", font: ChromeFont.count, color: colors.textMuted))
-            counts.append(ChromeText.attributed("\(attentionCount)!", font: ChromeFont.count, color: colors.attention))
+            counts.append(NSAttributedString(string: " · ", attributes: [
+                .font: countFont, .foregroundColor: palette.sidebarMutedForeground,
+            ]))
+            counts.append(NSAttributedString(string: "\(attentionCount)!", attributes: [
+                .font: Typography.tabular(Typography.smallSize, weight: .medium),
+                .foregroundColor: palette.color(for: .approval),
+            ]))
         }
         countLabel.attributedStringValue = counts
         let panes = "\(paneCount) pane\(paneCount == 1 ? "" : "s")"
@@ -1066,10 +1218,11 @@ private final class SidebarWindowRowView: SidebarRowView {
 
         showsShortcut = showShortcutHint && shortcutNumber != nil
         if let shortcutNumber {
-            shortcutCap.legend = "⌃\(shortcutNumber)"
-            shortcutCap.toolTip = "Ctrl+\(shortcutNumber)"
+            jumpBadge.caps = ["⌃\(shortcutNumber)"]
+            jumpBadge.toolTip = "Ctrl+\(shortcutNumber)"
         }
         hoverStateDidChange()
+        needsLayout = true
 
         let contextMenu = NSMenu()
         let renameItem = NSMenuItem(
@@ -1091,11 +1244,38 @@ private final class SidebarWindowRowView: SidebarRowView {
         menu = contextMenu
     }
 
+    override func layout() {
+        super.layout()
+        let left = ShellSidebarMetrics.contentLeft
+        let right = bounds.width - ShellSidebarMetrics.contentLeft
+        let midY = bounds.midY
+        disclosureButton.frame = NSRect(x: right + 4 - 20, y: midY - 10, width: 20, height: 20)
+        var slot = disclosureButton.frame.minX - 2
+        closeButton.frame = NSRect(x: slot - 20, y: midY - 10, width: 20, height: 20)
+        if !jumpBadge.isHidden {
+            let width = jumpBadge.intrinsicContentSize.width
+            jumpBadge.frame = NSRect(x: slot - width, y: midY - 10, width: width, height: 20)
+            slot = jumpBadge.frame.minX - 6
+        } else if !countLabel.isHidden {
+            let size = countLabel.intrinsicContentSize
+            let width = ceil(size.width) + 4
+            countLabel.frame = NSRect(x: slot - width, y: midY - size.height / 2, width: width, height: size.height)
+            slot = countLabel.frame.minX - 6
+        } else {
+            slot = closeButton.frame.minX - 4
+        }
+        let titleSize = titleLabel.intrinsicContentSize
+        titleLabel.frame = NSRect(x: left - 2, y: midY - titleSize.height / 2, width: max(0, slot - left + 2), height: titleSize.height)
+    }
+
     override func hoverStateDidChange() {
+        let palette = PaletteCenter.shared.palette
         background.style = isHovered ? .hover : .none
-        shortcutCap.isHidden = !showsShortcut
+        jumpBadge.isHidden = !showsShortcut
         closeButton.alphaValue = showsShortcut || !isHovered ? 0 : 1
         countLabel.isHidden = showsShortcut || isHovered
+        titleLabel.textColor = highlighted || isHovered ? palette.sidebarForeground : palette.sidebarMutedForeground
+        needsLayout = true
     }
 
     @objc private func handleToggle() {
@@ -1130,156 +1310,157 @@ private final class SidebarWindowRowView: SidebarRowView {
 
 // MARK: - Pane Row
 
-/// A pane under its window: status mark, title and the colored status word,
-/// with `omp · soprano · ⎇ feat/x · 2 tabs` muted on a second line when any
-/// of it applies (40 pt; 28 without). A plain shell has no mark, so the
-/// marks that remain are the agents and commands worth looking at. The
-/// focused pane gets the selection pill and pencil tick; every other row is
-/// plain. Holding ⌃ swaps the status word for the pane's accent jump
-/// keycaps; the pointer swaps it for a close button.
+/// A pane under its window. Agent and chat panes are Agents cards: project
+/// monogram and folder with the status pill on the first line, the title
+/// (14 pt) on the second, and the meta line (`omp · ⎇ feat/x · 2 tabs`) on a
+/// third when there is one. Other panes are slim rows: their kind's symbol,
+/// the title and a Running pill while a command runs, with the meta line
+/// under the title when there is one. The focused pane gets the active fill;
+/// every other row is plain. Holding ⌃ swaps the pill for the pane's jump
+/// hint; the pointer swaps it for a close button.
 private final class SidebarPaneRowView: SidebarRowView {
-    static let height: CGFloat = 40
-    static let singleLineHeight: CGFloat = 28
-    /// The mark sits under the window title, past the disclosure chevron.
-    private static let indent: CGFloat = 18
+    enum Kind: Equatable {
+        case card
+        case slim(symbol: String)
+    }
 
-    private let mark = ChromeStatusMark()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let shortcutCaps: ChromeKeycapGroupView
+    static let cardHeight: CGFloat = 76
+    static let compactCardHeight: CGFloat = 56
+    static let slimHeight: CGFloat = 36
+    static let slimMetaHeight: CGFloat = 52
+
+    private let monogram = ShellMonogramView()
+    private let kindIcon = NSImageView()
+    private let projectLabel = NSTextField.label("", size: Typography.smallSize)
+    private let pillView = ShellStatusPillView()
+    private let titleLabel = NSTextField.label("", size: Typography.bodySize, weight: .medium)
+    private let metaLabel = NSTextField.label("", size: Typography.smallSize)
+    private let jumpBadge = ShellJumpHintBadge()
     private let closeButton = SidebarRowView.makeCloseButton(accessibilityLabel: "Close Pane")
-    private let metaLabel = NSTextField(labelWithString: "")
     private var heightConstraint: NSLayoutConstraint!
-    private var titleTopConstraint: NSLayoutConstraint!
     private var onSelect: (() -> Void)?
     private var onClose: (() -> Void)?
-    private var titleColor: NSColor
+    private var kind: Kind = .card
     private var meta = PaneContextLine()
     private var showsShortcut = false
     private var isFocusedPane = false
+    private var inActiveWindow = true
+    private var recedes = false
 
-    override init(theme: AppTheme) {
-        shortcutCaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .accent)
-        titleColor = theme.colors.textPrimary
-        super.init(theme: theme)
-        setup()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    private func setup() {
-        addSubview(mark)
-
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
-
-        statusLabel.identifier = NSUserInterfaceItemIdentifier("pane-status-label")
-        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(statusLabel)
-
-        addSubview(shortcutCaps)
-
+    override init() {
+        super.init()
+        pillView.label.identifier = NSUserInterfaceItemIdentifier("pane-status-label")
+        metaLabel.identifier = NSUserInterfaceItemIdentifier("pane-row-meta")
+        jumpBadge.identifier = NSUserInterfaceItemIdentifier("sidebar-jump-pane")
+        kindIcon.imageScaling = .scaleNone
         closeButton.target = self
         closeButton.action = #selector(handleClose)
-        closeButton.apply(theme: theme)
-        addSubview(closeButton)
+        for view in [monogram, kindIcon, projectLabel, titleLabel, metaLabel, pillView, jumpBadge, closeButton] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = true
+            addSubview(view)
+        }
+        heightConstraint = heightAnchor.constraint(equalToConstant: Self.cardHeight)
+        heightConstraint.isActive = true
+    }
 
-        metaLabel.identifier = NSUserInterfaceItemIdentifier("pane-row-meta")
-        metaLabel.lineBreakMode = .byTruncatingTail
-        metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        metaLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(metaLabel)
+    var hasLiveTime: Bool { !pillView.isHidden && pillView.hasLiveTime }
 
-        let trailingInset = Chrome.pillInset + 8
-        heightConstraint = heightAnchor.constraint(equalToConstant: Self.height)
-        titleTopConstraint = titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5)
-        NSLayoutConstraint.activate([
-            heightConstraint,
-            titleTopConstraint,
-
-            mark.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: Chrome.pillInset + 8 + Self.indent
-            ),
-            mark.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            titleLabel.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -6),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: shortcutCaps.leadingAnchor, constant: -6),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -6),
-
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
-            statusLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            shortcutCaps.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingInset),
-            shortcutCaps.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 4)),
-            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            metaLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
-            metaLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            metaLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -trailingInset),
-        ])
+    func refreshTime(_ now: Date) {
+        pillView.refreshTime(now)
+        needsLayout = true
     }
 
     func configure(
+        kind: Kind,
         title: String,
+        project: String?,
         meta: PaneContextLine,
-        status: ChromeStatus,
-        statusWord: String?,
+        pill: ShellStatusPill?,
+        idleSince: Date?,
+        recedes: Bool,
         shortcutCaps caps: [String]?,
         showShortcutHint: Bool,
         highlighted: Bool,
         inActiveWindow: Bool,
+        now: Date,
         onSelect: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.onSelect = onSelect
         self.onClose = onClose
-        let colors = theme.colors
-        mark.set(status: status, colors: colors)
-        mark.isHidden = status == .idle
-        if let statusWord {
-            statusLabel.setStatusText(statusWord, color: status.color(in: colors))
-        } else {
-            statusLabel.stringValue = ""
+        self.kind = kind
+        self.recedes = recedes
+        self.inActiveWindow = inActiveWindow
+        isFocusedPane = highlighted
+
+        switch kind {
+        case .card:
+            monogram.projectName = project
+            monogram.isHidden = project == nil
+            kindIcon.isHidden = true
+            projectLabel.isHidden = false
+            projectLabel.stringValue = project ?? "No folder"
+        case .slim(let symbol):
+            monogram.isHidden = true
+            kindIcon.isHidden = false
+            kindIcon.image = NSImage.symbol(symbol, size: 13)
+            projectLabel.isHidden = true
         }
+        pillView.configure(pill, relativeTo: kind == .card ? idleSince : nil, now: now)
 
         showsShortcut = showShortcutHint && caps != nil
-        // Rebuilding the caps costs views, and this runs on every refresh.
-        if let caps, shortcutCaps.caps != caps {
-            shortcutCaps.caps = caps
-            shortcutCaps.toolTip = caps.map { $0.replacingOccurrences(of: "⌃⇧", with: "Ctrl+Shift+") }
+        if let caps, jumpBadge.caps != caps {
+            jumpBadge.caps = caps
+            jumpBadge.toolTip = caps.map { $0.replacingOccurrences(of: "⌃⇧", with: "Ctrl+Shift+") }
                 .joined(separator: ", then ")
         }
 
-        titleColor = inActiveWindow ? colors.textPrimary : colors.textMuted
-        titleLabel.setChromeText(title, color: titleColor)
-        isFocusedPane = highlighted
+        titleLabel.stringValue = title
         self.meta = meta
         updateMeta()
         hoverStateDidChange()
     }
 
     override func hoverStateDidChange() {
+        let palette = PaletteCenter.shared.palette
         background.style = isFocusedPane
             ? (isInKeyWindow ? .selected : .selectedUnfocused)
             : (isHovered ? .hover : .none)
-        shortcutCaps.isHidden = !showsShortcut
+        jumpBadge.isHidden = !showsShortcut
         closeButton.alphaValue = showsShortcut || !isHovered ? 0 : 1
-        statusLabel.isHidden = showsShortcut || isHovered || statusLabel.stringValue.isEmpty
+        pillView.isHidden = showsShortcut || isHovered || pillView.isEmpty
+        let lit = isFocusedPane || isHovered
+        switch kind {
+        case .card:
+            let receding = recedes && !lit
+            titleLabel.font = Typography.ui(Typography.bodySize, weight: receding ? .regular : .medium)
+            titleLabel.textColor = receding || !inActiveWindow
+                ? palette.sidebarForeground.shellScaled(by: 0.75)
+                : palette.sidebarForeground
+        case .slim:
+            titleLabel.font = Typography.ui(Typography.bodySize, weight: lit ? .medium : .regular)
+            titleLabel.textColor = lit ? palette.sidebarForeground
+                : inActiveWindow ? palette.sidebarForeground.shellScaled(by: 0.85)
+                : palette.secondaryLabel
+        }
+        kindIcon.contentTintColor = lit ? palette.sidebarForeground : palette.sidebarMutedForeground
+        projectLabel.textColor = palette.secondaryLabel
+        metaLabel.attributedStringValue = meta.attributed(font: Typography.ui(Typography.smallSize), color: palette.secondaryLabel)
+        needsLayout = true
     }
 
     func setTitle(_ title: String) {
         guard titleLabel.stringValue != title else { return }
-        titleLabel.setChromeText(title, color: titleColor)
+        titleLabel.stringValue = title
+        needsLayout = true
+    }
+
+    func setProject(_ project: String?) {
+        guard kind == .card else { return }
+        monogram.projectName = project
+        monogram.isHidden = project == nil
+        projectLabel.stringValue = project ?? "No folder"
+        needsLayout = true
     }
 
     func setMeta(_ meta: PaneContextLine) {
@@ -1289,11 +1470,67 @@ private final class SidebarPaneRowView: SidebarRowView {
     }
 
     private func updateMeta() {
-        metaLabel.attributedStringValue = meta.attributed(font: ChromeFont.meta, color: theme.colors.textMuted)
+        let palette = PaletteCenter.shared.palette
+        metaLabel.attributedStringValue = meta.attributed(font: Typography.ui(Typography.smallSize), color: palette.secondaryLabel)
         metaLabel.toolTip = meta.branch.map { "On branch \($0)" }
         metaLabel.isHidden = meta.isEmpty
-        heightConstraint.constant = meta.isEmpty ? Self.singleLineHeight : Self.height
-        titleTopConstraint.constant = meta.isEmpty ? 6 : 5
+        heightConstraint.constant = switch kind {
+        case .card: meta.isEmpty ? Self.compactCardHeight : Self.cardHeight
+        case .slim: meta.isEmpty ? Self.slimHeight : Self.slimMetaHeight
+        }
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let left = ShellSidebarMetrics.contentLeft
+        let right = bounds.width - ShellSidebarMetrics.contentLeft
+        switch kind {
+        case .card:
+            let line1: CGFloat = 1 + 8
+            let line2 = line1 + 24
+            let line3 = line2 + 22
+            var x = left
+            if !monogram.isHidden {
+                monogram.frame = NSRect(x: x, y: line1 + 2, width: 16, height: 16)
+                x += 16 + 6
+            }
+            let slotLeft = layoutTrailingSlot(right: right, lineY: line1)
+            let projectSize = projectLabel.intrinsicContentSize
+            projectLabel.frame = NSRect(x: x - 2, y: line1 + (20 - projectSize.height) / 2, width: max(0, slotLeft - 6 - x + 4), height: projectSize.height)
+            let titleSize = titleLabel.intrinsicContentSize
+            titleLabel.frame = NSRect(x: left - 2, y: line2 + (20 - titleSize.height) / 2, width: max(0, right - left + 4), height: titleSize.height)
+            let metaSize = metaLabel.intrinsicContentSize
+            metaLabel.frame = NSRect(x: left - 2, y: line3 + (16 - metaSize.height) / 2, width: max(0, right - left + 4), height: metaSize.height)
+        case .slim:
+            let titleLineY: CGFloat = metaLabel.isHidden ? (bounds.height - 20) / 2 : 7
+            kindIcon.frame = NSRect(x: left, y: titleLineY + 2, width: 16, height: 16)
+            let textLeft = left + 16 + 10
+            let slotLeft = layoutTrailingSlot(right: right, lineY: titleLineY)
+            let titleSize = titleLabel.intrinsicContentSize
+            titleLabel.frame = NSRect(x: textLeft - 2, y: titleLineY + (20 - titleSize.height) / 2, width: max(0, slotLeft - 8 - textLeft + 4), height: titleSize.height)
+            let metaSize = metaLabel.intrinsicContentSize
+            metaLabel.frame = NSRect(x: textLeft - 2, y: titleLineY + 21, width: max(0, right - textLeft + 4), height: metaSize.height)
+        }
+    }
+
+    /// Pill, jump hint and close button share the slot at the first line's
+    /// right edge; returns where the slot starts.
+    private func layoutTrailingSlot(right: CGFloat, lineY: CGFloat) -> CGFloat {
+        closeButton.frame = NSRect(x: right + 4 - 20, y: lineY, width: 20, height: 20)
+        var slotLeft = right
+        if !jumpBadge.isHidden {
+            let width = jumpBadge.intrinsicContentSize.width
+            jumpBadge.frame = NSRect(x: right + 4 - width, y: lineY, width: width, height: 20)
+            slotLeft = jumpBadge.frame.minX
+        } else if !pillView.isHidden {
+            let width = pillView.intrinsicContentSize.width
+            pillView.frame = NSRect(x: right - width, y: lineY, width: width, height: 20)
+            slotLeft = pillView.frame.minX
+        } else if closeButton.alphaValue > 0 {
+            slotLeft = closeButton.frame.minX
+        }
+        return slotLeft
     }
 
     @objc private func handleClose() {
@@ -1317,7 +1554,7 @@ private final class SidebarPaneRowView: SidebarRowView {
 /// instead of Auto Layout forcing document height to equal viewport height.
 ///
 /// It also owns the hover, like the file explorer: one tracking area follows
-/// the pointer and marks the row under it, so at most one row shows its pill
+/// the pointer and marks the row under it, so at most one row shows its fill
 /// and close button. Rows must not track the pointer themselves. They move
 /// under a resting pointer whenever ⌃ expands collapsed windows, a pane opens
 /// or closes, or the list scrolls, and AppKit sends no exit for a tracking
@@ -1427,10 +1664,9 @@ private final class SidebarListView: NSView {
 
 // MARK: - Nav Row
 
-/// A page entry above the windows (`Automations`): a 28 pt row with a muted
-/// SF Symbol and an SF Pro label. The pointer gives it the `hover` pill;
-/// while its page is open it is the raised nav pill, as Settings marks its
-/// open tab, with the icon in ink.
+/// A page entry above the windows (`Automations`): Agents' row look — a
+/// 16 pt muted symbol and a 14 pt label, the hover fill under the pointer and
+/// the active fill while its page is open.
 private final class SidebarNavRowView: NSView {
     var onClick: (() -> Void)?
     var isSelected = false {
@@ -1441,11 +1677,9 @@ private final class SidebarNavRowView: NSView {
         }
     }
 
-    private let background: ChromeRowBackgroundView
+    private let background = ShellRowSurfaceView()
     private let iconView = NSImageView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let title: String
-    private var theme: AppTheme
+    private let titleLabel: NSTextField
     private var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
@@ -1453,22 +1687,18 @@ private final class SidebarNavRowView: NSView {
         }
     }
 
-    init(title: String, symbolName: String, theme: AppTheme) {
-        self.title = title
-        self.theme = theme
-        background = ChromeRowBackgroundView(theme: theme)
+    init(title: String, symbolName: String) {
+        titleLabel = NSTextField.label(title, size: Typography.bodySize, weight: .medium)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         addSubview(background)
 
-        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        iconView.image = NSImage.symbol(symbolName, size: 13)
         iconView.imageScaling = .scaleNone
         iconView.setAccessibilityElement(false)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
 
-        titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
@@ -1479,17 +1709,18 @@ private final class SidebarNavRowView: NSView {
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            // The icon sits where a window row's disclosure chevron does.
-            iconView.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4 + 9),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ShellSidebarMetrics.contentLeft),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 4 + 18 + 4),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -(Chrome.pillInset + 8)),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -ShellSidebarMetrics.contentLeft),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
 
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(title)
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in self?.refresh() }
         refresh()
     }
 
@@ -1498,21 +1729,12 @@ private final class SidebarNavRowView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        background.apply(theme: theme)
-        refresh()
-    }
-
     private func refresh() {
-        let colors = theme.colors
-        background.style = isSelected ? .raisedTab : (isHovered ? .hover : .none)
-        iconView.contentTintColor = isSelected || isHovered ? colors.textPrimary : colors.textMuted
-        titleLabel.setChromeText(
-            title,
-            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
-            color: colors.textPrimary
-        )
+        let palette = PaletteCenter.shared.palette
+        background.style = isSelected ? .selected : (isHovered ? .hover : .none)
+        let lit = isSelected || isHovered
+        iconView.contentTintColor = lit ? palette.sidebarForeground : palette.sidebarMutedForeground
+        titleLabel.textColor = lit ? palette.sidebarForeground : palette.sidebarMutedForeground
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

@@ -113,7 +113,7 @@ struct PerformanceOptimizationTests {
         #expect(descendant(in: sidebar, identifiedBy: "sidebar-pane-\(secondPaneId)") === secondRow)
         #expect(
             descendants(of: secondRow, as: NSTextField.self)
-                .contains { $0.stringValue.contains(AgentStatus.waiting.displayLabel) }
+                .contains { $0.stringValue == "Done" }
         )
 
         manager.closePane(firstPaneId)

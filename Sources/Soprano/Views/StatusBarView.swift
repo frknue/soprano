@@ -1,10 +1,12 @@
 import AppKit
 
-/// Bottom status bar. Left: the keybinding mode chip and the
-/// `session › window › pane · Tab 1` breadcrumb. Right: muted counts with the
-/// panes that need you in the attention color, account usage, the ⌘P and
-/// Prefix hints, and the opt-in `Up h:mm:ss` readout.
-final class StatusBarView: NSView, NSPopoverDelegate {
+/// Bottom status bar in Soprano Agents' footer language. Left: the keybinding
+/// mode as a quiet pill (`Normal`, or `Prefix` / `Copy` / `Select` in a status
+/// tone) and the `session / window / pane · Tab 1` breadcrumb. Right: muted
+/// counts with the panes that need you in the attention color, account usage,
+/// the ⌘P and Prefix hints as `KbdView` caps, and the opt-in `Up h:mm:ss`
+/// readout. Every text is the 12 pt system font.
+final class StatusBarView: NSView {
     /// 26 pt including the hairline along the top edge.
     static let height: CGFloat = 26
 
@@ -12,17 +14,19 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     private static let launchDate = NSRunningApplication.current.launchDate ?? Date()
     private static let accountsObserverId = "StatusBarView"
     private static let gap: CGFloat = 12
+    /// Horizontal inset of the bar's content.
+    private static let inset: CGFloat = 12
 
     let agentManager: AgentManager
     let themeManager: ThemeManager
 
-    private let topRule = ChromeRuleView(axis: .horizontal)
-    private let modeChip: ChromeModeChip
+    private let topRule = NSView()
+    private let modeView = DashStatusModeView()
     private let locationLabel = NSTextField(labelWithString: "")
     private let countsLabel = NSTextField(labelWithString: "")
     private let usageLabel = NSTextField(labelWithString: "")
-    private let paletteHint: StatusHintView
-    private let prefixHint: StatusHintView
+    private let paletteHint = DashStatusHintView(title: "Commands")
+    private let prefixHint = DashStatusHintView(title: "Prefix")
     private let uptimeLabel = NSTextField(labelWithString: "")
     /// Counts, usage, hints and uptime. Segments that do not apply are left
     /// out of the stack rather than hidden: a detaching stack rearranges its
@@ -33,11 +37,9 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     /// Countdowns in the usage segment are in minutes; the clock tick
     /// re-renders it when this minute number changes.
     private var usageRenderedMinute = 0
-    private var usagePopover: NSPopover?
-    /// When the usage popover last closed. A transient popover closes on the
-    /// mouse-down of the very click that would toggle it, so a click right
-    /// after a close is that toggle and must not reopen it.
-    private var usagePopoverClosedAt: Date?
+    /// The usage card above the usage segment, while it is open.
+    private(set) var usageCard: ComposerPopover?
+    private var usageCardContent: DashUsageCardContent?
     /// Opens Settings on the Accounts tab.
     var onManageAccounts: (() -> Void)?
     private var mode: KeybindingState = .normal
@@ -54,10 +56,6 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
         self.themeManager = themeManager
-        let theme = themeManager.currentTheme
-        modeChip = ChromeModeChip(theme: theme)
-        paletteHint = StatusHintView(title: "Commands", theme: theme)
-        prefixHint = StatusHintView(title: "Prefix", theme: theme)
         super.init(frame: .zero)
         wantsLayer = true
         setupViews()
@@ -86,11 +84,12 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         clockTimer = nil
         AccountsController.shared.removeObserver(id: Self.accountsObserverId)
         guard window != nil else {
-            usagePopover?.close()
+            usageCard?.close()
             return
         }
-        AccountsController.shared.addObserver(id: Self.accountsObserverId) { [weak self] _ in
+        AccountsController.shared.addObserver(id: Self.accountsObserverId) { [weak self] snapshot in
             self?.refreshUsage()
+            self?.usageCardContent?.render(snapshot)
         }
         AccountsController.shared.refresh()
         refreshUsage()
@@ -109,9 +108,14 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     }
 
     private func setupViews() {
+        topRule.wantsLayer = true
         topRule.translatesAutoresizingMaskIntoConstraints = false
         addSubview(topRule)
-        addSubview(modeChip)
+        modeView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(modeView)
+        for label in [locationLabel, countsLabel, usageLabel, uptimeLabel] {
+            label.font = Typography.ui(Typography.smallSize)
+        }
 
         locationLabel.identifier = NSUserInterfaceItemIdentifier("status-location")
         locationLabel.lineBreakMode = .byTruncatingTail
@@ -151,24 +155,24 @@ final class StatusBarView: NSView, NSPopoverDelegate {
             topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             topRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             topRule.topAnchor.constraint(equalTo: topAnchor),
-            topRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
+            topRule.heightAnchor.constraint(equalToConstant: 1),
 
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
             content.topAnchor.constraint(equalTo: topRule.bottomAnchor),
             content.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            modeChip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.bar),
-            modeChip.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+            modeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset - 4),
+            modeView.centerYAnchor.constraint(equalTo: content.centerYAnchor),
 
-            locationLabel.leadingAnchor.constraint(equalTo: modeChip.trailingAnchor, constant: Self.gap + 2),
+            locationLabel.leadingAnchor.constraint(equalTo: modeView.trailingAnchor, constant: Self.gap - 2),
             locationLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             locationLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingStack.leadingAnchor,
                 constant: -Self.gap
             ),
 
-            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.bar),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.inset),
             trailingStack.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
     }
@@ -200,38 +204,33 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     }
 
     func refreshTheme() {
-        let theme = themeManager.currentTheme
-        layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        topRule.color = theme.colors.borderSubtle
-        usagePopover?.appearance = theme.appearance.nsAppearance
-        // An open popover re-renders in the new palette rather than waiting
-        // for the next account change.
-        (usagePopover?.contentViewController as? AccountUsagePopoverViewController)?
-            .render(AccountsController.shared.snapshot)
-        modeChip.apply(theme: theme)
-        paletteHint.apply(theme: theme)
-        prefixHint.apply(theme: theme)
-        applyMode()
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.sidebar.cgColor
+        topRule.layer?.backgroundColor = palette.border.cgColor
+        // An open card re-renders in the new palette rather than waiting for
+        // the next account change.
+        usageCard?.window.appearance = palette.appearance
+        usageCardContent?.render(AccountsController.shared.snapshot)
+        modeView.applyPalette(palette)
+        paletteHint.applyPalette(palette)
+        prefixHint.applyPalette(palette)
         updateUptime()
         refresh()
         refreshUsage()
     }
 
     private func applyMode() {
-        switch mode {
-        case .normal: modeChip.set(mode: .normal, text: "Normal")
-        case .prefix: modeChip.set(mode: .prefix, text: "Prefix")
-        case .copy: modeChip.set(mode: .copy, text: "Copy")
-        case .copySelection: modeChip.set(mode: .select, text: "Select")
-        }
+        modeView.mode = mode
     }
 
     private func updateUptime() {
         guard showsUptime else { return }
-        uptimeLabel.setChromeText(
-            Self.uptimeText(Date().timeIntervalSince(Self.launchDate)),
-            font: ChromeFont.count,
-            color: themeManager.currentTheme.colors.textMuted
+        uptimeLabel.attributedStringValue = NSAttributedString(
+            string: Self.uptimeText(Date().timeIntervalSince(Self.launchDate)),
+            attributes: [
+                .font: Typography.tabular(Typography.smallSize),
+                .foregroundColor: PaletteCenter.shared.palette.mutedForeground,
+            ]
         )
     }
 
@@ -247,26 +246,29 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     }
 
     /// `Claude 9% · 4h 12m | Codex 75% · 5d 8h`: each provider's tightest
-    /// window, the percentage in ink, yellow from 70 % and danger from 90 %.
-    /// Nil when no provider has usage yet.
-    private func usageText(theme: AppTheme, now: Date) -> NSAttributedString? {
-        let colors = theme.colors
-        let font = ChromeFont.count
+    /// window, the percentage in ink, the warning tone from 70 % and the error
+    /// tone from 90 %. Nil when no provider has usage yet.
+    private func usageText(now: Date) -> NSAttributedString? {
+        let palette = PaletteCenter.shared.palette
+        let font = Typography.tabular(Typography.smallSize)
         let snapshot = AccountsController.shared.snapshot
         let text = NSMutableAttributedString()
+        func append(_ string: String, _ color: NSColor) {
+            text.append(NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: color]))
+        }
         for provider in AccountProvider.allCases {
             guard let window = snapshot.headline(for: provider)?.usage.tightest else { continue }
             if text.length > 0 {
-                text.append(ChromeText.attributed("  |  ", font: font, color: colors.borderStrong))
+                append("  |  ", palette.border)
             }
-            text.append(ChromeText.attributed("\(provider.displayName) ", font: font, color: colors.textMuted))
-            text.append(ChromeText.attributed(
-                UsageFormat.percent(window.usedFraction),
-                font: font,
-                color: UsageSeverity.color(for: window.usedFraction, colors: colors)
-            ))
+            append("\(provider.displayName) ", palette.mutedForeground)
+            let fraction = window.usedFraction
+            append(
+                UsageFormat.percent(fraction),
+                fraction >= 0.9 ? palette.errorForeground : fraction >= 0.7 ? palette.warningForeground : palette.foreground
+            )
             if let reset = UsageFormat.timeUntil(window.resetsAt, now: now) {
-                text.append(ChromeText.attributed(" · \(reset)", font: font, color: colors.textMuted))
+                append(" · \(reset)", palette.mutedForeground)
             }
         }
         return text.length > 0 ? text : nil
@@ -275,7 +277,7 @@ final class StatusBarView: NSView, NSPopoverDelegate {
     private func refreshUsage() {
         let now = Date()
         usageRenderedMinute = Self.minuteNumber(now)
-        let text = usageText(theme: themeManager.currentTheme, now: now)
+        let text = usageText(now: now)
         usageLabel.attributedStringValue = text ?? NSAttributedString(string: "")
         if showsUsage != (text != nil) {
             showsUsage = text != nil
@@ -283,33 +285,33 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
     }
 
+    /// Opens Soprano Agents' usage card (`UsageCardPresenter`): a borderless
+    /// child-window card above the usage segment that closes on Escape, on a
+    /// click outside it, and on a second click on the segment.
     @objc private func usageClicked() {
-        if let usagePopover, usagePopover.isShown {
-            usagePopover.performClose(nil)
-            return
-        }
-        if let closedAt = usagePopoverClosedAt, Date().timeIntervalSince(closedAt) < 0.3 {
-            return
-        }
-        let controller = AccountUsagePopoverViewController(themeManager: themeManager)
-        let popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = false
-        popover.appearance = themeManager.currentTheme.appearance.nsAppearance
-        popover.contentViewController = controller
-        popover.delegate = self
-        controller.onManageAccounts = { [weak self, weak popover] in
-            popover?.performClose(nil)
-            self?.onManageAccounts?()
-        }
-        usagePopover = popover
-        AccountsController.shared.refresh()
-        popover.show(relativeTo: usageLabel.bounds, of: usageLabel, preferredEdge: .maxY)
+        toggleUsageCard()
     }
 
-    func popoverDidClose(_ notification: Notification) {
-        usagePopover = nil
-        usagePopoverClosedAt = Date()
+    func toggleUsageCard() {
+        if let usageCard, usageCard.window.isVisible {
+            usageCard.close()
+            return
+        }
+        guard usageLabel.window != nil else { return }
+        let content = DashUsageCardContent(themeManager: themeManager)
+        let card = ComposerPopover(content: content)
+        content.onManageAccounts = { [weak self] in
+            self?.usageCard?.close()
+            self?.onManageAccounts?()
+        }
+        card.onClose = { [weak self] in
+            self?.usageCard = nil
+            self?.usageCardContent = nil
+        }
+        usageCard = card
+        usageCardContent = content
+        card.show(anchoredTo: usageLabel, side: .above, alignment: .trailing)
+        AccountsController.shared.refresh()
     }
 
     private func handleAgentChange(_ change: AgentManagerChange) {
@@ -334,44 +336,46 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         }
     }
 
-    /// `session › window › pane` for the focused location, the pane in ink,
+    /// `session / window / pane` for the focused location, the pane in ink,
     /// with the active tab appended when the window has more than one. Nil
     /// when nothing is open.
-    private func locationText(theme: AppTheme) -> NSAttributedString? {
+    private func locationText() -> NSAttributedString? {
         guard let terminalWindow = agentManager.windows[agentManager.activeWindowId] else {
             return nil
         }
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
         let text = NSMutableAttributedString()
-        func append(_ string: String, _ color: NSColor, font: NSFont = ChromeFont.label) {
-            text.append(ChromeText.attributed(string, font: font, color: color))
+        let regular = Typography.ui(Typography.smallSize)
+        let medium = Typography.ui(Typography.smallSize, weight: .medium)
+        func append(_ string: String, _ color: NSColor, font: NSFont = regular) {
+            text.append(NSAttributedString(string: string, attributes: [.font: font, .foregroundColor: color]))
         }
         func separator() {
-            append(" › ", colors.borderStrong)
+            append("  /  ", palette.mutedForeground.shellScaled(by: 0.6))
         }
 
-        append(agentManager.activeSession?.name ?? "Session", colors.textMuted)
+        append(agentManager.activeSession?.name ?? "Session", palette.mutedForeground)
         separator()
         let paneTitle = agentManager.panes[agentManager.activePaneId]?.activeTab?.title
         append(
             terminalWindow.title,
-            paneTitle == nil ? colors.textPrimary : colors.textMuted,
-            font: paneTitle == nil ? ChromeFont.labelStrong : ChromeFont.label
+            paneTitle == nil ? palette.foreground : palette.mutedForeground,
+            font: paneTitle == nil ? medium : regular
         )
         if let paneTitle {
             separator()
-            append(paneTitle, colors.textPrimary, font: ChromeFont.labelStrong)
+            append(paneTitle, palette.foreground, font: medium)
         }
         if terminalWindow.tabs.count > 1 {
-            append(" · Tab \(terminalWindow.activeTabIndex + 1)", colors.textMuted)
+            append(" · Tab \(terminalWindow.activeTabIndex + 1)", palette.mutedForeground)
         }
         return text
     }
 
     private func refresh() {
-        let theme = themeManager.currentTheme
-        let colors = theme.colors
-        locationLabel.attributedStringValue = locationText(theme: theme)
+        let palette = PaletteCenter.shared.palette
+        let countFont = Typography.tabular(Typography.smallSize)
+        locationLabel.attributedStringValue = locationText()
             ?? NSAttributedString(string: "")
 
         func plural(_ count: Int, _ noun: String) -> String {
@@ -385,48 +389,42 @@ final class StatusBarView: NSView, NSPopoverDelegate {
         if agentManager.maximizedPaneId != nil {
             parts.append("maximized")
         }
-        let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            parts.joined(separator: " · "),
-            font: ChromeFont.count,
-            color: colors.textMuted
-        ))
+        let text = NSMutableAttributedString(string: parts.joined(separator: " · "), attributes: [
+            .font: countFont, .foregroundColor: palette.mutedForeground,
+        ])
         if agentManager.attentionCount > 0 {
-            text.append(ChromeText.attributed(" · ", font: ChromeFont.count, color: colors.textMuted))
-            text.append(ChromeText.attributed(
-                "\(agentManager.attentionCount) needs you",
-                font: ChromeFont.count,
-                color: colors.attention
-            ))
+            text.append(NSAttributedString(string: " · ", attributes: [
+                .font: countFont, .foregroundColor: palette.mutedForeground,
+            ]))
+            text.append(NSAttributedString(string: "\(agentManager.attentionCount) needs you", attributes: [
+                .font: Typography.tabular(Typography.smallSize, weight: .medium),
+                .foregroundColor: palette.color(for: .approval),
+            ]))
         }
         countsLabel.attributedStringValue = text
     }
 }
 
-/// `⌘P Commands` or `⌃A` `P` `Commands`: muted 16 pt keycaps, one per chord
-/// step, and a muted label.
-private final class StatusHintView: NSStackView {
-    let keycaps: ChromeKeycapGroupView
-    private let label = NSTextField(labelWithString: "")
-    private let title: String
+/// The account usage card (`AccountUsagePopoverViewController`) as the
+/// content of an Agents popover card, like Soprano Agents' `UsageCardContent`.
+final class DashUsageCardContent: ComposerPopoverContent {
+    let controller: AccountUsagePopoverViewController
+    var onManageAccounts: (() -> Void)?
 
-    var caps: [String] {
-        get { keycaps.caps }
-        set {
-            keycaps.caps = newValue
-            setAccessibilityLabel("\(newValue.joined(separator: " ")) \(title)")
-        }
-    }
-
-    init(title: String, theme: AppTheme) {
-        self.title = title
-        keycaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .muted)
+    init(themeManager: ThemeManager) {
+        controller = AccountUsagePopoverViewController(themeManager: themeManager)
         super.init(frame: .zero)
-        orientation = .horizontal
-        alignment = .centerY
-        spacing = 5
-        addArrangedSubview(keycaps)
-        addArrangedSubview(label)
-        apply(theme: theme)
+        identifier = NSUserInterfaceItemIdentifier("status-usage-card")
+        controller.onManageAccounts = { [weak self] in self?.onManageAccounts?() }
+        let card = controller.view
+        card.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
     }
 
     @available(*, unavailable)
@@ -434,8 +432,114 @@ private final class StatusHintView: NSStackView {
         fatalError("init(coder:) is not supported")
     }
 
-    func apply(theme: AppTheme) {
-        keycaps.apply(theme: theme)
-        label.setChromeText(title, font: ChromeFont.meta, color: theme.colors.textMuted)
+    /// Rebuilds the card for `snapshot` and refits the popover to it.
+    func render(_ snapshot: AccountsSnapshot) {
+        controller.render(snapshot)
+        requestResize?()
+    }
+}
+
+/// The keybinding mode as a quiet pill: `Normal` muted on the faint kbd
+/// plate, `Prefix`, `Copy` and `Select` in the approval, working and input
+/// tones on a wash of the same tone.
+final class DashStatusModeView: PaletteView {
+    private static let height: CGFloat = 18
+
+    private let label = NSTextField(labelWithString: "")
+
+    var mode: KeybindingState = .normal {
+        didSet {
+            guard mode != oldValue else { return }
+            applyPalette(palette)
+        }
+    }
+
+    /// The word the pill shows: `Normal`, `Prefix`, `Copy`, `Select`.
+    var displayedText: String { label.stringValue }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        identifier = NSUserInterfaceItemIdentifier("status-mode")
+        layer?.cornerRadius = Radius.sm
+        label.font = Typography.ui(Typography.smallSize, weight: .medium)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        applyPalette(palette)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        let (text, tone): (String, ThreadStatusTone?) = switch mode {
+        case .normal: ("Normal", nil)
+        case .prefix: ("Prefix", .approval)
+        case .copy: ("Copy", .working)
+        case .copySelection: ("Select", .input)
+        }
+        label.stringValue = text
+        if let tone {
+            let color = palette.color(for: tone)
+            label.textColor = color
+            layer?.backgroundColor = color.withAlphaComponent(palette.isDark ? 0.16 : 0.12).cgColor
+        } else {
+            label.textColor = palette.mutedForeground
+            layer?.backgroundColor = palette.foreground.withAlphaComponent(0.07).cgColor
+        }
+        setAccessibilityLabel("\(text) mode")
+    }
+}
+
+/// `⌘P Commands` or `⌃A` `P` `Prefix`: Soprano Agents' `KbdView` caps, one
+/// per chord step, then a muted 12 pt label.
+final class DashStatusHintView: NSStackView {
+    private let capsStack = NSStackView()
+    private let label = NSTextField(labelWithString: "")
+    private let title: String
+
+    var caps: [String] = [] {
+        didSet {
+            guard caps != oldValue else { return }
+            capsStack.setViews(caps.map { KbdView($0) }, in: .leading)
+            setAccessibilityLabel("\(caps.joined(separator: " ")) \(title)")
+        }
+    }
+
+    init(title: String) {
+        self.title = title
+        super.init(frame: .zero)
+        orientation = .horizontal
+        alignment = .centerY
+        spacing = 6
+        capsStack.orientation = .horizontal
+        capsStack.alignment = .centerY
+        capsStack.spacing = 3
+        label.stringValue = title
+        label.font = Typography.ui(Typography.smallSize)
+        addArrangedSubview(capsStack)
+        addArrangedSubview(label)
+        applyPalette(PaletteCenter.shared.palette)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    /// The caps re-color themselves (`KbdView` is a palette view).
+    func applyPalette(_ palette: Palette) {
+        label.textColor = palette.mutedForeground
     }
 }

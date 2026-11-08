@@ -484,9 +484,7 @@ final class EditorDocumentStore {
     var askToSave: @MainActor ([EditorDocument]) -> SaveChoice = EditorDocumentStore.alertAskingToSave
     /// Asked before a save would replace a version another program wrote.
     var askToOverwrite: @MainActor (EditorDocument) -> Bool = EditorDocumentStore.alertAskingToOverwrite
-    var reportSaveError: @MainActor (EditorDocument, Error) -> Void = { _, error in
-        NSAlert(error: error).runModal()
-    }
+    var reportSaveError: @MainActor (EditorDocument, Error) -> Void = EditorDocumentStore.alertReportingSaveError
 
     private var documents: [URL: EditorDocument] = [:]
     /// The views showing each document, keyed by the view itself: a tab's
@@ -598,39 +596,55 @@ final class EditorDocumentStore {
         }
     }
 
-    // MARK: - Alerts
+    // MARK: - Dialogs
 
+    /// Answered before the close goes on: Don't Save (⌘D), Cancel, Save (Return).
     private static func alertAskingToSave(_ documents: [EditorDocument]) -> SaveChoice {
-        let alert = NSAlert()
+        let title: String
+        let message: String
         if documents.count == 1 {
-            alert.messageText = "Do you want to save the changes you made to “\(documents[0].name)”?"
-            alert.informativeText = "Your changes will be lost if you don't save them."
+            title = "Do you want to save the changes you made to “\(documents[0].name)”?"
+            message = "Your changes will be lost if you don't save them."
         } else {
-            alert.messageText = "Do you want to save the changes you made to \(documents.count) files?"
-            alert.informativeText = documents.map(\.name).joined(separator: ", ")
+            title = "Do you want to save the changes you made to \(documents.count) files?"
+            message = documents.map(\.name).joined(separator: ", ")
                 + "\n\nYour changes will be lost if you don't save them."
         }
-        alert.addButton(withTitle: documents.count == 1 ? "Save" : "Save All")
-        alert.addButton(withTitle: "Cancel")
-        let discard = alert.addButton(withTitle: "Don't Save")
-        discard.keyEquivalent = "d"
-        discard.keyEquivalentModifierMask = [.command]
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
+        let choice = ShellDialogs.chooseModally(
+            title: title,
+            message: message,
+            buttons: [
+                ShellDialogButton("Don't Save", style: .destructiveOutline, keyEquivalent: "d", keyModifiers: .command),
+                ShellDialogButton("Cancel"),
+                ShellDialogButton(documents.count == 1 ? "Save" : "Save All", style: .primary),
+            ],
+            in: nil
+        )
+        switch choice {
+        case 2:
             return .save
-        case .alertSecondButtonReturn:
-            return .cancel
-        default:
+        case 0:
             return .discard
+        default:
+            return .cancel
         }
     }
 
     private static func alertAskingToOverwrite(_ document: EditorDocument) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "“\(document.name)” has changed on disk."
-        alert.informativeText = "Another program changed it since you opened it. Saving replaces that version with yours."
-        alert.addButton(withTitle: "Save Anyway")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        ShellDialogs.confirmModally(
+            title: "“\(document.name)” has changed on disk.",
+            message: "Another program changed it since you opened it. Saving replaces that version with yours.",
+            confirmTitle: "Save Anyway",
+            in: nil
+        )
+    }
+
+    private static func alertReportingSaveError(_ document: EditorDocument, _ error: Error) {
+        let error = error as NSError
+        ShellDialogs.alertModally(
+            title: error.localizedDescription,
+            message: error.localizedRecoverySuggestion ?? "",
+            in: nil
+        )
     }
 }

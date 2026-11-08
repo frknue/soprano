@@ -6,8 +6,9 @@ import AppKit
 /// width, so it never scrolls out of view.
 @MainActor
 enum TabRowLayout {
-    /// `padding: 0 4px` around the row; pills carry their own 2 pt gap.
-    static let padding: CGFloat = 4
+    /// `padding: 0 8px` around the row (Agents' tab strip); pills carry their
+    /// own 4 pt gap.
+    static let padding: CGFloat = 6
 
     /// Frames `tabs`, `addButton` (a direct subview of the row) and
     /// `scrollView` (whose document view is `container`) within the first
@@ -20,9 +21,10 @@ enum TabRowLayout {
         container: NSView,
         availableWidth: CGFloat,
         rule: CGFloat,
-        stripHeight: CGFloat
+        stripHeight: CGFloat,
+        leadingInset: CGFloat = 0
     ) -> CGFloat {
-        let addSize = addButton.frame.width > 0 ? addButton.frame.width : ChromeIconButton.defaultSize
+        let addSize = addButton.frame.width > 0 ? addButton.frame.width : ShellTabStyle.height
         let addArea = padding + addSize + padding
         var x = padding
         for tab in tabs {
@@ -30,14 +32,15 @@ enum TabRowLayout {
             x += tab.width
         }
         let tabsEnd = x
-        let fits = tabsEnd + addArea <= availableWidth
-        let viewportWidth = max(0, fits ? availableWidth : availableWidth - addArea)
-        scrollView.frame = NSRect(x: 0, y: rule, width: viewportWidth, height: stripHeight)
+        let room = max(0, availableWidth - leadingInset)
+        let fits = tabsEnd + addArea <= room
+        let viewportWidth = max(0, fits ? room : room - addArea)
+        scrollView.frame = NSRect(x: leadingInset, y: rule, width: viewportWidth, height: stripHeight)
         container.setFrameSize(NSSize(width: max(viewportWidth, tabsEnd + padding), height: stripHeight))
         // Everything fits, so the strip is not scrolled and the inline
         // position is the same in the row's coordinates.
         addButton.frame = NSRect(
-            x: fits ? tabsEnd + padding : viewportWidth + padding,
+            x: leadingInset + (fits ? tabsEnd + padding - 2 : viewportWidth + padding),
             y: rule + floor((stripHeight - addSize) / 2),
             width: addSize,
             height: addSize
@@ -46,22 +49,25 @@ enum TabRowLayout {
     }
 }
 
-/// A tab in the window and layout tab rows: a muted label at rest, the hover
-/// pill under the pointer, and the raised pill (`.raisedTab`) when selected.
+/// A tab in the window and layout tab rows, in Soprano Agents' tab strip
+/// look: a 24 pt `Radius.md` pill, `accent` when selected, `accent/60` under
+/// the pointer, muted 12 pt text at rest.
 /// Subclasses lay out their title and badges inside `pillRect`.
 class TabPillButton: NSButton {
     /// Each tab row is 32 pt including its bottom hairline.
     static let rowHeight: CGFloat = 32
-    static let pillHeight: CGFloat = 24
+    static let pillHeight: CGFloat = ShellTabStyle.height
     /// Space between neighboring pills; each tab keeps half on either side.
-    static let pillGap: CGFloat = 2
-    static let leadingPadding: CGFloat = 10
-    static let trailingPadding: CGFloat = 8
+    static let pillGap: CGFloat = 4
+    static let leadingPadding: CGFloat = 8
+    static let trailingPadding: CGFloat = 6
     /// Between the title, badges and close button.
     static let contentGap: CGFloat = 6
     /// Horizontal space a tab adds around its content.
     static let chromeWidth: CGFloat = pillGap + leadingPadding + trailingPadding
-
+    /// Tab titles: Agents' `text-xs`.
+    static let titleFont = Typography.ui(Typography.smallSize)
+    static let selectedTitleFont = Typography.ui(Typography.smallSize, weight: .medium)
     var isSelectedTab = false {
         didSet {
             guard isSelectedTab != oldValue else { return }
@@ -70,7 +76,6 @@ class TabPillButton: NSButton {
         }
     }
     private(set) var isHovered = false
-    private var colors: ThemeColors?
     private var trackingArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
@@ -81,6 +86,10 @@ class TabPillButton: NSButton {
         refusesFirstResponder = true
         wantsLayer = true
         setAccessibilityRole(.radioButton)
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in
+            self?.needsDisplay = true
+            self?.hoverStateDidChange()
+        }
     }
 
     @available(*, unavailable)
@@ -99,8 +108,12 @@ class TabPillButton: NSButton {
         )
     }
 
-    func applyPill(colors: ThemeColors) {
-        self.colors = colors
+    /// The title color for the tab's current state.
+    var titleColor: NSColor {
+        ShellTabStyle.textColor(isActive: isSelectedTab, isHovered: isHovered)
+    }
+
+    func applyPill() {
         needsDisplay = true
     }
 
@@ -109,10 +122,7 @@ class TabPillButton: NSButton {
     func hoverStateDidChange() {}
 
     override func draw(_ dirtyRect: NSRect) {
-        if let colors {
-            let style: ChromeSelectionPill.Style = isSelectedTab ? .raisedTab : (isHovered ? .hover : .none)
-            ChromeSelectionPill.draw(style, in: pillRect, colors: colors, inset: 0)
-        }
+        ShellTabStyle.draw(isActive: isSelectedTab, isHovered: isHovered, in: pillRect)
         super.draw(dirtyRect)
     }
 

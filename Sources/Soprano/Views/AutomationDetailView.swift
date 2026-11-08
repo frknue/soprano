@@ -1,8 +1,9 @@
 import AppKit
 
-/// One automation: its name and state with Run Now, Edit, Pause/Resume and
-/// Delete; a banner when the last run failed; its settings as a grid; the
-/// prompt; and its run history, newest first. Choosing a run opens its report.
+/// One automation, laid out as a Soprano Agents board: its name and state
+/// pill with Run Now, Edit, Pause/Resume and Delete; a notice when the last
+/// run failed; its settings as tiles; the prompt on a card; and its run
+/// history, newest first, as a card of rows. Choosing a run opens its report.
 final class AutomationDetailView: NSView {
     var onBack: (() -> Void)?
     var onAction: ((AutomationAction) -> Void)?
@@ -11,8 +12,8 @@ final class AutomationDetailView: NSView {
     var onRowClicked: (() -> Void)?
     /// Keys the prompt text does not use, so J/K keep driving the runs.
     var keyHandler: ((NSEvent) -> Bool)?
-    /// Whether the page has the keyboard; the selected run then carries the
-    /// pencil tick.
+    /// Whether the page has the keyboard; the selected run then shows the
+    /// active row fill.
     var isListFocused = false {
         didSet {
             guard isListFocused != oldValue else { return }
@@ -22,18 +23,16 @@ final class AutomationDetailView: NSView {
     /// The run to select once the runs are shown, coming back from its report.
     var pendingRunSelection: String?
 
-    private var theme: AppTheme
     private let stack = NSStackView()
     private var runRows: [AutomationRunRowView] = []
     private var selectedRunId: String?
     private var shown: (automation: Automation, runs: [AutomationRun], nextRun: Date?, clock: String)?
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         identifier = NSUserInterfaceItemIdentifier("automations-detail")
         let scrollView = AutomationViews.scrollingPage(stack: stack)
-        stack.spacing = Chrome.Space.s16
+        stack.spacing = 20
         addSubview(scrollView)
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -46,13 +45,6 @@ final class AutomationDetailView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
-    }
-
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        guard let shown else { return }
-        self.shown = nil
-        update(automation: shown.automation, runs: shown.runs, nextRun: shown.nextRun, now: Date())
     }
 
     /// Rebuilds the page only when what it shows changed: the automation,
@@ -92,94 +84,58 @@ final class AutomationDetailView: NSView {
     // MARK: - Content
 
     private func rebuild(automation: Automation, runs: [AutomationRun], nextRun: Date?, now: Date) {
-        let colors = theme.colors
         var views: [NSView] = []
         var spacingAfter: [NSView: CGFloat] = [:]
 
-        let breadcrumb = AutomationViews.breadcrumb(
-            ["Automations", automation.name],
-            theme: theme,
-            target: self,
-            action: #selector(backClicked)
-        )
+        let breadcrumb = AutomationViews.breadcrumb(["Automations", automation.name], target: self, action: #selector(backClicked))
         views.append(breadcrumb)
-        spacingAfter[breadcrumb] = Chrome.Space.s12
+        spacingAfter[breadcrumb] = 10
 
-        // Title, state chip and the actions.
-        let title = AutomationViews.label(automation.name, font: ChromeFont.title, color: colors.textPrimary)
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let chip = ChromeChip(
-            text: automation.enabled ? "Enabled" : "Paused",
-            theme: theme,
-            style: automation.enabled ? .filled : .outline
+        let titleRow = AutomationViews.titleRow(
+            automation.name,
+            pill: AutomationPill.state(of: automation, lastRun: runs.first),
+            now: now,
+            buttons: [
+                AutomationViews.button("Run Now", variant: .primary, target: self, action: #selector(runNowClicked)),
+                AutomationViews.button("Edit…", variant: .outline, target: self, action: #selector(editClicked)),
+                AutomationViews.button(automation.enabled ? "Pause" : "Resume", variant: .outline, target: self, action: #selector(toggleClicked)),
+                AutomationViews.button("Delete…", variant: .destructive, target: self, action: #selector(deleteClicked)),
+            ]
         )
-        let buttons: [NSView] = [
-            button("Run Now", kind: .ink, action: #selector(runNowClicked)),
-            button("Edit…", kind: .standard, action: #selector(editClicked)),
-            button(automation.enabled ? "Pause" : "Resume", kind: .standard, action: #selector(toggleClicked)),
-            button("Delete…", kind: .danger, action: #selector(deleteClicked)),
-        ]
-        let titleRow = AutomationViews.spreadRow(leading: [title, chip], trailing: buttons)
         views.append(titleRow)
-        spacingAfter[titleRow] = Chrome.Space.s4
+        spacingAfter[titleRow] = 4
 
         // `~/git/shop · Claude Code`
-        let meta = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            AutomationFormat.path(automation.folder),
-            font: ChromeFont.mono,
-            color: colors.textMuted,
-            lineBreakMode: .byTruncatingHead
-        ))
-        meta.append(ChromeText.attributed(
-            " · \(AutomationFormat.agentName(automation.agentId))",
-            font: ChromeFont.label,
-            color: colors.textMuted
-        ))
-        let metaLabel = NSTextField(labelWithAttributedString: meta)
-        metaLabel.lineBreakMode = .byTruncatingHead
-        metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        metaLabel.toolTip = automation.folder
-        views.append(metaLabel)
-        spacingAfter[metaLabel] = Chrome.Space.s24
+        let folder = AutoUIThemedLabel(AutomationFormat.path(automation.folder), size: Typography.smallSize) { $0.mutedForeground }
+        folder.font = Typography.mono(Typography.smallSize)
+        folder.lineBreakMode = .byTruncatingHead
+        folder.toolTip = automation.folder
+        folder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let agent = AutoUIThemedLabel("· \(AutomationFormat.agentName(automation.agentId))", size: Typography.rowSize) { $0.mutedForeground }
+        agent.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let meta = NSStackView(views: [folder, agent])
+        meta.orientation = .horizontal
+        meta.alignment = .firstBaseline
+        meta.spacing = 6
+        views.append(meta)
 
         if let lastRun = runs.first, lastRun.status == .failed {
-            let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
-                "Last run failed.",
-                font: ChromeFont.labelStrong,
-                color: colors.textPrimary,
-                lineBreakMode: .byWordWrapping
-            ))
-            if let message = lastRun.message.map({ AutomationFormat.firstParagraph(of: $0) }) {
-                text.append(ChromeText.attributed(
-                    " \(message)",
-                    font: ChromeFont.label,
-                    color: colors.textPrimary,
-                    lineBreakMode: .byWordWrapping
-                ))
-            }
-            let viewButton = ChromeButton(title: "View Run", theme: theme, target: self, action: #selector(viewFailedRunClicked))
-            let banner = AutomationViews.notice(text, theme: theme, button: viewButton)
-            views.append(banner)
-            spacingAfter[banner] = Chrome.Space.s24
+            let viewButton = AutomationViews.button("View Run", variant: .outline, target: self, action: #selector(viewFailedRunClicked))
+            let notice = AutoUINotice.make(
+                title: "Last run failed.",
+                message: lastRun.message.map { AutomationFormat.firstParagraph(of: $0) },
+                button: viewButton
+            )
+            views.append(notice)
         }
 
-        let grid = AutomationViews.metricsGrid(metrics(for: automation, nextRun: nextRun, now: now), columns: 4, theme: theme)
-        views.append(grid)
-        spacingAfter[grid] = Chrome.Space.s32
+        views.append(AutomationViews.tileGrid(tiles(for: automation, nextRun: nextRun, now: now), columns: 4))
 
-        let promptHeading = ChromeEyebrowView(title: "Prompt", theme: theme)
-        views.append(promptHeading)
-        spacingAfter[promptHeading] = Chrome.Space.s8
-        let prompt = AutomationTextBlockView(
-            text: ChromeText.attributed(automation.prompt, font: ChromeFont.row, color: colors.textPrimary, lineBreakMode: .byWordWrapping),
-            theme: theme,
-            boxed: true
-        )
+        let prompt = AutomationTextBlockView(text: automation.prompt)
         prompt.keyHandler = { [weak self] event in self?.keyHandler?(event) ?? false }
-        views.append(prompt)
-        spacingAfter[prompt] = Chrome.Space.s32
+        views.append(AutoUICardHeader.card("Prompt", body: [prompt]))
 
-        views.append(contentsOf: runSection(automation: automation, runs: runs, now: now, spacingAfter: &spacingAfter))
+        views.append(runsCard(runs: runs, now: now))
 
         stack.setArrangedSubviews(views) { view in
             if view !== breadcrumb {
@@ -191,122 +147,87 @@ final class AutomationDetailView: NSView {
         }
     }
 
-    private func metrics(for automation: Automation, nextRun: Date?, now: Date) -> [(String, NSView)] {
-        let colors = theme.colors
-        func value(_ text: String, mono: Bool = false, muted: Bool = false) -> NSView {
-            AutomationViews.wrappingLabel(ChromeText.attributed(
-                text,
-                font: mono ? ChromeFont.mono : ChromeFont.row,
-                color: muted ? colors.textMuted : colors.textPrimary,
-                lineBreakMode: .byWordWrapping
-            ))
-        }
-
-        let schedule: NSView
+    private func tiles(for automation: Automation, nextRun: Date?, now: Date) -> [NSView] {
+        let schedule: AutoUITileView
         if case .custom(let expression) = automation.cadence {
-            schedule = value(expression, mono: true)
+            schedule = AutoUITileView(title: "Schedule", value: AutoUITileView.value(expression, mono: true), detail: "Custom cron")
         } else {
-            schedule = value(automation.cadence.summary())
+            schedule = AutoUITileView(title: "Schedule", value: AutoUITileView.value(automation.cadence.summary()))
         }
 
-        let next: NSView
-        if let nextRun {
-            let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
-                AutomationFormat.dateTime(nextRun),
-                font: ChromeFont.row,
-                color: colors.textPrimary,
-                lineBreakMode: .byWordWrapping
-            ))
-            text.append(ChromeText.attributed(
-                "  \(AutomationFormat.relative(nextRun, now: now))",
-                font: ChromeFont.label,
-                color: colors.textMuted,
-                lineBreakMode: .byWordWrapping
-            ))
-            next = AutomationViews.wrappingLabel(text)
+        let next: AutoUITileView = if let nextRun {
+            AutoUITileView(
+                title: "Next run",
+                value: AutoUITileView.value(AutomationFormat.dateTime(nextRun)),
+                detail: AutomationFormat.relative(nextRun, now: now)
+            )
         } else {
-            next = value("Paused", muted: true)
+            AutoUITileView(title: "Next run", value: AutoUITileView.value("Paused", muted: true))
         }
 
-        let precheck: NSView
-        if let command = automation.precheck {
-            let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
-                command,
-                font: ChromeFont.mono,
-                color: colors.textPrimary,
-                lineBreakMode: .byWordWrapping
-            ))
-            text.append(ChromeText.attributed(
-                " · \(AutomationFormat.timeout(automation.precheckTimeoutSeconds)) timeout",
-                font: ChromeFont.label,
-                color: colors.textMuted,
-                lineBreakMode: .byWordWrapping
-            ))
-            precheck = AutomationViews.wrappingLabel(text)
+        let precheck: AutoUITileView = if let command = automation.precheck {
+            AutoUITileView(
+                title: "Precheck",
+                value: AutoUITileView.value(command, mono: true),
+                detail: "\(AutomationFormat.timeout(automation.precheckTimeoutSeconds)) timeout"
+            )
         } else {
-            precheck = value("None", muted: true)
+            AutoUITileView(title: "Precheck", value: AutoUITileView.value("None", muted: true))
         }
 
         return [
-            ("Schedule", schedule),
-            ("Next run", next),
-            ("Runs in", value(AutomationFormat.workspace(automation.workspace))),
-            ("Session", value(AutomationFormat.session(automation.session))),
-            ("Grace", value(AutomationFormat.grace(automation.graceMinutes))),
-            ("Precheck", precheck),
-            ("Agent", value(AutomationFormat.agentName(automation.agentId))),
-            ("Model", automation.model.map { value($0, mono: true) } ?? value("CLI default", muted: true)),
+            schedule,
+            next,
+            AutoUITileView(title: "Runs in", value: AutoUITileView.value(AutomationFormat.workspace(automation.workspace))),
+            AutoUITileView(title: "Session", value: AutoUITileView.value(AutomationFormat.session(automation.session))),
+            AutoUITileView(title: "Grace", value: AutoUITileView.value(AutomationFormat.grace(automation.graceMinutes))),
+            precheck,
+            AutoUITileView(title: "Agent", value: AutoUITileView.value(AutomationFormat.agentName(automation.agentId))),
+            AutoUITileView(
+                title: "Model",
+                value: automation.model.map { AutoUITileView.value($0, mono: true) } ?? AutoUITileView.value("CLI default", muted: true)
+            ),
         ]
     }
 
-    /// `RUNS  12 runs · 9 completed`, the column eyebrows and one row per run.
-    private func runSection(
-        automation: Automation,
-        runs: [AutomationRun],
-        now: Date,
-        spacingAfter: inout [NSView: CGFloat]
-    ) -> [NSView] {
-        let colors = theme.colors
-        let heading = ChromeEyebrowView(title: "Runs", theme: theme)
+    /// `Runs  12 runs · 9 completed`, the column titles and one row per run,
+    /// on a card (the Statistics board's breakdown card).
+    private func runsCard(runs: [AutomationRun], now: Date) -> NSView {
         let completed = runs.filter { $0.status == .completed }.count
-        let count = AutomationViews.label(
-            runs.isEmpty ? "" : "\(AutomationFormat.count(runs.count, "run")) · \(completed) completed",
-            font: ChromeFont.count,
-            color: colors.textMuted
+        let header = AutoUICardHeader.make(
+            "Runs",
+            hint: runs.isEmpty ? nil : "\(AutomationFormat.count(runs.count, "run")) · \(completed) completed"
         )
-        let headingRow = AutomationViews.spreadRow(leading: [heading, count], trailing: [])
-        spacingAfter[headingRow] = Chrome.Space.s8
-
-        guard !runs.isEmpty else {
+        var views: [NSView] = [header]
+        if runs.isEmpty {
             runRows = []
-            let empty = AutomationViews.label("No runs yet", font: ChromeFont.label, color: colors.textMuted)
-            return [headingRow, empty]
-        }
-
-        let header = AutomationRunHeaderView(theme: theme)
-        spacingAfter[header] = 0
-        let rule = ChromeRuleView(axis: .horizontal, color: colors.borderSubtle)
-        spacingAfter[rule] = Chrome.Space.s2
-
-        runRows = runs.map { run in
-            let row = AutomationRunRowView(run: run, theme: theme, now: now)
-            row.onOpen = { [weak self] in
-                guard let self else { return }
-                self.selectedRunId = run.id
-                self.updateRunSelection(scrollIntoView: false)
-                self.onRowClicked?()
-                self.onOpenRun?(run.id)
+            let empty = NSStackView(views: [AutoUIThemedLabel("No runs yet.", size: Typography.rowSize) { $0.mutedForeground }])
+            empty.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 8, right: 8)
+            views.append(empty)
+        } else {
+            views.append(AutomationRunHeaderView())
+            runRows = runs.map { run in
+                let row = AutomationRunRowView(run: run, now: now)
+                row.onOpen = { [weak self] in
+                    guard let self else { return }
+                    self.selectedRunId = run.id
+                    self.updateRunSelection(scrollIntoView: false)
+                    self.onRowClicked?()
+                    self.onOpenRun?(run.id)
+                }
+                return row
             }
-            spacingAfter[row] = 0
-            return row
+            views += runRows
         }
-        return [headingRow, header, rule] + runRows
-    }
-
-    private func button(_ title: String, kind: ChromeButton.Kind, action: Selector) -> ChromeButton {
-        let button = ChromeButton(title: title, theme: theme, kind: kind, target: self, action: action)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        return button
+        let column = NSStackView(views: views)
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.spacing = 0
+        column.setCustomSpacing(8, after: header)
+        for view in views.dropFirst() {
+            view.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        }
+        return AutoUICardView(content: column, inset: 8)
     }
 
     // MARK: - Selection
@@ -349,12 +270,12 @@ final class AutomationDetailView: NSView {
 
 // MARK: - Run rows
 
-/// Where the run history's columns sit: Run, Trigger, Started, Duration and
-/// Status, starting where the selection pill's content does.
+/// Where the run history's columns sit inside a row: Run, Trigger, Started,
+/// Duration and Status, after the row's 8 pt padding.
 enum AutomationRunColumns {
-    static let leading: CGFloat = Chrome.pillInset + 8
+    static let leading: CGFloat = 8
     static let gap: CGFloat = 16
-    private static let widths: [CGFloat] = [56, 100, 190, 120]
+    private static let widths: [CGFloat] = [56, 110, 190, 130]
 
     static func frames(width: CGFloat) -> [ClosedRange<CGFloat>] {
         var x = leading
@@ -368,18 +289,14 @@ enum AutomationRunColumns {
     }
 }
 
-/// The run history's column eyebrows.
+/// The run history's column titles.
 final class AutomationRunHeaderView: NSView {
     private let labels: [NSTextField]
     private static let titles = ["Run", "Trigger", "Started", "Duration", "Status"]
 
-    init(theme: AppTheme) {
-        labels = Self.titles.map { title in
-            let label = NSTextField(labelWithString: "")
-            label.setEyebrowText(title, color: theme.colors.textMuted)
-            return label
-        }
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        labels = Self.titles.map(AutomationViews.columnTitle)
+        super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 26).isActive = true
         labels.forEach(addSubview)
@@ -406,59 +323,54 @@ final class AutomationRunHeaderView: NSView {
     }
 }
 
-/// One run: `#3  Scheduled  Oct 29, 9:00 AM  4m 12s  ● DONE`, 32 pt.
+/// One run: `#3  Scheduled  Oct 29, 9:00 AM  4m 12s  ✓ Done`, 34 pt, a
+/// rounded row fill on hover and selection.
 final class AutomationRunRowView: NSView {
-    static let height: CGFloat = 32
+    static let height: CGFloat = 34
 
     let runId: String
     var onOpen: (() -> Void)?
 
-    private let background: ChromeRowBackgroundView
-    private let numberLabel = NSTextField(labelWithString: "")
-    private let triggerLabel = NSTextField(labelWithString: "")
-    private let startedLabel = NSTextField(labelWithString: "")
-    private let durationLabel = NSTextField(labelWithString: "")
-    private let statusMark: ChromeStatusMark
-    private let statusLabel = NSTextField(labelWithString: "")
+    private let background = ShellRowSurfaceView()
+    private let numberLabel = AutoUIThemedLabel("", size: Typography.rowSize, weight: .medium)
+    private let triggerLabel = AutoUIThemedLabel("", size: Typography.rowSize)
+    private let startedLabel = AutoUIThemedLabel("", size: Typography.rowSize)
+    private let durationLabel: AutoUIThemedLabel
+    private let statusView: AutoUIPillView
     private var isSelected = false
     private var isFocused = false
     private var isHovered = false
 
-    init(run: AutomationRun, theme: AppTheme, now: Date) {
+    init(run: AutomationRun, now: Date) {
         runId = run.id
-        background = ChromeRowBackgroundView(theme: theme)
-        let colors = theme.colors
-        let statusColor = AutomationStatusStyle.color(for: run.status, in: colors)
-        statusMark = ChromeStatusMark(shape: AutomationStatusStyle.shape(for: run.status), color: statusColor)
+        let durationText: String
+        let durationMuted: Bool
+        if let duration = run.duration {
+            (durationText, durationMuted) = (AutomationFormat.duration(duration), false)
+        } else if run.status.isFinal {
+            (durationText, durationMuted) = ("—", true)
+        } else {
+            (durationText, durationMuted) = ("\(AutomationFormat.duration(now.timeIntervalSince(run.startedAt))) so far", true)
+        }
+        durationLabel = AutoUIThemedLabel(durationText, size: Typography.rowSize) { durationMuted ? $0.mutedForeground : $0.foreground }
+        statusView = AutoUIPillView(AutomationPill.run(run.status), now: now)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("automations-run-row")
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
 
         background.translatesAutoresizingMaskIntoConstraints = true
+        background.horizontalInset = 0
         addSubview(background)
-        statusMark.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(statusMark)
-        for label in [numberLabel, triggerLabel, startedLabel, durationLabel, statusLabel] {
-            label.lineBreakMode = .byTruncatingTail
-            addSubview(label)
+        numberLabel.font = Typography.tabular(Typography.rowSize, weight: .medium)
+        durationLabel.font = Typography.tabular(Typography.rowSize)
+        for view in [numberLabel, triggerLabel, startedLabel, durationLabel, statusView] as [NSView] {
+            addSubview(view)
         }
 
-        numberLabel.setChromeText("#\(run.number)", font: ChromeFont.sans(size: 12, weight: .medium, tabular: true), color: colors.textPrimary)
-        triggerLabel.setChromeText(AutomationFormat.trigger(run.trigger), font: ChromeFont.label, color: colors.textPrimary)
-        startedLabel.setChromeText(AutomationFormat.dateTime(run.startedAt), font: ChromeFont.label, color: colors.textPrimary)
-        if let duration = run.duration {
-            durationLabel.setChromeText(AutomationFormat.duration(duration), font: ChromeFont.count, color: colors.textPrimary)
-        } else if run.status.isFinal {
-            durationLabel.setChromeText("—", font: ChromeFont.count, color: colors.textMuted)
-        } else {
-            durationLabel.setChromeText(
-                "\(AutomationFormat.duration(now.timeIntervalSince(run.startedAt))) so far",
-                font: ChromeFont.count,
-                color: colors.textMuted
-            )
-        }
-        statusLabel.setStatusText(run.status.label, color: statusColor)
+        numberLabel.stringValue = "#\(run.number)"
+        triggerLabel.stringValue = AutomationFormat.trigger(run.trigger)
+        startedLabel.stringValue = AutomationFormat.dateTime(run.startedAt)
         toolTip = run.message
 
         setAccessibilityElement(true)
@@ -495,17 +407,16 @@ final class AutomationRunRowView: NSView {
         let columns = AutomationRunColumns.frames(width: bounds.width)
         let middle = bounds.height / 2
         for (label, column) in zip([numberLabel, triggerLabel, startedLabel, durationLabel], columns) {
-            place(label, x: column.lowerBound, width: column.upperBound - column.lowerBound, centerY: middle)
+            let height = ceil(label.intrinsicContentSize.height)
+            label.frame = NSRect(x: column.lowerBound, y: floor(middle - height / 2), width: column.upperBound - column.lowerBound, height: height)
         }
         let status = columns[4]
-        let side = statusMark.size
-        statusMark.frame = NSRect(x: status.lowerBound, y: floor(middle - side / 2), width: side, height: side)
-        place(statusLabel, x: status.lowerBound + side + 6, width: status.upperBound - status.lowerBound - side - 6, centerY: middle)
-    }
-
-    private func place(_ label: NSTextField, x: CGFloat, width: CGFloat, centerY: CGFloat) {
-        let height = ceil(label.intrinsicContentSize.height)
-        label.frame = NSRect(x: x, y: floor(centerY - height / 2), width: max(0, width), height: height)
+        statusView.frame = NSRect(
+            x: status.lowerBound,
+            y: floor(middle - 10),
+            width: min(statusView.intrinsicContentSize.width, status.upperBound - status.lowerBound),
+            height: 20
+        )
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {

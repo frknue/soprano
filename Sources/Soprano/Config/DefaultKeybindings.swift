@@ -63,6 +63,7 @@ enum DefaultKeybindings {
             KeyBinding(id: "launch-claude-code", label: "Launch Claude", description: "Launch Claude Code agent", category: .agents, defaultKeys: "⌘2", mode: .direct, key: "2", meta: true),
             KeyBinding(id: "launch-opencode", label: "Launch OpenCode", description: "Launch OpenCode agent", category: .agents, defaultKeys: "⌘3", mode: .direct, key: "3", meta: true),
             KeyBinding(id: "launch-omp", label: "Launch omp", description: "Launch Oh My Pi agent", category: .agents, defaultKeys: "⌘4", mode: .direct, key: "4", meta: true),
+            KeyBinding(id: "new-chat", label: "New Chat", description: "Open a chat with an agent beside the focused pane", category: .agents, defaultKeys: "⌘I", mode: .direct, key: "i", meta: true),
             KeyBinding(id: "agent-dashboard", label: "Agent Dashboard", description: "Monitor and control agents across all windows", category: .agents, defaultKeys: "⇧⌘D", mode: .direct, key: "d", meta: true, shift: true),
 
             // General (direct)

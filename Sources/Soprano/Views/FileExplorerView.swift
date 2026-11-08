@@ -9,7 +9,6 @@ import AppKit
 /// Markdown tabs keep the previous root. Nothing is read, watched, or run
 /// while the explorer is inactive (sidebar closed or detached from a window).
 final class FileExplorerView: NSView {
-    static let toolbarHeight: CGFloat = 32
     /// Name-filter results are capped so a one-letter query in a huge
     /// repository cannot build an unbounded tree.
     static let filterResultLimit = 5_000
@@ -28,20 +27,18 @@ final class FileExplorerView: NSView {
 
     // MARK: Views
 
-    private let titleLabel = NSTextField(labelWithString: "")
-    private var collapseAllButton: ChromeIconButton!
-    private var refreshButton: ChromeIconButton!
-    private var moreButton: ChromeIconButton!
-    private let toolbarRule = ChromeRuleView(axis: .horizontal)
-    private let filterContainer: ChromeFieldView
-    private let filterIcon = NSImageView()
+    private var header: SurfaceToolbar!
+    private var collapseAllButton: ShellGhostButton!
+    private var refreshButton: ShellGhostButton!
+    private var moreButton: ShellGhostButton!
+    private var filterContainer: SurfaceFieldView!
     private let filterField = FocusReportingTextField(string: "")
-    private var clearFilterButton: ChromeIconButton!
+    private let clearFilterButton = GhostIconButton(symbol: "xmark", size: 20, symbolSize: 9, toolTip: "Clear file search")
     private let scrollView = NSScrollView()
     let outlineView = FileExplorerOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private let statusSpinner = NSProgressIndicator()
-    private var retryButton: ChromeButton!
+    private var retryButton: ShellTextButton!
     private let toast: SidebarToastView
     private var toastTask: Task<Void, Never>?
 
@@ -110,8 +107,7 @@ final class FileExplorerView: NSView {
         self.defaults = defaults
         showsIgnoredFiles = defaults.object(forKey: Self.showIgnoredKey) as? Bool ?? true
         dotfileHiddenRoots = Set(defaults.stringArray(forKey: Self.hiddenDotfileRootsKey) ?? [])
-        filterContainer = ChromeFieldView(theme: themeManager.currentTheme)
-        toast = SidebarToastView(colors: themeManager.currentTheme.colors)
+        toast = SidebarToastView()
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
@@ -805,9 +801,7 @@ final class FileExplorerView: NSView {
     }
 
     private func updateToolbar() {
-        let title = rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Explorer"
-        titleLabel.setChromeText(title, font: ChromeFont.labelStrong, color: colors.textPrimary)
-        titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
+        header.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         // Like Orca, Collapse All does nothing while the filter shows results.
         collapseAllButton.isEnabled = !isFiltering && !expandedPaths.isEmpty
         refreshButton.isEnabled = rootNode != nil
@@ -837,7 +831,7 @@ final class FileExplorerView: NSView {
             }
         }
         statusLabel.isHidden = message == nil
-        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "", colors: colors)
+        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "")
         retryButton.isHidden = !showsRetry
         if showsSpinner {
             statusSpinner.startAnimation(nil)
@@ -1154,10 +1148,10 @@ final class FileExplorerView: NSView {
         else { return }
         editingNode = node
         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        cell.beginEditing(colors: colors, delegate: self)
+        cell.beginEditing(delegate: self)
         cell.nameField.stringValue = node.placeholder == nil ? node.name : ""
         window?.makeFirstResponder(cell.nameField)
-        ChromeFieldView.styleEditor(of: cell.nameField, colors: colors)
+        SurfaceFieldView.styleEditor(of: cell.nameField)
         if node.placeholder == nil {
             cell.nameField.currentEditor()?.selectedRange = FileExplorerNaming.stemRange(of: node.name)
         }
@@ -1224,74 +1218,44 @@ final class FileExplorerView: NSView {
     private func setupViews() {
         wantsLayer = true
 
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
-
-        collapseAllButton = ChromeIconButton(
-            symbolName: "rectangle.compress.vertical",
-            accessibilityLabel: "Collapse All",
-            pointSize: 12,
-            size: 24,
+        collapseAllButton = SurfaceToolbar.button(
+            "rectangle.compress.vertical",
+            "Collapse All",
             target: self,
             action: #selector(collapseAllClicked)
         )
-        refreshButton = ChromeIconButton(
-            symbolName: "arrow.clockwise",
-            accessibilityLabel: "Refresh Explorer",
-            pointSize: 12,
-            size: 24,
-            target: self,
-            action: #selector(refreshClicked)
-        )
-        moreButton = ChromeIconButton(
-            symbolName: "ellipsis",
-            accessibilityLabel: "More Explorer Actions",
-            pointSize: 12,
-            size: 24,
-            target: self,
-            action: #selector(moreClicked)
-        )
-        for button in [collapseAllButton, refreshButton, moreButton] {
-            if let button {
-                addSubview(button)
-            }
-        }
-        addSubview(toolbarRule)
+        refreshButton = SurfaceToolbar.button("arrow.clockwise", "Refresh Explorer", target: self, action: #selector(refreshClicked))
+        moreButton = SurfaceToolbar.button("ellipsis", "More Explorer Actions", target: self, action: #selector(moreClicked))
 
-        addSubview(filterContainer)
-
-        filterIcon.image = FileExplorerCellView.symbol("magnifyingglass", size: 12, weight: .regular)
-        filterIcon.translatesAutoresizingMaskIntoConstraints = false
-        filterContainer.addSubview(filterIcon)
-
-        filterField.placeholderString = "Find files"
-        ChromeFieldView.styleEmbedded(filterField, colors: colors)
+        // Agents' `FilesSearchField`: magnifier, borderless 13 pt "Search files", clear button.
         filterField.cell?.isScrollable = true
         filterField.cell?.wraps = false
+        filterField.usesSingleLineMode = true
+        filterField.lineBreakMode = .byTruncatingTail
         filterField.delegate = self
+        filterField.setAccessibilityLabel("Search files")
+        filterField.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        filterField.setContentHuggingPriority(.init(1), for: .horizontal)
+        clearFilterButton.isHidden = true
+        clearFilterButton.onClick = { [weak self] in self?.clearFilterClicked() }
+        filterContainer = SurfaceFieldView(field: filterField, symbol: Icon.search, trailing: clearFilterButton)
+        filterContainer.setContentHuggingPriority(.init(1), for: .horizontal)
+        filterContainer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         filterField.onFocusChange = { [weak self] isFocused in
             guard let self else { return }
             filterContainer.isFocused = isFocused
             if isFocused {
-                ChromeFieldView.styleEditor(of: filterField, colors: colors)
+                SurfaceFieldView.styleEditor(of: filterField)
             }
         }
-        filterField.setAccessibilityLabel("Find files")
-        filterField.translatesAutoresizingMaskIntoConstraints = false
-        filterContainer.addSubview(filterField)
-
-        clearFilterButton = ChromeIconButton(
-            symbolName: "xmark",
-            accessibilityLabel: "Clear Filter",
-            pointSize: 9,
-            size: 18,
-            target: self,
-            action: #selector(clearFilterClicked)
+        header = SurfaceToolbar(
+            leading: [filterContainer],
+            trailing: [collapseAllButton, refreshButton, moreButton],
+            spacer: false,
+            leadingInset: 8
         )
-        clearFilterButton.isHidden = true
-        filterContainer.addSubview(clearFilterButton)
+        header.setSpacing(6, after: filterContainer)
+        addSubview(header)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("name"))
         column.resizingMask = .autoresizingMask
@@ -1301,7 +1265,7 @@ final class FileExplorerView: NSView {
         outlineView.rowHeight = FileExplorerOutlineView.rowHeight
         outlineView.rowSizeStyle = .custom
         outlineView.indentationPerLevel = FileExplorerOutlineView.indentation
-        outlineView.intercellSpacing = .zero
+        outlineView.intercellSpacing = NSSize(width: 0, height: 2)
         outlineView.backgroundColor = .clear
         outlineView.style = .plain
         outlineView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
@@ -1329,6 +1293,7 @@ final class FileExplorerView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
@@ -1345,12 +1310,9 @@ final class FileExplorerView: NSView {
         statusSpinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusSpinner)
 
-        retryButton = ChromeButton(
-            title: "Retry",
-            theme: themeManager.currentTheme,
-            target: self,
-            action: #selector(retryClicked)
-        )
+        retryButton = ShellTextButton(title: "Retry", variant: .outline)
+        retryButton.target = self
+        retryButton.action = #selector(retryClicked)
         retryButton.isHidden = true
         addSubview(retryButton)
 
@@ -1358,49 +1320,22 @@ final class FileExplorerView: NSView {
         addSubview(toast)
 
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: collapseAllButton.leadingAnchor, constant: -6),
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            moreButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            moreButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            refreshButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -2),
-            refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            collapseAllButton.trailingAnchor.constraint(equalTo: refreshButton.leadingAnchor, constant: -2),
-            collapseAllButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight - Chrome.hairline),
-            toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            // The filter sits on the panel with space around it, no rule below.
-            filterContainer.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 8),
-            filterContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            filterContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            filterContainer.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-
-            filterIcon.leadingAnchor.constraint(equalTo: filterContainer.leadingAnchor, constant: 8),
-            filterIcon.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
-            filterIcon.widthAnchor.constraint(equalToConstant: 13),
-            filterField.leadingAnchor.constraint(equalTo: filterIcon.trailingAnchor, constant: 6),
-            filterField.trailingAnchor.constraint(equalTo: clearFilterButton.leadingAnchor, constant: -2),
-            filterField.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
-            clearFilterButton.trailingAnchor.constraint(equalTo: filterContainer.trailingAnchor, constant: -4),
-            clearFilterButton.centerYAnchor.constraint(equalTo: filterContainer.centerYAnchor),
-
-            scrollView.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 4),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            statusLabel.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 24),
-            statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            statusLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
+            statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
             statusSpinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            statusSpinner.topAnchor.constraint(equalTo: filterContainer.bottomAnchor, constant: 24),
+            statusSpinner.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
             retryButton.centerXAnchor.constraint(equalTo: centerXAnchor),
-            retryButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 10),
+            retryButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 12),
 
             toast.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             toast.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -1409,25 +1344,13 @@ final class FileExplorerView: NSView {
     }
 
     func applyTheme() {
-        let colors = colors
-        let theme = themeManager.currentTheme
-        layer?.backgroundColor = colors.bgPanel.cgColor
-        for button in [collapseAllButton, refreshButton, moreButton, clearFilterButton] {
-            button?.apply(theme: theme)
-        }
-        toolbarRule.color = colors.borderSubtle
-        filterContainer.apply(theme: theme)
-        filterIcon.contentTintColor = colors.textMuted
-        ChromeFieldView.styleEmbedded(filterField, colors: colors)
-        filterField.placeholderAttributedString = NSAttributedString(
-            string: "Find files",
-            attributes: [.foregroundColor: colors.textMuted, .font: ChromeFont.label]
-        )
+        layer?.backgroundColor = PaletteCenter.shared.palette.background.cgColor
+        SurfaceFieldView.styleEmbedded(filterField)
+        SurfaceFieldView.setPlaceholder("Search files", of: filterField)
         if filterContainer.isFocused {
-            ChromeFieldView.styleEditor(of: filterField, colors: colors)
+            SurfaceFieldView.styleEditor(of: filterField)
         }
-        retryButton.apply(theme: theme)
-        toast.apply(colors: colors)
+        toast.apply()
         updateToolbar()
         updateStatus()
         reconfigureVisibleRows()
@@ -1446,7 +1369,8 @@ final class FileExplorerView: NSView {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000)
             guard let self, self.isManualRefreshing else { return }
-            self.refreshButton.setSymbol("hourglass", accessibilityLabel: "Refreshing Explorer", pointSize: 12)
+            self.refreshButton.setSymbol("hourglass")
+            self.refreshButton.setAccessibilityLabel("Refreshing Explorer")
         }
     }
 
@@ -1457,7 +1381,8 @@ final class FileExplorerView: NSView {
 
     private func finishManualRefresh() {
         isManualRefreshing = false
-        refreshButton.setSymbol("arrow.clockwise", accessibilityLabel: "Refresh Explorer", pointSize: 12)
+        refreshButton.setSymbol("arrow.clockwise")
+        refreshButton.setAccessibilityLabel("Refresh Explorer")
     }
 
     @objc private func retryClicked() {

@@ -186,6 +186,8 @@ final class ClipboardConfirmationCoordinator {
     }
 }
 
+/// Presents the confirmation as a `ShellDialogs` dialog with the content in a preview:
+/// deny (Esc, a click outside) on the left, allow (Return) on the right.
 @MainActor
 final class AppKitClipboardConfirmationPresenter: ClipboardConfirmationPresenting {
     func present(
@@ -198,47 +200,91 @@ final class AppKitClipboardConfirmationPresenter: ClipboardConfirmationPresentin
             return EmptyClipboardConfirmationPresentation()
         }
 
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = prompt.title
-        alert.informativeText = prompt.message
-        alert.addButton(withTitle: prompt.allowButtonTitle)
-        alert.addButton(withTitle: prompt.denyButtonTitle)
-        alert.buttons[0].keyEquivalent = "\r"
-        alert.buttons[1].keyEquivalent = "\u{1b}"
-        alert.accessoryView = makePreview(content: prompt.content)
-
-        let presentation = AppKitClipboardConfirmationPresentation(
-            alert: alert,
-            parentWindow: parentWindow,
-            completion: completion
-        )
-        presentation.begin()
+        let presentation = DialogClipboardConfirmationPresentation(completion: completion)
+        presentation.controller = ShellDialogs.choose(
+            title: prompt.title,
+            message: prompt.message,
+            buttons: [
+                ShellDialogButton(prompt.denyButtonTitle, keyEquivalent: "\u{1b}"),
+                ShellDialogButton(prompt.allowButtonTitle, style: .primary),
+            ],
+            accessory: ClipboardPreviewView(content: prompt.content),
+            in: parentWindow
+        ) { index in
+            // Held until answered; finishing clears the controller and so the cycle.
+            presentation.finish(with: index == 1 ? .allow : .deny)
+        }
         return presentation
     }
+}
 
-    private func makePreview(content: String) -> NSScrollView {
-        let frame = NSRect(x: 0, y: 0, width: 520, height: 220)
-        let scrollView = NSTextView.scrollableTextView()
-        scrollView.frame = frame
-        scrollView.borderType = .bezelBorder
+/// The clipboard content in a read-only, scrolling code block (`rounded-lg border
+/// bg-code font-mono`), as tall as the text up to `maxHeight`.
+final class ClipboardPreviewView: PaletteView {
+    static let maxHeight: CGFloat = 220
+    private static let minHeight: CGFloat = 44
+    private static let inset = NSSize(width: 10, height: 8)
+
+    let textView: NSTextView
+    private let scrollView: NSScrollView
+
+    init(content: String, width: CGFloat = ShellDialogController.width - 48) {
+        scrollView = NSTextView.scrollableTextView()
+        textView = scrollView.documentView as? NSTextView ?? NSTextView()
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.maxHeight))
+        layer?.cornerRadius = Radius.lg
+        layer?.borderWidth = 1
+        layer?.masksToBounds = true
+
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
-
-        guard let textView = scrollView.documentView as? NSTextView else {
-            return scrollView
-        }
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = false
         textView.importsGraphics = false
-        textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        textView.textContainerInset = NSSize(width: 6, height: 6)
+        textView.drawsBackground = false
+        textView.font = Typography.mono()
+        textView.textContainerInset = Self.inset
         textView.string = content
-        scrollView.documentView = textView
+        addSubview(scrollView)
 
-        return scrollView
+        let height = Self.height(of: textView, width: width)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: height),
+        ])
+        frame.size.height = height
+        applyPalette(palette)
+    }
+
+    /// The text's wrapped height plus insets and border, between `minHeight` and `maxHeight`.
+    private static func height(of textView: NSTextView, width: CGFloat) -> CGFloat {
+        let padding = (textView.textContainer?.lineFragmentPadding ?? 5) * 2
+        let textWidth = width - inset.width * 2 - padding - 2
+        let font = textView.font ?? Typography.mono()
+        // A trailing newline still takes a line in the view.
+        let text = textView.string.hasSuffix("\n") ? textView.string + " " : textView.string
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        let total = ceil(bounds.height) + inset.height * 2 + 2
+        return min(max(total, minHeight), maxHeight)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = palette.codeBackground.cgColor
+        layer?.borderColor = palette.border.cgColor
+        textView.textColor = palette.foreground
+        textView.insertionPointColor = palette.foreground
     }
 }
 
@@ -248,45 +294,28 @@ private final class EmptyClipboardConfirmationPresentation: ClipboardConfirmatio
 }
 
 @MainActor
-private final class AppKitClipboardConfirmationPresentation: ClipboardConfirmationPresentation {
-    private let alert: NSAlert
-    private weak var parentWindow: NSWindow?
+private final class DialogClipboardConfirmationPresentation: ClipboardConfirmationPresentation {
+    /// The shown dialog; nil once answered, or when the system-alert fallback answered it.
+    var controller: ShellDialogController?
     private var completion: ((ClipboardConfirmationDecision) -> Void)?
 
-    init(
-        alert: NSAlert,
-        parentWindow: NSWindow,
-        completion: @escaping (ClipboardConfirmationDecision) -> Void
-    ) {
-        self.alert = alert
-        self.parentWindow = parentWindow
+    init(completion: @escaping (ClipboardConfirmationDecision) -> Void) {
         self.completion = completion
     }
 
-    func begin() {
-        guard let parentWindow else {
-            finish(with: .dismissed)
-            return
-        }
-
-        alert.beginSheetModal(for: parentWindow) { [weak self] response in
-            guard let self else { return }
-            finish(with: response == .alertFirstButtonReturn ? .allow : .deny)
-        }
-    }
-
+    /// Closes the dialog unanswered (its terminal went away).
     func dismiss() {
-        guard completion != nil else { return }
-        guard let parentWindow, alert.window.sheetParent != nil else {
-            finish(with: .dismissed)
-            return
-        }
-        parentWindow.endSheet(alert.window, returnCode: .abort)
-    }
-
-    private func finish(with decision: ClipboardConfirmationDecision) {
         guard let completion else { return }
         self.completion = nil
+        controller?.finish(index: nil)
+        controller = nil
+        completion(.dismissed)
+    }
+
+    func finish(with decision: ClipboardConfirmationDecision) {
+        guard let completion else { return }
+        self.completion = nil
+        controller = nil
         completion(decision)
     }
 }

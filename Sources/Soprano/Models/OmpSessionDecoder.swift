@@ -8,7 +8,9 @@ struct OmpSessionDecoder: AgentTranscriptDecoding {
     /// From the session header; tool paths are shown relative to it.
     private(set) var cwd: String?
 
-    init() {}
+    init(cwd: String? = nil) {
+        self.cwd = cwd
+    }
 
     mutating func entry(forLine line: Data) -> AgentTranscriptEntry? {
         guard let record = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
@@ -112,7 +114,9 @@ struct OmpSessionDecoder: AgentTranscriptDecoding {
         return items
     }
 
-    private func toolCall(_ part: [String: Any]) -> AgentToolCall {
+    /// A tool call from its `toolCall` part: `name`, `arguments`, `intent`.
+    /// omp's ACP mode sends the same name and arguments, so chat tabs use it too.
+    func toolCall(_ part: [String: Any]) -> AgentToolCall {
         let name = part["name"] as? String ?? "tool"
         let arguments = part["arguments"] as? [String: Any] ?? [:]
         // The agent's own one-line description of the call.
@@ -155,7 +159,10 @@ struct OmpSessionDecoder: AgentTranscriptDecoding {
         }
     }
 
-    private func result(_ message: [String: Any], finishedAt: Date?) -> AgentToolResult {
+    /// A tool's result from its `toolResult` message: `content`, `details`,
+    /// `isError`, `toolName`. omp's ACP mode sends the same `content` and
+    /// `details` as a finished call's `rawOutput`.
+    func result(_ message: [String: Any], finishedAt: Date?) -> AgentToolResult {
         let details = message["details"] as? [String: Any] ?? [:]
         let exitCode = (details["exitCode"] as? NSNumber)?.intValue ?? 0
         let failed = message["isError"] as? Bool == true || exitCode != 0

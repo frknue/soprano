@@ -365,7 +365,11 @@ struct MarkdownIntegrationTests {
         #expect(!html.contains("<script>"))
         #expect(!html.contains(#"href="javascript:"#))
         #expect(html.contains(#"href="https://example.com""#))
-        #expect(html.contains("&lt;button onclick=\"bad()\"&gt;"))
+        // Code is escaped (and split into syntax spans), never live markup.
+        #expect(!html.contains("<button"))
+        #expect(html.contains("&lt;"))
+        #expect(html.contains("onclick"))
+        #expect(html.contains(#"<div class="code-header">html</div>"#))
         #expect(html.contains("Hello &amp; Goodbye"))
     }
 }

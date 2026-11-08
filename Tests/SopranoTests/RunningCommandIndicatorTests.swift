@@ -46,18 +46,18 @@ struct RunningCommandIndicatorTests {
         runningTabIds = [serverTabId]
         splitTree.sampleRunningCommands()
         #expect(manager.runningCommandTargets == [server])
-        #expect(paneRowTexts(in: sidebar) == ["RUNNING", ""])
+        #expect(paneRowTexts(in: sidebar) == ["Running", ""])
         #expect(commandBadge(in: serverLayoutTab) != nil)
         #expect(serverLayoutTab.toolTip?.hasSuffix("1 command running") == true)
-        #expect(headerTexts(paneId: serverPaneId, manager: manager).contains("RUNNING"))
-        #expect(!headerTexts(paneId: otherPaneId, manager: manager).contains("RUNNING"))
+        #expect(headerTexts(paneId: serverPaneId, manager: manager).contains("Running"))
+        #expect(!headerTexts(paneId: otherPaneId, manager: manager).contains("Running"))
 
         manager.attachAgentIfNeeded(paneId: serverPaneId, tabId: serverTabId, profileId: "codex")
-        #expect(paneRowTexts(in: sidebar) == ["STARTING", ""])
+        #expect(paneRowTexts(in: sidebar) == ["Starting", ""])
         #expect(commandBadge(in: serverLayoutTab) == nil)
 
         manager.agentProcessDidExit(target: server)
-        #expect(paneRowTexts(in: sidebar) == ["RUNNING", ""])
+        #expect(paneRowTexts(in: sidebar) == ["Running", ""])
 
         runningTabIds = []
         splitTree.sampleRunningCommands()
@@ -90,7 +90,7 @@ struct RunningCommandIndicatorTests {
         let serverTitle = try #require(manager.panes[paneId]?.tabs.first { $0.id == serverTabId }?.title)
         #expect(titles == [idleTitle, "● \(serverTitle)"])
         // The server tab is active, so the header's own lamp reports it too.
-        #expect(headerTexts(paneId: paneId, manager: manager).contains("RUNNING"))
+        #expect(headerTexts(paneId: paneId, manager: manager).contains("Running"))
     }
 
     private func makeSidebar(manager: AgentManager) -> SidebarView {

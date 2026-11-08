@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // NSApp.appearance follows the theme from here on, so alerts, menus
         // and panels match it, and `folio` re-resolves when macOS flips.
         themeManager.startDrivingApplicationAppearance()
+        // Views built on the Agents style read their colors from here.
+        PaletteCenter.shared.apply(theme: themeManager.currentTheme)
         GhosttyAppManager.shared.initialize(theme: themeManager.currentTheme)
         let agentManager = AgentManager()
         // Unsaved editor changes are asked about before any tab showing them closes.
@@ -35,6 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let agentNotificationManager = AgentNotificationManager(agentManager: agentManager)
         agentNotificationManager.requestAuthorizationIfNeeded()
+        // Chat tabs report their agent's lifecycle like hooks do.
+        agentManager.agentEventHandler = { [weak agentNotificationManager] event in
+            agentNotificationManager?.handle(event)
+        }
         let sessionManager = SessionManager(agentManager: agentManager)
         let gitBranchMonitor = GitBranchMonitor()
 

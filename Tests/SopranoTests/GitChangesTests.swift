@@ -197,32 +197,69 @@ struct GitChangesTests {
         #expect(!highlights.new[2].contains { $0.kind == .comment })
     }
 
-    @Test func charactersThatBreakALineStayOnTheirRowSoBothSidesKeepFacingEachOther() {
-        let lines = [
-            GitDiffLine(kind: .removed, oldNumber: 1, newNumber: nil, text: "a\rb\u{2028}c\u{0C}d"),
-            GitDiffLine(kind: .added, oldNumber: nil, newNumber: 1, text: "a\u{2029}b\u{85}c"),
-            GitDiffLine(kind: .context, oldNumber: 2, newNumber: 2, text: "end"),
-        ]
+    @Test func charactersThatBreakALineShowAsSymbolsOfTheSameLength() {
+        let text = "a\rb\u{2028}c\u{0C}d\u{2029}e\u{85}f"
+        let shown = SurfaceDiffDocument.displayText(text)
+        #expect(!shown.contains("\r"))
+        #expect(!shown.unicodeScalars.contains("\u{2028}"))
+        // Same length, so syntax tokens and word emphasis keep their offsets.
+        #expect((shown as NSString).length == (text as NSString).length)
+    }
 
-        let rendering = DiffRendering(lines: lines, language: nil)
-
-        for side in [rendering.inline, rendering.old, rendering.new] {
-            let storage = NSTextStorage(string: side.text)
-            let layoutManager = NSLayoutManager()
-            let container = NSTextContainer(size: NSSize(width: 10_000, height: 10_000))
-            layoutManager.addTextContainer(container)
-            storage.addLayoutManager(layoutManager)
-            var fragments = 0
-            layoutManager.enumerateLineFragments(
-                forGlyphRange: layoutManager.glyphRange(for: container)
-            ) { _, _, _, _, _ in
-                fragments += 1
-            }
-            #expect(fragments == side.rows.count)
-            let text = side.text as NSString
-            // Same length, so syntax tokens and emphasis keep their offsets.
-            #expect(text.length == side.rowStarts.last.map { $0 + 4 })
+    @Test func longUnmodifiedRunsFoldBehindAStripNamingTheEnclosingDeclaration() {
+        var lines = [GitDiffLine(kind: .context, oldNumber: 1, newNumber: 1, text: "struct Login {")]
+        for number in 2...10 {
+            lines.append(GitDiffLine(kind: .context, oldNumber: number, newNumber: number, text: "    let a\(number) = 1"))
         }
+        lines.append(GitDiffLine(kind: .removed, oldNumber: 11, newNumber: nil, text: "    let old = 1"))
+        lines.append(GitDiffLine(kind: .added, oldNumber: nil, newNumber: 11, text: "    let new = 1"))
+        for number in 12...20 {
+            lines.append(GitDiffLine(kind: .context, oldNumber: number, newNumber: number, text: "    let b\(number) = 1"))
+        }
+        let document = SurfaceDiffDocument(path: "Sources/Login.swift", lines: lines, language: nil)
+        #expect(document.additions == 1)
+        #expect(document.deletions == 1)
+        #expect(document.change == .modified)
+
+        let list = SurfaceDiffList.build(document, layout: .unified, collapsed: false, expanded: [])
+        // 10 context lines above the change keep 3; 9 below keep 3.
+        let fold = SurfaceDiffFold(id: 1, rows: 0..<7, range: nil, section: "")
+        #expect(list.rows.first == .header)
+        #expect(list.rows[1] == .fold(SurfaceDiffFold(id: 1, rows: 0..<7, range: nil, section: "struct Login {")))
+        #expect(fold.hiddenLines == 7)
+        #expect(Array(list.rows[2...9]) == [.line(7), .line(8), .line(9), .line(10), .line(11), .line(12), .line(13), .line(14)])
+        // Nothing follows the last fold, so it names no declaration.
+        #expect(list.rows[10] == .fold(SurfaceDiffFold(id: 15, rows: 15..<21, range: nil, section: "")))
+        #expect(list.rows.last == .end)
+        #expect(list.changeRows == [5])
+
+        // Opening a fold shows its lines; collapsing leaves only the header.
+        let expanded = SurfaceDiffList.build(document, layout: .unified, collapsed: false, expanded: [1])
+        #expect(expanded.rows[1] == .fold(SurfaceDiffFold(id: -1, rows: 0..<0, range: "@@ -1,14 +1,14 @@", section: "")))
+        #expect(expanded.rows[2] == .line(0))
+        #expect(SurfaceDiffList.build(document, layout: .split, collapsed: true, expanded: []).rows == [.header])
+    }
+
+    @Test func copyingASplitSelectionTakesTheSideTheDragStartedOnAndSkipsFillers() {
+        let lines = [
+            GitDiffLine(kind: .context, oldNumber: 1, newNumber: 1, text: "one"),
+            GitDiffLine(kind: .removed, oldNumber: 2, newNumber: nil, text: "two"),
+            GitDiffLine(kind: .context, oldNumber: 3, newNumber: 2, text: "three"),
+            GitDiffLine(kind: .added, oldNumber: nil, newNumber: 3, text: "\tfour"),
+        ]
+        let document = SurfaceDiffDocument(path: "app.txt", lines: lines, language: nil)
+        let list = SurfaceDiffList.build(document, layout: .split, collapsed: false, expanded: [])
+        // header, range strip, four split rows, end.
+        #expect(list.rows.count == 7)
+        let all = SurfaceDiffSelection(anchor: 5, head: 0, oldSide: true)
+        #expect(list.text(of: all, in: document) == "one\ntwo\nthree")
+        var new = all
+        new.oldSide = false
+        #expect(list.text(of: new, in: document) == "one\nthree\n\tfour")
+
+        let stacked = SurfaceDiffList.build(document, layout: .unified, collapsed: false, expanded: [])
+        #expect(stacked.text(of: SurfaceDiffSelection(anchor: 2, head: 5, oldSide: true), in: document)
+            == "one\ntwo\nthree\n\tfour")
     }
 
     // MARK: - Real Repository

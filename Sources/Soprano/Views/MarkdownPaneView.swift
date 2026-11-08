@@ -36,10 +36,11 @@ final class MarkdownPaneRegistry {
     }
 }
 
-/// Read-only, automatically reloading local Markdown content.
+/// Read-only, automatically reloading local Markdown content, drawn as Soprano
+/// Agents' Markdown reader: a 40 pt header with the repository-relative
+/// breadcrumbs and ghost buttons over New York 16/26 in a 920 pt column.
 @MainActor
 final class MarkdownPaneView: NSView, WKNavigationDelegate {
-    static let toolbarHeight: CGFloat = 32
 
     let target: TerminalTarget
     var onFocusRequested: (() -> Void)?
@@ -50,14 +51,13 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     private let themeManager: ThemeManager
     private let schemeHandler: MarkdownSchemeHandler
     private let webView: MarkdownWebView
-    private let toolbar = NSView()
-    private let toolbarRule = ChromeRuleView(axis: .horizontal)
-    private let pathLabel = NSTextField(labelWithString: "")
-    private var backButton: ChromeIconButton!
-    private var forwardButton: ChromeIconButton!
-    private var reloadButton: ChromeIconButton!
-    private var revealButton: ChromeIconButton!
-    private var editButton: ChromeIconButton!
+    private var toolbar: SurfaceToolbar!
+    private let breadcrumbs = SurfaceBreadcrumbs.label()
+    private var backButton: ShellGhostButton!
+    private var forwardButton: ShellGhostButton!
+    private var reloadButton: ShellGhostButton!
+    private var revealButton: ShellGhostButton!
+    private var editButton: ShellGhostButton!
 
     private(set) var fileURL: URL
     private var watcher: ConfigFileWatcher?
@@ -111,15 +111,10 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     }
 
     func applyTheme() {
-        let theme = themeManager.currentTheme
-        layer?.backgroundColor = theme.colors.bgBase.cgColor
-        toolbar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        toolbarRule.color = theme.colors.borderSubtle
-        pathLabel.textColor = theme.colors.textPrimary
-        for button in [backButton, forwardButton, reloadButton, revealButton, editButton] {
-            button?.apply(theme: theme)
-        }
-        webView.underPageBackgroundColor = theme.colors.bgBase
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.background.cgColor
+        webView.underPageBackgroundColor = palette.background
+        updateToolbar()
         if historyIndex >= 0 || hasLoadedPage {
             renderDocument(preservingScroll: true)
         }
@@ -157,42 +152,17 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
     private func setupViews() {
         wantsLayer = true
 
-        toolbar.wantsLayer = true
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        backButton = SurfaceToolbar.button("chevron.left", "Previous Markdown file", target: self, action: #selector(goBack))
+        forwardButton = SurfaceToolbar.button("chevron.right", "Next Markdown file", target: self, action: #selector(goForward))
+        reloadButton = SurfaceToolbar.button("arrow.clockwise", "Reload Markdown", target: self, action: #selector(reload))
+        editButton = SurfaceToolbar.button("arrow.up.forward.app", "Open in Editor", target: self, action: #selector(openInEditor))
+        revealButton = SurfaceToolbar.button("folder", "Reveal in Finder", target: self, action: #selector(revealInFinder))
+        toolbar = SurfaceToolbar(
+            leading: [breadcrumbs],
+            trailing: [backButton, forwardButton, reloadButton, editButton, revealButton]
+        )
+        toolbar.setSpacing(6, after: forwardButton)
         addSubview(toolbar)
-
-        backButton = makeToolbarButton(
-            symbol: "chevron.left",
-            toolTip: "Previous Markdown file",
-            action: #selector(goBack)
-        )
-        forwardButton = makeToolbarButton(
-            symbol: "chevron.right",
-            toolTip: "Next Markdown file",
-            action: #selector(goForward)
-        )
-        reloadButton = makeToolbarButton(
-            symbol: "arrow.clockwise",
-            toolTip: "Reload Markdown",
-            action: #selector(reload)
-        )
-        revealButton = makeToolbarButton(
-            symbol: "folder",
-            toolTip: "Reveal in Finder",
-            action: #selector(revealInFinder)
-        )
-        editButton = makeToolbarButton(
-            symbol: "square.and.pencil",
-            toolTip: "Open in Editor",
-            action: #selector(openInEditor)
-        )
-
-        pathLabel.font = ChromeFont.monoSmall
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        pathLabel.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(pathLabel)
-        toolbar.addSubview(toolbarRule)
 
         webView.navigationDelegate = self
         webView.onFocusRequested = { [weak self] in
@@ -208,31 +178,6 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
-
-            backButton.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
-            backButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 2),
-            forwardButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            reloadButton.leadingAnchor.constraint(equalTo: forwardButton.trailingAnchor, constant: 2),
-            reloadButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-
-            pathLabel.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
-            pathLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            pathLabel.trailingAnchor.constraint(
-                lessThanOrEqualTo: revealButton.leadingAnchor,
-                constant: -8
-            ),
-
-            editButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
-            editButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            revealButton.trailingAnchor.constraint(equalTo: editButton.leadingAnchor, constant: -2),
-            revealButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-
-            toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
-            toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             webView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -241,24 +186,14 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         ])
 
         applyTheme()
-        updateToolbar()
-    }
-
-    private func makeToolbarButton(symbol: String, toolTip: String, action: Selector) -> ChromeIconButton {
-        let button = ChromeIconButton(
-            symbolName: symbol,
-            accessibilityLabel: toolTip,
-            pointSize: 12,
-            target: self,
-            action: action
-        )
-        toolbar.addSubview(button)
-        return button
     }
 
     private func updateToolbar() {
-        pathLabel.stringValue = ConfigFile.abbreviatingHome(fileURL.path)
-        pathLabel.toolTip = fileURL.path
+        breadcrumbs.attributedStringValue = SurfaceBreadcrumbs.make(
+            SurfaceBreadcrumbs.displayPath(of: fileURL),
+            palette: PaletteCenter.shared.palette
+        )
+        breadcrumbs.toolTip = fileURL.path
         backButton.isEnabled = historyIndex > 0
         forwardButton.isEnabled = historyIndex >= 0 && historyIndex + 1 < history.count
     }
@@ -310,9 +245,15 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
         webView.load(URLRequest(url: pageURL))
     }
 
+    /// Agents' Markdown reader (`MarkdownStyle.document`) as a style sheet:
+    /// New York 16/26 in a 920 px column with 32/42 padding, h1 28/34, h2
+    /// 21/28 over a rule, links in `info`, inline code on a `foreground/10`
+    /// chip, code blocks with a language header and the timeline's syntax
+    /// colors, tables with row rules only, muted quotes on a 2 px rule.
     private func htmlDocument(body: String) -> String {
-        let theme = themeManager.currentTheme
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
+        let codeBlock = palette.isDark ? palette.input.timelineAlpha(0.32) : palette.secondary
+        let codeEdge = palette.isDark ? "none" : "1px solid \(palette.border.timelineAlpha(0.7).markdownCSS)"
         return """
         <!doctype html>
         <html>
@@ -325,15 +266,22 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
                          object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'">
           <style>
             :root {
-              color-scheme: \(theme.appearance == .light ? "light" : "dark");
-              --bg: \(colors.bgBase.markdownCSS);
-              --panel: \(colors.bgPanel.markdownCSS);
-              --text: \(colors.textPrimary.markdownCSS);
-              --muted: \(colors.textMuted.markdownCSS);
-              --accent: \(colors.accent.markdownCSS);
-              --selection: \(colors.textSelection.markdownCSS);
-              --border: \(colors.borderSubtle.markdownCSS);
-              --border-strong: \(colors.borderStrong.markdownCSS);
+              color-scheme: \(palette.isDark ? "dark" : "light");
+              --bg: \(palette.background.markdownCSS);
+              --text: \(palette.foreground.markdownCSS);
+              --muted: \(palette.mutedForeground.markdownCSS);
+              --link: \(palette.infoForeground.markdownCSS);
+              --selection: \(SurfaceText.selection(palette).markdownCSS);
+              --border: \(palette.border.markdownCSS);
+              --chip: \(palette.foreground.timelineAlpha(0.1).markdownCSS);
+              --quote: \(palette.foreground.timelineAlpha(0.35).markdownCSS);
+              --code-bg: \(codeBlock.markdownCSS);
+              --code-label: \(palette.foreground.timelineAlpha(0.72).markdownCSS);
+              --tok-keyword: \(palette.mergedForeground.markdownCSS);
+              --tok-string: \(palette.successForeground.markdownCSS);
+              --tok-number: \(palette.warningForeground.markdownCSS);
+              --tok-type: \(palette.infoForeground.markdownCSS);
+              --tok-deleted: \(palette.errorForeground.markdownCSS);
               --serif: ui-serif, "New York", Georgia, serif;
               --mono: ui-monospace, "SF Mono", Menlo, monospace;
             }
@@ -364,37 +312,55 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
             }
             h3 { font-size: 17px; line-height: 22px; font-weight: 500; margin: 24px 0 8px; }
             h4, h5, h6 { font-size: 16px; line-height: 26px; font-weight: 600; margin: 20px 0 6px; }
-            p, blockquote, ul, ol, pre, .table-scroll { margin: 0 0 16px; }
-            a {
-              color: inherit;
-              text-decoration: underline;
-              text-decoration-color: var(--accent);
-              text-underline-offset: 3px;
-            }
+            p, blockquote, ul, ol, .code-block, pre, .table-scroll { margin: 0 0 16px; }
+            a { color: var(--link); text-decoration: none; }
+            a:hover { text-decoration: underline; text-underline-offset: 3px; }
             code {
-              background: var(--panel);
+              background: var(--chip);
               border-radius: 4px;
+              color: var(--text);
               font: 13px/1 var(--mono);
-              padding: 1px 4px;
+              padding: 1px .35em;
+            }
+            .code-block {
+              background: var(--code-bg);
+              border: \(codeEdge);
+              border-radius: \(Int(Radius.lg))px;
+              overflow: hidden;
+            }
+            .code-header {
+              color: var(--code-label);
+              font: 11px/16px var(--mono);
+              height: 30px;
+              padding: 10px 12px 0;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
             }
             pre {
-              background: var(--panel);
-              border-radius: \(Int(Chrome.Radius.card))px;
-              font: 13px/20px var(--mono);
+              font: 13px/18px var(--mono);
               overflow: auto;
               padding: 12px 14px;
               tab-size: 4;
             }
+            .code-block pre { margin: 0; }
             pre code { background: transparent; border-radius: 0; font: inherit; padding: 0; }
             .raw-html { color: var(--muted); }
+            .tok-keyword, .tok-tag { color: var(--tok-keyword); }
+            .tok-heading { color: var(--text); }
+            .tok-string, .tok-inserted { color: var(--tok-string); }
+            .tok-comment { color: var(--muted); }
+            .tok-number, .tok-attribute { color: var(--tok-number); }
+            .tok-type, .tok-function, .tok-key { color: var(--tok-type); }
+            .tok-deleted { color: var(--tok-deleted); }
             blockquote {
-              border-left: 2px solid var(--border-strong);
+              border-left: 2px solid var(--quote);
               color: var(--muted);
               margin-left: 0;
-              padding-left: 14px;
+              padding-left: 12.8px;
             }
             blockquote > :last-child, li > :last-child { margin-bottom: 0; }
-            ul, ol { padding-left: 1.6em; }
+            ul, ol { padding-left: 24px; }
             li + li { margin-top: 4px; }
             input[type="checkbox"] { accent-color: var(--text); margin-right: .35em; }
             hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
@@ -406,8 +372,9 @@ final class MarkdownPaneView: NSView, WKNavigationDelegate {
               width: max-content;
               min-width: 100%;
             }
-            th, td { border: 1px solid var(--border); padding: 6px 12px; }
-            th { background: var(--panel); font-weight: 600; }
+            th, td { border-bottom: 1px solid var(--border); padding: 8px 12px; }
+            tr:last-child td { border-bottom: 0; }
+            th { font-weight: 600; padding-top: 9px; padding-bottom: 9px; }
             .align-left { text-align: left; }
             .align-center { text-align: center; }
             .align-right { text-align: right; }

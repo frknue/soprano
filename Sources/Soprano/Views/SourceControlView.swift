@@ -8,8 +8,6 @@ import AppKit
 /// without a working directory keep the current one. Nothing is read,
 /// watched, or run while the view is inactive.
 final class SourceControlView: NSView {
-    static let toolbarHeight: CGFloat = 32
-
     private static let noRoomMessage = "No room for another tab or pane in this window."
 
     /// What the active pane asks the view to show.
@@ -28,10 +26,10 @@ final class SourceControlView: NSView {
 
     // MARK: Views
 
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let branchLabel = NSTextField(labelWithString: "")
-    private var refreshButton: ChromeIconButton!
-    private let toolbarRule = ChromeRuleView(axis: .horizontal)
+    private let titleLabel = NSTextField.label(size: Typography.rowSize, weight: .medium)
+    private let branchLabel = NSTextField.label(size: Typography.smallSize)
+    private var refreshButton: ShellGhostButton!
+    private var header: SurfaceToolbar!
     private let scrollView = NSScrollView()
     private let outlineView = SourceControlOutlineView()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
@@ -67,7 +65,7 @@ final class SourceControlView: NSView {
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
         self.themeManager = themeManager
-        toast = SidebarToastView(colors: themeManager.currentTheme.colors)
+        toast = SidebarToastView()
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
@@ -365,15 +363,13 @@ final class SourceControlView: NSView {
     }
 
     private func updateToolbar() {
-        titleLabel.setChromeText(
-            rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control",
-            font: ChromeFont.labelStrong,
-            color: colors.textPrimary
-        )
+        let palette = PaletteCenter.shared.palette
+        titleLabel.stringValue = rootURL.map { $0.path == "/" ? "/" : $0.lastPathComponent } ?? "Source Control"
+        titleLabel.textColor = palette.foreground
         titleLabel.toolTip = rootURL.map { ($0.path as NSString).abbreviatingWithTildeInPath }
         branchLabel.stringValue = rootURL == nil ? "" : changeList.branch ?? ""
-        branchLabel.font = ChromeFont.monoSmall
-        branchLabel.textColor = colors.textMuted
+        branchLabel.font = Typography.mono(Typography.smallSize)
+        branchLabel.textColor = palette.mutedForeground
         refreshButton.isEnabled = rootURL != nil
     }
 
@@ -396,7 +392,7 @@ final class SourceControlView: NSView {
             showsSpinner = true
         }
         statusLabel.isHidden = message == nil
-        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "", colors: colors)
+        statusLabel.attributedStringValue = SidebarEmptyState.text(message ?? "")
         scrollView.isHidden = message != nil || showsSpinner
         if showsSpinner {
             statusSpinner.startAnimation(nil)
@@ -548,26 +544,20 @@ final class SourceControlView: NSView {
     private func setupViews() {
         wantsLayer = true
 
-        titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
-
         branchLabel.lineBreakMode = .byTruncatingTail
         branchLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-        branchLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(branchLabel)
+        branchLabel.setContentHuggingPriority(.init(1), for: .horizontal)
 
-        refreshButton = ChromeIconButton(
-            symbolName: "arrow.clockwise",
-            accessibilityLabel: "Refresh Source Control",
-            pointSize: 12,
-            size: 24,
+        refreshButton = SurfaceToolbar.button(
+            "arrow.clockwise",
+            "Refresh Source Control",
             target: self,
             action: #selector(refreshClicked)
         )
-        addSubview(refreshButton)
-        addSubview(toolbarRule)
+        header = SurfaceToolbar(leading: [titleLabel, branchLabel], trailing: [refreshButton])
+        header.setSpacing(8, after: titleLabel)
+        addSubview(header)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("change"))
         column.resizingMask = .autoresizingMask
@@ -601,7 +591,8 @@ final class SourceControlView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
-        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -621,30 +612,20 @@ final class SourceControlView: NSView {
         addSubview(toast)
 
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2),
-            branchLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
-            branchLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-            branchLabel.trailingAnchor.constraint(lessThanOrEqualTo: refreshButton.leadingAnchor, constant: -6),
+            header.topAnchor.constraint(equalTo: topAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            refreshButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-            refreshButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-
-            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight - Chrome.hairline),
-            toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            scrollView.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            statusLabel.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 24),
-            statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            statusLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
+            statusLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
             statusSpinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            statusSpinner.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor, constant: 24),
+            statusSpinner.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
 
             toast.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             toast.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -653,11 +634,8 @@ final class SourceControlView: NSView {
     }
 
     func applyTheme() {
-        let colors = colors
-        layer?.backgroundColor = colors.bgPanel.cgColor
-        refreshButton.apply(theme: themeManager.currentTheme)
-        toolbarRule.color = colors.borderSubtle
-        toast.apply(colors: colors)
+        layer?.backgroundColor = PaletteCenter.shared.palette.background.cgColor
+        toast.apply()
         updateToolbar()
         updateStatus()
         reconfigureVisibleRows()
@@ -868,7 +846,8 @@ private final class SourceControlOutlineView: NSOutlineView {
 
 // MARK: - Cells
 
-/// Chevron, area eyebrow, and change count (`.section-heading`).
+/// Chevron, area title and change count, an Agents section header
+/// ("Staged Changes  3", 12 pt medium, muted, no uppercase eyebrow).
 private final class SourceControlHeaderCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("source-control-header")
 
@@ -882,7 +861,7 @@ private final class SourceControlHeaderCell: NSTableCellView {
         chevronView.imageScaling = .scaleProportionallyDown
         titleField.lineBreakMode = .byTruncatingTail
         titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        countField.font = ChromeFont.count
+        countField.font = Typography.tabular(Typography.smallSize)
         countField.setContentCompressionResistancePriority(.required, for: .horizontal)
         for view in [chevronView, titleField, countField] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -912,10 +891,14 @@ private final class SourceControlHeaderCell: NSTableCellView {
             size: 9,
             weight: .semibold
         )
-        chevronView.contentTintColor = colors.textMuted
-        titleField.attributedStringValue = ChromeText.eyebrow(section.area.title, color: colors.textMuted)
+        let muted = PaletteCenter.shared.palette.sidebarMutedForeground
+        chevronView.contentTintColor = muted
+        titleField.attributedStringValue = NSAttributedString(string: section.area.title, attributes: [
+            .font: Typography.ui(Typography.smallSize, weight: .medium),
+            .foregroundColor: muted,
+        ])
         countField.stringValue = "\(section.items.count)"
-        countField.textColor = colors.textMuted
+        countField.textColor = muted
     }
 }
 
@@ -936,13 +919,13 @@ private final class SourceControlChangeCell: NSTableCellView {
         iconView.imageScaling = .scaleProportionallyDown
         nameField.lineBreakMode = .byTruncatingMiddle
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        directoryField.font = ChromeFont.monoSmall
+        directoryField.font = Typography.mono(Typography.smallSize)
         directoryField.lineBreakMode = .byTruncatingHead
         // The folder gives way before the name does.
         directoryField.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         directoryField.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
         for field in [addedField, deletedField] {
-            field.font = ChromeFont.monoSmall
+            field.font = Typography.mono(Typography.smallSize)
             field.alignment = .right
             field.setContentCompressionResistancePriority(.required, for: .horizontal)
             field.setContentHuggingPriority(.required, for: .horizontal)
@@ -1000,7 +983,7 @@ private final class SourceControlChangeCell: NSTableCellView {
 
         let isDeleted = change.status == .deleted
         var nameAttributes: [NSAttributedString.Key: Any] = [
-            .font: ChromeFont.label,
+            .font: FileExplorerCellView.nameFont,
             .foregroundColor: isDeleted ? colors.textMuted : colors.textPrimary,
         ]
         if isDeleted {

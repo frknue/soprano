@@ -218,7 +218,7 @@ struct AgentDashboardViewTests {
         // Before Codex titles itself, it goes by its name over its folder.
         #expect(title.stringValue == "Codex")
         #expect(context.stringValue == "storefront")
-        #expect(status.stringValue == "NEEDS INPUT")
+        #expect(status.stringValue == "Done")
         #expect(title.frame.minY > context.frame.maxY)
         #expect(title.frame.maxX < status.frame.minX)
         #expect(fields.allSatisfy { row.bounds.contains($0.frame) })
@@ -241,7 +241,7 @@ struct AgentDashboardViewTests {
         let location = try #require(allSubviews(in: controller.view).compactMap { $0 as? NSTextField }.first {
             $0.identifier?.rawValue == "agent-dashboard-detail-location"
         })
-        #expect(location.stringValue.hasPrefix("Payments App ▸ Codex · payments · "))
+        #expect(location.stringValue.hasPrefix("Payments App  /  Codex · payments · "))
     }
 
     @Test func dashboardOpensWithoutResizingTheMainWindowAndShowsLiveCounts() throws {
@@ -305,11 +305,11 @@ struct AgentDashboardViewTests {
         #expect(detail?.frame.width ?? 0 > 500)
         let dashboard = try #require(allSubviews(in: contentViewController.view)
             .first { $0.identifier?.rawValue == "agent-dashboard" })
-        let header = try #require(allSubviews(in: dashboard).compactMap { $0 as? SettingsHeaderView }.first)
-        #expect(header.frame.height == SettingsHeaderView.height)
+        let header = try #require(allSubviews(in: dashboard).compactMap { $0 as? ShellPageHeaderView }.first)
+        #expect(header.frame.height == ShellPageHeaderView.height)
         #expect(header.frame.maxY == dashboard.bounds.maxY)
         #expect(header.displayedSubtitle == "Monitoring 1 agent across 1 window")
-        #expect(sectionHeadings(in: dashboard) == ["WORKING 1"])
+        #expect(sectionHeadings(in: dashboard) == ["Working 1"])
 
         let terminalScrollView = try #require(
             allSubviews(in: contentViewController.view)
@@ -363,7 +363,7 @@ struct AgentDashboardViewTests {
         #expect(
             agentManager.agent(paneId: paneId, tabId: tabId)?.status == .stopped
         )
-        #expect(sectionHeadings(in: dashboard) == ["STOPPED 1"])
+        #expect(sectionHeadings(in: dashboard) == ["Stopped 1"])
 
         let restartButton = try #require(
             allSubviews(in: contentViewController.view)
@@ -377,7 +377,7 @@ struct AgentDashboardViewTests {
             agentManager.agent(paneId: paneId, tabId: tabId)?.status == .starting
         )
 
-        #expect(sectionHeadings(in: dashboard) == ["WORKING 1"])
+        #expect(sectionHeadings(in: dashboard) == ["Working 1"])
 
         let dashboardRoot = try #require(
             allSubviews(in: contentViewController.view)
@@ -684,7 +684,7 @@ struct AgentDashboardViewTests {
         let reordered = try arrangedRows(in: controller.view)
         #expect(reordered.map(folder(of:)) == ["project-2", "project-0", "project-1", "project-3"])
         #expect(reordered.prefix(3).elementsEqual([rows[2], rows[0], rows[1]]) { $0 === $1 })
-        #expect(sectionHeadings(in: controller.view) == ["NEEDS YOU 1", "WORKING 3"])
+        #expect(sectionHeadings(in: controller.view) == ["Needs you 1", "Working 3"])
     }
 
     @Test func stopAndRestartStayInTheToolbarAndWorkInTheNarrowestWindow() throws {
@@ -731,6 +731,85 @@ struct AgentDashboardViewTests {
         }
     }
 
+    @Test func anAgentsTranscriptReadsAsTheChatTimelineWithPromptJumpsAndTheDetailedWorkLogOnO() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dashboard-timeline-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let reply = (1...8).map { "Paragraph \($0) of the answer, long enough to take a line of its own." }
+            .joined(separator: "\\n\\n")
+        var lines: [String] = []
+        var parent = "null"
+        for turn in 1...3 {
+            let minute = String(format: "%02d", turn * 2)
+            lines.append(#"{"type":"user","uuid":"u\#(turn)","parentUuid":\#(parent),"cwd":"\#(directory.path)","timestamp":"2026-11-08T09:\#(minute):00.000Z","message":{"role":"user","content":"Prompt \#(turn)"}}"#)
+            lines.append(#"{"type":"assistant","uuid":"c\#(turn)","parentUuid":"u\#(turn)","timestamp":"2026-11-08T09:\#(minute):05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"t\#(turn)","name":"Bash","input":{"command":"swift test"}}]}}"#)
+            lines.append(#"{"type":"user","uuid":"o\#(turn)","parentUuid":"c\#(turn)","timestamp":"2026-11-08T09:\#(minute):20.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t\#(turn)","content":"ignored"}]},"toolUseResult":{"stdout":"passed","stderr":"","interrupted":false,"isImage":false}}"#)
+            lines.append(#"{"type":"assistant","uuid":"r\#(turn)","parentUuid":"o\#(turn)","timestamp":"2026-11-08T09:\#(minute):40.000Z","message":{"role":"assistant","content":[{"type":"text","text":"\#(reply)"}]}}"#)
+            parent = "\"r\(turn)\""
+        }
+        let transcript = directory.appendingPathComponent("session.jsonl")
+        try (lines.joined(separator: "\n") + "\n").write(to: transcript, atomically: true, encoding: .utf8)
+
+        let manager = AgentManager()
+        let paneId = try #require(manager.spawnAgent("claude-code", cwd: directory.path))
+        let tabId = try #require(manager.panes[paneId]?.activeTab?.id)
+        manager.updateAgentStatus(paneId: paneId, tabId: tabId, status: .idle)
+        manager.recordAgentConversation(
+            AgentConversation(id: "dashboard-timeline", cwd: directory.path, transcriptPath: transcript.path),
+            paneId: paneId, tabId: tabId
+        )
+        let (controller, window) = openDashboard(for: manager, height: 520)
+        let timeline = try #require(allSubviews(in: controller.view).compactMap { $0 as? ChatTimelineView }.first)
+        func userRows() -> [TimelineRow] {
+            timeline.rows.filter { if case .user = $0.content { true } else { false } }
+        }
+        for _ in 0..<300 where userRows().count < 3 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        controller.view.layoutSubtreeIfNeeded()
+
+        // Agents' timeline: the prompts as bubbles, each finished turn folded behind
+        // "Worked for …" in the minimal work log, the answers as Markdown.
+        #expect(!timeline.isHidden)
+        #expect(userRows().count == 3)
+        let folds = timeline.rows.compactMap { row -> String? in
+            if case let .fold(model) = row.content { return model.label }
+            return nil
+        }
+        #expect(folds == ["Worked for 40s", "Worked for 40s", "Worked for 40s"])
+        #expect(timeline.rows.contains { if case .assistant = $0.content { true } else { false } })
+        #expect(!timeline.isDetailed)
+        #expect(timeline.isFollowing)
+
+        let root = controller.view
+        #expect(root.identifier?.rawValue == "agent-dashboard")
+        let list = try #require(timeline.listView as? TimelineListView)
+        let clip = try #require(list.enclosingScrollView?.contentView)
+        // [ twice from the end puts the second prompt at the top of the lane.
+        let previous = try #require(keyEvent(character: "[", keyCode: 33, window: window))
+        #expect(root.performKeyEquivalent(with: previous))
+        #expect(root.performKeyEquivalent(with: previous))
+        let second = try #require(list.top(ofRow: userRows()[1].id))
+        #expect(abs(clip.bounds.minY - (second - list.topPadding)) < 1)
+        #expect(!timeline.isFollowing)
+        // G follows the newest entry again.
+        #expect(root.performKeyEquivalent(with: try #require(keyEvent(character: "g", keyCode: 5, window: window))))
+        #expect(timeline.isFollowing)
+
+        // O opens the detailed work log: the folds open and the commands show.
+        #expect(root.performKeyEquivalent(with: try #require(keyEvent(character: "o", keyCode: 31, window: window))))
+        #expect(timeline.isDetailed)
+        #expect(timeline.rows.contains { row in
+            if case let .workEntry(model) = row.content { return model.entry.kind == .command }
+            return false
+        })
+        let details = try #require(allSubviews(in: controller.view).compactMap { $0 as? ShellTextButton }.first {
+            $0.identifier?.rawValue == "agent-dashboard-details"
+        })
+        #expect(details.title == "Hide details")
+    }
+
     private func openDashboard(
         for manager: AgentManager,
         width: CGFloat = 900,
@@ -771,7 +850,7 @@ struct AgentDashboardViewTests {
             .stringValue
     }
 
-    /// The list's section headings in order, as `NEEDS YOU 2`.
+    /// The list's section headings in order, as `Needs you 2`.
     private func sectionHeadings(in view: NSView) -> [String] {
         guard let stack = allSubviews(in: view)
             .first(where: { $0.identifier?.rawValue == "agent-dashboard-section" })?

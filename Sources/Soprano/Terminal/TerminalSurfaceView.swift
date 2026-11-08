@@ -370,7 +370,7 @@ struct TerminalConfig {
         }
     }
 
-    private static func shellQuoted(_ value: String) -> String {
+    static func shellQuoted(_ value: String) -> String {
         "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 

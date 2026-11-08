@@ -39,14 +39,15 @@ struct PaneContextLine: Equatable {
     /// The line in one font and color, its parts joined by ` · `, the branch
     /// led by SF Symbols' branch glyph.
     func attributed(font: NSFont, color: NSColor) -> NSAttributedString {
-        var parts = context.map { ChromeText.attributed($0, font: font, color: color) }
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+        var parts = context.map { NSAttributedString(string: $0, attributes: attributes) }
         if let branch {
             parts.append(Self.branchText(branch, font: font, color: color))
         }
         if tabCount > 1 {
-            parts.append(ChromeText.attributed("\(tabCount) tabs", font: font, color: color))
+            parts.append(NSAttributedString(string: "\(tabCount) tabs", attributes: attributes))
         }
-        let separator = ChromeText.attributed(" · ", font: font, color: color)
+        let separator = NSAttributedString(string: " · ", attributes: attributes)
         let text = NSMutableAttributedString()
         for (index, part) in parts.enumerated() {
             if index > 0 { text.append(separator) }
@@ -58,6 +59,7 @@ struct PaneContextLine: Equatable {
     /// The branch glyph, drawn in the text's color and centered on its cap
     /// height, then the name.
     private static func branchText(_ branch: String, font: NSFont, color: NSColor) -> NSAttributedString {
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         let text = NSMutableAttributedString()
         let configuration = NSImage.SymbolConfiguration(pointSize: font.pointSize - 1, weight: .regular)
             .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
@@ -72,9 +74,9 @@ struct PaneContextLine: Equatable {
                 height: image.size.height
             )
             text.append(NSAttributedString(attachment: attachment))
-            text.append(ChromeText.attributed(" ", font: font, color: color))
+            text.append(NSAttributedString(string: " ", attributes: attributes))
         }
-        text.append(ChromeText.attributed(branch, font: font, color: color))
+        text.append(NSAttributedString(string: branch, attributes: attributes))
         return text
     }
 }

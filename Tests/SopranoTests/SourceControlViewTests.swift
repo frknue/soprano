@@ -33,7 +33,7 @@ struct SourceControlViewTests {
         }
     }
 
-    @Test func aDiffTabShowsTheWholeFileInlineOrAlignedSideBySideAndFollowsTheFile() async throws {
+    @Test func aDiffTabListsTheChangesStackedOrSplitAndFollowsTheFile() async throws {
         guard GitStatusReader.executableURL != nil else { return }
         try await withRepository { root in
             let fileURL = root.appendingPathComponent("app.txt")
@@ -44,7 +44,7 @@ struct SourceControlViewTests {
             let themeManager = ThemeManager(themeId: "gruvbox-dark")
             let target = TerminalTarget(paneId: "pane", tabId: "tab")
 
-            let inline = DiffPaneView(
+            let stacked = DiffPaneView(
                 target: target,
                 fileURL: fileURL,
                 staged: false,
@@ -57,42 +57,55 @@ struct SourceControlViewTests {
                 backing: .buffered,
                 defer: true
             )
-            window.contentView = inline
+            window.contentView = stacked
             defer { window.contentView = nil }
-            let inlineText = try #require(textViews(in: inline).first)
-            try await waitUntil { inlineText.string == "one\ntwo\nthree\n" }
-            // The change being read carries the pencil tick on its first row.
-            let gutter = try #require(inlineText.enclosingScrollView?.verticalRulerView as? DiffGutterRuler)
-            #expect(gutter.currentChangeRow == 1)
+            try await waitUntil { stacked.document?.lines.map(\.text) == ["one", "two", "three"] }
+            #expect(stacked.document?.path == "app.txt")
+            #expect(stacked.layoutMode == .unified)
+            // The file opens with its change: the block's range heads it.
+            #expect(stacked.list.rows == [
+                .header,
+                .fold(SurfaceDiffFold(id: -1, rows: 0..<0, range: "@@ -1,3 +1,2 @@", section: "")),
+                .line(0), .line(1), .line(2),
+                .end,
+            ])
+            #expect(stacked.list.changeRows == [3])
+            #expect(stacked.tableView.numberOfRows == stacked.list.rows.count)
+
+            // Pressing a line and dragging selects whole lines; ⌘C copies their text without
+            // markers or numbers. ⇧-click moves the end; the strip and header copy nothing.
+            stacked.beginSelection(at: 3, x: 40, extending: false)
+            #expect(stacked.selectedText() == "two")
+            stacked.extendSelection(to: 4)
+            #expect(stacked.selectedText() == "two\nthree")
+            stacked.beginSelection(at: 0, x: 40, extending: true)
+            #expect(stacked.selection?.rows == 0...3)
+            #expect(stacked.selectedText() == "one\ntwo")
 
             // The file changes on disk: the open diff reloads.
             try Data("one\nthree\nfour\n".utf8).write(to: fileURL)
-            try await waitUntil { inlineText.string == "one\ntwo\nthree\nfour\n" }
+            try await waitUntil { stacked.document?.lines.map(\.text) == ["one", "two", "three", "four"] }
 
             defaults.set(true, forKey: DiffPaneView.sideBySideDefaultsKey)
-            let sideBySide = DiffPaneView(
+            let split = DiffPaneView(
                 target: target,
                 fileURL: fileURL,
                 staged: false,
                 themeManager: themeManager,
                 defaults: defaults
             )
-            sideBySide.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
-            let sides = textViews(in: sideBySide)
-            try #require(sides.count == 2)
-            try await waitUntil { !sides[0].string.isEmpty }
-            #expect(sides[0].string == "one\ntwo\nthree\n\n")
-            #expect(sides[1].string == "one\n\nthree\nfour\n")
+            split.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+            #expect(split.layoutMode == .split)
+            try await waitUntil { split.document != nil }
+            let document = try #require(split.document)
+            #expect(document.old.rows.map(\.kind) == [.context, .removed, .context, .filler])
+            #expect(document.new.rows.map(\.kind) == [.context, .filler, .context, .added])
+            #expect(split.list.rows.filter { if case .pair = $0 { true } else { false } }.count == 4)
+            #expect(split.list.changeRows.count == 2)
         }
     }
 
     // MARK: - Helpers
-
-    private func textViews(in view: NSView) -> [DiffTextView] {
-        view.subviews.flatMap { subview in
-            ((subview as? DiffTextView).map { [$0] } ?? []) + textViews(in: subview)
-        }
-    }
 
     /// A repository whose `app.txt` is committed as "one\ntwo\nthree\n".
     private func withRepository(_ body: (URL) async throws -> Void) async throws {

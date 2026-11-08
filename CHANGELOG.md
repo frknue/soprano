@@ -10,6 +10,16 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- **Agent chat**: `⌘I` (`new-chat`), the sidebar **+** menu, or `⌘P` → *New omp Chat*
+  opens omp as a chat instead of a terminal — beside the focused pane, as a tab of it, in
+  a new tab, or in a new window. It looks and works like Soprano Agents' chat: message
+  bubbles, Markdown answers, each turn's work and diffs under **Worked for**, a card of
+  the files it changed, and a floating composer with approvals (**Decline** / **Approve**),
+  omp's questions (number keys pick), the plan, a `/` command menu, model, thinking and
+  mode pickers, and a context ring that compacts. Return sends, or queues while omp works;
+  `⌘Return` steers the running turn and `Esc` stops it. Chats report status and notify
+  like agent panes, appear in the Agent Dashboard, and reopen their conversation after a
+  restart.
 - **Automations**, like Orca's: the top of the sidebar, **Commands ▸ Automations**, or
   `⌘P` → *Automations* lists prompts an agent (omp, Claude Code, Codex, or OpenCode) runs
   on a schedule — hourly, daily, weekdays, weekly, or any cron expression — in a folder or
@@ -109,6 +119,17 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Soprano now looks like Soprano Agents: the left sidebar reaches into the title bar with
+  the sidebar toggle and session switcher, a Search row, windows as "name N ⌄" sections,
+  and agents as cards with a project monogram and a status pill (Working with its
+  duration, Approval, Input, Failed, Done) instead of uppercase labels; the right
+  sidebar, window and layout tab rows, pane headers, status bar, the Agent Dashboard
+  (whose conversation now reads like a chat), the Automations page and its editor, the
+  editor, diff, Markdown and browser panes, the Settings screen (now a card over the
+  window, with a searchable shortcut list and per-row reset buttons), and every dialog
+  (unsaved changes, close session, rename prompts, paste confirmation) follow the same
+  look. Diff panes keep line selection and ⌘C, plus a right-click Copy Line / Copy File
+  Path menu.
 - Agent notifications are cleaner, like Soprano Agents': a short title saying what the
   agent wants (`Claude Code finished`, `Codex needs approval`, `omp needs input`) over
   the conversation's name, with no location subtitle or quoted reply. Each tab keeps one

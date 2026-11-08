@@ -1,121 +1,74 @@
 import AppKit
 
-// MARK: - Rendered Diff
+// MARK: - Document
 
-/// Line numbers shown in the gutter for one row.
-struct DiffRowNumbers: Equatable, Sendable {
-    var old: Int?
-    var new: Int?
-}
-
-/// One text view's worth of a diff: the inline view, or one side of the
-/// side-by-side view. Built off the main thread; only colors are applied
-/// on it, so a theme change never re-reads git.
-struct DiffRenderedSide: Sendable {
-    enum Gutter: Sendable {
-        /// Old and new numbers plus a +/− marker.
-        case inline
-        case old
-        case new
+/// One file's whole-file diff (`GitStatusReader.diff` reads every line as
+/// context) prepared for Soprano Agents' diff list: both layouts, the syntax
+/// colors of each side, and the counts the header shows. Built off the main
+/// thread; a palette change only redraws.
+struct SurfaceDiffDocument: Sendable {
+    /// The file header's change glyph.
+    enum Change: Sendable {
+        case added
+        case deleted
+        case modified
     }
 
-    /// A changed range within a row, in text offsets.
-    struct Emphasis: Sendable {
-        var range: NSRange
-        var isAddition: Bool
-    }
+    /// Repository-relative path (the header and Copy path).
+    let path: String
+    let lines: [GitDiffLine]
+    /// Stacked rows: each change's removed lines above its added ones.
+    let unified: GitDiffLayout
+    /// Split rows, old and new side row for row (fillers pad the shorter).
+    let old: GitDiffLayout
+    let new: GitDiffLayout
+    let highlights: GitDiffHighlights
+    let additions: Int
+    let deletions: Int
+    /// The largest line number either side shows.
+    let maxLine: Int
+    /// The widest line, in monospaced columns.
+    let maxColumns: Int
+    let change: Change
 
-    let gutter: Gutter
-    /// Every row's line text followed by a newline.
-    let text: String
-    let rows: [GitDiffRow]
-    /// UTF-16 offset of each row in `text`.
-    let rowStarts: [Int]
-    let numbers: [DiffRowNumbers]
-    /// A line index per row, for keeping the reading position when the
-    /// view switches between inline and side by side.
-    let anchors: [Int]
-    /// Syntax tokens with ranges in `text`.
-    let tokens: [SyntaxToken]
-    let emphasis: [Emphasis]
-    let changeStarts: [Int]
-    /// The widest number the gutter shows.
-    let largestNumber: Int
-
-    init(
-        layout: GitDiffLayout,
-        gutter: Gutter,
-        lines: [GitDiffLine],
-        highlights: GitDiffHighlights,
-        anchors: [Int]
-    ) {
-        var text = ""
-        var rowStarts: [Int] = []
-        var numbers: [DiffRowNumbers] = []
-        var tokens: [SyntaxToken] = []
-        var emphasis: [Emphasis] = []
-        var largestNumber = 0
-        var offset = 0
-        rowStarts.reserveCapacity(layout.rows.count)
-        numbers.reserveCapacity(layout.rows.count)
-
-        for row in layout.rows {
-            rowStarts.append(offset)
-            guard let index = row.lineIndex else {
-                numbers.append(DiffRowNumbers())
-                text += "\n"
-                offset += 1
-                continue
+    init(path: String, lines: [GitDiffLine], language: CodeLanguage?) {
+        self.path = path
+        self.lines = lines
+        unified = GitDiffLayout.inline(lines)
+        let sides = GitDiffLayout.sideBySide(lines)
+        old = sides.old
+        new = sides.new
+        highlights = GitDiffHighlights.compute(lines, language: language)
+        var added = 0
+        var removed = 0
+        var context = 0
+        var maxLine = 1
+        var maxColumns = 0
+        for line in lines {
+            switch line.kind {
+            case .added: added += 1
+            case .removed: removed += 1
+            case .context: context += 1
             }
-            let line = lines[index]
-            let length = line.text.utf16.count
-            // A removed line reads as the old file has it, every other line as the new one.
-            let usesOld = gutter == .old || (gutter == .inline && row.kind == .removed)
-            let sideTokens = usesOld ? highlights.old : highlights.new
-            if index < sideTokens.count {
-                for token in sideTokens[index] where NSMaxRange(token.range) <= length {
-                    tokens.append(SyntaxToken(
-                        range: NSRange(location: token.range.location + offset, length: token.range.length),
-                        kind: token.kind
-                    ))
-                }
-            }
-            if let changed = row.changedRange, changed.length > 0, NSMaxRange(changed) <= length {
-                emphasis.append(Emphasis(
-                    range: NSRange(location: changed.location + offset, length: changed.length),
-                    isAddition: row.kind == .added
-                ))
-            }
-            numbers.append(DiffRowNumbers(old: line.oldNumber, new: line.newNumber))
-            switch gutter {
-            case .inline:
-                largestNumber = max(largestNumber, line.oldNumber ?? 0, line.newNumber ?? 0)
-            case .old:
-                largestNumber = max(largestNumber, line.oldNumber ?? 0)
-            case .new:
-                largestNumber = max(largestNumber, line.newNumber ?? 0)
-            }
-            text += Self.displayText(line.text)
-            text += "\n"
-            offset += length + 1
+            maxLine = max(maxLine, line.oldNumber ?? 0, line.newNumber ?? 0)
+            maxColumns = max(maxColumns, Self.columns(of: line.text))
         }
-
-        self.gutter = gutter
-        self.text = text
-        self.rows = layout.rows
-        self.rowStarts = rowStarts
-        self.numbers = numbers
-        self.anchors = anchors
-        self.tokens = tokens
-        self.emphasis = emphasis
-        self.changeStarts = layout.changeStarts
-        self.largestNumber = largestNumber
+        additions = added
+        deletions = removed
+        self.maxLine = maxLine
+        self.maxColumns = maxColumns
+        change = context == 0 && removed == 0 ? .added : context == 0 && added == 0 ? .deleted : .modified
     }
 
-    /// One git line is one row: characters the text system would break the
-    /// line at show as visible symbols of the same UTF-16 length, so token
-    /// and emphasis offsets still apply.
-    private static func displayText(_ text: String) -> String {
+    /// Columns `text` takes in a monospaced font, as the diff rows draw it.
+    static func columns(of text: String) -> Int {
+        DiffLine(kind: .context, text: text, oldNumber: nil, newNumber: nil).columns
+    }
+
+    /// The text a row draws: line breaks the text system would act on show as
+    /// visible symbols of the same UTF-16 length, so token and emphasis offsets
+    /// still apply.
+    static func displayText(_ text: String) -> String {
         guard text.unicodeScalars.contains(where: { lineBreakSymbols[$0] != nil }) else { return text }
         var scalars = String.UnicodeScalarView()
         for scalar in text.unicodeScalars {
@@ -132,499 +85,212 @@ struct DiffRenderedSide: Sendable {
         "\u{2028}": "\u{2424}", // ␤ line separator
         "\u{2029}": "\u{00B6}", // ¶ paragraph separator
     ]
-}
 
-/// Both layouts of one text diff, so switching between them needs no reload.
-struct DiffRendering: Sendable {
-    let lines: [GitDiffLine]
-    let inline: DiffRenderedSide
-    let old: DiffRenderedSide
-    let new: DiffRenderedSide
-    let linesAdded: Int
-    let linesRemoved: Int
+    /// The changed words of a row, kept only when the line shares real content with its pair:
+    /// at least 3 non-blank characters and a quarter of the line (Agents' rule). Two unrelated
+    /// lines that merely share indentation or a closing ")" would otherwise light up whole.
+    func emphasis(of row: GitDiffRow) -> NSRange? {
+        guard let range = row.changedRange, range.length > 0, let index = row.lineIndex else { return nil }
+        let text = lines[index].text as NSString
+        guard NSMaxRange(range) <= text.length else { return nil }
+        let outside = text.substring(to: range.location) + text.substring(from: NSMaxRange(range))
+        let shared = outside.filter { !$0.isWhitespace }.count
+        let total = (text as String).filter { !$0.isWhitespace }.count
+        return shared >= 3 && shared * 4 >= total ? range : nil
+    }
 
-    init(lines: [GitDiffLine], language: CodeLanguage?) {
-        let highlights = GitDiffHighlights.compute(lines, language: language)
-        let inlineLayout = GitDiffLayout.inline(lines)
-        let sides = GitDiffLayout.sideBySide(lines)
-        // A side-by-side row stands for the earlier of the two lines it shows.
-        let pairAnchors = zip(sides.old.rows, sides.new.rows).map { old, new in
-            min(old.lineIndex ?? .max, new.lineIndex ?? .max)
-        }
-        self.lines = lines
-        inline = DiffRenderedSide(
-            layout: inlineLayout,
-            gutter: .inline,
-            lines: lines,
-            highlights: highlights,
-            anchors: inlineLayout.rows.map { $0.lineIndex ?? 0 }
-        )
-        old = DiffRenderedSide(layout: sides.old, gutter: .old, lines: lines, highlights: highlights, anchors: pairAnchors)
-        new = DiffRenderedSide(layout: sides.new, gutter: .new, lines: lines, highlights: highlights, anchors: pairAnchors)
-        var added = 0
-        var removed = 0
-        for line in lines {
-            switch line.kind {
-            case .added: added += 1
-            case .removed: removed += 1
-            case .context: break
-            }
-        }
-        linesAdded = added
-        linesRemoved = removed
+    /// The syntax tokens of a row's line as its own side of the file reads it.
+    func tokens(of row: GitDiffRow, oldSide: Bool) -> [SyntaxToken]? {
+        guard let index = row.lineIndex else { return nil }
+        let side = oldSide ? highlights.old : highlights.new
+        return index < side.count ? side[index] : nil
     }
 }
 
-// MARK: - Column
+// MARK: - List
 
-/// One scrolling text view of a diff with its gutter: the inline view, or
-/// one side of the side-by-side view.
-@MainActor
-final class DiffColumn {
-    let scrollView = NSScrollView()
-    let textView: DiffTextView
-    let ruler: DiffGutterRuler
-    private let textStorage = NSTextStorage()
-    private let layoutManager = NSLayoutManager()
-    private(set) var side: DiffRenderedSide?
-    private var colors: ThemeColors?
+/// Stacked (one column) or split (old | new) rows.
+enum SurfaceDiffLayout: Sendable {
+    case unified
+    case split
+}
 
-    init() {
-        let container = NSTextContainer(size: NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        ))
-        container.widthTracksTextView = false
-        layoutManager.allowsNonContiguousLayout = true
-        layoutManager.addTextContainer(container)
-        textStorage.addLayoutManager(layoutManager)
-        textView = DiffTextView(frame: .zero, textContainer: container)
-        ruler = DiffGutterRuler(textView: textView)
-        configure()
-    }
+/// A strip before a block of shown lines: the unmodified lines folded away above it (a click
+/// shows them), or the block's `@@` range when nothing above is hidden; then the enclosing
+/// declaration git would name.
+struct SurfaceDiffFold: Equatable, Sendable {
+    /// The first hidden line's old line number: stable across both layouts.
+    var id: Int
+    /// The hidden layout rows; empty for a range strip.
+    var rows: Range<Int>
+    /// `@@ -a,b +c,d @@`, shown when no lines are hidden.
+    var range: String?
+    var section: String
 
-    private func configure() {
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = false
-        textView.importsGraphics = false
-        textView.usesFontPanel = false
-        textView.allowsDocumentBackgroundColorChange = false
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticTextReplacementEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.isAutomaticLinkDetectionEnabled = false
-        textView.isAutomaticDataDetectionEnabled = false
-        textView.isAutomaticTextCompletionEnabled = false
-        textView.isContinuousSpellCheckingEnabled = false
-        textView.isGrammarCheckingEnabled = false
-        textView.smartInsertDeleteEnabled = false
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = true
-        textView.autoresizingMask = [.width, .height]
-        textView.minSize = .zero
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainerInset = NSSize(width: 4, height: 6)
+    var hiddenLines: Int { rows.count }
+}
 
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.verticalRulerView = ruler
-        scrollView.hasVerticalRuler = true
-        scrollView.rulersVisible = true
-        scrollView.contentView.postsBoundsChangedNotifications = true
-    }
+enum SurfaceDiffListRow: Equatable, Sendable {
+    case header
+    case fold(SurfaceDiffFold)
+    /// A stacked row (index into `unified.rows`).
+    case line(Int)
+    /// A split row (index into `old.rows` and `new.rows`).
+    case pair(Int)
+    case end
+}
 
-    /// Replaces the text; nil empties the column.
-    func show(_ side: DiffRenderedSide?) {
-        self.side = side
-        textView.setRows(kinds: side?.rows.map(\.kind) ?? [], starts: side?.rowStarts ?? [])
-        textStorage.beginEditing()
-        textStorage.replaceCharacters(in: NSRange(location: 0, length: textStorage.length), with: side?.text ?? "")
-        applyAttributes()
-        textStorage.endEditing()
-        ruler.show(side)
-        // Brings the frame up to the new text before anything scrolls in it.
-        textView.sizeToFit()
-    }
+/// The rows the diff list shows: the file header, then the changes with three lines of
+/// context around each (git's default hunks), longer unmodified runs folded.
+struct SurfaceDiffList: Equatable, Sendable {
+    /// Context lines kept around each change.
+    static let context = 3
 
-    func apply(colors: ThemeColors) {
-        self.colors = colors
-        textView.colors = colors
-        textView.backgroundColor = colors.bgBase
-        textView.insertionPointColor = colors.caret
-        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
-        scrollView.backgroundColor = colors.bgBase
-        ruler.colors = colors
-        textStorage.beginEditing()
-        applyAttributes()
-        textStorage.endEditing()
-    }
+    var rows: [SurfaceDiffListRow] = []
+    /// The list row of each change's first line, in order.
+    var changeRows: [Int] = []
 
-    private func applyAttributes() {
-        guard let colors else { return }
-        let font = ChromeFont.mono
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = []
-        paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
-        // A fixed row height keeps both sides aligned even where a fallback
-        // font would make one line taller.
-        let lineHeight = ceil(layoutManager.defaultLineHeight(for: font))
-        paragraph.minimumLineHeight = lineHeight
-        paragraph.maximumLineHeight = lineHeight
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: colors.syntaxPlain,
-            .paragraphStyle: paragraph,
-        ]
-        textView.typingAttributes = attributes
-        let length = textStorage.length
-        textStorage.setAttributes(attributes, range: NSRange(location: 0, length: length))
-        guard let side else { return }
-        // Semibold and italic SF Mono keep the regular advance, so rows and
-        // columns never shift.
-        let emphasizedFont = SyntaxTokenKind.keyword.font(from: font)
-        let italicFont = SyntaxTokenKind.comment.font(from: font)
-        for token in side.tokens where NSMaxRange(token.range) <= length {
-            textStorage.addAttribute(.foregroundColor, value: token.kind.color(in: colors), range: token.range)
-            if token.kind.isEmphasized {
-                textStorage.addAttribute(.font, value: emphasizedFont, range: token.range)
-            } else if token.kind.isItalic {
-                textStorage.addAttribute(.font, value: italicFont, range: token.range)
+    static let empty = SurfaceDiffList()
+
+    static func build(
+        _ document: SurfaceDiffDocument,
+        layout: SurfaceDiffLayout,
+        collapsed: Bool,
+        expanded: Set<Int>
+    ) -> SurfaceDiffList {
+        var list = SurfaceDiffList(rows: [.header])
+        guard !collapsed else { return list }
+        let layoutRows = layout == .unified ? document.unified.rows : document.old.rows
+        let changeStarts = Set(layout == .unified ? document.unified.changeStarts : document.old.changeStarts)
+        func row(_ index: Int) -> SurfaceDiffListRow { layout == .unified ? .line(index) : .pair(index) }
+        func isContext(_ index: Int) -> Bool { layoutRows[index].kind == .context }
+
+        // Hidden runs of context rows.
+        var hidden: [Range<Int>] = []
+        var index = 0
+        while index < layoutRows.count {
+            guard isContext(index) else {
+                index += 1
+                continue
+            }
+            let start = index
+            while index < layoutRows.count, isContext(index) { index += 1 }
+            let atStart = start == 0
+            let atEnd = index == layoutRows.count
+            let from = atStart ? start : start + context
+            let to = atEnd ? index : index - context
+            if to > from {
+                let fold = from..<to
+                let id = oldNumber(document, layoutRows[fold.lowerBound]) ?? fold.lowerBound
+                if !expanded.contains(id) { hidden.append(fold) }
             }
         }
-        let addedEmphasis = colors.diffAddWord
-        let removedEmphasis = colors.diffDeleteWord
-        for emphasis in side.emphasis where NSMaxRange(emphasis.range) <= length {
-            textStorage.addAttribute(
-                .backgroundColor,
-                value: emphasis.isAddition ? addedEmphasis : removedEmphasis,
-                range: emphasis.range
-            )
+
+        var next = 0
+        var hiddenIndex = 0
+        var blockStarted = false
+        while next < layoutRows.count {
+            if hiddenIndex < hidden.count, hidden[hiddenIndex].lowerBound == next {
+                let fold = hidden[hiddenIndex]
+                hiddenIndex += 1
+                let id = oldNumber(document, layoutRows[fold.lowerBound]) ?? fold.lowerBound
+                list.rows.append(.fold(SurfaceDiffFold(
+                    id: id,
+                    rows: fold,
+                    range: nil,
+                    section: fold.upperBound < layoutRows.count ? section(document, before: layoutRows[fold.upperBound]) : ""
+                )))
+                next = fold.upperBound
+                blockStarted = true
+                continue
+            }
+            if !blockStarted {
+                // The file opens with a change: its block's range, as git heads a hunk.
+                let blockEnd = hiddenIndex < hidden.count ? hidden[hiddenIndex].lowerBound : layoutRows.count
+                list.rows.append(.fold(SurfaceDiffFold(
+                    id: -1,
+                    rows: next..<next,
+                    range: rangeText(document, rows: Array(layoutRows[next..<blockEnd]), layout: layout,
+                                     newRows: layout == .split ? Array(document.new.rows[next..<blockEnd]) : []),
+                    section: ""
+                )))
+                blockStarted = true
+            }
+            if changeStarts.contains(next) { list.changeRows.append(list.rows.count) }
+            list.rows.append(row(next))
+            next += 1
         }
+        list.rows.append(.end)
+        return list
     }
 
-    // MARK: Scrolling
-
-    var clipView: NSClipView { scrollView.contentView }
-
-    /// The top of a row in text view coordinates.
-    func rowTop(_ row: Int) -> CGFloat? {
-        guard let side, row >= 0, row < side.rowStarts.count else { return nil }
-        let glyph = layoutManager.glyphIndexForCharacter(at: side.rowStarts[row])
-        let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-        return fragment.minY + textView.textContainerOrigin.y
+    private static func oldNumber(_ document: SurfaceDiffDocument, _ row: GitDiffRow) -> Int? {
+        row.lineIndex.flatMap { document.lines[$0].oldNumber }
     }
 
-    /// The row at a height in text view coordinates, clamped to the rows.
-    func row(atY y: CGFloat) -> Int? {
-        guard let side, !side.rowStarts.isEmpty, let container = textView.textContainer else { return nil }
-        let point = NSPoint(x: 0, y: y - textView.textContainerOrigin.y)
-        let glyph = layoutManager.glyphIndex(for: point, in: container)
-        let character = layoutManager.characterIndexForGlyph(at: glyph)
-        return textView.row(containing: character)
-    }
-
-    /// The row a third of the way down the visible area, where change
-    /// navigation reads from and puts its target.
-    func anchorRow() -> Int? {
-        let bounds = clipView.bounds
-        return row(atY: bounds.minY + bounds.height / 3)
-    }
-
-    /// Puts the row's top a third of the way down the visible area.
-    func scroll(toRow row: Int) {
-        guard let top = rowTop(row) else { return }
-        let bounds = clipView.bounds
-        scroll(to: NSPoint(x: bounds.minX, y: max(0, top - bounds.height / 3)))
-    }
-
-    /// The line index of the first visible row.
-    func topAnchorLine() -> Int? {
-        guard let side, let row = row(atY: clipView.bounds.minY), row < side.anchors.count else { return nil }
-        return side.anchors[row]
-    }
-
-    /// Puts the last row at or before `line` at the top.
-    func scroll(toAnchorLine line: Int) {
-        guard let side, !side.anchors.isEmpty else { return }
-        let row = side.anchors.lastIndex(where: { $0 <= line }) ?? 0
-        guard let top = rowTop(row) else { return }
-        scroll(to: NSPoint(x: clipView.bounds.minX, y: row == 0 ? 0 : top))
-    }
-
-    /// Scrolls the text to `point`, as far as the text reaches. The text lays
-    /// out lazily and the text view only grows as it does, so a screenful
-    /// past the target is laid out first; otherwise a jump far down the file
-    /// would stop short.
-    func scroll(to point: NSPoint) {
-        let clip = clipView
-        if let container = textView.textContainer {
-            let origin = textView.textContainerOrigin
-            layoutManager.ensureLayout(
-                forBoundingRect: NSRect(x: 0, y: 0, width: textView.bounds.width, height: point.y - origin.y + clip.bounds.height),
-                in: container
-            )
+    /// Git's default function context: the nearest line of the old file above `row` that
+    /// starts with a letter, `_` or `$`, at most 80 characters.
+    static func section(_ document: SurfaceDiffDocument, before row: GitDiffRow) -> String {
+        guard var index = row.lineIndex else { return "" }
+        while index > 0 {
+            index -= 1
+            let line = document.lines[index]
+            guard line.kind != .added, let first = line.text.unicodeScalars.first else { continue }
+            if CharacterSet.letters.contains(first) || first == "_" || first == "$" {
+                let trimmed = line.text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+                return String(trimmed.prefix(80))
+            }
         }
-        let origin = clip.constrainBoundsRect(NSRect(origin: point, size: clip.bounds.size)).origin
-        clip.scroll(to: origin)
-        scrollView.reflectScrolledClipView(clip)
+        return ""
+    }
+
+    /// `@@ -a,b +c,d @@` for a block of shown rows.
+    private static func rangeText(
+        _ document: SurfaceDiffDocument,
+        rows: [GitDiffRow],
+        layout: SurfaceDiffLayout,
+        newRows: [GitDiffRow]
+    ) -> String {
+        let indices = (rows + newRows).compactMap(\.lineIndex)
+        let lines = Set(indices).sorted().map { document.lines[$0] }
+        let oldNumbers = lines.compactMap(\.oldNumber)
+        let newNumbers = lines.compactMap(\.newNumber)
+        return "@@ -\(oldNumbers.first ?? 0),\(oldNumbers.count) +\(newNumbers.first ?? 0),\(newNumbers.count) @@"
     }
 }
 
-// MARK: - Text View
+// MARK: - Selection
 
-/// A read-only diff text view painting each row's tint across its full width.
-final class DiffTextView: NSTextView {
-    var onFocus: (() -> Void)?
-    /// F7 (true) and ⇧F7 (false): the next or previous change.
-    var onNavigate: ((Bool) -> Void)?
-    var colors: ThemeColors? {
-        didSet { needsDisplay = true }
-    }
+/// Whole lines selected in the diff list: the list rows from `anchor` (where
+/// the drag or click started) to `head`, on the side the drag started on in
+/// split view (`oldSide`; stacked rows have one side).
+struct SurfaceDiffSelection: Equatable, Sendable {
+    var anchor: Int
+    var head: Int
+    var oldSide: Bool
 
-    private var rowKinds: [GitDiffRow.Kind] = []
-    private var rowStarts: [Int] = []
-
-    func setRows(kinds: [GitDiffRow.Kind], starts: [Int]) {
-        rowKinds = kinds
-        rowStarts = starts
-        needsDisplay = true
-    }
-
-    /// The row holding a character: the last row starting at or before it.
-    func row(containing characterIndex: Int) -> Int? {
-        guard !rowStarts.isEmpty else { return nil }
-        var low = 0
-        var high = rowStarts.count
-        while low < high {
-            let middle = (low + high) / 2
-            if rowStarts[middle] <= characterIndex {
-                low = middle + 1
-            } else {
-                high = middle
-            }
-        }
-        return max(0, low - 1)
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        let accepted = super.becomeFirstResponder()
-        if accepted {
-            DispatchQueue.main.async { [weak self] in
-                self?.onFocus?()
-            }
-        }
-        return accepted
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.specialKey == .f7 {
-            switch event.modifierFlags.intersection([.command, .control, .option, .shift]) {
-            case []:
-                onNavigate?(true)
-                return
-            case .shift:
-                onNavigate?(false)
-                return
-            default:
-                break
-            }
-        }
-        super.keyDown(with: event)
-    }
-
-    override func drawBackground(in rect: NSRect) {
-        super.drawBackground(in: rect)
-        guard let colors, !rowStarts.isEmpty, let layoutManager, let textContainer else { return }
-        let origin = textContainerOrigin
-        let glyphRange = layoutManager.glyphRange(
-            forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y),
-            in: textContainer
-        )
-        guard glyphRange.length > 0 else { return }
-        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { fragment, _, _, glyphs, _ in
-            let character = layoutManager.characterIndexForGlyph(at: glyphs.location)
-            guard let row = self.row(containing: character) else { return }
-            guard let tint = Self.tint(for: self.rowKinds[row], colors: colors) else { return }
-            let rowRect = NSRect(x: rect.minX, y: fragment.minY + origin.y, width: rect.width, height: fragment.height)
-            tint.setFill()
-            rowRect.fill(using: .sourceOver)
-        }
-    }
-
-    /// Row washes: green or pink for changes, a flat 3 % ink for fillers.
-    static func tint(for kind: GitDiffRow.Kind, colors: ThemeColors) -> NSColor? {
-        switch kind {
-        case .context: nil
-        case .added: colors.diffAdd
-        case .removed: colors.diffDelete
-        case .filler: colors.diffFiller
-        }
-    }
+    var rows: ClosedRange<Int> { min(anchor, head)...max(anchor, head) }
 }
 
-// MARK: - Gutter
-
-/// Muted line numbers beside each row, with the row's wash and a Semibold
-/// +/− marker in its status color: old and new numbers inline, the side's own
-/// number side by side. The current change's first row carries the 2×14
-/// pencil tick at the gutter's leading edge.
-final class DiffGutterRuler: NSRulerView {
-    private weak var diffTextView: DiffTextView?
-    private var side: DiffRenderedSide?
-    private var digits = 3
-    var colors: ThemeColors? {
-        didSet { needsDisplay = true }
-    }
-    /// The first row of the change being read; nil hides the tick.
-    var currentChangeRow: Int? {
-        didSet {
-            guard currentChangeRow != oldValue else { return }
-            needsDisplay = true
+extension SurfaceDiffList {
+    /// The file line a list row shows on one side: a stacked row's line, or a
+    /// split row's old or new line; nil for headers, folds and fillers.
+    func line(atRow row: Int, oldSide: Bool, in document: SurfaceDiffDocument) -> GitDiffLine? {
+        guard rows.indices.contains(row) else { return nil }
+        let layoutRow: GitDiffRow
+        switch rows[row] {
+        case .line(let index): layoutRow = document.unified.rows[index]
+        case .pair(let index): layoutRow = oldSide ? document.old.rows[index] : document.new.rows[index]
+        case .header, .fold, .end: return nil
         }
+        return layoutRow.lineIndex.map { document.lines[$0] }
     }
 
-    private let font = ChromeFont.monoSmall
-    private let markerFont = ChromeFont.monospaced(size: 11, weight: .semibold)
-    private let padding: CGFloat = 6
-    /// Numbers start clear of the pencil tick.
-    private let leading = Chrome.tickInset + Chrome.tickWidth + 4
-
-    init(textView: DiffTextView) {
-        self.diffTextView = textView
-        super.init(scrollView: nil, orientation: .verticalRuler)
-        clientView = textView
-        ruleThickness = 36
-        clipsToBounds = true
-    }
-
-    @available(*, unavailable)
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override var isFlipped: Bool { true }
-
-    private var digitWidth: CGFloat {
-        ("8" as NSString).size(withAttributes: [.font: font]).width
-    }
-
-    /// Right edges of the number columns and the marker column. Inline shows
-    /// old and new numbers; a side shows only its own.
-    private var columns: (old: CGFloat, new: CGFloat, marker: CGFloat) {
-        let width = CGFloat(digits) * digitWidth
-        let old = leading + width
-        let new = side?.gutter == .inline ? old + padding + width : old
-        return (old, new, new + padding + digitWidth)
-    }
-
-    func show(_ side: DiffRenderedSide?) {
-        self.side = side
-        digits = max(3, String(side?.largestNumber ?? 0).count)
-        let thickness = ceil(columns.marker + padding + Chrome.hairline)
-        if thickness != ruleThickness {
-            ruleThickness = thickness
-        }
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let colors else { return }
-        // Views no longer clip to their bounds: a row scrolled half out of
-        // view must not paint over the toolbar.
-        NSBezierPath.clip(bounds)
-        colors.bgPanel.setFill()
-        bounds.fill()
-        drawHashMarksAndLabels(in: dirtyRect)
-        colors.borderSubtle.setFill()
-        NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
-    }
-
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let colors,
-              let side,
-              !side.rowStarts.isEmpty,
-              let textView = diffTextView,
-              let layoutManager = textView.layoutManager,
-              let container = textView.textContainer
-        else { return }
-
-        let origin = textView.textContainerOrigin
-        let visible = textView.visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: visible, in: container)
-        let characters = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-        guard var row = textView.row(containing: characters.location) else { return }
-        let end = NSMaxRange(characters)
-        let columns = columns
-        let numberAttributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.textMuted]
-
-        func drawLabel(_ label: String, rightEdge: CGFloat, in rowRect: NSRect, attributes: [NSAttributedString.Key: Any]) {
-            let string = label as NSString
-            let size = string.size(withAttributes: attributes)
-            string.draw(
-                at: NSPoint(x: rightEdge - size.width, y: rowRect.minY + (rowRect.height - size.height) / 2),
-                withAttributes: attributes
-            )
-        }
-
-        while row < side.rowStarts.count, side.rowStarts[row] <= end {
-            let glyph = layoutManager.glyphIndexForCharacter(at: side.rowStarts[row])
-            let fragment = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            let y = convert(NSPoint(x: 0, y: fragment.minY + origin.y), from: textView).y
-            let rowRect = NSRect(x: 0, y: y, width: ruleThickness - 1, height: fragment.height)
-            let kind = side.rows[row].kind
-            if let tint = DiffTextView.tint(for: kind, colors: colors) {
-                tint.setFill()
-                rowRect.fill(using: .sourceOver)
-            }
-            let numbers = side.numbers[row]
-            switch side.gutter {
-            case .inline:
-                if let old = numbers.old {
-                    drawLabel(String(old), rightEdge: columns.old, in: rowRect, attributes: numberAttributes)
-                }
-                if let new = numbers.new {
-                    drawLabel(String(new), rightEdge: columns.new, in: rowRect, attributes: numberAttributes)
-                }
-            case .old:
-                if let old = numbers.old {
-                    drawLabel(String(old), rightEdge: columns.old, in: rowRect, attributes: numberAttributes)
-                }
-            case .new:
-                if let new = numbers.new {
-                    drawLabel(String(new), rightEdge: columns.new, in: rowRect, attributes: numberAttributes)
-                }
-            }
-            let marker: (String, NSColor)? = switch kind {
-            case .added: ("+", colors.success)
-            case .removed: ("−", colors.danger)
-            case .context, .filler: nil
-            }
-            if let marker {
-                drawLabel(
-                    marker.0,
-                    rightEdge: columns.marker,
-                    in: rowRect,
-                    attributes: [.font: markerFont, .foregroundColor: marker.1]
-                )
-            }
-            if row == currentChangeRow {
-                let tick = NSRect(
-                    x: Chrome.tickInset,
-                    y: floor(rowRect.midY - Chrome.tickHeight / 2),
-                    width: Chrome.tickWidth,
-                    height: Chrome.tickHeight
-                )
-                colors.pencilTick.setFill()
-                NSBezierPath(roundedRect: tick, xRadius: 1, yRadius: 1).fill()
-            }
-            row += 1
-        }
+    /// The text ⌘C copies: the selected lines as the file has them, one per
+    /// line, without markers or line numbers.
+    func text(of selection: SurfaceDiffSelection, in document: SurfaceDiffDocument) -> String {
+        selection.rows
+            .compactMap { line(atRow: $0, oldSide: selection.oldSide, in: document)?.text }
+            .joined(separator: "\n")
     }
 }

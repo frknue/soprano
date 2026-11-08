@@ -2,12 +2,16 @@ import AppKit
 
 /// A file open in Soprano, Orca-style: an editable, syntax-colored text view
 /// with line numbers, find (⌘F), undo, and ⌘S; images are shown, other files
-/// get a note and a way out to their default app.
+/// get a note and a way out to their default app. Drawn as Soprano Agents'
+/// file viewer: a 40 pt header with the repository-relative breadcrumbs and
+/// ghost buttons, SF Mono 13 on 20 pt lines beside muted line numbers, the
+/// diff palette's syntax colors.
 ///
 /// Every tab showing the same file shares one `EditorDocument`, so edits,
 /// undo, and the saved state are the same in each.
 final class EditorPaneView: NSView {
-    static let toolbarHeight: CGFloat = 32
+    /// Height of one code line (Agents' `FileViewerViewController.lineHeight`).
+    static let lineHeight: CGFloat = 20
 
     let target: TerminalTarget
     let document: EditorDocument
@@ -20,23 +24,23 @@ final class EditorPaneView: NSView {
     var onEdited: (() -> Void)?
     var onMarkdownPreviewRequested: ((URL) -> Void)?
 
-    private let toolbar = NSView()
-    private let toolbarRule = ChromeRuleView(axis: .horizontal)
-    private let pathLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
-    private var reloadButton: ChromeButton!
-    private var saveButton: ChromeIconButton!
-    private var previewButton: ChromeIconButton!
-    private var revealButton: ChromeIconButton!
-    private var openExternallyButton: ChromeIconButton!
+    private var toolbar: SurfaceToolbar!
+    private let breadcrumbs = SurfaceBreadcrumbs.label()
+    private let statusLabel = NSTextField.label(size: Typography.smallSize)
+    private var reloadButton: ShellTextButton!
+    private var saveButton: ShellGhostButton!
+    private var previewButton: ShellGhostButton!
+    private var revealButton: ShellGhostButton!
+    private var openExternallyButton: ShellGhostButton!
+    /// The breadcrumb path, recomputed when the document moves.
+    private var displayPath: (url: URL, path: String)?
 
     private let scrollView = NSScrollView()
     private let layoutManager = EditorLayoutManager()
     let textView: EditorTextView
     private var ruler: EditorLineNumberRuler!
     private let imageView = NSImageView()
-    private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private var messageButton: ChromeButton!
+    private var message: SurfaceMessageView!
     private var pendingRestore: (selection: [NSValue], origin: NSPoint)?
     private var lastLineCountDigits = 0
 
@@ -56,6 +60,7 @@ final class EditorPaneView: NSView {
             height: CGFloat.greatestFiniteMagnitude
         ))
         container.widthTracksTextView = false
+        container.lineFragmentPadding = 0
         layoutManager.allowsNonContiguousLayout = true
         layoutManager.addTextContainer(container)
         document.textStorage.addLayoutManager(layoutManager)
@@ -87,6 +92,7 @@ final class EditorPaneView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override var isFlipped: Bool { true }
 
     func focusPreferredControl() {
         onFocusRequested?()
@@ -103,39 +109,29 @@ final class EditorPaneView: NSView {
     // MARK: - Setup
 
     private func setupViews() {
-        toolbar.wantsLayer = true
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(toolbar)
-
-        pathLabel.font = ChromeFont.monoSmall
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        pathLabel.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(pathLabel)
-
         statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(statusLabel)
 
-        reloadButton = ChromeButton(
-            title: "Reload",
-            theme: themeManager.currentTheme,
-            target: self,
-            action: #selector(reloadClicked)
-        )
+        reloadButton = ShellTextButton(title: "Reload", variant: .outline)
+        reloadButton.target = self
+        reloadButton.action = #selector(reloadClicked)
         reloadButton.toolTip = "Replace your unsaved changes with the version on disk"
-        toolbar.addSubview(reloadButton)
 
-        saveButton = makeToolbarButton("square.and.arrow.down", "Save (⌘S)", #selector(saveClicked))
-        previewButton = makeToolbarButton("eye", "Open Markdown Preview", #selector(previewClicked))
-        revealButton = makeToolbarButton("folder", "Reveal in Finder", #selector(revealClicked))
-        openExternallyButton = makeToolbarButton(
+        previewButton = SurfaceToolbar.button(Icon.eye, "Open Markdown Preview", target: self, action: #selector(previewClicked))
+        saveButton = SurfaceToolbar.button("square.and.arrow.down", "Save (⌘S)", target: self, action: #selector(saveClicked))
+        openExternallyButton = SurfaceToolbar.button(
             "arrow.up.forward.app",
             "Open with Default App",
-            #selector(openExternallyClicked)
+            target: self,
+            action: #selector(openExternallyClicked)
         )
-        toolbar.addSubview(toolbarRule)
+        revealButton = SurfaceToolbar.button("folder", "Reveal in Finder", target: self, action: #selector(revealClicked))
+        toolbar = SurfaceToolbar(
+            leading: [breadcrumbs, statusLabel, reloadButton],
+            trailing: [previewButton, saveButton, openExternallyButton, revealButton]
+        )
+        toolbar.setSpacing(8, after: breadcrumbs)
+        addSubview(toolbar)
 
         textView.isRichText = false
         textView.importsGraphics = false
@@ -159,7 +155,7 @@ final class EditorPaneView: NSView {
         textView.autoresizingMask = [.width, .height]
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.textContainerInset = NSSize(width: 12, height: 8)
         textView.delegate = self
         textView.onFocus = { [weak self] in self?.onFocusRequested?() }
         textView.setAccessibilityLabel(document.name)
@@ -168,8 +164,11 @@ final class EditorPaneView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
+        // Below the text: above it, the bar would cover the first line.
+        scrollView.findBarPosition = .belowContent
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         ruler = EditorLineNumberRuler(textView: textView, document: document)
         scrollView.verticalRulerView = ruler
@@ -185,51 +184,24 @@ final class EditorPaneView: NSView {
         addSubview(scrollView)
 
         imageView.imageScaling = .scaleProportionallyDown
+        imageView.imageAlignment = .alignCenter
         imageView.animates = true
+        imageView.setAccessibilityLabel("Image preview")
         imageView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(imageView)
 
-        messageLabel.alignment = .center
-        messageLabel.font = ChromeFont.empty
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(messageLabel)
-        messageButton = ChromeButton(
-            title: "Open with Default App",
-            theme: themeManager.currentTheme,
+        message = SurfaceMessageView(
+            buttonTitle: "Open with Default App",
             target: self,
             action: #selector(openExternallyClicked)
         )
-        addSubview(messageButton)
+        addSubview(message)
+        message.pin(centeredIn: scrollView.centerYAnchor, of: self)
 
         NSLayoutConstraint.activate([
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
-
-            pathLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 12),
-            pathLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.leadingAnchor, constant: -8),
-
-            statusLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            statusLabel.trailingAnchor.constraint(equalTo: reloadButton.leadingAnchor, constant: -8),
-
-            reloadButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            reloadButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -6),
-
-            openExternallyButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
-            openExternallyButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            revealButton.trailingAnchor.constraint(equalTo: openExternallyButton.leadingAnchor, constant: -2),
-            revealButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            previewButton.trailingAnchor.constraint(equalTo: revealButton.leadingAnchor, constant: -2),
-            previewButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            saveButton.trailingAnchor.constraint(equalTo: previewButton.leadingAnchor, constant: -2),
-            saveButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-
-            toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
-            toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
 
             scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -240,61 +212,40 @@ final class EditorPaneView: NSView {
             imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
             imageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -10),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-            messageButton.topAnchor.constraint(equalTo: messageLabel.bottomAnchor, constant: 14),
-            messageButton.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])
-    }
-
-    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> ChromeIconButton {
-        let button = ChromeIconButton(
-            symbolName: symbol,
-            accessibilityLabel: label,
-            pointSize: 12,
-            size: 24,
-            target: self,
-            action: action
-        )
-        toolbar.addSubview(button)
-        return button
     }
 
     // MARK: - Theme
 
     func applyTheme() {
-        let colors = themeManager.currentTheme.colors
-        layer?.backgroundColor = colors.bgBase.cgColor
-        toolbar.layer?.backgroundColor = colors.bgPanel.cgColor
-        toolbarRule.color = colors.borderSubtle
-        pathLabel.textColor = colors.textPrimary
-        for button in [saveButton, previewButton, revealButton, openExternallyButton] {
-            button?.apply(theme: themeManager.currentTheme)
-        }
-        reloadButton.apply(theme: themeManager.currentTheme)
-        messageButton.apply(theme: themeManager.currentTheme)
-        messageLabel.textColor = colors.textMuted
-
-        let font = ChromeFont.mono
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = []
-        paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: colors.syntaxPlain,
-            .paragraphStyle: paragraph,
-        ]
-        document.applyBaseAttributes(attributes)
-        textView.typingAttributes = attributes
-        textView.backgroundColor = colors.bgBase
-        textView.insertionPointColor = colors.caret
-        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
-        scrollView.backgroundColor = colors.bgBase
-        ruler.colors = colors
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.background.cgColor
+        document.applyBaseAttributes(Self.textAttributes(palette))
+        textView.typingAttributes = Self.textAttributes(palette)
+        textView.backgroundColor = palette.background
+        textView.insertionPointColor = palette.foreground
+        textView.selectedTextAttributes = [.backgroundColor: SurfaceText.selection(palette)]
+        scrollView.backgroundColor = palette.background
+        ruler.needsDisplay = true
         applyHighlights()
         updateChrome()
+    }
+
+    /// SF Mono 13 on a fixed 20 pt line, centered in it, tabs four columns.
+    static func textAttributes(_ palette: Palette) -> [NSAttributedString.Key: Any] {
+        let font = Typography.mono()
+        let natural = ceil(font.ascender - font.descender + font.leading)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = lineHeight
+        paragraph.maximumLineHeight = lineHeight
+        paragraph.tabStops = []
+        paragraph.defaultTabInterval = 4 * (" " as NSString).size(withAttributes: [.font: font]).width
+        return [
+            .font: font,
+            .foregroundColor: palette.foreground,
+            .paragraphStyle: paragraph,
+            .baselineOffset: max(0, (lineHeight - natural) / 2),
+        ]
     }
 
     /// Syntax colors are drawn by this view's layout manager rather than
@@ -307,9 +258,9 @@ final class EditorPaneView: NSView {
         for key in [NSAttributedString.Key.foregroundColor, .editorSyntaxEmphasis, .obliqueness] {
             layoutManager.removeTemporaryAttribute(key, forCharacterRange: all)
         }
-        let colors = themeManager.currentTheme.colors
+        let style = DiffStyle(palette: PaletteCenter.shared.palette)
         for token in document.tokens where NSMaxRange(token.range) <= length {
-            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: token.kind.color(in: colors)]
+            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: style.syntaxColor(token.kind)]
             if token.kind.isEmphasized {
                 attributes[.editorSyntaxEmphasis] = true
             } else if token.kind.isItalic {
@@ -371,13 +322,11 @@ final class EditorPaneView: NSView {
         scrollView.isHidden = content != .text
         imageView.isHidden = content != .image
         imageView.image = document.image
-        if case .unavailable(let message) = content {
-            messageLabel.stringValue = message
-            messageLabel.isHidden = false
-            messageButton.isHidden = false
+        if case .unavailable(let text) = content {
+            message.text = text
+            message.isHidden = false
         } else {
-            messageLabel.isHidden = true
-            messageButton.isHidden = true
+            message.isHidden = true
         }
         textView.isEditable = content == .text && !document.isReadOnly
         lastLineCountDigits = String(document.lineCount).count
@@ -386,31 +335,35 @@ final class EditorPaneView: NSView {
     }
 
     private func updateChrome() {
-        let colors = themeManager.currentTheme.colors
-        pathLabel.stringValue = ConfigFile.abbreviatingHome(document.url.path)
-        pathLabel.toolTip = document.url.path
+        let palette = PaletteCenter.shared.palette
+        if displayPath?.url != document.url {
+            displayPath = (document.url, SurfaceBreadcrumbs.displayPath(of: document.url))
+        }
+        breadcrumbs.attributedStringValue = SurfaceBreadcrumbs.make(displayPath?.path ?? document.name, palette: palette)
+        breadcrumbs.toolTip = document.url.path
         textView.isEditable = document.content == .text && !document.isReadOnly
 
         let status: (text: String, color: NSColor)? = switch (document.diskState, document.content) {
         case (.changed, _):
-            ("Changed on disk", colors.danger)
+            ("Changed on disk", palette.errorForeground)
         case (.deleted, _):
-            ("Deleted on disk", colors.danger)
+            ("Deleted on disk", palette.errorForeground)
         case (_, .image):
-            document.image.map { ("\(Int($0.size.width)) × \(Int($0.size.height))", colors.textMuted) }
+            document.image.map { ("\(Int($0.size.width)) × \(Int($0.size.height))", palette.mutedForeground) }
         case (_, .unavailable):
             nil
         default:
             if document.isReadOnly {
-                ("Read only", colors.textMuted)
+                ("Read only", palette.mutedForeground)
             } else if document.isDirty {
-                ("Modified", colors.yellow)
+                ("Modified", palette.warningForeground)
             } else {
                 nil
             }
         }
         statusLabel.isHidden = status == nil
-        statusLabel.setChromeText(status?.text ?? "", font: ChromeFont.meta, color: status?.color ?? colors.textMuted)
+        statusLabel.stringValue = status?.text ?? ""
+        statusLabel.textColor = status?.color ?? palette.mutedForeground
         reloadButton.isHidden = document.diskState != .changed
         saveButton.isEnabled = document.content == .text && !document.isReadOnly
         previewButton.isHidden = !["md", "markdown"].contains(document.url.pathExtension.lowercased())
@@ -610,16 +563,16 @@ final class EditorTextView: NSTextView {
 
 // MARK: - Line Numbers
 
-/// The gutter: a muted line number beside the first line fragment of each
-/// line, on the panel color with one hairline.
+/// The gutter (Agents' `FileLineNumberGutter`): muted, right-aligned SF Mono
+/// 12 beside the first line fragment of each line, 10 pt either side, on the
+/// text's background with no rule.
 final class EditorLineNumberRuler: NSRulerView {
+    static let padding: CGFloat = 10
+
     private weak var editorTextView: NSTextView?
     private let document: EditorDocument
-    var colors: ThemeColors? {
-        didSet { needsDisplay = true }
-    }
 
-    private let font = ChromeFont.monoSmall
+    private let font = Typography.mono(Typography.smallSize)
 
     init(textView: NSTextView, document: EditorDocument) {
         self.editorTextView = textView
@@ -628,7 +581,7 @@ final class EditorLineNumberRuler: NSRulerView {
         clientView = textView
         ruleThickness = 36
         // A ruler sits beside the scroll view, not inside its clip view; the
-        // gutter must keep its hairline and numbers off the toolbar.
+        // gutter must keep its fill and numbers off the toolbar.
         clipsToBounds = true
     }
 
@@ -639,11 +592,11 @@ final class EditorLineNumberRuler: NSRulerView {
 
     override var isFlipped: Bool { true }
 
-    /// Wide enough for the largest line number.
+    /// Wide enough for the largest line number (two digits at least).
     func updateThickness() {
-        let digits = max(3, String(document.lineCount).count)
-        let digitWidth = ("8" as NSString).size(withAttributes: [.font: font]).width
-        let thickness = ceil(CGFloat(digits) * digitWidth + 18)
+        let digits = max(2, String(document.lineCount).count)
+        let digitWidth = ("0" as NSString).size(withAttributes: [.font: font]).width
+        let thickness = ceil(CGFloat(digits) * digitWidth) + Self.padding * 2
         if thickness != ruleThickness {
             ruleThickness = thickness
         }
@@ -651,20 +604,16 @@ final class EditorLineNumberRuler: NSRulerView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let colors else { return }
         // The dirty rect can reach past the ruler's bounds; clip so the
-        // hairline and numbers stay inside the gutter.
+        // fill and numbers stay inside the gutter.
         NSBezierPath.clip(bounds)
-        colors.bgPanel.setFill()
+        PaletteCenter.shared.palette.background.setFill()
         bounds.fill()
-        colors.borderSubtle.setFill()
-        NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
         drawHashMarksAndLabels(in: dirtyRect)
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        guard let colors,
-              let textView = editorTextView,
+        guard let textView = editorTextView,
               let layoutManager = textView.layoutManager,
               let container = textView.textContainer,
               let text = textView.textStorage?.mutableString
@@ -674,17 +623,17 @@ final class EditorLineNumberRuler: NSRulerView {
         let glyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: container)
         let characterRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         let insetY = textView.textContainerOrigin.y
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: PaletteCenter.shared.palette.mutedForeground,
+        ]
 
         func drawNumber(_ number: Int, fragmentY: CGFloat, height: CGFloat) {
             let y = convert(NSPoint(x: 0, y: fragmentY + insetY), from: textView).y
             let label = String(number) as NSString
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: colors.textMuted,
-            ]
             let size = label.size(withAttributes: attributes)
             label.draw(
-                at: NSPoint(x: ruleThickness - size.width - 9, y: y + (height - size.height) / 2),
+                at: NSPoint(x: ruleThickness - size.width - Self.padding, y: y + (height - size.height) / 2),
                 withAttributes: attributes
             )
         }

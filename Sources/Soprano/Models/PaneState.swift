@@ -8,6 +8,10 @@ enum PaneContentKind {
     static let diff = "diff"
     /// A file's staged changes: HEAD against the index.
     static let stagedDiff = "staged-diff"
+    /// An agent tab shown as a chat instead of a terminal. Kept on an agent
+    /// tab rather than as a `PaneType` so older builds decode the workspace
+    /// and reopen the conversation in the agent's terminal.
+    static let chat = "chat"
 
     /// The tab title for `fileURL` shown as `contentKind`, after Orca's
     /// "name (diff)" and "name (staged diff)".
@@ -97,6 +101,11 @@ struct PaneTab: Identifiable {
     /// A real web page, as opposed to browser-backed file content.
     var isWebBrowser: Bool {
         type == .browser && contentKind == nil
+    }
+
+    /// An agent driven over the Agent Client Protocol and shown as a chat.
+    var isChat: Bool {
+        type == .agent && contentKind == PaneContentKind.chat
     }
 
     /// The directory the tab's process actually started in: explicit tab cwd,

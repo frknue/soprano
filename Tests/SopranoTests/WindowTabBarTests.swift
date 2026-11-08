@@ -133,17 +133,16 @@ struct WindowTabBarTests {
         let bar = makeBar(manager: manager, width: 260)
         let button = try #require(tabs(in: bar).first)
         let badge = try #require(agentBadge(in: button) as? StatusCountBadgeView)
-        let theme = ThemeManager(themeId: "gruvbox-dark").currentTheme
-        // A bare mark and count in the status color: no plate, no border.
+        let palette = PaletteCenter.shared.palette
+        // A bare pill symbol and count in the pill's tone: no plate, no border.
         #expect(badge.layer?.backgroundColor == nil)
-        #expect(badge.status == .working)
-        #expect(badge.mark.shape == .dot)
-        #expect(badge.mark.color == theme.colors.success)
-        #expect(badge.mark.frame.width == StatusCountBadgeView.markSize)
+        #expect(badge.pill?.label == "Working")
+        #expect(badge.icon.contentTintColor == palette.color(for: .working))
+        #expect(badge.icon.frame.width == StatusCountBadgeView.iconSize)
         #expect(descendants(in: badge).compactMap { ($0 as? NSTextField)?.stringValue } == ["12"])
         #expect(button.bounds.contains(badge.frame))
-        // The pill's 8 pt trailing padding, inside the 1 pt half of the gap.
-        #expect(button.bounds.maxX - badge.frame.maxX == 9)
+        // The pill's trailing padding, inside its half of the gap.
+        #expect(button.bounds.maxX - badge.frame.maxX == TabPillButton.pillGap / 2 + TabPillButton.trailingPadding)
         // The badge sits on whole points; a one-hairline rule leaves the tab an
         // odd height, so it may sit half a point below the exact middle.
         #expect(abs(badge.frame.midY - button.bounds.midY) <= 0.5)
@@ -157,14 +156,13 @@ struct WindowTabBarTests {
 
         manager.updateAgentStatus(paneId: paneId, status: .waiting)
         bar.layoutSubtreeIfNeeded()
-        #expect(badge.status == .needsInput)
-        #expect(badge.mark.color == theme.colors.yellow)
+        #expect(badge.pill?.label == "Done")
+        #expect(badge.icon.contentTintColor == palette.color(for: .done))
         #expect(button.toolTip?.contains("1 needs input, 11 working") == true)
         #expect(button.cell?.titleRect(forBounds: button.bounds) == titleRect)
         manager.updateAgentStatus(paneId: paneId, status: .error)
-        #expect(badge.status == .error)
-        #expect(badge.mark.shape == .diamond)
-        #expect(badge.mark.color == theme.colors.danger)
+        #expect(badge.pill?.label == "Failed")
+        #expect(badge.icon.contentTintColor == palette.color(for: .failed))
     }
 
     @Test func overflowingTabsScrollToKeepTheKeyboardSelectedWindowVisible() throws {

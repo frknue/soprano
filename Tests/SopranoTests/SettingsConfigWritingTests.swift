@@ -53,8 +53,8 @@ struct SettingsConfigWritingTests {
         let popup = controls(NSPopUpButton.self, in: controller.view).first
         #expect(popup != nil)
 
-        let mochaIndex = AppTheme.options.firstIndex { $0.id == "catppuccin-mocha" }!
-        popup?.selectItem(at: mochaIndex)
+        // The menu sets Folio apart with a separator, so pick by value.
+        popup?.selectItem(at: popup?.indexOfItem(withRepresentedObject: "catppuccin-mocha") ?? -1)
         send(popup!)
 
         #expect(store.settings.themeId == "catppuccin-mocha")
@@ -68,7 +68,7 @@ struct SettingsConfigWritingTests {
         let controller = makeController(store)
         // Switches sit at the trailing edge of a labeled row, so the
         // accessibility label is what names them.
-        let toggle = controls(ChromeSwitch.self, in: controller.view)
+        let toggle = controls(SettingsSwitch.self, in: controller.view)
             .first { $0.accessibilityLabel() == "Restore last session" }
         #expect(toggle != nil)
 
@@ -84,7 +84,7 @@ struct SettingsConfigWritingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = makeController(store)
-        let toggle = controls(ChromeSwitch.self, in: controller.view)
+        let toggle = controls(SettingsSwitch.self, in: controller.view)
             .first { $0.accessibilityLabel() == "Hide window bar" }
         #expect(toggle != nil)
 
@@ -131,7 +131,7 @@ struct SettingsConfigWritingTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let controller = makeController(store)
-        let toggle = controls(ChromeSwitch.self, in: controller.view)
+        let toggle = controls(SettingsSwitch.self, in: controller.view)
             .first { $0.accessibilityLabel() == "Show uptime in status bar" }
         #expect(toggle?.state == .off)
 

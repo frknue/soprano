@@ -211,6 +211,85 @@ struct ClipboardConfirmationCoordinatorTests {
         )
         #expect(Set([paste.title, read.title, write.title]).count == 3)
     }
+
+    @Test func theAppKitPresenterAsksInADialogOverTheWindowWithThePreview() throws {
+        let parent = Self.offscreenWindow()
+        defer { parent.orderOut(nil) }
+        var decisions: [ClipboardConfirmationDecision] = []
+
+        let presentation = AppKitClipboardConfirmationPresenter().present(
+            ClipboardConfirmationPrompt(kind: .paste, content: "rm -rf build\nmake"),
+            from: parent
+        ) { decisions.append($0) }
+
+        let overlay = try #require(parent.childWindows?.first as? ShellDialogOverlayWindow)
+        let preview = try #require(Self.descendants(of: overlay.backdrop).compactMap { $0 as? ClipboardPreviewView }.first)
+        #expect(preview.textView.string == "rm -rf build\nmake")
+        #expect(preview.textView.isEditable == false)
+        #expect(overlay.keyHandler?(Self.key("\r", code: 36)) == true)
+        presentation.dismiss()
+
+        #expect(decisions == [.allow])
+        #expect(overlay.isVisible == false)
+    }
+
+    @Test func escapeInTheAppKitPresentersDialogDenies() throws {
+        let parent = Self.offscreenWindow()
+        defer { parent.orderOut(nil) }
+        var decisions: [ClipboardConfirmationDecision] = []
+
+        _ = AppKitClipboardConfirmationPresenter().present(
+            ClipboardConfirmationPrompt(kind: .osc52Read, content: "secret"),
+            from: parent
+        ) { decisions.append($0) }
+
+        let overlay = try #require(parent.childWindows?.first as? ShellDialogOverlayWindow)
+        #expect(overlay.keyHandler?(Self.key("\u{1b}", code: 53)) == true)
+
+        #expect(decisions == [.deny])
+    }
+
+    @Test func dismissingTheAppKitPresentersDialogClosesItUnanswered() throws {
+        let parent = Self.offscreenWindow()
+        defer { parent.orderOut(nil) }
+        var decisions: [ClipboardConfirmationDecision] = []
+
+        let presentation = AppKitClipboardConfirmationPresenter().present(
+            ClipboardConfirmationPrompt(kind: .osc52Write, content: "x"),
+            from: parent
+        ) { decisions.append($0) }
+        let overlay = try #require(parent.childWindows?.first as? ShellDialogOverlayWindow)
+
+        presentation.dismiss()
+        presentation.dismiss()
+
+        #expect(decisions == [.dismissed])
+        #expect(overlay.isVisible == false)
+        #expect(parent.childWindows?.isEmpty ?? true)
+    }
+
+    private static func offscreenWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: -20_000, y: -20_000, width: 900, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.orderFront(nil)
+        return window
+    }
+
+    private static func key(_ characters: String, code: UInt16) -> NSEvent {
+        NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
+        )!
+    }
+
+    private static func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendants(of: $0) }
+    }
 }
 
 @MainActor

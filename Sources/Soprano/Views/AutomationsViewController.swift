@@ -26,7 +26,7 @@ final class AutomationsViewController: NSViewController {
 
     private var page: Page = .list
     private var rootView: AutomationsRootView!
-    private var headerView: SettingsHeaderView!
+    private var headerView: ShellPageHeaderView!
     private var contentView: NSView!
     private var listView: AutomationListView!
     private var detailView: AutomationDetailView?
@@ -57,10 +57,8 @@ final class AutomationsViewController: NSViewController {
     }
 
     override func loadView() {
-        let theme = themeManager.currentTheme
         let root = AutomationsRootView()
         root.identifier = NSUserInterfaceItemIdentifier("automations")
-        root.wantsLayer = true
         root.onEscape = { [weak self] in self?.handleEscape() }
         root.onNew = { [weak self] in self?.presentEditor(for: nil, template: nil) }
         root.onMove = { [weak self] delta in self?.moveSelection(by: delta) }
@@ -68,7 +66,7 @@ final class AutomationsViewController: NSViewController {
         root.onFocusChange = { [weak self] focused in self?.setHasKeyboard(focused) }
         rootView = root
 
-        headerView = SettingsHeaderView(title: "Automations", theme: theme)
+        headerView = ShellPageHeaderView(title: "Automations")
         headerView.onClose = { [weak self] in self?.onDismiss?() }
         root.addSubview(headerView)
 
@@ -76,7 +74,7 @@ final class AutomationsViewController: NSViewController {
         contentView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(contentView)
 
-        listView = AutomationListView(theme: theme)
+        listView = AutomationListView()
         listView.onOpen = { [weak self] id in self?.display(.automation(id)) }
         listView.onAction = { [weak self] action, id in self?.perform(action, on: id) }
         listView.onNew = { [weak self] template in self?.presentEditor(for: nil, template: template) }
@@ -96,7 +94,6 @@ final class AutomationsViewController: NSViewController {
         ])
 
         view = root
-        applyColors(theme: theme)
         start()
         reload()
     }
@@ -127,24 +124,15 @@ final class AutomationsViewController: NSViewController {
             isObserving = false
         }
         if let editor {
-            editor.sheetParent?.endSheet(editor)
+            editor.dismiss()
             self.editor = nil
         }
     }
 
+    /// Colors follow `PaletteCenter`; a theme change only re-renders the page.
     func apply(theme: AppTheme) {
         guard isViewLoaded else { return }
-        applyColors(theme: theme)
-        listView.apply(theme: theme)
-        detailView?.apply(theme: theme)
-        runView?.apply(theme: theme)
-        editor?.apply(theme: theme)
         reload()
-    }
-
-    private func applyColors(theme: AppTheme) {
-        view.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        headerView.apply(theme: theme)
     }
 
     // MARK: - Navigation
@@ -171,13 +159,12 @@ final class AutomationsViewController: NSViewController {
         detailView = nil
         runView?.removeFromSuperview()
         runView = nil
-        let theme = themeManager.currentTheme
         switch page {
         case .list:
             listView.isHidden = false
         case .automation:
             listView.isHidden = true
-            let detail = AutomationDetailView(theme: theme)
+            let detail = AutomationDetailView()
             detail.onBack = { [weak self] in self?.goBack() }
             detail.onAction = { [weak self] action in
                 guard let self, case .automation(let id) = self.page else { return }
@@ -192,7 +179,7 @@ final class AutomationsViewController: NSViewController {
             detailView = detail
         case .run:
             listView.isHidden = true
-            let runDetail = AutomationRunDetailView(theme: theme)
+            let runDetail = AutomationRunDetailView()
             runDetail.onBack = { [weak self] in self?.goBack() }
             runDetail.onOpenRun = { [weak self] runId in self?.openRun(runId) }
             runDetail.keyHandler = { [weak rootView] event in rootView?.handleKey(event) ?? false }
@@ -369,36 +356,33 @@ final class AutomationsViewController: NSViewController {
 
     private func confirmDelete(_ automation: Automation) {
         guard let window = view.window else { return }
-        let alert = NSAlert()
-        alert.messageText = "Delete \(automation.name)?"
-        alert.informativeText = "Its run history goes too. Windows and worktrees of earlier runs stay."
-        let deleteButton = alert.addButton(withTitle: "Delete")
-        deleteButton.hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        alert.beginSheetModal(for: window) { [weak self] response in
-            MainActor.assumeIsolated {
-                guard let self, response == .alertFirstButtonReturn else { return }
-                if !self.controller.delete(automation.id) {
-                    self.showWriteFailure()
-                }
-                self.focusPage()
+        ShellDialogs.confirm(
+            title: "Delete \(automation.name)?",
+            message: "Its run history goes too. Windows and worktrees of earlier runs stay.",
+            confirmTitle: "Delete",
+            isDestructive: true,
+            in: window
+        ) { [weak self] confirmed in
+            guard let self else { return }
+            if confirmed, !self.controller.delete(automation.id) {
+                self.showWriteFailure()
             }
+            self.focusPage()
         }
     }
 
     private func showWriteFailure() {
         guard let window = view.window else { return }
-        let alert = NSAlert()
-        alert.messageText = "Soprano couldn't change settings.json"
-        alert.informativeText = "Check that \(ConfigStore.shared.displayPath) is writable, then try again."
-        alert.addButton(withTitle: "OK")
-        alert.beginSheetModal(for: window)
+        ShellDialogs.alert(
+            title: "Soprano couldn't change settings.json",
+            message: "Check that \(ConfigStore.shared.displayPath) is writable, then try again.",
+            in: window
+        )
     }
 
     private func presentEditor(for automation: Automation?, template: AutomationTemplate?) {
         guard editor == nil, let window = view.window else { return }
         let panel = AutomationEditorPanel(
-            theme: themeManager.currentTheme,
             automation: automation,
             template: template,
             automations: controller.automations,
@@ -408,28 +392,19 @@ final class AutomationsViewController: NSViewController {
         panel.onSave = { [weak self] automation in
             self?.save(automation) ?? false
         }
-        panel.onClose = { [weak self, weak panel] in
-            guard let self, let panel else { return }
-            panel.sheetParent?.endSheet(panel)
-            panel.orderOut(nil)
+        panel.onClose = { [weak self] in
+            guard let self else { return }
             self.editor = nil
             self.focusPage()
         }
         editor = panel
-        window.beginSheet(panel)
+        panel.present(over: window)
     }
 
+    /// Writes `automation`; false (the editor stays open and says why) when
+    /// settings.json could not be written.
     private func save(_ automation: Automation) -> Bool {
-        guard controller.save(automation) else {
-            if let editor {
-                let alert = NSAlert()
-                alert.messageText = "Soprano couldn't save the automation"
-                alert.informativeText = "Check that \(ConfigStore.shared.displayPath) is writable, then try again."
-                alert.addButton(withTitle: "OK")
-                alert.beginSheetModal(for: editor)
-            }
-            return false
-        }
+        guard controller.save(automation) else { return false }
         if page == .list {
             listView.select(automation.id)
         }
@@ -461,6 +436,7 @@ enum AutomationAction {
         }
         menu.addItem(.separator())
         menu.addItem(AutomationMenuItem(title: "Delete…", perform: { perform(.delete) }))
+        menu.appearance = PaletteCenter.shared.palette.appearance
         return menu
     }
 }
@@ -491,12 +467,21 @@ final class AutomationMenuItem: NSMenuItem {
 /// list → workspace), ⌘N opens the editor, and J/K or the arrows with Return
 /// drive whichever list the page shows. `MainWindowController` recognizes it
 /// so ⌘N reaches the page instead of opening a window.
-final class AutomationsRootView: NSView {
+final class AutomationsRootView: PaletteView {
     var onEscape: (() -> Void)?
     var onNew: (() -> Void)?
     var onMove: ((Int) -> Void)?
     var onActivate: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = palette.background.cgColor
+    }
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -684,58 +669,22 @@ enum AutomationFormat {
     }
 }
 
-/// How a run's status is marked: ring = nothing happening, dot = activity
-/// or your turn, diamond = failure, as `ChromeStatus` marks agents.
-enum AutomationStatusStyle {
-    static func shape(for status: AutomationRun.Status) -> ChromeStatusMark.Shape {
-        switch status {
-        case .starting, .completed, .skipped: .ring
-        case .running, .needsInput: .dot
-        case .failed: .diamond
-        }
-    }
-
-    static func color(for status: AutomationRun.Status, in colors: ThemeColors) -> NSColor {
-        switch status {
-        case .starting, .needsInput: colors.yellow
-        case .running, .completed: colors.success
-        case .failed: colors.danger
-        case .skipped: colors.gray
-        }
-    }
-}
-
 // MARK: - Shared views
 
-/// Label and layout helpers shared by the page's views.
+/// Layout helpers shared by the page's views: Soprano Agents' board column
+/// (`StatisticsDocumentView`), tile grid and header rows.
 @MainActor
 enum AutomationViews {
-    static func label(
-        _ text: String = "",
-        font: NSFont = ChromeFont.label,
-        color: NSColor,
-        lineBreakMode: NSLineBreakMode = .byTruncatingTail
-    ) -> NSTextField {
-        let label = NSTextField(labelWithString: "")
-        label.lineBreakMode = lineBreakMode
-        label.cell?.truncatesLastVisibleLine = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setChromeText(text, font: font, color: color)
-        return label
-    }
-
-    static func wrappingLabel(_ text: NSAttributedString) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: "")
-        label.attributedStringValue = text
-        label.maximumNumberOfLines = 0
-        label.isSelectable = false
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
-    }
+    /// The page column's padding (`px-6`).
+    static let pagePadding: CGFloat = 24
+    /// The page column's reading width.
+    static let maxWidth: CGFloat = 1_040
+    /// Fills the column up to its cap: below the window's own size
+    /// priorities, so the capped column never resizes the window.
+    static let fillPriority = NSLayoutConstraint.Priority.dragThatCannotResizeWindow
 
     /// A vertical page in a scroll view: content runs from the top, sits in
-    /// the page gutter, and stops widening at a readable width.
+    /// the page padding, and stops widening at a readable width.
     static func scrollingPage(stack: NSStackView) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -753,15 +702,14 @@ enum AutomationViews {
         stack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(stack)
 
-        let fill = stack.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -Chrome.Space.page * 2)
-        fill.priority = Chrome.fillPriority
+        let fill = stack.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -pagePadding * 2)
+        fill.priority = fillPriority
         // The document fills the viewport when the page is shorter, but the
         // stack keeps its own height at the top: with an equal bottom it
         // stretched to the viewport and the spare height landed inside
-        // whichever row hugged least (the failure notice, the run's grid).
-        // The lowest priority shrink-wraps a taller page without ever
-        // outweighing a row's own hugging.
-        let hug = document.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: Chrome.Space.page)
+        // whichever row hugged least. The lowest priority shrink-wraps a
+        // taller page without ever outweighing a row's own hugging.
+        let hug = document.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: pagePadding + 8)
         hug.priority = .init(1)
         NSLayoutConstraint.activate([
             document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
@@ -770,44 +718,37 @@ enum AutomationViews {
             document.bottomAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.bottomAnchor),
             document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
-            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: Chrome.Space.page),
-            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: Chrome.Space.s16),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor, constant: -Chrome.Space.page),
+            stack.centerXAnchor.constraint(equalTo: document.centerXAnchor),
+            stack.leadingAnchor.constraint(greaterThanOrEqualTo: document.leadingAnchor, constant: pagePadding),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor, constant: -(pagePadding + 8)),
             hug,
-            stack.widthAnchor.constraint(lessThanOrEqualToConstant: 1_040),
+            stack.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
             fill,
         ])
         return scrollView
     }
 
-    /// Settings shown as a grid of eyebrow-over-value cells, `columns` wide.
-    static func metricsGrid(_ cells: [(String, NSView)], columns: Int, theme: AppTheme) -> NSStackView {
+    /// Tiles `columns` wide, `gap-3`, every tile in a row as tall as the tallest.
+    static func tileGrid(_ tiles: [NSView], columns: Int) -> NSStackView {
         let grid = NSStackView()
         grid.orientation = .vertical
         grid.alignment = .leading
-        grid.spacing = Chrome.Space.s16
+        grid.spacing = 12
         grid.translatesAutoresizingMaskIntoConstraints = false
         var index = 0
-        while index < cells.count {
+        while index < tiles.count {
             let row = NSStackView()
             row.orientation = .horizontal
             row.alignment = .top
             row.distribution = .fillEqually
-            row.spacing = Chrome.Space.s24
+            row.spacing = 12
             row.translatesAutoresizingMaskIntoConstraints = false
             for column in 0..<columns {
-                let cellIndex = index + column
-                guard cellIndex < cells.count else {
-                    row.addArrangedSubview(NSView())
-                    continue
-                }
-                let (title, value) = cells[cellIndex]
-                let cell = NSStackView(views: [ChromeEyebrowView(title: title, theme: theme), value])
-                cell.orientation = .vertical
-                cell.alignment = .leading
-                cell.spacing = Chrome.Space.s4
-                row.addArrangedSubview(cell)
-                value.widthAnchor.constraint(equalTo: cell.widthAnchor).isActive = true
+                let tileIndex = index + column
+                let tile = tileIndex < tiles.count ? tiles[tileIndex] : NSView()
+                row.addArrangedSubview(tile)
+                tile.heightAnchor.constraint(equalTo: row.heightAnchor).isActive = true
             }
             grid.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
@@ -816,97 +757,58 @@ enum AutomationViews {
         return grid
     }
 
-    /// A tinted notice: the error wash, a diamond and the text, like the
-    /// Settings config notices.
-    static func notice(_ text: NSAttributedString, theme: AppTheme, button: NSButton? = nil) -> NSView {
-        let colors = theme.colors
-        let notice = NSView()
-        notice.wantsLayer = true
-        notice.layer?.cornerRadius = Chrome.Radius.control
-        notice.layer?.backgroundColor = colors.errorWash.cgColor
-        notice.translatesAutoresizingMaskIntoConstraints = false
-
-        let mark = ChromeStatusMark(shape: .diamond, color: colors.danger)
-        notice.addSubview(mark)
-        let label = wrappingLabel(text)
-        notice.addSubview(label)
-
-        var constraints = [
-            mark.leadingAnchor.constraint(equalTo: notice.leadingAnchor, constant: 10),
-            mark.topAnchor.constraint(equalTo: label.topAnchor, constant: 4),
-            label.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
-            label.topAnchor.constraint(equalTo: notice.topAnchor, constant: 8),
-            notice.bottomAnchor.constraint(greaterThanOrEqualTo: label.bottomAnchor, constant: 8),
-        ]
-        if let button {
-            button.setContentCompressionResistancePriority(.required, for: .horizontal)
-            notice.addSubview(button)
-            constraints += [
-                button.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 10),
-                button.trailingAnchor.constraint(equalTo: notice.trailingAnchor, constant: -6),
-                button.topAnchor.constraint(equalTo: notice.topAnchor, constant: 6),
-                notice.bottomAnchor.constraint(greaterThanOrEqualTo: button.bottomAnchor, constant: 6),
-            ]
-        } else {
-            constraints.append(label.trailingAnchor.constraint(equalTo: notice.trailingAnchor, constant: -10))
-        }
-        // The bottoms above are only floors; this keeps the notice as short
-        // as its text or button allows.
-        let fit = notice.heightAnchor.constraint(equalToConstant: 0)
-        fit.priority = .init(1)
-        constraints.append(fit)
-        NSLayoutConstraint.activate(constraints)
-        return notice
-    }
-
-    /// A status mark and its UPPERCASE word, for a run.
-    static func statusView(_ status: AutomationRun.Status, theme: AppTheme) -> NSStackView {
-        let color = AutomationStatusStyle.color(for: status, in: theme.colors)
-        let mark = ChromeStatusMark(shape: AutomationStatusStyle.shape(for: status), color: color)
-        let word = NSTextField(labelWithString: "")
-        word.setStatusText(status.label, color: color)
-        let stack = NSStackView(views: [mark, word])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 6
-        stack.setHuggingPriority(.required, for: .horizontal)
-        return stack
-    }
-
-    /// A row's back button and breadcrumb: `‹ Automations / Weekday audit`.
-    static func breadcrumb(_ trail: [String], theme: AppTheme, target: AnyObject, action: Selector) -> NSStackView {
-        let colors = theme.colors
-        let back = ChromeIconButton(
-            symbolName: "chevron.left",
-            accessibilityLabel: "Back to \(trail.dropLast().last ?? "Automations")",
+    /// The back button and trail above a page's title: `‹ Automations / Weekday audit`.
+    static func breadcrumb(_ trail: [String], target: AnyObject, action: Selector) -> NSStackView {
+        let back = ShellGhostButton(
+            symbol: "chevron.left",
+            label: "Back to \(trail.dropLast().last ?? "Automations")",
+            size: 24,
+            symbolSize: 12,
             target: target,
             action: action
         )
-        back.apply(theme: theme)
-        let text = NSMutableAttributedString()
+        var views: [NSView] = [back]
         for (index, part) in trail.enumerated() {
-            if index > 0 {
-                text.append(ChromeText.attributed("  /  ", font: ChromeFont.label, color: colors.textMuted))
-            }
             let isLast = index == trail.count - 1
-            text.append(ChromeText.attributed(
-                part,
-                font: ChromeFont.label,
-                color: isLast ? colors.textPrimary : colors.textMuted
-            ))
+            if index > 0 {
+                views.append(AutoUIThemedLabel("/", size: Typography.rowSize) { $0.mutedForeground.shellScaled(by: 0.6) })
+            }
+            let label = AutoUIThemedLabel(part, size: Typography.rowSize, weight: isLast ? .medium : .regular) {
+                isLast ? $0.foreground : $0.mutedForeground
+            }
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            views.append(label)
         }
-        let label = NSTextField(labelWithAttributedString: text)
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let stack = NSStackView(views: [back, label])
+        let stack = NSStackView(views: views)
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = Chrome.Space.s4
+        stack.spacing = 6
+        stack.setCustomSpacing(4, after: back)
         return stack
     }
 
+    /// A page's title row: the 20 pt title and its status pill, the actions
+    /// at the far edge.
+    static func titleRow(_ title: String, pill: ShellStatusPill, now: Date, buttons: [NSView]) -> NSStackView {
+        let titleLabel = AutoUIThemedLabel(title, size: 20, weight: .semibold)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let pillView = AutoUIPillView(pill, now: now)
+        let row = spreadRow(leading: [titleLabel, pillView], trailing: buttons)
+        row.setCustomSpacing(12, after: titleLabel)
+        return row
+    }
+
+    /// A page action: Agents' text button, kept at its own width.
+    static func button(_ title: String, variant: ShellTextButton.Variant, target: AnyObject, action: Selector) -> ShellTextButton {
+        let button = ShellTextButton(title: title, variant: variant)
+        button.target = target
+        button.action = action
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return button
+    }
+
     /// A horizontal row whose trailing views are pushed to the far edge.
-    static func spreadRow(leading: [NSView], trailing: [NSView], spacing: CGFloat = Chrome.Space.s8) -> NSStackView {
+    static func spreadRow(leading: [NSView], trailing: [NSView], spacing: CGFloat = 8) -> NSStackView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         spacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
@@ -917,6 +819,11 @@ enum AutomationViews {
         row.translatesAutoresizingMaskIntoConstraints = false
         return row
     }
+
+    /// Column titles over a card's rows (12 pt medium, muted, sentence case).
+    static func columnTitle(_ title: String) -> AutoUIThemedLabel {
+        AutoUIThemedLabel(title, size: Typography.smallSize, weight: .medium) { $0.mutedForeground }
+    }
 }
 
 final class AutomationFlippedView: NSView {
@@ -924,13 +831,14 @@ final class AutomationFlippedView: NSView {
 }
 
 /// Read-only, selectable text that is as tall as its text at the width it
-/// gets, optionally on a card: the prompt and a run's report. Keys it does
-/// not use go to `keyHandler`, so J/K keep driving the page after a click
-/// into the text.
-final class AutomationTextBlockView: NSView {
+/// gets: the prompt and a run's messages. Keys it does not use go to
+/// `keyHandler`, so J/K keep driving the page after a click into the text.
+final class AutomationTextBlockView: PaletteView {
     private let textView = AutomationReadOnlyTextView()
-    private let inset: CGFloat
-    private let boxed: Bool
+    private let text: String
+    private let font: NSFont
+    private let role: (Palette) -> NSColor
+    private let lineBreakMode: NSLineBreakMode
     private var measuredHeight: CGFloat = 20
     private var measuredWidth: CGFloat = -1
 
@@ -939,12 +847,18 @@ final class AutomationTextBlockView: NSView {
         set { textView.keyHandler = newValue }
     }
 
-    init(text: NSAttributedString, theme: AppTheme, boxed: Bool) {
-        self.boxed = boxed
-        inset = boxed ? Chrome.Space.s12 : 0
+    init(
+        text: String,
+        font: NSFont = Typography.ui(Typography.bodySize),
+        lineBreakMode: NSLineBreakMode = .byWordWrapping,
+        role: @escaping (Palette) -> NSColor = { $0.foreground }
+    ) {
+        self.text = text
+        self.font = font
+        self.role = role
+        self.lineBreakMode = lineBreakMode
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
@@ -954,27 +868,26 @@ final class AutomationTextBlockView: NSView {
         textView.textContainer?.widthTracksTextView = false
         textView.isVerticallyResizable = false
         textView.isHorizontallyResizable = false
-        textView.textStorage?.setAttributedString(text)
         addSubview(textView)
-        apply(theme: theme)
+        applyPalette(palette)
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
+    var string: String { textView.string }
 
-    func apply(theme: AppTheme) {
-        let colors = theme.colors
-        textView.insertionPointColor = colors.caret
-        textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
-        textView.linkTextAttributes = [.foregroundColor: colors.blue, .underlineStyle: NSUnderlineStyle.single.rawValue]
-        if boxed {
-            layer?.cornerRadius = Chrome.Radius.card
-            layer?.backgroundColor = colors.raised.cgColor
-            layer?.borderWidth = Chrome.hairline
-            layer?.borderColor = colors.borderSubtle.cgColor
-        }
+    override func applyPalette(_ palette: Palette) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = lineBreakMode
+        paragraph.lineHeightMultiple = font.isFixedPitch ? 1.25 : 1.4
+        textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: role(palette),
+            .paragraphStyle: paragraph,
+        ]))
+        textView.insertionPointColor = palette.foreground
+        textView.selectedTextAttributes = [.backgroundColor: palette.primary.withAlphaComponent(palette.isDark ? 0.45 : 0.22)]
+        textView.linkTextAttributes = [.foregroundColor: palette.infoForeground, .cursor: NSCursor.pointingHand]
+        measuredWidth = -1
+        needsLayout = true
     }
 
     override var intrinsicContentSize: NSSize {
@@ -983,8 +896,8 @@ final class AutomationTextBlockView: NSView {
 
     override func layout() {
         super.layout()
-        let width = max(0, bounds.width - inset * 2)
-        textView.frame = NSRect(x: inset, y: inset, width: width, height: max(0, bounds.height - inset * 2))
+        let width = max(0, bounds.width)
+        textView.frame = NSRect(x: 0, y: 0, width: width, height: max(0, bounds.height))
         guard width != measuredWidth,
               let container = textView.textContainer,
               let layoutManager = textView.layoutManager
@@ -992,14 +905,12 @@ final class AutomationTextBlockView: NSView {
         measuredWidth = width
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
         layoutManager.ensureLayout(for: container)
-        let height = ceil(layoutManager.usedRect(for: container).height) + inset * 2
+        let height = ceil(layoutManager.usedRect(for: container).height)
         if height != measuredHeight {
             measuredHeight = height
             invalidateIntrinsicContentSize()
         }
     }
-
-    override var isFlipped: Bool { true }
 }
 
 final class AutomationReadOnlyTextView: NSTextView {
@@ -1008,5 +919,86 @@ final class AutomationReadOnlyTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         if keyHandler?(event) == true { return }
         super.keyDown(with: event)
+    }
+}
+
+/// Markdown rendered by the chat's renderer (`Views/Chat/Markdown`), as tall
+/// as it is at the width it gets: a run's report and a precheck's output.
+/// Keys its selectable text does not use go to `keyHandler`.
+final class AutomationMarkdownBlockView: NSView {
+    private let markdown = MarkdownView(frame: .zero)
+    private let source: String
+    private var measuredHeight: CGFloat = 0
+    private var measuredWidth: CGFloat = -1
+    nonisolated(unsafe) private var keyMonitor: Any?
+
+    var keyHandler: ((NSEvent) -> Bool)?
+
+    init(markdown source: String) {
+        self.source = source
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(markdown)
+        render()
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in self?.render() }
+    }
+
+    /// `text` as a fenced code block, fenced past any backtick run inside it.
+    convenience init(code text: String) {
+        let longestRun = text.split(whereSeparator: { $0 != "`" }).map(\.count).max() ?? 0
+        let fence = String(repeating: "`", count: max(3, longestRun + 1))
+        self.init(markdown: "\(fence)\n\(text)\n\(fence)")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var isFlipped: Bool { true }
+
+    private func render() {
+        markdown.apply(MarkdownRenderer.render(source, style: .assistant))
+        markdown.setQuoteColor(PaletteCenter.shared.palette.foreground.timelineAlpha(0.9 * 0.35))
+        measuredWidth = -1
+        needsLayout = true
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: measuredHeight)
+    }
+
+    override func layout() {
+        super.layout()
+        guard bounds.width != measuredWidth else { return }
+        measuredWidth = bounds.width
+        let height = markdown.layoutMarkdown(width: bounds.width)
+        markdown.frame.origin = .zero
+        if height != measuredHeight {
+            measuredHeight = height
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        guard window != nil else { return }
+        // The rendered text views are the renderer's own; the page's keys
+        // reach them first while one holds a selection.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            nonisolated(unsafe) let incoming = event
+            let consumed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let window = self.window, incoming.window === window,
+                      let responder = window.firstResponder as? NSView,
+                      responder.isDescendant(of: self)
+                else { return false }
+                return self.keyHandler?(incoming) == true
+            }
+            return consumed ? nil : incoming
+        }
     }
 }

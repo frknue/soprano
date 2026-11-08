@@ -922,6 +922,9 @@ final class AgentNotificationManager: NSObject, UNUserNotificationCenterDelegate
             if let terminalView = view as? TerminalSurfaceView {
                 return Target(paneId: terminalView.paneId, tabId: terminalView.tabId)
             }
+            if let chatView = view as? AgentChatPaneView {
+                return Target(paneId: chatView.target.paneId, tabId: chatView.target.tabId)
+            }
             guard let parent = view.superview else { return nil }
             view = parent
         }

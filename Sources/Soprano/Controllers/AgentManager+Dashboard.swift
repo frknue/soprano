@@ -47,7 +47,8 @@ extension AgentManager {
             startedAt: agent.startedAt,
             cwd: cwd,
             sessionName: terminalSessions[terminalWindow.sessionId]?.name,
-            conversation: agent.conversation
+            conversation: agent.conversation,
+            isChat: tab.isChat
         )
     }
 }

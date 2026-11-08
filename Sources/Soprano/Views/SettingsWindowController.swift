@@ -1,6 +1,7 @@
 import AppKit
 
-private enum SettingsTab: Int, CaseIterable {
+/// The settings pages, in navigation order.
+enum SettingsTab: Int, CaseIterable {
     case general
     case keyboardShortcuts
     case agentProfiles
@@ -17,6 +18,7 @@ private enum SettingsTab: Int, CaseIterable {
         }
     }
 
+    /// SF Symbol for the navigation.
     var symbolName: String {
         switch self {
         case .general: return "gearshape"
@@ -28,28 +30,17 @@ private enum SettingsTab: Int, CaseIterable {
     }
 }
 
-/// Folio settings metrics (direction §8, `soprano-settings.html`).
-private enum SettingsLayout {
-    static let navWidth: CGFloat = 200
-    static let navItemHeight: CGFloat = 30
-    /// The page starts this far from the nav.
-    static let pageLeading: CGFloat = 48
-    static let pageTrailing: CGFloat = 24
-    /// Eyebrow and note column beside each card.
-    static let marginColumn: CGFloat = 232
-    static let columnGap: CGFloat = 40
-    static let cardColumn: CGFloat = 680
-    static let pageWidth = marginColumn + columnGap + cardColumn
-    /// Narrower than this, each margin column moves above its card.
-    static let sideBySideMinimumWidth = marginColumn + columnGap + 440
-    static let sectionSpacing: CGFloat = 28
-    static let rowHeight: CGFloat = 36
-    static let tallRowHeight: CGFloat = 44
-    static let rowInset: CGFloat = 12
-    static let rowPadding: CGFloat = 8
-}
+/// The settings screen, laid out as Soprano Agents' settings modal: a 240 pt
+/// navigation on the left, the "Settings › Page" breadcrumb header, and the
+/// page as titled sections of grouped rows (`SettingsForm`).
+///
+/// The screen keeps no settings state of its own: every control writes one
+/// key into `settings.json` through `ConfigStore`, and the page re-renders
+/// when the file (or the accounts) change.
+final class SettingsViewController: NSViewController {
+    static let pageMaxWidth: CGFloat = 768
+    static let filterIdentifier = NSUserInterfaceItemIdentifier("keybindings.filter")
 
-final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     private let themeManager: ThemeManager
     private var settings: AppSettings
     private var keybindingConfig: KeyBindingConfig
@@ -57,52 +48,50 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     /// Where edits go. Every control on this screen writes one key into
     /// `settings.json`; nothing here owns state of its own.
     private let configStore: ConfigStore
+    /// What the Accounts page reads and acts through; `AccountsController`
+    /// in the app.
+    private let accounts: any SettingsAccountsSource
     /// What is currently drawn on screen but is not part of `settings` or
     /// `keybindingConfig`, so a change in either alone still triggers a
     /// rebuild: config problems, and the agent catalog.
     private var renderedIssues: [ConfigIssue] = []
     private var renderedAgents: [AgentProfile] = []
 
-    private var currentTab: SettingsTab = .general
-    private var currentTheme: AppTheme
+    private(set) var currentTab: SettingsTab = .general
+    /// The close button and Esc: the owner takes the screen away.
+    var onClose: (() -> Void)?
 
-    private var rootContainer: NSView!
-    private var sidebar: NSView!
-    private var sidebarRule: ChromeRuleView!
-    private var tabStack: NSStackView!
-    private var contentBackgroundView: NSView!
-    private var scrollView: NSScrollView!
-    private var scrollDocumentView: NSView!
-    private var contentStack: NSStackView!
-    private var tabButtons: [SettingsTab: SettingsTabButton] = [:]
-    /// The current tab's sections, so a width change can move every margin
-    /// column above its card at once.
-    private var sections: [SettingsSectionView] = []
-    private var sectionsAreStacked = false
+    private let nav = SettingsNavView()
+    private let header = SettingsHeaderView()
+    private let scrollView = NSScrollView()
+    private let document = SettingsDocumentView()
+    private var renderedPageWidth: CGFloat = 0
+    private var renderedClipWidth: CGFloat = -1
+    private var rebuildScheduled = false
+    private var isRebuilding = false
+    /// The Keyboard Shortcuts page's filter text.
+    private(set) var shortcutQuery = ""
 
-    private var notificationStatusIcon: NSImageView?
-    private var notificationStatusTitle: NSTextField?
-    private var notificationStatusLabel: NSTextField?
-    private var notificationFixButton: NSButton?
-    private var projectDirectoriesStack: NSStackView?
+    private var notificationRow: SettingsRowView?
+    private var notificationFixButton: SettingsButton?
+    private var projectDirectoriesGroup: SettingsGroupView?
+    private var projectDirectoryAddRow: NSView?
     private var projectDirectoryInput: NSTextField?
-    /// Handlers for the Accounts tab's buttons, keyed by button tag: each row
-    /// acts on its own list and account, which a shared selector cannot carry.
-    /// Refilled on every rebuild of that tab.
-    private var accountActions: [Int: () -> Void] = [:]
+    private var projectDirectoriesForm: SettingsForm?
     private static let accountsObserverId = "SettingsViewController.accounts"
 
     init(
         themeManager: ThemeManager,
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig,
-        configStore: ConfigStore = .shared
+        configStore: ConfigStore = .shared,
+        accounts: any SettingsAccountsSource = AccountsController.shared
     ) {
         self.themeManager = themeManager
         self.settings = settings
         self.keybindingConfig = keybindingConfig
         self.configStore = configStore
-        self.currentTheme = themeManager.currentTheme
+        self.accounts = accounts
         super.init(nibName: nil, bundle: nil)
 
         // Permission can change while this screen is open — the user may be
@@ -115,6 +104,11 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
             name: AgentNotificationManager.authorizationDidChange,
             object: nil
         )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
     }
 
     @objc private func notificationAuthorizationDidChange() {
@@ -136,584 +130,481 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         self.settings = settings
         self.keybindingConfig = keybindingConfig
         guard isViewLoaded, !isUnchanged else { return }
-
-        // Rebuilding tears down the control that is mid-edit; let the current
-        // event finish first so AppKit is not left editing a detached field.
-        DispatchQueue.main.async { [weak self] in
-            self?.rebuildCurrentTab()
-        }
+        scheduleRebuild()
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
+    // MARK: - Layout
 
     override func loadView() {
-        rootContainer = NSView()
-        rootContainer.wantsLayer = true
+        let root = SettingsRootView()
 
-        sidebar = NSView()
-        sidebar.wantsLayer = true
-        sidebar.translatesAutoresizingMaskIntoConstraints = false
-        rootContainer.addSubview(sidebar)
-
-        tabStack = NSStackView()
-        tabStack.orientation = .vertical
-        tabStack.spacing = 2
-        tabStack.edgeInsets = NSEdgeInsets(top: 16, left: 10, bottom: 16, right: 10)
-        tabStack.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.addSubview(tabStack)
-
-        for tab in SettingsTab.allCases {
-            let button = makeTabButton(for: tab)
-            tabButtons[tab] = button
-            tabStack.addArrangedSubview(button)
-        }
-
-        sidebarRule = ChromeRuleView(
-            axis: .vertical,
-            color: currentTheme.colors.borderSubtle
-        )
-        sidebar.addSubview(sidebarRule)
-
-        contentBackgroundView = NSView()
-        contentBackgroundView.wantsLayer = true
-        contentBackgroundView.translatesAutoresizingMaskIntoConstraints = false
-        rootContainer.addSubview(contentBackgroundView)
-
-        scrollView = NSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.documentView = document
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        contentBackgroundView.addSubview(scrollView)
 
-        scrollDocumentView = SettingsScrollDocumentView(frame: .zero)
-        scrollDocumentView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = scrollDocumentView
+        nav.onSelect = { [weak self] tab in self?.switchTab(to: tab) }
+        nav.onOpenFile = { [weak self] in self?.configStore.openInEditor() }
+        header.onClose = { [weak self] in self?.onClose?() }
 
-        contentStack = NSStackView()
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = SettingsLayout.sectionSpacing
-        contentStack.edgeInsets = NSEdgeInsets(top: 28, left: 0, bottom: 40, right: 0)
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        scrollDocumentView.addSubview(contentStack)
-
-        let fillDocumentWidth = contentStack.widthAnchor.constraint(
-            equalTo: scrollDocumentView.widthAnchor,
-            constant: -(SettingsLayout.pageLeading + SettingsLayout.pageTrailing)
-        )
-        // Use the available width without letting the fitting width shrink
-        // the main window; see `Chrome.fillPriority`.
-        fillDocumentWidth.priority = Chrome.fillPriority
-
+        for view in [nav, header, scrollView] as [NSView] {
+            root.addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            sidebar.leadingAnchor.constraint(equalTo: rootContainer.leadingAnchor),
-            sidebar.topAnchor.constraint(equalTo: rootContainer.topAnchor),
-            sidebar.bottomAnchor.constraint(equalTo: rootContainer.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: SettingsLayout.navWidth),
+            nav.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            nav.topAnchor.constraint(equalTo: root.topAnchor),
+            nav.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            nav.widthAnchor.constraint(equalToConstant: SettingsNavView.width),
 
-            contentBackgroundView.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            contentBackgroundView.trailingAnchor.constraint(equalTo: rootContainer.trailingAnchor),
-            contentBackgroundView.topAnchor.constraint(equalTo: rootContainer.topAnchor),
-            contentBackgroundView.bottomAnchor.constraint(equalTo: rootContainer.bottomAnchor),
+            header.leadingAnchor.constraint(equalTo: nav.trailingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
 
-            tabStack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
-            tabStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            tabStack.topAnchor.constraint(equalTo: sidebar.topAnchor),
-
-            sidebarRule.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            sidebarRule.topAnchor.constraint(equalTo: sidebar.topAnchor),
-            sidebarRule.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
-            sidebarRule.widthAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            scrollView.leadingAnchor.constraint(equalTo: contentBackgroundView.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: contentBackgroundView.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: contentBackgroundView.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: contentBackgroundView.bottomAnchor),
-
-            scrollDocumentView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
-            scrollDocumentView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
-            scrollDocumentView.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            // The document may be taller than the viewport. Equality here makes
-            // the full shortcuts list become the window's minimum height.
-            scrollDocumentView.bottomAnchor.constraint(
-                greaterThanOrEqualTo: scrollView.contentView.bottomAnchor
-            ),
-            scrollDocumentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
-
-            // The page hangs from the nav at a fixed distance, the way a
-            // printed page hangs from its spine, rather than floating centred.
-            contentStack.leadingAnchor.constraint(
-                equalTo: scrollDocumentView.leadingAnchor,
-                constant: SettingsLayout.pageLeading
-            ),
-            contentStack.trailingAnchor.constraint(
-                lessThanOrEqualTo: scrollDocumentView.trailingAnchor,
-                constant: -SettingsLayout.pageTrailing
-            ),
-            // A settings form is a reading column, not a canvas: capping the
-            // measure keeps labels and their controls near each other.
-            contentStack.widthAnchor.constraint(lessThanOrEqualToConstant: SettingsLayout.pageWidth),
-            fillDocumentWidth,
-            contentStack.topAnchor.constraint(equalTo: scrollDocumentView.topAnchor),
-            contentStack.bottomAnchor.constraint(equalTo: scrollDocumentView.bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: nav.trailingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
 
-        view = rootContainer
-        rebuildCurrentTab()
-        apply(theme: currentTheme)
+        view = root
+        rebuildCurrentTab(resetScroll: true)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         // The controller keeps the handler by id; capturing weakly lets this
         // screen go away without unregistering, which a deinit could not do.
-        AccountsController.shared.addObserver(id: Self.accountsObserverId) { [weak self] _ in
-            guard let self else { return }
+        accounts.addObserver(id: Self.accountsObserverId) { [weak self] _ in
+            guard let self, currentTab == .accounts else { return }
             // A snapshot can change from inside a button's own action; let
             // that event finish before the button is torn down.
-            DispatchQueue.main.async { [weak self] in
-                self?.accountsSnapshotDidChange()
-            }
+            scheduleRebuild()
         }
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        updateSectionArrangement()
-    }
-
-    /// Margin columns sit beside their cards while the page is wide enough
-    /// for both, and move above them once it is not. Measured from this
-    /// view's own bounds: in `viewDidLayout` the page itself may not be laid
-    /// out yet.
-    private func updateSectionArrangement() {
-        let pageWidth = min(
-            SettingsLayout.pageWidth,
-            view.bounds.width - SettingsLayout.navWidth - SettingsLayout.pageLeading - SettingsLayout.pageTrailing
-        )
-        guard pageWidth > 0 else { return }
-        let stacked = pageWidth < SettingsLayout.sideBySideMinimumWidth
-        guard stacked != sectionsAreStacked else { return }
-        sectionsAreStacked = stacked
-        for section in sections {
-            section.isStacked = stacked
+        // The page column follows the card's width; a change re-renders it
+        // once this layout pass is over.
+        if !isRebuilding,
+           Self.pageWidth(for: view.bounds.width) != renderedPageWidth
+            || scrollView.contentView.bounds.width != renderedClipWidth {
+            scheduleRebuild()
         }
     }
 
-    private func accountsSnapshotDidChange() {
-        guard isViewLoaded, currentTab == .accounts else { return }
-        // Usage refreshes arrive while the user reads further down; keep
-        // their place instead of jumping back to the top.
-        let clipView = scrollView.contentView
-        let origin = clipView.bounds.origin
-        rebuildCurrentTab()
-        let restored = clipView.constrainBoundsRect(
-            NSRect(origin: origin, size: clipView.bounds.size)
-        ).origin
-        clipView.scroll(to: restored)
-        scrollView.reflectScrolledClipView(clipView)
+    /// Width of the page column for a card `width` wide.
+    static func pageWidth(for width: CGFloat) -> CGFloat {
+        max(320, min(pageMaxWidth, width - SettingsNavView.width - 48))
     }
 
-    /// Opens the Accounts tab, e.g. from the status bar's usage readout.
+    /// The view that takes the keyboard when the screen opens.
+    var initialFirstResponder: NSView { document }
+
+    // MARK: - Pages
+
+    /// Opens the Accounts page, e.g. from the status bar's usage readout.
     func showAccountsTab() {
         switchTab(to: .accounts)
     }
 
-    func apply(theme: AppTheme) {
-        currentTheme = theme
-        guard isViewLoaded else { return }
-
-        view.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        sidebar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        contentBackgroundView.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        sidebarRule.color = theme.colors.borderSubtle
-
-        for (tab, button) in tabButtons {
-            button.apply(theme: theme)
-            button.isActive = tab == currentTab
+    func switchTab(to tab: SettingsTab) {
+        guard isViewLoaded else {
+            currentTab = tab
+            return
         }
-
-        rebuildCurrentTab()
-    }
-
-    private func makeTabButton(for tab: SettingsTab) -> SettingsTabButton {
-        let button = SettingsTabButton(
-            tab: tab,
-            theme: currentTheme,
-            target: self,
-            action: #selector(tabClicked(_:))
-        )
-        button.tag = tab.rawValue
-        button.isActive = tab == currentTab
-
-        NSLayoutConstraint.activate([
-            button.heightAnchor.constraint(equalToConstant: SettingsLayout.navItemHeight),
-            button.widthAnchor.constraint(equalToConstant: SettingsLayout.navWidth - 20),
-        ])
-        return button
-    }
-
-    @objc private func tabClicked(_ sender: NSButton) {
-        guard let tab = SettingsTab(rawValue: sender.tag) else { return }
-        switchTab(to: tab)
-    }
-
-    private func switchTab(to tab: SettingsTab) {
-        if isViewLoaded {
-            view.window?.endEditing(for: nil)
-        }
+        view.window?.endEditing(for: nil)
+        let changed = tab != currentTab
         currentTab = tab
-        for (item, button) in tabButtons {
-            button.isActive = item == tab
-        }
-        rebuildCurrentTab()
+        rebuildCurrentTab(resetScroll: changed)
         if tab == .accounts {
             // Throttled by the controller, so flipping tabs does not refetch.
-            AccountsController.shared.refresh()
+            accounts.refresh(force: false)
         }
     }
 
-    private func clearContent() {
-        for subview in contentStack.arrangedSubviews {
-            contentStack.removeArrangedSubview(subview)
-            subview.removeFromSuperview()
+    private func scheduleRebuild() {
+        guard !rebuildScheduled else { return }
+        rebuildScheduled = true
+        // Rebuilding tears down the control that fired or is mid-edit; let
+        // the current event finish first.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            rebuildScheduled = false
+            rebuildCurrentTab(resetScroll: false)
         }
-        sections.removeAll()
-        notificationStatusIcon = nil
-        notificationStatusTitle = nil
-        notificationStatusLabel = nil
-        notificationFixButton = nil
-        projectDirectoriesStack = nil
-        projectDirectoryInput = nil
     }
 
-    private func rebuildCurrentTab() {
+    /// Rebuilds the page from settings, keeping the scroll position and the
+    /// focused text field (by identifier, with its selection) unless the page
+    /// changed.
+    private func rebuildCurrentTab(resetScroll: Bool) {
         guard isViewLoaded else { return }
         // Stamped here rather than in `update`, because this is where issues
         // actually reach the screen — every other entry point (tab switch,
-        // theme change, Reload) lands here too.
+        // Reload) lands here too.
         renderedIssues = configStore.issues
         renderedAgents = configStore.resolved.agents
-        clearContent()
+        let focused = focusedFieldState()
+        let origin = scrollView.contentView.bounds.origin
+        isRebuilding = true
+        defer { isRebuilding = false }
+
+        nav.update(selected: currentTab)
+        header.pageTitle = currentTab.title
+        notificationRow = nil
+        notificationFixButton = nil
+        projectDirectoriesGroup = nil
+        projectDirectoryAddRow = nil
+        projectDirectoryInput = nil
+        projectDirectoriesForm = nil
+
+        let width = Self.pageWidth(for: view.bounds.width)
+        let form = SettingsForm(width: width)
+        let sections: [NSView]
         switch currentTab {
-        case .general:
-            buildGeneralTab()
-        case .keyboardShortcuts:
-            buildKeyboardShortcutsTab()
-        case .agentProfiles:
-            buildAgentProfilesTab()
-        case .accounts:
-            buildAccountsTab()
-        case .about:
-            buildAboutTab()
+        case .general: sections = generalPage(form)
+        case .keyboardShortcuts: sections = keyboardShortcutsPage(form)
+        case .agentProfiles: sections = agentProfilesPage(form)
+        case .accounts: sections = accountsPage(form)
+        case .about: sections = aboutPage(form)
         }
-
-        // Keep settings cards at their natural height when the window is taller
-        // than the content. This spacer absorbs the remaining viewport space.
-        let flexibleSpace = NSView()
-        flexibleSpace.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(flexibleSpace)
-        flexibleSpace.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
-
+        document.setSections(sections, width: width)
+        renderedPageWidth = width
         view.layoutSubtreeIfNeeded()
-        updateSectionArrangement()
-        scrollView.contentView.scroll(to: .zero)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+        fitDocument()
+
+        let clip = scrollView.contentView
+        let target = resetScroll ? .zero : clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin
+        clip.scroll(to: target)
+        scrollView.reflectScrolledClipView(clip)
+        refreshNotificationAuthorizationRow()
+        restoreFocus(focused)
     }
 
-    // MARK: - Page building blocks
-
-    /// The page head: a New York page title over a muted line saying what
-    /// the tab is for.
-    private func addPageHeader(title: String, subtitle: String) {
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.setChromeText(title, font: ChromeFont.screen, color: currentTheme.colors.textPrimary)
-
-        let subtitleLabel = makeWrappingLabel(subtitle, font: ChromeFont.row, color: currentTheme.colors.textMuted)
-
-        let head = NSStackView(views: [titleLabel, subtitleLabel])
-        head.orientation = .vertical
-        head.alignment = .leading
-        head.spacing = 4
-        head.translatesAutoresizingMaskIntoConstraints = false
-        subtitleLabel.widthAnchor.constraint(equalTo: head.widthAnchor).isActive = true
-        addContentSubview(head)
+    private func fitDocument() {
+        let clipWidth = scrollView.contentView.bounds.width
+        document.fit(to: clipWidth)
+        renderedClipWidth = clipWidth
     }
 
-    private func addContentSubview(_ view: NSView) {
-        contentStack.addArrangedSubview(view)
-        view.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+    private func focusedFieldState() -> (identifier: NSUserInterfaceItemIdentifier, selection: NSRange)? {
+        guard let editor = view.window?.firstResponder as? NSTextView,
+              let field = editor.delegate as? NSTextField,
+              field.isDescendant(of: document),
+              let identifier = field.identifier
+        else { return nil }
+        return (identifier, editor.selectedRange())
     }
 
-    /// A section: an eyebrow and optional note in the margin column, beside
-    /// (or, on a narrow page, above) a card. Returns the card's row stack.
-    @discardableResult
-    private func addSection(title: String?, note: NSAttributedString? = nil) -> NSStackView {
-        let card = NSView()
-        card.wantsLayer = true
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.layer?.cornerRadius = Chrome.Radius.card
-        card.layer?.borderWidth = Chrome.hairline
-        card.layer?.backgroundColor = currentTheme.colors.raised.cgColor
-        card.layer?.borderColor = currentTheme.colors.borderSubtle.cgColor
+    private func restoreFocus(_ state: (identifier: NSUserInterfaceItemIdentifier, selection: NSRange)?) {
+        guard let window = view.window else { return }
+        if let state, let field = document.field(withIdentifier: state.identifier) {
+            window.makeFirstResponder(field)
+            let length = field.stringValue.utf16.count
+            let location = min(state.selection.location, length)
+            field.currentEditor()?.selectedRange = NSRange(location: location, length: min(state.selection.length, length - location))
+        } else if window.firstResponder == nil || window.firstResponder === window
+                    || (window.firstResponder as? NSView)?.window == nil {
+            window.makeFirstResponder(document)
+        }
+    }
 
-        let rows = NSStackView()
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = 0
-        rows.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(rows)
-        NSLayoutConstraint.activate([
-            rows.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            rows.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            rows.topAnchor.constraint(equalTo: card.topAnchor),
-            rows.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+    /// Esc while the shortcut filter edits a query clears the query first.
+    func handleEscape() -> Bool {
+        guard currentTab == .keyboardShortcuts, !shortcutQuery.isEmpty,
+              focusedFieldState()?.identifier == Self.filterIdentifier
+        else { return false }
+        shortcutQuery = ""
+        rebuildCurrentTab(resetScroll: false)
+        return true
+    }
+
+    private func write(_ value: Any, at path: [String]) {
+        configStore.write(value, at: path)
+    }
+
+    /// Reset action for `path` when its value differs from the default, else nil.
+    private func reset(_ path: [String], isDefault: Bool) -> (() -> Void)? {
+        isDefault ? nil : { [weak self] in self?.configStore.remove(at: path) }
+    }
+
+    private func switchControl(_ isOn: Bool, label: String, action: Selector) -> SettingsSwitch {
+        SettingsSwitch(isOn: isOn, label: label, target: self, action: action)
+    }
+
+    private func openFileButton(_ form: SettingsForm) -> SettingsButton {
+        form.button("Open settings.json") { [weak self] in self?.configStore.openInEditor() }
+    }
+
+    // MARK: - General
+
+    private func generalPage(_ form: SettingsForm) -> [NSView] {
+        let defaults = AppSettings.defaultSettings
+        var sections: [NSView] = []
+
+        // Without this, a typo in the file would fail silently.
+        let issues = configStore.issues
+        if !issues.isEmpty {
+            sections.append(form.section("settings.json", issues.map { issue in
+                form.row(
+                    issue.severity == .error ? "Error" : "Warning",
+                    description: issue.line.map { "Line \($0): \(issue.message)" } ?? issue.message,
+                    descriptionRole: issue.severity == .error ? { $0.errorForeground } : { $0.warningForeground },
+                    control: openFileButton(form)
+                )
+            }))
+        }
+
+        let theme = SettingsSelectButton(
+            options: AppTheme.options.map { ($0.name, $0.id) },
+            selected: settings.themeId,
+            width: 224,
+            accessibilityLabel: "Theme",
+            separatorAfterFirst: true
+        )
+        theme.target = self
+        theme.action = #selector(themeChanged(_:))
+        let appearances = AppearancePreference.allCases
+        let appearance = SettingsSegmentedControl(
+            titles: appearances.map(\.title),
+            selectedSegment: appearances.firstIndex(of: settings.appearance) ?? 0,
+            target: self,
+            action: #selector(appearanceChanged(_:))
+        )
+        appearance.setAccessibilityLabel("Appearance")
+        sections.append(form.section("Appearance", [
+            form.row(
+                "Theme",
+                description: "Folio follows the appearance below; the other themes pin their own palette.",
+                reset: reset(["theme"], isDefault: settings.themeId == defaults.themeId),
+                control: theme
+            ),
+            form.row(
+                "Appearance",
+                description: "Light or dark for Folio. System follows the macOS appearance.",
+                reset: reset(["appearance"], isDefault: settings.appearance == defaults.appearance),
+                control: appearance
+            ),
+            form.row(
+                "Hide window bar",
+                description: "Hide the title bar and traffic-light controls so panes use the full window.",
+                reset: reset(["hideWindowBar"], isDefault: settings.hideWindowBar == defaults.hideWindowBar),
+                control: switchControl(settings.hideWindowBar, label: "Hide window bar", action: #selector(hideWindowBarChanged(_:)))
+            ),
+            form.row(
+                "Hide window tabs",
+                description: "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F.",
+                reset: reset(["hideWindowTabs"], isDefault: settings.hideWindowTabs == defaults.hideWindowTabs),
+                control: switchControl(settings.hideWindowTabs, label: "Hide window tabs", action: #selector(hideWindowTabsChanged(_:)))
+            ),
+            form.row(
+                "Show uptime in status bar",
+                description: "How long Soprano has been running, as Up h:mm:ss at the end of the status bar.",
+                reset: reset(["statusBar", "uptime"], isDefault: settings.statusBarUptime == defaults.statusBarUptime),
+                control: switchControl(settings.statusBarUptime, label: "Show uptime in status bar", action: #selector(statusBarUptimeChanged(_:)))
+            ),
+        ]))
+
+        sections.append(form.section("Session", [
+            form.row(
+                "Restore workspace",
+                description: "Reopen the workspace from the previous launch when Soprano starts.",
+                reset: reset(["restoreLastSession"], isDefault: settings.restoreLastSession == defaults.restoreLastSession),
+                control: switchControl(settings.restoreLastSession, label: "Restore last session", action: #selector(restoreSessionChanged(_:)))
+            ),
+        ]))
+
+        sections.append(notificationsSection(form, defaults: defaults))
+        sections.append(projectDirectoriesSection(form))
+        sections.append(keybindingBehaviorSection(form))
+        return sections
+    }
+
+    private func notificationsSection(_ form: SettingsForm, defaults: AppSettings) -> NSView {
+        let sound = form.row(
+            "Play a sound",
+            description: "Play the system sound with each notification.",
+            reset: reset(["notifications", "sound"], isDefault: settings.notificationSound == defaults.notificationSound),
+            control: switchControl(settings.notificationSound, label: "Play a sound", action: #selector(notificationSoundChanged(_:)))
+        )
+        // Permission lives in System Settings, and macOS only ever prompts
+        // once. The row says where it stands and offers the way there.
+        let fix = form.button("Open System Settings") {
+            AgentNotificationManager.openSystemNotificationSettings()
+        }
+        let status = form.row("Checking permission", description: "Checking notification permission…", control: fix)
+        notificationRow = status
+        notificationFixButton = fix
+        return form.section(
+            "Notifications",
+            note: "Banners for panes that are not focused, named window ▸ pane.",
+            [sound, status]
+        )
+    }
+
+    /// Describes the current permission and offers the way to System Settings
+    /// where that can change anything.
+    func refreshNotificationAuthorizationRow() {
+        guard let notificationRow, let notificationFixButton else { return }
+        let title: String
+        let message: String
+        var role: (Palette) -> NSColor = { $0.foreground }
+        let offersSystemSettings: Bool
+        switch AgentNotificationManager.authorization {
+        case .authorized:
+            title = "Notifications allowed"
+            message = "macOS is allowed to show Soprano notifications."
+            role = { $0.successForeground }
+            offersSystemSettings = true
+        case .denied:
+            title = "Notifications blocked"
+            message = "macOS is blocking Soprano notifications. Panes still show status "
+                + "and an unread ring, but no banner appears."
+            role = { $0.errorForeground }
+            offersSystemSettings = true
+        case .notDetermined:
+            title = "Not asked yet"
+            message = "macOS has not been asked yet. The prompt appears the first time "
+                + "an unfocused pane wants you."
+            offersSystemSettings = false
+        case .unavailable:
+            title = "Notifications unavailable"
+            message = "Notifications need the packaged app; unbundled builds cannot post them."
+            offersSystemSettings = false
+        case nil:
+            title = "Checking permission"
+            message = "Checking notification permission…"
+            offersSystemSettings = false
+        }
+        notificationRow.titleLabel.stringValue = title
+        notificationRow.titleLabel.role = role
+        notificationRow.setDescription(message)
+        notificationFixButton.isHidden = !offersSystemSettings
+    }
+
+    private func projectDirectoriesSection(_ form: SettingsForm) -> NSView {
+        let input = SettingsInputField(placeholder: "Folder path", font: Typography.mono(Typography.rowSize))
+        input.field.identifier = NSUserInterfaceItemIdentifier("projects.add")
+        input.field.target = self
+        input.field.action = #selector(addProjectDirectory)
+        input.field.cell?.sendsActionOnEndEditing = false
+        input.field.setAccessibilityLabel("Folder path")
+        input.setContentHuggingPriority(NSLayoutConstraint.Priority(200), for: .horizontal)
+        input.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        projectDirectoryInput = input.field
+
+        let browse = SettingsButton("Browse…") { [weak self] in self?.browseProjectDirectory() }
+        let add = SettingsButton("Add", variant: .primary) { [weak self] in self?.addProjectDirectory() }
+        projectDirectoryAddRow = SettingsActionsRowView(views: [input, browse, add], fills: true)
+
+        let group = SettingsGroupView(rows: [])
+        projectDirectoriesGroup = group
+        projectDirectoriesForm = form
+        rebuildProjectDirectoriesList()
+        return form.section(
+            "Project directories",
+            note: "Directories available to project-aware features.",
+            group: group
+        )
+    }
+
+    /// Re-lists the directories in place, keeping the add row (and what is
+    /// typed into it) instead of rebuilding the page.
+    private func rebuildProjectDirectoriesList() {
+        guard let group = projectDirectoriesGroup, let form = projectDirectoriesForm, let addRow = projectDirectoryAddRow else { return }
+
+        // The list shows what the FILE says, not the resolved result: a root
+        // on an unmounted volume is dropped during resolution, and rendering
+        // the resolved list would make "Remove" renumber onto the wrong entry
+        // and a later write delete the missing root for good.
+        let directories = configuredProjectDirectories
+        var rows: [NSView] = []
+        if directories.isEmpty {
+            rows.append(form.row(
+                "No project directories",
+                description: "Add a folder below, or list them under \"projectDirectories\" in settings.json."
+            ))
+        }
+        for (index, directory) in directories.enumerated() {
+            var isDirectory: ObjCBool = false
+            let isReachable = FileManager.default.fileExists(
+                atPath: SopranoConfig.expandPath(directory),
+                isDirectory: &isDirectory
+            ) && isDirectory.boolValue
+            let remove = form.button("Remove", size: .xs) { [weak self] in self?.removeProjectDirectory(at: index) }
+            let row = form.row(
+                directory,
+                description: isReachable ? nil : "Not found",
+                descriptionRole: { $0.warningForeground },
+                control: remove
+            )
+            row.titleLabel.font = Typography.mono(Typography.rowSize, weight: .medium)
+            row.titleLabel.lineBreakMode = .byTruncatingMiddle
+            rows.append(row)
+        }
+        rows.append(addRow)
+        group.setRows(rows)
+        if view.window != nil {
+            view.layoutSubtreeIfNeeded()
+            fitDocument()
+        }
+    }
+
+    private func keybindingBehaviorSection(_ form: SettingsForm) -> NSView {
+        let defaults = DefaultKeybindings.config
+        let prefix = SettingsPrefixKeyControl(
+            key: keybindingConfig.prefixKey,
+            target: self,
+            action: #selector(prefixKeyRecorded(_:))
+        )
+
+        let timeoutLimits = SopranoConfig.Limits.prefixTimeoutMs
+        let timeout = numberField(
+            "\(keybindingConfig.prefixTimeoutMs)",
+            width: 80,
+            identifier: "keybindings.prefixTimeoutMs",
+            label: "Prefix timeout in milliseconds",
+            action: #selector(prefixTimeoutCommitted(_:))
+        )
+        let resizeLimits = SopranoConfig.Limits.resizeTickPercent
+        let resize = numberField(
+            "\(Int(keybindingConfig.resizeTickPercent))",
+            width: 64,
+            identifier: "keybindings.resizeTickPercent",
+            label: "Resize step in percent",
+            action: #selector(resizeStepCommitted(_:))
+        )
+        let legend = SettingsKeycaps.prefixLegend(keybindingConfig.prefixKey)
+        return form.section("Keybindings", [
+            form.row(
+                "Prefix key",
+                description: "⌃ + this key starts a prefix chord: \(legend), then the key. Click it and press a key to change it.",
+                reset: reset(["keybindings", "prefixKey"], isDefault: keybindingConfig.prefixKey == defaults.prefixKey),
+                control: prefix
+            ),
+            form.row(
+                "Prefix timeout",
+                description: "Milliseconds the prefix waits for its key (\(timeoutLimits.lowerBound)–\(timeoutLimits.upperBound)).",
+                reset: reset(["keybindings", "prefixTimeoutMs"], isDefault: keybindingConfig.prefixTimeoutMs == defaults.prefixTimeoutMs),
+                control: timeout
+            ),
+            form.row(
+                "Resize step",
+                description: "Percent of the window a pane grows or shrinks per resize key (\(resizeLimits.lowerBound)–\(resizeLimits.upperBound)).",
+                reset: reset(["keybindings", "resizeTickPercent"], isDefault: keybindingConfig.resizeTickPercent == defaults.resizeTickPercent),
+                control: resize
+            ),
         ])
-
-        addSection(title: title, note: note, content: card)
-        return rows
     }
 
-    private func addSection(title: String?, note: NSAttributedString?, content: NSView) {
-        var sideViews: [NSView] = []
-        if let title {
-            sideViews.append(ChromeEyebrowView(title: title, theme: currentTheme))
-        }
-        if let note {
-            let label = NSTextField(wrappingLabelWithString: "")
-            label.attributedStringValue = note
-            label.maximumNumberOfLines = 0
-            label.isSelectable = false
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            sideViews.append(label)
-        }
-        let section = SettingsSectionView(side: sideViews, content: content, isStacked: sectionsAreStacked)
-        sections.append(section)
-        addContentSubview(section)
-    }
-
-    /// A margin note: 11 pt muted text on a 16 pt line, with optional
-    /// inline mono runs (paths) in ink.
-    private func note(_ parts: [(String, isMono: Bool)]) -> NSAttributedString {
-        let colors = currentTheme.colors
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 16
-        paragraph.maximumLineHeight = 16
-        let text = NSMutableAttributedString()
-        for (string, isMono) in parts {
-            text.append(NSAttributedString(string: string, attributes: [
-                .font: isMono ? ChromeFont.monoSmall : ChromeFont.meta,
-                .foregroundColor: isMono ? colors.textPrimary : colors.textMuted,
-                .paragraphStyle: paragraph,
-            ]))
-        }
-        return text
-    }
-
-    private func note(_ string: String) -> NSAttributedString {
-        note([(string, isMono: false)])
-    }
-
-    /// One form row: `leading` at the left, `trailing` pinned to the card's
-    /// right edge. Rows after the first carry a hairline inset from the left.
-    private func makeFormRow(
-        leading: NSView,
-        trailing: NSView? = nil,
-        minHeight: CGFloat = SettingsLayout.rowHeight,
-        leadingFills: Bool = false
-    ) -> NSView {
-        let row = NSView()
-        row.translatesAutoresizingMaskIntoConstraints = false
-        leading.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(leading)
-
-        let inset = SettingsLayout.rowInset
-        let padding = SettingsLayout.rowPadding
-        var constraints = [
-            row.heightAnchor.constraint(greaterThanOrEqualToConstant: minHeight),
-            leading.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: inset),
-            leading.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            leading.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: padding),
-            row.bottomAnchor.constraint(greaterThanOrEqualTo: leading.bottomAnchor, constant: padding),
-        ]
-        if let trailing {
-            trailing.translatesAutoresizingMaskIntoConstraints = false
-            trailing.setContentHuggingPriority(.required, for: .horizontal)
-            trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
-            row.addSubview(trailing)
-            constraints += [
-                trailing.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -inset),
-                trailing.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-                trailing.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: padding),
-                row.bottomAnchor.constraint(greaterThanOrEqualTo: trailing.bottomAnchor, constant: padding),
-                leadingFills
-                    ? trailing.leadingAnchor.constraint(equalTo: leading.trailingAnchor, constant: 16)
-                    : trailing.leadingAnchor.constraint(greaterThanOrEqualTo: leading.trailingAnchor, constant: 16),
-            ]
-        } else if leadingFills {
-            constraints.append(leading.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -inset))
-        } else {
-            constraints.append(leading.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -inset))
-        }
-        NSLayoutConstraint.activate(constraints)
-
-        // Rows hug their content so the trailing flexible space, not a row,
-        // absorbs the slack on tabs shorter than the viewport.
-        let hugContent = row.heightAnchor.constraint(equalToConstant: minHeight)
-        hugContent.priority = .defaultLow
-        hugContent.isActive = true
-        return row
-    }
-
-    /// A labeled control row: 13 pt ink label, control on the right edge.
-    private func makeSettingRow(label: String, control: NSView) -> NSView {
-        let labelField = NSTextField(labelWithString: label)
-        labelField.lineBreakMode = .byTruncatingTail
-        labelField.setChromeText(label, font: ChromeFont.row, color: currentTheme.colors.textPrimary)
-        labelField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return makeFormRow(leading: labelField, trailing: control)
-    }
-
-    /// Appends `row` to a card's row stack, ruled off from the row above it.
-    private func addRow(_ row: NSView, to stack: NSStackView) {
-        if !stack.arrangedSubviews.isEmpty {
-            let rule = ChromeRuleView(axis: .horizontal, color: currentTheme.colors.borderSubtle)
-            rule.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(rule)
-            NSLayoutConstraint.activate([
-                rule.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: SettingsLayout.rowInset),
-                rule.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                rule.topAnchor.constraint(equalTo: row.topAnchor),
-                rule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-            ])
-        }
-        stack.addArrangedSubview(row)
-        row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-    }
-
-    private func addRows(_ rows: [NSView], to stack: NSStackView) {
-        for row in rows {
-            addRow(row, to: stack)
-        }
-    }
-
-    /// An SF Symbol in front of a row's text (`.lead > .icon`): 14 pt, muted.
-    private func makeIcon(_ symbolName: String, color: NSColor? = nil) -> NSImageView {
-        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
-        let icon = NSImageView()
-        icon.image = image
-        icon.contentTintColor = color ?? currentTheme.colors.textMuted
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.setContentHuggingPriority(.required, for: .horizontal)
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 14),
-            icon.heightAnchor.constraint(equalToConstant: 14),
-        ])
-        return icon
-    }
-
-    /// Icon then content, 10 pt apart (`.lead`).
-    private func makeLead(icon: NSView, content: NSView) -> NSStackView {
-        let lead = NSStackView(views: [icon, content])
-        lead.orientation = .horizontal
-        lead.alignment = .centerY
-        lead.spacing = 10
-        lead.setHuggingPriority(.defaultLow, for: .horizontal)
-        lead.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return lead
-    }
-
-    private func makeMonoLabel(_ text: String, color: NSColor? = nil) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = ChromeFont.mono
-        label.textColor = color ?? currentTheme.colors.textPrimary
-        label.lineBreakMode = .byTruncatingMiddle
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
-    }
-
-    private func makeWrappingLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = font
-        label.textColor = color
-        label.maximumNumberOfLines = 0
-        label.isSelectable = false
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return label
-    }
-
-    private func makeButtonGroup(_ buttons: [NSView], spacing: CGFloat = 6) -> NSStackView {
-        let group = NSStackView(views: buttons)
-        group.orientation = .horizontal
-        group.alignment = .centerY
-        group.spacing = spacing
-        group.setHuggingPriority(.required, for: .horizontal)
-        return group
-    }
-
-    private func makeSwitch(action: Selector, isOn: Bool, accessibilityLabel: String) -> ChromeSwitch {
-        let control = ChromeSwitch(isOn: isOn, theme: currentTheme, target: self, action: action)
-        control.setAccessibilityLabel(accessibilityLabel)
-        return control
-    }
-
-    /// A text field on a Folio field surface. The surface's edge follows
-    /// editing focus through the delegate callbacks below.
-    private func makeFieldSurface(
-        _ field: NSTextField,
-        width: CGFloat? = nil,
-        unit: String? = nil
-    ) -> ChromeFieldView {
-        let surface = ChromeFieldView(theme: currentTheme)
-        ChromeFieldView.styleEmbedded(field, colors: currentTheme.colors, font: ChromeFont.label)
-        field.delegate = self
-        field.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(field)
-
-        var constraints = [
-            surface.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
-            field.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 8),
-            field.centerYAnchor.constraint(equalTo: surface.centerYAnchor),
-        ]
-        if let unit {
-            let unitLabel = NSTextField(labelWithString: unit)
-            unitLabel.setChromeText(unit, font: ChromeFont.label, color: currentTheme.colors.textMuted)
-            unitLabel.translatesAutoresizingMaskIntoConstraints = false
-            unitLabel.setContentHuggingPriority(.required, for: .horizontal)
-            unitLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-            surface.addSubview(unitLabel)
-            constraints += [
-                unitLabel.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 4),
-                unitLabel.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -8),
-                unitLabel.firstBaselineAnchor.constraint(equalTo: field.firstBaselineAnchor),
-            ]
-        } else {
-            constraints.append(field.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -8))
-        }
-        if let width {
-            constraints.append(surface.widthAnchor.constraint(equalToConstant: width))
-        }
-        NSLayoutConstraint.activate(constraints)
-        return surface
-    }
-
-    private func makeTextField(value: String) -> NSTextField {
-        let field = NSTextField(string: value)
-        field.font = ChromeFont.label
-        field.textColor = currentTheme.colors.textPrimary
-        field.translatesAutoresizingMaskIntoConstraints = false
-        return field
-    }
-
-    private func makeNumberField(value: String) -> NSTextField {
-        let field = makeTextField(value: value)
-        field.font = ChromeFont.sans(size: 12, tabular: true)
+    private func numberField(_ value: String, width: CGFloat, identifier: String, label: String, action: Selector) -> SettingsInputField {
+        let input = SettingsInputField(value: value, width: width, font: Typography.tabular(Typography.bodySize))
+        let field = input.field
+        field.identifier = NSUserInterfaceItemIdentifier(identifier)
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         formatter.generatesDecimalNumbers = false
@@ -724,18 +615,11 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         // through `Int(_:)`.
         formatter.usesGroupingSeparator = false
         field.formatter = formatter
-        return field
-    }
-
-    func controlTextDidBeginEditing(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField else { return }
-        (field.superview as? ChromeFieldView)?.isFocused = true
-        ChromeFieldView.styleEditor(of: field, colors: currentTheme.colors)
-    }
-
-    func controlTextDidEndEditing(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField else { return }
-        (field.superview as? ChromeFieldView)?.isFocused = false
+        field.target = self
+        field.action = action
+        field.cell?.sendsActionOnEndEditing = true
+        field.setAccessibilityLabel(label)
+        return input
     }
 
     /// Reads a number the way the field displays it, so a value the formatter
@@ -748,423 +632,17 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         return Int(field.stringValue)
     }
 
-    private func makeActionButton(
-        title: String,
-        action: Selector,
-        kind: ChromeButton.Kind = .standard
-    ) -> NSButton {
-        ChromeButton(title: title, theme: currentTheme, kind: kind, target: self, action: action)
-    }
-
-    /// A tinted notice inside a card: a config problem or a failed account
-    /// action. The status wash carries the severity; there is no box.
-    private func makeNotice(_ message: String, isError: Bool, button: NSButton? = nil) -> NSView {
-        let colors = currentTheme.colors
-        let notice = NSView()
-        notice.wantsLayer = true
-        notice.layer?.cornerRadius = Chrome.Radius.control
-        notice.layer?.backgroundColor = (isError ? colors.errorWash : colors.needsInputWash).cgColor
-        notice.translatesAutoresizingMaskIntoConstraints = false
-
-        let mark = ChromeStatusMark(
-            shape: isError ? .diamond : .dot,
-            color: isError ? colors.danger : colors.yellow
-        )
-        notice.addSubview(mark)
-
-        let label = makeWrappingLabel(message, font: ChromeFont.label, color: colors.textPrimary)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        notice.addSubview(label)
-
-        var constraints = [
-            mark.leadingAnchor.constraint(equalTo: notice.leadingAnchor, constant: 10),
-            mark.topAnchor.constraint(equalTo: label.topAnchor, constant: 4),
-            label.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
-            label.topAnchor.constraint(equalTo: notice.topAnchor, constant: 7),
-            notice.bottomAnchor.constraint(greaterThanOrEqualTo: label.bottomAnchor, constant: 7),
-        ]
-        if let button {
-            button.setContentCompressionResistancePriority(.required, for: .horizontal)
-            notice.addSubview(button)
-            constraints += [
-                button.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 10),
-                button.trailingAnchor.constraint(equalTo: notice.trailingAnchor, constant: -6),
-                button.centerYAnchor.constraint(equalTo: notice.centerYAnchor),
-                button.topAnchor.constraint(greaterThanOrEqualTo: notice.topAnchor, constant: 4),
-                notice.bottomAnchor.constraint(greaterThanOrEqualTo: button.bottomAnchor, constant: 4),
-            ]
-        } else {
-            constraints.append(label.trailingAnchor.constraint(equalTo: notice.trailingAnchor, constant: -10))
-        }
-        NSLayoutConstraint.activate(constraints)
-        let hugContent = notice.heightAnchor.constraint(equalToConstant: 28)
-        hugContent.priority = .defaultLow
-        hugContent.isActive = true
-        return notice
-    }
-
-    // MARK: - General
-
-    private func buildGeneralTab() {
-        addPageHeader(
-            title: "General",
-            subtitle: "Theme, persistence, project roots, and keybinding behavior. Every setting here is stored in settings.json."
-        )
-
-        addConfigFileSection()
-        addAppearanceSection()
-
-        let sessionRows = addSection(title: "Session")
-        addRow(
-            makeSettingRow(
-                label: "Restore workspace from the previous launch",
-                control: makeSwitch(
-                    action: #selector(restoreSessionChanged(_:)),
-                    isOn: settings.restoreLastSession,
-                    accessibilityLabel: "Restore last session"
-                )
-            ),
-            to: sessionRows
-        )
-
-        addNotificationsSection()
-        addProjectDirectoriesSection()
-        addKeybindingBehaviorSection()
-    }
-
-    /// The file section is the bridge between the two ways to configure
-    /// Soprano: it names the file the UI is editing, opens it, and reports
-    /// anything wrong with it. Without this, a typo in the file would fail
-    /// silently.
-    private func addConfigFileSection() {
-        let rows = addSection(
-            title: "Configuration File",
-            note: note([
-                ("This screen edits ", isMono: false),
-                (configStore.displayPath, isMono: true),
-                (". Hand edits apply as soon as you save — comments and key order are preserved.", isMono: false),
-            ])
-        )
-
-        for issue in configStore.issues {
-            let location = issue.line.map { "Line \($0): " } ?? ""
-            let notice = makeNotice(location + issue.message, isError: issue.severity == .error)
-            addRow(makeFormRow(leading: notice, leadingFills: true), to: rows)
-        }
-
-        let buttons = makeButtonGroup([
-            makeActionButton(title: "Open settings.json", action: #selector(openConfigFile)),
-            makeActionButton(title: "Reveal in Finder", action: #selector(revealConfigFile)),
-            makeActionButton(title: "Reload", action: #selector(reloadConfigFile)),
-        ])
-        let lead = makeLead(icon: makeIcon("doc.text"), content: makeMonoLabel(configStore.displayPath))
-        addRow(
-            makeFormRow(
-                leading: lead,
-                trailing: buttons,
-                minHeight: SettingsLayout.tallRowHeight,
-                leadingFills: true
-            ),
-            to: rows
-        )
-    }
-
-    private func addAppearanceSection() {
-        let rows = addSection(title: "Appearance")
-
-        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        popup.target = self
-        popup.action = #selector(themeChanged(_:))
-        popup.isBordered = false
-        popup.font = ChromeFont.label
-        popup.removeAllItems()
-        popup.addItems(withTitles: AppTheme.options.map(\.name))
-        if let selectedIndex = AppTheme.options.firstIndex(where: { $0.id == settings.themeId }) {
-            popup.selectItem(at: selectedIndex)
-        }
-        popup.setAccessibilityLabel("Theme")
-        let select = ChromeFieldView(theme: currentTheme)
-        popup.translatesAutoresizingMaskIntoConstraints = false
-        select.addSubview(popup)
-        NSLayoutConstraint.activate([
-            select.widthAnchor.constraint(equalToConstant: 190),
-            select.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
-            popup.leadingAnchor.constraint(equalTo: select.leadingAnchor, constant: 6),
-            popup.trailingAnchor.constraint(equalTo: select.trailingAnchor, constant: -4),
-            popup.centerYAnchor.constraint(equalTo: select.centerYAnchor),
-        ])
-
-        let appearances = AppearancePreference.allCases
-        let appearanceControl = SettingsSegmentedControl(
-            items: appearances.map { ($0.title, $0.symbolName) },
-            selectedSegment: appearances.firstIndex(of: settings.appearance) ?? 0,
-            theme: currentTheme,
-            target: self,
-            action: #selector(appearanceChanged(_:))
-        )
-        appearanceControl.setAccessibilityLabel("Appearance")
-
-        let hideWindowBarRow = makeSettingRow(
-            label: "Hide window bar",
-            control: makeSwitch(
-                action: #selector(hideWindowBarChanged(_:)),
-                isOn: settings.hideWindowBar,
-                accessibilityLabel: "Hide window bar"
-            )
-        )
-        hideWindowBarRow.toolTip =
-            "Hide the title bar and traffic-light controls so panes use the full window"
-
-        let hideWindowTabsRow = makeSettingRow(
-            label: "Hide window tabs",
-            control: makeSwitch(
-                action: #selector(hideWindowTabsChanged(_:)),
-                isOn: settings.hideWindowTabs,
-                accessibilityLabel: "Hide window tabs"
-            )
-        )
-        hideWindowTabsRow.toolTip =
-            "Hide the numbered window tabs; the tab row moves up. Switch windows from the sidebar, ⌃1…⌃9, or ⌘F"
-
-        let uptimeRow = makeSettingRow(
-            label: "Show uptime in status bar",
-            control: makeSwitch(
-                action: #selector(statusBarUptimeChanged(_:)),
-                isOn: settings.statusBarUptime,
-                accessibilityLabel: "Show uptime in status bar"
-            )
-        )
-
-        addRows(
-            [
-                makeSettingRow(label: "Theme", control: select),
-                makeSettingRow(label: "Appearance", control: appearanceControl),
-                hideWindowBarRow,
-                hideWindowTabsRow,
-                uptimeRow,
-            ],
-            to: rows
-        )
-    }
-
-    private func addNotificationsSection() {
-        let rows = addSection(
-            title: "Notifications",
-            note: note("Banners for panes that are not focused, named window ▸ pane.")
-        )
-
-        let soundRow = makeSettingRow(
-            label: "Play a sound",
-            control: makeSwitch(
-                action: #selector(notificationSoundChanged(_:)),
-                isOn: settings.notificationSound,
-                accessibilityLabel: "Play a sound"
-            )
-        )
-
-        // Permission lives in System Settings, and macOS only ever prompts
-        // once. The row says where it stands and offers the way there.
-        let icon = makeIcon("checkmark.circle")
-        notificationStatusIcon = icon
-
-        let title = NSTextField(labelWithString: "")
-        title.lineBreakMode = .byTruncatingTail
-        notificationStatusTitle = title
-
-        let message = makeWrappingLabel("", font: ChromeFont.meta, color: currentTheme.colors.textMuted)
-        notificationStatusLabel = message
-
-        let text = NSStackView(views: [title, message])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 1
-        text.setHuggingPriority(.defaultLow, for: .horizontal)
-        message.widthAnchor.constraint(equalTo: text.widthAnchor).isActive = true
-
-        let fixButton = makeActionButton(
-            title: "Open System Settings",
-            action: #selector(openNotificationSystemSettings)
-        )
-        notificationFixButton = fixButton
-
-        let statusRow = makeFormRow(
-            leading: makeLead(icon: icon, content: text),
-            trailing: fixButton,
-            minHeight: SettingsLayout.tallRowHeight,
-            leadingFills: true
-        )
-
-        addRows([soundRow, statusRow], to: rows)
-        refreshNotificationAuthorizationRow()
-    }
-
-    private func addProjectDirectoriesSection() {
-        let rows = addSection(
-            title: "Project Directories",
-            note: note("Directories available to project-aware features.")
-        )
-
-        let listStack = NSStackView()
-        listStack.orientation = .vertical
-        listStack.alignment = .leading
-        listStack.spacing = 0
-        listStack.translatesAutoresizingMaskIntoConstraints = false
-        projectDirectoriesStack = listStack
-        rows.addArrangedSubview(listStack)
-        listStack.widthAnchor.constraint(equalTo: rows.widthAnchor).isActive = true
-        rebuildProjectDirectoriesList()
-
-        let input = makeTextField(value: "")
-        input.placeholderAttributedString = ChromeText.attributed(
-            "Folder path",
-            font: ChromeFont.label,
-            color: currentTheme.colors.textMuted
-        )
-        input.target = self
-        input.action = #selector(addProjectDirectory)
-        input.cell?.sendsActionOnEndEditing = false
-        projectDirectoryInput = input
-        let inputSurface = makeFieldSurface(input)
-        inputSurface.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let addRowContent = NSStackView(views: [
-            inputSurface,
-            makeActionButton(title: "Browse…", action: #selector(browseProjectDirectory)),
-            makeActionButton(title: "Add", action: #selector(addProjectDirectory), kind: .ink),
-        ])
-        addRowContent.orientation = .horizontal
-        addRowContent.alignment = .centerY
-        addRowContent.spacing = 8
-
-        addRow(
-            makeFormRow(leading: addRowContent, minHeight: SettingsLayout.tallRowHeight, leadingFills: true),
-            to: rows
-        )
-    }
-
-    private func addKeybindingBehaviorSection() {
-        let rows = addSection(
-            title: "Keybinding Behavior",
-            note: note("Adjust prefix trigger and pane resize granularity.")
-        )
-
-        let prefixControl = SettingsPrefixKeyControl(
-            key: keybindingConfig.prefixKey,
-            theme: currentTheme,
-            target: self,
-            action: #selector(prefixKeyRecorded(_:))
-        )
-
-        let timeoutField = makeNumberField(value: "\(keybindingConfig.prefixTimeoutMs)")
-        timeoutField.alignment = .right
-        timeoutField.target = self
-        timeoutField.action = #selector(prefixTimeoutCommitted(_:))
-        timeoutField.cell?.sendsActionOnEndEditing = true
-        timeoutField.setAccessibilityLabel("Prefix timeout in milliseconds")
-
-        let resizeField = makeNumberField(value: "\(Int(keybindingConfig.resizeTickPercent))")
-        resizeField.alignment = .right
-        resizeField.target = self
-        resizeField.action = #selector(resizeStepCommitted(_:))
-        resizeField.cell?.sendsActionOnEndEditing = true
-        resizeField.setAccessibilityLabel("Resize step in percent")
-
-        addRows(
-            [
-                makeSettingRow(label: "Prefix key", control: prefixControl),
-                makeSettingRow(
-                    label: "Prefix timeout",
-                    control: makeFieldSurface(timeoutField, width: 84, unit: "ms")
-                ),
-                makeSettingRow(
-                    label: "Resize step",
-                    control: makeFieldSurface(resizeField, width: 56, unit: "%")
-                ),
-            ],
-            to: rows
-        )
-    }
-
-    @objc private func openConfigFile() {
-        configStore.openInEditor()
-    }
-
-    @objc private func revealConfigFile() {
-        configStore.revealInFinder()
-    }
-
-    @objc private func reloadConfigFile() {
-        configStore.reloadFromDisk()
-        rebuildCurrentTab()
-    }
-
-    private func rebuildProjectDirectoriesList() {
-        guard let list = projectDirectoriesStack else { return }
-        for row in list.arrangedSubviews {
-            list.removeArrangedSubview(row)
-            row.removeFromSuperview()
-        }
-
-        // The list shows what the FILE says, not the resolved result: a root
-        // on an unmounted volume is dropped during resolution, and rendering
-        // the resolved list would make "Remove" renumber onto the wrong entry
-        // and a later write delete the missing root for good.
-        let directories = configuredProjectDirectories
-        if directories.isEmpty {
-            let empty = NSTextField(labelWithString: "No project directories configured")
-            empty.setChromeText(
-                "No project directories configured",
-                font: ChromeFont.row,
-                color: currentTheme.colors.textMuted
-            )
-            addRow(makeFormRow(leading: empty), to: list)
-            return
-        }
-
-        for (index, directory) in directories.enumerated() {
-            var isDirectory: ObjCBool = false
-            let isReachable = FileManager.default.fileExists(
-                atPath: SopranoConfig.expandPath(directory),
-                isDirectory: &isDirectory
-            ) && isDirectory.boolValue
-
-            let pathLabel = makeMonoLabel(
-                isReachable ? directory : "\(directory)  ·  not found",
-                color: isReachable ? currentTheme.colors.textPrimary : currentTheme.colors.textMuted
-            )
-
-            let removeButton = makeActionButton(
-                title: "Remove",
-                action: #selector(removeProjectDirectory(_:))
-            )
-            removeButton.tag = index
-
-            addRow(
-                makeFormRow(
-                    leading: makeLead(icon: makeIcon("folder"), content: pathLabel),
-                    trailing: removeButton,
-                    leadingFills: true
-                ),
-                to: list
-            )
-        }
-    }
-
-    @objc private func themeChanged(_ sender: NSPopUpButton) {
-        let index = sender.indexOfSelectedItem
-        guard index >= 0, index < AppTheme.options.count else { return }
-        let option = AppTheme.options[index]
-
-        settings.themeId = option.id
-        configStore.write(option.id, at: ["theme"])
+    @objc private func themeChanged(_ sender: SettingsSelectButton) {
+        guard let id = sender.selectedValue, AppTheme.isKnownId(id) else { return }
+        settings.themeId = id
+        configStore.write(id, at: ["theme"])
 
         // The shared store observer normally applies the theme during write().
         // Standalone settings controllers used in tests and previews have no
         // observer, so retain the local fallback without applying it twice.
-        if themeManager.themeId != option.id {
-            themeManager.setTheme(id: option.id)
+        if themeManager.themeId != id {
+            themeManager.setTheme(id: id)
         }
-        apply(theme: themeManager.currentTheme)
     }
 
     @objc private func appearanceChanged(_ sender: SettingsSegmentedControl) {
@@ -1179,102 +657,34 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         if themeManager.appearance != preference {
             themeManager.setAppearance(preference)
         }
-        apply(theme: themeManager.currentTheme)
     }
 
-    @objc private func restoreSessionChanged(_ sender: ChromeSwitch) {
+    @objc private func restoreSessionChanged(_ sender: SettingsSwitch) {
         settings.restoreLastSession = sender.state == .on
         configStore.write(settings.restoreLastSession, at: ["restoreLastSession"])
     }
 
-    @objc private func hideWindowBarChanged(_ sender: ChromeSwitch) {
+    @objc private func hideWindowBarChanged(_ sender: SettingsSwitch) {
         settings.hideWindowBar = sender.state == .on
         configStore.write(settings.hideWindowBar, at: ["hideWindowBar"])
     }
 
-    @objc private func hideWindowTabsChanged(_ sender: ChromeSwitch) {
+    @objc private func hideWindowTabsChanged(_ sender: SettingsSwitch) {
         settings.hideWindowTabs = sender.state == .on
         configStore.write(settings.hideWindowTabs, at: ["hideWindowTabs"])
     }
 
-    @objc private func statusBarUptimeChanged(_ sender: ChromeSwitch) {
+    @objc private func statusBarUptimeChanged(_ sender: SettingsSwitch) {
         settings.statusBarUptime = sender.state == .on
         configStore.write(settings.statusBarUptime, at: ["statusBar", "uptime"])
     }
 
-    @objc private func notificationSoundChanged(_ sender: ChromeSwitch) {
+    @objc private func notificationSoundChanged(_ sender: SettingsSwitch) {
         settings.notificationSound = sender.state == .on
         configStore.write(settings.notificationSound, at: ["notifications", "sound"])
     }
 
-    @objc private func openNotificationSystemSettings() {
-        AgentNotificationManager.openSystemNotificationSettings()
-    }
-
-    /// Describes the current permission and offers the way to System Settings
-    /// where that can change anything.
-    func refreshNotificationAuthorizationRow() {
-        guard let notificationStatusIcon,
-              let notificationStatusTitle,
-              let notificationStatusLabel,
-              let notificationFixButton
-        else { return }
-
-        let colors = currentTheme.colors
-        let title: String
-        let message: String
-        let symbolName: String
-        let tint: NSColor
-        let offersSystemSettings: Bool
-
-        switch AgentNotificationManager.authorization {
-        case .authorized:
-            title = "Notifications allowed"
-            message = "macOS is allowed to show Soprano notifications."
-            symbolName = "checkmark.circle"
-            tint = colors.success
-            offersSystemSettings = true
-        case .denied:
-            title = "Notifications blocked"
-            message = "macOS is blocking Soprano notifications. Panes still show status "
-                + "and an unread ring, but no banner appears."
-            symbolName = "xmark.circle"
-            tint = colors.danger
-            offersSystemSettings = true
-        case .notDetermined:
-            title = "Not asked yet"
-            message = "macOS has not been asked yet. The prompt appears the first time "
-                + "an unfocused pane wants you."
-            symbolName = "questionmark.circle"
-            tint = colors.textMuted
-            offersSystemSettings = false
-        case .unavailable:
-            title = "Notifications unavailable"
-            message = "Notifications need the packaged app; unbundled builds cannot post them."
-            symbolName = "minus.circle"
-            tint = colors.textMuted
-            offersSystemSettings = false
-        case nil:
-            title = "Checking permission"
-            message = "Checking notification permission…"
-            symbolName = "clock"
-            tint = colors.textMuted
-            offersSystemSettings = false
-        }
-
-        notificationStatusIcon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
-        notificationStatusIcon.contentTintColor = tint
-        notificationStatusTitle.setChromeText(
-            title,
-            font: ChromeFont.row,
-            color: tint == colors.danger ? colors.danger : colors.textPrimary
-        )
-        notificationStatusLabel.stringValue = message
-        notificationFixButton.isHidden = !offersSystemSettings
-    }
-
-    @objc private func browseProjectDirectory() {
+    private func browseProjectDirectory() {
         guard let window = view.window else { return }
 
         let panel = NSOpenPanel()
@@ -1326,10 +736,10 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         rebuildProjectDirectoriesList()
     }
 
-    @objc private func removeProjectDirectory(_ sender: NSButton) {
+    private func removeProjectDirectory(at index: Int) {
         var directories = configuredProjectDirectories
-        guard sender.tag >= 0, sender.tag < directories.count else { return }
-        let removed = SopranoConfig.expandPath(directories.remove(at: sender.tag))
+        guard directories.indices.contains(index) else { return }
+        let removed = SopranoConfig.expandPath(directories.remove(at: index))
         if !directories.contains(where: { SopranoConfig.expandPath($0) == removed }) {
             settings.projectDirectories.removeAll { $0 == removed }
         }
@@ -1380,40 +790,33 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
 
     // MARK: - Keyboard Shortcuts
 
-    private func buildKeyboardShortcutsTab() {
-        addPageHeader(
-            title: "Keyboard Shortcuts",
-            subtitle: "The shortcuts in effect. Rebind any of them by id under \"keybindings.bindings\" in settings.json — for example \"\(exampleBindingId)\": \"\(exampleBindingChord)\" — or set one to null to turn it off."
-        )
+    private func keyboardShortcutsPage(_ form: SettingsForm) -> [NSView] {
+        var sections: [NSView] = []
+        let filter = SettingsInputField(value: shortcutQuery, placeholder: "Search shortcuts", width: form.width, height: 32)
+        filter.field.identifier = Self.filterIdentifier
+        filter.field.setAccessibilityLabel("Search shortcuts")
+        filter.onChange = { [weak self] text in self?.setShortcutQuery(text) }
+        sections.append(filter)
 
-        let fileRows = addSection(
-            title: "Editing shortcuts",
-            note: note([
-                ("Shortcuts are configured in ", isMono: false),
-                (configStore.displayPath, isMono: true),
-                (". Ids shown here are the keys to use.", isMono: false),
-            ])
-        )
-        addRow(
-            makeFormRow(
-                leading: makeLead(icon: makeIcon("doc.text"), content: makeMonoLabel(configStore.displayPath)),
-                trailing: makeActionButton(title: "Open settings.json", action: #selector(openConfigFile)),
-                minHeight: SettingsLayout.tallRowHeight,
-                leadingFills: true
-            ),
-            to: fileRows
-        )
+        if shortcutQuery.isEmpty {
+            sections.append(form.section(nil, [
+                form.row(
+                    "Keyboard shortcuts",
+                    description: "The shortcuts in effect. Rebind any of them by id under \"keybindings.bindings\" in settings.json — for example \"\(exampleBindingId)\": \"\(exampleBindingChord)\" — or set one to null to turn it off.",
+                    control: openFileButton(form)
+                ),
+            ]))
+        }
 
         let groups: [(title: String, category: KeyBindingCategory)] = [
             ("Navigation", .navigation),
-            ("Layout & Splits", .layout),
-            ("Agent Launchers", .agents),
+            ("Layout & splits", .layout),
+            ("Agent launchers", .agents),
             ("General", .general),
         ]
-
         let customized = configStore.resolved.customizedBindingIds
         let disabledIds = configStore.resolved.disabledBindingIds
-
+        var anyMatch = false
         for (groupTitle, category) in groups {
             let active = keybindingConfig.bindings.filter { $0.category == category }
             // Disabled bindings still belong on this list: a shortcut that is
@@ -1422,27 +825,55 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
             let disabled = DefaultKeybindings.config.bindings.filter {
                 $0.category == category && disabledIds.contains($0.id)
             }
-            let entries = active.map { ($0, false) } + disabled.map { ($0, true) }
+            let entries = (active.map { ($0, false) } + disabled.map { ($0, true) })
+                .filter { shortcutMatches($0.0, isDisabled: $0.1) }
             guard !entries.isEmpty else { continue }
-
-            let rows = addSection(title: groupTitle)
-            for (binding, isDisabled) in entries {
-                addRow(
-                    makeShortcutRow(
-                        action: binding.label,
-                        description: "\(binding.id) · \(binding.description)",
-                        binding: binding,
-                        isCustomized: customized.contains(binding.id),
-                        isDisabled: isDisabled
-                    ),
-                    to: rows
-                )
-            }
+            anyMatch = true
+            sections.append(form.section(groupTitle, entries.map { binding, isDisabled in
+                shortcutRow(binding, isCustomized: customized.contains(binding.id), isDisabled: isDisabled, form: form)
+            }))
         }
+        if !anyMatch {
+            sections.append(form.section(nil, [
+                form.row("No matching shortcuts", description: "Try an action name, id or shortcut."),
+            ]))
+        }
+        return sections
     }
 
-    /// A real, currently-bound action to show in the tab's instructions, so the
-    /// example always names something the reader can find in the list below.
+    private func setShortcutQuery(_ query: String) {
+        guard query != shortcutQuery else { return }
+        shortcutQuery = query
+        scheduleRebuild()
+    }
+
+    /// Bindings matching the filter: label, id, description or keys.
+    private func shortcutMatches(_ binding: KeyBinding, isDisabled: Bool) -> Bool {
+        let needle = shortcutQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return true }
+        let caps = isDisabled ? [] : SettingsKeycaps.alternatives(for: binding, prefixKey: keybindingConfig.prefixKey)
+            .map { $0.joined(separator: " ") }
+        return ([binding.label, binding.id, binding.description] + caps).contains { $0.lowercased().contains(needle) }
+    }
+
+    private func shortcutRow(_ binding: KeyBinding, isCustomized: Bool, isDisabled: Bool, form: SettingsForm) -> NSView {
+        let control: NSView = isDisabled
+            ? SettingsLabel("Off", size: Typography.smallSize) { $0.mutedForeground.withAlphaComponent(0.7) }
+            : SettingsKeycapsView(alternatives: SettingsKeycaps.alternatives(for: binding, prefixKey: keybindingConfig.prefixKey))
+        let id = binding.id
+        let row = form.row(
+            binding.label,
+            description: "\(binding.id) · \(binding.description)",
+            titleRole: isDisabled ? { $0.mutedForeground } : nil,
+            reset: isCustomized || isDisabled ? { [weak self] in self?.configStore.remove(at: ["keybindings", "bindings", id]) } : nil,
+            control: control
+        )
+        if isCustomized { row.toolTip = "Customized in settings.json" }
+        return row
+    }
+
+    /// A real, currently-bound action to show in the page's instructions, so
+    /// the example always names something the reader can find in the list.
     private var exampleBindingId: String {
         keybindingConfig.bindings.first { $0.id == "split-vertical" }?.id
             ?? keybindingConfig.bindings.first?.id
@@ -1455,233 +886,56 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
             ?? "prefix+shift+|"
     }
 
-    private func makeShortcutRow(
-        action: String,
-        description: String,
-        binding: KeyBinding,
-        isCustomized: Bool = false,
-        isDisabled: Bool = false
-    ) -> NSView {
-        let colors = currentTheme.colors
-        let actionLabel = NSTextField(labelWithString: action)
-        actionLabel.lineBreakMode = .byTruncatingTail
-        actionLabel.setChromeText(
-            action,
-            font: ChromeFont.row,
-            color: isDisabled ? colors.textMuted : colors.textPrimary
-        )
-        actionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let descriptionLabel = NSTextField(labelWithString: description)
-        descriptionLabel.font = ChromeFont.meta
-        descriptionLabel.textColor = colors.textMuted
-        descriptionLabel.lineBreakMode = .byTruncatingTail
-        descriptionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let text = NSStackView(views: [actionLabel, descriptionLabel])
-        text.orientation = .vertical
-        text.alignment = .leading
-        text.spacing = 1
-        text.setHuggingPriority(.defaultLow, for: .horizontal)
-        text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        let keysView: NSView
-        if isDisabled {
-            keysView = ChromeChip(text: "Off", theme: currentTheme, style: .outline)
-        } else if isCustomized {
-            // Same chip as a configured agent profile: this one comes from the file.
-            let chip = ChromeChip(text: "settings.json", theme: currentTheme)
-            keysView = makeButtonGroup([chip, makeKeycaps(binding)], spacing: 8)
-            keysView.toolTip = "Customized in settings.json"
-        } else {
-            keysView = makeKeycaps(binding)
-        }
-
-        return makeFormRow(
-            leading: text,
-            trailing: keysView,
-            minHeight: SettingsLayout.tallRowHeight,
-            leadingFills: true
-        )
-    }
-
-    /// A binding's keys as K1 keycaps, the same caps the command palette
-    /// shows: one cap per chord, a prefix sequence as separate caps (`⌃A`
-    /// then `P`). Alternatives ("⌘+ / ⌘=") keep their muted slash between them.
-    private func makeKeycaps(_ binding: KeyBinding) -> NSView {
-        let alternatives = SettingsKeycaps.alternatives(for: binding, prefixKey: keybindingConfig.prefixKey)
-        var views: [NSView] = []
-        for (index, caps) in alternatives.enumerated() {
-            if index > 0 {
-                let slash = NSTextField(labelWithString: "/")
-                slash.setChromeText("/", font: ChromeFont.meta, color: currentTheme.colors.textMuted)
-                views.append(slash)
-            }
-            views.append(ChromeKeycapGroupView(caps: caps, theme: currentTheme))
-        }
-        return makeButtonGroup(views, spacing: 4)
-    }
-
     // MARK: - Agent Profiles
 
-    private func buildAgentProfilesTab() {
-        addPageHeader(
-            title: "Agent Profiles",
-            subtitle: "The agents Soprano can launch. Add your own — or patch a built-in — under \"agents\" in settings.json."
-        )
-
-        let fileRows = addSection(
-            title: "Adding an agent",
-            note: note("Reusing a built-in id patches that profile instead of creating a new one.")
-        )
-        let example = makeWrappingLabel(
-            "{ \"id\": \"aider\", \"name\": \"Aider\", \"command\": \"aider\", \"launchKey\": \"cmd+4\" }",
-            font: ChromeFont.monoSmall,
-            color: currentTheme.colors.textPrimary
-        )
-        addRow(
-            makeFormRow(
-                leading: example,
-                trailing: makeActionButton(title: "Open settings.json", action: #selector(openConfigFile)),
-                minHeight: SettingsLayout.tallRowHeight,
-                leadingFills: true
+    private func agentProfilesPage(_ form: SettingsForm) -> [NSView] {
+        let intro = form.section(nil, [
+            form.row(
+                "Agent profiles",
+                description: "The agents Soprano can launch. Add your own under \"agents\" in settings.json — for example { \"id\": \"aider\", \"name\": \"Aider\", \"command\": \"aider\", \"launchKey\": \"cmd+4\" }. Reusing a built-in id patches that profile instead of creating a new one.",
+                control: openFileButton(form)
             ),
-            to: fileRows
-        )
-
-        let gridStack = NSStackView()
-        gridStack.orientation = .vertical
-        gridStack.alignment = .leading
-        gridStack.spacing = 12
-        gridStack.translatesAutoresizingMaskIntoConstraints = false
-
-        var currentRow: NSStackView?
-        for (index, profile) in AgentCatalog.all.enumerated() {
-            if index % 2 == 0 {
-                let row = NSStackView()
-                row.orientation = .horizontal
-                row.distribution = .fillEqually
-                row.alignment = .top
-                row.spacing = 12
-                row.translatesAutoresizingMaskIntoConstraints = false
-                gridStack.addArrangedSubview(row)
-                row.widthAnchor.constraint(equalTo: gridStack.widthAnchor).isActive = true
-                currentRow = row
-            }
-
-            let card = makeAgentCard(profile)
-            currentRow?.addArrangedSubview(card)
-        }
-        // An odd last card keeps its column width instead of spanning both.
-        if AgentCatalog.all.count % 2 == 1 {
-            currentRow?.addArrangedSubview(NSView())
-        }
-
-        addSection(title: nil, note: nil, content: gridStack)
-    }
-
-    private func makeAgentCard(_ profile: AgentProfile) -> NSView {
-        let colors = currentTheme.colors
-        let card = NSView()
-        card.wantsLayer = true
-        card.layer?.cornerRadius = Chrome.Radius.card
-        card.layer?.borderWidth = Chrome.hairline
-        card.layer?.backgroundColor = colors.raised.cgColor
-        card.layer?.borderColor = colors.borderSubtle.cgColor
-        card.translatesAutoresizingMaskIntoConstraints = false
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        card.addSubview(stack)
-
-        let title = NSTextField(labelWithString: profile.name)
-        title.lineBreakMode = .byTruncatingTail
-        title.setChromeText(profile.name, font: ChromeFont.row, color: colors.textPrimary)
-        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
-        var titleViews: [NSView] = [ChromeStatusMark(shape: .dot, color: profile.nsColor)]
-        // Profile icons are SF Symbol names; a custom one that is not
-        // resolves to no glyph rather than to its raw name.
-        if NSImage(systemSymbolName: profile.icon, accessibilityDescription: nil) != nil {
-            titleViews.append(makeIcon(profile.icon))
-        }
-        titleViews.append(title)
-        if configStore.resolved.configuredAgentIds.contains(profile.id) {
-            titleViews.append(ChromeChip(text: "settings.json", theme: currentTheme))
-        }
-        let titleRow = NSStackView(views: titleViews)
-        titleRow.orientation = .horizontal
-        titleRow.alignment = .centerY
-        titleRow.spacing = 8
-        stack.addArrangedSubview(titleRow)
-
-        let description = makeWrappingLabel(profile.description, font: ChromeFont.meta, color: colors.textMuted)
-        stack.addArrangedSubview(description)
-
-        let command = NSTextField(labelWithString: "$ \(profile.command) \(profile.args.joined(separator: " "))")
-        command.font = ChromeFont.monoSmall
-        command.textColor = colors.textPrimary
-        command.lineBreakMode = .byTruncatingMiddle
-        command.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        stack.addArrangedSubview(command)
-
-        let ready = profile.patterns?.ready?.joined(separator: ", ") ?? "-"
-        let error = profile.patterns?.error?.joined(separator: ", ") ?? "-"
-        let patterns = makeWrappingLabel("Patterns\nReady: \(ready)\nError: \(error)", font: ChromeFont.meta, color: colors.textMuted)
-        stack.addArrangedSubview(patterns)
-
-        NSLayoutConstraint.activate([
-            card.heightAnchor.constraint(greaterThanOrEqualToConstant: 150),
-            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: card.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
-            description.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24),
-            patterns.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -24),
-            command.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor, constant: -24),
-            titleRow.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor, constant: -24),
         ])
-
-        return card
+        let configured = configStore.resolved.configuredAgentIds
+        let rows = AgentCatalog.all.map { profile in
+            let ready = profile.patterns?.ready?.joined(separator: ", ") ?? "–"
+            let error = profile.patterns?.error?.joined(separator: ", ") ?? "–"
+            return SettingsAgentProfileRowView(
+                name: profile.name,
+                color: profile.nsColor,
+                description: profile.description,
+                command: "$ \(([profile.command] + profile.args).joined(separator: " "))",
+                patterns: "Ready: \(ready)  ·  Error: \(error)",
+                badge: configured.contains(profile.id) ? "settings.json" : nil,
+                width: form.width
+            )
+        }
+        return [intro, form.section("Profiles", rows)]
     }
 
     // MARK: - Accounts
 
-    private func buildAccountsTab() {
-        accountActions.removeAll()
-        let snapshot = AccountsController.shared.snapshot
+    private static let accountsIntro = "Sign in to several Claude and Codex accounts. omp balances across its accounts; Claude Code and the Codex CLI use the one you choose."
 
-        addPageHeader(
-            title: "Accounts",
-            subtitle: "Sign in to several Claude and Codex accounts. omp balances across its accounts; Claude Code and the Codex CLI use the one you choose."
-        )
-
-        let refreshButton = makeAccountButton(title: "Refresh") {
-            AccountsController.shared.refresh(force: true)
+    private func accountsPage(_ form: SettingsForm) -> [NSView] {
+        let snapshot = accounts.snapshot
+        let refresh = form.button(snapshot.isRefreshing ? "Refreshing…" : "Refresh", size: .xs) { [accounts] in
+            accounts.refresh(force: true)
         }
-        refreshButton.isEnabled = !snapshot.isRefreshing
-        let refreshLabel = NSTextField(labelWithString: Self.accountsRefreshText(snapshot))
-        refreshLabel.setChromeText(
-            Self.accountsRefreshText(snapshot),
-            font: ChromeFont.meta,
-            color: currentTheme.colors.textMuted
-        )
-        let refreshRow = makeButtonGroup([refreshButton, refreshLabel], spacing: 10)
-        refreshRow.translatesAutoresizingMaskIntoConstraints = false
-        contentStack.addArrangedSubview(refreshRow)
-
-        for list in AccountListID.all {
-            addAccountListSection(list, snapshot: snapshot)
+        refresh.isEnabled = !snapshot.isRefreshing
+        let updated = SettingsLabel(Self.accountsRefreshText(snapshot), size: Typography.smallSize) { $0.mutedForeground }
+        var sections = [form.section(nil, [
+            form.row("Accounts", description: Self.accountsIntro, control: form.group([updated, refresh], spacing: 10)),
+        ])]
+        for listID in AccountListID.all {
+            sections.append(accountListSection(listID, snapshot: snapshot, form: form))
         }
+        return sections
     }
 
     /// "Updated 4m ago": recomputed on every rebuild, which each refresh
     /// triggers, so it never needs a timer of its own.
-    private static func accountsRefreshText(_ snapshot: AccountsSnapshot, now: Date = Date()) -> String {
+    static func accountsRefreshText(_ snapshot: AccountsSnapshot, now: Date = Date()) -> String {
         if snapshot.isRefreshing { return "Updating…" }
         guard let lastRefresh = snapshot.lastRefresh else { return "Not updated yet" }
         let seconds = max(0, now.timeIntervalSince(lastRefresh))
@@ -1693,38 +947,36 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         return "Updated \(hours / 24)d ago"
     }
 
-    private func addAccountListSection(_ listID: AccountListID, snapshot: AccountsSnapshot) {
-        let rows = addSection(
-            title: "\(listID.provider.displayName) · \(listID.tool.displayName)",
-            note: note(Self.accountListSubtitle(listID.tool))
-        )
-
+    private func accountListSection(_ listID: AccountListID, snapshot: AccountsSnapshot, form: SettingsForm) -> NSView {
+        var rows: [NSView] = []
         if let error = snapshot.errors[listID] {
-            let dismiss = makeAccountButton(title: "Dismiss") {
-                AccountsController.shared.dismissError(in: listID)
+            let dismiss = form.button("Dismiss", variant: .ghost, size: .xs) { [accounts] in
+                accounts.dismissError(in: listID)
             }
-            addRow(
-                makeFormRow(leading: makeNotice(error, isError: true, button: dismiss), leadingFills: true),
-                to: rows
-            )
+            rows.append(form.row("Something went wrong", description: error, descriptionRole: { $0.errorForeground }, control: dismiss))
         }
 
         let list = snapshot.lists[listID]
         if let list, let reason = list.unavailableReason {
-            addAccountsNote(reason, to: rows)
+            rows.append(form.row("Unavailable", description: reason))
         } else if let list {
-            addRow(makeDefaultAccountRow(list), to: rows)
+            rows.append(defaultAccountRow(list, form: form))
             for account in list.accounts {
-                addRow(makeAccountRow(account, in: list, snapshot: snapshot), to: rows)
+                rows.append(accountRow(account, in: list, snapshot: snapshot, form: form))
             }
         } else {
-            addAccountsNote(snapshot.isRefreshing ? "Loading accounts…" : "Accounts not loaded yet.", to: rows)
+            rows.append(form.row(snapshot.isRefreshing ? "Loading accounts…" : "Accounts not loaded yet."))
         }
+        rows.append(accountListFooter(listID, list: list, snapshot: snapshot, form: form))
 
-        addAccountListFooter(listID, list: list, snapshot: snapshot, to: rows)
+        return form.section(
+            "\(listID.provider.displayName) · \(listID.tool.displayName)",
+            note: Self.accountListNote(listID.tool),
+            rows
+        )
     }
 
-    private static func accountListSubtitle(_ tool: AccountTool) -> String {
+    private static func accountListNote(_ tool: AccountTool) -> String {
         switch tool {
         case .omp:
             return "omp uses every account and fails over when one runs out. New omp panes try the preferred account first."
@@ -1735,19 +987,15 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         }
     }
 
-    private func addAccountsNote(_ text: String, to stack: NSStackView) {
-        let label = makeWrappingLabel(text, font: ChromeFont.label, color: currentTheme.colors.textMuted)
-        addRow(makeFormRow(leading: label, leadingFills: true), to: stack)
-    }
-
     /// "Automatic" for omp, "System default" for the CLIs: the choice that
     /// leaves the tool to its own login.
-    private func makeDefaultAccountRow(_ list: AccountList) -> NSView {
+    private func defaultAccountRow(_ list: AccountList, form: SettingsForm) -> NSView {
         let isSelected = list.selectedAccountId == nil
+        let listID = list.id
         let title: String
         let detail: String
         var problem: String?
-        if list.id.tool == .omp {
+        if listID.tool == .omp {
             title = "Automatic"
             detail = "Balance by usage"
         } else {
@@ -1761,53 +1009,50 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
                 detail = "Not signed in"
             }
         }
-
-        var buttons: [NSButton] = []
+        var buttons: [NSView] = []
         if !isSelected {
-            let listID = list.id
-            buttons.append(makeAccountButton(title: listID.tool == .omp ? "Automatic" : "Use") {
-                AccountsController.shared.select(accountId: nil, in: listID)
+            buttons.append(form.button(listID.tool == .omp ? "Automatic" : "Use", size: .xs) { [accounts] in
+                accounts.select(accountId: nil, in: listID)
             })
         }
-        return makeAccountEntryRow(
+        return SettingsAccountEntryRowView(
             title: title,
             isSelected: isSelected,
             badge: isSelected ? "Active" : nil,
             detail: detail,
             problem: problem,
-            buttons: buttons
+            control: buttons.isEmpty ? nil : form.group(buttons),
+            width: form.width
         )
     }
 
-    private func makeAccountRow(_ account: AccountRow, in list: AccountList, snapshot: AccountsSnapshot) -> NSView {
+    private func accountRow(_ account: AccountRow, in list: AccountList, snapshot: AccountsSnapshot, form: SettingsForm) -> NSView {
         let listID = list.id
         let accountId = account.id
         let isSelected = list.selectedAccountId == accountId
-
-        var buttons: [NSButton] = []
+        var buttons: [NSView] = []
         if !isSelected {
-            buttons.append(makeAccountButton(title: listID.tool == .omp ? "Prefer" : "Use") {
-                AccountsController.shared.select(accountId: accountId, in: listID)
+            buttons.append(form.button(listID.tool == .omp ? "Prefer" : "Use", size: .xs) { [accounts] in
+                accounts.select(accountId: accountId, in: listID)
             })
         }
-        let reauthenticate = makeAccountButton(title: "Re-authenticate") {
-            AccountsController.shared.reauthenticate(accountId: accountId, in: listID)
+        let reauthenticate = form.button("Re-authenticate", size: .xs) { [accounts] in
+            accounts.reauthenticate(accountId: accountId, in: listID)
         }
         // One browser sign-in at a time, across every list.
         reauthenticate.isEnabled = snapshot.pendingLogin == nil
         buttons.append(reauthenticate)
-        buttons.append(makeAccountButton(title: "Remove") { [weak self] in
+        buttons.append(form.button("Remove", variant: .destructiveOutline, size: .xs) { [weak self] in
             self?.confirmRemoveAccount(account, from: listID)
         })
-
-        let detailParts = Self.accountDetailParts(account)
-        return makeAccountEntryRow(
+        return SettingsAccountEntryRowView(
             title: account.identity.email,
             isSelected: isSelected,
             badge: isSelected ? (listID.tool == .omp ? "Preferred" : "Active") : nil,
-            detail: detailParts.joined(separator: "  ·  "),
+            detail: Self.accountDetailParts(account).joined(separator: "  ·  "),
             problem: account.problem,
-            buttons: buttons
+            control: form.group(buttons),
+            width: form.width
         )
     }
 
@@ -1829,136 +1074,35 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
         return parts
     }
 
-    /// Mark, title with an optional chip, a wrapping detail line, and the
-    /// row's buttons on the right edge. The chosen login sits on the muted
-    /// selection pill with a filled mark; a login with a problem gets the
-    /// error diamond.
-    private func makeAccountEntryRow(
-        title: String,
-        isSelected: Bool,
-        badge: String?,
-        detail: String,
-        problem: String?,
-        buttons: [NSButton]
-    ) -> NSView {
-        let colors = currentTheme.colors
-        let hasProblem = !(problem ?? "").isEmpty
-
-        let mark = ChromeStatusMark(
-            shape: hasProblem ? .diamond : (isSelected ? .dot : .ring),
-            color: hasProblem ? colors.danger : (isSelected ? colors.textPrimary : colors.textMuted)
-        )
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.lineBreakMode = .byTruncatingMiddle
-        titleLabel.setChromeText(title, font: ChromeFont.row, color: colors.textPrimary)
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        var titleViews: [NSView] = [titleLabel]
-        if let badge {
-            let chip = ChromeChip(text: badge, theme: currentTheme)
-            chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-            titleViews.append(chip)
-        }
-        let titleRow = NSStackView(views: titleViews)
-        titleRow.orientation = .horizontal
-        titleRow.alignment = .centerY
-        titleRow.spacing = 8
-
-        let textStack = NSStackView(views: [titleRow])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 2
-        textStack.setHuggingPriority(.defaultLow, for: .horizontal)
-        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        titleRow.widthAnchor.constraint(lessThanOrEqualTo: textStack.widthAnchor).isActive = true
-
-        let detailLabel = makeWrappingLabel(detail, font: ChromeFont.meta, color: colors.textMuted)
-        textStack.addArrangedSubview(detailLabel)
-        detailLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
-
-        if let problem, hasProblem {
-            let problemLabel = makeWrappingLabel(problem, font: ChromeFont.meta, color: colors.danger)
-            textStack.addArrangedSubview(problemLabel)
-            problemLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
-        }
-
-        // The mark sits on the title's line, not the block's centre: an
-        // 18 pt slot (the title's line height) centres it there.
-        let markSlot = NSView()
-        markSlot.translatesAutoresizingMaskIntoConstraints = false
-        markSlot.addSubview(mark)
-        NSLayoutConstraint.activate([
-            markSlot.widthAnchor.constraint(equalToConstant: Chrome.statusMark),
-            markSlot.heightAnchor.constraint(equalToConstant: 18),
-            mark.centerXAnchor.constraint(equalTo: markSlot.centerXAnchor),
-            mark.centerYAnchor.constraint(equalTo: markSlot.centerYAnchor),
-        ])
-
-        let lead = NSStackView(views: [markSlot, textStack])
-        lead.orientation = .horizontal
-        lead.alignment = .top
-        lead.spacing = 10
-        lead.setHuggingPriority(.defaultLow, for: .horizontal)
-
-        let row = makeFormRow(
-            leading: lead,
-            trailing: buttons.isEmpty ? nil : makeButtonGroup(buttons),
-            minHeight: SettingsLayout.tallRowHeight,
-            leadingFills: true
-        )
-
-        if isSelected {
-            let pill = ChromeRowBackgroundView(theme: currentTheme)
-            pill.style = .selectedUnfocused
-            pill.translatesAutoresizingMaskIntoConstraints = false
-            row.addSubview(pill, positioned: .below, relativeTo: nil)
-            NSLayoutConstraint.activate([
-                pill.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-                pill.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                pill.topAnchor.constraint(equalTo: row.topAnchor, constant: 4),
-                pill.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -4),
-            ])
-        }
-        return row
-    }
-
     /// The running sign-in for this list, or the button that starts one.
-    private func addAccountListFooter(
-        _ listID: AccountListID,
-        list: AccountList?,
-        snapshot: AccountsSnapshot,
-        to stack: NSStackView
-    ) {
-        var buttons: [NSView] = []
-
+    private func accountListFooter(_ listID: AccountListID, list: AccountList?, snapshot: AccountsSnapshot, form: SettingsForm) -> NSView {
         if let pending = snapshot.pendingLogin, pending.list == listID {
-            let email = pending.accountId.flatMap { id in
-                list?.accounts.first { $0.id == id }?.identity.email
-            }
+            let email = pending.accountId.flatMap { id in list?.accounts.first { $0.id == id }?.identity.email }
             let text = email.map { "Waiting for sign-in in your browser to re-authenticate \($0)…" }
                 ?? "Waiting for sign-in in your browser…"
-            addAccountsNote(text, to: stack)
-
+            var buttons: [NSView] = []
             if let url = pending.signInURL {
-                buttons.append(makeAccountButton(title: "Open Sign-in Page") {
+                buttons.append(form.button("Open Sign-in Page", size: .xs) {
                     _ = NSWorkspace.shared.open(url)
                 })
             }
-            buttons.append(makeAccountButton(title: "Cancel") {
-                AccountsController.shared.cancelLogin()
+            buttons.append(form.button("Cancel", variant: .ghost, size: .xs) { [accounts] in
+                accounts.cancelLogin()
             })
-        } else {
-            let add = makeAccountButton(title: "Add Account", kind: .ink) {
-                AccountsController.shared.addAccount(to: listID)
-            }
-            // One browser sign-in at a time, across every list.
-            add.isEnabled = snapshot.pendingLogin == nil
-            buttons.append(add)
+            return form.row(
+                text,
+                description: pending.signInURL == nil
+                    ? "Finish signing in in the browser window that opened."
+                    : "If no browser window opened, open the sign-in page yourself.",
+                control: form.group(buttons)
+            )
         }
-        addRow(
-            makeFormRow(leading: makeButtonGroup(buttons, spacing: 8), minHeight: SettingsLayout.tallRowHeight),
-            to: stack
-        )
+        let add = form.button("Add Account", symbol: "plus", variant: .primary, size: .xs) { [accounts] in
+            accounts.addAccount(to: listID)
+        }
+        // One browser sign-in at a time, across every list.
+        add.isEnabled = snapshot.pendingLogin == nil
+        return SettingsActionsRowView(views: [add])
     }
 
     private static func accountRemovalExplanation(_ tool: AccountTool) -> String {
@@ -1973,74 +1117,47 @@ final class SettingsViewController: NSViewController, NSTextFieldDelegate {
     }
 
     private func confirmRemoveAccount(_ account: AccountRow, from listID: AccountListID) {
-        let alert = NSAlert()
-        alert.messageText = "Remove \(account.identity.email)?"
-        alert.informativeText = Self.accountRemovalExplanation(listID.tool)
-        alert.addButton(withTitle: "Remove").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-
         let accountId = account.id
-        guard let window = view.window else {
-            if alert.runModal() == .alertFirstButtonReturn {
-                AccountsController.shared.remove(accountId: accountId, from: listID)
-            }
-            return
+        let source = accounts
+        ShellDialogs.confirm(
+            title: "Remove \(account.identity.email)?",
+            message: Self.accountRemovalExplanation(listID.tool),
+            confirmTitle: "Remove",
+            isDestructive: true,
+            in: view.window
+        ) { confirmed in
+            guard confirmed else { return }
+            source.remove(accountId: accountId, from: listID)
         }
-        alert.beginSheetModal(for: window) { response in
-            guard response == .alertFirstButtonReturn else { return }
-            AccountsController.shared.remove(accountId: accountId, from: listID)
-        }
-    }
-
-    private func makeAccountButton(
-        title: String,
-        kind: ChromeButton.Kind = .standard,
-        handler: @escaping () -> Void
-    ) -> NSButton {
-        let button = makeActionButton(title: title, action: #selector(accountButtonClicked(_:)), kind: kind)
-        let tag = accountActions.count + 1
-        button.tag = tag
-        accountActions[tag] = handler
-        return button
-    }
-
-    @objc private func accountButtonClicked(_ sender: NSButton) {
-        accountActions[sender.tag]?()
     }
 
     // MARK: - About
 
-    private func buildAboutTab() {
-        let colors = currentTheme.colors
-
-        let title = NSTextField(labelWithString: "Soprano")
-        title.setChromeText("Soprano", font: ChromeFont.title, color: colors.textPrimary)
-
-        let tagline = NSTextField(labelWithString: "AI Agent Orchestration Platform")
-        tagline.setChromeText("AI Agent Orchestration Platform", font: ChromeFont.row, color: colors.textMuted)
-
-        let version = NSTextField(labelWithString: "Version: \(AppVersion.current)")
-        version.setChromeText("Version: \(AppVersion.current)", font: ChromeFont.meta, color: colors.textMuted)
-
-        let runtime = NSTextField(labelWithString: "Runtime: Swift + AppKit + libghostty")
-        runtime.setChromeText("Runtime: Swift + AppKit + libghostty", font: ChromeFont.meta, color: colors.textMuted)
-
-        let hero = NSStackView(views: [title, tagline, version, runtime])
-        hero.orientation = .vertical
-        hero.alignment = .leading
-        hero.spacing = 2
-        hero.setCustomSpacing(6, after: title)
-        hero.setCustomSpacing(12, after: tagline)
-        hero.translatesAutoresizingMaskIntoConstraints = false
-        addContentSubview(hero)
-
-        let rows = addSection(title: "Quick Reference")
-        addRows(
-            quickReferenceBindings().map { binding in
-                makeSettingRow(label: binding.label, control: makeKeycaps(binding))
-            },
-            to: rows
-        )
+    private func aboutPage(_ form: SettingsForm) -> [NSView] {
+        let about = form.section("About", [
+            form.row("Version", description: "Current version of the application.", control: form.value(AppVersion.current)),
+            form.row("Runtime", description: "AI agent orchestration platform.", control: form.value("Swift + AppKit + libghostty")),
+            form.row(
+                "Settings file",
+                description: configStore.displayPath,
+                mono: true,
+                control: form.group([
+                    openFileButton(form),
+                    form.button("Show in Finder", variant: .ghost) { [weak self] in self?.configStore.revealInFinder() },
+                    form.button("Reload", variant: .ghost) { [weak self] in
+                        self?.configStore.reloadFromDisk()
+                        self?.rebuildCurrentTab(resetScroll: false)
+                    },
+                ])
+            ),
+        ])
+        let quickReference = form.section("Quick reference", quickReferenceBindings().map { binding in
+            form.row(
+                binding.label,
+                control: SettingsKeycapsView(alternatives: SettingsKeycaps.alternatives(for: binding, prefixKey: keybindingConfig.prefixKey))
+            )
+        })
+        return [about, quickReference]
     }
 
     private func quickReferenceBindings() -> [KeyBinding] {
@@ -2069,23 +1186,94 @@ private extension AppearancePreference {
         case .dark: return "Dark"
         }
     }
+}
 
-    var symbolName: String {
-        switch self {
-        case .system: return "display"
-        case .light: return "sun.max"
-        case .dark: return "moon"
-        }
+/// The settings screen's root: flipped, so the page reads from the top.
+private final class SettingsRootView: NSView {
+    override var isFlipped: Bool { true }
+}
+
+/// An agent profile row: a color dot and the name (with a `settings.json`
+/// badge when the file configures it), the description, then the command and
+/// the status patterns in mono.
+final class SettingsAgentProfileRowView: NSView {
+    init(name: String, color: NSColor, description: String, command: String, patterns: String, badge: String?, width: CGFloat) {
+        super.init(frame: .zero)
+        let dot = SettingsColorDot(color: color)
+        let title = SettingsLabel(name, size: Typography.bodySize, weight: .medium)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let titleRow = NSStackView(views: [dot, title])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 8
+        if let badge { titleRow.addArrangedSubview(ComposerBadge(badge)) }
+
+        let textWidth = max(120, width - 32)
+        let descriptionLabel = SettingsLabel(description, size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+        descriptionLabel.preferredMaxLayoutWidth = textWidth
+        let commandLabel = SettingsLabel(command, size: Typography.smallSize) { $0.foreground }
+        commandLabel.font = Typography.mono(Typography.smallSize)
+        commandLabel.lineBreakMode = .byTruncatingMiddle
+        commandLabel.isSelectable = true
+        let patternsLabel = SettingsLabel(patterns, size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+        patternsLabel.font = Typography.mono(Typography.tinySize)
+        patternsLabel.preferredMaxLayoutWidth = textWidth
+
+        let stack = NSStackView(views: [titleRow, descriptionLabel, commandLabel, patternsLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.setCustomSpacing(6, after: descriptionLabel)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            commandLabel.widthAnchor.constraint(lessThanOrEqualToConstant: textWidth),
+        ])
+        setAccessibilityElement(true)
+        setAccessibilityRole(.group)
+        setAccessibilityLabel(name)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+}
+
+/// An 8 pt dot in a fixed color (an agent profile's color).
+private final class SettingsColorDot: NSView {
+    private let color: NSColor
+
+    init(color: NSColor) {
+        self.color = color
+        super.init(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 8),
+            heightAnchor.constraint(equalToConstant: 8),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        color.setFill()
+        NSBezierPath(ovalIn: bounds).fill()
     }
 }
 
-/// K1 keycaps for Settings, built from the `KeyBinding` itself through the
+/// Keycaps for Settings, built from the `KeyBinding` itself through the
 /// palette's `MainWindowController.keycaps(for:prefixKey:)`, so a shortcut
 /// reads the same in both places (`⌃⇥`, `⌘esc`, `↵`).
 enum SettingsKeycaps {
     /// One cap list per alternative. Only a built-in binding whose
-    /// `defaultKeys` lists several K1 chords (`⌘+ / ⌘=`) has more than one;
-    /// the bound chord keeps its place among them.
+    /// `defaultKeys` lists several chords (`⌘+ / ⌘=`) has more than one; the
+    /// bound chord keeps its place among them.
     static func alternatives(for binding: KeyBinding, prefixKey: String) -> [[String]] {
         let caps = MainWindowController.keycaps(for: binding, prefixKey: prefixKey)
         guard !caps.isEmpty else { return [] }
@@ -2098,522 +1286,5 @@ enum SettingsKeycaps {
     /// The prefix chord as one cap: `⌃A`.
     static func prefixLegend(_ prefixKey: String) -> String {
         "⌃" + prefixKey.uppercased()
-    }
-}
-
-/// A top-anchored document view whose height can exceed the settings viewport.
-private final class SettingsScrollDocumentView: NSView {
-    override var isFlipped: Bool { true }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-}
-
-/// One settings section: the margin column (eyebrow and note) beside its
-/// card, or above it when the page is too narrow for both.
-private final class SettingsSectionView: NSView {
-    private let side = NSStackView()
-    private var sideBySideConstraints: [NSLayoutConstraint] = []
-    private var stackedConstraints: [NSLayoutConstraint] = []
-
-    var isStacked: Bool {
-        didSet {
-            guard isStacked != oldValue else { return }
-            applyArrangement()
-        }
-    }
-
-    init(side sideViews: [NSView], content: NSView, isStacked: Bool) {
-        self.isStacked = isStacked
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-
-        side.orientation = .vertical
-        side.alignment = .leading
-        side.spacing = 6
-        side.translatesAutoresizingMaskIntoConstraints = false
-        for view in sideViews {
-            side.addArrangedSubview(view)
-            view.widthAnchor.constraint(equalTo: side.widthAnchor).isActive = true
-        }
-        addSubview(side)
-
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-
-        NSLayoutConstraint.activate([
-            side.leadingAnchor.constraint(equalTo: leadingAnchor),
-            side.topAnchor.constraint(equalTo: topAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bottomAnchor.constraint(greaterThanOrEqualTo: side.bottomAnchor),
-            bottomAnchor.constraint(greaterThanOrEqualTo: content.bottomAnchor),
-        ])
-        let hug = heightAnchor.constraint(equalToConstant: 0)
-        hug.priority = .defaultLow
-        hug.isActive = true
-
-        let hasSide = !sideViews.isEmpty
-        sideBySideConstraints = [
-            side.widthAnchor.constraint(equalToConstant: SettingsLayout.marginColumn),
-            content.leadingAnchor.constraint(
-                equalTo: leadingAnchor,
-                constant: SettingsLayout.marginColumn + SettingsLayout.columnGap
-            ),
-            content.topAnchor.constraint(equalTo: topAnchor),
-        ]
-        stackedConstraints = [
-            side.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hasSide
-                ? content.topAnchor.constraint(equalTo: side.bottomAnchor, constant: 8)
-                : content.topAnchor.constraint(equalTo: topAnchor),
-        ]
-        applyArrangement()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    private func applyArrangement() {
-        NSLayoutConstraint.deactivate(isStacked ? sideBySideConstraints : stackedConstraints)
-        NSLayoutConstraint.activate(isStacked ? stackedConstraints : sideBySideConstraints)
-        // Beside the card the eyebrow lines up with the first row's label.
-        side.edgeInsets = NSEdgeInsets(top: isStacked ? 0 : 11, left: 0, bottom: 0, right: 0)
-    }
-}
-
-/// A segmented control (`.segmented`): an overlay track with a raised
-/// active segment. Each segment is a button, so VoiceOver reads them as a
-/// radio group.
-private final class SettingsSegmentedControl: NSControl {
-    private(set) var selectedSegment: Int
-    private var segments: [SettingsSegmentButton] = []
-    private var theme: AppTheme
-
-    init(
-        items: [(title: String, symbolName: String)],
-        selectedSegment: Int,
-        theme: AppTheme,
-        target: AnyObject,
-        action: Selector
-    ) {
-        self.selectedSegment = selectedSegment
-        self.theme = theme
-        super.init(frame: .zero)
-        self.target = target
-        self.action = action
-        translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.control
-        layer?.backgroundColor = theme.colors.bgOverlay.cgColor
-        setAccessibilityElement(true)
-        setAccessibilityRole(.radioGroup)
-
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.spacing = 2
-        stack.edgeInsets = NSEdgeInsets(top: 2, left: 2, bottom: 2, right: 2)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
-        ])
-
-        for (index, item) in items.enumerated() {
-            let segment = SettingsSegmentButton(
-                title: item.title,
-                symbolName: item.symbolName,
-                theme: theme,
-                target: self,
-                action: #selector(segmentClicked(_:))
-            )
-            segment.tag = index
-            segment.isActive = index == selectedSegment
-            segments.append(segment)
-            stack.addArrangedSubview(segment)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc private func segmentClicked(_ sender: NSButton) {
-        guard sender.tag != selectedSegment else { return }
-        selectedSegment = sender.tag
-        for segment in segments {
-            segment.isActive = segment.tag == selectedSegment
-        }
-        sendAction(action, to: target)
-    }
-}
-
-private final class SettingsSegmentButton: NSButton {
-    private static let padding: CGFloat = 10
-    private static let iconSide: CGFloat = 12
-    private static let gap: CGFloat = 5
-
-    var isActive = false {
-        didSet {
-            needsDisplay = true
-            setAccessibilityValue(isActive)
-        }
-    }
-    private let theme: AppTheme
-    private let symbol: NSImage?
-
-    init(title: String, symbolName: String, theme: AppTheme, target: AnyObject, action: Selector) {
-        self.theme = theme
-        self.symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
-        super.init(frame: .zero)
-        self.title = title
-        self.target = target
-        self.action = action
-        isBordered = false
-        setButtonType(.momentaryPushIn)
-        translatesAutoresizingMaskIntoConstraints = false
-        setAccessibilityRole(.radioButton)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    private var label: NSAttributedString {
-        ChromeText.attributed(
-            title,
-            font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
-            color: isActive ? theme.colors.textPrimary : theme.colors.textMuted
-        )
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let textWidth = ceil(ChromeText.attributed(title, font: ChromeFont.labelStrong, color: .labelColor).size().width)
-        return NSSize(width: Self.padding * 2 + Self.iconSide + Self.gap + textWidth, height: 20)
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let colors = theme.colors
-        if isActive {
-            let shape = NSBezierPath(
-                roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-                xRadius: Chrome.Radius.cap,
-                yRadius: Chrome.Radius.cap
-            )
-            colors.bgRaised.setFill()
-            shape.fill()
-            colors.borderSubtle.setStroke()
-            shape.lineWidth = Chrome.hairline
-            shape.stroke()
-        }
-        let ink = isActive ? colors.textPrimary : colors.textMuted
-        let label = label
-        let textSize = label.size()
-        let contentWidth = Self.iconSide + Self.gap + ceil(textSize.width)
-        var x = floor((bounds.width - contentWidth) / 2)
-        if let symbol {
-            let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [ink]))
-            let tinted = symbol.withSymbolConfiguration(configuration) ?? symbol
-            let size = tinted.size
-            tinted.draw(
-                in: NSRect(
-                    x: x + floor((Self.iconSide - size.width) / 2),
-                    y: floor((bounds.height - size.height) / 2),
-                    width: size.width,
-                    height: size.height
-                ),
-                from: .zero,
-                operation: .sourceOver,
-                fraction: 1,
-                respectFlipped: true,
-                hints: nil
-            )
-        }
-        x += Self.iconSide + Self.gap
-        label.draw(at: NSPoint(x: x, y: floor((bounds.height - textSize.height) / 2)))
-    }
-}
-
-/// The Prefix key control: the configured prefix as an accent field keycap
-/// (`⌃A`). Click it (or press Space) and type a key to make Control plus that
-/// key the prefix.
-private final class SettingsPrefixKeyControl: NSControl, EscapeConsumingControl, KeyCapturingResponder {
-    private let cap: ChromeKeycapView
-    private(set) var key: String
-    private var isRecording = false {
-        didSet { refresh() }
-    }
-
-    var consumesEscape: Bool { isRecording }
-    /// ⌃A, ⌃L, ⌃1… are exactly the keys a recording wants, so Soprano's
-    /// chords step aside while it runs.
-    var capturesKeys: Bool { isRecording }
-
-    init(key: String, theme: AppTheme, target: AnyObject, action: Selector) {
-        self.key = key
-        cap = ChromeKeycapView(
-            legend: SettingsKeycaps.prefixLegend(key),
-            theme: theme,
-            style: .field,
-            tone: .accent
-        )
-        super.init(frame: .zero)
-        self.target = target
-        self.action = action
-        translatesAutoresizingMaskIntoConstraints = false
-        setContentHuggingPriority(.required, for: .horizontal)
-        addSubview(cap)
-        NSLayoutConstraint.activate([
-            cap.leadingAnchor.constraint(equalTo: leadingAnchor),
-            cap.trailingAnchor.constraint(equalTo: trailingAnchor),
-            cap.topAnchor.constraint(equalTo: topAnchor),
-            cap.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-        toolTip = "Click, then press the key to use with Control"
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        setAccessibilityLabel("Prefix key")
-        refresh()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    /// A key view only under Full Keyboard Access, like the Chrome switch;
-    /// a click or an accessibility press still takes focus for the length
-    /// of one recording.
-    override var canBecomeKeyView: Bool { isEnabled && NSApp.isFullKeyboardAccessEnabled }
-
-    override var acceptsFirstResponder: Bool { isEnabled && (isRecording || canBecomeKeyView) }
-
-    override var focusRingMaskBounds: NSRect { bounds }
-
-    override func drawFocusRingMask() {
-        NSBezierPath(
-            roundedRect: bounds,
-            xRadius: Chrome.Radius.control,
-            yRadius: Chrome.Radius.control
-        ).fill()
-    }
-
-    /// Esc ends a recording and keeps the current prefix. The overlay
-    /// header's Done steps aside while `consumesEscape`, so Esc reaches this
-    /// key-equivalent pass.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if isRecording, event.keyCode == 53 {
-            endRecording()
-            return true
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        if isRecording {
-            endRecording()
-        } else {
-            nextResponder?.tryToPerform(#selector(NSResponder.cancelOperation(_:)), with: sender)
-        }
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        beginRecording()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        beginRecording()
-        return true
-    }
-
-    override func keyDown(with event: NSEvent) {
-        guard isRecording else {
-            if event.charactersIgnoringModifiers == " " {
-                beginRecording()
-            } else {
-                super.keyDown(with: event)
-            }
-            return
-        }
-        // Esc keeps the current prefix.
-        if event.keyCode == 53 {
-            endRecording()
-            return
-        }
-        guard let raw = event.charactersIgnoringModifiers,
-              case let typed = raw.lowercased(),
-              typed.count == 1,
-              let scalar = typed.unicodeScalars.first,
-              !CharacterSet.whitespacesAndNewlines.contains(scalar),
-              !CharacterSet.controlCharacters.contains(scalar),
-              // Function keys (arrows, F-keys) live in the private-use range.
-              !(0xF700...0xF8FF).contains(scalar.value),
-              // The prefix matches Control alone, so a character that needs
-              // Shift (⇧1 is "!") could never be typed. A shifted letter is
-              // still that letter.
-              !event.modifierFlags.contains(.shift) || typed != raw
-        else {
-            NSSound.beep()
-            return
-        }
-        key = typed
-        endRecording()
-        sendAction(action, to: target)
-    }
-
-    override func resignFirstResponder() -> Bool {
-        isRecording = false
-        return super.resignFirstResponder()
-    }
-
-    private func beginRecording() {
-        guard isEnabled else { return }
-        isRecording = true
-        if let window, window.firstResponder !== self, !window.makeFirstResponder(self) {
-            isRecording = false
-        }
-    }
-
-    /// Without Full Keyboard Access the control is not a key view, so it
-    /// hands focus back once the recording is over.
-    private func endRecording() {
-        isRecording = false
-        if !canBecomeKeyView, window?.firstResponder === self {
-            window?.makeFirstResponder(nil)
-        }
-    }
-
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        if newWindow !== window {
-            isRecording = false
-        }
-        super.viewWillMove(toWindow: newWindow)
-    }
-
-    private func refresh() {
-        cap.legend = isRecording ? "⌃…" : SettingsKeycaps.prefixLegend(key)
-        setAccessibilityValue(cap.legend)
-    }
-}
-
-/// A settings nav item (`.nav-item`): a 14 pt symbol and the tab name. The
-/// active item is the raised pill with ink Medium text; hover is the hover
-/// pill.
-private final class SettingsTabButton: NSButton {
-    private static let inset: CGFloat = 10
-    private static let symbolSlot: CGFloat = 14
-
-    var isActive = false {
-        didSet { needsDisplay = true }
-    }
-    private var theme: AppTheme
-    private let symbol: NSImage?
-    private var isHovered = false {
-        didSet { needsDisplay = true }
-    }
-    private var hoverArea: NSTrackingArea?
-
-    init(tab: SettingsTab, theme: AppTheme, target: AnyObject?, action: Selector) {
-        self.theme = theme
-        self.symbol = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.title)
-        super.init(frame: .zero)
-        self.title = tab.title
-        self.target = target
-        self.action = action
-        isBordered = false
-        setButtonType(.momentaryPushIn)
-        translatesAutoresizingMaskIntoConstraints = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let colors = theme.colors
-        if isActive {
-            ChromeSelectionPill.draw(.raisedTab, in: bounds, colors: colors, inset: 0)
-        } else if isHovered {
-            ChromeSelectionPill.draw(.hover, in: bounds, colors: colors, inset: 0)
-        }
-        let ink = isActive ? colors.textPrimary : colors.textMuted
-
-        var x = Self.inset
-        if let symbol {
-            let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [ink]))
-            let tinted = symbol.withSymbolConfiguration(configuration) ?? symbol
-            let size = tinted.size
-            tinted.draw(
-                in: NSRect(
-                    x: x + floor((Self.symbolSlot - size.width) / 2),
-                    y: floor((bounds.height - size.height) / 2),
-                    width: size.width,
-                    height: size.height
-                ),
-                from: .zero,
-                operation: .sourceOver,
-                fraction: 1,
-                respectFlipped: true,
-                hints: nil
-            )
-            x += Self.symbolSlot + 8
-        }
-
-        let label = ChromeText.attributed(
-            title,
-            font: isActive ? ChromeFont.labelStrong : ChromeFont.label,
-            color: ink
-        )
-        let height = ceil(label.size().height)
-        label.draw(in: NSRect(
-            x: x,
-            y: floor((bounds.height - height) / 2),
-            width: max(0, bounds.width - x - Self.inset),
-            height: height
-        ))
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let hoverArea {
-            removeTrackingArea(hoverArea)
-        }
-        let area = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
-        addTrackingArea(area)
-        hoverArea = area
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
     }
 }

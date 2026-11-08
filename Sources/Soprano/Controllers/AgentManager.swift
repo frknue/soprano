@@ -221,20 +221,22 @@ final class AgentManager: @unchecked Sendable {
         panes[activePaneId]?.activeTab?.cwd
     }
 
+    /// Opens a window holding one terminal, or a chat with `chatProfileId`.
     @discardableResult
-    func createWindow(cwd: String? = nil) -> String? {
-        createWindow(in: activeSessionId, cwd: cwd ?? activeWorkingDirectory)
+    func createWindow(cwd: String? = nil, chatProfileId: String? = nil) -> String? {
+        createWindow(in: activeSessionId, cwd: cwd ?? activeWorkingDirectory, chatProfileId: chatProfileId)
     }
 
     @discardableResult
     private func createWindow(
         in sessionId: String,
         cwd workingDirectory: String?,
+        chatProfileId: String? = nil,
         activate: Bool = true
     ) -> String? {
         guard terminalSessions[sessionId] != nil else { return nil }
         let windowId = nextWindowId()
-        let pane = makeTerminalPane(cwd: workingDirectory)
+        let pane = makePane(cwd: workingDirectory, chatProfileId: chatProfileId)
         let windowTitle = uniqueAutomaticWindowTitle(
             Self.suggestedWindowTitle(for: pane.activeTab), in: sessionId
         )
@@ -356,34 +358,24 @@ final class AgentManager: @unchecked Sendable {
 
     // MARK: - Pane Spawning
 
+    /// Opens a pane beside the active one with `profileId`'s agent, as a chat
+    /// when `chat` is set and the agent supports one.
     @discardableResult
-    func spawnAgent(_ profileId: String, cwd: String? = nil) -> String? {
+    func spawnAgent(_ profileId: String, cwd: String? = nil, chat: Bool = false) -> String? {
         guard canAddPane(to: activeWindowId) else { return nil }
         let workingDirectory = cwd ?? activeWorkingDirectory
         let paneId = nextPaneId()
-        let tabId = nextTabId()
-        let profile = AgentCatalog.profile(for: profileId)
-
         let tab: PaneTab
-        if let profile, profile.id != "terminal" {
-            let dirName = workingDirectory?.split(separator: "/").last.map(String.init)
-            let title = dirName.map { "\(profile.name): \($0)" } ?? profile.name
-            let agent = AgentInstance(id: tabId, profileId: profile.id)
-            tab = PaneTab(
-                id: tabId,
+        if let profile = AgentCatalog.profile(for: profileId), profile.id != "terminal" {
+            tab = createPaneTab(
+                id: nextTabId(),
                 type: .agent,
-                title: title,
-                agent: agent,
-                cwd: workingDirectory
+                profileId: profile.id,
+                cwd: workingDirectory,
+                contentKind: chat ? PaneContentKind.chat : nil
             )
         } else {
-            let title = workingDirectory?.split(separator: "/").last.map(String.init) ?? "Terminal"
-            tab = PaneTab(
-                id: tabId,
-                type: .terminal,
-                title: title,
-                cwd: workingDirectory
-            )
+            tab = createPaneTab(id: nextTabId(), type: .terminal, cwd: workingDirectory)
         }
 
         let pane = PaneState(id: paneId, tabs: [tab])
@@ -745,7 +737,8 @@ final class AgentManager: @unchecked Sendable {
                 type: .agent,
                 title: sourceTab.title,
                 agent: newAgent,
-                cwd: sourceTab.cwd
+                cwd: sourceTab.cwd,
+                contentKind: sourceTab.isChat ? PaneContentKind.chat : nil
             )
         } else if sourceTab.type == .browser {
             newTab = PaneTab(
@@ -1153,6 +1146,27 @@ final class AgentManager: @unchecked Sendable {
         notifyChange()
     }
 
+    /// Handles lifecycle events of agents Soprano drives itself (chat tabs)
+    /// the way hook events are handled: status, attention and the banner.
+    /// The app sets it to the notification manager.
+    var agentEventHandler: ((AgentEventPayload) -> Void)?
+
+    /// Reports `event` through `agentEventHandler`, or, without one, only
+    /// updates the agent's status.
+    func reportAgentEvent(_ event: AgentEventPayload) {
+        if let agentEventHandler {
+            agentEventHandler(event)
+            return
+        }
+        updateAgentStatus(
+            paneId: event.paneId,
+            tabId: event.tabId,
+            status: event.state.agentStatus,
+            needsAttention: event.shouldNotify,
+            waitingReason: event.waitingReason
+        )
+    }
+
     func agent(paneId: String, tabId: String) -> AgentInstance? {
         panes[paneId]?.tabs.first(where: { $0.id == tabId })?.agent
     }
@@ -1318,11 +1332,12 @@ final class AgentManager: @unchecked Sendable {
     }
 
     /// Opens a tab at the end of the active window's row holding one fresh
-    /// terminal, started in the active terminal's directory, and shows it.
+    /// terminal, or a chat with `chatProfileId`, started in the active
+    /// terminal's directory, and shows it.
     @discardableResult
-    func createLayoutTab(cwd: String? = nil) -> String? {
+    func createLayoutTab(cwd: String? = nil, chatProfileId: String? = nil) -> String? {
         guard let terminalWindow = windows[activeWindowId] else { return nil }
-        let pane = makeTerminalPane(cwd: cwd ?? activeWorkingDirectory)
+        let pane = makePane(cwd: cwd ?? activeWorkingDirectory, chatProfileId: chatProfileId)
         let layoutTabId = nextLayoutTabId()
         terminalWindow.appendTab(
             LayoutTab(id: layoutTabId, layout: .leaf(pane.id), activePaneId: pane.id)
@@ -1399,7 +1414,12 @@ final class AgentManager: @unchecked Sendable {
     // MARK: - Pane Tabs
 
     @discardableResult
-    func addTabToPane(_ paneId: String, type: PaneType, profileId: String? = nil) -> String? {
+    func addTabToPane(
+        _ paneId: String,
+        type: PaneType,
+        profileId: String? = nil,
+        contentKind: String? = nil
+    ) -> String? {
         guard let pane = panes[paneId],
               let terminalWindow = window(containingPane: paneId),
               pane.tabs.count < PaneState.maxTabsPerPane
@@ -1410,7 +1430,8 @@ final class AgentManager: @unchecked Sendable {
             id: tabId,
             type: type,
             profileId: profileId,
-            cwd: pane.activeTab?.cwd
+            cwd: pane.activeTab?.cwd,
+            contentKind: contentKind
         )
 
         pane.tabs.append(tab)
@@ -1843,11 +1864,14 @@ final class AgentManager: @unchecked Sendable {
     }
 
     /// Registers a new pane holding one terminal that starts in
-    /// `workingDirectory`.
-    private func makeTerminalPane(cwd workingDirectory: String?) -> PaneState {
+    /// `workingDirectory`, or a chat with `chatProfileId`'s agent there.
+    private func makePane(cwd workingDirectory: String?, chatProfileId: String? = nil) -> PaneState {
+        let tab = chatProfileId.map {
+            createPaneTab(id: nextTabId(), type: .agent, profileId: $0, cwd: workingDirectory, contentKind: PaneContentKind.chat)
+        } ?? createPaneTab(id: nextTabId(), type: .terminal, cwd: workingDirectory)
         let pane = PaneState(
             id: nextPaneId(),
-            tabs: [createPaneTab(id: nextTabId(), type: .terminal, cwd: workingDirectory)]
+            tabs: [tab]
         )
         panes[pane.id] = pane
         return pane
@@ -2060,12 +2084,15 @@ final class AgentManager: @unchecked Sendable {
             let agent = AgentInstance(id: id, profileId: profile.id)
             let dirName = cwd?.split(separator: "/").last.map(String.init)
             let restoredTitle = title ?? dirName.map { "\(profile.name): \($0)" } ?? profile.name
+            // A chat for an agent that cannot serve one opens its terminal.
+            let isChat = contentKind == PaneContentKind.chat && AgentChatLaunch.supports(profileId: profile.id)
             return PaneTab(
                 id: id,
                 type: .agent,
                 title: restoredTitle,
                 agent: agent,
-                cwd: cwd
+                cwd: cwd,
+                contentKind: isChat ? PaneContentKind.chat : nil
             )
         }
 
