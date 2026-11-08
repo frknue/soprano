@@ -91,22 +91,22 @@ struct ActiveLocationIndicatorTests {
         #expect(manager.panes[paneId] == nil)
     }
 
-    @Test func holdingControlShowsAccentJumpKeycapsAndReleasingItHidesThem() throws {
+    @Test func holdingControlShowsWindowJumpHintsAndReleasingItHidesThem() throws {
         let manager = AgentManager()
         _ = try #require(manager.createWindow())
         let sidebar = makeSidebar(manager: manager)
-        func visibleCaps() -> [ChromeKeycapView] {
-            descendants(of: sidebar, as: ChromeKeycapView.self).filter { !$0.isHiddenOrHasHiddenAncestor }
+        func visibleWindowHints() -> [ShellJumpHintBadge] {
+            descendants(of: sidebar, as: ShellJumpHintBadge.self).filter {
+                !$0.isHiddenOrHasHiddenAncestor && $0.identifier?.rawValue == "sidebar-jump-window"
+            }
         }
-        #expect(visibleCaps().isEmpty)
+        #expect(visibleWindowHints().isEmpty)
 
         sidebar.setControlKeyHeld(true)
-        let caps = visibleCaps()
-        #expect(caps.map(\.legend).filter { $0.hasPrefix("⌃") && !$0.hasPrefix("⌃⇧") } == ["⌃1", "⌃2"])
-        #expect(caps.allSatisfy { $0.tone == .accent })
+        #expect(visibleWindowHints().map(\.caps) == [["⌃1"], ["⌃2"]])
 
         sidebar.setControlKeyHeld(false)
-        #expect(visibleCaps().isEmpty)
+        #expect(visibleWindowHints().isEmpty)
     }
 
     @Test func everyPaneRowDownToTheLastWindowShowsItsHintAndATypedLetterNarrowsThem() throws {
@@ -116,8 +116,8 @@ struct ActiveLocationIndicatorTests {
         }
         let sidebar = makeSidebar(manager: manager)
         func paneCaps() -> [[String]] {
-            descendants(of: sidebar, as: ChromeKeycapGroupView.self)
-                .filter { !$0.isHiddenOrHasHiddenAncestor }
+            descendants(of: sidebar, as: ShellJumpHintBadge.self)
+                .filter { !$0.isHiddenOrHasHiddenAncestor && $0.identifier?.rawValue == "sidebar-jump-pane" }
                 .sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
                 .map(\.caps)
         }
@@ -150,7 +150,7 @@ struct ActiveLocationIndicatorTests {
             themeManager: ThemeManager(themeId: "gruvbox-dark")
         )
 
-        #expect(locationText(in: statusBar) == "Session 1 › Soprano › Claude")
+        #expect(locationText(in: statusBar) == "Session 1  /  Soprano  /  Claude")
     }
 
     @Test func statusBarNamesTheActiveTabOnlyForWindowsWithSeveralTabs() throws {
@@ -186,15 +186,13 @@ struct ActiveLocationIndicatorTests {
         return sidebar
     }
 
-    /// Rows whose background draws the focused-list pill and pencil tick.
+    /// Rows whose surface shows the active fill.
     private func selectedRowIdentifiers(in view: NSView) -> [String] {
-        descendants(of: view, as: ChromeRowBackgroundView.self)
-            .filter { $0.style == .selected }
-            .compactMap { $0.superview?.identifier?.rawValue }
+        rowIdentifiers(in: view, style: .selected)
     }
 
-    private func rowIdentifiers(in view: NSView, style: ChromeSelectionPill.Style) -> [String] {
-        descendants(of: view, as: ChromeRowBackgroundView.self)
+    private func rowIdentifiers(in view: NSView, style: ShellRowSurfaceView.Style) -> [String] {
+        descendants(of: view, as: ShellRowSurfaceView.self)
             .filter { $0.style == style }
             .compactMap { $0.superview?.identifier?.rawValue }
     }

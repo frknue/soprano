@@ -2,13 +2,13 @@ import AppKit
 import Testing
 @testable import Soprano
 
-/// Guards the editor gutter's right hairline. AppKit hands a ruler dirty
-/// rects that reach past its bounds and does not clip the view for it, so the
-/// hairline must stay inside the gutter instead of drawing up over the file
-/// toolbar and the pane header.
+/// Guards the editor gutter's fill. AppKit hands a ruler dirty rects that
+/// reach past its bounds and does not clip the view for it, so the gutter
+/// must stay inside itself instead of drawing up over the file toolbar and
+/// the pane header.
 @MainActor
 struct GutterRulerTests {
-    @Test func theGutterHairlineNeverPaintsOutsideTheRuler() throws {
+    @Test func theGutterNeverPaintsOutsideTheRuler() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("GutterRulerTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -28,7 +28,6 @@ struct GutterRulerTests {
         )
 
         let ruler = EditorLineNumberRuler(textView: textView, document: document)
-        ruler.colors = ThemeManager(themeId: "gruvbox-dark").currentTheme.colors
         ruler.updateThickness()
         ruler.frame = NSRect(x: 0, y: 100, width: ruler.ruleThickness, height: 200)
 
@@ -55,14 +54,14 @@ struct GutterRulerTests {
         NSColor.red.setFill()
         NSRect(x: 0, y: 0, width: 60, height: 500).fill()
         context.cgContext.translateBy(x: 0, y: 100)
-        // The dirty rect AppKit delivered when the hairline escaped: far above
+        // The dirty rect AppKit delivered when the gutter escaped: far above
         // and below the ruler's own bounds.
         ruler.draw(NSRect(x: 0, y: -150, width: ruler.ruleThickness, height: 500))
         NSGraphicsContext.restoreGraphicsState()
 
-        let hairlineColumn = Int(ruler.ruleThickness) - 1
+        let edgeColumn = Int(ruler.ruleThickness) - 1
         func isMarker(_ row: Int) -> Bool {
-            let color = bitmap.colorAt(x: hairlineColumn, y: row) ?? .clear
+            let color = bitmap.colorAt(x: edgeColumn, y: row) ?? .clear
             return color.redComponent > 0.9 && color.greenComponent < 0.2
         }
         // The ruler occupies rows 200..<400; above and below stay the marker.

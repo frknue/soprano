@@ -112,7 +112,7 @@ final class ThemeManager {
 
     /// The appearance `folio` follows under the `system` preference. While
     /// `NSApp.appearance` is nil this is the system's own setting.
-    private static func systemAppearance() -> AppTheme.Appearance {
+    static func systemAppearance() -> AppTheme.Appearance {
         AppTheme.Appearance(NSApplication.shared.effectiveAppearance)
     }
 }

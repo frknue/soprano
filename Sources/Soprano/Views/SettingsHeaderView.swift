@@ -1,120 +1,63 @@
 import AppKit
 
 /// A control that uses Esc itself while it holds keyboard focus, such as the
-/// Prefix key recorder ending a recording. The overlay header's `Done esc`
-/// leaves Esc to it.
+/// Prefix key recorder ending a recording. The settings overlay and the page
+/// headers leave Esc to it.
 @MainActor
 protocol EscapeConsumingControl: AnyObject {
     var consumesEscape: Bool { get }
 }
 
-/// The header shared by the full-window overlays (Settings and the Agent
-/// Dashboard): a New York screen title, an optional muted subtitle, a
-/// `Done esc` button that returns to the workspace, and one hairline under
-/// it. It sits directly under the 28 pt titlebar band.
-final class SettingsHeaderView: NSView {
-    static let height: CGFloat = 56
-
-    let closeButton: ChromeButton
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let subtitleLabel = NSTextField(labelWithString: "")
-    private let rule: ChromeRuleView
-    private var theme: AppTheme
+/// The settings page header, ported from Soprano Agents: the breadcrumb
+/// "Settings › General" and a close button (×), with one hairline under it.
+final class SettingsHeaderView: PaletteView {
+    static let height = Metrics.topbarHeight
 
     var onClose: (() -> Void)?
+    let closeButton = GhostIconButton(symbol: "xmark", size: 28, symbolSize: 13, toolTip: "Close settings")
+    private let root = SettingsLabel("Settings", size: Typography.bodySize) { $0.mutedForeground }
+    private let chevron = NSImageView()
+    private let current = SettingsLabel("", size: Typography.bodySize, weight: .medium)
+    private let rule = CALayer()
 
-    var title: String {
-        didSet { applyText() }
-    }
-
-    /// Muted meta text after the title, e.g. "Monitoring 4 agents across 3
-    /// windows". Empty or nil hides it.
-    var subtitle: String? {
-        didSet { applyText() }
-    }
-
-    var displayedSubtitle: String { subtitleLabel.stringValue }
-
-    init(title: String = "Settings", subtitle: String? = nil, theme: AppTheme) {
-        self.theme = theme
-        self.title = title
-        self.subtitle = subtitle
-        closeButton = ChromeButton(title: "Done", theme: theme, kind: .standard, keycap: "esc")
-        rule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        super.init(frame: .zero)
-        wantsLayer = true
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        addSubview(titleLabel)
-
-        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
-        subtitleLabel.lineBreakMode = .byTruncatingTail
-        subtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(subtitleLabel)
-
-        closeButton.target = self
-        closeButton.action = #selector(closeClicked)
-        closeButton.keyEquivalent = "\u{1b}"
-        closeButton.keyEquivalentModifierMask = []
-        closeButton.toolTip = "Return to the workspace (Esc)"
-        addSubview(closeButton)
-
-        addSubview(rule)
-
+        layer?.addSublayer(rule)
+        chevron.image = NSImage.symbol(Icon.chevronRight, size: 11)
+        closeButton.onClick = { [weak self] in self?.onClose?() }
+        for view in [root, chevron, current, closeButton] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Self.height),
-
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.page),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -0.5),
-
-            subtitleLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 14),
-            subtitleLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-            subtitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -Chrome.Space.s16),
-
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.page),
+            root.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            root.centerYAnchor.constraint(equalTo: centerYAnchor),
+            chevron.leadingAnchor.constraint(equalTo: root.trailingAnchor, constant: 6),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            current.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 6),
+            current.centerYAnchor.constraint(equalTo: centerYAnchor),
+            current.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -12),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            rule.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        apply(theme: theme)
+        applyPalette(palette)
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
+    /// The page in the breadcrumb.
+    var pageTitle: String {
+        get { current.stringValue }
+        set { current.stringValue = newValue }
     }
 
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        let colors = theme.colors
-        layer?.backgroundColor = colors.bgBase.cgColor
-        applyText()
-        closeButton.apply(theme: theme)
-        rule.color = colors.borderSubtle
+    override func layout() {
+        super.layout()
+        rule.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
     }
 
-    private func applyText() {
-        let colors = theme.colors
-        titleLabel.setChromeText(title, font: ChromeFont.screen, color: colors.textPrimary)
-        let subtitle = subtitle ?? ""
-        subtitleLabel.setChromeText(subtitle, font: ChromeFont.meta, color: colors.textMuted)
-        subtitleLabel.isHidden = subtitle.isEmpty
-    }
-
-    /// AppKit offers Esc to key equivalents before the first responder's
-    /// `keyDown`, so Done would win over a control that needs Esc.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.keyCode == 53, (window?.firstResponder as? EscapeConsumingControl)?.consumesEscape == true {
-            return false
-        }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    @objc private func closeClicked() {
-        onClose?()
+    override func applyPalette(_ palette: Palette) {
+        rule.backgroundColor = palette.border.cgColor
+        chevron.contentTintColor = palette.mutedForeground
     }
 }

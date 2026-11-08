@@ -113,13 +113,13 @@ struct FileExplorerTests {
         )
 
         cell.configure(node: node, isExpanded: false, status: .modified, isIgnored: false, colors: colors)
-        #expect(cell.nameField.textColor == colors.textPrimary)
+        #expect(cell.nameField.textColor == PaletteCenter.shared.palette.foreground)
         #expect(cell.statusLabel.stringValue == "M")
         let letterColor = cell.statusLabel.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil)
         #expect((letterColor as? NSColor) == colors.yellow)
 
         cell.configure(node: node, isExpanded: false, status: nil, isIgnored: true, colors: colors)
-        #expect(cell.nameField.textColor == colors.gray)
+        #expect(cell.nameField.textColor == PaletteCenter.shared.palette.mutedForeground.shellScaled(by: 0.7))
         #expect(cell.statusLabel.isHidden)
         #expect(!cell.ignoredView.isHidden)
     }
@@ -152,15 +152,15 @@ struct FileExplorerTests {
         #expect(abs(nameEnd(status: nil, ignored: false) - clean) < 1)
     }
 
-    @Test func theRenameFieldIsClippedToTheControlRadiusOnlyWhileEditing() throws {
+    @Test func theRenameFieldIsClippedToTheRowRadiusOnlyWhileEditing() throws {
         final class Delegate: NSObject, NSTextFieldDelegate {}
         let delegate = Delegate()
         let cell = FileExplorerCellView(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
 
-        cell.beginEditing(colors: AppTheme.folioPaper.colors, delegate: delegate)
+        cell.beginEditing(delegate: delegate)
         let layer = try #require(cell.nameField.layer)
         #expect(layer.masksToBounds)
-        #expect(layer.cornerRadius == Chrome.Radius.control)
+        #expect(layer.cornerRadius == Radius.md)
 
         cell.endEditing()
         #expect(!layer.masksToBounds)
@@ -179,14 +179,13 @@ struct FileExplorerTests {
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 120))
         window.contentView = host
         defer { window.contentView = nil }
-        let colors = AppTheme.folioPaper.colors
-        let toast = SidebarToastView(colors: colors)
+        let toast = SidebarToastView()
         toast.translatesAutoresizingMaskIntoConstraints = true
         toast.frame = NSRect(x: 16, y: 16, width: 288, height: 64)
         host.addSubview(toast)
         toast.display()
         let layer = try #require(toast.layer)
-        #expect(layer.shadowOpacity == colors.shadowE2.opacity)
+        #expect(layer.shadowOpacity == SidebarToastView.shadowOpacity)
         toast.needsDisplay = false
 
         // AppKit drops a backing layer's shadow when the appearance flips;
@@ -197,9 +196,9 @@ struct FileExplorerTests {
         #expect(toast.needsDisplay)
         toast.display()
 
-        #expect(layer.shadowOpacity == colors.shadowE2.opacity)
-        #expect(layer.borderWidth == Chrome.hairline)
-        #expect(layer.borderColor == colors.borderSubtle.cgColor)
+        #expect(layer.shadowOpacity == SidebarToastView.shadowOpacity)
+        #expect(layer.borderWidth == 1)
+        #expect(layer.borderColor == PaletteCenter.shared.palette.border.cgColor)
     }
 
     @Test func readingARealRepositoryReportsChangesAndIgnoredPaths() throws {

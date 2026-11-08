@@ -18,8 +18,6 @@ final class MainContentViewController: NSViewController {
     private var windowTabBarHeightConstraint: NSLayoutConstraint!
     private var windowTabsHidden = false
     private var statusBarView: StatusBarView!
-    /// The titlebar's bottom hairline; above the safe area it is off screen.
-    private let titlebarRule = ChromeRuleView(axis: .horizontal)
     private var sidebarWidthConstraint: NSLayoutConstraint!
     private var sidebarResizeHandle: SidebarResizeHandleView!
     private var sidebarWidth: CGFloat
@@ -28,16 +26,17 @@ final class MainContentViewController: NSViewController {
     private var rightSidebarWidthConstraint: NSLayoutConstraint!
     private var rightSidebarResizeHandle: SidebarResizeHandleView!
     private var rightSidebarWidth: CGFloat
-    private var settingsContainerView: NSView!
-    private var settingsHeaderView: SettingsHeaderView!
+    private var settingsOverlayView: SettingsOverlayView?
     private var settingsViewController: SettingsViewController?
-    private var settingsViewConstraints: [NSLayoutConstraint] = []
     private var dashboardViewController: AgentDashboardViewController?
     /// Runs the automations; set once by the app delegate after launch.
     var automationController: AutomationController?
     private var dashboardViewConstraints: [NSLayoutConstraint] = []
     private var automationsViewController: AutomationsViewController?
     private var automationsViewConstraints: [NSLayoutConstraint] = []
+    /// Keep full-window pages clear of the traffic lights while the sidebar
+    /// is hidden; their constants follow the window in `viewDidLayout`.
+    private var pageTrafficLightConstraints: [NSLayoutConstraint] = []
 
     private static let sidebarVisibleKey = "soprano-sidebar-visible"
     private static let rightSidebarVisibleKey = "soprano-right-sidebar-visible"
@@ -75,7 +74,6 @@ final class MainContentViewController: NSViewController {
     override func loadView() {
         let root = MainContentRootView(frame: .zero)
         root.wantsLayer = true
-        let safeArea = root.safeAreaLayoutGuide
 
         // Split tree (tiling layout)
         splitTreeView = splitTreeViewFactory(agentManager, themeManager)
@@ -109,6 +107,9 @@ final class MainContentViewController: NSViewController {
             // focused changes nothing that would move the keyboard itself.
             self?.closeAutomations()
         }
+        sidebarView.onToggleSidebarRequested = { [weak self] in
+            self?.toggleSidebar()
+        }
         sidebarView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(sidebarView, positioned: .above, relativeTo: splitTreeView)
 
@@ -136,6 +137,12 @@ final class MainContentViewController: NSViewController {
         layoutTabBarView.onRightSidebarToggle = { [weak self] in
             self?.toggleRightSidebar()
         }
+        windowTabBarView.onSidebarToggle = { [weak self] in
+            self?.toggleSidebar()
+        }
+        layoutTabBarView.onSidebarToggle = { [weak self] in
+            self?.toggleSidebar()
+        }
         updateRightSidebarToggle()
 
         // Status bar
@@ -148,9 +155,6 @@ final class MainContentViewController: NSViewController {
         splitTreeView.onCopyModeStateChanged = { [weak self] state in
             self?.setKeybindingMode(state)
         }
-
-        titlebarRule.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(titlebarRule)
 
         sidebarView.setContentWidth(sidebarWidth)
 
@@ -187,22 +191,25 @@ final class MainContentViewController: NSViewController {
                 equalToConstant: SidebarResizeHandleView.grabWidth
             ),
 
-            // Respect the window safe area so content stays out of the titlebar/traffic-light region.
+            // The sidebars and the top tab row start at the window's top edge:
+            // their first rows sit in the title bar strip, beside the traffic
+            // lights, as Soprano Agents' header row does.
             sidebarView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            sidebarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            sidebarView.topAnchor.constraint(equalTo: root.topAnchor),
             sidebarView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
             sidebarWidthConstraint,
 
             rightSidebarView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            rightSidebarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            rightSidebarView.topAnchor.constraint(equalTo: root.topAnchor),
             rightSidebarView.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
             rightSidebarWidthConstraint,
 
             // Window tabs stay above the terminal layout with the sidebars or
-            // native window bar hidden; only `hideWindowTabs` collapses them.
+            // native window bar hidden; only `hideWindowTabs` collapses them,
+            // and the layout tab row then moves up into the title bar strip.
             windowTabBarView.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
             windowTabBarView.trailingAnchor.constraint(equalTo: rightSidebarView.leadingAnchor),
-            windowTabBarView.topAnchor.constraint(equalTo: safeArea.topAnchor),
+            windowTabBarView.topAnchor.constraint(equalTo: root.topAnchor),
             windowTabBarHeightConstraint,
 
             // The active window's own tabs, each a complete split layout.
@@ -222,14 +229,7 @@ final class MainContentViewController: NSViewController {
             statusBarView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             statusBarView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             statusBarView.heightAnchor.constraint(equalToConstant: StatusBarView.height),
-
-            titlebarRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            titlebarRule.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            titlebarRule.bottomAnchor.constraint(equalTo: safeArea.topAnchor),
-            titlebarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
         ])
-
-        buildSettingsScreen(in: root, below: safeArea.topAnchor)
 
         self.view = root
         applyTheme()
@@ -249,6 +249,7 @@ final class MainContentViewController: NSViewController {
         // Hidden sidebars have no edge to grab, and the handle would otherwise sit
         // over the leftmost pane.
         sidebarResizeHandle.isHidden = !sidebarVisible
+        updateRightSidebarToggle()
         animateWidth(of: sidebarWidthConstraint, to: sidebarVisible ? sidebarWidth : 0)
     }
 
@@ -325,11 +326,13 @@ final class MainContentViewController: NSViewController {
         }
     }
 
-    /// The right sidebar's toggle sits at the end of the top tab row while
-    /// the sidebar is closed.
+    /// The sidebars' toggles sit at the ends of the top tab row while the
+    /// sidebar is closed.
     private func updateRightSidebarToggle() {
         windowTabBarView.showsRightSidebarToggle = !rightSidebarVisible && !windowTabsHidden
         layoutTabBarView.showsRightSidebarToggle = !rightSidebarVisible && windowTabsHidden
+        windowTabBarView.showsSidebarToggle = !sidebarVisible && !windowTabsHidden
+        layoutTabBarView.showsSidebarToggle = !sidebarVisible && windowTabsHidden
     }
 
     private func returnKeyboardFocusToPanes() {
@@ -500,6 +503,11 @@ final class MainContentViewController: NSViewController {
         sidebarView.promptToRenameActiveWindow()
     }
 
+    var isShowingSettings: Bool { settingsViewController != nil }
+
+    /// Opens Settings as Soprano Agents' settings modal: the whole window
+    /// dimmed and a centered card over it, with the keyboard inside the card.
+    /// An open screen takes the new values.
     func showSettings(
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig
@@ -511,40 +519,44 @@ final class MainContentViewController: NSViewController {
         if automationsViewController != nil {
             closeAutomations(restoreKeyboardFocus: false)
         }
-        preservingWindowFrame {
-            let settingsViewController: SettingsViewController
-            if let existingController = self.settingsViewController {
-                settingsViewController = existingController
-            } else {
-                let controller = SettingsViewController(
-                    themeManager: themeManager,
-                    settings: settings,
-                    keybindingConfig: keybindingConfig
-                )
-                addChild(controller)
-                controller.view.translatesAutoresizingMaskIntoConstraints = false
-                settingsContainerView.addSubview(controller.view)
-                settingsViewConstraints = [
-                    controller.view.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
-                    controller.view.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
-                    controller.view.topAnchor.constraint(equalTo: settingsHeaderView.bottomAnchor),
-                    controller.view.bottomAnchor.constraint(equalTo: settingsContainerView.bottomAnchor),
-                ]
-                NSLayoutConstraint.activate(settingsViewConstraints)
-                self.settingsViewController = controller
-                settingsViewController = controller
-            }
-
-            settingsViewController.update(
-                settings: settings,
-                keybindingConfig: keybindingConfig
-            )
-            settingsViewController.apply(theme: themeManager.currentTheme)
-
-            splitTreeView.isHidden = true
-            settingsContainerView.isHidden = false
+        if let settingsViewController {
+            settingsViewController.update(settings: settings, keybindingConfig: keybindingConfig)
+            return
         }
-        view.window?.makeFirstResponder(settingsHeaderView.closeButton)
+        let controller = SettingsViewController(
+            themeManager: themeManager,
+            settings: settings,
+            keybindingConfig: keybindingConfig
+        )
+        preservingWindowFrame {
+            let overlay = SettingsOverlayView()
+            overlay.onClose = { [weak self] in
+                self?.closeSettings()
+            }
+            overlay.onEscape = { [weak controller] in
+                controller?.handleEscape() ?? false
+            }
+            controller.onClose = { [weak self] in
+                self?.closeSettings()
+            }
+            addChild(controller)
+            controller.view.translatesAutoresizingMaskIntoConstraints = false
+            overlay.content.addSubview(controller.view)
+            view.addSubview(overlay, positioned: .above, relativeTo: nil)
+            NSLayoutConstraint.activate([
+                overlay.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+                overlay.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+                overlay.topAnchor.constraint(equalTo: view.topAnchor),
+                overlay.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                controller.view.leadingAnchor.constraint(equalTo: overlay.content.leadingAnchor),
+                controller.view.trailingAnchor.constraint(equalTo: overlay.content.trailingAnchor),
+                controller.view.topAnchor.constraint(equalTo: overlay.content.topAnchor),
+                controller.view.bottomAnchor.constraint(equalTo: overlay.content.bottomAnchor),
+            ])
+            settingsOverlayView = overlay
+            settingsViewController = controller
+        }
+        view.window?.makeFirstResponder(controller.initialFirstResponder)
     }
 
     /// Opens Settings on the Accounts tab, as the status bar's usage popover
@@ -563,38 +575,30 @@ final class MainContentViewController: NSViewController {
         settings: AppSettings,
         keybindingConfig: KeyBindingConfig
     ) {
-        guard !settingsContainerView.isHidden,
-              let settingsViewController
-        else { return }
-        settingsViewController.update(
+        settingsViewController?.update(
             settings: settings,
             keybindingConfig: keybindingConfig
         )
     }
 
     func closeSettings() {
-        guard !settingsContainerView.isHidden else { return }
+        guard let settingsViewController else { return }
         view.window?.endEditing(for: nil)
         preservingWindowFrame {
-            settingsContainerView.isHidden = true
-            splitTreeView.isHidden = false
-
-            // Hidden views still participate in Auto Layout. Detach the settings
-            // hierarchy so its content-size constraints cannot restrict the main
-            // window after returning to the workspace.
-            NSLayoutConstraint.deactivate(settingsViewConstraints)
-            settingsViewConstraints.removeAll()
-            settingsViewController?.view.removeFromSuperview()
-            settingsViewController?.removeFromParent()
-            settingsViewController = nil
+            // Removing the overlay takes its constraints along, so the card
+            // cannot restrict the main window after returning to the workspace.
+            settingsOverlayView?.removeFromSuperview()
+            settingsOverlayView = nil
+            settingsViewController.view.removeFromSuperview()
+            settingsViewController.removeFromParent()
+            self.settingsViewController = nil
         }
-
         splitTreeView.restoreKeyboardFocus()
     }
 
     func showDashboard() {
         loadViewIfNeeded()
-        if !settingsContainerView.isHidden {
+        if isShowingSettings {
             closeSettings()
         }
         if automationsViewController != nil {
@@ -629,17 +633,41 @@ final class MainContentViewController: NSViewController {
             addChild(controller)
             controller.view.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(controller.view, positioned: .above, relativeTo: nil)
-            dashboardViewConstraints = [
-                controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            ]
+            dashboardViewConstraints = pageConstraints(for: controller.view)
             NSLayoutConstraint.activate(dashboardViewConstraints)
             dashboardViewController = controller
             splitTreeView.isHidden = true
         }
         view.window?.makeFirstResponder(dashboardViewController?.view)
+    }
+
+    /// A page (Agent Dashboard, Automations) covers the workspace right of
+    /// the sidebar from the window's top edge, tab rows included, like Soprano
+    /// Agents' statistics board. With the sidebar hidden it starts right of
+    /// the traffic lights.
+    private func pageConstraints(for page: NSView) -> [NSLayoutConstraint] {
+        let followsSidebar = page.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor)
+        followsSidebar.priority = .defaultHigh
+        let clearsTrafficLights = page.leadingAnchor.constraint(
+            greaterThanOrEqualTo: view.leadingAnchor,
+            constant: ShellTitlebar.trafficLightInset(for: view)
+        )
+        pageTrafficLightConstraints = pageTrafficLightConstraints.filter(\.isActive) + [clearsTrafficLights]
+        return [
+            followsSidebar,
+            clearsTrafficLights,
+            page.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            page.topAnchor.constraint(equalTo: view.topAnchor),
+            page.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
+        ]
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let inset = ShellTitlebar.trafficLightInset(for: view)
+        for constraint in pageTrafficLightConstraints where constraint.constant != inset {
+            constraint.constant = inset
+        }
     }
 
     func closeDashboard(restoreKeyboardFocus: Bool = true) {
@@ -678,7 +706,7 @@ final class MainContentViewController: NSViewController {
     func showAutomations(selectingRun runId: String? = nil) {
         loadViewIfNeeded()
         guard let automationController else { return }
-        if !settingsContainerView.isHidden {
+        if isShowingSettings {
             closeSettings()
         }
         if dashboardViewController != nil {
@@ -704,12 +732,7 @@ final class MainContentViewController: NSViewController {
                 addChild(controller)
                 controller.view.translatesAutoresizingMaskIntoConstraints = false
                 view.addSubview(controller.view, positioned: .above, relativeTo: nil)
-                automationsViewConstraints = [
-                    controller.view.leadingAnchor.constraint(equalTo: sidebarView.trailingAnchor),
-                    controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                    controller.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                    controller.view.bottomAnchor.constraint(equalTo: statusBarView.topAnchor),
-                ]
+                automationsViewConstraints = pageConstraints(for: controller.view)
                 NSLayoutConstraint.activate(automationsViewConstraints)
                 automationsViewController = controller
                 splitTreeView.isHidden = true
@@ -757,12 +780,8 @@ final class MainContentViewController: NSViewController {
 
     private func applyTheme() {
         let theme = themeManager.currentTheme
-        // Shows only in the titlebar strip; everything below covers it.
+        // Shows only behind gaps between the chrome rows.
         view.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        titlebarRule.color = theme.colors.borderSubtle
-        settingsContainerView?.layer?.backgroundColor = theme.colors.bgBase.cgColor
-        settingsHeaderView?.apply(theme: theme)
-        settingsViewController?.apply(theme: theme)
         dashboardViewController?.apply(theme: theme)
         automationsViewController?.apply(theme: theme)
     }
@@ -773,31 +792,6 @@ final class MainContentViewController: NSViewController {
             layoutView: view,
             update: update
         )
-    }
-
-    private func buildSettingsScreen(in root: NSView, below topAnchor: NSLayoutYAxisAnchor) {
-        settingsContainerView = NSView()
-        settingsContainerView.wantsLayer = true
-        settingsContainerView.isHidden = true
-        settingsContainerView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(settingsContainerView, positioned: .above, relativeTo: nil)
-
-        settingsHeaderView = SettingsHeaderView(theme: themeManager.currentTheme)
-        settingsHeaderView.onClose = { [weak self] in
-            self?.closeSettings()
-        }
-        settingsContainerView.addSubview(settingsHeaderView)
-
-        NSLayoutConstraint.activate([
-            settingsContainerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            settingsContainerView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            settingsContainerView.topAnchor.constraint(equalTo: topAnchor),
-            settingsContainerView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-            settingsHeaderView.leadingAnchor.constraint(equalTo: settingsContainerView.leadingAnchor),
-            settingsHeaderView.trailingAnchor.constraint(equalTo: settingsContainerView.trailingAnchor),
-            settingsHeaderView.topAnchor.constraint(equalTo: settingsContainerView.topAnchor),
-        ])
     }
 }
 

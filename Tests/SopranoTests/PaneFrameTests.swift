@@ -2,25 +2,25 @@ import AppKit
 import Testing
 @testable import Soprano
 
-/// Folio pane focus and attention (direction §6): the focused pane has a
-/// raised header and the focus rule, the others are veiled, and an attention
-/// pane is framed and never veiled.
+/// Pane focus and attention: the focused pane has a `card` header and the
+/// focus rule, the others are veiled, and an attention pane is framed in the
+/// warning tone and never veiled.
 @MainActor
 struct PaneFrameTests {
-    @Test func onlyTheFocusedPaneHasARaisedHeaderAndTheFocusRuleAndNoPaneHasAFrame() throws {
+    @Test func onlyTheFocusedPaneHasACardHeaderAndTheFocusRuleAndNoPaneHasAFrame() throws {
         let fixture = try PaneFixture(attentionOnCodex: false)
-        let colors = fixture.themeManager.currentTheme.colors
+        let palette = PaletteCenter.shared.palette
         let focused = try fixture.container(fixture.focusedPaneId)
         let other = try fixture.container(fixture.codexPaneId)
 
         let focusedHeader = try fixture.header(in: focused)
-        #expect(focusedHeader.layer?.backgroundColor == colors.raised.cgColor)
+        #expect(focusedHeader.layer?.backgroundColor == palette.card.cgColor)
         #expect(focusedHeader.showsFocusMark)
         #expect(focused.layer?.borderWidth == 0)
         #expect(!focused.isVeiled)
 
         let otherHeader = try fixture.header(in: other)
-        #expect(otherHeader.layer?.backgroundColor == colors.bgPanel.cgColor)
+        #expect(otherHeader.layer?.backgroundColor == palette.background.cgColor)
         #expect(!otherHeader.showsFocusMark)
         #expect(other.layer?.borderWidth == 0)
         #expect(other.isVeiled)
@@ -28,48 +28,47 @@ struct PaneFrameTests {
 
     @Test func theFocusedTitleIsInkMediumAndOtherTitlesAreMuted() throws {
         let fixture = try PaneFixture(attentionOnCodex: false)
-        let colors = fixture.themeManager.currentTheme.colors
+        let palette = PaletteCenter.shared.palette
         let focusedTitle = try fixture.visibleLabel("Claude Code", in: fixture.container(fixture.focusedPaneId))
         let otherTitle = try fixture.visibleLabel("Codex", in: fixture.container(fixture.codexPaneId))
 
-        #expect(focusedTitle.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == ChromeFont.labelStrong)
-        #expect(focusedTitle.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.textPrimary)
-        #expect(otherTitle.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == ChromeFont.label)
-        #expect(otherTitle.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.textMuted)
+        #expect(focusedTitle.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == Typography.ui(PaneHeaderView.titleSize, weight: .medium))
+        #expect(focusedTitle.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == palette.foreground)
+        #expect(otherTitle.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == Typography.ui(PaneHeaderView.titleSize))
+        #expect(otherTitle.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == palette.mutedForeground)
     }
 
-    @Test func anAttentionPaneIsFramedNeverVeiledAndWashedInItsStatusColor() throws {
+    @Test func anAttentionPaneIsFramedNeverVeiledAndWashedInItsStatusTone() throws {
         let fixture = try PaneFixture(attentionOnCodex: true)
-        let colors = fixture.themeManager.currentTheme.colors
+        let palette = PaletteCenter.shared.palette
         let codex = try fixture.container(fixture.codexPaneId)
         let header = try fixture.header(in: codex)
 
-        #expect(codex.layer?.borderWidth == Chrome.attentionFrame)
-        #expect(codex.layer?.borderColor == colors.attention.cgColor)
+        #expect(codex.layer?.borderWidth == PaneContainerView.attentionFrame)
+        #expect(codex.layer?.borderColor == palette.color(for: .approval).shellScaled(by: 0.8).cgColor)
         #expect(!codex.isVeiled)
         #expect(!header.showsFocusMark)
+        // A finished turn reads Done; the attention wash marks the header.
         #expect(header.layer?.backgroundColor == PaneHeaderView.background(
-            status: .needsInput,
+            tone: nil,
             isFocused: false,
             needsAttention: true,
-            colors: colors
+            palette: palette
         ).cgColor)
-        #expect(fixture.visibleTexts(in: header).contains("NEEDS INPUT"))
-        // The frame says attention; the header keeps its one status mark.
-        let marks = fixture.descendants(of: header, as: ChromeStatusMark.self).filter { !$0.isHidden }
-        #expect(marks.count == 1)
-        #expect(marks.first?.color == colors.yellow)
+        // The frame says attention; the header keeps its one status pill.
+        #expect(fixture.visibleTexts(in: header).contains("Done"))
+        #expect(header.statusPillValue?.tone == .done)
     }
 
     @Test func headerWashesFollowTheComponentPrecedence() {
-        let colors = AppTheme.folioPaper.colors
-        let needsInputWash = colors.bgPanel.mixed(with: colors.yellow, fraction: 0.10)
-        let attentionWash = colors.bgPanel.mixed(with: colors.attention, fraction: 0.10)
+        let palette = Palette(soprano: AppTheme.folioPaper)
+        let inputWash = palette.card.mixed(with: palette.color(for: .input), fraction: 0.10)
+        let attentionWash = palette.card.mixed(with: palette.color(for: .approval), fraction: 0.10)
 
-        #expect(PaneHeaderView.background(status: .needsInput, isFocused: true, needsAttention: true, colors: colors) == needsInputWash)
-        #expect(PaneHeaderView.background(status: .working, isFocused: true, needsAttention: true, colors: colors) == attentionWash)
-        #expect(PaneHeaderView.background(status: .working, isFocused: true, needsAttention: false, colors: colors) == colors.raised)
-        #expect(PaneHeaderView.background(status: .working, isFocused: false, needsAttention: false, colors: colors) == colors.bgPanel)
+        #expect(PaneHeaderView.background(tone: .input, isFocused: true, needsAttention: true, palette: palette) == inputWash)
+        #expect(PaneHeaderView.background(tone: nil, isFocused: true, needsAttention: true, palette: palette) == attentionWash)
+        #expect(PaneHeaderView.background(tone: nil, isFocused: true, needsAttention: false, palette: palette) == palette.card)
+        #expect(PaneHeaderView.background(tone: nil, isFocused: false, needsAttention: false, palette: palette) == palette.background)
     }
 
     @Test func theVeilNeverTakesClicksFromThePaneBody() throws {
@@ -98,7 +97,7 @@ struct PaneFrameTests {
         manager.setRunningCommandTargets([TerminalTarget(paneId: paneId, tabId: firstTab)])
         manager.switchTab(paneId, index: 0)
         let themeManager = ThemeManager(themeId: "folio-paper")
-        let colors = themeManager.currentTheme.colors
+        let palette = PaletteCenter.shared.palette
 
         let header = PaneHeaderView(paneId: paneId, agentManager: manager, themeManager: themeManager)
         let tabs = descendants(of: header, as: NSButton.self)
@@ -106,14 +105,14 @@ struct PaneFrameTests {
         #expect(tabs.map(\.attributedTitle.string) == ["● server", "● Codex"])
 
         let server = tabs[0].attributedTitle
-        #expect(server.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.runningCommand)
-        #expect(server.attribute(.font, at: 2, effectiveRange: nil) as? NSFont == ChromeFont.labelStrong)
-        #expect(server.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor == colors.textPrimary)
+        #expect(server.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == palette.color(for: .working))
+        #expect(server.attribute(.font, at: 2, effectiveRange: nil) as? NSFont == Typography.ui(Typography.smallSize, weight: .medium))
+        #expect(server.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor == palette.foreground)
 
         let codex = tabs[1].attributedTitle
-        #expect(codex.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.attention)
-        #expect(codex.attribute(.font, at: 2, effectiveRange: nil) as? NSFont == ChromeFont.label)
-        #expect(codex.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor == colors.textMuted)
+        #expect(codex.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == palette.color(for: .approval))
+        #expect(codex.attribute(.font, at: 2, effectiveRange: nil) as? NSFont == Typography.ui(Typography.smallSize))
+        #expect(codex.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor == palette.mutedForeground)
     }
 
     private func descendants<T: NSView>(of view: NSView, as type: T.Type) -> [T] {

@@ -123,6 +123,7 @@ final class MainWindowController: NSWindowController {
             // The terminal palette is regenerated on every resolved change,
             // including `folio` following the system into light or dark.
             GhosttyAppManager.shared.applyAppearance(theme: theme)
+            PaletteCenter.shared.apply(theme: theme)
             self?.applyTheme()
             self?.mainContentVC?.refreshTheme()
         }
@@ -287,7 +288,66 @@ final class MainWindowController: NSWindowController {
                         _ = self.agentManager.spawnAgent(profile.id)
                     }
                 )
-            }
+            } + agentChatPaletteItems()
+    }
+
+    /// A chat opens wherever a terminal can: beside the focused pane, as a
+    /// tab of that pane, in a new tab of the window, or in a new window.
+    private func agentChatPaletteItems() -> [CommandItem] {
+        let defaultProfileId = AgentChatLaunch.chatProfiles.first?.id
+        return AgentChatLaunch.chatProfiles.flatMap { profile -> [CommandItem] in
+            let name = profile.name
+            let search = "chat conversation gui \(name)"
+            return [
+                CommandItem(
+                    id: "chat-pane-\(profile.id)",
+                    icon: "bubble.left.and.text.bubble.right",
+                    label: "New \(name) Chat",
+                    description: "Open a chat with \(name) beside the focused pane",
+                    shortcut: profile.id == defaultProfileId ? commandShortcut(for: "new-chat") : [],
+                    searchText: search,
+                    action: { [weak self] in
+                        _ = self?.agentManager.spawnAgent(profile.id, chat: true)
+                    }
+                ),
+                CommandItem(
+                    id: "chat-pane-tab-\(profile.id)",
+                    icon: "bubble.left.and.text.bubble.right",
+                    label: "New \(name) Chat in This Pane",
+                    description: "Open a chat with \(name) as a tab of the focused pane",
+                    searchText: search,
+                    action: { [weak self] in
+                        guard let self else { return }
+                        _ = self.agentManager.addTabToPane(
+                            self.agentManager.activePaneId,
+                            type: .agent,
+                            profileId: profile.id,
+                            contentKind: PaneContentKind.chat
+                        )
+                    }
+                ),
+                CommandItem(
+                    id: "chat-tab-\(profile.id)",
+                    icon: "bubble.left.and.text.bubble.right",
+                    label: "New \(name) Chat Tab",
+                    description: "Open a tab holding a chat with \(name)",
+                    searchText: search,
+                    action: { [weak self] in
+                        _ = self?.agentManager.createLayoutTab(chatProfileId: profile.id)
+                    }
+                ),
+                CommandItem(
+                    id: "chat-window-\(profile.id)",
+                    icon: "bubble.left.and.text.bubble.right",
+                    label: "New \(name) Chat Window",
+                    description: "Open a window holding a chat with \(name)",
+                    searchText: search,
+                    action: { [weak self] in
+                        _ = self?.agentManager.createWindow(chatProfileId: profile.id)
+                    }
+                ),
+            ]
+        }
     }
 
     /// Listed only while Soprano Git is installed; the binding still explains itself without it.
@@ -1122,17 +1182,9 @@ private extension MainWindowController {
         keybindingOpenInSopranoGit()
     }
 
-    /// A one-button notice attached to the window.
+    /// A one-button notice over the window.
     func showNotice(title: String, message: String) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        if let window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
+        ShellDialogs.alert(title: title, message: message, in: window)
     }
 
     @objc func openMarkdownMenuItemSelected() {

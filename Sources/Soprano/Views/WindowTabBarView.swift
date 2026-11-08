@@ -1,6 +1,9 @@
 import AppKit
 
-/// The current session's windows, presented as a horizontal row above the terminals.
+/// The current session's windows, presented as a horizontal row above the
+/// terminals, in Soprano Agents' tab strip look. The row sits in the window's
+/// title bar strip: it keeps clear of the traffic lights when nothing is to
+/// its left, and its empty space moves the window.
 final class WindowTabBarView: NSView {
     static let height: CGFloat = TabPillButton.rowHeight
 
@@ -8,25 +11,15 @@ final class WindowTabBarView: NSView {
     private let themeManager: ThemeManager
     private let observerId = "WindowTabBarView-\(UUID().uuidString)"
     private let scrollView = NSScrollView()
-    private let tabContainer = NSView()
-    private let addButton = ChromeIconButton(
-        symbolName: "plus",
-        accessibilityLabel: "New Window",
-        pointSize: 12,
-        target: nil,
-        action: nil
-    )
-    private let bottomRule = ChromeRuleView(axis: .horizontal)
+    private let tabContainer = ShellTitlebarDragView()
+    private let addButton = ShellGhostButton(symbol: "plus", label: "New Window", size: 24, symbolSize: 12)
+    private let bottomRule = NSView()
     private var buttons: [WindowTabButton] = []
     private var activeWindowId: String?
     private var revealActiveTab = true
     private var previousViewportWidth: CGFloat = 0
-    private let rightSidebarToggle = ChromeIconButton(
-        symbolName: "sidebar.right",
-        accessibilityLabel: "Toggle Right Sidebar",
-        target: nil,
-        action: nil
-    )
+    private let rightSidebarToggle = ShellGhostButton(symbol: Icon.panelRight, label: "Toggle Right Sidebar")
+    private let sidebarToggle = ShellGhostButton(symbol: Icon.sidebarLeft, label: "Toggle Sidebar")
 
     /// Orca shows a toggle at the top right while the right sidebar is closed;
     /// it lives at the end of this strip so it never covers a tab.
@@ -37,6 +30,15 @@ final class WindowTabBarView: NSView {
         }
     }
     var onRightSidebarToggle: (() -> Void)?
+
+    /// Agents' header shows the sidebar toggle while the sidebar is hidden.
+    var showsSidebarToggle = false {
+        didSet {
+            sidebarToggle.isHidden = !showsSidebarToggle
+            needsLayout = true
+        }
+    }
+    var onSidebarToggle: (() -> Void)?
 
     init(agentManager: AgentManager, themeManager: ThemeManager) {
         self.agentManager = agentManager
@@ -55,6 +57,11 @@ final class WindowTabBarView: NSView {
         scrollView.documentView = tabContainer
         addSubview(scrollView)
 
+        sidebarToggle.target = self
+        sidebarToggle.action = #selector(toggleSidebar)
+        sidebarToggle.isHidden = true
+        addSubview(sidebarToggle)
+
         addButton.identifier = NSUserInterfaceItemIdentifier("new-window-tab")
         addButton.refusesFirstResponder = true
         addButton.target = self
@@ -72,7 +79,7 @@ final class WindowTabBarView: NSView {
         rightSidebarToggle.translatesAutoresizingMaskIntoConstraints = true
         addSubview(rightSidebarToggle)
 
-        bottomRule.translatesAutoresizingMaskIntoConstraints = true
+        bottomRule.wantsLayer = true
         addSubview(bottomRule)
 
         agentManager.addObserver(id: observerId) { [weak self] change in
@@ -111,6 +118,10 @@ final class WindowTabBarView: NSView {
         refresh()
     }
 
+    override func mouseDown(with event: NSEvent) {
+        ShellTitlebar.handleMouseDown(event, in: self)
+    }
+
     private func refresh() {
         guard !isHidden else { return }
         let windows = agentManager.activeSessionWindows
@@ -131,10 +142,9 @@ final class WindowTabBarView: NSView {
         }
 
         let theme = themeManager.currentTheme
-        layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        bottomRule.color = theme.colors.borderSubtle
-        rightSidebarToggle.apply(theme: theme)
-        addButton.apply(theme: theme)
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.background.cgColor
+        bottomRule.layer?.backgroundColor = palette.border.cgColor
         for (index, terminalWindow) in windows.enumerated() {
             let previousWidth = buttons[index].tabWidth
             let panes = agentManager.orderedPanes(in: terminalWindow.id)
@@ -162,9 +172,9 @@ final class WindowTabBarView: NSView {
 
     override func layout() {
         super.layout()
-        let rule = Chrome.hairline
+        let rule: CGFloat = 1
         let stripHeight = max(0, bounds.height - rule)
-        let iconSize = ChromeIconButton.defaultSize
+        let iconSize = Metrics.titlebarControlSize
         let toggleWidth: CGFloat = showsRightSidebarToggle ? iconSize + 8 : 0
         let availableWidth = max(0, bounds.width - toggleWidth)
         rightSidebarToggle.frame = NSRect(
@@ -173,6 +183,16 @@ final class WindowTabBarView: NSView {
             width: iconSize,
             height: iconSize
         )
+        var leadingInset = ShellTitlebar.trafficLightInset(for: self)
+        if showsSidebarToggle {
+            sidebarToggle.frame = NSRect(
+                x: max(leadingInset, 6),
+                y: rule + floor((stripHeight - iconSize) / 2),
+                width: iconSize,
+                height: iconSize
+            )
+            leadingInset = sidebarToggle.frame.maxX + 4
+        }
         bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: rule)
         let viewportWidth = TabRowLayout.layout(
             tabs: buttons.map { ($0, $0.tabWidth) },
@@ -181,7 +201,8 @@ final class WindowTabBarView: NSView {
             container: tabContainer,
             availableWidth: availableWidth,
             rule: rule,
-            stripHeight: stripHeight
+            stripHeight: stripHeight,
+            leadingInset: leadingInset
         )
         if viewportWidth != previousViewportWidth {
             previousViewportWidth = viewportWidth
@@ -189,8 +210,8 @@ final class WindowTabBarView: NSView {
         }
         if revealActiveTab, viewportWidth > 0,
            let selected = buttons.first(where: { $0.windowId == activeWindowId }) {
-            // Include the row's 4 pt padding so the first tab reveals flush.
-            selected.scrollToVisible(selected.bounds.insetBy(dx: -4, dy: 0))
+            // Include the row's padding so the first tab reveals flush.
+            selected.scrollToVisible(selected.bounds.insetBy(dx: -TabRowLayout.padding, dy: 0))
             revealActiveTab = false
         }
     }
@@ -201,6 +222,15 @@ final class WindowTabBarView: NSView {
 
     @objc private func toggleRightSidebar() {
         onRightSidebarToggle?()
+    }
+
+    @objc private func toggleSidebar() {
+        onSidebarToggle?()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        needsLayout = true
     }
 }
 
@@ -240,24 +270,15 @@ private final class WindowTabButton: TabPillButton {
         runningCommands: Int,
         theme: AppTheme
     ) {
-        let colors = theme.colors
-        let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            "\(number)  ",
-            font: ChromeFont.label,
-            color: colors.textMuted
-        ))
-        text.append(ChromeText.attributed(
-            title,
-            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
-            color: isSelected ? colors.textPrimary : colors.textMuted
-        ))
-        attributedTitle = text
+        self.number = number
+        windowTitle = title
         agentBadge.configure(agents: agents, theme: theme)
         commandBadge.configure(runningCommands: runningCommands, theme: theme)
-        let titleWidth = min(Self.maxTitleWidth, ceil(text.size().width))
-        tabWidth = max(Self.minWidth, Self.chromeWidth + titleWidth + badgeAreaWidth)
         isSelectedTab = isSelected
-        applyPill(colors: colors)
+        renderTitle()
+        let titleWidth = min(Self.maxTitleWidth, ceil(attributedTitle.size().width))
+        tabWidth = max(Self.minWidth, Self.chromeWidth + titleWidth + badgeAreaWidth)
+        applyPill()
 
         var description = "Window \(number): \(title)"
         for summary in [
@@ -271,6 +292,28 @@ private final class WindowTabButton: TabPillButton {
         setAccessibilityValue(isSelected)
         needsLayout = true
         needsDisplay = true
+    }
+
+    private var number = 0
+    private var windowTitle = ""
+
+    /// Agents' tab text: the muted index, then the title in the tab's state
+    /// color (medium while selected).
+    private func renderTitle() {
+        let palette = PaletteCenter.shared.palette
+        let text = NSMutableAttributedString(string: "\(number)  ", attributes: [
+            .font: Typography.tabular(Typography.smallSize),
+            .foregroundColor: palette.mutedForeground.shellScaled(by: 0.8),
+        ])
+        text.append(NSAttributedString(string: windowTitle, attributes: [
+            .font: isSelectedTab ? Self.selectedTitleFont : Self.titleFont,
+            .foregroundColor: titleColor,
+        ]))
+        attributedTitle = text
+    }
+
+    override func hoverStateDidChange() {
+        renderTitle()
     }
 
     private var visibleBadges: [StatusCountBadgeView] {

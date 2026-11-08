@@ -18,26 +18,33 @@ struct StatusBarViewTests {
         #expect(label("status-uptime", in: statusBar) == nil)
     }
 
-    @Test func theBarHasNoBrandOrMissionClockAndShowsTheModeChipCountsAndKeyHints() throws {
+    @Test func theBarHasNoBrandOrMissionClockAndShowsTheModePillCountsAndKeyHints() throws {
         let manager = AgentManager()
         let statusBar = makeStatusBar(manager: manager)
         let texts = descendants(of: statusBar, as: NSTextField.self).map(\.stringValue)
         #expect(!texts.contains("SOPRANO"))
         #expect(!texts.contains { $0.hasPrefix("T+") })
 
-        let chip = try #require(descendants(of: statusBar, as: ChromeModeChip.self).first)
-        #expect(chip.displayedText == "NORMAL")
+        // A quiet pill in title case: no uppercase status words.
+        let mode = try #require(descendants(of: statusBar, as: DashStatusModeView.self).first)
+        #expect(mode.displayedText == "Normal")
         statusBar.setKeybindingMode(.prefix)
-        #expect(chip.displayedText == "PREFIX")
+        #expect(mode.displayedText == "Prefix")
+        statusBar.setKeybindingMode(.copy)
+        #expect(mode.displayedText == "Copy")
+        statusBar.setKeybindingMode(.copySelection)
+        #expect(mode.displayedText == "Select")
 
         #expect(label("status-counts", in: statusBar)?.stringValue == "1 session · 1 window · 1 pane")
+        #expect(label("status-counts", in: statusBar)?.font?.pointSize == Typography.smallSize)
         // The caps follow settings.json, so read the expected chords from it.
         let keybindings = ConfigStore.shared.keybindings
         let palette = keybindings.bindings.first { $0.id == "command-palette" }
             .map { MainWindowController.keycaps(for: $0, prefixKey: keybindings.prefixKey) } ?? []
         let groups = hintGroups(in: statusBar)
         #expect(groups.map(\.caps) == [palette, ["⌃" + keybindings.prefixKey.uppercased()]].filter { !$0.isEmpty })
-        #expect(groups.allSatisfy { $0.style == .small && $0.tone == .muted })
+        // One Agents `KbdView` per cap.
+        #expect(groups.allSatisfy { descendants(of: $0, as: KbdView.self).count == $0.caps.count })
     }
 
     @Test func thePaletteHintFollowsPrefixBindingsShiftInferenceAndRemoval() {
@@ -69,9 +76,24 @@ struct StatusBarViewTests {
         #expect(hintGroups(in: statusBar).map(\.caps) == [["⌃B"]])
     }
 
+    @Test func theUsageCardHostsTheAccountsCardAsAgentsPopoverContentThatEscapeCloses() throws {
+        let content = DashUsageCardContent(themeManager: ThemeManager(themeId: "folio-paper"))
+        content.layoutSubtreeIfNeeded()
+        #expect(content.subviews.first === content.controller.view)
+        #expect(content.fittingSize.width == AccountUsagePopoverViewController.width)
+        var closed = false
+        content.requestClose = { closed = true }
+        let escape = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53
+        ))
+        #expect(content.handleKey(escape))
+        #expect(closed)
+    }
+
     /// Hints left out of the bar are detached, so only shown groups are found.
-    private func hintGroups(in statusBar: StatusBarView) -> [ChromeKeycapGroupView] {
-        descendants(of: statusBar, as: ChromeKeycapGroupView.self)
+    private func hintGroups(in statusBar: StatusBarView) -> [DashStatusHintView] {
+        descendants(of: statusBar, as: DashStatusHintView.self)
     }
 
     private func makeStatusBar(manager: AgentManager) -> StatusBarView {

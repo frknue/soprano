@@ -38,13 +38,15 @@ final class RightSidebarView: NSView {
     private let defaults: UserDefaults
     private let contentContainer = NSView()
     private var contentWidthConstraint: NSLayoutConstraint!
-    private let header = NSView()
-    private let segmentTrack = RightSidebarSegmentTrack()
+    /// Soprano Agents' right-panel tab strip: one tab per panel, the panel
+    /// close button at the end. It sits in the title bar strip, so its
+    /// empty space moves the window.
+    private let header = ShellTitlebarDragView()
+    private let tabStack = NSStackView()
     private var tabButtons: [Tab: RightSidebarTabButton] = [:]
-    private let headingView: ChromeEyebrowView
-    private var closeButton: ChromeIconButton!
-    private let headerRule = ChromeRuleView(axis: .horizontal)
-    private let leadingBorder = ChromeRuleView(axis: .vertical)
+    private var closeButton: ShellGhostButton!
+    private let headerRule = NSView()
+    private let leadingBorder = NSView()
     private var isResizeHighlighted = false
     private(set) var isOpen = false
     private(set) var activeTab: Tab
@@ -60,7 +62,6 @@ final class RightSidebarView: NSView {
         sourceControlView = SourceControlView(agentManager: agentManager, themeManager: themeManager)
         let activeTab = defaults.string(forKey: Self.activeTabKey).flatMap(Tab.init(rawValue:)) ?? .explorer
         self.activeTab = activeTab
-        headingView = ChromeEyebrowView(title: activeTab.title, theme: themeManager.currentTheme)
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("right-sidebar")
         wantsLayer = true
@@ -83,39 +84,30 @@ final class RightSidebarView: NSView {
         addSubview(contentContainer)
 
         header.translatesAutoresizingMaskIntoConstraints = false
+        header.wantsLayer = true
         contentContainer.addSubview(header)
+        headerRule.wantsLayer = true
+        headerRule.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(headerRule)
 
-        // The tabs are a segmented icon pair: a bgOverlay track with a raised
-        // pill under the active icon.
-        segmentTrack.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(segmentTrack)
-        var previousTrailing = segmentTrack.leadingAnchor
+        tabStack.orientation = .horizontal
+        tabStack.alignment = .centerY
+        tabStack.spacing = 4
+        tabStack.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(tabStack)
         for tab in Tab.allCases {
             let button = RightSidebarTabButton(tab: tab, target: self, action: #selector(tabClicked(_:)))
-            segmentTrack.addSubview(button)
-            NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(
-                    equalTo: previousTrailing,
-                    constant: tab == Tab.allCases.first ? RightSidebarSegmentTrack.padding : RightSidebarSegmentTrack.gap
-                ),
-                button.centerYAnchor.constraint(equalTo: segmentTrack.centerYAnchor),
-            ])
-            previousTrailing = button.trailingAnchor
+            tabStack.addArrangedSubview(button)
             tabButtons[tab] = button
         }
-        segmentTrack.trailingAnchor.constraint(
-            equalTo: previousTrailing,
-            constant: RightSidebarSegmentTrack.padding
-        ).isActive = true
 
-        header.addSubview(headingView)
-        closeButton = ChromeIconButton(
-            symbolName: "sidebar.right",
-            accessibilityLabel: "Toggle Right Sidebar",
+        closeButton = ShellGhostButton(
+            symbol: Icon.panelRight,
+            label: "Toggle Right Sidebar",
             target: self,
             action: #selector(closeClicked)
         )
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(closeButton)
 
         for panel in [explorerView, sourceControlView] as [NSView] {
@@ -128,10 +120,12 @@ final class RightSidebarView: NSView {
                 panel.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
             ])
         }
+        leadingBorder.wantsLayer = true
+        leadingBorder.translatesAutoresizingMaskIntoConstraints = false
         addSubview(leadingBorder)
 
         contentWidthConstraint = contentContainer.widthAnchor.constraint(
-            equalToConstant: SidebarWidthStore.right.defaultWidth - Chrome.hairline
+            equalToConstant: SidebarWidthStore.right.defaultWidth - 1
         )
 
         NSLayoutConstraint.activate([
@@ -145,44 +139,39 @@ final class RightSidebarView: NSView {
             header.topAnchor.constraint(equalTo: contentContainer.topAnchor),
             header.heightAnchor.constraint(equalToConstant: Self.headerHeight),
 
-            segmentTrack.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: Chrome.Space.s8),
-            segmentTrack.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
-            segmentTrack.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            tabStack.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            tabStack.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+            tabStack.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
 
-            headingView.leadingAnchor.constraint(equalTo: segmentTrack.trailingAnchor, constant: Chrome.Space.s8),
-            headingView.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -Chrome.Space.s4),
-            headingView.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
-
-            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -Chrome.Space.s8),
+            closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
             closeButton.centerYAnchor.constraint(
                 equalTo: header.topAnchor,
-                constant: (Self.headerHeight - Chrome.hairline) / 2
+                constant: (Self.headerHeight - 1) / 2
             ),
 
             headerRule.leadingAnchor.constraint(equalTo: header.leadingAnchor),
             headerRule.trailingAnchor.constraint(equalTo: header.trailingAnchor),
             headerRule.bottomAnchor.constraint(equalTo: header.bottomAnchor),
-            headerRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
+            headerRule.heightAnchor.constraint(equalToConstant: 1),
 
             leadingBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
             leadingBorder.topAnchor.constraint(equalTo: topAnchor),
             leadingBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            leadingBorder.widthAnchor.constraint(equalToConstant: Chrome.hairline),
+            leadingBorder.widthAnchor.constraint(equalToConstant: 1),
         ])
     }
 
     /// Width of the sidebar's content, kept in step with the dragged width.
     func setContentWidth(_ width: CGFloat) {
-        contentWidthConstraint.constant = max(0, width - Chrome.hairline)
+        contentWidthConstraint.constant = max(0, width - 1)
     }
 
-    /// Accents the leading hairline while the resize handle is hovered or
+    /// Darkens the leading hairline while the resize handle is hovered or
     /// dragged, like the left sidebar's trailing edge.
     func setResizeHighlighted(_ isHighlighted: Bool) {
         isResizeHighlighted = isHighlighted
-        leadingBorder.color = isHighlighted
-            ? themeManager.currentTheme.colors.accent
-            : themeManager.currentTheme.colors.borderSubtle
+        let palette = PaletteCenter.shared.palette
+        leadingBorder.layer?.backgroundColor = (isHighlighted ? palette.input : palette.border).cgColor
     }
 
     func setOpen(_ open: Bool) {
@@ -218,7 +207,6 @@ final class RightSidebarView: NSView {
         let hadFocus = containsKeyboardFocus
         activeTab = tab
         defaults.set(tab.rawValue, forKey: Self.activeTabKey)
-        headingView.title = tab.title
         updatePanelVisibility()
         refreshTheme()
         updateActivity()
@@ -236,16 +224,13 @@ final class RightSidebarView: NSView {
     }
 
     func refreshTheme() {
-        let theme = themeManager.currentTheme
-        let colors = theme.colors
-        layer?.backgroundColor = colors.bgPanel.cgColor
-        headingView.apply(theme: theme)
-        headerRule.color = colors.borderSubtle
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.background.cgColor
+        header.layer?.backgroundColor = palette.background.cgColor
+        headerRule.layer?.backgroundColor = palette.border.cgColor
         setResizeHighlighted(isResizeHighlighted)
-        closeButton.apply(theme: theme)
-        segmentTrack.colors = colors
         for (tab, button) in tabButtons {
-            button.apply(colors: colors, isActive: tab == activeTab)
+            button.isActiveTab = tab == activeTab
         }
         explorerView.applyTheme()
         sourceControlView.applyTheme()
@@ -260,36 +245,17 @@ final class RightSidebarView: NSView {
     }
 }
 
-/// The `.segmented` track behind the tab pair: a `bgOverlay` 24 pt capsule
-/// with 2 pt padding.
-final class RightSidebarSegmentTrack: NSView {
-    static let padding: CGFloat = 2
-    static let gap: CGFloat = 2
-
-    var colors: ThemeColors? {
-        didSet { needsDisplay = true }
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let colors else { return }
-        colors.bgOverlay.setFill()
-        NSBezierPath(
-            roundedRect: bounds,
-            xRadius: Chrome.Radius.control,
-            yRadius: Chrome.Radius.control
-        ).fill()
-    }
-}
-
-/// One icon segment in the sidebar header. The active segment sits on a
-/// raised pill with a `borderSubtle` ring and an ink glyph; the others are
-/// muted, ink under the pointer. Never accent.
+/// One panel tab in Agents' right-panel strip (`h-6 rounded-md pl-1.5 pr-2
+/// text-xs`): an 11 pt glyph and the title, `accent` when active,
+/// `accent/60` under the pointer, muted otherwise.
 final class RightSidebarTabButton: NSButton {
-    static let segmentSize = NSSize(width: 30, height: 20)
-
     let tab: RightSidebarView.Tab
-    private var colors: ThemeColors?
-    private(set) var isActiveTab = false
+    var isActiveTab = false {
+        didSet {
+            setAccessibilityValue(isActiveTab ? "selected" : nil)
+            refresh()
+        }
+    }
     private var isHovered = false
     private var hoverArea: NSTrackingArea?
 
@@ -298,19 +264,19 @@ final class RightSidebarTabButton: NSButton {
         super.init(frame: .zero)
         self.target = target
         self.action = action
-        title = ""
         isBordered = false
         refusesFirstResponder = true
-        imagePosition = .imageOnly
-        image = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.title)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
+        imagePosition = .imageLeading
+        imageHugsTitle = true
+        imageScaling = .scaleNone
+        image = NSImage.symbol(tab.symbolName, size: 11)
         toolTip = tab.title
         setAccessibilityLabel(tab.title)
+        setAccessibilityRole(.radioButton)
         translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.segmentSize.width),
-            heightAnchor.constraint(equalToConstant: Self.segmentSize.height),
-        ])
+        heightAnchor.constraint(equalToConstant: ShellTabStyle.height).isActive = true
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in self?.refresh() }
+        refresh()
     }
 
     @available(*, unavailable)
@@ -318,11 +284,19 @@ final class RightSidebarTabButton: NSButton {
         fatalError("init(coder:) is not supported")
     }
 
-    func apply(colors: ThemeColors, isActive: Bool) {
-        self.colors = colors
-        isActiveTab = isActive
-        setAccessibilityValue(isActive ? "selected" : nil)
-        refreshTint()
+    override var intrinsicContentSize: NSSize {
+        let titleWidth = ceil(attributedTitle.size().width)
+        return NSSize(width: 6 + 12 + 4 + titleWidth + 8, height: ShellTabStyle.height)
+    }
+
+    private func refresh() {
+        let color = ShellTabStyle.textColor(isActive: isActiveTab, isHovered: isHovered)
+        attributedTitle = NSAttributedString(string: " " + tab.title, attributes: [
+            .font: Typography.ui(Typography.smallSize, weight: isActiveTab ? .medium : .regular),
+            .foregroundColor: color,
+        ])
+        contentTintColor = color
+        invalidateIntrinsicContentSize()
         needsDisplay = true
     }
 
@@ -357,30 +331,11 @@ final class RightSidebarTabButton: NSButton {
     private func setHovered(_ hovered: Bool) {
         guard isHovered != hovered else { return }
         isHovered = hovered
-        refreshTint()
-    }
-
-    private func refreshTint() {
-        guard let colors else { return }
-        contentTintColor = isActiveTab || isHovered ? colors.textPrimary : colors.textMuted
+        refresh()
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isActiveTab, let colors {
-            let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
-            NSGraphicsContext.saveGraphicsState()
-            let shadow = NSShadow()
-            shadow.shadowColor = colors.textPrimary.withAlphaComponent(0.10)
-            shadow.shadowOffset = NSSize(width: 0, height: isFlipped ? 1 : -1)
-            shadow.shadowBlurRadius = 2
-            shadow.set()
-            colors.raised.setFill()
-            pill.fill()
-            NSGraphicsContext.restoreGraphicsState()
-            colors.borderSubtle.setStroke()
-            pill.lineWidth = Chrome.hairline
-            pill.stroke()
-        }
+        ShellTabStyle.draw(isActive: isActiveTab, isHovered: isHovered, in: bounds)
         super.draw(dirtyRect)
     }
 }

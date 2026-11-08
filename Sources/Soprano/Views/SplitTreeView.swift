@@ -27,6 +27,7 @@ final class SplitTreeView: NSView {
     private let terminalPromptSubmitter: (NSView, String) -> Bool
     private let terminalIsRunningCommand: (NSView) -> Bool
     private let scheduleCodexReadiness: CodexReadinessScheduler
+    private let makeChatSession: (AgentChatLaunch) -> AgentChatSession
     var onCopyModeStateChanged: ((KeybindingState) -> Void)?
 
     /// Cached pane container views keyed by pane ID.
@@ -90,7 +91,8 @@ final class SplitTreeView: NSView {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                 callback()
             }
-        }
+        },
+        makeChatSession: @escaping (AgentChatLaunch) -> AgentChatSession = { AgentChatSession(launch: $0) }
     ) {
         self.agentManager = agentManager
         self.themeManager = themeManager
@@ -102,6 +104,7 @@ final class SplitTreeView: NSView {
         self.terminalPromptSubmitter = terminalPromptSubmitter
         self.terminalIsRunningCommand = terminalIsRunningCommand
         self.scheduleCodexReadiness = scheduleCodexReadiness
+        self.makeChatSession = makeChatSession
         self.lastWorkspaceRestoreGeneration = agentManager.workspaceRestoreGeneration
         super.init(frame: .zero)
         wantsLayer = true
@@ -219,6 +222,10 @@ final class SplitTreeView: NSView {
         switch action {
         case .stop:
             guard let view = tabContentViews[target] else { return }
+            if let chatView = view as? AgentChatPaneView {
+                chatView.session.stop()
+                return
+            }
             destroyTerminalSurface(in: view)
 
         case .restart:
@@ -226,6 +233,10 @@ final class SplitTreeView: NSView {
                 where: { $0.id == target.tabId }
             ) else { return }
             if let view = tabContentViews[target] {
+                if let chatView = view as? AgentChatPaneView {
+                    chatView.session.restart(resuming: tab.agent?.conversation?.id)
+                    return
+                }
                 guard restartTerminalView(view, terminalConfig(for: tab, paneId: target.paneId))
                 else { return }
                 scheduleCodexReadinessIfNeeded(for: target)
@@ -262,8 +273,12 @@ final class SplitTreeView: NSView {
     func terminalInteractionState(
         for target: TerminalTarget
     ) -> TerminalInteractionState {
-        guard let contentView = tabContentViews[target],
-              terminalViewHasLiveSurface(contentView)
+        guard let contentView = tabContentViews[target] else { return .unavailable }
+        // A chat has no terminal, but takes replies while its agent runs.
+        if let chatView = contentView as? AgentChatPaneView {
+            return TerminalInteractionState(isAvailable: chatView.session.isRunning, visibleText: "")
+        }
+        guard terminalViewHasLiveSurface(contentView)
         else {
             return .unavailable
         }
@@ -278,8 +293,12 @@ final class SplitTreeView: NSView {
         _ prompt: String,
         to target: TerminalTarget
     ) -> Bool {
-        guard let contentView = tabContentViews[target],
-              terminalViewHasLiveSurface(contentView)
+        guard let contentView = tabContentViews[target] else { return false }
+        // A chat's session reports its own status.
+        if let chatView = contentView as? AgentChatPaneView {
+            return chatView.session.send(prompt)
+        }
+        guard terminalViewHasLiveSurface(contentView)
         else {
             return false
         }
@@ -326,6 +345,8 @@ final class SplitTreeView: NSView {
 
         if let terminalView = findTerminalView(in: container) {
             window.makeFirstResponder(terminalView)
+        } else if let chatView = findChatView(in: container) {
+            chatView.focusPreferredControl()
         } else if let markdownView = findMarkdownView(in: container) {
             markdownView.focusPreferredControl()
         } else if let editorView = findEditorView(in: container) {
@@ -462,6 +483,7 @@ final class SplitTreeView: NSView {
 
     private func discardCachedTabContentView(_ view: NSView) {
         clearFirstResponderIfNeeded(in: view)
+        (view as? AgentChatPaneView)?.close()
         destroyTerminalSurface(in: view)
         view.removeFromSuperview()
     }
@@ -513,7 +535,8 @@ final class SplitTreeView: NSView {
     @discardableResult
     func startBackgroundTerminal(for target: TerminalTarget) -> Bool {
         guard let tab = agentManager.panes[target.paneId]?.tabs.first(where: { $0.id == target.tabId }),
-              tab.type == .agent
+              tab.type == .agent,
+              !tab.isChat
         else { return false }
         let view: NSView
         if let existing = tabContentViews[target] {
@@ -541,6 +564,11 @@ final class SplitTreeView: NSView {
         let target = TerminalTarget(paneId: paneId, tabId: tab.id)
         if let existing = tabContentViews[target] {
             return existing
+        }
+
+        if tab.isChat, let chatView = makeChatView(for: tab, target: target) {
+            tabContentViews[target] = chatView
+            return chatView
         }
 
         let view: NSView
@@ -724,6 +752,82 @@ final class SplitTreeView: NSView {
         }
     }
 
+    /// A chat tab's view and the session that runs its agent: starts the
+    /// agent on the tab's conversation unless the tab was stopped, and turns
+    /// what the session reports into the tab's status, title and
+    /// conversation. Nil when the tab's agent has no chat, so it opens as a
+    /// terminal instead.
+    private func makeChatView(for tab: PaneTab, target: TerminalTarget) -> AgentChatPaneView? {
+        guard let agent = tab.agent,
+              let profile = AgentCatalog.profile(for: agent.profileId),
+              let launch = AgentChatLaunch.forProfile(profile, cwd: agent.conversation?.cwd ?? tab.cwd)
+        else { return nil }
+        let session = makeChatSession(launch)
+        let view = AgentChatPaneView(target: target, session: session, agentName: profile.name, themeManager: themeManager)
+        view.onFocusRequested = { [weak self] in
+            self?.agentManager.focusTab(paneId: target.paneId, tabId: target.tabId)
+        }
+        view.onRestartRequested = { [weak self] in
+            self?.agentManager.restartAgent(target: target)
+        }
+        session.onEvent = { [weak self] event in
+            self?.handleChatEvent(event, target: target, agentName: profile.name)
+        }
+        if agent.status != .stopped {
+            session.start(resuming: agent.conversation?.id)
+        }
+        return view
+    }
+
+    private func handleChatEvent(_ event: AgentChatEvent, target: TerminalTarget, agentName: String) {
+        switch event {
+        case .status(let status, let waitingReason, let notify, let message):
+            let state: AgentEventState
+            switch status {
+            case .idle: state = .ready
+            case .running: state = .running
+            case .waiting: state = .needsInput
+            case .error: state = .error
+            case .starting, .stopped:
+                // Hooks never report these; a stop must not turn the tab
+                // into a terminal the way a hook's stop does.
+                agentManager.updateAgentStatus(
+                    paneId: target.paneId, tabId: target.tabId, status: status, needsAttention: false
+                )
+                return
+            }
+            agentManager.reportAgentEvent(AgentEventPayload(
+                paneId: target.paneId,
+                tabId: target.tabId,
+                profileId: nil,
+                state: state,
+                shouldNotify: notify,
+                title: agentName,
+                body: message ?? "",
+                waitingReason: waitingReason,
+                message: message
+            ))
+        case .conversation(let id, let cwd):
+            agentManager.recordAgentConversation(
+                AgentConversation(id: id, cwd: cwd), paneId: target.paneId, tabId: target.tabId
+            )
+        case .title(let title):
+            agentManager.renameTab(target.paneId, tabId: target.tabId, to: title)
+        }
+    }
+
+    private func findChatView(in view: NSView) -> AgentChatPaneView? {
+        if let chatView = view as? AgentChatPaneView {
+            return chatView
+        }
+        for subview in view.subviews {
+            if let found = findChatView(in: subview) {
+                return found
+            }
+        }
+        return nil
+    }
+
     private func findTerminalView(in view: NSView) -> TerminalSurfaceView? {
         if let terminalView = view as? TerminalSurfaceView {
             return terminalView
@@ -858,6 +962,7 @@ final class SplitTreeView: NSView {
         let colors = themeManager.currentTheme.colors
         for view in tabContentViews.values {
             findBrowserView(in: view)?.applyTheme()
+            findChatView(in: view)?.applyTheme()
             findMarkdownView(in: view)?.applyTheme()
             findEditorView(in: view)?.applyTheme()
             findDiffView(in: view)?.applyTheme()
@@ -886,9 +991,7 @@ final class SplitTreeView: NSView {
         view.wantsLayer = true
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
 
-        let label = NSTextField(labelWithString: text)
-        label.alignment = .center
-        label.setChromeText(text, font: ChromeFont.empty, color: theme.colors.textMuted)
+        let label = Self.placeholderLabel(text)
         label.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(label)
 
@@ -901,14 +1004,11 @@ final class SplitTreeView: NSView {
     }
 
     private func makePlaceholderContent() -> NSView {
-        let theme = themeManager.currentTheme
         let placeholder = NSView()
         placeholder.wantsLayer = true
-        placeholder.layer?.backgroundColor = theme.colors.bgBase.cgColor
+        placeholder.layer?.backgroundColor = PaletteCenter.shared.palette.background.cgColor
 
-        let label = NSTextField(labelWithString: "Empty")
-        label.alignment = .center
-        label.setChromeText("Empty", font: ChromeFont.empty, color: theme.colors.textMuted)
+        let label = Self.placeholderLabel("Empty")
         label.translatesAutoresizingMaskIntoConstraints = false
         placeholder.addSubview(label)
 
@@ -919,6 +1019,15 @@ final class SplitTreeView: NSView {
 
         return placeholder
     }
+
+    /// A centered muted line in the Agents body type.
+    private static func placeholderLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.alignment = .center
+        label.font = Typography.ui(Typography.bodySize)
+        label.textColor = PaletteCenter.shared.palette.mutedForeground
+        return label
+    }
 }
 
 // MARK: - PaneContainerView
@@ -926,13 +1035,16 @@ final class SplitTreeView: NSView {
 /// A cached container for a single pane. Holds the header and content area.
 /// This view survives layout rebuilds — it's detached and reattached, never destroyed.
 ///
-/// Folio (direction §6): the focused pane has no frame, only its raised
-/// header and focus rule; every other pane's body sits under the unfocused
-/// veil; an attention pane gets a 2 pt `attention` frame and is never veiled.
+/// The focused pane has no frame, only its `card` header and focus rule;
+/// every other pane's body sits under the unfocused veil; an attention pane
+/// gets a 1 pt frame in the warning tone (Agents' Approval pill color) and
+/// is never veiled.
 final class PaneContainerView: NSView {
     let paneId: String
     let agentManager: AgentManager
     let themeManager: ThemeManager
+    /// The attention frame's width.
+    static let attentionFrame: CGFloat = 1
 
     private var headerView: PaneHeaderView
     private let veilView = PaneVeilView()
@@ -1000,17 +1112,18 @@ final class PaneContainerView: NSView {
 
     func update() {
         let colors = themeManager.currentTheme.colors
+        let palette = PaletteCenter.shared.palette
         let isActive = paneId == agentManager.activePaneId
         let needsAttention = agentManager.panes[paneId]?.tabs.contains {
             $0.agent?.needsAttention == true
         } ?? false
         // Containers are cached for the lifetime of a pane, so colors set
         // once would otherwise keep the old theme forever.
-        layer?.backgroundColor = colors.bgBase.cgColor
+        layer?.backgroundColor = palette.background.cgColor
         // A layer border composites above every sublayer, so the frame
         // stays on top of the header and a Metal terminal body alike.
-        layer?.borderWidth = needsAttention ? Chrome.attentionFrame : 0
-        layer?.borderColor = colors.attention.cgColor
+        layer?.borderWidth = needsAttention ? Self.attentionFrame : 0
+        layer?.borderColor = palette.color(for: .approval).shellScaled(by: 0.8).cgColor
         veilView.isHidden = isActive || needsAttention
         veilView.apply(colors: colors)
         headerView.update()
@@ -1083,7 +1196,8 @@ private final class PaneVeilView: NSView {
     func apply(colors: ThemeColors) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        ChromeSurface.applyVeil(to: veilLayer, colors: colors)
+        veilLayer.backgroundColor = colors.unfocusedVeil.cgColor
+        veilLayer.compositingFilter = colors.unfocusedVeilCompositingFilter
         CATransaction.commit()
     }
 
@@ -1118,13 +1232,13 @@ final class ThemedSplitView: NSSplitView, NSSplitViewDelegate {
         fatalError("init(coder:) is not supported")
     }
 
-    /// Panes are separated by one borderStrong hairline (tiled panes keep
-    /// square corners and no other edge).
+    /// Panes are separated by one `border` hairline (tiled panes keep square
+    /// corners and no other edge).
     override var dividerColor: NSColor {
-        themeManager.currentTheme.colors.borderStrong
+        PaletteCenter.shared.palette.border
     }
 
-    override var dividerThickness: CGFloat { Chrome.hairline }
+    override var dividerThickness: CGFloat { 1 }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()

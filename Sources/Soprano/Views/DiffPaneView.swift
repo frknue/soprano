@@ -1,12 +1,18 @@
 import AppKit
 
-/// One file's git diff, read-only, after Orca's diff editor: the whole file
-/// with removed and added rows tinted, inline or side by side, kept current
-/// while the tab is shown.
-final class DiffPaneView: NSView {
-    static let toolbarHeight: CGFloat = 32
+/// One file's git diff, read-only, drawn as Soprano Agents' diff surface: a
+/// subheader with the scope, `+N -N`, change navigation, the stacked | split
+/// toggle and line wrapping; the file's sticky header with its path, Copy path
+/// and counts; the changes with three lines of context, longer unmodified runs
+/// folded behind a "N unmodified lines" strip that shows them on a click;
+/// tinted rows with change bars, line numbers and word highlights. Kept
+/// current while the tab is shown.
+final class DiffPaneView: NSView, NSTableViewDataSource, NSTableViewDelegate {
+    static let subheaderHeight: CGFloat = 28
     /// The layout new diff views start in; the toggle updates it.
     static let sideBySideDefaultsKey = "soprano-diff-side-by-side"
+    /// Line wrapping, app-wide for the session (Agents' `DiffViewOptions.wrap`, on by default).
+    @MainActor static var wrapsLines = true
 
     let target: TerminalTarget
     let fileURL: URL
@@ -18,31 +24,33 @@ final class DiffPaneView: NSView {
     /// Opens the working-tree file in the editor (toolbar button).
     var onOpenFileRequested: ((URL) -> Void)?
 
-    private let toolbar = NSView()
-    private let toolbarRule = ChromeRuleView(axis: .horizontal)
-    private let pathLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "")
-    private let statsLabel = NSTextField(labelWithString: "")
-    private var previousButton: ChromeIconButton!
-    private var nextButton: ChromeIconButton!
-    private var layoutButton: ChromeIconButton!
-    private var openFileButton: ChromeIconButton!
+    private let subheader = NSView()
+    private let scopeLabel = SurfaceDiffScopeLabel()
+    private let statsLabel = NSTextField.label(size: Typography.tinySize)
+    private var previousButton: ShellGhostButton!
+    private var nextButton: ShellGhostButton!
+    private let layoutToggle = SurfaceDiffLayoutToggle()
+    private var wrapButton: ShellGhostButton!
+    private var openFileButton: ShellGhostButton!
+    private let scrollView = NSScrollView()
+    let tableView = SurfaceDiffTableView()
+    private let message = SurfaceMessageView()
 
-    /// The inline view, or the old side when side by side.
-    private let primary = DiffColumn()
-    /// The new side when side by side.
-    private let secondary = DiffColumn()
-    private let columnRule = ChromeRuleView(axis: .vertical)
-    private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private var inlineConstraints: [NSLayoutConstraint] = []
-    private var sideBySideConstraints: [NSLayoutConstraint] = []
-
-    private var isSideBySide: Bool
-    private var rendering: DiffRendering?
+    private(set) var document: SurfaceDiffDocument?
+    private(set) var list = SurfaceDiffList.empty
+    private(set) var layoutMode: SurfaceDiffLayout
+    private var wrap = DiffPaneView.wrapsLines
+    private var isCollapsed = false
+    /// Folds the reader opened (`SurfaceDiffFold.id`).
+    private var expandedFolds: Set<Int> = []
+    private var style = DiffStyle(palette: PaletteCenter.shared.palette)
+    private var numberWidth: CGFloat = 40
+    private var heights: [CGFloat] = []
+    private var heightsWidth: CGFloat = -1
+    private var textOffset: CGFloat = 0
+    /// The selected lines; cleared whenever the list is rebuilt.
+    private(set) var selection: SurfaceDiffSelection?
     private var fileExists: Bool
-    private var isSyncingScroll = false
-    private var needsFirstChangeScroll = false
-    private var didScrollToFirstChange = false
 
     private var location: DiffLocation?
     private var externalGitDirectory: String?
@@ -66,12 +74,11 @@ final class DiffPaneView: NSView {
         self.staged = staged
         self.themeManager = themeManager
         self.defaults = defaults
-        isSideBySide = defaults.bool(forKey: Self.sideBySideDefaultsKey)
+        layoutMode = defaults.bool(forKey: Self.sideBySideDefaultsKey) ? .split : .unified
         fileExists = FileManager.default.fileExists(atPath: fileURL.path)
         super.init(frame: .zero)
         wantsLayer = true
         setupViews()
-        applyLayoutMode()
         applyTheme()
         NotificationCenter.default.addObserver(
             self,
@@ -88,195 +95,143 @@ final class DiffPaneView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override var isFlipped: Bool { true }
 
     func focusPreferredControl() {
         onFocusRequested?()
-        window?.makeFirstResponder(rendering != nil ? primary.textView : self)
+        window?.makeFirstResponder(document != nil ? tableView : self)
     }
 
     // MARK: - Setup
 
     private func setupViews() {
-        toolbar.wantsLayer = true
-        toolbar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(toolbar)
-
-        pathLabel.font = ChromeFont.monoSmall
-        pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.stringValue = ConfigFile.abbreviatingHome(fileURL.path)
-        pathLabel.toolTip = fileURL.path
-        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-        statsLabel.font = ChromeFont.monoSmall
+        scopeLabel.title = staged ? "Staged changes" : "Changes"
         statsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        statsLabel.setContentHuggingPriority(.required, for: .horizontal)
-        let labels = NSStackView(views: [pathLabel, statusLabel, statsLabel])
-        labels.orientation = .horizontal
-        labels.alignment = .centerY
-        labels.spacing = 8
-        labels.translatesAutoresizingMaskIntoConstraints = false
-        toolbar.addSubview(labels)
+        previousButton = SurfaceToolbar.button("chevron.up", "Previous Change (⇧F7)", target: self, action: #selector(previousChangeClicked))
+        nextButton = SurfaceToolbar.button("chevron.down", "Next Change (F7)", target: self, action: #selector(nextChangeClicked))
+        wrapButton = SurfaceToolbar.button("text.word.spacing", "Disable line wrapping", target: self, action: #selector(wrapClicked))
+        openFileButton = SurfaceToolbar.button(Icon.fileText, "Open File", target: self, action: #selector(openFileClicked))
+        layoutToggle.onChange = { [weak self] layout in self?.setLayout(layout) }
 
-        previousButton = makeToolbarButton("chevron.up", "Previous Change (⇧F7)", #selector(previousChangeClicked))
-        nextButton = makeToolbarButton("chevron.down", "Next Change (F7)", #selector(nextChangeClicked))
-        layoutButton = makeToolbarButton("rectangle.split.2x1", "Switch to Side-by-Side Diff", #selector(layoutClicked))
-        openFileButton = makeToolbarButton("doc.text", "Open File", #selector(openFileClicked))
-        toolbar.addSubview(toolbarRule)
-
-        for column in [primary, secondary] {
-            column.textView.onFocus = { [weak self] in self?.onFocusRequested?() }
-            column.textView.onNavigate = { [weak self] forward in self?.navigate(forward: forward) }
-            column.textView.setAccessibilityLabel(fileURL.lastPathComponent)
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(clipViewBoundsChanged(_:)),
-                name: NSView.boundsDidChangeNotification,
-                object: column.clipView
-            )
-            addSubview(column.scrollView)
-        }
-        addSubview(columnRule)
-
-        messageLabel.alignment = .center
-        messageLabel.font = ChromeFont.empty
-        messageLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(messageLabel)
-
-        let primaryView = primary.scrollView
-        let secondaryView = secondary.scrollView
-        NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: topAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: Self.toolbarHeight),
-
-            labels.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 12),
-            labels.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            labels.trailingAnchor.constraint(lessThanOrEqualTo: previousButton.leadingAnchor, constant: -8),
-
-            openFileButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -8),
-            openFileButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            layoutButton.trailingAnchor.constraint(equalTo: openFileButton.leadingAnchor, constant: -2),
-            layoutButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            nextButton.trailingAnchor.constraint(equalTo: layoutButton.leadingAnchor, constant: -2),
-            nextButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            previousButton.trailingAnchor.constraint(equalTo: nextButton.leadingAnchor, constant: -2),
-            previousButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-
-            toolbarRule.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
-            toolbarRule.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            toolbarRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            primaryView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            primaryView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            primaryView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            columnRule.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            columnRule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            columnRule.widthAnchor.constraint(equalToConstant: Chrome.hairline),
-            columnRule.trailingAnchor.constraint(equalTo: secondaryView.leadingAnchor),
-            secondaryView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            secondaryView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            secondaryView.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: Self.toolbarHeight / 2 - 10),
-            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        let stack = NSStackView(views: [
+            scopeLabel, spacer, statsLabel, previousButton, nextButton, layoutToggle, wrapButton, openFileButton,
         ])
-        // Inline, the new side collapses to nothing at the trailing edge.
-        inlineConstraints = [
-            primaryView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            secondaryView.widthAnchor.constraint(equalToConstant: 0),
-        ]
-        sideBySideConstraints = [
-            primaryView.trailingAnchor.constraint(equalTo: columnRule.leadingAnchor),
-            secondaryView.widthAnchor.constraint(equalTo: primaryView.widthAnchor),
-        ]
-    }
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 2
+        stack.setCustomSpacing(8, after: statsLabel)
+        stack.setCustomSpacing(6, after: nextButton)
+        stack.setCustomSpacing(6, after: layoutToggle)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        subheader.addSubview(stack)
 
-    private func makeToolbarButton(_ symbol: String, _ label: String, _ action: Selector) -> ChromeIconButton {
-        let button = ChromeIconButton(
-            symbolName: symbol,
-            accessibilityLabel: label,
-            pointSize: 12,
-            size: 24,
-            target: self,
-            action: action
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("diff"))
+        column.resizingMask = .autoresizingMask
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.style = .plain
+        tableView.intercellSpacing = .zero
+        tableView.selectionHighlightStyle = .none
+        tableView.floatsGroupRows = true
+        tableView.usesAutomaticRowHeights = false
+        tableView.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        tableView.gridStyleMask = []
+        tableView.focusRingType = .none
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.scrollText = { [weak self] delta in self?.scrollText(by: delta) ?? false }
+        tableView.onFocus = { [weak self] in self?.onFocusRequested?() }
+        tableView.onNavigate = { [weak self] forward in self?.navigate(forward: forward) }
+        tableView.isLineRow = { [weak self] row in self?.isLineRow(row) ?? false }
+        tableView.onSelectionBegin = { [weak self] row, x, extend in self?.beginSelection(at: row, x: x, extending: extend) }
+        tableView.onSelectionExtend = { [weak self] row in self?.extendSelection(to: row) }
+        tableView.onSelectAll = { [weak self] in self?.selectAllLines() }
+        tableView.onClearSelection = { [weak self] in self?.setSelection(nil) }
+        tableView.onCopy = { [weak self] in self?.copySelection() ?? false }
+        tableView.hasSelection = { [weak self] in self?.selectedText()?.isEmpty == false }
+        tableView.contextMenu = { [weak self] row, x in self?.contextMenu(row: row, x: x) }
+        tableView.setAccessibilityLabel(fileURL.lastPathComponent)
+
+        scrollView.documentView = tableView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.drawsBackground = false
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(listWidthChanged),
+            name: NSView.frameDidChangeNotification,
+            object: scrollView.contentView
         )
-        toolbar.addSubview(button)
-        return button
-    }
 
-    private func applyLayoutMode() {
-        NSLayoutConstraint.deactivate(isSideBySide ? inlineConstraints : sideBySideConstraints)
-        NSLayoutConstraint.activate(isSideBySide ? sideBySideConstraints : inlineConstraints)
+        for subview in [subheader, scrollView] {
+            subview.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(subview)
+        }
+        addSubview(message)
+        message.pin(centeredIn: scrollView.centerYAnchor, of: self)
+        NSLayoutConstraint.activate([
+            subheader.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            subheader.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            subheader.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            subheader.heightAnchor.constraint(equalToConstant: Self.subheaderHeight),
+            stack.leadingAnchor.constraint(equalTo: subheader.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: subheader.trailingAnchor),
+            stack.centerYAnchor.constraint(equalTo: subheader.centerYAnchor),
+
+            scrollView.topAnchor.constraint(equalTo: subheader.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
         updateContentVisibility()
     }
 
     private func updateContentVisibility() {
-        let showsText = rendering != nil
-        primary.scrollView.isHidden = !showsText
-        secondary.scrollView.isHidden = !showsText || !isSideBySide
-        columnRule.isHidden = !showsText || !isSideBySide
-        messageLabel.isHidden = showsText
+        let showsDiff = document != nil
+        scrollView.isHidden = !showsDiff
+        message.isHidden = showsDiff || message.text.isEmpty
     }
 
     // MARK: - Theme
 
     func applyTheme() {
-        let colors = themeManager.currentTheme.colors
-        layer?.backgroundColor = colors.bgBase.cgColor
-        toolbar.layer?.backgroundColor = colors.bgPanel.cgColor
-        toolbarRule.color = colors.borderSubtle
-        columnRule.color = colors.borderSubtle
-        pathLabel.textColor = colors.textPrimary
-        for button in [previousButton, nextButton, layoutButton, openFileButton] {
-            button?.apply(theme: themeManager.currentTheme)
-        }
-        messageLabel.textColor = colors.textMuted
-        primary.apply(colors: colors)
-        secondary.apply(colors: colors)
+        let palette = PaletteCenter.shared.palette
+        style = DiffStyle(palette: palette)
+        numberWidth = style.numberWidth(maxLine: document?.maxLine ?? 1)
+        layer?.backgroundColor = palette.background.cgColor
+        tableView.backgroundColor = palette.background
+        heights = []
+        heightsWidth = -1
+        tableView.reloadData()
         updateChrome()
     }
 
     private func updateChrome() {
-        let colors = themeManager.currentTheme.colors
-        statusLabel.isHidden = !staged
-        statusLabel.setChromeText(staged ? "Staged" : "", font: ChromeFont.meta, color: colors.textMuted)
-
-        let stats = NSMutableAttributedString()
-        if let rendering {
-            let font = ChromeFont.monoSmall
-            if rendering.linesAdded > 0 {
-                stats.append(NSAttributedString(
-                    string: "+\(rendering.linesAdded)",
-                    attributes: [.font: font, .foregroundColor: colors.success]
-                ))
-            }
-            if rendering.linesRemoved > 0 {
-                if stats.length > 0 {
-                    stats.append(NSAttributedString(string: " ", attributes: [.font: font]))
-                }
-                stats.append(NSAttributedString(
-                    string: "−\(rendering.linesRemoved)",
-                    attributes: [.font: font, .foregroundColor: colors.danger]
-                ))
-            }
+        if let document {
+            statsLabel.isHidden = false
+            statsLabel.attributedStringValue = DiffStatText.make(
+                additions: document.additions,
+                deletions: document.deletions,
+                palette: style.palette,
+                size: Typography.tinySize
+            )
+        } else {
+            statsLabel.isHidden = true
         }
-        statsLabel.attributedStringValue = stats
-        statsLabel.isHidden = stats.length == 0
-
-        let hasChanges = rendering != nil && !(primary.side?.changeStarts.isEmpty ?? true)
+        let hasChanges = !list.changeRows.isEmpty
         previousButton.isEnabled = hasChanges
         nextButton.isEnabled = hasChanges
-        let layoutLabel = isSideBySide ? "Switch to Inline Diff" : "Switch to Side-by-Side Diff"
-        layoutButton.setSymbol(
-            isSideBySide ? "rectangle.split.1x2" : "rectangle.split.2x1",
-            accessibilityLabel: layoutLabel,
-            pointSize: 12
-        )
-        layoutButton.toolTip = layoutLabel
+        layoutToggle.layout = layoutMode
+        wrapButton.isOn = wrap
+        let wrapLabel = wrap ? "Disable line wrapping" : "Enable line wrapping"
+        wrapButton.toolTip = wrapLabel
+        wrapButton.setAccessibilityLabel(wrapLabel)
         openFileButton.isEnabled = fileExists
     }
 
@@ -325,7 +280,7 @@ final class DiffPaneView: NSView {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard let self, !self.hasLoaded, self.loadInFlight else { return }
-            self.messageLabel.stringValue = "Loading diff…"
+            self.message.text = "Loading diff…"
             self.updateContentVisibility()
         }
     }
@@ -338,30 +293,21 @@ final class DiffPaneView: NSView {
         updateLocation(result.location)
 
         switch result.content {
-        case .message(let message):
-            rendering = nil
-            primary.show(nil)
-            secondary.show(nil)
-            messageLabel.stringValue = message
+        case .message(let text):
+            document = nil
+            list = .empty
+            message.text = text
+            tableView.reloadData()
             updateContentVisibility()
-        case .text(let newRendering):
-            if newRendering.lines != rendering?.lines {
-                let savedOrigin = rendering != nil ? primary.clipView.bounds.origin : nil
-                let savedSecondaryX = secondary.clipView.bounds.minX
-                rendering = newRendering
+        case .text(let newDocument):
+            if newDocument.lines != document?.lines || newDocument.path != document?.path {
+                let origin = document != nil ? scrollView.contentView.bounds.origin : nil
+                document = newDocument
+                numberWidth = style.numberWidth(maxLine: newDocument.maxLine)
                 updateContentVisibility()
-                showRendering()
-                layoutSubtreeIfNeeded()
-                if let savedOrigin {
-                    primary.scroll(to: savedOrigin)
-                    if isSideBySide {
-                        secondary.scroll(to: NSPoint(x: savedSecondaryX, y: secondary.clipView.bounds.minY))
-                    }
-                }
-                if !didScrollToFirstChange {
-                    didScrollToFirstChange = true
-                    needsFirstChangeScroll = true
-                    scrollToFirstChangeIfSized()
+                rebuildList()
+                if let origin {
+                    scrollTo(y: origin.y)
                 }
             }
         }
@@ -373,43 +319,110 @@ final class DiffPaneView: NSView {
         }
     }
 
-    private func showRendering() {
-        guard let rendering else { return }
-        if isSideBySide {
-            primary.show(rendering.old)
-            secondary.show(rendering.new)
+    private func rebuildList() {
+        list = document.map {
+            SurfaceDiffList.build($0, layout: layoutMode, collapsed: isCollapsed, expanded: expandedFolds)
+        } ?? .empty
+        selection = nil
+        heights = []
+        heightsWidth = -1
+        tableView.reloadData()
+    }
+
+    // MARK: - Selection
+
+    private func isLineRow(_ row: Int) -> Bool {
+        guard list.rows.indices.contains(row) else { return false }
+        switch list.rows[row] {
+        case .line, .pair: return true
+        case .header, .fold, .end: return false
+        }
+    }
+
+    /// Whether an x in the list falls on the old (left) side of a split row.
+    private func isOldSide(x: CGFloat) -> Bool {
+        layoutMode == .split && x < SurfaceDiffSplitLineView.dividerX(rowWidth: tableView.bounds.width)
+    }
+
+    /// A press on a line: selects it, or with ⇧ extends the selection to it.
+    func beginSelection(at row: Int, x: CGFloat, extending: Bool) {
+        if extending, var current = selection {
+            current.head = row
+            setSelection(current)
         } else {
-            primary.show(rendering.inline)
-            secondary.show(nil)
-        }
-        updateCurrentChange()
-    }
-
-    /// The change being read is the last one starting at or above the row a
-    /// third of the way down (where navigation puts it), else the first; its
-    /// first row gets the pencil tick in each visible gutter.
-    private func updateCurrentChange() {
-        let row: Int? = primary.side.flatMap { side in
-            guard let anchor = primary.anchorRow() else { return side.changeStarts.first }
-            return side.changeStarts.last(where: { $0 <= anchor }) ?? side.changeStarts.first
-        }
-        primary.ruler.currentChangeRow = row
-        secondary.ruler.currentChangeRow = isSideBySide ? row : nil
-    }
-
-    /// The first change is scrolled to once the view has a height, which a
-    /// tab loaded in the background gets only when shown.
-    private func scrollToFirstChangeIfSized() {
-        guard needsFirstChangeScroll, primary.clipView.bounds.height > 0 else { return }
-        needsFirstChangeScroll = false
-        if let first = primary.side?.changeStarts.first {
-            primary.scroll(toRow: first)
+            setSelection(SurfaceDiffSelection(anchor: row, head: row, oldSide: isOldSide(x: x)))
         }
     }
 
-    override func layout() {
-        super.layout()
-        scrollToFirstChangeIfSized()
+    func extendSelection(to row: Int) {
+        guard var current = selection, list.rows.indices.contains(row) else { return }
+        current.head = row
+        setSelection(current)
+    }
+
+    private func selectAllLines() {
+        guard let first = list.rows.indices.first(where: isLineRow),
+              let last = list.rows.indices.last(where: isLineRow) else { return }
+        setSelection(SurfaceDiffSelection(anchor: first, head: last, oldSide: selection?.oldSide ?? false))
+    }
+
+    private func setSelection(_ newSelection: SurfaceDiffSelection?) {
+        guard newSelection != selection else { return }
+        selection = newSelection
+        tableView.enumerateAvailableRowViews { rowView, row in
+            self.applySelection(to: rowView.view(atColumn: 0), row: row)
+        }
+    }
+
+    private func applySelection(to view: Any?, row: Int) {
+        let selected = selection?.rows.contains(row) == true
+        if let cell = view as? SurfaceDiffUnifiedLineView { cell.isLineSelected = selected }
+        if let cell = view as? SurfaceDiffSplitLineView { cell.selectedSide = selected ? selection?.oldSide : nil }
+    }
+
+    /// The selected lines as the file has them, one per line.
+    func selectedText() -> String? {
+        guard let selection, let document else { return nil }
+        return list.text(of: selection, in: document)
+    }
+
+    /// ⌘C: the selected lines on the pasteboard.
+    @discardableResult
+    func copySelection() -> Bool {
+        guard let text = selectedText(), !text.isEmpty else { return false }
+        Self.copyToPasteboard(text)
+        return true
+    }
+
+    private static func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// Right click: Copy (with a selection), Copy Line (the clicked line, on the clicked side),
+    /// Copy File Path.
+    private func contextMenu(row: Int, x: CGFloat) -> NSMenu? {
+        guard let document else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        func add(_ title: String, enabled: Bool = true, _ action: @escaping () -> Void) {
+            let item = NSMenuItem(title: title, action: #selector(SurfaceDiffMenuAction.run), keyEquivalent: "")
+            let target = SurfaceDiffMenuAction(action)
+            item.target = target
+            item.representedObject = target
+            item.isEnabled = enabled
+            menu.addItem(item)
+        }
+        if let text = selectedText(), !text.isEmpty {
+            add("Copy") { Self.copyToPasteboard(text) }
+        }
+        let line = list.line(atRow: row, oldSide: isOldSide(x: x), in: document)
+        add("Copy Line", enabled: line != nil) {
+            if let line { Self.copyToPasteboard(line.text) }
+        }
+        let path = fileURL.path
+        add("Copy File Path") { Self.copyToPasteboard(path) }
+        return menu
     }
 
     // MARK: - Watching
@@ -475,39 +488,61 @@ final class DiffPaneView: NSView {
         scheduleReload(immediately: true)
     }
 
-    // MARK: - Scrolling
+    // MARK: - Navigation
 
-    /// Keeps both sides on the same rows; horizontal scrolling stays per side.
-    @objc private func clipViewBoundsChanged(_ notification: Notification) {
-        guard let clip = notification.object as? NSClipView else { return }
-        let isPrimary = clip === primary.clipView
-        let source = isPrimary ? primary : secondary
-        let other = isPrimary ? secondary : primary
-        source.ruler.needsDisplay = true
-        if isPrimary {
-            updateCurrentChange()
-        }
-        guard isSideBySide, !isSyncingScroll else { return }
-        let otherClip = other.clipView
-        guard otherClip.bounds.minY != clip.bounds.minY else { return }
-        isSyncingScroll = true
-        other.scroll(to: NSPoint(x: otherClip.bounds.minX, y: clip.bounds.minY))
-        isSyncingScroll = false
+    /// The list row a third of the way down the visible area, where change
+    /// navigation reads from and puts its target.
+    private func anchorRow() -> Int {
+        let bounds = scrollView.contentView.bounds
+        let row = tableView.row(at: NSPoint(x: 1, y: bounds.minY + bounds.height / 3))
+        return row >= 0 ? row : (bounds.minY > 0 ? list.rows.count : 0)
     }
 
     /// Moves to the next or previous change relative to the row a third of
-    /// the way down; side by side, the old side leads and the new follows.
+    /// the way down.
     private func navigate(forward: Bool) {
-        guard rendering != nil,
-              let side = primary.side,
-              let anchor = primary.anchorRow()
-        else { return }
+        guard document != nil, !list.changeRows.isEmpty else { return }
+        let anchor = anchorRow()
         let target = forward
-            ? side.changeStarts.first(where: { $0 > anchor })
-            : side.changeStarts.last(where: { $0 < anchor })
-        if let target {
-            primary.scroll(toRow: target)
+            ? list.changeRows.first(where: { $0 > anchor })
+            : list.changeRows.last(where: { $0 < anchor })
+        guard let target else { return }
+        tableView.layoutSubtreeIfNeeded()
+        scrollTo(y: tableView.rect(ofRow: target).minY - scrollView.contentView.bounds.height / 3)
+    }
+
+    private func scrollTo(y: CGFloat) {
+        let maxY = max(0, tableView.frame.height - scrollView.contentView.bounds.height)
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(max(0, y), maxY)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    /// The file line a list row stands for (a split row, the earlier of its two lines).
+    private func anchorLine(of row: Int) -> Int? {
+        guard let document, list.rows.indices.contains(row) else { return nil }
+        switch list.rows[row] {
+        case .line(let index):
+            return document.unified.rows[index].lineIndex
+        case .pair(let index):
+            let lines = [document.old.rows[index].lineIndex, document.new.rows[index].lineIndex].compactMap { $0 }
+            return lines.min()
+        case .fold(let fold):
+            return fold.rows.isEmpty ? nil : fold.rows.lowerBound
+        case .header, .end:
+            return nil
         }
+    }
+
+    /// Runs `change` and scrolls back to the file line that was at the top.
+    private func preservingTopLine(_ change: () -> Void) {
+        let top = tableView.row(at: NSPoint(x: 1, y: scrollView.contentView.bounds.minY + SurfaceDiffDrawing.headerHeight + 1))
+        let line = top >= 0 ? anchorLine(of: top) : nil
+        change()
+        tableView.layoutSubtreeIfNeeded()
+        guard let line,
+              let row = list.rows.indices.first(where: { (anchorLine(of: $0) ?? -1) >= line })
+        else { return }
+        scrollTo(y: tableView.rect(ofRow: row).minY - SurfaceDiffDrawing.headerHeight)
     }
 
     // MARK: - Actions
@@ -520,19 +555,48 @@ final class DiffPaneView: NSView {
         navigate(forward: true)
     }
 
-    @objc private func layoutClicked() {
-        let anchorLine = primary.topAnchorLine()
-        let secondaryHadFocus = window?.firstResponder === secondary.textView
-        isSideBySide.toggle()
-        defaults.set(isSideBySide, forKey: Self.sideBySideDefaultsKey)
-        applyLayoutMode()
-        showRendering()
-        layoutSubtreeIfNeeded()
-        if let anchorLine {
-            primary.scroll(toAnchorLine: anchorLine)
+    private func setLayout(_ layout: SurfaceDiffLayout) {
+        guard layout != layoutMode else { return }
+        layoutMode = layout
+        defaults.set(layout == .split, forKey: Self.sideBySideDefaultsKey)
+        textOffset = 0
+        preservingTopLine { rebuildList() }
+        updateChrome()
+    }
+
+    /// Stacked ↔ split (also the toggle's two buttons).
+    func toggleLayout() {
+        setLayout(layoutMode == .unified ? .split : .unified)
+    }
+
+    @objc private func wrapClicked() {
+        wrap.toggle()
+        Self.wrapsLines = wrap
+        textOffset = 0
+        preservingTopLine {
+            heights = []
+            heightsWidth = -1
+            tableView.reloadData()
         }
-        if secondaryHadFocus {
-            window?.makeFirstResponder(primary.textView)
+        updateChrome()
+    }
+
+    private func toggleCollapsed() {
+        isCollapsed.toggle()
+        rebuildList()
+        scrollTo(y: 0)
+        updateChrome()
+    }
+
+    private func expand(_ fold: SurfaceDiffFold) {
+        let row = list.rows.firstIndex(of: .fold(fold))
+        let anchorY = row.map { tableView.rect(ofRow: $0).minY - scrollView.contentView.bounds.minY }
+        expandedFolds.insert(fold.id)
+        rebuildList()
+        tableView.layoutSubtreeIfNeeded()
+        // The first shown line takes the strip's place on screen.
+        if let row, let anchorY, list.rows.indices.contains(row) {
+            scrollTo(y: tableView.rect(ofRow: row).minY - anchorY)
         }
         updateChrome()
     }
@@ -544,6 +608,152 @@ final class DiffPaneView: NSView {
     override func mouseDown(with event: NSEvent) {
         onFocusRequested?()
         super.mouseDown(with: event)
+    }
+
+    // MARK: - Horizontal text scroll (no wrap)
+
+    private func scrollText(by delta: CGFloat) -> Bool {
+        guard !wrap, let document else { return false }
+        let limit = max(0, ceil(CGFloat(document.maxColumns + 1) * style.columnWidth - codeWidth(rowWidth: listWidth)))
+        guard limit > 0 else { return false }
+        let next = min(max(0, textOffset + delta), limit)
+        guard next != textOffset else { return true }
+        textOffset = next
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            if let cell = rowView.view(atColumn: 0) as? SurfaceDiffUnifiedLineView { cell.textOffset = next }
+            if let cell = rowView.view(atColumn: 0) as? SurfaceDiffSplitLineView { cell.textOffset = next }
+        }
+        return true
+    }
+
+    /// Width the code text gets in a row `rowWidth` wide (per side when split).
+    private func codeWidth(rowWidth: CGFloat) -> CGFloat {
+        let side = layoutMode == .split ? SurfaceDiffSplitLineView.dividerX(rowWidth: rowWidth) : rowWidth
+        return max(20, side - numberWidth - DiffStyle.codeInset - DiffStyle.codeTrailing)
+    }
+
+    // MARK: - Heights
+
+    /// Width the list lays rows out in (the clip view's; the table column follows it).
+    private var listWidth: CGFloat { max(100, scrollView.contentView.bounds.width) }
+
+    /// Wrapped rows change height with the list's width.
+    @objc private func listWidthChanged() {
+        guard wrap, !list.rows.isEmpty, heightsWidth >= 0, abs(listWidth - heightsWidth) > 0.5 else { return }
+        heights = []
+        heightsWidth = -1
+        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<list.rows.count))
+    }
+
+    private func height(of row: SurfaceDiffListRow, rowWidth: CGFloat) -> CGFloat {
+        switch row {
+        case .header: return SurfaceDiffDrawing.headerHeight
+        case .fold: return SurfaceDiffDrawing.foldHeight
+        case .end: return SurfaceDiffDrawing.endHeight
+        case .line(let index):
+            guard wrap, let document, let line = document.unified.rows[index].lineIndex else { return DiffStyle.lineHeight }
+            return CGFloat(wrappedLines(document.lines[line], width: codeWidth(rowWidth: rowWidth))) * DiffStyle.lineHeight
+        case .pair(let index):
+            guard wrap, let document else { return DiffStyle.lineHeight }
+            let width = codeWidth(rowWidth: rowWidth)
+            let count = [document.old.rows[index].lineIndex, document.new.rows[index].lineIndex]
+                .compactMap { $0 }
+                .map { wrappedLines(document.lines[$0], width: width) }
+                .max() ?? 1
+            return CGFloat(count) * DiffStyle.lineHeight
+        }
+    }
+
+    private func wrappedLines(_ line: GitDiffLine, width: CGFloat) -> Int {
+        style.wrappedLines(of: DiffLine(kind: .context, text: line.text, oldNumber: nil, newNumber: nil), width: width)
+    }
+
+    // MARK: - Table
+
+    func numberOfRows(in tableView: NSTableView) -> Int { list.rows.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard list.rows.indices.contains(row) else { return DiffStyle.lineHeight }
+        guard wrap else { return height(of: list.rows[row], rowWidth: 0) }
+        if heights.count != list.rows.count || heightsWidth < 0 {
+            let width = listWidth
+            heightsWidth = width
+            heights = list.rows.map { height(of: $0, rowWidth: width) }
+        }
+        return heights[row]
+    }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        list.rows.indices.contains(row) && list.rows[row] == .header
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let identifier = NSUserInterfaceItemIdentifier("SurfaceDiffRow")
+        let rowView = tableView.makeView(withIdentifier: identifier, owner: self) as? SurfaceDiffTableRowView
+            ?? SurfaceDiffTableRowView()
+        rowView.identifier = identifier
+        rowView.palette = style.palette
+        return rowView
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let document, list.rows.indices.contains(row) else { return nil }
+        switch list.rows[row] {
+        case .header:
+            let cell = reuse(SurfaceDiffFileHeaderView.identifier) { SurfaceDiffFileHeaderView() }
+            cell.configure(document, staged: staged, collapsed: isCollapsed, palette: style.palette)
+            cell.onToggle = { [weak self] in self?.toggleCollapsed() }
+            return cell
+        case .fold(let fold):
+            let cell = reuse(SurfaceDiffFoldView.identifier) { SurfaceDiffFoldView() }
+            cell.configure(fold, numberWidth: numberWidth, style: style)
+            cell.onExpand = { [weak self] in self?.expand(fold) }
+            return cell
+        case .line(let index):
+            let cell = reuse(SurfaceDiffUnifiedLineView.identifier) { SurfaceDiffUnifiedLineView() }
+            let layoutRow = document.unified.rows[index]
+            guard let side = side(of: layoutRow, in: document, oldSide: layoutRow.kind == .removed) else { return cell }
+            cell.configure(side: side, numberWidth: numberWidth, wrap: wrap, textOffset: textOffset, style: style)
+            applySelection(to: cell, row: row)
+            return cell
+        case .pair(let index):
+            let cell = reuse(SurfaceDiffSplitLineView.identifier) { SurfaceDiffSplitLineView() }
+            cell.configure(
+                old: side(of: document.old.rows[index], in: document, oldSide: true),
+                new: side(of: document.new.rows[index], in: document, oldSide: false),
+                numberWidth: numberWidth,
+                wrap: wrap,
+                textOffset: textOffset,
+                style: style
+            )
+            applySelection(to: cell, row: row)
+            return cell
+        case .end:
+            return reuse(SurfaceDiffEndView.identifier) { SurfaceDiffEndView() }
+        }
+    }
+
+    /// What a layout row draws on its side: the old side's number for removed lines (and
+    /// the old column of a split row), the new one otherwise; nil for a filler.
+    private func side(of row: GitDiffRow, in document: SurfaceDiffDocument, oldSide: Bool) -> SurfaceDiffSide? {
+        guard let index = row.lineIndex, row.kind != .filler else { return nil }
+        let line = document.lines[index]
+        let kind = SurfaceDiffDrawing.kind(row.kind)
+        let text = SurfaceDiffDrawing.text(
+            line,
+            kind: kind,
+            tokens: document.tokens(of: row, oldSide: oldSide),
+            emphasis: document.emphasis(of: row),
+            wrap: wrap,
+            style: style
+        )
+        return SurfaceDiffSide(kind: kind, number: oldSide ? line.oldNumber : line.newNumber, text: text)
+    }
+
+    private func reuse<View: NSView>(_ identifier: NSUserInterfaceItemIdentifier, make: () -> View) -> View {
+        (tableView.makeView(withIdentifier: identifier, owner: self) as? View) ?? make()
     }
 }
 
@@ -558,7 +768,7 @@ private struct DiffLocation: Equatable, Sendable {
 
 private struct DiffLoadResult: Sendable {
     enum Content: Sendable {
-        case text(DiffRendering)
+        case text(SurfaceDiffDocument)
         case message(String)
     }
 
@@ -591,7 +801,7 @@ private enum DiffLoader {
             return DiffLoadResult(
                 location: location,
                 fileExists: fileExists,
-                content: .text(DiffRendering(lines: lines, language: language))
+                content: .text(SurfaceDiffDocument(path: relativePath, lines: lines, language: language))
             )
         case .binary:
             return message("Binary file changed\nText diff is unavailable for this file.", location)

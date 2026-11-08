@@ -25,11 +25,52 @@ struct MarkdownHTMLRenderer: MarkupWalker {
         result += "</blockquote>\n"
     }
 
+    /// Agents' code block: a header with the language, then the code with
+    /// syntax classes (`tok-*`, colored by the reader's style sheet).
     mutating func visitCodeBlock(_ codeBlock: CodeBlock) {
-        let language = codeBlock.language
-            .map { " class=\"language-\(Self.escapeAttribute($0))\"" }
-            ?? ""
-        result += "<pre><code\(language)>\(Self.escapeText(codeBlock.code))</code></pre>\n"
+        let languageName = codeBlock.language?.trimmingCharacters(in: .whitespaces) ?? ""
+        let language = languageName.isEmpty
+            ? ""
+            : " class=\"language-\(Self.escapeAttribute(languageName))\""
+        result += "<div class=\"code-block\"><div class=\"code-header\">\(Self.escapeText(languageName))</div>"
+        result += "<pre><code\(language)>\(Self.highlighted(codeBlock.code, language: languageName))</code></pre></div>\n"
+    }
+
+    /// `code` escaped, its syntax tokens wrapped in `<span class="tok-…">`.
+    static func highlighted(_ code: String, language: String) -> String {
+        guard !language.isEmpty, let codeLanguage = CodeLanguage.named(language) else { return escapeText(code) }
+        let text = code as NSString
+        var output = ""
+        var cursor = 0
+        for token in CodeSyntaxHighlighter.tokens(in: code, language: codeLanguage)
+        where token.range.location >= cursor && NSMaxRange(token.range) <= text.length {
+            if token.range.location > cursor {
+                output += escapeText(text.substring(with: NSRange(location: cursor, length: token.range.location - cursor)))
+            }
+            output += "<span class=\"tok-\(tokenClass(token.kind))\">\(escapeText(text.substring(with: token.range)))</span>"
+            cursor = NSMaxRange(token.range)
+        }
+        if cursor < text.length {
+            output += escapeText(text.substring(from: cursor))
+        }
+        return output
+    }
+
+    private static func tokenClass(_ kind: SyntaxTokenKind) -> String {
+        switch kind {
+        case .keyword: "keyword"
+        case .string: "string"
+        case .comment: "comment"
+        case .number: "number"
+        case .type: "type"
+        case .function: "function"
+        case .attribute: "attribute"
+        case .key: "key"
+        case .tag: "tag"
+        case .heading: "heading"
+        case .inserted: "inserted"
+        case .deleted: "deleted"
+        }
     }
 
     mutating func visitHeading(_ heading: Heading) {

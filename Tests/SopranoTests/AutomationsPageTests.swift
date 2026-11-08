@@ -101,7 +101,7 @@ struct AutomationsPageTests {
         let (controller, directory) = try makeController(automations: oneAutomation)
         defer { try? FileManager.default.removeItem(at: directory) }
         let automation = try #require(controller.automations.first)
-        let detail = AutomationDetailView(theme: ThemeManager(themeId: "folio").currentTheme)
+        let detail = AutomationDetailView()
         let now = Date()
         let nextRun = now.addingTimeInterval(15.5 * 3_600)
         detail.update(automation: automation, runs: [], nextRun: nextRun, now: now)
@@ -114,6 +114,68 @@ struct AutomationsPageTests {
         // A time it states that changed is shown.
         detail.update(automation: automation, runs: [], nextRun: nextRun, now: now.addingTimeInterval(3 * 3_600))
         #expect(allSubviews(in: detail).map(ObjectIdentifier.init) != before)
+    }
+
+    @Test func anAutomationsStatePillShowsItsLiveRunElsePausedFailedOrActive() throws {
+        let (controller, directory) = try makeController(automations: oneAutomation)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var automation = try #require(controller.automations.first)
+        func run(_ status: AutomationRun.Status) -> AutomationRun {
+            AutomationRun(
+                id: "run", automationId: automation.id, number: 1, trigger: .manual,
+                startedAt: Date(), status: status, profileId: "omp", folder: automation.folder
+            )
+        }
+
+        #expect(AutomationPill.state(of: automation, lastRun: nil).label == "Active")
+        #expect(AutomationPill.state(of: automation, lastRun: run(.failed)).label == "Failed")
+        #expect(AutomationPill.state(of: automation, lastRun: run(.running)).label == "Running")
+        #expect(AutomationPill.state(of: automation, lastRun: run(.needsInput)).tone == .input)
+        automation.enabled = false
+        #expect(AutomationPill.state(of: automation, lastRun: run(.completed)).label == "Paused")
+        // A run still going outranks the pause.
+        #expect(AutomationPill.state(of: automation, lastRun: run(.starting)).label == "Starting")
+    }
+
+    @Test func theEditorStaysOpenAndSaysWhyWhenTheAutomationCannotBeSaved() throws {
+        let (controller, directory) = try makeController(automations: oneAutomation)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let automation = try #require(controller.automations.first)
+        let editor = AutomationEditorPanel(
+            automation: automation,
+            template: nil,
+            automations: controller.automations,
+            takenIds: controller.takenIds,
+            projectDirectories: []
+        )
+        var saved: [Automation] = []
+        var closed = 0
+        editor.onClose = { closed += 1 }
+        editor.onSave = { saved.append($0); return false }
+        #expect(editor.canSave)
+
+        editor.submit()
+        #expect(saved.map(\.id) == [automation.id])
+        #expect(saved.first?.prompt == automation.prompt)
+        #expect(closed == 0)
+        #expect(editor.shownError?.contains("couldn't save") == true)
+
+        editor.onSave = { _ in true }
+        editor.submit()
+        #expect(closed == 1)
+    }
+
+    @Test func aRunsReportIsRenderedByTheChatsMarkdownRenderer() throws {
+        let run = AutomationRun(
+            id: "run", automationId: "audit", number: 3, trigger: .manual,
+            startedAt: Date(timeIntervalSinceNow: -60), finishedAt: Date(), status: .completed,
+            output: "Dependencies are **mostly current**.", profileId: "omp", folder: "/tmp"
+        )
+        let page = AutomationRunDetailView()
+        page.update(run: run, automation: nil, isLive: false, now: Date())
+        let report = try #require(allSubviews(in: page).first { $0.identifier?.rawValue == "automations-run-report" })
+        let text = allSubviews(in: report).compactMap { ($0 as? NSTextView)?.string }.joined()
+        #expect(text == "Dependencies are mostly current.")
     }
 
     @Test(arguments: [
@@ -170,8 +232,8 @@ struct AutomationsPageTests {
             // visible width leaves out a scroller when the system shows one.
             let scrollView = try #require(allSubviews(in: detail).compactMap { $0 as? NSScrollView }.first)
             let column = try #require(scrollView.documentView?.subviews.first)
-            let available = scrollView.contentView.bounds.width - 2 * Chrome.Space.page
-            #expect(column.frame.width == min(available, 1_040))
+            let available = scrollView.contentView.bounds.width - 2 * AutomationViews.pagePadding
+            #expect(column.frame.width == min(available, AutomationViews.maxWidth))
         }
 
         content.closeAutomations()

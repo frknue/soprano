@@ -1,30 +1,29 @@
 import AppKit
 
-/// An unboxed badge in a window or layout tab: a 7 pt status mark and a
-/// tabular count (`● 3`), both in the color of the most urgent agent behind
-/// it, or the running-command color for terminals running a command. Hidden
-/// at zero.
+/// An unboxed badge in a window or layout tab, in Soprano Agents' status pill
+/// language: the pill symbol of the most urgent agent behind it (Working,
+/// Approval, Input, Done, Failed) or the Running terminal symbol for commands,
+/// and a tabular count, both in the pill's tone. Hidden at zero.
 final class StatusCountBadgeView: NSView {
     /// Most urgent first; the badge takes the first status any agent has.
     static let urgencyOrder: [AgentStatus] = [.error, .waiting, .running, .starting, .idle]
-    static let markSize: CGFloat = 7
+    static let iconSize: CGFloat = 12
     static let height: CGFloat = 16
-    private static let gap: CGFloat = 4
+    private static let gap: CGFloat = 3
 
-    let mark = ChromeStatusMark(size: StatusCountBadgeView.markSize)
+    let icon = NSImageView()
     private let countLabel = NSTextField(labelWithString: "")
-    /// The status the badge shows, nil while hidden.
-    private(set) var status: ChromeStatus?
+    /// The pill the badge shows, nil while hidden.
+    private(set) var pill: ShellStatusPill?
     private(set) var badgeWidth: CGFloat = 0
 
     init(identifier: String) {
         super.init(frame: .zero)
         self.identifier = NSUserInterfaceItemIdentifier(identifier)
-        // Laid out by frame; a constraint-less Auto Layout view would be
-        // reset by every window layout pass.
-        mark.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(mark)
+        icon.imageScaling = .scaleNone
+        addSubview(icon)
         addSubview(countLabel)
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in self?.applyTint() }
     }
 
     @available(*, unavailable)
@@ -33,22 +32,31 @@ final class StatusCountBadgeView: NSView {
     }
 
     func configure(agents: [AgentInstance], theme: AppTheme) {
-        let urgent = Self.urgencyOrder.first { status in agents.contains { $0.status == status } }
-        configure(count: agents.count, status: urgent?.chromeStatus ?? .ready, theme: theme)
+        let urgent = Self.urgencyOrder.lazy.compactMap { status in agents.first { $0.status == status } }.first
+        let pill = urgent.flatMap { ShellStatusPill.of(status: $0.status, waitingReason: $0.waitingReason, workingSince: nil) }
+            ?? ShellStatusPill(label: "Ready", symbol: Icon.circleCheck, tone: .muted, since: nil)
+        configure(count: agents.count, pill: pill)
     }
 
     func configure(runningCommands count: Int, theme: AppTheme) {
-        configure(count: count, status: .running, theme: theme)
+        configure(count: count, pill: .running)
     }
 
-    private func configure(count: Int, status: ChromeStatus, theme: AppTheme) {
+    private func configure(count: Int, pill: ShellStatusPill) {
         isHidden = count == 0
-        self.status = count == 0 ? nil : status
-        let color = status.color(in: theme.colors)
-        mark.set(status: status, colors: theme.colors)
-        countLabel.setChromeText("\(count)", font: ChromeFont.badge, color: color)
-        badgeWidth = Self.markSize + Self.gap + ceil(countLabel.intrinsicContentSize.width)
+        self.pill = count == 0 ? nil : pill
+        icon.image = NSImage.symbol(pill.symbol, size: 11, weight: .medium)
+        countLabel.stringValue = "\(count)"
+        countLabel.font = Typography.tabular(Typography.smallSize, weight: .medium)
+        applyTint()
+        badgeWidth = Self.iconSize + Self.gap + ceil(countLabel.intrinsicContentSize.width)
         needsLayout = true
+    }
+
+    private func applyTint() {
+        let color = PaletteCenter.shared.palette.color(for: pill?.tone ?? .muted)
+        icon.contentTintColor = color
+        countLabel.textColor = color
     }
 
     /// "2 agents: 1 working, 1 ready" for tooltips; nil without agents.
@@ -70,15 +78,15 @@ final class StatusCountBadgeView: NSView {
 
     override func layout() {
         super.layout()
-        mark.frame = NSRect(
+        icon.frame = NSRect(
             x: 0,
-            y: floor((bounds.height - Self.markSize) / 2),
-            width: Self.markSize,
-            height: Self.markSize
+            y: floor((bounds.height - Self.iconSize) / 2),
+            width: Self.iconSize,
+            height: Self.iconSize
         )
         let size = countLabel.intrinsicContentSize
         countLabel.frame = NSRect(
-            x: Self.markSize + Self.gap,
+            x: Self.iconSize + Self.gap,
             y: floor((bounds.height - size.height) / 2),
             width: ceil(size.width),
             height: size.height

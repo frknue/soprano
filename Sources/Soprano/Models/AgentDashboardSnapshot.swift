@@ -18,6 +18,8 @@ struct AgentDashboardEntry: Identifiable, Equatable {
     /// The agent's own conversation, which locates the transcript the
     /// dashboard renders as a timeline.
     var conversation: AgentConversation? = nil
+    /// A chat tab: it has no terminal, and replies go to its session.
+    var isChat = false
     /// The branch the agent works on when it is not its repository's default;
     /// the dashboard fills it in from the shared `GitBranchMonitor`.
     var branch: String? = nil

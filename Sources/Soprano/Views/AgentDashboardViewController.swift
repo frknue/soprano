@@ -27,11 +27,11 @@ final class AgentDashboardViewController: NSViewController {
     private let promptSender: PromptSender
     private let branchProvider: BranchProvider
     private let transcriptStore: AgentTranscriptStore
-    private var headerView: SettingsHeaderView!
+    private var headerView: ShellPageHeaderView!
     private var listPanel: NSView!
-    private var listRule: ChromeRuleView!
+    private var listRule: DashRuleView!
     private var keyHintsView: AgentDashboardHintsView!
-    private var keyHintsRule: ChromeRuleView!
+    private var keyHintsRule: DashRuleView!
     private var rowsStack: NSStackView!
     private var detailView: AgentDashboardDetailView!
     private var agentRows: [AgentDashboardRowView] = []
@@ -87,7 +87,6 @@ final class AgentDashboardViewController: NSViewController {
 
     override func loadView() {
         let theme = themeManager.currentTheme
-        let colors = theme.colors
         let root = AgentDashboardRootView()
         root.identifier = NSUserInterfaceItemIdentifier("agent-dashboard")
         root.onEscape = { [weak self] in
@@ -121,9 +120,9 @@ final class AgentDashboardViewController: NSViewController {
             self?.setListFocused(focused)
         }
         root.wantsLayer = true
-        root.layer?.backgroundColor = colors.bgBase.cgColor
+        root.layer?.backgroundColor = PaletteCenter.shared.palette.background.cgColor
 
-        headerView = SettingsHeaderView(title: "Agent Dashboard", theme: theme)
+        headerView = ShellPageHeaderView(title: "Agent Dashboard")
         headerView.onClose = { [weak self] in
             self?.onDismiss?()
         }
@@ -133,6 +132,9 @@ final class AgentDashboardViewController: NSViewController {
         root.addSubview(listPanel)
 
         detailView = AgentDashboardDetailView(theme: theme)
+        detailView.waitingReason = { [weak agentManager] entry in
+            agentManager?.agent(paneId: entry.paneId, tabId: entry.tabId)?.waitingReason
+        }
         detailView.onOpen = { [weak self] target in
             self?.onAgentSelected?(target.paneId, target.tabId)
         }
@@ -158,7 +160,7 @@ final class AgentDashboardViewController: NSViewController {
         root.addSubview(detailView)
 
         let preferredListWidth = listPanel.widthAnchor.constraint(equalToConstant: Self.listWidth)
-        preferredListWidth.priority = Chrome.fillPriority
+        preferredListWidth.priority = dashFillPriority
         NSLayoutConstraint.activate([
             headerView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -201,12 +203,12 @@ final class AgentDashboardViewController: NSViewController {
 
     func apply(theme: AppTheme) {
         guard isViewLoaded else { return }
-        let colors = theme.colors
-        view.layer?.backgroundColor = colors.bgBase.cgColor
+        let palette = PaletteCenter.shared.palette
+        view.layer?.backgroundColor = palette.background.cgColor
         headerView.apply(theme: theme)
-        listPanel.layer?.backgroundColor = colors.bgPanel.cgColor
-        listRule.color = colors.borderSubtle
-        keyHintsRule.color = colors.borderSubtle
+        listPanel.layer?.backgroundColor = palette.sidebar.cgColor
+        listRule.applyPalette(palette)
+        keyHintsRule.applyPalette(palette)
         keyHintsView.apply(theme: theme)
         detailView.apply(theme: theme)
         // Rows, section headings and the empty state take their colors when
@@ -320,7 +322,9 @@ final class AgentDashboardViewController: NSViewController {
     }
 
     private func makeRow(entry: AgentDashboardEntry, theme: AppTheme) -> AgentDashboardRowView {
-        let row = AgentDashboardRowView(entry: entry, theme: theme)
+        let row = AgentDashboardRowView(entry: entry, theme: theme) { [weak agentManager] entry in
+            agentManager?.agent(paneId: entry.paneId, tabId: entry.tabId)?.waitingReason
+        }
         row.isListFocused = isListFocused
         row.onSelect = { [weak self] in
             guard let self else { return }
@@ -336,11 +340,11 @@ final class AgentDashboardViewController: NSViewController {
     /// The sidebar: the sectioned rows on the panel surface over a footer
     /// with the list's key hints, closed by one hairline on its trailing edge.
     private func makeAgentListPanel(theme: AppTheme) -> NSView {
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
         let panel = NSView()
         panel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-list")
         panel.wantsLayer = true
-        panel.layer?.backgroundColor = colors.bgPanel.cgColor
+        panel.layer?.backgroundColor = palette.sidebar.cgColor
         panel.translatesAutoresizingMaskIntoConstraints = false
 
         let scrollView = NSScrollView()
@@ -362,7 +366,7 @@ final class AgentDashboardViewController: NSViewController {
         rowsStack.translatesAutoresizingMaskIntoConstraints = false
         documentView.addSubview(rowsStack)
 
-        keyHintsRule = ChromeRuleView(axis: .horizontal, color: colors.borderSubtle)
+        keyHintsRule = DashRuleView(axis: .horizontal)
         panel.addSubview(keyHintsRule)
 
         keyHintsView = AgentDashboardHintsView(
@@ -373,7 +377,7 @@ final class AgentDashboardViewController: NSViewController {
         keyHintsView.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-key-hints")
         panel.addSubview(keyHintsView)
 
-        listRule = ChromeRuleView(axis: .vertical, color: colors.borderSubtle)
+        listRule = DashRuleView(axis: .vertical)
         panel.addSubview(listRule)
 
         NSLayoutConstraint.activate([
@@ -399,8 +403,8 @@ final class AgentDashboardViewController: NSViewController {
             keyHintsRule.trailingAnchor.constraint(equalTo: listRule.leadingAnchor),
             keyHintsRule.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -Self.footerHeight),
 
-            keyHintsView.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: Chrome.pillInset + 14),
-            keyHintsView.trailingAnchor.constraint(lessThanOrEqualTo: listRule.leadingAnchor, constant: -Chrome.Space.s12),
+            keyHintsView.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: ShellSidebarMetrics.contentLeft),
+            keyHintsView.trailingAnchor.constraint(lessThanOrEqualTo: listRule.leadingAnchor, constant: -12),
             keyHintsView.centerYAnchor.constraint(equalTo: panel.bottomAnchor, constant: -Self.footerHeight / 2),
 
             listRule.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
@@ -535,7 +539,11 @@ final class AgentDashboardViewController: NSViewController {
         let title = NSTextField(wrappingLabelWithString: titleText)
         title.alignment = .center
         title.lineBreakMode = .byWordWrapping
-        title.setChromeText(titleText, font: ChromeFont.empty, color: theme.colors.textMuted)
+        title.attributedStringValue = NSAttributedString(string: titleText, attributes: [
+            .font: Typography.ui(Typography.bodySize, weight: .medium),
+            .foregroundColor: PaletteCenter.shared.palette.mutedForeground,
+        ])
+        title.alignment = .center
         title.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(title)
 
@@ -543,11 +551,15 @@ final class AgentDashboardViewController: NSViewController {
         let detail = NSTextField(wrappingLabelWithString: detailText)
         detail.alignment = .center
         detail.lineBreakMode = .byWordWrapping
-        detail.setChromeText(detailText, font: ChromeFont.meta, color: theme.colors.textMuted)
+        detail.attributedStringValue = NSAttributedString(string: detailText, attributes: [
+            .font: Typography.ui(Typography.smallSize),
+            .foregroundColor: PaletteCenter.shared.palette.mutedForeground.shellScaled(by: 0.7),
+        ])
+        detail.alignment = .center
         detail.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(detail)
 
-        let inset = Chrome.Space.s16
+        let inset: CGFloat = 16
         NSLayoutConstraint.activate([
             title.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             title.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: inset),
@@ -566,6 +578,82 @@ private enum AgentDashboardScroll: Equatable {
     case pages(Int)
 }
 
+/// Just below `.windowSizeStayPut`: the dashboard's preferred widths give way
+/// before the window would resize for them.
+private let dashFillPriority = NSLayoutConstraint.Priority(
+    rawValue: NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 1
+)
+
+/// A one-point `border` hairline (the sidebar's trailing edge, the footer's top).
+private final class DashRuleView: PaletteView {
+    private let axis: NSLayoutConstraint.Orientation
+
+    init(axis: NSLayoutConstraint.Orientation) {
+        self.axis = axis
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.required, for: axis == .horizontal ? .vertical : .horizontal)
+        applyPalette(palette)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        axis == .horizontal
+            ? NSSize(width: NSView.noIntrinsicMetric, height: 1)
+            : NSSize(width: 1, height: NSView.noIntrinsicMetric)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = palette.border.cgColor
+    }
+}
+
+/// The live terminal's read-only text. It hands plain keys back to the
+/// dashboard, so clicking into the text to copy something never captures J/K.
+private final class DashTerminalTextView: NSTextView {
+    var keyHandler: ((NSEvent) -> Bool)?
+
+    /// A read-only text view in a borderless scroll view.
+    static func makeScrollView(identifier: String, inset: NSSize) -> (NSScrollView, DashTerminalTextView) {
+        let scrollView = NSScrollView()
+        scrollView.identifier = NSUserInterfaceItemIdentifier(identifier)
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.hasHorizontalScroller = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let textView = DashTerminalTextView(usingTextLayoutManager: false)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = true
+        textView.importsGraphics = false
+        textView.font = Typography.mono()
+        textView.textContainerInset = inset
+        scrollView.documentView = textView
+        return (scrollView, textView)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if keyHandler?(event) == true { return }
+        super.keyDown(with: event)
+    }
+}
+
 /// How long an agent has been running: `38s`, `4m 12s`, `2h 7m`.
 private func agentDashboardElapsedText(status: AgentStatus, startedAt: Date?, now: Date) -> String {
     guard let startedAt else { return "" }
@@ -582,9 +670,26 @@ private func agentDashboardElapsedText(status: AgentStatus, startedAt: Date?, no
     return "\(interval / 3_600)h \((interval % 3_600) / 60)m"
 }
 
+/// The Agent Dashboard's read-only source for the chat timeline: the selected agent's
+/// transcript as turns (`ChatThread(transcript:isRunning:)`). The dashboard answers no
+/// approvals and queues no messages through it.
+@MainActor
+final class DashTranscriptSource: ChatTimelineSource {
+    var thread = ChatThread()
+    /// What the timeline says before the transcript has a turn.
+    var emptyText = ""
+
+    func emptyTimelineText(agentName: String) -> String { emptyText }
+    var canSendQueuedNow: Bool { false }
+    func choosePermissionOption(_ optionId: String) {}
+    func sendQueuedPromptNow(id: String) {}
+    func removeQueuedPrompt(id: String) {}
+}
+
 /// The selected agent: its title and context over a toolbar (Timeline or
-/// Terminal, details, Open / Stop / Restart), then its conversation in a
-/// readable column — or its live terminal in a card — and at the bottom a
+/// Terminal, details, Open / Stop / Restart), then its conversation in Soprano
+/// Agents' chat timeline (user bubbles, Worked-for folds, the work log, diffs,
+/// Markdown) — or its live terminal in a code card — and at the bottom a
 /// composer with what the agent is doing right now over the reply field.
 private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     var onOpen: ((TerminalTarget) -> Void)?
@@ -600,15 +705,15 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     /// so a click into the text to copy something never captures J/K.
     var keyHandler: ((NSEvent) -> Bool)? {
         didSet {
-            timelineTextView.keyHandler = keyHandler
+            timelineView.keyHandler = keyHandler
             terminalTextView.keyHandler = keyHandler
         }
     }
 
-    private static let gutter = Chrome.Space.page
-    /// The conversation and the composer keep to this width, centered.
-    private static let readableWidth: CGFloat = 760
-    private static let replyFieldHeight: CGFloat = 32
+    private static let gutter: CGFloat = 24
+    /// The composer keeps to the timeline's chat lane, centered.
+    private static let readableWidth = Metrics.chatMaxWidth
+    private static let replyFieldHeight: CGFloat = 48
 
     private var theme: AppTheme
     private var entry: AgentDashboardEntry?
@@ -617,57 +722,51 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     private var hasTranscript = false
     /// Set with T; applies to every agent until switched back.
     private var prefersTerminal = false
+    /// The detailed work log (O); the minimal one by default.
     private var isDetailed = false
-    /// Whether the timeline sticks to its newest entry as entries arrive.
-    private var isFollowing = true
-    private var turnStarts: [Int] = []
-    private let timelineRenderer: AgentTimelineRenderer
+    private let transcriptSource: DashTranscriptSource
+    private let timelineView: ChatTimelineView
 
-    private let statusMark = ChromeStatusMark()
+    /// The status pill's symbol before the title (Agents' header pill).
+    private let statusMark = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "No agent selected")
     private let statusLabel = NSTextField(labelWithString: "")
     private let timerLabel = NSTextField(labelWithString: "")
     private let locationLabel = NSTextField(labelWithString: "")
-    private let modeControl: ChromeSegmentedControl
-    private let detailsButton: ChromeButton
-    private let openButton: ChromeButton
-    private let stopButton: ChromeButton
-    private let restartButton: ChromeButton
+    private let modeControl = ShellSegmentedControl(titles: ["Timeline", "Terminal"])
+    private let detailsButton = ShellTextButton(title: "Show details", keycap: "O", variant: .ghost)
+    private let openButton = ShellTextButton(title: "Open", keycap: "↵")
+    private let stopButton = ShellTextButton(title: "Stop")
+    private let restartButton = ShellTextButton(title: "Restart")
     private let toolbar = NSStackView()
-    private let contentRule: ChromeRuleView
+    private let contentRule = NSView()
     private var terminalCard: NSView!
     private var terminalScrollView: NSScrollView!
-    private var terminalTextView: AgentDashboardTextView!
-    private var timelineScrollView: NSScrollView!
-    private var timelineTextView: AgentDashboardTextView!
-    private let jumpButton: ChromeButton
-    private let composerRule: ChromeRuleView
-    private let activityMark = ChromeStatusMark()
+    private var terminalTextView: DashTerminalTextView!
+    private let activityMark = NSImageView()
     private let activityLabel = NSTextField(labelWithString: "")
-    private let replyFieldView: ChromeFieldView
+    /// Agents' composer card around the reply field and the send button.
+    private let replyFieldView = ShellComposerSurface()
     private let replyField = AgentDashboardReplyField()
-    private let sendButton: ChromeButton
+    /// The chat composer's round send button: the primary disc while there is
+    /// something to send, the faint disabled disc otherwise.
+    private let sendButton = ComposerPrimaryButton()
     private let replyHintLabel = NSTextField(labelWithString: "")
 
     /// Whether the selected agent shows its live terminal instead of its
     /// timeline: agents without a readable transcript, or after T.
     var isShowingTerminal: Bool { !showsTimeline }
 
-    private var showsTimeline: Bool { hasTranscript && !prefersTerminal }
+    /// A chat has no terminal to show, so it always shows its conversation.
+    private var showsTimeline: Bool { entry?.isChat == true || (hasTranscript && !prefersTerminal) }
 
     init(theme: AppTheme) {
         self.theme = theme
-        timelineRenderer = AgentTimelineRenderer(colors: theme.colors)
-        modeControl = ChromeSegmentedControl(titles: ["Timeline", "Terminal"], theme: theme)
-        detailsButton = ChromeButton(title: "Show details", theme: theme, keycap: "O")
-        openButton = ChromeButton(title: "Open", theme: theme, keycap: "↵")
-        stopButton = ChromeButton(title: "Stop", theme: theme)
-        restartButton = ChromeButton(title: "Restart", theme: theme)
-        jumpButton = ChromeButton(title: "Jump to latest", theme: theme, keycap: "G")
-        sendButton = ChromeButton(title: "Send", theme: theme, kind: .ink)
-        contentRule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        composerRule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        replyFieldView = ChromeFieldView(theme: theme)
+        let source = DashTranscriptSource()
+        let timelineView = ChatTimelineView(source: source, agentName: "", identifier: "agent-dashboard-timeline")
+        timelineView.isDetailed = false
+        transcriptSource = source
+        self.timelineView = timelineView
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail")
         translatesAutoresizingMaskIntoConstraints = false
@@ -684,44 +783,22 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
     func apply(theme: AppTheme) {
         self.theme = theme
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
         refreshEntryLabels()
-        contentRule.color = colors.borderSubtle
-        composerRule.color = colors.borderSubtle
-        modeControl.apply(theme: theme)
-        replyFieldView.apply(theme: theme)
-        timelineScrollView.backgroundColor = colors.bgBase
-        timelineTextView.backgroundColor = colors.bgBase
-        // The live terminal sits in a card on the panel surface, so it reads
-        // as a terminal shown inside the page rather than as the page.
-        terminalCard.layer?.backgroundColor = colors.bgPanel.cgColor
-        terminalCard.layer?.borderColor = colors.borderSubtle.cgColor
-        terminalScrollView.backgroundColor = colors.bgPanel
-        terminalTextView.backgroundColor = colors.bgPanel
-        for textView in [terminalTextView!, timelineTextView!] {
-            textView.insertionPointColor = colors.caret
-            textView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
-        }
-        // NSTextView draws links with these instead of the renderer's own.
-        timelineTextView.linkTextAttributes = [
-            .foregroundColor: colors.blue,
-            .underlineStyle: NSUnderlineStyle.single.rawValue,
-            .cursor: NSCursor.pointingHand,
+        contentRule.layer?.backgroundColor = palette.border.cgColor
+        layer?.backgroundColor = palette.background.cgColor
+        // The live terminal sits in an Agents code card (SF Mono 13 on the
+        // code background, radius 8), a terminal shown inside the page.
+        terminalCard.layer?.backgroundColor = palette.codeBackground.cgColor
+        terminalCard.layer?.borderColor = palette.border.cgColor
+        terminalScrollView.backgroundColor = palette.codeBackground
+        terminalTextView.backgroundColor = palette.codeBackground
+        terminalTextView.insertionPointColor = palette.foreground
+        terminalTextView.selectedTextAttributes = [
+            .backgroundColor: palette.primary.withAlphaComponent(palette.isDark ? 0.45 : 0.22),
         ]
-        ChromeFieldView.styleEmbedded(replyField, colors: colors, font: ChromeFont.row)
-        ChromeFieldView.styleEditor(of: replyField, colors: colors)
+        styleReplyField()
         setReplyPlaceholder(replyField.placeholderAttributedString?.string)
-        [detailsButton, openButton, stopButton, restartButton, jumpButton, sendButton].forEach {
-            $0.apply(theme: theme)
-        }
-        // The jump button floats over the conversation with e2 elevation; its
-        // drawn pill casts the shadow, so no layer ring.
-        let shadow = colors.shadowE2
-        jumpButton.layer?.shadowColor = shadow.color.cgColor
-        jumpButton.layer?.shadowOpacity = shadow.opacity
-        jumpButton.layer?.shadowRadius = shadow.blur / 2
-        jumpButton.layer?.shadowOffset = CGSize(width: 0, height: -shadow.offsetY)
-        timelineRenderer.apply(colors: colors)
         updateTerminalText()
         renderTimeline()
         updateActivity()
@@ -748,10 +825,9 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         let timelineChanged = selectionChanged
             || timeline != self.timeline
             || entry?.status != self.entry?.status
-        let modeChanged = hasTranscript != self.hasTranscript
+        let modeChanged = hasTranscript != self.hasTranscript || entry?.isChat != self.entry?.isChat
         if selectionChanged {
             replyField.stringValue = ""
-            isFollowing = true
         }
         self.entry = entry
         self.terminal = terminal
@@ -761,7 +837,8 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         if modeChanged {
             applyMode()
         } else if showsTimeline {
-            if timelineChanged { renderTimeline() }
+            // A newly selected agent's conversation opens at its newest entry.
+            if timelineChanged { renderTimeline(scrollToEnd: selectionChanged) }
         } else if terminalTextChanged {
             updateTerminalText()
         }
@@ -828,8 +905,14 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     // MARK: - Keyboard
 
     func scrollText(_ amount: AgentDashboardScroll) {
-        let scrollView: NSScrollView = showsTimeline ? timelineScrollView : terminalScrollView
-        let clip = scrollView.contentView
+        if showsTimeline {
+            switch amount {
+            case .lines(let count): timelineView.scroll(by: CGFloat(count) * 48)
+            case .pages(let count): timelineView.scroll(by: CGFloat(count) * timelineView.pageHeight)
+            }
+            return
+        }
+        let clip = terminalScrollView.contentView
         let delta: CGFloat
         switch amount {
         case .lines(let count):
@@ -837,47 +920,29 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         case .pages(let count):
             delta = CGFloat(count) * max(clip.bounds.height - 40, 48)
         }
-        scroll(scrollView, toY: clip.bounds.minY + delta)
+        let documentHeight = terminalScrollView.documentView?.frame.height ?? 0
+        let maximum = max(0, documentHeight - clip.bounds.height)
+        clip.scroll(to: NSPoint(x: 0, y: min(max(0, clip.bounds.minY + delta), maximum)))
+        terminalScrollView.reflectScrolledClipView(clip)
     }
 
     /// Scrolls the next (`direction` > 0) or previous prompt to the top.
     func jumpToTurn(_ direction: Int) {
-        guard showsTimeline, !turnStarts.isEmpty,
-              let layoutManager = timelineTextView.layoutManager,
-              let container = timelineTextView.textContainer
-        else { return }
-        layoutManager.ensureLayout(for: container)
-        let length = timelineTextView.textStorage?.length ?? 0
-        let originY = timelineTextView.textContainerOrigin.y
-        let tops = turnStarts.filter { $0 < length }.map { start in
-            layoutManager.lineFragmentRect(
-                forGlyphAt: layoutManager.glyphIndexForCharacter(at: start),
-                effectiveRange: nil
-            ).minY + originY
-        }
-        let current = timelineScrollView.contentView.bounds.minY
-        let target = direction > 0
-            ? tops.first { $0 > current + 8 }
-            : tops.last { $0 < current - 8 }
-        if let target {
-            scroll(timelineScrollView, toY: target - 8)
-        } else if direction > 0 {
-            followLatest()
-        } else {
-            scroll(timelineScrollView, toY: 0)
-        }
+        guard showsTimeline else { return }
+        timelineView.jumpToMessage(direction)
     }
 
+    /// O: the detailed work log (thinking, every step, open diffs) or the minimal one.
     func toggleDetails() {
         guard showsTimeline else { return }
         isDetailed.toggle()
         detailsButton.title = isDetailed ? "Hide details" : "Show details"
-        renderTimeline()
+        timelineView.isDetailed = isDetailed
     }
 
     func followLatest() {
         if showsTimeline {
-            scrollTimelineToEnd()
+            timelineView.jumpToLatest()
         } else {
             let length = terminalTextView.textStorage?.length ?? 0
             terminalTextView.scrollRangeToVisible(NSRange(location: length, length: 0))
@@ -889,7 +954,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     }
 
     private func setPrefersTerminal(_ prefers: Bool) {
-        guard hasTranscript, prefers != prefersTerminal else { return }
+        guard hasTranscript, entry?.isChat != true, prefers != prefersTerminal else { return }
         prefersTerminal = prefers
         applyMode()
         if prefersTerminal {
@@ -900,6 +965,9 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     // MARK: - Layout
 
     private func build() {
+        wantsLayer = true
+        statusMark.imageScaling = .scaleNone
+        statusMark.translatesAutoresizingMaskIntoConstraints = false
         addSubview(statusMark)
 
         titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-detail-title")
@@ -943,7 +1011,7 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         toolbar.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-toolbar")
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
-        toolbar.spacing = Chrome.Space.s8
+        toolbar.spacing = 6
         toolbar.setClippingResistancePriority(.defaultLow, for: .horizontal)
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.addView(modeControl, in: .leading)
@@ -956,44 +1024,27 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         toolbar.setVisibilityPriority(NSStackView.VisibilityPriority(rawValue: 895), for: openButton)
         addSubview(toolbar)
 
+        contentRule.wantsLayer = true
+        contentRule.translatesAutoresizingMaskIntoConstraints = false
         addSubview(contentRule)
 
-        (timelineScrollView, timelineTextView) = Self.makeTextScrollView(
-            identifier: "agent-dashboard-timeline",
-            inset: NSSize(width: Self.gutter, height: 20)
-        )
-        timelineTextView.minimumInset = Self.gutter
-        timelineTextView.readableWidth = Self.readableWidth
-        addSubview(timelineScrollView)
-        timelineScrollView.contentView.postsBoundsChangedNotifications = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(timelineDidScroll(_:)),
-            name: NSView.boundsDidChangeNotification,
-            object: timelineScrollView.contentView
-        )
+        timelineView.translatesAutoresizingMaskIntoConstraints = false
+        timelineView.bottomInset = 8
+        addSubview(timelineView)
 
         terminalCard = NSView()
         terminalCard.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-terminal-card")
         terminalCard.wantsLayer = true
-        terminalCard.layer?.cornerRadius = Chrome.Radius.card
-        terminalCard.layer?.borderWidth = Chrome.hairline
+        terminalCard.layer?.cornerRadius = Radius.lg
+        terminalCard.layer?.borderWidth = 1
         terminalCard.layer?.masksToBounds = true
         terminalCard.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalCard)
-        (terminalScrollView, terminalTextView) = Self.makeTextScrollView(
+        (terminalScrollView, terminalTextView) = DashTerminalTextView.makeScrollView(
             identifier: "agent-dashboard-terminal",
-            inset: NSSize(width: 16, height: 14)
+            inset: NSSize(width: 14, height: 12)
         )
         terminalCard.addSubview(terminalScrollView)
-
-        configureButton(jumpButton, identifier: "agent-dashboard-jump", action: #selector(jumpClicked))
-        jumpButton.toolTip = "Scroll to the newest entry and keep following it (G)"
-        jumpButton.wantsLayer = true
-        jumpButton.layer?.masksToBounds = false
-        addSubview(jumpButton)
-
-        addSubview(composerRule)
 
         activityLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-activity-line")
         activityLabel.lineBreakMode = .byTruncatingTail
@@ -1015,32 +1066,37 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         replyField.onFocus = { [weak self] in
             guard let self else { return }
             self.replyFieldView.isFocused = true
-            ChromeFieldView.styleEditor(of: self.replyField, colors: self.theme.colors)
+            self.styleReplyField()
         }
         replyField.translatesAutoresizingMaskIntoConstraints = false
         replyFieldView.addSubview(replyField)
 
-        configureButton(sendButton, identifier: "agent-dashboard-send", action: #selector(sendClicked))
-        addSubview(sendButton)
+        sendButton.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-send")
+        sendButton.onClick = { [weak self] in self?.sendClicked() }
+        sendButton.translatesAutoresizingMaskIntoConstraints = false
+        replyFieldView.addSubview(sendButton)
+        activityMark.imageScaling = .scaleNone
+        activityMark.translatesAutoresizingMaskIntoConstraints = false
 
         replyHintLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-reply-hint")
-        replyHintLabel.font = ChromeFont.meta
+        replyHintLabel.font = Typography.ui(Typography.smallSize)
         replyHintLabel.lineBreakMode = .byTruncatingTail
         replyHintLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(replyHintLabel)
 
-        // The composer keeps to the conversation's column: the readable width,
-        // or the gutters on a narrow window.
+        // The composer keeps to the timeline's chat lane: the lane width, or
+        // the gutters on a narrow window.
         let column = NSLayoutGuide()
         addLayoutGuide(column)
         let preferredColumnWidth = column.widthAnchor.constraint(equalToConstant: Self.readableWidth)
         // Just below the sidebar's preferred width, so a window too narrow for
         // both shrinks the column rather than the sidebar.
-        preferredColumnWidth.priority = NSLayoutConstraint.Priority(rawValue: Chrome.fillPriority.rawValue - 1)
+        preferredColumnWidth.priority = NSLayoutConstraint.Priority(rawValue: dashFillPriority.rawValue - 1)
 
         let gutter = Self.gutter
         NSLayoutConstraint.activate([
             statusMark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: gutter),
+            statusMark.widthAnchor.constraint(equalToConstant: 16),
             statusMark.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
 
             titleLabel.leadingAnchor.constraint(equalTo: statusMark.trailingAnchor, constant: 10),
@@ -1052,40 +1108,36 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             timerLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             timerLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -gutter),
 
-            locationLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: gutter + 18),
+            locationLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             locationLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
             locationLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -gutter),
 
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: gutter),
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -gutter),
             toolbar.topAnchor.constraint(equalTo: locationLabel.bottomAnchor, constant: 14),
-            toolbar.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
+            toolbar.heightAnchor.constraint(equalToConstant: ShellTextButton.height),
 
             contentRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             contentRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             contentRule.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 12),
+            contentRule.heightAnchor.constraint(equalToConstant: 1),
 
-            timelineScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            timelineScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            timelineScrollView.topAnchor.constraint(equalTo: contentRule.bottomAnchor),
-            timelineScrollView.bottomAnchor.constraint(equalTo: composerRule.topAnchor),
+            // The timeline centers its own chat lane across the full width.
+            timelineView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            timelineView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            timelineView.topAnchor.constraint(equalTo: contentRule.bottomAnchor),
+            timelineView.bottomAnchor.constraint(equalTo: activityLabel.topAnchor, constant: -12),
 
             // The terminal keeps the full width: its lines are as wide as the
             // agent's pane and wrap badly in the reading column.
             terminalCard.leadingAnchor.constraint(equalTo: leadingAnchor, constant: gutter),
             terminalCard.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -gutter),
-            terminalCard.topAnchor.constraint(equalTo: contentRule.bottomAnchor, constant: Chrome.Space.s16),
-            terminalCard.bottomAnchor.constraint(equalTo: composerRule.topAnchor, constant: -Chrome.Space.s16),
-            terminalScrollView.leadingAnchor.constraint(equalTo: terminalCard.leadingAnchor, constant: Chrome.hairline),
-            terminalScrollView.trailingAnchor.constraint(equalTo: terminalCard.trailingAnchor, constant: -Chrome.hairline),
-            terminalScrollView.topAnchor.constraint(equalTo: terminalCard.topAnchor, constant: Chrome.hairline),
-            terminalScrollView.bottomAnchor.constraint(equalTo: terminalCard.bottomAnchor, constant: -Chrome.hairline),
-
-            jumpButton.centerXAnchor.constraint(equalTo: timelineScrollView.centerXAnchor),
-            jumpButton.bottomAnchor.constraint(equalTo: composerRule.topAnchor, constant: -Chrome.Space.s12),
-
-            composerRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            composerRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalCard.topAnchor.constraint(equalTo: contentRule.bottomAnchor, constant: 16),
+            terminalCard.bottomAnchor.constraint(equalTo: activityLabel.topAnchor, constant: -16),
+            terminalScrollView.leadingAnchor.constraint(equalTo: terminalCard.leadingAnchor, constant: 1),
+            terminalScrollView.trailingAnchor.constraint(equalTo: terminalCard.trailingAnchor, constant: -1),
+            terminalScrollView.topAnchor.constraint(equalTo: terminalCard.topAnchor, constant: 1),
+            terminalScrollView.bottomAnchor.constraint(equalTo: terminalCard.bottomAnchor, constant: -1),
 
             column.centerXAnchor.constraint(equalTo: centerXAnchor),
             column.widthAnchor.constraint(lessThanOrEqualToConstant: Self.readableWidth),
@@ -1094,75 +1146,34 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
 
             activityMark.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 2),
             activityMark.centerYAnchor.constraint(equalTo: activityLabel.centerYAnchor),
+            activityMark.widthAnchor.constraint(equalToConstant: 16),
+            activityMark.heightAnchor.constraint(equalToConstant: 16),
+            statusMark.heightAnchor.constraint(equalToConstant: 16),
             activityLabel.leadingAnchor.constraint(equalTo: activityMark.trailingAnchor, constant: 8),
             activityLabel.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
-            activityLabel.topAnchor.constraint(equalTo: composerRule.bottomAnchor, constant: Chrome.Space.s12),
 
             replyFieldView.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            replyFieldView.topAnchor.constraint(equalTo: activityLabel.bottomAnchor, constant: Chrome.Space.s8),
+            replyFieldView.topAnchor.constraint(equalTo: activityLabel.bottomAnchor, constant: 8),
             replyFieldView.heightAnchor.constraint(equalToConstant: Self.replyFieldHeight),
-            replyFieldView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -Chrome.Space.s8),
+            replyFieldView.trailingAnchor.constraint(equalTo: column.trailingAnchor),
 
-            replyField.leadingAnchor.constraint(equalTo: replyFieldView.leadingAnchor, constant: 10),
-            replyField.trailingAnchor.constraint(equalTo: replyFieldView.trailingAnchor, constant: -10),
+            replyField.leadingAnchor.constraint(equalTo: replyFieldView.leadingAnchor, constant: 16),
+            replyField.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -10),
             replyField.centerYAnchor.constraint(equalTo: replyFieldView.centerYAnchor),
 
-            sendButton.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            // Agents' round send button inside the composer card.
+            sendButton.trailingAnchor.constraint(equalTo: replyFieldView.trailingAnchor, constant: -10),
             sendButton.centerYAnchor.constraint(equalTo: replyFieldView.centerYAnchor),
-            sendButton.heightAnchor.constraint(equalToConstant: Self.replyFieldHeight),
-            sendButton.widthAnchor.constraint(
-                equalToConstant: sendButton.intrinsicContentSize.width + 2 * (Chrome.Space.s16 - ChromeButton.horizontalPadding)
-            ),
 
             replyHintLabel.leadingAnchor.constraint(equalTo: replyFieldView.leadingAnchor, constant: 2),
             replyHintLabel.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
             replyHintLabel.topAnchor.constraint(equalTo: replyFieldView.bottomAnchor, constant: 6),
-            replyHintLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Chrome.Space.s12),
+            replyHintLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
         ])
     }
 
-    /// A read-only text view in a borderless scroll view. TextKit 1, because
-    /// the timeline draws its cards, diffs and code with `NSTextBlock`.
-    private static func makeTextScrollView(
-        identifier: String,
-        inset: NSSize
-    ) -> (NSScrollView, AgentDashboardTextView) {
-        let scrollView = NSScrollView()
-        scrollView.identifier = NSUserInterfaceItemIdentifier(identifier)
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = true
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-
-        let textView = AgentDashboardTextView(usingTextLayoutManager: false)
-        textView.minSize = .zero
-        textView.maxSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.textContainer?.containerSize = NSSize(
-            width: 0,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isRichText = true
-        textView.importsGraphics = false
-        textView.font = ChromeFont.mono
-        textView.textContainerInset = inset
-        scrollView.documentView = textView
-        return (scrollView, textView)
-    }
-
     private func configureButton(
-        _ button: ChromeButton,
+        _ button: NSButton,
         identifier: String,
         action: Selector
     ) {
@@ -1176,107 +1187,67 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     /// Shows the timeline or the live terminal and sets the toolbar to match.
     private func applyMode() {
         let timelineVisible = showsTimeline
-        timelineScrollView.isHidden = !timelineVisible
+        timelineView.isHidden = !timelineVisible
         terminalCard.isHidden = timelineVisible
         modeControl.select(timelineVisible ? 0 : 1)
         if timelineVisible {
-            renderTimeline()
+            renderTimeline(scrollToEnd: true)
         } else {
             updateTerminalText()
         }
-        updateJumpButton()
         updateActivity()
         updateControls()
     }
 
-    private func renderTimeline() {
-        guard timelineTextView != nil, showsTimeline else { return }
-        let follows = isFollowing
-        if let timeline {
-            let output = timelineRenderer.render(
-                timeline,
-                detailed: isDetailed,
-                isAgentActive: isAgentActive,
-                agentName: entry?.profileName
-            )
-            timelineTextView.textStorage?.setAttributedString(output.text)
-            turnStarts = output.turnStarts
-        } else {
-            timelineTextView.textStorage?.setAttributedString(NSAttributedString(
-                string: "Waiting for the agent's first message…",
-                attributes: [
-                    .font: ChromeFont.row,
-                    .foregroundColor: theme.colors.textMuted,
-                ]
-            ))
-            turnStarts = []
-        }
-        if follows {
-            scrollTimelineToEnd()
-        }
-        updateJumpButton()
+    /// Hands the transcript to the chat timeline as turns; the last one runs
+    /// while the agent works. The timeline keeps following its newest row
+    /// unless the person scrolled away (`scrollToEnd` forces it).
+    private func renderTimeline(scrollToEnd: Bool = false) {
+        guard showsTimeline else { return }
+        transcriptSource.thread = timeline.map { ChatThread(transcript: $0, isRunning: isAgentWorking) } ?? ChatThread()
+        transcriptSource.emptyText = entry == nil
+            ? "Choose an agent to follow its work."
+            : "Waiting for the agent's first message…"
+        timelineView.reload(scrollToEnd: scrollToEnd)
     }
 
-    private var isAgentActive: Bool {
+    /// Whether the newest turn is still going ("Working for", Thinking). An
+    /// agent that waits on the person shows its turn finished, its question or
+    /// last message as the answer.
+    private var isAgentWorking: Bool {
         switch entry?.status {
-        case .running?, .starting?, .waiting?: true
+        case .running?, .starting?: true
         default: false
         }
     }
 
-    private func scrollTimelineToEnd() {
-        let length = timelineTextView.textStorage?.length ?? 0
-        timelineTextView.scrollRangeToVisible(NSRange(location: length, length: 0))
-        isFollowing = true
-        updateJumpButton()
-    }
-
-    @objc private func timelineDidScroll(_ notification: Notification) {
-        let clip = timelineScrollView.contentView
-        let documentHeight = timelineScrollView.documentView?.frame.height ?? 0
-        let following = clip.bounds.maxY >= documentHeight - 24
-        guard following != isFollowing else { return }
-        isFollowing = following
-        updateJumpButton()
-    }
-
-    /// Offers the way back to the newest entry once the timeline was
-    /// scrolled away from it.
-    private func updateJumpButton() {
-        jumpButton.isHidden = !showsTimeline || isFollowing || entry == nil
-    }
-
-    private func scroll(_ scrollView: NSScrollView, toY y: CGFloat) {
-        let clip = scrollView.contentView
-        let documentHeight = scrollView.documentView?.frame.height ?? 0
-        let maximum = max(0, documentHeight - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: 0, y: min(max(0, y), maximum)))
-        scrollView.reflectScrolledClipView(clip)
-    }
-
-    /// The composer's activity line: the agent's status mark, then what it is
+    /// The composer's activity line: the agent's pill symbol, then what it is
     /// doing according to its transcript (`▶ Bash · swift test · 38s`), or its
     /// state in words when it writes none.
     private func updateActivity(now: Date = Date()) {
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
         guard let entry else {
             activityMark.isHidden = true
             activityLabel.stringValue = ""
             return
         }
+        let pill = self.pill(for: entry)
         activityMark.isHidden = false
-        activityMark.set(status: entry.status.chromeStatus, colors: colors)
+        activityMark.image = NSImage.symbol(pill.symbol, size: 12)
+        activityMark.contentTintColor = palette.color(for: pill.tone)
         let activity = AgentTimelineActivity.current(in: timeline, status: entry.status, now: now)
-        let color = activity?.tone == .failed ? colors.danger : colors.textMuted
+        let color = activity?.tone == .failed ? palette.errorForeground : palette.mutedForeground
         let line = activity.map {
             $0.attributed(
-                font: ChromeFont.label,
-                titleFont: ChromeFont.labelStrong,
-                codeFont: ChromeFont.mono,
+                font: Typography.ui(Typography.rowSize),
+                titleFont: Typography.ui(Typography.rowSize, weight: .medium),
+                codeFont: Typography.mono(Typography.smallSize),
                 color: color,
-                codeColor: activity?.tone == .failed ? colors.danger : colors.textPrimary
+                codeColor: activity?.tone == .failed ? palette.errorForeground : palette.foreground
             )
-        } ?? ChromeText.attributed(fallbackActivity, font: ChromeFont.label, color: color, lineBreakMode: .byTruncatingTail)
+        } ?? NSAttributedString(string: fallbackActivity, attributes: [
+            .font: Typography.ui(Typography.rowSize), .foregroundColor: color,
+        ])
         guard activityLabel.attributedStringValue != line else { return }
         activityLabel.attributedStringValue = line
     }
@@ -1293,39 +1264,52 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Title row (mark, New York title, status, timer) and the location line:
-    /// the agent's task as the sidebar names it, over `window ▸ omp · folder`.
+    /// Why the selected agent waits; the entry does not carry it.
+    var waitingReason: (AgentDashboardEntry) -> AgentWaitingReason? = { _ in nil }
+
+    /// The Agents status pill for an entry; an idle agent reads Ready.
+    private func pill(for entry: AgentDashboardEntry) -> ShellStatusPill {
+        ShellStatusPill.of(status: entry.status, waitingReason: waitingReason(entry), workingSince: nil)
+            ?? ShellStatusPill(label: "Ready", symbol: Icon.circleCheck, tone: .muted, since: nil)
+    }
+
+    /// Agents' chat header: the agent's task (14 pt semibold), its status
+    /// pill and timer, over the location line `window / omp · folder`.
     private func refreshEntryLabels() {
-        let colors = theme.colors
-        titleLabel.setChromeText(
-            entry?.title ?? "No agent selected",
-            font: ChromeFont.headline,
-            color: entry == nil ? colors.textMuted : colors.textPrimary
-        )
+        let palette = PaletteCenter.shared.palette
+        titleLabel.attributedStringValue = NSAttributedString(string: entry?.title ?? "No agent selected", attributes: [
+            .font: Typography.ui(Typography.bodySize, weight: .semibold),
+            .foregroundColor: entry == nil ? palette.mutedForeground : palette.foreground,
+        ])
+        let meta = Typography.ui(Typography.smallSize)
         guard let entry else {
             statusMark.isHidden = true
-            statusLabel.setStatusText("", color: colors.textMuted)
+            statusLabel.stringValue = ""
             timerLabel.stringValue = ""
             titleLabel.toolTip = nil
-            locationLabel.setChromeText("Choose an agent to follow its work.", font: ChromeFont.meta, color: colors.textMuted)
+            locationLabel.attributedStringValue = NSAttributedString(string: "Choose an agent to follow its work.", attributes: [
+                .font: meta, .foregroundColor: palette.mutedForeground,
+            ])
             locationLabel.toolTip = nil
             setReplyPlaceholder(nil)
             return
         }
 
-        let status = entry.status.chromeStatus
+        let pill = pill(for: entry)
+        let tint = palette.color(for: pill.tone)
         statusMark.isHidden = false
-        statusMark.set(status: status, colors: colors)
-        statusLabel.setStatusText(status.label, color: status.color(in: colors))
+        statusMark.image = NSImage.symbol(pill.symbol, size: 12.5)
+        statusMark.contentTintColor = tint
+        statusLabel.attributedStringValue = NSAttributedString(string: pill.label, attributes: [
+            .font: Typography.ui(Typography.smallSize, weight: .medium), .foregroundColor: tint,
+        ])
         updateTimer()
         titleLabel.toolTip = entry.title
 
-        let location = NSMutableAttributedString(attributedString: ChromeText.attributed(
-            "\(entry.windowTitle) ▸ ",
-            font: ChromeFont.meta,
-            color: colors.textMuted
-        ))
-        location.append(entry.context.attributed(font: ChromeFont.meta, color: colors.textMuted))
+        let location = NSMutableAttributedString(string: "\(entry.windowTitle)  /  ", attributes: [
+            .font: meta, .foregroundColor: palette.secondaryLabel,
+        ])
+        location.append(entry.context.attributed(font: meta, color: palette.secondaryLabel))
         locationLabel.attributedStringValue = location
         let path = entry.cwd.map { ($0 as NSString).abbreviatingWithTildeInPath }
         locationLabel.toolTip = [entry.location, path].compactMap { $0 }.joined(separator: "\n")
@@ -1335,12 +1319,16 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     private func updateTimer(now: Date = Date()) {
         guard let entry else { return }
         let text = agentDashboardElapsedText(status: entry.status, startedAt: entry.startedAt, now: now)
-        timerLabel.setChromeText(text, font: ChromeFont.count, color: theme.colors.textMuted)
+        timerLabel.attributedStringValue = NSAttributedString(string: text, attributes: [
+            .font: Typography.tabular(Typography.smallSize), .foregroundColor: PaletteCenter.shared.palette.secondaryLabel,
+        ])
     }
 
     private func setReplyPlaceholder(_ placeholder: String?) {
         replyField.placeholderAttributedString = placeholder.map {
-            ChromeText.attributed($0, font: ChromeFont.row, color: theme.colors.textMuted)
+            NSAttributedString(string: $0, attributes: [
+                .font: Typography.ui(Typography.bodySize), .foregroundColor: PaletteCenter.shared.palette.placeholder,
+            ])
         }
     }
 
@@ -1360,17 +1348,13 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         let textChanged = terminalTextView.string != displayText
         let attributedText: NSAttributedString
         if terminal.isAvailable, !terminal.visibleText.isEmpty {
-            attributedText = AgentOutputHighlighter.highlight(
-                displayText,
-                theme: theme,
-                font: ChromeFont.mono
-            )
+            attributedText = AgentOutputHighlighter.highlight(displayText, theme: theme, font: Typography.mono())
         } else {
             attributedText = NSAttributedString(
                 string: displayText,
                 attributes: [
-                    .font: ChromeFont.row,
-                    .foregroundColor: theme.colors.textMuted,
+                    .font: Typography.ui(Typography.rowSize),
+                    .foregroundColor: PaletteCenter.shared.palette.mutedForeground,
                 ]
             )
         }
@@ -1382,9 +1366,27 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         }
     }
 
+    /// Agents' composer field: borderless 14 pt ink on the composer card,
+    /// with an ink caret and the palette's selection while it edits.
+    private func styleReplyField() {
+        let palette = PaletteCenter.shared.palette
+        replyField.isBordered = false
+        replyField.isBezeled = false
+        replyField.drawsBackground = false
+        replyField.focusRingType = .none
+        replyField.font = Typography.ui(Typography.bodySize)
+        replyField.textColor = palette.foreground
+        guard let editor = replyField.currentEditor() as? NSTextView else { return }
+        editor.insertionPointColor = palette.foreground
+        editor.selectedTextAttributes = [
+            .backgroundColor: palette.primary.withAlphaComponent(palette.isDark ? 0.45 : 0.22),
+        ]
+    }
+
     private func updateControls() {
-        replyHintLabel.textColor = theme.colors.textMuted
-        modeControl.setEnabled(hasTranscript, forSegment: 0)
+        replyHintLabel.textColor = PaletteCenter.shared.palette.mutedForeground
+        modeControl.setEnabled(hasTranscript || entry?.isChat == true, forSegment: 0)
+        modeControl.setEnabled(entry?.isChat != true, forSegment: 1)
         detailsButton.isEnabled = showsTimeline
         guard let entry else {
             openButton.isEnabled = false
@@ -1402,7 +1404,9 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         replyField.isEnabled = canReply
 
         if !terminal.isAvailable {
-            replyHintLabel.stringValue = "Open the agent to initialize its terminal."
+            replyHintLabel.stringValue = entry.isChat
+                ? "Restart the agent before replying."
+                : "Open the agent to initialize its terminal."
         } else {
             switch entry.status {
             case .starting:
@@ -1427,10 +1431,11 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
     }
 
     private func updateSendButton() {
-        sendButton.isEnabled = canReply
+        let canSend = canReply
             && !replyField.stringValue
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty
+        sendButton.update(canSend ? .send : .sendDisabled, tooltip: "Send")
     }
 
     private var target: TerminalTarget? {
@@ -1452,16 +1457,12 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
         onRestart?(target)
     }
 
-    @objc private func modeChanged(_ sender: ChromeSegmentedControl) {
+    @objc private func modeChanged(_ sender: ShellSegmentedControl) {
         setPrefersTerminal(sender.selectedSegment == 1)
     }
 
     @objc private func detailsClicked() {
         toggleDetails()
-    }
-
-    @objc private func jumpClicked() {
-        followLatest()
     }
 
     @objc private func sendClicked() {
@@ -1475,37 +1476,8 @@ private final class AgentDashboardDetailView: NSView, NSTextFieldDelegate {
             updateSendButton()
         } else {
             replyHintLabel.stringValue = "Could not send to this terminal."
-            replyHintLabel.textColor = theme.colors.danger
+            replyHintLabel.textColor = PaletteCenter.shared.palette.errorForeground
         }
-    }
-}
-
-/// Read-only dashboard text that hands the keyboard back to the dashboard:
-/// clicking into it selects text for copying without capturing J/K.
-private final class AgentDashboardTextView: NSTextView {
-    var keyHandler: ((NSEvent) -> Bool)?
-    /// When set, the text keeps to this width, centered, with at least
-    /// `minimumInset` on either side: a readable column on a wide window.
-    var readableWidth: CGFloat? {
-        didSet { updateReadableInset() }
-    }
-    var minimumInset: CGFloat = 0
-
-    override func keyDown(with event: NSEvent) {
-        if keyHandler?(event) == true { return }
-        super.keyDown(with: event)
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        updateReadableInset()
-    }
-
-    private func updateReadableInset() {
-        guard let readableWidth else { return }
-        let inset = max(minimumInset, floor((bounds.width - readableWidth) / 2))
-        guard textContainerInset.width != inset else { return }
-        textContainerInset = NSSize(width: inset, height: textContainerInset.height)
     }
 }
 
@@ -1541,19 +1513,24 @@ private final class AgentDashboardSectionHeaderView: NSView {
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-section")
         translatesAutoresizingMaskIntoConstraints = false
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setEyebrowText(section.title, color: theme.colors.textMuted)
+        titleLabel.attributedStringValue = NSAttributedString(string: section.title, attributes: [
+            .font: Typography.ui(Typography.rowSize, weight: .semibold),
+            .foregroundColor: PaletteCenter.shared.palette.sidebarMutedForeground,
+        ])
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(titleLabel)
         countLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-section-count")
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(countLabel)
+        // Agents' section header: "Working  3", the title at the cards'
+        // content edge and the count muted after it.
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Self.height),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 14),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ShellSidebarMetrics.contentLeft),
             titleLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
             countLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
             countLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Chrome.Space.s12),
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -ShellSidebarMetrics.contentLeft),
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -1567,7 +1544,10 @@ private final class AgentDashboardSectionHeaderView: NSView {
     func update(count: Int) {
         guard count != self.count else { return }
         self.count = count
-        countLabel.setChromeText("\(count)", font: ChromeFont.count, color: theme.colors.textMuted)
+        countLabel.attributedStringValue = NSAttributedString(string: "\(count)", attributes: [
+            .font: Typography.tabular(Typography.smallSize),
+            .foregroundColor: PaletteCenter.shared.palette.sidebarMutedForeground,
+        ])
         setAccessibilityLabel("\(section.title), \(count)")
     }
 }
@@ -1590,7 +1570,7 @@ private final class AgentDashboardHintsView: NSStackView {
         // visibility priorities drop hints rather than clip one. Below
         // `.windowSizeStayPut`, so the hints never widen the window.
         setHuggingPriority(.defaultLow, for: .horizontal)
-        setClippingResistancePriority(Chrome.fillPriority, for: .horizontal)
+        setClippingResistancePriority(dashFillPriority, for: .horizontal)
         rebuild()
     }
 
@@ -1609,9 +1589,12 @@ private final class AgentDashboardHintsView: NSStackView {
             removeView(view)
         }
         for (index, hint) in hints.enumerated() {
-            let caps = ChromeKeycapGroupView(caps: hint.caps, theme: theme, style: .standard, tone: .muted)
-            let label = NSTextField(labelWithString: hint.label)
-            label.setChromeText(hint.label, font: ChromeFont.meta, color: theme.colors.textMuted)
+            // Agents' `KbdView` chips, one per key, then a muted label.
+            let caps = NSStackView(views: hint.caps.map { KbdView($0) })
+            caps.orientation = .horizontal
+            caps.spacing = 3
+            let label = NSTextField.label(hint.label, size: Typography.smallSize)
+            label.textColor = PaletteCenter.shared.palette.mutedForeground
             let item = NSStackView(views: [caps, label])
             item.orientation = .horizontal
             item.alignment = .centerY
@@ -1645,7 +1628,8 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     private let theme: AppTheme
-    private let statusMark = ChromeStatusMark()
+    private let monogram = ShellMonogramView()
+    private let statusIcon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let elapsedLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
@@ -1653,10 +1637,17 @@ private final class AgentDashboardRowView: NSControl {
     private var activity: AgentTimelineActivity?
     private var isHovered = false
     private var isKeyboardSelected = false
+    /// Why a waiting agent waits; the entry does not carry it.
+    private let waitingReason: (AgentDashboardEntry) -> AgentWaitingReason?
 
-    init(entry: AgentDashboardEntry, theme: AppTheme) {
+    init(
+        entry: AgentDashboardEntry,
+        theme: AppTheme,
+        waitingReason: @escaping (AgentDashboardEntry) -> AgentWaitingReason?
+    ) {
         self.entry = entry
         self.theme = theme
+        self.waitingReason = waitingReason
         super.init(frame: .zero)
         identifier = NSUserInterfaceItemIdentifier("agent-dashboard-row")
         translatesAutoresizingMaskIntoConstraints = false
@@ -1713,33 +1704,36 @@ private final class AgentDashboardRowView: NSControl {
         }
     }
 
+    /// Agents' card surface: `sidebarRowActive` for the keyboard selection
+    /// (`sidebarRowSelected` while the list does not have the keyboard), a
+    /// soft warning wash for a row that needs you, `sidebarRowHover` under
+    /// the pointer; rounded and inset like the sidebar's cards.
     override func draw(_ dirtyRect: NSRect) {
-        let style = selectionStyle
-        guard style == .attention else {
-            ChromeSelectionPill.draw(style, in: bounds, colors: theme.colors)
-            return
+        let palette = PaletteCenter.shared.palette
+        let fill: NSColor? = switch selectionStyle {
+        case .selected: palette.sidebarRowActive
+        case .selectedUnfocused: palette.sidebarRowSelected
+        case .attention: palette.color(for: .approval).shellScaled(by: 0.10)
+        case .hover: palette.sidebarRowHover
+        default: nil
         }
-        drawAttention()
+        guard let fill else { return }
+        let rect = bounds.insetBy(dx: ShellSidebarMetrics.contentInset, dy: 2)
+        fill.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: Radius.md, yRadius: Radius.md).fill()
+        if selectionStyle == .selected, !palette.isDark {
+            palette.sidebarBorder.shellScaled(by: 0.7).setStroke()
+            let ring = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Radius.md, yRadius: Radius.md)
+            ring.lineWidth = 1
+            ring.stroke()
+        }
     }
 
-    /// `.agent.is-attention`: the full-bleed wash, with the attention tick
-    /// where the selected pill's pencil tick sits (pill inset + tick inset),
-    /// so the two line up in one list.
-    private func drawAttention() {
-        let colors = theme.colors
-        colors.attentionRowWash.setFill()
-        bounds.fill(using: .sourceOver)
-        let tick = NSRect(
-            x: bounds.minX + Chrome.pillInset + Chrome.tickInset,
-            y: floor(bounds.midY - Chrome.tickHeight / 2),
-            width: Chrome.tickWidth,
-            height: Chrome.tickHeight
-        )
-        colors.attention.setFill()
-        NSBezierPath(roundedRect: tick, xRadius: 1, yRadius: 1).fill()
+    private enum SelectionStyle {
+        case none, hover, attention, selected, selectedUnfocused
     }
 
-    private var selectionStyle: ChromeSelectionPill.Style {
+    private var selectionStyle: SelectionStyle {
         if isKeyboardSelected { return isListFocused ? .selected : .selectedUnfocused }
         if entry.needsAttention { return .attention }
         return isHovered ? .hover : .none
@@ -1756,7 +1750,10 @@ private final class AgentDashboardRowView: NSControl {
     func updateElapsed(now: Date) {
         let text = agentDashboardElapsedText(status: entry.status, startedAt: entry.startedAt, now: now)
         guard elapsedLabel.stringValue != text else { return }
-        elapsedLabel.setChromeText(text, font: ChromeFont.count, color: theme.colors.textMuted)
+        elapsedLabel.attributedStringValue = NSAttributedString(string: text, attributes: [
+            .font: Typography.tabular(Typography.smallSize),
+            .foregroundColor: PaletteCenter.shared.palette.secondaryLabel,
+        ])
     }
 
     /// Shows what the agent is doing according to its transcript after its
@@ -1775,7 +1772,12 @@ private final class AgentDashboardRowView: NSControl {
     }
 
     private func build() {
-        addSubview(statusMark)
+        addSubview(monogram)
+        statusIcon.imageScaling = .scaleNone
+        addSubview(statusIcon)
+        for view in [monogram, statusIcon] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
 
         titleLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-title")
         elapsedLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-elapsed")
@@ -1793,24 +1795,30 @@ private final class AgentDashboardRowView: NSControl {
             label.setContentHuggingPriority(.required, for: .horizontal)
         }
 
-        // Two lines (16 + 3 + 14) centered in the 52 pt row. The pill sits
-        // 4 pt in, and `.agent` pads 14 / 12 inside it.
+        // Two lines centered in the 52 pt card: monogram, title (14 pt
+        // medium) and the status pill, then the context and activity.
         let firstLine: CGFloat = 17.5
         let secondLine: CGFloat = 35.5
+        let left = ShellSidebarMetrics.contentLeft
         NSLayoutConstraint.activate([
-            statusMark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.pillInset + 14),
-            statusMark.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
+            monogram.leadingAnchor.constraint(equalTo: leadingAnchor, constant: left),
+            monogram.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
+            monogram.widthAnchor.constraint(equalToConstant: 16),
+            monogram.heightAnchor.constraint(equalToConstant: 16),
 
-            titleLabel.leadingAnchor.constraint(equalTo: statusMark.trailingAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: monogram.trailingAnchor, constant: 8),
             titleLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: elapsedLabel.leadingAnchor, constant: -8),
 
-            elapsedLabel.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -8),
+            elapsedLabel.trailingAnchor.constraint(equalTo: statusIcon.leadingAnchor, constant: -8),
             elapsedLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
-            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(Chrome.pillInset + 12)),
+            statusIcon.trailingAnchor.constraint(equalTo: statusLabel.leadingAnchor, constant: -2),
+            statusIcon.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
+            statusIcon.widthAnchor.constraint(equalToConstant: 16),
+            statusLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -left),
             statusLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: firstLine),
 
-            activityLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            activityLabel.leadingAnchor.constraint(equalTo: monogram.leadingAnchor),
             activityLabel.trailingAnchor.constraint(lessThanOrEqualTo: statusLabel.trailingAnchor),
             activityLabel.centerYAnchor.constraint(equalTo: topAnchor, constant: secondLine),
         ])
@@ -1824,21 +1832,32 @@ private final class AgentDashboardRowView: NSControl {
     /// times a second, mostly with a new spinner frame its title drops, so
     /// the labels are set only when what they show changed.
     private func render(previous: AgentDashboardEntry?) {
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
         let statusChanged = previous?.status != entry.status
             || previous?.needsAttention != entry.needsAttention
         if statusChanged {
-            let status = entry.status.chromeStatus
-            statusMark.set(status: status, colors: colors)
-            statusLabel.setStatusText(status.label, color: status.color(in: colors))
+            let pill = ShellStatusPill.of(status: entry.status, waitingReason: waitingReason(entry), workingSince: nil)
+                ?? ShellStatusPill(label: "Ready", symbol: Icon.circleCheck, tone: .muted, since: nil)
+            let tint = palette.color(for: pill.tone)
+            statusIcon.image = NSImage.symbol(pill.symbol, size: 12.5)
+            statusIcon.contentTintColor = tint
+            statusLabel.attributedStringValue = NSAttributedString(string: pill.label, attributes: [
+                .font: Typography.ui(Typography.smallSize, weight: .medium),
+                .foregroundColor: tint,
+            ])
             needsDisplay = true
         }
         if statusChanged || previous?.startedAt != entry.startedAt {
             updateElapsed(now: Date())
         }
+        let folder = entry.cwd.map { TerminalTitle.folderName($0) }
+        monogram.projectName = folder ?? entry.profileName
         let title = entry.title
         if previous?.title != title {
-            titleLabel.setChromeText(title, font: ChromeFont.labelStrong, color: colors.textPrimary)
+            titleLabel.attributedStringValue = NSAttributedString(string: title, attributes: [
+                .font: Typography.ui(Typography.bodySize, weight: .medium),
+                .foregroundColor: palette.sidebarForeground,
+            ])
         }
         let context = entry.context
         if previous?.context != context {
@@ -1861,19 +1880,20 @@ private final class AgentDashboardRowView: NSControl {
     /// line (the subject in mono), or the activity in the danger color when
     /// it failed. The composer's activity line keeps the subject in ink.
     private func renderActivity() {
-        let colors = theme.colors
+        let palette = PaletteCenter.shared.palette
+        let meta = Typography.ui(Typography.smallSize)
         let line = NSMutableAttributedString(
-            attributedString: entry.context.attributed(font: ChromeFont.meta, color: colors.textMuted)
+            attributedString: entry.context.attributed(font: meta, color: palette.secondaryLabel)
         )
         if let activity {
-            let color = activity.tone == .failed ? colors.danger : colors.textMuted
+            let color = activity.tone == .failed ? palette.errorForeground : palette.secondaryLabel
             if line.length > 0 {
-                line.append(ChromeText.attributed(" — ", font: ChromeFont.meta, color: colors.textMuted))
+                line.append(NSAttributedString(string: " — ", attributes: [.font: meta, .foregroundColor: palette.secondaryLabel]))
             }
             line.append(activity.attributed(
-                font: ChromeFont.meta,
-                titleFont: ChromeFont.meta,
-                codeFont: ChromeFont.monoSmall,
+                font: meta,
+                titleFont: meta,
+                codeFont: Typography.mono(Typography.tinySize),
                 color: color,
                 codeColor: color,
                 compact: true

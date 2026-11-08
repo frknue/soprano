@@ -170,24 +170,37 @@ final class KeybindingManager: @unchecked Sendable {
             // must only cover the self-is-gone case — otherwise it would
             // resurrect events handleKeyDown intentionally swallowed.
             guard let self else { return event }
-            if event.type == .flagsChanged {
-                self.setControlKeyHeld(event.modifierFlags.contains(.control))
-                return event
-            }
-            if let window = event.window,
-               MainActor.assumeIsolated({ Self.leavesKeysAlone(in: window) }) {
-                return event
-            }
-            return self.handleKeyDown(event: event)
+            return self.filter(event)
         }
     }
 
-    /// The command palette (a child panel of the main window) and a
-    /// recording shortcut field take every key themselves: a chord there
-    /// must not act on the panes behind them.
+    /// What the local monitor does with one event: the event to deliver on,
+    /// or nil when a binding consumed it.
+    func filter(_ event: NSEvent) -> NSEvent? {
+        if event.type == .flagsChanged {
+            setControlKeyHeld(event.modifierFlags.contains(.control))
+            return event
+        }
+        // Only the window number crosses into the main actor; the event is not Sendable.
+        let windowNumber = event.windowNumber
+        let leavesKeys = MainActor.assumeIsolated {
+            NSApp.window(withWindowNumber: windowNumber).map(Self.leavesKeysAlone(in:)) ?? false
+        }
+        if leavesKeys {
+            return event
+        }
+        return handleKeyDown(event: event)
+    }
+
+    /// The command palette (a child panel of the main window), a dialog card
+    /// and the window it covers, and a recording shortcut field take every
+    /// key themselves: a chord there must not act on the panes behind them,
+    /// so ⌘D picks Don't Save instead of opening a terminal.
     @MainActor
     static func leavesKeysAlone(in window: NSWindow) -> Bool {
         window is CommandPalettePanel
+            || window is ShellDialogOverlayWindow
+            || window.childWindows?.contains { $0 is ShellDialogOverlayWindow && $0.isVisible } == true
             || (window.firstResponder as? KeyCapturingResponder)?.capturesKeys == true
     }
 
@@ -576,6 +589,10 @@ final class KeybindingManager: @unchecked Sendable {
         }
 
         switch binding.id {
+        case "new-chat":
+            if let profile = AgentChatLaunch.chatProfiles.first {
+                _ = agentManager.spawnAgent(profile.id, chat: true)
+            }
         case "nav-left":
             agentManager.navigateToPane(direction: .left)
         case "nav-down":

@@ -1,8 +1,9 @@
 import AppKit
 
-/// The Automations list: a search field and New Automation over a table of
-/// every automation (Name, Schedule, Folder, Next run, Last run, Agent and a
-/// ⋯ menu). Without automations it offers Orca's four templates instead.
+/// The Automations list, in Soprano Agents' board language: a search field
+/// and New Automation over a card of rows, one per automation (name and
+/// prompt, schedule and next run, last run, agent and folder, its state pill
+/// and a ⋯ menu). Without automations it offers Orca's four templates instead.
 final class AutomationListView: NSView, NSTextFieldDelegate {
     struct Item: Equatable {
         var automation: Automation
@@ -19,7 +20,7 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     /// Esc in the search field with nothing to clear.
     var onEscape: (() -> Void)?
     /// Whether the page, which drives this list, has the keyboard; the
-    /// selected row then carries the pencil tick.
+    /// selected row then shows the active row fill.
     var isListFocused = false {
         didSet {
             guard isListFocused != oldValue else { return }
@@ -28,7 +29,6 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     }
 
     private(set) var selectedId: String?
-    private var theme: AppTheme
     private var items: [Item] = []
     private var visibleItems: [Item] = []
     private var now = Date()
@@ -36,33 +36,24 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     /// which is after settings.json has been read back.
     private var pendingSelectionId: String?
 
-    private let searchSurface: ChromeFieldView
-    private let searchIcon = NSImageView()
-    private let searchField = NSTextField(string: "")
-    private let newButton: ChromeButton
-    private let toolbarRule: ChromeRuleView
-    private let headerView: AutomationListHeaderView
-    private let headerRule: ChromeRuleView
+    private let searchBox = AutomationSearchBox()
+    private var searchField: NSTextField { searchBox.field }
+    private let newButton = ShellTextButton(title: "New Automation", keycap: "⌘N", variant: .primary)
     private let scrollView = NSScrollView()
+    private let pageStack = NSStackView()
     private let rowsStack = NSStackView()
+    private var listCard: AutoUICardView!
     private var rows: [String: AutomationListRowView] = [:]
     private var orderedRows: [AutomationListRowView] = []
     private var emptyStateView: NSView?
-    private var noMatchesLabel: NSTextField?
+    private var noMatchesView: NSView?
 
-    private static let toolbarHeight: CGFloat = 52
+    private static let toolbarHeight: CGFloat = 60
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        searchSurface = ChromeFieldView(theme: theme)
-        newButton = ChromeButton(title: "New Automation", theme: theme, kind: .ink, keycap: "⌘N")
-        toolbarRule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        headerView = AutomationListHeaderView(theme: theme)
-        headerRule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         identifier = NSUserInterfaceItemIdentifier("automations-list")
         build()
-        applyColors()
     }
 
     @available(*, unavailable)
@@ -71,31 +62,22 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     }
 
     private func build() {
-        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)
-        searchIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-        searchIcon.setAccessibilityElement(false)
-        searchIcon.translatesAutoresizingMaskIntoConstraints = false
-        searchSurface.addSubview(searchIcon)
-
         searchField.identifier = NSUserInterfaceItemIdentifier("automations-search")
         searchField.delegate = self
-        searchField.lineBreakMode = .byTruncatingTail
-        searchField.cell?.usesSingleLineMode = true
-        searchField.cell?.isScrollable = true
-        searchField.cell?.wraps = false
         searchField.setAccessibilityLabel("Search automations")
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchSurface.addSubview(searchField)
-        addSubview(searchSurface)
+        searchBox.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(searchBox)
 
         newButton.target = self
         newButton.action = #selector(newClicked)
         newButton.toolTip = "New Automation (⌘N)"
         addSubview(newButton)
 
-        addSubview(toolbarRule)
-        addSubview(headerView)
-        addSubview(headerRule)
+        // The page column: centered, up to the reading width, `px-6`.
+        let column = NSLayoutGuide()
+        addLayoutGuide(column)
+        let columnFill = column.widthAnchor.constraint(equalTo: widthAnchor, constant: -AutomationViews.pagePadding * 2)
+        columnFill.priority = AutomationViews.fillPriority
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
@@ -108,50 +90,50 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
         document.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = document
 
+        pageStack.orientation = .vertical
+        pageStack.alignment = .leading
+        pageStack.spacing = 20
+        pageStack.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(pageStack)
+
         rowsStack.orientation = .vertical
         rowsStack.alignment = .leading
         rowsStack.spacing = 0
-        rowsStack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: Chrome.Space.page, right: 0)
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(rowsStack)
+        let header = AutomationListHeaderView()
+        let cardStack = NSStackView(views: [header, rowsStack])
+        cardStack.orientation = .vertical
+        cardStack.alignment = .leading
+        cardStack.spacing = 2
+        header.widthAnchor.constraint(equalTo: cardStack.widthAnchor).isActive = true
+        rowsStack.widthAnchor.constraint(equalTo: cardStack.widthAnchor).isActive = true
+        listCard = AutoUICardView(content: cardStack, inset: 8)
+        listCard.identifier = NSUserInterfaceItemIdentifier("automations-table")
 
+        let hug = document.bottomAnchor.constraint(equalTo: pageStack.bottomAnchor, constant: 32)
+        hug.priority = .init(1)
         NSLayoutConstraint.activate([
-            searchSurface.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.page),
-            searchSurface.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2),
+            column.centerXAnchor.constraint(equalTo: centerXAnchor),
+            column.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: AutomationViews.pagePadding),
+            column.widthAnchor.constraint(lessThanOrEqualToConstant: AutomationViews.maxWidth),
+            columnFill,
+
+            searchBox.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            searchBox.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight / 2 + 4),
             // 280 when there is room; narrower rather than widening the window.
-            searchSurface.widthAnchor.constraint(lessThanOrEqualToConstant: 280),
+            searchBox.widthAnchor.constraint(lessThanOrEqualToConstant: 280),
             {
-                let preferred = searchSurface.widthAnchor.constraint(equalToConstant: 280)
-                preferred.priority = Chrome.fillPriority
+                let preferred = searchBox.widthAnchor.constraint(equalToConstant: 280)
+                preferred.priority = AutomationViews.fillPriority
                 return preferred
             }(),
-            searchSurface.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-            searchIcon.leadingAnchor.constraint(equalTo: searchSurface.leadingAnchor, constant: 8),
-            searchIcon.centerYAnchor.constraint(equalTo: searchSurface.centerYAnchor),
-            searchField.leadingAnchor.constraint(equalTo: searchIcon.trailingAnchor, constant: 6),
-            searchField.trailingAnchor.constraint(equalTo: searchSurface.trailingAnchor, constant: -8),
-            searchField.centerYAnchor.constraint(equalTo: searchSurface.centerYAnchor),
 
-            newButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.page),
-            newButton.centerYAnchor.constraint(equalTo: searchSurface.centerYAnchor),
-            newButton.leadingAnchor.constraint(greaterThanOrEqualTo: searchSurface.trailingAnchor, constant: Chrome.Space.s16),
-
-            toolbarRule.leadingAnchor.constraint(equalTo: leadingAnchor),
-            toolbarRule.trailingAnchor.constraint(equalTo: trailingAnchor),
-            toolbarRule.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
-
-            headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            headerView.topAnchor.constraint(equalTo: toolbarRule.bottomAnchor),
-            headerView.heightAnchor.constraint(equalToConstant: AutomationListHeaderView.height),
-
-            headerRule.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.page),
-            headerRule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.page),
-            headerRule.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            newButton.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            newButton.centerYAnchor.constraint(equalTo: searchBox.centerYAnchor),
+            newButton.leadingAnchor.constraint(greaterThanOrEqualTo: searchBox.trailingAnchor, constant: 16),
 
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: headerRule.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor, constant: Self.toolbarHeight),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
             document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
@@ -160,41 +142,12 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
             document.bottomAnchor.constraint(greaterThanOrEqualTo: scrollView.contentView.bottomAnchor),
             document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
 
-            rowsStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            rowsStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            rowsStack.topAnchor.constraint(equalTo: document.topAnchor),
-            rowsStack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            pageStack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            pageStack.trailingAnchor.constraint(equalTo: column.trailingAnchor),
+            pageStack.topAnchor.constraint(equalTo: document.topAnchor, constant: 4),
+            pageStack.bottomAnchor.constraint(lessThanOrEqualTo: document.bottomAnchor, constant: -32),
+            hug,
         ])
-    }
-
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        searchSurface.apply(theme: theme)
-        newButton.apply(theme: theme)
-        headerView.apply(theme: theme)
-        applyColors()
-        // Rows, cards and the empty state take their colors when they are
-        // built, so a theme change rebuilds them.
-        rowsStack.setArrangedSubviews([])
-        rows.removeAll()
-        orderedRows.removeAll()
-        emptyStateView = nil
-        noMatchesLabel = nil
-        render()
-    }
-
-    private func applyColors() {
-        let colors = theme.colors
-        searchIcon.contentTintColor = colors.textMuted
-        ChromeFieldView.styleEmbedded(searchField, colors: colors, font: ChromeFont.label)
-        ChromeFieldView.styleEditor(of: searchField, colors: colors)
-        searchField.placeholderAttributedString = ChromeText.attributed(
-            "Search automations",
-            font: ChromeFont.label,
-            color: colors.textMuted
-        )
-        toolbarRule.color = colors.borderSubtle
-        headerRule.color = colors.borderSubtle
     }
 
     // MARK: - Content
@@ -234,27 +187,25 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
             selectedId = visibleItems.first?.automation.id
         }
 
-        let isEmpty = items.isEmpty
-        headerView.isHidden = isEmpty
-        headerRule.isHidden = isEmpty
-        if isEmpty {
+        if items.isEmpty {
             orderedRows = []
             rows.removeAll()
-            noMatchesLabel = nil
+            rowsStack.setArrangedSubviews([])
+            noMatchesView = nil
             let empty = emptyStateView ?? makeEmptyState()
             emptyStateView = empty
-            setArrangedViews([empty])
+            setPageViews([empty])
             return
         }
         emptyStateView = nil
         if visibleItems.isEmpty {
             orderedRows = []
-            let label = noMatchesLabel ?? makeNoMatchesLabel()
-            noMatchesLabel = label
-            setArrangedViews([label])
+            let noMatches = noMatchesView ?? makeNoMatches()
+            noMatchesView = noMatches
+            setPageViews([noMatches])
             return
         }
-        noMatchesLabel = nil
+        noMatchesView = nil
 
         var reusable = rows
         rows.removeAll()
@@ -268,14 +219,19 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
         for (id, row) in reusable {
             rows[id] = row
         }
-        setArrangedViews(orderedRows)
+        if rowsStack.arrangedSubviews != orderedRows {
+            rowsStack.setArrangedSubviews(orderedRows) { [rowsStack] view in
+                view.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
+            }
+        }
+        setPageViews([listCard])
         updateRowSelection(scrollIntoView: false)
     }
 
-    private func setArrangedViews(_ views: [NSView]) {
-        guard rowsStack.arrangedSubviews != views else { return }
-        rowsStack.setArrangedSubviews(views) { view in
-            view.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
+    private func setPageViews(_ views: [NSView]) {
+        guard pageStack.arrangedSubviews != views else { return }
+        pageStack.setArrangedSubviews(views) { [pageStack] view in
+            view.widthAnchor.constraint(equalTo: pageStack.widthAnchor).isActive = true
         }
     }
 
@@ -292,7 +248,7 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     }
 
     private func makeRow() -> AutomationListRowView {
-        let row = AutomationListRowView(theme: theme)
+        let row = AutomationListRowView()
         row.onOpen = { [weak self, weak row] in
             guard let self, let id = row?.automationId else { return }
             self.selectedId = id
@@ -338,12 +294,11 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
     }
 
     func controlTextDidBeginEditing(_ notification: Notification) {
-        searchSurface.isFocused = true
-        ChromeFieldView.styleEditor(of: searchField, colors: theme.colors)
+        searchBox.isEditing = true
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
-        searchSurface.isFocused = false
+        searchBox.isEditing = false
     }
 
     /// The arrows move the selection and Return opens it while the search
@@ -372,93 +327,150 @@ final class AutomationListView: NSView, NSTextFieldDelegate {
 
     // MARK: - Empty states
 
-    private func makeNoMatchesLabel() -> NSTextField {
-        let label = AutomationViews.label("", font: ChromeFont.empty, color: theme.colors.textMuted)
-        label.alignment = .center
-        label.setChromeText("No automations match", font: ChromeFont.empty, color: theme.colors.textMuted)
-        label.heightAnchor.constraint(equalToConstant: 120).isActive = true
-        return label
+    private func makeNoMatches() -> NSView {
+        let label = AutoUIThemedLabel("No automations match.", size: Typography.rowSize) { $0.mutedForeground }
+        let stack = NSStackView(views: [label])
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        return AutoUICardView(content: stack, inset: 8)
     }
 
     /// "No automations yet" over Orca's four templates and a blank card.
     private func makeEmptyState() -> NSView {
-        let colors = theme.colors
         let container = NSView()
         container.identifier = NSUserInterfaceItemIdentifier("automations-empty")
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = AutomationViews.label("No automations yet", font: ChromeFont.empty, color: colors.textMuted)
-        container.addSubview(title)
-
-        let heading = ChromeEyebrowView(title: "Start from a template", theme: theme)
-        container.addSubview(heading)
+        let title = AutoUIThemedLabel("No automations yet", size: 16, weight: .semibold)
+        let message = AutoUIThemedLabel(
+            "An automation sends a prompt to an agent on a schedule while Soprano is open.",
+            size: Typography.bodySize
+        ) { $0.mutedForeground }
+        let heading = AutoUICardHeader.make("Start from a template", inRowCard: false)
 
         var cards: [NSView] = AutomationTemplate.all.map { template in
-            AutomationTemplateCardView(template: template, theme: theme) { [weak self] in
+            AutomationTemplateCardView(template: template) { [weak self] in
                 self?.onNew?(template)
             }
         }
-        cards.append(AutomationTemplateCardView(template: nil, theme: theme) { [weak self] in
+        cards.append(AutomationTemplateCardView(template: nil) { [weak self] in
             self?.onNew?(nil)
         })
         cards.append(NSView())
         let grid = NSStackView()
         grid.orientation = .vertical
-        grid.spacing = Chrome.Space.s12
+        grid.spacing = 12
         grid.translatesAutoresizingMaskIntoConstraints = false
         for start in stride(from: 0, to: cards.count, by: 3) {
             let row = NSStackView(views: Array(cards[start..<min(start + 3, cards.count)]))
             row.orientation = .horizontal
             row.distribution = .fillEqually
             row.alignment = .top
-            row.spacing = Chrome.Space.s12
+            row.spacing = 12
             grid.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: grid.widthAnchor).isActive = true
         }
-        container.addSubview(grid)
 
-        let fill = grid.widthAnchor.constraint(equalTo: container.widthAnchor, constant: -Chrome.Space.page * 2)
-        fill.priority = Chrome.fillPriority
+        for view in [title, message, heading, grid] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            title.topAnchor.constraint(equalTo: container.topAnchor, constant: Chrome.Space.s48),
-            title.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-            heading.topAnchor.constraint(equalTo: title.bottomAnchor, constant: Chrome.Space.s32),
-            heading.leadingAnchor.constraint(equalTo: grid.leadingAnchor),
-            grid.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: Chrome.Space.s12),
-            grid.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            grid.widthAnchor.constraint(lessThanOrEqualToConstant: 780),
-            fill,
-            container.bottomAnchor.constraint(equalTo: grid.bottomAnchor, constant: Chrome.Space.s24),
+            title.topAnchor.constraint(equalTo: container.topAnchor, constant: 24),
+            title.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            message.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 6),
+            message.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            message.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+            heading.topAnchor.constraint(equalTo: message.bottomAnchor, constant: 28),
+            heading.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            grid.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 12),
+            grid.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            grid.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: grid.bottomAnchor, constant: 8),
         ])
         return container
     }
 }
 
+/// The list's search field: Agents' input box (`h-8 rounded-lg border-input`,
+/// dark `bg-input/32`, a primary ring while editing) with a search icon.
+final class AutomationSearchBox: PaletteView {
+    let field = NSTextField(string: "")
+    private let icon = NSImageView()
+
+    var isEditing = false {
+        didSet { applyPalette(palette) }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        layer?.cornerRadius = Radius.lg
+        layer?.borderWidth = 1
+        icon.image = NSImage.symbol(Icon.search, size: 13)
+        icon.setAccessibilityElement(false)
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.font = Typography.ui(Typography.bodySize)
+        for view in [icon, field] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            field.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 8),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            field.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        applyPalette(palette)
+    }
+
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = (palette.isDark ? palette.input.shellScaled(by: 0.32) : palette.background).cgColor
+        layer?.borderColor = (isEditing ? palette.primary.shellScaled(by: 0.7) : palette.input).cgColor
+        icon.contentTintColor = palette.mutedForeground
+        field.textColor = palette.foreground
+        field.placeholderAttributedString = NSAttributedString(string: "Search automations", attributes: [
+            .foregroundColor: palette.placeholder,
+            .font: Typography.ui(Typography.bodySize),
+        ])
+        (field.currentEditor() as? NSTextView)?.insertionPointColor = palette.foreground
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(field)
+    }
+}
+
 // MARK: - Columns
 
-/// Where the table's columns sit at a given width: Name and Folder share
-/// what the fixed columns leave, Name taking the larger part.
+/// Where the list's columns sit inside a row: Name takes what the fixed
+/// columns leave, after the row's 8 pt padding.
 enum AutomationListColumns {
+    static let padding: CGFloat = 8
     static let gap: CGFloat = 16
-    static let menuWidth: CGFloat = Chrome.iconButtonSize
-    private static let fixed: [CGFloat] = [170, 150, 160, 110]
+    static let menuWidth: CGFloat = 24
+    private static let fixed: [CGFloat] = [170, 120, 160, 92]
 
     struct Frames {
         var name: ClosedRange<CGFloat>
         var schedule: ClosedRange<CGFloat>
-        var folder: ClosedRange<CGFloat>
-        var nextRun: ClosedRange<CGFloat>
         var lastRun: ClosedRange<CGFloat>
         var agent: ClosedRange<CGFloat>
+        var state: ClosedRange<CGFloat>
         var menu: ClosedRange<CGFloat>
     }
 
     static func frames(width: CGFloat) -> Frames {
-        let gutter = Chrome.Space.page
-        let flexible = max(260, width - gutter * 2 - menuWidth - gap * 6 - fixed.reduce(0, +))
-        let nameWidth = floor(flexible * 0.6)
-        let widths = [nameWidth, fixed[0], flexible - nameWidth, fixed[1], fixed[2], fixed[3], menuWidth]
-        var x = gutter
+        let nameWidth = max(160, width - padding * 2 - menuWidth - gap * 5 - fixed.reduce(0, +))
+        let widths = [nameWidth] + fixed + [menuWidth]
+        var x = padding
         var ranges: [ClosedRange<CGFloat>] = []
         for width in widths {
             ranges.append(x...(x + width))
@@ -467,11 +479,10 @@ enum AutomationListColumns {
         return Frames(
             name: ranges[0],
             schedule: ranges[1],
-            folder: ranges[2],
-            nextRun: ranges[3],
-            lastRun: ranges[4],
-            agent: ranges[5],
-            menu: ranges[6]
+            lastRun: ranges[2],
+            agent: ranges[3],
+            state: ranges[4],
+            menu: ranges[5]
         )
     }
 }
@@ -480,24 +491,19 @@ private extension ClosedRange where Bound == CGFloat {
     var width: CGFloat { upperBound - lowerBound }
 }
 
-/// The table's column eyebrows.
+/// The list's column titles.
 final class AutomationListHeaderView: NSView {
-    static let height: CGFloat = 32
+    static let height: CGFloat = 30
 
-    private var theme: AppTheme
     private let labels: [NSTextField]
-    private static let titles = ["Name", "Schedule", "Folder", "Next run", "Last run", "Agent"]
+    private static let titles = ["Name", "Schedule", "Last run", "Agent", "Status"]
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        labels = Self.titles.map { _ in NSTextField(labelWithString: "") }
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        labels = Self.titles.map(AutomationViews.columnTitle)
+        super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
-        for label in labels {
-            label.lineBreakMode = .byTruncatingTail
-            addSubview(label)
-        }
-        apply(theme: theme)
+        heightAnchor.constraint(equalToConstant: Self.height).isActive = true
+        labels.forEach(addSubview)
     }
 
     @available(*, unavailable)
@@ -507,17 +513,10 @@ final class AutomationListHeaderView: NSView {
 
     override var isFlipped: Bool { true }
 
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        for (label, title) in zip(labels, Self.titles) {
-            label.setEyebrowText(title, color: theme.colors.textMuted)
-        }
-    }
-
     override func layout() {
         super.layout()
         let frames = AutomationListColumns.frames(width: bounds.width)
-        let columns = [frames.name, frames.schedule, frames.folder, frames.nextRun, frames.lastRun, frames.agent]
+        let columns = [frames.name, frames.schedule, frames.lastRun, frames.agent, frames.state]
         for (label, column) in zip(labels, columns) {
             let height = label.intrinsicContentSize.height
             label.frame = NSRect(x: column.lowerBound, y: floor((bounds.height - height) / 2), width: column.width, height: height)
@@ -527,10 +526,11 @@ final class AutomationListHeaderView: NSView {
 
 // MARK: - Row
 
-/// One automation: 52 pt with two lines where a column has a detail (the
-/// prompt under the name, the relative time under a date). Clicking opens
-/// its detail; the ⋯ button and the context menu offer Run Now, Edit,
-/// Pause/Resume and Delete.
+/// One automation, 52 pt, two lines where a column has a detail (the prompt
+/// under the name, the next run under the schedule, when under the last run,
+/// the folder under the agent), its state pill and the ⋯ button; a rounded
+/// row fill on hover and selection. Clicking opens its detail; the ⋯ button
+/// and the context menu offer Run Now, Edit, Pause/Resume and Delete.
 final class AutomationListRowView: NSView {
     static let height: CGFloat = 52
 
@@ -538,53 +538,45 @@ final class AutomationListRowView: NSView {
     var onAction: ((AutomationAction) -> Void)?
     private(set) var automationId: String?
 
-    private let theme: AppTheme
-    private let background: ChromeRowBackgroundView
-    private let nameLabel = NSTextField(labelWithString: "")
-    private let promptLabel = NSTextField(labelWithString: "")
-    private let scheduleLabel = NSTextField(labelWithString: "")
-    private let folderLabel = NSTextField(labelWithString: "")
-    private let nextRunLabel = NSTextField(labelWithString: "")
-    private let nextRunDetailLabel = NSTextField(labelWithString: "")
-    private let lastRunMark = ChromeStatusMark()
-    private let lastRunLabel = NSTextField(labelWithString: "")
-    private let lastRunDetailLabel = NSTextField(labelWithString: "")
-    private let agentLabel = NSTextField(labelWithString: "")
-    private let menuButton: ChromeIconButton
+    private let background = ShellRowSurfaceView()
+    private let nameLabel = AutoUIThemedLabel("", size: Typography.rowSize, weight: .medium)
+    private let promptLabel = AutoUIThemedLabel("", size: Typography.smallSize) { $0.mutedForeground }
+    private let scheduleLabel = AutoUIThemedLabel("", size: Typography.rowSize)
+    private let nextRunLabel = AutoUIThemedLabel("", size: Typography.smallSize) { $0.mutedForeground }
+    private let lastRunPill = AutoUIPillView()
+    private let lastRunLabel = AutoUIThemedLabel("", size: Typography.rowSize) { $0.mutedForeground }
+    private let lastRunDetailLabel = AutoUIThemedLabel("", size: Typography.smallSize) { $0.mutedForeground }
+    private let agentLabel = AutoUIThemedLabel("", size: Typography.rowSize)
+    private let folderLabel = AutoUIThemedLabel("", size: Typography.smallSize) { $0.mutedForeground }
+    private let statePill = AutoUIPillView()
+    private let menuButton = ShellGhostButton(symbol: "ellipsis", label: "Automation Actions", size: 24, symbolSize: 13)
     private var item: AutomationListView.Item?
     private var isSelected = false
     private var isFocused = false
     private var isHovered = false
 
-    init(theme: AppTheme) {
-        self.theme = theme
-        background = ChromeRowBackgroundView(theme: theme)
-        menuButton = ChromeIconButton(symbolName: "ellipsis", accessibilityLabel: "Automation Actions", target: nil, action: nil)
-        super.init(frame: .zero)
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
         identifier = NSUserInterfaceItemIdentifier("automations-row")
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
 
-        background.inset = Chrome.Space.page - Chrome.Space.s8
         background.translatesAutoresizingMaskIntoConstraints = true
+        background.horizontalInset = 0
         addSubview(background)
-        for label in [
-            nameLabel, promptLabel, scheduleLabel, folderLabel, nextRunLabel,
-            nextRunDetailLabel, lastRunLabel, lastRunDetailLabel, agentLabel,
-        ] {
-            label.lineBreakMode = .byTruncatingTail
-            label.cell?.truncatesLastVisibleLine = true
-            addSubview(label)
-        }
+        folderLabel.font = Typography.mono(Typography.smallSize)
         folderLabel.lineBreakMode = .byTruncatingHead
-        lastRunMark.translatesAutoresizingMaskIntoConstraints = true
-        addSubview(lastRunMark)
+        for view in [
+            nameLabel, promptLabel, scheduleLabel, nextRunLabel, lastRunPill, lastRunLabel,
+            lastRunDetailLabel, agentLabel, folderLabel, statePill,
+        ] as [NSView] {
+            addSubview(view)
+        }
         menuButton.target = self
         menuButton.action = #selector(menuClicked(_:))
-        // Laid out by frame; its own 24 pt size constraints must match from the start.
+        // Laid out by frame.
         menuButton.translatesAutoresizingMaskIntoConstraints = true
-        menuButton.frame = NSRect(x: 0, y: 0, width: Chrome.iconButtonSize, height: Chrome.iconButtonSize)
-        menuButton.apply(theme: theme)
+        menuButton.frame = NSRect(x: 0, y: 0, width: 24, height: 24)
         addSubview(menuButton)
 
         setAccessibilityElement(true)
@@ -608,49 +600,45 @@ final class AutomationListRowView: NSView {
 
     private func render(now: Date) {
         guard let item else { return }
-        let colors = theme.colors
         let automation = item.automation
 
-        nameLabel.setChromeText(automation.name, font: ChromeFont.sans(size: 13, weight: .medium), color: colors.textPrimary)
-        promptLabel.setChromeText(AutomationFormat.firstLine(of: automation.prompt), font: ChromeFont.meta, color: colors.textMuted)
+        nameLabel.stringValue = automation.name
+        promptLabel.stringValue = AutomationFormat.firstLine(of: automation.prompt)
 
         switch automation.cadence {
         case .custom(let expression):
-            scheduleLabel.setChromeText(expression, font: ChromeFont.mono, color: colors.textPrimary)
+            scheduleLabel.font = Typography.mono(Typography.rowSize)
+            scheduleLabel.stringValue = expression
         case let cadence:
-            scheduleLabel.setChromeText(cadence.summary(), font: ChromeFont.label, color: colors.textPrimary)
+            scheduleLabel.font = Typography.ui(Typography.rowSize)
+            scheduleLabel.stringValue = cadence.summary()
         }
-        folderLabel.setChromeText(AutomationFormat.path(automation.folder), font: ChromeFont.mono, color: colors.textMuted)
-        folderLabel.toolTip = automation.folder
-
         if let nextRun = item.nextRun {
-            nextRunLabel.setChromeText(AutomationFormat.dateTime(nextRun), font: ChromeFont.label, color: colors.textPrimary)
-            nextRunDetailLabel.setChromeText(AutomationFormat.relative(nextRun, now: now), font: ChromeFont.meta, color: colors.textMuted)
+            nextRunLabel.stringValue = "Next \(AutomationFormat.relative(nextRun, now: now))"
+            nextRunLabel.toolTip = AutomationFormat.dateTime(nextRun)
         } else {
-            nextRunLabel.setChromeText(automation.enabled ? "—" : "Paused", font: ChromeFont.label, color: colors.textMuted)
-            nextRunDetailLabel.stringValue = ""
+            nextRunLabel.stringValue = automation.enabled ? "No next run" : "Paused"
+            nextRunLabel.toolTip = nil
         }
 
         if let lastRun = item.lastRun {
-            let color = AutomationStatusStyle.color(for: lastRun.status, in: colors)
-            lastRunMark.isHidden = false
-            lastRunMark.shape = AutomationStatusStyle.shape(for: lastRun.status)
-            lastRunMark.color = color
-            lastRunLabel.setStatusText(lastRun.status.label, color: color)
-            lastRunDetailLabel.setChromeText(
-                AutomationFormat.relative(lastRun.finishedAt ?? lastRun.startedAt, now: now),
-                font: ChromeFont.meta,
-                color: colors.textMuted
-            )
-            lastRunLabel.toolTip = lastRun.message
+            lastRunPill.isHidden = false
+            lastRunLabel.isHidden = true
+            lastRunPill.configure(AutomationPill.run(lastRun.status), now: now)
+            lastRunPill.toolTip = lastRun.message
+            lastRunDetailLabel.stringValue = AutomationFormat.relative(lastRun.finishedAt ?? lastRun.startedAt, now: now)
         } else {
-            lastRunMark.isHidden = true
-            lastRunLabel.setChromeText("Never", font: ChromeFont.label, color: colors.textMuted)
+            lastRunPill.isHidden = true
+            lastRunLabel.isHidden = false
+            lastRunLabel.stringValue = "Never"
             lastRunDetailLabel.stringValue = ""
-            lastRunLabel.toolTip = nil
         }
 
-        agentLabel.setChromeText(AutomationFormat.agentName(automation.agentId), font: ChromeFont.label, color: colors.textPrimary)
+        agentLabel.stringValue = AutomationFormat.agentName(automation.agentId)
+        folderLabel.stringValue = AutomationFormat.path(automation.folder)
+        folderLabel.toolTip = automation.folder
+        statePill.configure(AutomationPill.state(of: automation, lastRun: item.lastRun), now: now)
+
         setAccessibilityLabel("\(automation.name), \(automation.cadence.summary()), \(automation.enabled ? "enabled" : "paused")")
         needsLayout = true
     }
@@ -675,32 +663,36 @@ final class AutomationListRowView: NSView {
         super.layout()
         background.frame = bounds
         let frames = AutomationListColumns.frames(width: bounds.width)
-        let firstLine: CGFloat = 18
+        let firstLine: CGFloat = 17
         let secondLine: CGFloat = 35
         let middle = bounds.height / 2
 
         place(nameLabel, in: frames.name, centerY: firstLine)
         place(promptLabel, in: frames.name, centerY: secondLine)
-        place(scheduleLabel, in: frames.schedule, centerY: middle)
-        place(folderLabel, in: frames.folder, centerY: middle)
-        let nextHasDetail = !nextRunDetailLabel.stringValue.isEmpty
-        place(nextRunLabel, in: frames.nextRun, centerY: nextHasDetail ? firstLine : middle)
-        place(nextRunDetailLabel, in: frames.nextRun, centerY: secondLine)
+        place(scheduleLabel, in: frames.schedule, centerY: firstLine)
+        place(nextRunLabel, in: frames.schedule, centerY: secondLine)
 
         let lastHasDetail = !lastRunDetailLabel.stringValue.isEmpty
         let lastLine = lastHasDetail ? firstLine : middle
-        var lastRange = frames.lastRun
-        if !lastRunMark.isHidden {
-            let side = lastRunMark.size
-            lastRunMark.frame = NSRect(x: lastRange.lowerBound, y: floor(lastLine - side / 2), width: side, height: side)
-            lastRange = (lastRange.lowerBound + side + 6)...lastRange.upperBound
-        }
+        let lastRange = frames.lastRun
+        lastRunPill.frame = NSRect(
+            x: lastRange.lowerBound,
+            y: floor(lastLine - 10),
+            width: min(lastRunPill.intrinsicContentSize.width, lastRange.width),
+            height: 20
+        )
         place(lastRunLabel, in: lastRange, centerY: lastLine)
-        place(lastRunDetailLabel, in: frames.lastRun, centerY: secondLine)
-        place(agentLabel, in: frames.agent, centerY: middle)
+        place(lastRunDetailLabel, in: lastRange, centerY: secondLine)
+        place(agentLabel, in: frames.agent, centerY: firstLine)
+        place(folderLabel, in: frames.agent, centerY: secondLine)
+        statePill.frame = NSRect(
+            x: frames.state.lowerBound,
+            y: floor(middle - 10),
+            width: min(statePill.intrinsicContentSize.width, frames.state.width),
+            height: 20
+        )
 
-        let side = Chrome.iconButtonSize
-        menuButton.frame = NSRect(x: frames.menu.lowerBound, y: floor(middle - side / 2), width: side, height: side)
+        menuButton.frame = NSRect(x: frames.menu.lowerBound, y: floor(middle - 12), width: 24, height: 24)
     }
 
     private func place(_ label: NSTextField, in column: ClosedRange<CGFloat>, centerY: CGFloat) {
@@ -828,44 +820,30 @@ struct AutomationTemplate: Equatable {
 }
 
 /// A template card (category, name, description, schedule), or with no
-/// template the blank "New automation" card. 8 pt radius, raised fill,
-/// `hover` under the pointer.
-final class AutomationTemplateCardView: NSView {
-    private static let height: CGFloat = 128
+/// template the blank "New automation" card: the board card look
+/// (`rounded-xl border-border/60 bg-card/40`) with the accent fill on hover.
+final class AutomationTemplateCardView: InteractiveView {
+    private static let height: CGFloat = 132
 
-    private let theme: AppTheme
-    private let action: () -> Void
-    private var isHovered = false {
-        didSet { refreshFill() }
-    }
-
-    init(template: AutomationTemplate?, theme: AppTheme, action: @escaping () -> Void) {
-        self.theme = theme
-        self.action = action
+    init(template: AutomationTemplate?, action: @escaping () -> Void) {
         super.init(frame: .zero)
+        onClick = action
         translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.cornerRadius = Chrome.Radius.card
-        layer?.borderWidth = Chrome.hairline
+        layer?.cornerRadius = Radius.xl
+        layer?.borderWidth = 1
         heightAnchor.constraint(equalToConstant: Self.height).isActive = true
         build(template: template)
-        refreshFill()
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityLabel(template.map { "\($0.label) template" } ?? "New automation")
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
+        applyPalette(palette)
     }
 
     private func build(template: AutomationTemplate?) {
-        let colors = theme.colors
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Chrome.Space.s4
+        stack.spacing = 4
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
@@ -873,84 +851,55 @@ final class AutomationTemplateCardView: NSView {
         let detail: String
         let footer: String
         if let template {
-            let category = NSTextField(labelWithString: "")
-            category.setEyebrowText(template.category, color: colors.textMuted)
+            let category = AutoUIThemedLabel(template.category, size: Typography.smallSize, weight: .medium) { $0.mutedForeground }
             stack.addArrangedSubview(category)
+            stack.setCustomSpacing(6, after: category)
             title = template.label
             detail = template.description
             footer = template.cadence.summary()
         } else {
-            let icon = NSImageView(image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil) ?? NSImage())
-            icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
-            icon.contentTintColor = colors.textMuted
-            stack.addArrangedSubview(icon)
+            let image = NSImageView(image: NSImage.symbol("plus", size: 13) ?? NSImage())
+            PaletteCenter.shared.addObserver(image) { [weak image] palette in image?.contentTintColor = palette.mutedForeground }
+            image.contentTintColor = PaletteCenter.shared.palette.mutedForeground
+            stack.addArrangedSubview(image)
+            stack.setCustomSpacing(6, after: image)
             title = "New automation"
             detail = "Write your own prompt and schedule."
             footer = ""
         }
-        stack.addArrangedSubview(AutomationViews.label(title, font: ChromeFont.sans(size: 13, weight: .medium), color: colors.textPrimary))
-        let description = AutomationViews.wrappingLabel(ChromeText.attributed(
-            detail,
-            font: ChromeFont.meta,
-            color: colors.textMuted,
-            lineBreakMode: .byWordWrapping
-        ))
+        stack.addArrangedSubview(AutoUIThemedLabel(title, size: Typography.bodySize, weight: .semibold))
+        let description = AutoUIThemedLabel(detail, size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
         description.maximumNumberOfLines = 3
+        description.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         stack.addArrangedSubview(description)
         description.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
-        let footerLabel = AutomationViews.label(footer, font: ChromeFont.meta, color: colors.textMuted)
+        let footerLabel = AutoUIThemedLabel(footer, size: Typography.smallSize, weight: .medium) { $0.mutedForeground }
+        footerLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(footerLabel)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.s12),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.s12),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: Chrome.Space.s12),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
             footerLabel.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             footerLabel.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor),
-            footerLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Chrome.Space.s12),
+            footerLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
         ])
     }
 
-    private func refreshFill() {
-        let colors = theme.colors
-        layer?.backgroundColor = (isHovered ? colors.hover : colors.raised).cgColor
-        layer?.borderColor = colors.borderSubtle.cgColor
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = (isHovered ? palette.accent : palette.card.withAlphaComponent(0.4)).cgColor
+        layer?.borderColor = palette.border.withAlphaComponent(palette.border.alphaComponent * 0.6).cgColor
+        alphaValue = isPressed ? 0.85 : 1
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         super.hitTest(point) == nil ? nil : self
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for area in trackingAreas {
-            removeTrackingArea(area)
-        }
-        addTrackingArea(NSTrackingArea(
-            rect: .zero,
-            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
-            owner: self
-        ))
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        action()
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-
     override func accessibilityPerformPress() -> Bool {
-        action()
+        onClick?()
         return true
     }
 }

@@ -1,20 +1,22 @@
 import AppKit
 
-/// The New Automation / Edit Automation sheet: a Folio floating surface on
-/// the main window with the automation's name, prompt, agent, folder, where
-/// runs work, session, schedule, grace, precheck, model and whether it is
-/// enabled. Save stays disabled until the prompt, folder and schedule are
-/// valid; Return in a one-line field saves and Esc cancels.
-final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDelegate {
-    /// Writes the automation; false keeps the sheet open.
+/// The New Automation / Edit Automation dialog: a Soprano Agents form dialog
+/// (`OverlayWindow` card over the dimmed window, labelled fields, selects,
+/// segmented controls and a switch, Cancel and Save in the footer) with the
+/// automation's name, prompt, agent, model, folder, where runs work, schedule,
+/// session, grace, precheck and whether it is enabled. Save stays disabled
+/// until the prompt, folder and schedule are valid; Return in a one-line
+/// field or ⌘Return saves, Esc cancels. A failed write shows above the
+/// buttons and keeps the dialog open.
+@MainActor
+final class AutomationEditorPanel: NSObject {
+    /// Writes the automation; false keeps the dialog open with an error.
     var onSave: ((Automation) -> Bool)?
-    /// The sheet is done, saved or cancelled; the presenter ends it.
+    /// The dialog closed, saved or cancelled.
     var onClose: (() -> Void)?
 
-    private static let width: CGFloat = 620
-    private static let padding: CGFloat = 20
-    private static let labelWidth: CGFloat = 96
-    private static let promptHeight: CGFloat = 148
+    static let width: CGFloat = 560
+    private static let promptHeight: CGFloat = 96
 
     private enum Cadence: Int, CaseIterable {
         case hourly
@@ -41,52 +43,43 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     private static let timeoutOptions: [(seconds: Int, title: String)] = [
         (30, "30 sec"), (60, "1 min"), (120, "2 min"), (300, "5 min"), (600, "10 min"),
     ]
-    private static let chooseFolderTag = -1
+    /// The folder menu's values besides folder paths.
+    private static let chooseFolderValue = "\u{1}choose"
+    private static let noFolderValue = ""
 
-    private var theme: AppTheme
+    let window = ShellDialogOverlayWindow()
     private let existing: Automation?
     private let takenIds: Set<String>
     private var folderChoices: [String]
     private var selectedFolder: String?
+    /// The cron the preset controls described last, to seed Custom with.
+    private var lastPresetExpression: String?
 
-    private let surface = AutomationEditorSurfaceView()
-    private let contentStack = NSStackView()
-    private let titleLabel = NSTextField(labelWithString: "")
-    private var formLabels: [NSTextField] = []
-    private var fieldSurfaces: [ChromeFieldView] = []
-    private var styledFields: [(field: NSTextField, font: NSFont, placeholder: String)] = []
-
-    private let nameField = NSTextField(string: "")
-    private let promptSurface: ChromeFieldView
-    private let promptView = AutomationPromptTextView()
-    private let promptNote = NSTextField(labelWithString: "")
-    private let agentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let folderPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let folderNote = NSTextField(labelWithString: "")
-    private let workspaceControl: ChromeSegmentedControl
-    private let baseBranchField = NSTextField(string: "")
-    private var baseBranchSurface: ChromeFieldView!
-    private let sessionControl: ChromeSegmentedControl
-    private let cadencePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let minuteLabel = NSTextField(labelWithString: "")
-    private let minuteField = NSTextField(string: "")
-    private var minuteSurface: ChromeFieldView!
-    private let weekdayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private var weekdaySurface: ChromeFieldView!
-    private let timePicker = NSDatePicker()
-    private var timeSurface: ChromeFieldView!
-    private let cronField = NSTextField(string: "")
-    private var cronSurface: ChromeFieldView!
-    private let scheduleNote = NSTextField(labelWithString: "")
-    private let gracePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let precheckField = NSTextField(string: "")
-    private let timeoutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let modelField = NSTextField(string: "")
-    private let enabledSwitch: ChromeSwitch
-    private let rule: ChromeRuleView
-    private let footerLabel = NSTextField(labelWithString: "")
-    private let cancelButton: ChromeButton
-    private let saveButton: ChromeButton
+    private let nameField = AutoUIInputField(placeholder: "Weekday repo audit")
+    private let promptView: AutomationPromptTextView
+    private let promptBox: AutoUITextBox
+    private let promptNote = AutoUIThemedLabel("", size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+    private let agentSelect: AutoUISelectButton
+    private let modelField = AutoUIInputField(placeholder: "CLI default", monospaced: true)
+    private let folderSelect: AutoUISelectButton
+    private let folderNote = AutoUIThemedLabel("", size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+    private let workspaceControl: AutoUISegmentedControl
+    private let baseBranchField = AutoUIInputField(placeholder: "origin's default branch", monospaced: true)
+    private let sessionControl: AutoUISegmentedControl
+    private let cadenceSelect: AutoUISelectButton
+    private let minuteLabel = AutoUIThemedLabel("at minute", size: Typography.rowSize) { $0.mutedForeground }
+    private let minuteField = AutoUIInputField(placeholder: "0")
+    private let weekdaySelect: AutoUISelectButton
+    private let timeBox = AutomationTimeBox()
+    private let cronField = AutoUIInputField(placeholder: "0 9 * * 1-5", monospaced: true)
+    private let scheduleNote = AutoUIThemedLabel("", size: Typography.smallSize, wrapping: true) { $0.mutedForeground }
+    private let graceSelect: AutoUISelectButton
+    private let precheckField = AutoUIInputField(placeholder: "gh pr list --json number -q '.[0].number'", monospaced: true)
+    private let timeoutSelect: AutoUISelectButton
+    private let enabledSwitch: AutoUISwitchControl
+    private let errorLabel = AutoUIThemedLabel("", size: Typography.smallSize, wrapping: true) { $0.errorForeground }
+    private let cancelButton = TextButton("Cancel", variant: .outline, size: .regular)
+    private let saveButton: TextButton
 
     /// - Parameters:
     ///   - automation: the automation to edit; nil creates one.
@@ -95,46 +88,66 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     ///   - takenIds: every id in settings.json, valid or not, for a new id.
     ///   - projectDirectories: roots whose child folders the folder list offers.
     init(
-        theme: AppTheme,
         automation: Automation?,
         template: AutomationTemplate?,
         automations: [Automation],
         takenIds: Set<String>,
         projectDirectories: [String]
     ) {
-        self.theme = theme
         existing = automation
         self.takenIds = takenIds
         folderChoices = Self.folderChoices(automations: automations, projectDirectories: projectDirectories)
         selectedFolder = automation?.folder
-        promptSurface = ChromeFieldView(theme: theme)
-        workspaceControl = ChromeSegmentedControl(titles: ["Folder", "New worktree"], theme: theme)
-        sessionControl = ChromeSegmentedControl(titles: ["Fresh", "Reuse"], theme: theme)
-        enabledSwitch = ChromeSwitch(isOn: automation?.enabled ?? true, theme: theme)
-        rule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
-        cancelButton = ChromeButton(title: "Cancel", theme: theme)
-        saveButton = ChromeButton(title: automation == nil ? "Create" : "Save Changes", theme: theme, kind: .ink)
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 640),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
+        let promptView = AutomationPromptTextView()
+        self.promptView = promptView
+        promptBox = AutoUITextBox(textView: promptView, width: Self.width - 50)
+        agentSelect = AutoUISelectButton(options: [], selected: "", width: nil, accessibilityLabel: "Agent")
+        folderSelect = AutoUISelectButton(options: [], selected: "", width: nil, accessibilityLabel: "Folder", monospaced: true)
+        workspaceControl = AutoUISegmentedControl(titles: ["Folder", "New worktree"], selectedIndex: 0, accessibilityLabel: "Runs in")
+        sessionControl = AutoUISegmentedControl(titles: ["Fresh", "Reuse"], selectedIndex: 0, accessibilityLabel: "Session")
+        cadenceSelect = AutoUISelectButton(
+            options: Cadence.allCases.map { AutoUISelectOption(title: $0.title, value: "\($0.rawValue)") },
+            selected: "\(Cadence.weekdays.rawValue)",
+            width: 124,
+            accessibilityLabel: "Schedule"
         )
-        backgroundColor = .clear
-        isOpaque = false
-        hasShadow = true
-        isReleasedWhenClosed = false
-        autorecalculatesKeyViewLoop = true
+        weekdaySelect = AutoUISelectButton(
+            options: Calendar.current.weekdaySymbols.enumerated().map { AutoUISelectOption(title: $1, value: "\($0)") },
+            selected: "1",
+            width: 132,
+            accessibilityLabel: "Day"
+        )
+        graceSelect = AutoUISelectButton(options: [], selected: "", width: nil, accessibilityLabel: "Grace")
+        timeoutSelect = AutoUISelectButton(options: [], selected: "", width: 100, accessibilityLabel: "Precheck timeout")
+        enabledSwitch = AutoUISwitchControl(isOn: automation?.enabled ?? true, label: "Enabled")
+        saveButton = TextButton(automation == nil ? "Create" : "Save Changes", variant: .primary, size: .regular)
+        super.init()
 
-        build()
         load(automation: automation, template: template)
-        apply(theme: theme)
+        build()
         refreshScheduleControls()
+        refreshSessionControl()
         refreshValidation()
-        initialFirstResponder = nameField
     }
 
-    override var canBecomeKey: Bool { true }
+    /// The dialog's card, for tests and the snapshot harness.
+    private(set) var card: ShellDialogCardView?
+
+    /// Shows the dialog over `parent` with the keyboard in the name field.
+    func present(over parent: NSWindow) {
+        window.owner = self
+        window.present(over: parent, focus: nameField.field)
+    }
+
+    /// Sizes the dialog to `parent` without showing it (tests, snapshots).
+    func layout(over parent: NSWindow) {
+        window.cover(parent)
+    }
+
+    /// Closes the dialog without saving.
+    func dismiss() {
+        window.dismiss()
+    }
 
     // MARK: - Folders
 
@@ -170,44 +183,27 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     }
 
     private func populateFolders() {
-        folderPopup.removeAllItems()
-        let menu = folderPopup.menu ?? NSMenu()
         if let selectedFolder, !folderChoices.contains(selectedFolder) {
             folderChoices.insert(selectedFolder, at: 0)
         }
+        var options: [AutoUISelectOption] = []
         if selectedFolder == nil {
-            let placeholder = NSMenuItem(title: "Choose a folder", action: nil, keyEquivalent: "")
-            placeholder.isEnabled = false
-            menu.addItem(placeholder)
+            options.append(AutoUISelectOption(title: "Choose a folder", value: Self.noFolderValue, isEnabled: false))
         }
         for folder in folderChoices {
-            let item = NSMenuItem(title: AutomationFormat.path(folder), action: nil, keyEquivalent: "")
-            item.representedObject = folder
-            item.toolTip = folder
-            menu.addItem(item)
+            options.append(AutoUISelectOption(title: AutomationFormat.path(folder), value: folder, toolTip: folder))
         }
-        if !folderChoices.isEmpty {
-            menu.addItem(.separator())
-        }
-        let choose = NSMenuItem(title: "Choose Folder…", action: nil, keyEquivalent: "")
-        choose.tag = Self.chooseFolderTag
-        menu.addItem(choose)
-
-        if let selectedFolder,
-           let index = menu.items.firstIndex(where: { $0.representedObject as? String == selectedFolder }) {
-            folderPopup.selectItem(at: index)
-        } else {
-            folderPopup.selectItem(at: 0)
-        }
+        options.append(AutoUISelectOption(title: "Choose Folder…", value: Self.chooseFolderValue, separatorBefore: !options.isEmpty))
+        folderSelect.setOptions(options, selected: selectedFolder ?? Self.noFolderValue)
+        folderSelect.toolTip = selectedFolder
     }
 
-    @objc private func folderChanged(_ sender: NSPopUpButton) {
-        guard let item = sender.selectedItem else { return }
-        if item.tag == Self.chooseFolderTag {
+    private func folderChanged(_ value: String) {
+        if value == Self.chooseFolderValue {
             chooseFolder()
             return
         }
-        selectedFolder = item.representedObject as? String
+        selectedFolder = value.isEmpty ? nil : value
         populateFolders()
         refreshValidation()
     }
@@ -223,7 +219,7 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         if let selectedFolder {
             panel.directoryURL = URL(fileURLWithPath: selectedFolder, isDirectory: true)
         }
-        panel.beginSheetModal(for: self) { [weak self] response in
+        panel.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if response == .OK, let url = panel.url {
@@ -238,296 +234,227 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     // MARK: - Building
 
     private func build() {
-        let root = NSView()
-        root.translatesAutoresizingMaskIntoConstraints = true
-        root.autoresizingMask = [.width, .height]
-        contentView = root
+        let card = ShellDialogCardView()
+        self.card = card
+        card.translatesAutoresizingMaskIntoConstraints = false
+        window.backdrop.addSubview(card)
+        let preferredWidth = card.widthAnchor.constraint(equalToConstant: Self.width)
+        preferredWidth.priority = .shellDialogPreferred
+        NSLayoutConstraint.activate([
+            card.centerXAnchor.constraint(equalTo: window.backdrop.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: window.backdrop.centerYAnchor),
+            preferredWidth,
+            card.widthAnchor.constraint(lessThanOrEqualTo: window.backdrop.widthAnchor, constant: -32),
+            card.heightAnchor.constraint(lessThanOrEqualTo: window.backdrop.heightAnchor, constant: -32),
+        ])
+        let container = card.content
+        window.autorecalculatesKeyViewLoop = true
+        window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
 
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(surface)
+        let body = makeBody()
 
-        contentStack.orientation = .vertical
-        contentStack.alignment = .leading
-        contentStack.spacing = Chrome.Space.s12
-        contentStack.translatesAutoresizingMaskIntoConstraints = false
-        surface.addSubview(contentStack)
+        // The form scrolls when the window is too short for it; the footer stays.
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.hasHorizontalScroller = false
+        let document = AutomationFlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = document
+        body.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(body)
+        let fitsBody = scrollView.heightAnchor.constraint(equalTo: document.heightAnchor)
+        fitsBody.priority = NSLayoutConstraint.Priority(440)
 
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        contentStack.addArrangedSubview(titleLabel)
-        contentStack.setCustomSpacing(Chrome.Space.s16, after: titleLabel)
+        let footer = ShellDialogFooterView()
+        cancelButton.onClick = { [weak self] in self?.cancel() }
+        saveButton.onClick = { [weak self] in self?.submit() }
+        let buttons = NSStackView(views: [cancelButton, saveButton])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
 
-        // Name
-        nameField.identifier = NSUserInterfaceItemIdentifier("automation-editor-name")
-        addRow("Name", fieldSurface(nameField, font: ChromeFont.row, placeholder: "Weekday repo audit"), fills: true)
+        for view in [scrollView, footer, buttons] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+        container.addSubview(scrollView)
+        container.addSubview(footer)
+        footer.addSubview(buttons)
+        NSLayoutConstraint.activate([
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            document.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            body.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            body.topAnchor.constraint(equalTo: document.topAnchor),
+            document.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+            fitsBody,
 
-        // Prompt
-        promptView.delegate = self
+            scrollView.topAnchor.constraint(equalTo: container.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            footer.topAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            footer.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            footer.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            footer.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            buttons.topAnchor.constraint(equalTo: footer.topAnchor, constant: 16),
+            buttons.bottomAnchor.constraint(equalTo: footer.bottomAnchor, constant: -16),
+            buttons.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -24),
+            buttons.leadingAnchor.constraint(greaterThanOrEqualTo: footer.leadingAnchor, constant: 24),
+        ])
+    }
+
+    private func makeBody() -> NSStackView {
+        let title = AutoUIThemedLabel(existing == nil ? "New Automation" : "Edit Automation", size: 16, weight: .semibold)
+        let message = AutoUIThemedLabel(
+            "Sends the prompt to an agent on a schedule while Soprano is open, until you pause it.",
+            wrapping: true
+        ) { $0.mutedForeground }
+
+        nameField.field.identifier = NSUserInterfaceItemIdentifier("automation-editor-name")
+        nameField.field.setAccessibilityLabel("Name")
         promptView.placeholder = "Review the repository health and summarize what needs attention."
-        promptView.onCancel = { [weak self] in self?.cancel() }
-        promptView.onFocusChange = { [weak self] focused in self?.promptSurface.isFocused = focused }
-        promptView.isRichText = false
-        promptView.allowsUndo = true
-        promptView.drawsBackground = false
+        promptView.delegate = self
         promptView.isAutomaticQuoteSubstitutionEnabled = false
         promptView.isAutomaticDashSubstitutionEnabled = false
-        promptView.textContainerInset = NSSize(width: 4, height: 6)
-        promptView.isVerticallyResizable = true
-        promptView.isHorizontallyResizable = false
-        promptView.autoresizingMask = [.width]
-        promptView.minSize = .zero
-        promptView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
-        promptView.textContainer?.widthTracksTextView = true
         promptView.setAccessibilityLabel("Prompt")
-        let promptScroll = NSScrollView()
-        promptScroll.drawsBackground = false
-        promptScroll.hasVerticalScroller = true
-        promptScroll.autohidesScrollers = true
-        promptScroll.borderType = .noBorder
-        promptScroll.translatesAutoresizingMaskIntoConstraints = false
-        promptView.frame = NSRect(x: 0, y: 0, width: Self.width - Self.labelWidth - 60, height: Self.promptHeight)
-        promptScroll.documentView = promptView
-        promptSurface.addSubview(promptScroll)
-        NSLayoutConstraint.activate([
-            promptSurface.heightAnchor.constraint(equalToConstant: Self.promptHeight),
-            promptScroll.leadingAnchor.constraint(equalTo: promptSurface.leadingAnchor, constant: 2),
-            promptScroll.trailingAnchor.constraint(equalTo: promptSurface.trailingAnchor, constant: -2),
-            promptScroll.topAnchor.constraint(equalTo: promptSurface.topAnchor, constant: 2),
-            promptScroll.bottomAnchor.constraint(equalTo: promptSurface.bottomAnchor, constant: -2),
-        ])
-        fieldSurfaces.append(promptSurface)
-        addRow("Prompt", column([promptSurface, note(promptNote)]), fills: true)
+        promptView.onFocusChange = { [weak self] focused in self?.promptBox.setFocused(focused) }
+        promptBox.heightAnchor.constraint(equalToConstant: Self.promptHeight).isActive = true
 
-        // Agent
-        agentPopup.setAccessibilityLabel("Agent")
-        addRow("Agent", popupSurface(agentPopup, width: 220, action: #selector(agentChanged(_:))), fills: false)
-
-        // Folder
-        folderPopup.setAccessibilityLabel("Folder")
-        let folderSurface = popupSurface(folderPopup, width: nil, font: ChromeFont.mono, action: #selector(folderChanged(_:)))
-        addRow("Folder", column([folderSurface, note(folderNote)]), fills: true)
-
-        // Runs in
-        workspaceControl.target = self
-        workspaceControl.action = #selector(workspaceChanged(_:))
-        workspaceControl.setAccessibilityLabel("Runs in")
-        baseBranchSurface = fieldSurface(baseBranchField, font: ChromeFont.mono, placeholder: "origin's default branch", width: 220)
-        baseBranchField.setAccessibilityLabel("Base branch")
-        baseBranchField.toolTip = "The branch each run's worktree starts from"
-        addRow("Runs in", line([workspaceControl, baseBranchSurface]), fills: false)
-
-        // Session
-        sessionControl.target = self
-        sessionControl.action = #selector(sessionChanged(_:))
-        sessionControl.setAccessibilityLabel("Session")
-        addRow("Session", sessionControl, fills: false)
-
-        // Schedule
-        cadencePopup.setAccessibilityLabel("Schedule")
-        cadencePopup.addItems(withTitles: Cadence.allCases.map(\.title))
-        let cadenceSurface = popupSurface(cadencePopup, width: 128, action: #selector(cadenceChanged(_:)))
-        minuteLabel.setContentHuggingPriority(.required, for: .horizontal)
-        minuteSurface = fieldSurface(minuteField, font: ChromeFont.sans(size: 12, tabular: true), placeholder: "0", width: 52)
-        minuteField.setAccessibilityLabel("Minute past the hour")
-        minuteField.toolTip = "0–59"
-        weekdayPopup.setAccessibilityLabel("Day")
-        weekdayPopup.addItems(withTitles: Calendar.current.weekdaySymbols)
-        weekdaySurface = popupSurface(weekdayPopup, width: 128, action: #selector(scheduleInputChanged(_:)))
-        timePicker.datePickerStyle = .textFieldAndStepper
-        timePicker.datePickerElements = .hourMinute
-        timePicker.isBezeled = false
-        timePicker.isBordered = false
-        timePicker.drawsBackground = false
-        timePicker.font = ChromeFont.sans(size: 12, tabular: true)
-        timePicker.target = self
-        timePicker.action = #selector(scheduleInputChanged(_:))
-        timePicker.setAccessibilityLabel("Time")
-        timePicker.translatesAutoresizingMaskIntoConstraints = false
-        timeSurface = ChromeFieldView(theme: theme)
-        timeSurface.addSubview(timePicker)
-        NSLayoutConstraint.activate([
-            timeSurface.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-            timePicker.leadingAnchor.constraint(equalTo: timeSurface.leadingAnchor, constant: 6),
-            timePicker.trailingAnchor.constraint(equalTo: timeSurface.trailingAnchor, constant: -2),
-            timePicker.centerYAnchor.constraint(equalTo: timeSurface.centerYAnchor),
-        ])
-        fieldSurfaces.append(timeSurface)
-        cronSurface = fieldSurface(cronField, font: ChromeFont.mono, placeholder: "0 9 * * 1-5", width: 260)
-        cronField.setAccessibilityLabel("Cron schedule")
-        let scheduleLine = line([cadenceSurface, minuteLabel, minuteSurface, weekdaySurface, timeSurface, cronSurface])
-        addRow("Schedule", column([scheduleLine, note(scheduleNote)]), fills: true)
-
-        // Grace
-        gracePopup.setAccessibilityLabel("Grace")
-        gracePopup.toolTip = "How late a run due while the Mac slept or Soprano was closed may still start"
-        addRow("Grace", popupSurface(gracePopup, width: 160, action: #selector(scheduleInputChanged(_:))), fills: false)
-
-        // Precheck
-        precheckField.setAccessibilityLabel("Precheck")
-        precheckField.toolTip = "A shell command run in the folder before each scheduled run; the run starts only when it exits 0"
-        timeoutPopup.setAccessibilityLabel("Precheck timeout")
-        timeoutPopup.toolTip = "How long the precheck may take"
-        let precheckSurface = fieldSurface(precheckField, font: ChromeFont.mono, placeholder: "gh pr list --json number -q '.[0].number'")
-        precheckSurface.setContentHuggingPriority(.init(1), for: .horizontal)
-        let precheckLine = line([precheckSurface, popupSurface(timeoutPopup, width: 104, action: #selector(scheduleInputChanged(_:)))])
-        precheckLine.distribution = .fill
-        addRow("Precheck", precheckLine, fills: true)
-
-        // Model
-        modelField.setAccessibilityLabel("Model")
-        addRow("Model", fieldSurface(modelField, font: ChromeFont.label, placeholder: "CLI default", width: 220), fills: false)
-
-        // Enabled
-        enabledSwitch.setAccessibilityLabel("Enabled")
-        addRow("Enabled", enabledSwitch, fills: false)
-
-        // Footer
-        contentStack.setCustomSpacing(Chrome.Space.s16, after: contentStack.arrangedSubviews.last ?? titleLabel)
-        contentStack.addArrangedSubview(rule)
-        rule.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelClicked)
-        saveButton.target = self
-        saveButton.action = #selector(saveClicked)
-        footerLabel.lineBreakMode = .byTruncatingTail
-        footerLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let footer = AutomationViews.spreadRow(leading: [footerLabel], trailing: [cancelButton, saveButton])
-        contentStack.addArrangedSubview(footer)
-        footer.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
-
-        NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            surface.topAnchor.constraint(equalTo: root.topAnchor),
-            surface.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-
-            contentStack.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: Self.padding),
-            contentStack.topAnchor.constraint(equalTo: surface.topAnchor, constant: Self.padding),
-            contentStack.widthAnchor.constraint(equalToConstant: Self.width - Self.padding * 2),
-        ])
-    }
-
-    /// `Name   [field          ]`: a muted label column and the control,
-    /// which either fills the row or keeps its own width.
-    private func addRow(_ title: String, _ control: NSView, fills: Bool) {
-        let label = NSTextField(labelWithString: title)
-        label.alignment = .right
-        label.translatesAutoresizingMaskIntoConstraints = false
-        formLabels.append(label)
-        // The label sits on the control's first line, whatever its height.
-        let labelBox = NSView()
-        labelBox.translatesAutoresizingMaskIntoConstraints = false
-        labelBox.addSubview(label)
-        NSLayoutConstraint.activate([
-            labelBox.widthAnchor.constraint(equalToConstant: Self.labelWidth),
-            labelBox.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-            label.leadingAnchor.constraint(equalTo: labelBox.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: labelBox.trailingAnchor),
-            label.centerYAnchor.constraint(equalTo: labelBox.centerYAnchor),
-        ])
-        var views = [labelBox, control]
-        if fills {
-            control.setContentHuggingPriority(.init(1), for: .horizontal)
-        } else {
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-            views.append(spacer)
+        agentSelect.onSelect = { [weak self] _ in self?.refreshValidation() }
+        modelField.field.setAccessibilityLabel("Model")
+        folderSelect.onSelect = { [weak self] value in self?.folderChanged(value) }
+        workspaceControl.onSelect = { [weak self] _ in
+            self?.refreshSessionControl()
+            self?.refreshValidation()
         }
-        let wrapper = NSStackView(views: views)
-        wrapper.orientation = .horizontal
-        wrapper.alignment = .top
-        wrapper.distribution = .fill
-        wrapper.spacing = Chrome.Space.s12
-        contentStack.addArrangedSubview(wrapper)
-        wrapper.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        baseBranchField.field.setAccessibilityLabel("Base branch")
+        baseBranchField.toolTip = "The branch each run's worktree starts from"
+        sessionControl.onSelect = { [weak self] _ in self?.refreshSessionControl() }
+        cadenceSelect.onSelect = { [weak self] _ in self?.cadenceChanged() }
+        minuteField.field.setAccessibilityLabel("Minute past the hour")
+        minuteField.toolTip = "0–59"
+        minuteField.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        minuteField.onChange = { [weak self] _ in self?.refreshValidation() }
+        minuteLabel.setContentHuggingPriority(.required, for: .horizontal)
+        weekdaySelect.onSelect = { [weak self] _ in self?.refreshValidation() }
+        timeBox.picker.target = self
+        timeBox.picker.action = #selector(scheduleInputChanged(_:))
+        cronField.field.setAccessibilityLabel("Cron schedule")
+        cronField.onChange = { [weak self] _ in self?.refreshValidation() }
+        graceSelect.onSelect = { [weak self] _ in self?.refreshValidation() }
+        graceSelect.toolTip = "How late a run due while the Mac slept or Soprano was closed may still start"
+        precheckField.field.setAccessibilityLabel("Precheck")
+        precheckField.toolTip = "A shell command run in the folder before each scheduled run; the run starts only when it exits 0"
+        timeoutSelect.toolTip = "How long the precheck may take"
+        for field in [nameField, modelField, baseBranchField, minuteField, cronField, precheckField] {
+            field.onCommand = { [weak self] selector in
+                guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+                self?.submit()
+                return true
+            }
+        }
+
+        let runsIn = line([workspaceControl, baseBranchField], fill: baseBranchField)
+        let schedule = line([cadenceSelect, minuteLabel, minuteField, weekdaySelect, timeBox, cronField], fill: cronField)
+        let precheck = line([precheckField, timeoutSelect], fill: precheckField)
+
+        let enabledLabel = AutoUIThemedLabel("Enabled", size: Typography.rowSize)
+        let enabledRow = NSStackView(views: [enabledSwitch, enabledLabel])
+        enabledRow.orientation = .horizontal
+        enabledRow.alignment = .centerY
+        enabledRow.spacing = 8
+
+        let rows: [NSView] = [
+            Self.labeled("Name", nameField),
+            Self.labeled("Prompt", promptBox, note: promptNote),
+            Self.pair(Self.labeled("Agent", agentSelect), Self.labeled("Model", modelField)),
+            Self.labeled("Folder", folderSelect, note: folderNote),
+            Self.labeled("Runs in", runsIn),
+            Self.labeled("Schedule", schedule, note: scheduleNote),
+            Self.pair(Self.labeled("Session", sessionControl, fillsWidth: false), Self.labeled("Grace", graceSelect)),
+            Self.labeled("Precheck", precheck),
+            enabledRow,
+        ]
+
+        let body = NSStackView()
+        body.orientation = .vertical
+        // The card's preferred width decides the form's; the stack must not
+        // hug its narrowest content against it.
+        body.setHuggingPriority(.init(1), for: .horizontal)
+        body.alignment = .leading
+        body.spacing = 14
+        body.detachesHiddenViews = true
+        body.edgeInsets = NSEdgeInsets(top: 24, left: 24, bottom: 20, right: 24)
+        body.addArrangedSubview(title)
+        body.addArrangedSubview(message)
+        body.setCustomSpacing(8, after: title)
+        body.setCustomSpacing(20, after: message)
+        for row in rows {
+            body.addArrangedSubview(row)
+        }
+        body.addArrangedSubview(errorLabel)
+        body.setCustomSpacing(16, after: rows[rows.count - 2])
+        for view in ([message, errorLabel] as [NSView]) + rows.filter({ $0 !== enabledRow }) {
+            view.widthAnchor.constraint(equalTo: body.widthAnchor, constant: -48).isActive = true
+        }
+        for label in [message, promptNote, folderNote, scheduleNote, errorLabel] {
+            label.preferredMaxLayoutWidth = Self.width - 48
+        }
+        errorLabel.isHidden = true
+        return body
     }
 
-    /// A control above its validation note. Field surfaces take the full
-    /// width; a line of controls keeps its own.
-    private func column(_ views: [NSView]) -> NSStackView {
+    /// A field under its label (13 pt medium) with an optional note under it;
+    /// the field spans the column unless it keeps its own width.
+    private static func labeled(_ title: String, _ control: NSView, note: NSTextField? = nil, fillsWidth: Bool = true) -> NSView {
+        let label = AutoUIThemedLabel(title, size: Typography.rowSize, weight: .medium)
+        var views: [NSView] = [label, control]
+        if let note { views.append(note) }
         let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = Chrome.Space.s4
+        stack.spacing = 6
         stack.detachesHiddenViews = true
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        for view in views where view is ChromeFieldView {
-            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-        }
-        for view in views where view is NSTextField {
-            view.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor).isActive = true
-        }
+        stack.setCustomSpacing(6, after: control)
+        control.translatesAutoresizingMaskIntoConstraints = false
+        if fillsWidth { control.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        note?.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return stack
     }
 
-    /// Controls side by side; hidden ones drop out.
-    private func line(_ views: [NSView]) -> NSStackView {
-        let stack = NSStackView(views: views)
+    /// Two labelled fields side by side, equally wide.
+    private static func pair(_ leading: NSView, _ trailing: NSView) -> NSView {
+        let row = NSStackView(views: [leading, trailing])
+        row.orientation = .horizontal
+        row.alignment = .top
+        row.distribution = .fillEqually
+        row.spacing = 12
+        row.setHuggingPriority(.init(1), for: .horizontal)
+        return row
+    }
+
+    /// Controls side by side; hidden ones drop out. `fill` takes the width the
+    /// others leave; while it is hidden a spacer does, so no control stretches.
+    private func line(_ views: [NSView], fill: NSView) -> NSStackView {
+        let spacer = NSView()
+        let stack = NSStackView(views: views + [spacer])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = Chrome.Space.s8
+        stack.spacing = 8
+        stack.distribution = .fill
         stack.detachesHiddenViews = true
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        // The column sets the width; a line of fixed-width controls must not
+        // pull the dialog in to their total.
+        stack.setHuggingPriority(.init(1), for: .horizontal)
+        let collapsed = spacer.widthAnchor.constraint(equalToConstant: 0)
+        collapsed.priority = .init(300)
+        let stretched = fill.widthAnchor.constraint(equalToConstant: 2_000)
+        stretched.priority = .init(200)
+        NSLayoutConstraint.activate([collapsed, stretched])
+        stack.setCustomSpacing(0, after: views[views.count - 1])
         return stack
-    }
-
-    private func note(_ label: NSTextField) -> NSTextField {
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }
-
-    private func fieldSurface(_ field: NSTextField, font: NSFont, placeholder: String, width: CGFloat? = nil) -> ChromeFieldView {
-        let fieldSurface = ChromeFieldView(theme: theme)
-        field.delegate = self
-        field.lineBreakMode = .byTruncatingTail
-        field.cell?.usesSingleLineMode = true
-        field.cell?.isScrollable = true
-        field.cell?.wraps = false
-        field.translatesAutoresizingMaskIntoConstraints = false
-        fieldSurface.addSubview(field)
-        var constraints = [
-            fieldSurface.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-            field.leadingAnchor.constraint(equalTo: fieldSurface.leadingAnchor, constant: 8),
-            field.trailingAnchor.constraint(equalTo: fieldSurface.trailingAnchor, constant: -8),
-            field.centerYAnchor.constraint(equalTo: fieldSurface.centerYAnchor),
-        ]
-        if let width {
-            constraints.append(fieldSurface.widthAnchor.constraint(equalToConstant: width))
-        }
-        NSLayoutConstraint.activate(constraints)
-        fieldSurfaces.append(fieldSurface)
-        styledFields.append((field, font, placeholder))
-        return fieldSurface
-    }
-
-    /// A borderless popup on a field surface, as Settings draws its selects.
-    private func popupSurface(
-        _ popup: NSPopUpButton,
-        width: CGFloat?,
-        font: NSFont = ChromeFont.label,
-        action: Selector
-    ) -> ChromeFieldView {
-        popup.target = self
-        popup.action = action
-        popup.isBordered = false
-        popup.font = font
-        popup.autoenablesItems = false
-        popup.translatesAutoresizingMaskIntoConstraints = false
-        let select = ChromeFieldView(theme: theme)
-        select.addSubview(popup)
-        var constraints = [
-            select.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-            popup.leadingAnchor.constraint(equalTo: select.leadingAnchor, constant: 6),
-            popup.trailingAnchor.constraint(equalTo: select.trailingAnchor, constant: -4),
-            popup.centerYAnchor.constraint(equalTo: select.centerYAnchor),
-        ]
-        if let width {
-            constraints.append(select.widthAnchor.constraint(equalToConstant: width))
-        }
-        NSLayoutConstraint.activate(constraints)
-        fieldSurfaces.append(select)
-        return select
     }
 
     // MARK: - Values
@@ -535,55 +462,54 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     private func load(automation: Automation?, template: AutomationTemplate?) {
         nameField.stringValue = automation?.name ?? template?.name ?? ""
         promptView.string = automation?.prompt ?? template?.prompt ?? ""
+        promptView.setSelectedRange(NSRange(location: 0, length: 0))
 
-        let agentIds = Automation.agentIds.filter { AgentCatalog.profile(for: $0) != nil }
-        var choices = agentIds
-        if let agentId = automation?.agentId, !choices.contains(agentId) {
-            choices.insert(agentId, at: 0)
+        var agentIds = Automation.agentIds.filter { AgentCatalog.profile(for: $0) != nil }
+        if let agentId = automation?.agentId, !agentIds.contains(agentId) {
+            agentIds.insert(agentId, at: 0)
         }
-        for agentId in choices {
-            agentPopup.addItem(withTitle: AutomationFormat.agentName(agentId))
-            agentPopup.lastItem?.representedObject = agentId
-        }
-        let agentId = automation?.agentId ?? (choices.contains("omp") ? "omp" : choices.first)
-        if let index = agentPopup.itemArray.firstIndex(where: { $0.representedObject as? String == agentId }) {
-            agentPopup.selectItem(at: index)
-        }
+        let agentId = automation?.agentId ?? (agentIds.contains("omp") ? "omp" : agentIds.first) ?? ""
+        agentSelect.setOptions(
+            agentIds.map { AutoUISelectOption(title: AutomationFormat.agentName($0), value: $0) },
+            selected: agentId
+        )
 
         populateFolders()
 
         switch automation?.workspace ?? .folder {
         case .folder:
-            workspaceControl.select(0)
+            workspaceControl.selectedIndex = 0
         case .worktree(let baseBranch):
-            workspaceControl.select(1)
+            workspaceControl.selectedIndex = 1
             baseBranchField.stringValue = baseBranch ?? ""
         }
-        sessionControl.select(automation?.session == .reuse ? 1 : 0)
+        sessionControl.selectedIndex = automation?.session == .reuse ? 1 : 0
 
         let cadence = automation?.cadence ?? template?.cadence ?? .weekdays(hour: 9, minute: 0)
         var hour = 9
         var minute = 0
         var weekday = 1
+        let selected: Cadence
         switch cadence {
         case .hourly(let value):
-            cadencePopup.selectItem(at: Cadence.hourly.rawValue)
+            selected = .hourly
             minute = value
         case .daily(let h, let m):
-            cadencePopup.selectItem(at: Cadence.daily.rawValue)
+            selected = .daily
             (hour, minute) = (h, m)
         case .weekdays(let h, let m):
-            cadencePopup.selectItem(at: Cadence.weekdays.rawValue)
+            selected = .weekdays
             (hour, minute) = (h, m)
         case .weekly(let day, let h, let m):
-            cadencePopup.selectItem(at: Cadence.weekly.rawValue)
+            selected = .weekly
             (weekday, hour, minute) = (day % 7, h, m)
         case .custom(let expression):
-            cadencePopup.selectItem(at: Cadence.custom.rawValue)
+            selected = .custom
             cronField.stringValue = expression
         }
+        cadenceSelect.select("\(selected.rawValue)")
         minuteField.stringValue = "\(minute)"
-        weekdayPopup.selectItem(at: weekday)
+        weekdaySelect.select("\(weekday)")
         setTime(hour: hour, minute: minute)
 
         let grace = automation?.graceMinutes ?? template?.graceMinutes ?? Automation.defaultGraceMinutes
@@ -592,11 +518,7 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
             graceOptions.append((grace, AutomationFormat.grace(grace)))
             graceOptions.sort { $0.minutes < $1.minutes }
         }
-        for option in graceOptions {
-            gracePopup.addItem(withTitle: option.title)
-            gracePopup.lastItem?.tag = option.minutes
-        }
-        gracePopup.selectItem(withTag: grace)
+        graceSelect.setOptions(graceOptions.map { AutoUISelectOption(title: $0.title, value: "\($0.minutes)") }, selected: "\(grace)")
 
         precheckField.stringValue = automation?.precheck ?? ""
         let timeout = automation?.precheckTimeoutSeconds ?? Automation.defaultPrecheckTimeoutSeconds
@@ -605,32 +527,27 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
             timeoutOptions.append((timeout, AutomationFormat.timeout(timeout)))
             timeoutOptions.sort { $0.seconds < $1.seconds }
         }
-        for option in timeoutOptions {
-            timeoutPopup.addItem(withTitle: option.title)
-            timeoutPopup.lastItem?.tag = option.seconds
-        }
-        timeoutPopup.selectItem(withTag: timeout)
+        timeoutSelect.setOptions(timeoutOptions.map { AutoUISelectOption(title: $0.title, value: "\($0.seconds)") }, selected: "\(timeout)")
 
         modelField.stringValue = automation?.model ?? ""
-        refreshSessionControl()
     }
 
     private func setTime(hour: Int, minute: Int) {
         var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
         components.hour = hour
         components.minute = minute
-        timePicker.dateValue = Calendar.current.date(from: components) ?? Date()
+        timeBox.picker.dateValue = Calendar.current.date(from: components) ?? Date()
     }
 
     private var cadence: Cadence {
-        Cadence(rawValue: cadencePopup.indexOfSelectedItem) ?? .weekdays
+        Int(cadenceSelect.selectedValue).flatMap(Cadence.init(rawValue:)) ?? .weekdays
     }
 
-    private var isWorktree: Bool { workspaceControl.selectedSegment == 1 }
+    private var isWorktree: Bool { workspaceControl.selectedIndex == 1 }
 
     /// The schedule the controls describe, or why they describe none.
     private func schedule() -> Result<CronSchedule, CronSchedule.ParseError> {
-        let time = Calendar.current.dateComponents([.hour, .minute], from: timePicker.dateValue)
+        let time = Calendar.current.dateComponents([.hour, .minute], from: timeBox.picker.dateValue)
         let hour = time.hour ?? 9
         let minute = time.minute ?? 0
         let expression: String
@@ -645,7 +562,7 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         case .weekdays:
             expression = AutomationCadence.weekdays(hour: hour, minute: minute).expression
         case .weekly:
-            expression = AutomationCadence.weekly(weekday: max(0, weekdayPopup.indexOfSelectedItem), hour: hour, minute: minute).expression
+            expression = AutomationCadence.weekly(weekday: max(0, Int(weekdaySelect.selectedValue) ?? 1), hour: hour, minute: minute).expression
         case .custom:
             let text = cronField.stringValue.trimmingCharacters(in: .whitespaces)
             guard !text.isEmpty else {
@@ -677,19 +594,19 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     private func refreshScheduleControls() {
         let cadence = cadence
         minuteLabel.isHidden = cadence != .hourly
-        minuteSurface.isHidden = cadence != .hourly
-        weekdaySurface.isHidden = cadence != .weekly
-        timeSurface.isHidden = cadence == .hourly || cadence == .custom
-        cronSurface.isHidden = cadence != .custom
+        minuteField.isHidden = cadence != .hourly
+        weekdaySelect.isHidden = cadence != .weekly
+        timeBox.isHidden = cadence == .hourly || cadence == .custom
+        cronField.isHidden = cadence != .custom
     }
 
     /// Reuse hands a run to the previous run's agent in the same folder, so a
     /// worktree run is always fresh.
     private func refreshSessionControl() {
-        baseBranchSurface.isHidden = !isWorktree
+        baseBranchField.isHidden = !isWorktree
         sessionControl.setEnabled(!isWorktree, forSegment: 1)
         if isWorktree {
-            sessionControl.select(0)
+            sessionControl.selectedIndex = 0
         }
         sessionControl.toolTip = isWorktree
             ? "Worktree runs always start a fresh agent"
@@ -697,17 +614,18 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
     }
 
     private func refreshValidation() {
-        let colors = theme.colors
         let promptValid = !trimmedPrompt.isEmpty
         promptNote.isHidden = promptValid
-        promptNote.setChromeText("Enter the prompt the agent gets on every run.", font: ChromeFont.meta, color: colors.textMuted)
+        promptNote.stringValue = "Enter the prompt the agent gets on every run."
 
         if selectedFolder == nil {
             folderNote.isHidden = false
-            folderNote.setChromeText("Choose the folder its runs work in.", font: ChromeFont.meta, color: colors.textMuted)
+            folderNote.stringValue = "Choose the folder its runs work in."
+            folderNote.role = { $0.mutedForeground }
         } else if !folderExists {
             folderNote.isHidden = false
-            folderNote.setChromeText("This folder doesn't exist.", font: ChromeFont.meta, color: colors.danger)
+            folderNote.stringValue = "This folder doesn't exist."
+            folderNote.role = { $0.errorForeground }
         } else {
             folderNote.isHidden = true
         }
@@ -715,87 +633,36 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         let schedule = schedule()
         switch schedule {
         case .success(let schedule):
-            cronSurface.isInvalid = false
-            minuteSurface.isInvalid = false
+            cronField.isInvalid = false
+            minuteField.isInvalid = false
             if cadence != .custom {
                 lastPresetExpression = schedule.expression
             }
             let next = schedule.nextOccurrence(after: Date()).map { "Next run \(AutomationFormat.dateTime($0))" }
-            scheduleNote.setChromeText(next ?? "This schedule never runs.", font: ChromeFont.meta, color: colors.textMuted)
+            scheduleNote.stringValue = next ?? "This schedule never runs."
+            scheduleNote.role = { $0.mutedForeground }
         case .failure(let error):
-            cronSurface.isInvalid = cadence == .custom && !cronField.stringValue.isEmpty
-            minuteSurface.isInvalid = cadence == .hourly
-            scheduleNote.setChromeText(error.message, font: ChromeFont.meta, color: cadence == .custom && cronField.stringValue.isEmpty ? colors.textMuted : colors.danger)
+            cronField.isInvalid = cadence == .custom && !cronField.stringValue.isEmpty
+            minuteField.isInvalid = cadence == .hourly
+            scheduleNote.stringValue = error.message
+            let quiet = cadence == .custom && cronField.stringValue.isEmpty
+            scheduleNote.role = { quiet ? $0.mutedForeground : $0.errorForeground }
         }
 
         var isValid = promptValid && folderExists
         if case .failure = schedule { isValid = false }
         saveButton.isEnabled = isValid
-        resizeToFit()
     }
 
-    /// Keeps the sheet as tall as its rows as notes and controls come and go,
-    /// with its top edge where it is.
-    private func resizeToFit() {
-        contentStack.layoutSubtreeIfNeeded()
-        let height = ceil(contentStack.fittingSize.height) + Self.padding * 2
-        guard abs(height - frame.height) > 0.5 else { return }
-        var newFrame = frame
-        newFrame.origin.y += newFrame.height - height
-        newFrame.size = NSSize(width: Self.width, height: height)
-        setFrame(newFrame, display: true)
-    }
+    /// Whether Save would write now; for tests.
+    var canSave: Bool { saveButton.isEnabled }
 
-    func apply(theme: AppTheme) {
-        self.theme = theme
-        let colors = theme.colors
-        surface.colors = colors
-        titleLabel.setChromeText(existing == nil ? "New Automation" : "Edit Automation", font: ChromeFont.headline, color: colors.textPrimary)
-        for label in formLabels {
-            label.setChromeText(label.stringValue, font: ChromeFont.label, color: colors.textMuted)
-        }
-        for fieldSurface in fieldSurfaces {
-            fieldSurface.apply(theme: theme)
-        }
-        for (field, font, placeholder) in styledFields {
-            ChromeFieldView.styleEmbedded(field, colors: colors, font: font)
-            ChromeFieldView.styleEditor(of: field, colors: colors)
-            field.placeholderAttributedString = ChromeText.attributed(placeholder, font: font, color: colors.textMuted)
-        }
-        promptView.font = ChromeFont.row
-        promptView.textColor = colors.textPrimary
-        promptView.insertionPointColor = colors.caret
-        promptView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
-        promptView.typingAttributes = [.font: ChromeFont.row, .foregroundColor: colors.textPrimary]
-        promptView.placeholderColor = colors.textMuted
-        timePicker.textColor = colors.textPrimary
-        minuteLabel.setChromeText("at minute", font: ChromeFont.label, color: colors.textMuted)
-        workspaceControl.apply(theme: theme)
-        sessionControl.apply(theme: theme)
-        enabledSwitch.apply(theme: theme)
-        rule.color = colors.borderSubtle
-        footerLabel.setChromeText("Runs on its own while Soprano is open, until you pause it.", font: ChromeFont.meta, color: colors.textMuted)
-        cancelButton.apply(theme: theme)
-        saveButton.apply(theme: theme)
-        refreshValidation()
-    }
+    /// The error shown above the buttons, if any; for tests.
+    var shownError: String? { errorLabel.isHidden ? nil : errorLabel.stringValue }
 
     // MARK: - Actions
 
-    @objc private func agentChanged(_ sender: NSPopUpButton) {
-        refreshValidation()
-    }
-
-    @objc private func workspaceChanged(_ sender: ChromeSegmentedControl) {
-        refreshSessionControl()
-        refreshValidation()
-    }
-
-    @objc private func sessionChanged(_ sender: ChromeSegmentedControl) {
-        refreshSessionControl()
-    }
-
-    @objc private func cadenceChanged(_ sender: NSPopUpButton) {
+    private func cadenceChanged() {
         // Custom starts from the preset it replaces, so a small change is easy.
         if cadence == .custom, cronField.stringValue.isEmpty {
             cronField.stringValue = lastPresetExpression ?? ""
@@ -804,30 +671,24 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         refreshValidation()
     }
 
-    /// The cron the preset controls described last, to seed Custom with.
-    private var lastPresetExpression: String?
-
     @objc private func scheduleInputChanged(_ sender: Any?) {
         refreshValidation()
     }
 
-    @objc private func cancelClicked() {
-        cancel()
-    }
-
-    @objc private func saveClicked() {
-        submit()
-    }
-
     private func cancel() {
+        close()
+    }
+
+    private func close() {
+        window.dismiss()
         onClose?()
     }
 
-    private func submit() {
+    func submit() {
         guard saveButton.isEnabled,
               case .success(let schedule) = schedule(),
               let folder = selectedFolder,
-              let agentId = agentPopup.selectedItem?.representedObject as? String
+              !agentSelect.selectedValue.isEmpty
         else {
             NSSound.beep()
             return
@@ -841,145 +702,94 @@ final class AutomationEditorPanel: NSPanel, NSTextFieldDelegate, NSTextViewDeleg
         let automation = Automation(
             id: existing?.id ?? Automation.makeId(from: name, existing: takenIds),
             name: name,
-            agentId: agentId,
+            agentId: agentSelect.selectedValue,
             folder: folder,
             prompt: trimmedPrompt,
             schedule: schedule,
             enabled: enabledSwitch.isOn,
             workspace: workspace,
-            session: !isWorktree && sessionControl.selectedSegment == 1 ? .reuse : .fresh,
-            graceMinutes: gracePopup.selectedTag(),
+            session: !isWorktree && sessionControl.selectedIndex == 1 ? .reuse : .fresh,
+            graceMinutes: Int(graceSelect.selectedValue) ?? Automation.defaultGraceMinutes,
             precheck: optional(precheckField.stringValue),
-            precheckTimeoutSeconds: timeoutPopup.selectedTag(),
+            precheckTimeoutSeconds: Int(timeoutSelect.selectedValue) ?? Automation.defaultPrecheckTimeoutSeconds,
             model: optional(modelField.stringValue)
         )
         if onSave?(automation) == true {
-            onClose?()
+            close()
+        } else {
+            errorLabel.stringValue = "Soprano couldn't save the automation. Check that \(ConfigStore.shared.displayPath) is writable, then try again."
+            errorLabel.isHidden = false
         }
     }
 
     // MARK: - Keyboard
 
-    override func cancelOperation(_ sender: Any?) {
-        cancel()
-    }
-
     /// Esc cancels and ⌘Return saves from any control, the prompt included.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-        if event.type == .keyDown, event.keyCode == 53, flags.isEmpty, attachedSheet == nil {
+        if event.keyCode == 53, flags.isEmpty {
             cancel()
             return true
         }
-        if event.type == .keyDown, flags == .command, event.keyCode == 36 || event.keyCode == 76 {
+        if flags == .command, event.keyCode == 36 || event.keyCode == 76 {
             submit()
             return true
         }
-        return super.performKeyEquivalent(with: event)
+        return false
     }
+}
 
-    func controlTextDidChange(_ notification: Notification) {
-        if notification.object as? NSTextField === minuteField || notification.object as? NSTextField === cronField {
-            scheduleInputChanged(nil)
-        }
-    }
-
-    func controlTextDidBeginEditing(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField else { return }
-        (field.superview as? ChromeFieldView)?.isFocused = true
-        ChromeFieldView.styleEditor(of: field, colors: theme.colors)
-    }
-
-    func controlTextDidEndEditing(_ notification: Notification) {
-        guard let field = notification.object as? NSTextField else { return }
-        (field.superview as? ChromeFieldView)?.isFocused = false
-    }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        switch commandSelector {
-        case #selector(NSResponder.insertNewline(_:)):
-            submit()
-            return true
-        case #selector(NSResponder.cancelOperation(_:)):
-            cancel()
-            return true
-        default:
-            return false
-        }
-    }
-
+extension AutomationEditorPanel: NSTextViewDelegate {
     func textDidChange(_ notification: Notification) {
         refreshValidation()
     }
 }
 
-// MARK: - Surface
+// MARK: - Time
 
-/// The sheet's floating surface: raised fill, 12 pt radius, the elevation
-/// shadow's contact ring. It restyles its layer on every update, because
-/// AppKit resets a backing layer's shadow when the appearance changes.
-private final class AutomationEditorSurfaceView: NSView {
-    var colors: ThemeColors? {
-        didSet { needsDisplay = true }
-    }
+/// The time of day: a stepper date picker in Agents' input box.
+final class AutomationTimeBox: PaletteView {
+    let picker = NSDatePicker()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
+        layer?.cornerRadius = Radius.lg
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
+        picker.datePickerStyle = .textFieldAndStepper
+        picker.datePickerElements = .hourMinute
+        picker.isBezeled = false
+        picker.isBordered = false
+        picker.drawsBackground = false
+        picker.font = Typography.tabular(Typography.bodySize)
+        picker.setAccessibilityLabel("Time")
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(picker)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+            widthAnchor.constraint(equalToConstant: 108),
+            picker.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            picker.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            picker.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        applyPalette(palette)
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override var wantsUpdateLayer: Bool { true }
-
-    override func updateLayer() {
-        guard let layer, let colors else { return }
-        ChromeSurface.applyFloating(to: layer, colors: colors, radius: Chrome.Radius.panel, shadow: colors.shadowE3)
-        layer.borderWidth = Chrome.hairline
-        layer.borderColor = colors.borderSubtle.cgColor
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        needsDisplay = true
+    override func applyPalette(_ palette: Palette) {
+        layer?.backgroundColor = (palette.isDark ? palette.input.shellScaled(by: 0.32) : palette.background).cgColor
+        layer?.borderColor = palette.input.cgColor
+        picker.textColor = palette.foreground
+        picker.appearance = palette.appearance
     }
 }
 
 // MARK: - Prompt
 
-/// The multi-line prompt: a muted placeholder while empty, Tab moving on to
-/// the next control instead of typing a tab, and Esc cancelling the sheet.
-private final class AutomationPromptTextView: NSTextView {
-    var placeholder = "" {
-        didSet { needsDisplay = true }
-    }
-    var placeholderColor: NSColor = .placeholderTextColor {
-        didSet { needsDisplay = true }
-    }
-    var onCancel: (() -> Void)?
+/// The multi-line prompt: a placeholder while empty, and Tab moving on to the
+/// next control instead of typing a tab.
+final class AutomationPromptTextView: AutoUIPlaceholderTextView {
     var onFocusChange: ((Bool) -> Void)?
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard string.isEmpty, !placeholder.isEmpty else { return }
-        let padding = textContainer?.lineFragmentPadding ?? 0
-        let origin = NSPoint(x: textContainerInset.width + padding, y: textContainerInset.height)
-        let width = bounds.width - origin.x * 2
-        ChromeText.attributed(
-            placeholder,
-            font: font ?? ChromeFont.row,
-            color: placeholderColor,
-            lineBreakMode: .byWordWrapping
-        ).draw(in: NSRect(x: origin.x, y: origin.y, width: max(0, width), height: bounds.height - origin.y))
-    }
-
-    override func didChangeText() {
-        super.didChangeText()
-        needsDisplay = true
-    }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
@@ -999,9 +809,5 @@ private final class AutomationPromptTextView: NSTextView {
 
     override func insertBacktab(_ sender: Any?) {
         window?.selectPreviousKeyView(sender)
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        onCancel?()
     }
 }

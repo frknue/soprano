@@ -140,7 +140,7 @@ struct PaneHeaderCloseButtonTests {
         window.contentView = tree
         defer { window.contentView = nil }
         let editor = try #require(descendants(of: tree, as: EditorPaneView.self).first)
-        let eye = try #require(descendants(of: editor, as: ChromeIconButton.self).first {
+        let eye = try #require(descendants(of: editor, as: ShellGhostButton.self).first {
             $0.toolTip == "Open Markdown Preview"
         })
         let entered = try #require(NSEvent.enterExitEvent(
@@ -155,7 +155,8 @@ struct PaneHeaderCloseButtonTests {
             userData: nil
         ))
         eye.mouseEntered(with: entered)
-        #expect(eye.contentTintColor == themeManager.currentTheme.colors.textPrimary)
+        let palette = PaletteCenter.shared.palette
+        #expect(eye.contentTintColor == palette.foreground)
 
         eye.performClick(nil)
         #expect(manager.panes[target.paneId]?.activeTab?.isMarkdown == true)
@@ -167,12 +168,12 @@ struct PaneHeaderCloseButtonTests {
 
         #expect(manager.panes[target.paneId]?.activeTab?.id == target.tabId)
         #expect(descendants(of: tree, as: EditorPaneView.self).first === editor)
-        #expect(eye.contentTintColor == themeManager.currentTheme.colors.textMuted)
+        #expect(eye.contentTintColor == palette.mutedForeground)
 
         eye.mouseEntered(with: entered)
-        #expect(eye.contentTintColor == themeManager.currentTheme.colors.textPrimary)
+        #expect(eye.contentTintColor == palette.foreground)
         eye.mouseExited(with: entered)
-        #expect(eye.contentTintColor == themeManager.currentTheme.colors.textMuted)
+        #expect(eye.contentTintColor == palette.mutedForeground)
     }
 
     private func clickClose(

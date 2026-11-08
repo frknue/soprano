@@ -28,17 +28,17 @@ brew install --cask frknue/tap/soprano
 </div>
 
 ```
-┌───────────────────────┬─ Codex ─────────── WORKING ─┬─ Claude Code ────── NEEDS INPUT ─┐
-│ WINDOWS               │ • editing SplitNode.swift   │ Drop the legacy column? [y/n]    │
-│ soprano               │ • 3 files changed           │ >                                │
-│   Codex    ⎇ main     │                             │                                  │
-│ ▎ Claude   ⎇ fix/ui • ├─ Terminal 1 ────────────────┴──────────────────────────────────┤
-│   Browser             │ > swift test                                                   │
-│  webapp               │ Executed 142 tests, 0 failures                                 │
-│   Terminal ⎇ main     │ >                                                              │
-├───────────────────────┴────────────────────────────────────────────────────────────────┤
-│ NORMAL  work › soprano › Claude Code · Tab 1     1 needs you   ⌘P Commands   ⌃A Prefix │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌ ◧ Session 1 ⌄ ────────┬─ Codex ─────── ◌ Working 2m ─┬─ Claude Code ────── ⓘ Input ─┐
+│ ⌕ Search              │ • editing SplitNode.swift    │ Drop the legacy column? [y/n]│
+│ soprano 2 ⌄           │ • 3 files changed            │ >                            │
+│  SO soprano ◌ Working │                              │                              │
+│  Codex                ├─ Terminal 1 ─────────────────┴──────────────────────────────┤
+│  SO soprano  ⓘ Input  │ > swift test                                                │
+│  Claude Code          │ Executed 142 tests, 0 failures                              │
+│ webapp 1 ⌄            │ >                                                           │
+├───────────────────────┴─────────────────────────────────────────────────────────────┤
+│ Normal  work / soprano / Claude Code          1 needs you   ⌘P Commands   ⌃A Prefix │
+└─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Why
@@ -48,8 +48,9 @@ stop to ask you something eventually, and terminal tabs hide the one that is blo
 Soprano is built around the question you actually have all day: *which agent needs me
 right now?*
 
-- **Panes report their own status.** `STARTING` · `WORKING` · `READY` · `NEEDS INPUT` ·
-  `ERROR` · `STOPPED`, driven by real agent lifecycle hooks rather than output scraping.
+- **Panes report their own status.** Starting · Working (with its duration) · Done ·
+  Approval · Input · Failed · Stopped, driven by real agent lifecycle hooks rather than
+  output scraping.
 - **Notifications say what happened, and where.** `Claude Code needs approval` over the
   conversation's name; clicking one activates Soprano and focuses that exact tab.
 - **A real terminal.** Every pane is a [libghostty](https://github.com/ghostty-org/ghostty)
@@ -141,6 +142,7 @@ Launch Soprano, then:
 | `⌃A` then `\|` | Split vertically. `⌃A` is the tmux-style prefix; `-` splits horizontally |
 | `⌘1` | Codex starts in the new pane |
 | `⌘4` | omp (Oh My Pi) starts in a new agent pane |
+| `⌘I` | omp opens as a chat beside the pane: the same agent as a conversation with a composer instead of a terminal |
 | `⌃H` `⌃J` `⌃K` `⌃L` | Move between panes — no prefix needed |
 | `⌘B` | A WebKit browser pane splits off to the right |
 | *drag a file from Finder onto a terminal* | Its shell-safe path is inserted at the cursor |
@@ -150,7 +152,7 @@ Launch Soprano, then:
 | `⌃A` then `C` | Create a window inside the current session; `P` / `N` moves between its windows |
 | `⌃A` then `S` | Switch sessions while their terminals keep running |
 | *hold* `⌃` | The sidebar reveals its window and pane jump hints |
-| *switch away, let an agent finish* | macOS notification such as `Claude Code finished`, plus a blue unread ring on the pane |
+| *switch away, let an agent finish* | macOS notification such as `Claude Code finished`, plus an attention outline on the pane |
 | `⌘P` | Command palette for everything above |
 
 ## Agents that report in
@@ -169,17 +171,17 @@ launchers configure those hooks per launch, without changing your global configu
   approval events; install the [`omp` CLI](https://omp.sh/docs/cli) separately.
   Soprano runs its interactive terminal client, not the Bun-only SDK.
 
-When a background agent finishes, macOS shows a notification and the pane gets a blue
-unread ring. The notification is two short lines: what the agent wants — `Claude Code
+When a background agent finishes, macOS shows a notification and the pane gets an
+attention outline. The notification is two short lines: what the agent wants — `Claude Code
 finished`, `Codex needs approval`, `omp needs input`, `OpenCode failed` — over the tab's
 title, which agents set to the conversation's name (the window or session stands in while
 the tab is still named after the agent). Each tab keeps one banner, so a new one replaces
 the last instead of stacking. Plain terminals that post their own notifications keep
 their title and body, subtitled `session ▸ window ▸ pane`. Clicking one activates
-Soprano and focuses that tab. The pane header and status bar expose
-`STARTING`, `WORKING`, `READY`, `NEEDS INPUT`, `ERROR`, and `STOPPED`. Focusing the
-relevant tab clears its unread marker, and a completed turn stays at `NEEDS INPUT` until
-the next prompt is submitted.
+Soprano and focuses that tab. Pane headers, sidebar cards, and the dashboard show the
+agent's status as a pill: Starting, Working with its duration, Done, Approval, Input,
+Failed, or Stopped. Focusing the relevant tab clears its unread marker, and a completed
+turn stays Done until the next prompt is submitted.
 
 Plain terminals report too. While a shell runs a command — `npm run dev`, a build, an
 editor — its pane header shows `RUNNING` beside a cyan dot, its tab in the pane's tab
@@ -194,7 +196,7 @@ interrupting you. Banners are silent by default; enable *Play a sound* under
 **Settings ▸ General ▸ Notifications**, or set `notifications.sound` in `settings.json`.
 
 That same section reports whether macOS is allowing banners at all. Denying the prompt
-leaves the in-app unread ring as the only signal, and because macOS only ever asks once,
+leaves the in-app attention outline as the only signal, and because macOS only ever asks once,
 Soprano cannot re-prompt — the section links straight to
 **System Settings → Notifications → Soprano** instead.
 
@@ -248,8 +250,8 @@ underlying agent process inherits the Soprano terminal environment.
 
 `⌃A` is the prefix. **Settings → Keyboard Shortcuts** (`⌘,`) lists every binding below
 with its id; rebind one under `keybindings.bindings` in [`settings.json`](#settings). The
-prefix key, its timeout, and the resize step sit under **Settings ▸ General ▸ Keybinding
-Behavior**: click the prefix keycap (or focus it and press `Space`), then press the new
+prefix key, its timeout, and the resize step sit under **Settings ▸ General ▸ Keybindings**:
+click the prefix keycap (or focus it and press `Space`), then press the new
 key; `Esc` keeps the current one.
 
 **Panes**
@@ -288,6 +290,7 @@ key; `Esc` keeps the current one.
 | Shortcut | Action |
 |---|---|
 | `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude Code / OpenCode / omp |
+| `⌘I` | New omp chat beside the focused pane |
 | `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
 | `⌘L` | Focus the address bar of the focused browser pane (elsewhere it toggles the right sidebar) |
@@ -419,26 +422,27 @@ doing right now.
 
 The selected agent shows its title and location over a toolbar: **Timeline** /
 **Terminal**, **Show details**, and **Open**, **Stop**, and **Restart**. For a Claude
-Code, Codex, OpenCode, or omp agent the **timeline** reads as a conversation from the
-transcript the agent writes while it runs in its pane: your prompts as cards, each answer
-under the agent's name with its replies rendered as Markdown, and every run of tool calls
-in one card — a line per call with its result (✓, ✗, or ▶ while it runs) and the diff of
-every edit. It keeps to a readable column on wide windows; **Jump to latest** appears
+Code, Codex, OpenCode, or omp agent the **timeline** reads like the [chat](#agent-chat),
+from the transcript the agent writes while it runs in its pane: your prompts as bubbles,
+Markdown answers, each turn's work under **Worked for** with the diff of every edit, and
+a card of the files it changed. **Scroll to end** appears
 once you scroll away from the newest entry. Claude Code and omp report their transcript
 through Soprano's hooks, and OpenCode its session in OpenCode's database; Codex is found
 once its first reply arrives, or right away with the
-[Codex hooks](#agents-that-report-in) installed. Plain terminals and custom agents show
-their live terminal in a card instead, with theme-aware highlighting for
-prompts, diagnostics, paths, diffs, and fenced code. Under either view, the composer
-says what the agent is doing right now (the entry in the list repeats that line) above
-the reply field. Replies are available while the agent is working, ready, waiting for
-input, or in an error state and are typed into that exact pane tab.
+[Codex hooks](#agents-that-report-in) installed. [Chats](#agent-chat) show their
+conversation the same way, without a Terminal view, and replies go to the chat. Plain
+terminals and custom agents show their live terminal in a card instead, with
+theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code. Under
+either view, the composer says what the agent is doing right now (the entry in the list
+repeats that line) above the reply field. Replies are available while the agent is
+working, ready, waiting for input, or in an error state and are typed into that exact
+pane tab.
 
 Use `J` / `K` or the arrow keys to move through agents, `Tab` (or `R`) to focus the reply
 field and `⇧Tab` to leave it again, `Return` to open the selected agent, and `Esc` to
 close the dashboard without changing the active agent. In the timeline, `⇧J` / `⇧K` (or
 `Page Down` / `Page Up`) scroll, `[` / `]` jump to the previous or next prompt, `O`
-toggles details (thinking, full commands, and output), `G` jumps back to the newest
+toggles details (every step and diff open, or the minimal work log), `G` jumps back to the newest
 entry and keeps following it, and `T` switches between the timeline and the live
 terminal. Clicking into the text to copy from it leaves these keys working.
 
@@ -451,6 +455,46 @@ explorer open too, dragging either sidebar still leaves panes those 320 points.
 
 Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly onto a
 terminal to insert their shell-safe paths.
+
+## Agent chat
+
+A chat runs an agent without a terminal, like Orca's Chat UI: Soprano starts the agent's
+[Agent Client Protocol](https://agentclientprotocol.com) server (`omp acp`, through your
+login shell like an agent pane) and shows the conversation in a GUI. omp is the agent
+with a chat today; the other agents keep their terminal.
+
+Open one wherever a terminal opens: `⌘I` (`new-chat`) or **New omp Chat Pane** in the
+sidebar **+** menu beside the focused pane, and from the command palette **New omp Chat**,
+**New omp Chat in This Pane** (a pane tab), **New omp Chat Tab**, or **New omp Chat
+Window**. Splitting a chat (`⌃A` then `|` or `-`) opens another chat with the same agent.
+
+The chat looks and works like [Soprano Agents](https://github.com/frknue/soprano_agents)'
+chat column: your messages as bubbles on the right, the agent's answers as Markdown, and
+each turn's work under **Working for** / **Worked for** — a line per step (thinking,
+commands, reads, searches) with each edit's diff, and a card of the files the turn
+changed. Clicking a file in that card scrolls to its diff.
+
+The composer floats at the bottom:
+
+- **Sending:** `Return` sends and `⇧Return` breaks the line. While omp works, `Return`
+  queues the message until the turn ends (queued messages can be removed or sent right
+  away), `⌘Return` steers it into the running turn, and `Esc` (or the stop button) stops
+  the turn. `↑` / `↓` in an empty composer recall earlier messages; `/` lists omp's
+  commands and skills.
+- **Approvals:** when omp wants to run a command, the composer shows it with **Decline**,
+  **Approve**, and **⋯** for **Always allow**; sending a message instead declines and
+  redirects the agent.
+- **Questions:** omp's questions show their choices with `1`–`9`; type your own answer
+  instead, or close the question.
+- **Footer:** the model picker, thinking level, and mode omp offers, a ring showing how
+  much of the context window is in use (click it to compact the conversation), and omp's
+  plan above the composer while it has one.
+
+A chat reports status, notifies, and appears in the
+[Agent Dashboard](#knowing-where-you-are) like an agent pane, and **Stop** / **Restart**
+work the same. Its conversation is an ordinary omp session, so a restored workspace
+reopens it in the chat, and `omp --resume <id>` opens it in a terminal — use one at a
+time. An older Soprano opens a saved chat as an omp terminal on the same conversation.
 
 ## Automations
 
@@ -835,10 +879,11 @@ and clicking it lists every account's 5-hour and weekly windows.
 
 ## Settings
 
-`⌘,` opens a five-tab settings screen: **General** (theme, appearance, window bar,
-status-bar uptime, restore-last-session, notifications, project directories, prefix key
-and resize step), **Keyboard Shortcuts**, **Agent Profiles**, **Accounts**, and
-**About**.
+`⌘,` opens Settings as a card over the window, like Soprano Agents': **General** (theme,
+appearance, window bar, status-bar uptime, restore workspace, notifications, project
+directories, prefix key and resize step), **Keyboard Shortcuts** (searchable), **Agent
+Profiles**, **Accounts**, and **About**. A row whose value differs from the default shows
+a reset button; `Esc`, the close button, or a click outside closes it.
 
 Everything it edits lives in **`~/.config/soprano/settings.json`**, and that file — not
 the UI, not `defaults` — is the source of truth. The screen is a view over it: clicking
@@ -927,7 +972,7 @@ A user-defined agent is a first-class one: it appears in the sidebar's **+** men
 shortcut, and its panes restore with the workspace. Instead of `command`/`args` you can
 give a `launchScript` to run something multi-step (`nvm use 22 && aider`).
 
-What it does *not* get automatically is status reporting — `WORKING` / `NEEDS INPUT`
+What it does *not* get automatically is status reporting — Working / Done / Input
 come from lifecycle hooks, and Soprano only injects those for its four built-in
 launchers. Every pane exports `SOPRANO_BIN`, `SOPRANO_PANE_ID`, and `SOPRANO_TAB_ID`, so
 an agent with its own hook mechanism can report in the same way the built-ins do.

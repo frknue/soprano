@@ -103,7 +103,7 @@ enum BrowserAutomationError: LocalizedError {
 /// `snapshot`.
 @MainActor
 final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextFieldDelegate {
-    static let navigationBarHeight: CGFloat = 32
+    static let navigationBarHeight: CGFloat = SurfaceToolbar.height
 
     let target: BrowserTarget
     var onFocusRequested: (() -> Void)?
@@ -112,13 +112,12 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
 
     private let themeManager: ThemeManager
     private let webView: SopranoWebView
-    private let navigationBar = NSView()
-    private let navigationRule = ChromeRuleView(axis: .horizontal)
-    private let addressFrame: ChromeFieldView
+    private var navigationBar: SurfaceToolbar!
+    private var addressFrame: SurfaceFieldView!
     private let addressField = FocusReportingTextField()
-    private var backButton: ChromeIconButton!
-    private var forwardButton: ChromeIconButton!
-    private var reloadButton: ChromeIconButton!
+    private var backButton: ShellGhostButton!
+    private var forwardButton: ShellGhostButton!
+    private var reloadButton: ShellGhostButton!
     private let progressIndicator = NSProgressIndicator()
     private var hasLoadedLocation = false
     private var webViewObservations: [NSKeyValueObservation] = []
@@ -137,7 +136,6 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         configuration.preferences.isElementFullscreenEnabled = true
         self.webView = SopranoWebView(frame: .zero, configuration: configuration)
 
-        addressFrame = ChromeFieldView(theme: themeManager.currentTheme)
         super.init(frame: .zero)
         setupViews()
         observeWebView()
@@ -160,21 +158,12 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
     }
 
     func applyTheme() {
-        let theme = themeManager.currentTheme
-        layer?.backgroundColor = theme.colors.bgBase.cgColor
-        navigationBar.layer?.backgroundColor = theme.colors.bgPanel.cgColor
-        navigationRule.color = theme.colors.borderSubtle
-        addressFrame.apply(theme: theme)
-        ChromeFieldView.styleEmbedded(addressField, colors: theme.colors, font: ChromeFont.mono)
-        addressField.placeholderAttributedString = NSAttributedString(
-            string: "Search or enter address",
-            attributes: [.foregroundColor: theme.colors.textMuted, .font: ChromeFont.label]
-        )
+        let palette = PaletteCenter.shared.palette
+        layer?.backgroundColor = palette.background.cgColor
+        SurfaceFieldView.styleEmbedded(addressField)
+        SurfaceFieldView.setPlaceholder("Search or enter address", of: addressField)
         if addressFrame.isFocused {
-            ChromeFieldView.styleEditor(of: addressField, colors: theme.colors)
-        }
-        for button in [backButton, forwardButton, reloadButton] {
-            button?.apply(theme: theme)
+            SurfaceFieldView.styleEditor(of: addressField)
         }
         progressIndicator.contentFilters = []
     }
@@ -323,38 +312,51 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
 
     private func setupViews() {
         wantsLayer = true
-        navigationBar.wantsLayer = true
-        navigationBar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(navigationBar)
 
-        backButton = makeToolbarButton(symbol: "chevron.left", toolTip: "Back", action: #selector(goBack))
-        forwardButton = makeToolbarButton(symbol: "chevron.right", toolTip: "Forward", action: #selector(goForward))
-        reloadButton = makeToolbarButton(symbol: "arrow.clockwise", toolTip: "Reload", action: #selector(reloadPage))
-
-        navigationBar.addSubview(addressFrame)
+        backButton = SurfaceToolbar.button("chevron.left", "Back", target: self, action: #selector(goBack))
+        forwardButton = SurfaceToolbar.button("chevron.right", "Forward", target: self, action: #selector(goForward))
+        reloadButton = SurfaceToolbar.button("arrow.clockwise", "Reload", target: self, action: #selector(reloadPage))
 
         addressField.usesSingleLineMode = true
+        addressField.lineBreakMode = .byTruncatingTail
         addressField.cell?.isScrollable = true
+        addressField.cell?.wraps = false
         addressField.target = self
         addressField.action = #selector(addressSubmitted)
         addressField.delegate = self
+        addressField.setAccessibilityLabel("Address")
+        addressField.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        addressField.setContentHuggingPriority(.init(1), for: .horizontal)
+        addressFrame = SurfaceFieldView(field: addressField, symbol: Icon.globe)
+        // Agents' segmented-toggle tray: a faint foreground fill at rest.
+        addressFrame.restingFill = { $0.foreground.withAlphaComponent($0.isDark ? 0.06 : 0.05) }
+        addressFrame.setContentHuggingPriority(.init(1), for: .horizontal)
+        addressFrame.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         addressField.onFocusChange = { [weak self] isFocused in
             guard let self else { return }
             addressFrame.isFocused = isFocused
             if isFocused {
-                ChromeFieldView.styleEditor(of: addressField, colors: themeManager.currentTheme.colors)
+                SurfaceFieldView.styleEditor(of: addressField)
             }
         }
-        addressField.translatesAutoresizingMaskIntoConstraints = false
-        addressFrame.addSubview(addressField)
-
-        navigationBar.addSubview(navigationRule)
 
         progressIndicator.style = .spinning
         progressIndicator.controlSize = .small
         progressIndicator.isDisplayedWhenStopped = false
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
-        navigationBar.addSubview(progressIndicator)
+        NSLayoutConstraint.activate([
+            progressIndicator.widthAnchor.constraint(equalToConstant: 14),
+            progressIndicator.heightAnchor.constraint(equalToConstant: 14),
+        ])
+
+        navigationBar = SurfaceToolbar(
+            leading: [backButton, forwardButton, reloadButton, addressFrame],
+            trailing: [progressIndicator],
+            spacer: false,
+            leadingInset: 8
+        )
+        navigationBar.setSpacing(6, after: reloadButton)
+        addSubview(navigationBar)
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -382,36 +384,6 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
             navigationBar.topAnchor.constraint(equalTo: topAnchor),
             navigationBar.leadingAnchor.constraint(equalTo: leadingAnchor),
             navigationBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            navigationBar.heightAnchor.constraint(equalToConstant: Self.navigationBarHeight),
-
-            backButton.leadingAnchor.constraint(equalTo: navigationBar.leadingAnchor, constant: 8),
-            backButton.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 2),
-            forwardButton.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            reloadButton.leadingAnchor.constraint(equalTo: forwardButton.trailingAnchor, constant: 2),
-            reloadButton.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-
-            addressFrame.leadingAnchor.constraint(equalTo: reloadButton.trailingAnchor, constant: 6),
-            addressFrame.trailingAnchor.constraint(equalTo: progressIndicator.leadingAnchor, constant: -8),
-            addressFrame.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            addressFrame.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
-
-            addressField.leadingAnchor.constraint(equalTo: addressFrame.leadingAnchor, constant: 8),
-            addressField.trailingAnchor.constraint(equalTo: addressFrame.trailingAnchor, constant: -8),
-            addressField.centerYAnchor.constraint(equalTo: addressFrame.centerYAnchor),
-
-            navigationRule.leadingAnchor.constraint(equalTo: navigationBar.leadingAnchor),
-            navigationRule.trailingAnchor.constraint(equalTo: navigationBar.trailingAnchor),
-            navigationRule.bottomAnchor.constraint(equalTo: navigationBar.bottomAnchor),
-            navigationRule.heightAnchor.constraint(equalToConstant: Chrome.hairline),
-
-            progressIndicator.trailingAnchor.constraint(
-                equalTo: navigationBar.trailingAnchor,
-                constant: -10
-            ),
-            progressIndicator.centerYAnchor.constraint(equalTo: navigationBar.centerYAnchor),
-            progressIndicator.widthAnchor.constraint(equalToConstant: 14),
-            progressIndicator.heightAnchor.constraint(equalToConstant: 14),
 
             webView.topAnchor.constraint(equalTo: navigationBar.bottomAnchor),
             webView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -421,18 +393,6 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
 
         applyTheme()
         updateNavigationControls()
-    }
-
-    private func makeToolbarButton(symbol: String, toolTip: String, action: Selector) -> ChromeIconButton {
-        let button = ChromeIconButton(
-            symbolName: symbol,
-            accessibilityLabel: toolTip,
-            pointSize: 12,
-            target: self,
-            action: action
-        )
-        navigationBar.addSubview(button)
-        return button
     }
 
     private func load(_ url: URL) {
@@ -559,11 +519,8 @@ final class BrowserPaneView: NSView, WKNavigationDelegate, WKUIDelegate, NSTextF
         backButton.isEnabled = webView.canGoBack
         forwardButton.isEnabled = webView.canGoForward
         let reloadLabel = webView.isLoading ? "Stop" : "Reload"
-        reloadButton.setSymbol(
-            webView.isLoading ? "xmark" : "arrow.clockwise",
-            accessibilityLabel: reloadLabel,
-            pointSize: 12
-        )
+        reloadButton.setSymbol(webView.isLoading ? "xmark" : "arrow.clockwise")
+        reloadButton.setAccessibilityLabel(reloadLabel)
         reloadButton.toolTip = reloadLabel
     }
 

@@ -150,13 +150,31 @@ Scale for this app:
   routing, drag-and-drop, env export, copy mode); `GhosttyAppManager` owns the
   single global `ghostty_app_t`.
 - `Views/` — `SplitTreeView` renders a `SplitNode`; browser panes are WebKit.
-  `Chrome.swift` is the Folio design system: metrics, `ChromeFont`, `ChromeText`,
-  status marks, buttons, keycaps, mode chip, selection pills, switches, fields,
-  floating surfaces. New chrome builds on it. It depends only on AppKit,
-  `Config/Theme.swift`, and `Utilities/NSColor+Hex.swift`, because the sibling
-  apps vendor those three files. `Theme.swift` holds the palettes and derived
-  tokens; the `folio` id resolves to Folio Paper or Folio Ink from the effective
-  appearance, and the seven third-party themes are dark.
+  `Views/AgentsStyle/` is the look Soprano shares with Soprano Agents
+  (`~/git/private/soprano-agents`), ported from its `Theme/`: `Palette` (tokens
+  derived from the Soprano theme by `Palette(soprano:)`), `PaletteCenter.shared`
+  (fed by the app's `ThemeManager`), `Typography`, `Metrics`, `Radius`, `Icon`,
+  `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`. Keep these
+  files identical to Soprano Agents'. `Views/Shell/` holds the Agents-style
+  chrome widgets (monograms, status pills, tabs, title-bar helpers) the
+  sidebars, tab rows and pane headers use, and `ShellDialogs` — every confirm,
+  prompt and alert is an Agents dialog card from there, never an `NSAlert`
+  (it falls back to one only without a visible window); `Views/Chat/` the chat tab's
+  timeline, Markdown and composer, ported from Soprano Agents' `Views/Timeline`
+  and `Views/Composer`; the Agent Dashboard shows transcripts with the same
+  timeline (`Chat/TranscriptThread.swift`). `Views/Settings/`, `Views/Surfaces/` and
+  `Views/Automations/` hold the Agents-style form controls and file-surface
+  pieces of those screens. `Chrome.swift` is the older Folio component set,
+  kept because the sibling apps vendor it with `CommandPalettePanel.swift` (the
+  palette Soprano Agents shares); new UI does not use it. It depends only on
+  AppKit, `Config/Theme.swift`, and `Utilities/NSColor+Hex.swift`, because the
+  sibling apps vendor those three files. `Theme.swift` holds the palettes and
+  derived tokens; the `folio` id resolves to Folio Paper or Folio Ink from the
+  effective appearance, and the seven third-party themes are dark.
+- `Chat/` — the chat tab's agent connection: `AgentChatSession` drives an agent's
+  Agent Client Protocol server (`omp acp`) over `JSONRPCConnection`, and
+  `ACPTurnBuilder` folds its `session/update`s into the turns (`ChatTurns`) the
+  timeline shows.
 - `Config/` — built-in defaults (agent profiles, keybindings, themes) **and** the
   user configuration layer. `ConfigStore` is the runtime authority for every
   user-facing setting: it loads `~/.config/soprano/settings.json`, resolves it
@@ -192,26 +210,19 @@ they are app state, not configuration.
 
 ## Conventions
 
-- Chrome is Folio. Build it from `Chrome.swift` components and color it only
-  from `ThemeColors` tokens, including the derived ones (`selection`,
-  `focusMark`, `inkButtonFill`, `attention`, …).
-- Fonts by role through `ChromeFont`: New York (`title`, `screen`, `headline`,
-  `empty`, `figure`, `serif(...)`) only at 15 pt and up; SF Pro for all other
-  chrome; SF Mono (`mono`, `monoSmall`) for paths, SHAs, code, and diffs. Text
-  is 11 pt or larger.
-- Eyebrows and status labels are the only uppercase text, and they get it from
-  `ChromeText.eyebrow` / `.status` (or `setEyebrowText` / `setStatusText`);
-  every other string keeps its own case.
-- The accent (sienna in Folio) is reserved for the keyboard-focus mark (pencil
-  tick, 2-pt rule under a focused header), the caret and terminal cursor,
-  matched characters on the selected row, a non-NORMAL `ChromeModeChip`, and
-  the `.accent` keycap tone for the Prefix cap and ⌃-jump digits. Primary
-  buttons are ink (`ChromeButton` `.ink`); destructive ones are `.danger`.
+- The look is Soprano Agents'. New or restyled chrome subclasses `PaletteView`
+  (re-coloring in `applyPalette(_:)`), takes colors only from
+  `PaletteCenter.shared.palette`, fonts from `Typography` (system font 14 body,
+  13 rows, 12 meta and pills, 11 kbd; SF Mono 13 for code, paths and diffs),
+  radii from `Radius` (composer, bubbles and cards 16; buttons, menus and code
+  blocks 8; rows 6) and SF Symbols from `Icon`. Compare it with Soprano Agents'
+  own renders (`SopranoAgents snapshot`) before calling it done.
+- No uppercase eyebrows or status words: sections are "Title N ⌄" headers and
+  agent status is an Agents status pill (symbol + word: Working with its
+  duration, Approval, Input, Failed, Done, else a relative time).
 - Keycaps follow K1: one cap per chord (`⌘1`, `⇧⌘P`, `⌃A`), a prefix sequence
-  as separate caps (`⌃A` then `P`, via `ChromeKeycapGroupView`), letter legends
-  uppercase (`J`, `⇧J`), `esc` lowercase.
-- Radii come from `Chrome.Radius`: floating panels 12, popovers 10, cards 8,
-  controls and selection 6, keycaps and chips 4; tiled panes stay square.
+  as separate caps (`⌃A` then `P`), letter legends uppercase (`J`, `⇧J`), `esc`
+  lowercase.
 - Motion is opacity-only fades of 150 ms or less, and none under Reduce Motion.
 - Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`), not XCTest,
   with long sentence-style test names. One `struct …Tests` per file in

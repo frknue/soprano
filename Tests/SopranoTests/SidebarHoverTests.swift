@@ -113,9 +113,9 @@ struct SidebarHoverTests {
     }
 
     /// Window and pane rows on screen, top to bottom, minus the focused pane,
-    /// whose selection pill outranks the hover.
+    /// whose active fill outranks the hover.
     private func unselectedRows(in sidebar: SidebarView) -> [NSView] {
-        descendants(of: sidebar, as: ChromeRowBackgroundView.self)
+        descendants(of: sidebar, as: ShellRowSurfaceView.self)
             .filter { $0.style != .selected && $0.style != .selectedUnfocused }
             .compactMap(\.superview)
             .filter { row in
@@ -126,7 +126,7 @@ struct SidebarHoverTests {
     }
 
     private func hoveredRows(in sidebar: SidebarView) -> [NSView] {
-        descendants(of: sidebar, as: ChromeRowBackgroundView.self)
+        descendants(of: sidebar, as: ShellRowSurfaceView.self)
             .filter { $0.style == .hover }
             .compactMap(\.superview)
     }
@@ -138,7 +138,7 @@ struct SidebarHoverTests {
     }
 
     private func row(containing windowPoint: NSPoint, in sidebar: SidebarView) -> NSView? {
-        descendants(of: sidebar, as: ChromeRowBackgroundView.self).compactMap(\.superview).first { row in
+        descendants(of: sidebar, as: ShellRowSurfaceView.self).compactMap(\.superview).first { row in
             row.bounds.contains(row.convert(windowPoint, from: nil))
         }
     }
