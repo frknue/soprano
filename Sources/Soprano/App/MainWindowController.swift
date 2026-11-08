@@ -288,7 +288,31 @@ final class MainWindowController: NSWindowController {
                         _ = self.agentManager.spawnAgent(profile.id)
                     }
                 )
-            } + agentChatPaletteItems()
+            } + agentPaneTabPaletteItems() + agentChatPaletteItems()
+    }
+
+    /// Each agent (in its terminal) as a tab of the focused pane, what the
+    /// pane header's `+` offers.
+    private func agentPaneTabPaletteItems() -> [CommandItem] {
+        AgentCatalog.all
+            .filter { $0.id != "terminal" }
+            .map { profile in
+                CommandItem(
+                    id: "agent-pane-tab-\(profile.id)",
+                    icon: "plus.square.on.square",
+                    label: "New \(profile.name) in This Pane",
+                    description: "Open \(profile.name) as a tab of the focused pane",
+                    searchText: "pane tab split \(profile.name)",
+                    action: { [weak self] in
+                        guard let self else { return }
+                        _ = self.agentManager.addTabToPane(
+                            self.agentManager.activePaneId,
+                            type: .agent,
+                            profileId: profile.id
+                        )
+                    }
+                )
+            }
     }
 
     /// A chat opens wherever a terminal can: beside the focused pane, as a
@@ -544,6 +568,33 @@ final class MainWindowController: NSWindowController {
                 }
             ),
             CommandItem(
+                id: "new-browser-pane-tab",
+                icon: "globe",
+                label: "New Browser in This Pane",
+                description: "Open a browser as a tab of the focused pane",
+                searchText: "pane tab split web",
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.addTabToPane(self.agentManager.activePaneId, type: .browser)
+                }
+            ),
+            CommandItem(
+                id: "open-markdown-pane-tab",
+                icon: "doc.richtext",
+                label: "Open Markdown in This Pane…",
+                description: "Open a local Markdown file as a tab of the focused pane",
+                searchText: "pane tab split read preview documentation readme md",
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        guard let self, let window = self.window else { return }
+                        let paneId = self.agentManager.activePaneId
+                        MarkdownFilePicker.begin(relativeTo: window) { [weak self] fileURL in
+                            _ = self?.agentManager.openMarkdown(fileURL: fileURL, in: paneId)
+                        }
+                    }
+                }
+            ),
+            CommandItem(
                 id: "split-horizontal",
                 icon: "rectangle.split.1x2",
                 label: "Split Horizontal",
@@ -615,6 +666,53 @@ final class MainWindowController: NSWindowController {
                 shortcut: commandShortcut(for: "close-tab"),
                 action: { [weak self] in
                     self?.agentManager.closeActiveLayoutTab()
+                }
+            ),
+            CommandItem(
+                id: "new-pane-tab",
+                icon: "plus.square.on.square",
+                label: "New Pane Tab",
+                description: "Open a terminal tab inside the active pane",
+                shortcut: commandShortcut(for: "new-pane-tab-direct", "new-pane-tab"),
+                searchText: "new terminal in this pane split",
+                action: { [weak self] in
+                    guard let self else { return }
+                    _ = self.agentManager.addTabToPane(self.agentManager.activePaneId, type: .terminal)
+                }
+            ),
+            CommandItem(
+                id: "next-pane-tab",
+                icon: "chevron.right.square",
+                label: "Next Pane Tab",
+                description: "Switch to the next tab inside the active pane",
+                shortcut: commandShortcut(for: "next-pane-tab-direct", "next-pane-tab"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    self.agentManager.nextTab(self.agentManager.activePaneId)
+                }
+            ),
+            CommandItem(
+                id: "previous-pane-tab",
+                icon: "chevron.left.square",
+                label: "Previous Pane Tab",
+                description: "Switch to the previous tab inside the active pane",
+                shortcut: commandShortcut(for: "prev-pane-tab-direct", "prev-pane-tab"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    self.agentManager.prevTab(self.agentManager.activePaneId)
+                }
+            ),
+            CommandItem(
+                id: "close-pane-tab",
+                icon: "xmark.square.fill",
+                label: "Close Pane Tab",
+                description: "Close the active tab inside the active pane",
+                shortcut: commandShortcut(for: "close-pane-tab-direct", "close-pane-tab"),
+                action: { [weak self] in
+                    guard let self else { return }
+                    let paneId = self.agentManager.activePaneId
+                    guard let tab = self.agentManager.panes[paneId]?.activeTab else { return }
+                    self.agentManager.removeTabFromPane(paneId, tabId: tab.id)
                 }
             ),
             CommandItem(

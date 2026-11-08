@@ -10,6 +10,14 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 ## [Unreleased]
 
 ### Added
+- Splits get their own tabs from the mouse: every pane header has a **+** whose menu opens
+  a terminal, browser, agent, agent chat, or Markdown file as a tab of that split (also
+  **New … in This Pane** in the command palette). The palette lists **New Pane Tab**,
+  **Next Pane Tab**, **Previous Pane Tab**, and **Close Pane Tab**: `⌃⌘T` / `⌃⌘→` / `⌃⌘←` / `⌃⌘W`
+  (`new-pane-tab-direct`, `next-pane-tab-direct`, `prev-pane-tab-direct`,
+  `close-pane-tab-direct`), or `⌃A` → `⇧T` / `>` / `<` / `⇧W` as before.
+  Crowded pane tabs shrink to share the header, then scroll and keep the active tab in
+  view, instead of running under its buttons.
 - **Agent chat**: `⌘I` (`new-chat`), the sidebar **+** menu, or `⌘P` → *New omp Chat*
   opens omp as a chat instead of a terminal — beside the focused pane, as a tab of it, in
   a new tab, or in a new window. It looks and works like Soprano Agents' chat: message

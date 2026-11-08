@@ -639,13 +639,13 @@ final class KeybindingManager: @unchecked Sendable {
         case "previous-tab":
             agentManager.activatePreviousLayoutTab()
 
-        case "new-pane-tab":
+        case "new-pane-tab", "new-pane-tab-direct":
             _ = agentManager.addTabToPane(agentManager.activePaneId, type: .terminal)
-        case "next-pane-tab":
+        case "next-pane-tab", "next-pane-tab-direct":
             agentManager.nextTab(agentManager.activePaneId)
-        case "prev-pane-tab":
+        case "prev-pane-tab", "prev-pane-tab-direct":
             agentManager.prevTab(agentManager.activePaneId)
-        case "close-pane-tab":
+        case "close-pane-tab", "close-pane-tab-direct":
             closeActivePaneTab()
 
         case "command-palette":

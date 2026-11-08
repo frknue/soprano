@@ -283,7 +283,8 @@ key; `Esc` keeps the current one.
 | `⌃Tab` / `⌃⇧Tab` | Next / previous tab (wraps around) |
 | `⌘T` or `⌃A` → `T` | New tab |
 | `⌃A` → `W` | Close tab |
-| `⌃A` → `⇧T` / `>` / `<` / `⇧W` | New pane tab / next / previous / close pane tab |
+| `⌃⌘T` / `⌃⌘→` / `⌃⌘←` / `⌃⌘W` | New pane tab / next / previous / close pane tab (in the focused split) |
+| `⌃A` → `⇧T` / `>` / `<` / `⇧W` | The same, with the prefix |
 
 **Agents and panes to open**
 
@@ -684,13 +685,26 @@ Workspaces. Workspaces saved by older builds with window depth reopen with each 
 layer as its own tab, in the order the layers were created, with the active layer as
 the active tab.
 
-**Pane tabs** are different: they live inside a single pane, such as editor files or a
-Markdown reader sharing the pane with its terminal, and appear in the pane header only
-when the pane has more than one. `⌃A` then `⇧T` opens a terminal pane tab in the active
-pane, `>` / `<` cycle them, and `⇧W` closes the active one. Every pane tab shows its
-own `×` on the active tab and under the pointer, and that `×` closes only that tab;
-the `×` at the header's trailing edge closes the active pane tab. Closing the last tab
-closes the pane.
+**Pane tabs** are different: they live inside a single pane (one split), such as editor
+files or a Markdown reader sharing the pane with its terminal, so each split of a layout
+keeps its own row of tabs. Every pane header has a `+` after its title or tabs; it opens
+a menu of what the new tab holds — a terminal, a browser, Codex, Claude Code, OpenCode or
+omp in its terminal, an agent chat, or a Markdown file — and opens it in that pane, in
+the directory of its active tab. It greys out once the pane holds ten tabs. The command
+palette has the same as **New Browser in This Pane**, **New Claude Code in This Pane**
+(one per agent), **New omp Chat in This Pane** and **Open Markdown in This Pane…**.
+`⌃⌘T` (or `⌃A` then `⇧T`) opens a terminal tab in the focused pane straight away,
+`⌃⌘→` / `⌃⌘←` (or `⌃A` then `>` / `<`) cycle its tabs, and `⌃⌘W` (or `⌃A` then `⇧W`)
+closes the active one (**New Pane Tab**, **Next Pane Tab**, **Previous Pane Tab**,
+**Close Pane Tab** in the palette; `new-pane-tab-direct`, `next-pane-tab-direct`,
+`prev-pane-tab-direct`, `close-pane-tab-direct` in `settings.json`). The tabs appear in
+the pane header once the pane has more than one and shrink to share the header when it
+gets narrow, each
+keeping its `×` and a letter or two of its title. Past that the row scrolls sideways
+(trackpad or wheel) and always keeps the active tab in view. Every
+pane tab shows its own `×` on the active tab and under the pointer, and that `×` closes
+only that tab; the `×` at the header's trailing edge closes the active pane tab. Closing
+the last tab closes the pane.
 
 ## Markdown reader
 

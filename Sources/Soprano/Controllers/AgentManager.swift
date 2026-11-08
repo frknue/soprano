@@ -593,6 +593,13 @@ final class AgentManager: @unchecked Sendable {
         )
     }
 
+    /// Opens `fileURL` in a Markdown reader tab of `paneId`, the way
+    /// `openEditor` opens files; a full pane gets it in a new split.
+    @discardableResult
+    func openMarkdown(fileURL: URL, in paneId: String) -> TerminalTarget? {
+        openFileTab(fileURL: fileURL, contentKind: PaneContentKind.markdown, preview: false, in: paneId)
+    }
+
     private func openFileTab(
         fileURL: URL,
         contentKind: String,
