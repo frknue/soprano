@@ -52,11 +52,17 @@ enum DefaultKeybindings {
             KeyBinding(id: "next-tab", label: "Next Tab", description: "Switch to the next tab of the active window", category: .navigation, defaultKeys: "Ctrl+Tab", mode: .direct, key: "\t", ctrl: true),
             KeyBinding(id: "previous-tab", label: "Previous Tab", description: "Switch to the previous tab of the active window", category: .navigation, defaultKeys: "Ctrl+Shift+Tab", mode: .direct, key: "\t", ctrl: true, shift: true),
 
-            // Pane tabs: tabs inside one pane, such as open files (prefix)
+            // Pane tabs: tabs inside one pane (split), such as open files
+            // (prefix: Shift+T / > / < / Shift+W; direct: ⌃⌘ with T / → / ← / W,
+            // which neither the shell nor macOS uses)
             KeyBinding(id: "new-pane-tab", label: "New Pane Tab", description: "Open a terminal tab inside the active pane", category: .layout, defaultKeys: "Prefix → Shift+T", mode: .prefix, key: "t", shift: true),
+            KeyBinding(id: "new-pane-tab-direct", label: "New Pane Tab (Direct)", description: "Open a terminal tab inside the active pane without the prefix", category: .layout, defaultKeys: "⌃⌘T", mode: .direct, key: "t", ctrl: true, meta: true),
             KeyBinding(id: "next-pane-tab", label: "Next Pane Tab", description: "Switch to the next tab inside the active pane", category: .layout, defaultKeys: "Prefix → >", mode: .prefix, key: ">", shift: true),
+            KeyBinding(id: "next-pane-tab-direct", label: "Next Pane Tab (Direct)", description: "Switch to the next tab inside the active pane without the prefix", category: .navigation, defaultKeys: "⌃⌘→", mode: .direct, key: "\u{F703}", ctrl: true, meta: true),
             KeyBinding(id: "prev-pane-tab", label: "Previous Pane Tab", description: "Switch to the previous tab inside the active pane", category: .layout, defaultKeys: "Prefix → <", mode: .prefix, key: "<", shift: true),
+            KeyBinding(id: "prev-pane-tab-direct", label: "Previous Pane Tab (Direct)", description: "Switch to the previous tab inside the active pane without the prefix", category: .navigation, defaultKeys: "⌃⌘←", mode: .direct, key: "\u{F702}", ctrl: true, meta: true),
             KeyBinding(id: "close-pane-tab", label: "Close Pane Tab", description: "Close the active tab inside the active pane", category: .layout, defaultKeys: "Prefix → Shift+W", mode: .prefix, key: "w", shift: true),
+            KeyBinding(id: "close-pane-tab-direct", label: "Close Pane Tab (Direct)", description: "Close the active tab inside the active pane without the prefix", category: .layout, defaultKeys: "⌃⌘W", mode: .direct, key: "w", ctrl: true, meta: true),
 
             // Agents (direct: Cmd+1/2/3/4)
             KeyBinding(id: "launch-codex", label: "Launch Codex", description: "Launch Codex agent", category: .agents, defaultKeys: "⌘1", mode: .direct, key: "1", meta: true),

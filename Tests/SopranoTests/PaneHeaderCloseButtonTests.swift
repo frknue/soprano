@@ -111,6 +111,125 @@ struct PaneHeaderCloseButtonTests {
         #expect(manager.panes[paneId]?.activeTab?.id == firstTabId)
     }
 
+    @Test func thePlusMenuOpensTerminalsBrowsersAgentsAndChatsAsTabsOfThatSplitOnlyUntilItIsFull() throws {
+        let manager = AgentManager()
+        let leftPaneId = manager.activePaneId
+        let rightPaneId = try #require(manager.splitPane(direction: .horizontal, paneId: leftPaneId))
+        manager.focusPane(leftPaneId)
+        let header = PaneHeaderView(
+            paneId: rightPaneId,
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        let addButton = try #require(descendants(of: header, as: NSButton.self).first {
+            $0.identifier?.rawValue == "pane-add-tab-button"
+        })
+        let chatProfileId = try #require(AgentChatLaunch.chatProfiles.first?.id)
+        func choose(_ id: String) throws {
+            let menu = header.addTabMenu()
+            let index = menu.items.firstIndex { $0.identifier?.rawValue == "pane-add-tab-\(id)" }
+            menu.performActionForItem(at: try #require(index, "no \(id) item"))
+            header.update()
+        }
+
+        try choose("terminal")
+        #expect(manager.activePaneId == rightPaneId)
+        try choose("browser")
+        try choose("agent-claude-code")
+        try choose("chat-\(chatProfileId)")
+
+        let right = try #require(manager.panes[rightPaneId])
+        let added = right.tabs.dropFirst()
+        #expect(added.map(\.type) == [.terminal, .browser, .agent, .agent])
+        #expect(added.map(\.isWebBrowser) == [false, true, false, false])
+        #expect(added.map { $0.agent?.profileId } == [nil, nil, "claude-code", chatProfileId])
+        #expect(added.map(\.isChat) == [false, false, false, true])
+        #expect(right.activeTab?.id == added.last?.id)
+        #expect(manager.panes[leftPaneId]?.tabs.count == 1)
+        // The menu's Markdown item asks for a file, then opens it here.
+        #expect(header.addTabMenu().items.contains { $0.identifier?.rawValue == "pane-add-tab-markdown" })
+        let readme = FileManager.default.temporaryDirectory.appendingPathComponent("pane-tab-\(UUID().uuidString).md")
+        try "# Notes".write(to: readme, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: readme) }
+        let reader = try #require(manager.openMarkdown(fileURL: readme, in: rightPaneId))
+        #expect(reader.paneId == rightPaneId)
+        #expect(right.activeTab?.isMarkdown == true)
+        header.update()
+
+        while right.tabs.count < PaneState.maxTabsPerPane {
+            try choose("terminal")
+        }
+        #expect(!addButton.isEnabled)
+    }
+
+    @Test func crowdedTabsWithUnequalTitlesKeepTheirCloseButtonsTheHeaderButtonsAndTheActiveTabInView() throws {
+        let manager = AgentManager()
+        let paneId = manager.activePaneId
+        let pane = try #require(manager.panes[paneId])
+        for _ in 1..<PaneState.maxTabsPerPane {
+            _ = try #require(manager.addTabToPane(paneId, type: .terminal))
+        }
+        for index in pane.tabs.indices {
+            pane.tabs[index].title = index == 3
+                ? "a-markdown-file-with-a-very-long-name-that-keeps-going-and-going.md"
+                : String(UnicodeScalar(UInt8(97 + index)))
+        }
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: PaneHeaderView.height))
+        let header = PaneHeaderView(
+            paneId: paneId,
+            agentManager: manager,
+            themeManager: ThemeManager(themeId: "gruvbox-dark")
+        )
+        header.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            header.topAnchor.constraint(equalTo: host.topAnchor),
+            header.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            host.widthAnchor.constraint(equalToConstant: 360),
+            host.heightAnchor.constraint(equalToConstant: PaneHeaderView.height),
+        ])
+        header.update()
+        host.layoutSubtreeIfNeeded()
+
+        let buttons = descendants(of: header, as: NSButton.self)
+        for tab in pane.tabs {
+            let tabButton = try #require(buttons.first { $0.identifier?.rawValue == "pane-tab-\(tab.id)" })
+            let close = try #require(buttons.first { $0.identifier?.rawValue == "close-pane-tab-\(tab.id)" })
+            #expect(tabButton.bounds.contains(close.frame), "close of \(tab.title) leaves its tab")
+            #expect(close.frame.minX >= 8 + 14, "\(tab.title) leaves no room for its title")
+        }
+        for identifier in ["pane-add-tab-button", "pane-close-button"] {
+            let button = try #require(buttons.first { $0.identifier?.rawValue == identifier })
+            let center = NSPoint(x: button.frame.midX, y: button.frame.midY)
+            #expect(header.hitTest(header.convert(center, to: host)) === button, "\(identifier) is covered")
+        }
+
+        // The last tab, added last, is active; walking back across every tab
+        // and forward again crosses the overflow edge both ways.
+        func expectActiveTabFullyVisible() throws {
+            header.update()
+            host.layoutSubtreeIfNeeded()
+            let activeId = try #require(pane.activeTab?.id)
+            let active = try #require(buttons.first { $0.identifier?.rawValue == "pane-tab-\(activeId)" })
+            let clip = try #require(descendants(of: header, as: NSScrollView.self).first?.contentView)
+            #expect(
+                clip.bounds.contains(active.convert(active.bounds, to: clip)),
+                "\(pane.tabs[pane.activeTabIndex].title) is scrolled out of view"
+            )
+        }
+        #expect(pane.activeTabIndex == PaneState.maxTabsPerPane - 1)
+        try expectActiveTabFullyVisible()
+        for _ in 1..<PaneState.maxTabsPerPane {
+            manager.prevTab(paneId)
+            try expectActiveTabFullyVisible()
+        }
+        #expect(pane.activeTabIndex == 0)
+        manager.prevTab(paneId)
+        try expectActiveTabFullyVisible()
+    }
+
     @Test func closingAMarkdownPreviewClearsTheEditorsEyeHoverTint() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaneHeaderCloseButtonTests-\(UUID().uuidString)")

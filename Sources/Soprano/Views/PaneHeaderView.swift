@@ -1,9 +1,10 @@
 import AppKit
 
 /// Header bar at the top of each pane, in Soprano Agents' header language:
-/// the pane kind's symbol and title (or the pane tabs as Agents tabs), the
-/// Agents status pill (Working / Approval / Input / Done / Failed, Running
-/// for a shell running a command) and a ghost close button.
+/// the pane kind's symbol and title (or the pane tabs as Agents tabs), a
+/// ghost `+` that opens a terminal tab in this pane, the Agents status pill
+/// (Working / Approval / Input / Done / Failed, Running for a shell running
+/// a command) and a ghost close button.
 ///
 /// The focused pane's header sits on `card` with a medium ink title and a
 /// 2 pt `primary` focus rule on its bottom edge; every other header sits on
@@ -23,9 +24,18 @@ final class PaneHeaderView: NSView {
     private let titleLabel = NSTextField.label("", size: PaneHeaderView.titleSize)
     private let statusPill = ShellStatusPillView()
     private let tabStackView = NSStackView()
+    /// Scrolls the tab strip sideways once its tabs are at their narrowest.
+    private let tabScrollView = NSScrollView()
+    private var revealActiveTab = false
+    private var revealedActiveTabId: String?
+    private var previousTabViewportWidth: CGFloat = 0
     private let bottomRule = NSView()
     private let focusRule = NSView()
     private var closeButton: ShellGhostButton!
+    private var addTabButton: ShellGhostButton!
+    /// The `+` follows the title, or the tab strip when the pane has tabs.
+    private var addTabAfterTitle: NSLayoutConstraint!
+    private var addTabAfterTabs: NSLayoutConstraint!
     private var tabButtons: [(id: String, button: PaneTabButton)] = []
 
     init(paneId: String, agentManager: AgentManager, themeManager: ThemeManager) {
@@ -74,13 +84,24 @@ final class PaneHeaderView: NSView {
         tabStackView.alignment = .centerY
         tabStackView.spacing = 2
         // Like Agents' tab strip, tabs share the room and truncate their
-        // titles instead of dropping off: a gravity-area stack detaches the
-        // views that do not fit.
-        tabStackView.distribution = .fill
-        tabStackView.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        // titles in proportion to their length instead of running under the
+        // `+` and the close button. Each tab still keeps its close button and
+        // a letter or two (`PaneTabButton.minWidth`); when even that does not
+        // fit, the strip scrolls and keeps the active tab in view.
+        tabStackView.distribution = .fillProportionally
         tabStackView.translatesAutoresizingMaskIntoConstraints = false
-        tabStackView.isHidden = true
-        addSubview(tabStackView)
+
+        tabScrollView.drawsBackground = false
+        tabScrollView.borderType = .noBorder
+        // Too short for a scroller; still scrolls by trackpad or wheel.
+        tabScrollView.hasHorizontalScroller = false
+        tabScrollView.hasVerticalScroller = false
+        tabScrollView.horizontalScrollElasticity = .allowed
+        tabScrollView.verticalScrollElasticity = .none
+        tabScrollView.documentView = tabStackView
+        tabScrollView.translatesAutoresizingMaskIntoConstraints = false
+        tabScrollView.isHidden = true
+        addSubview(tabScrollView)
 
         statusPill.label.identifier = NSUserInterfaceItemIdentifier("pane-status-label")
         statusPill.setContentHuggingPriority(.required, for: .horizontal)
@@ -100,6 +121,18 @@ final class PaneHeaderView: NSView {
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(closeButton)
 
+        addTabButton = ShellGhostButton(
+            symbol: "plus",
+            label: "New Pane Tab",
+            size: 20,
+            symbolSize: 10,
+            target: self,
+            action: #selector(addTabAction)
+        )
+        addTabButton.identifier = NSUserInterfaceItemIdentifier("pane-add-tab-button")
+        addTabButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(addTabButton)
+
         for rule in [bottomRule, focusRule] {
             rule.wantsLayer = true
             rule.translatesAutoresizingMaskIntoConstraints = false
@@ -107,18 +140,24 @@ final class PaneHeaderView: NSView {
         }
 
         // Pane containers are briefly zero-width while AppKit reparents a
-        // cached split tree. Let the flexible labels collapse during that
-        // transient state instead of breaking the fixed control constraints.
-        let titleTrailingConstraint = titleLabel.trailingAnchor.constraint(
+        // cached split tree. Let the flexible title or tabs collapse during
+        // that transient state instead of breaking the fixed control
+        // constraints.
+        let addTabTrailingConstraint = addTabButton.trailingAnchor.constraint(
             lessThanOrEqualTo: statusPill.leadingAnchor,
             constant: -8
         )
-        titleTrailingConstraint.priority = .defaultHigh
-        let tabsTrailingConstraint = tabStackView.trailingAnchor.constraint(
-            lessThanOrEqualTo: statusPill.leadingAnchor,
-            constant: -8
-        )
-        tabsTrailingConstraint.priority = .defaultHigh
+        addTabTrailingConstraint.priority = .defaultHigh
+        addTabAfterTitle = addTabButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 4)
+        addTabAfterTabs = addTabButton.leadingAnchor.constraint(equalTo: tabScrollView.trailingAnchor, constant: 4)
+        // The strip hugs its tabs (748), the tabs shrink to the strip (749)
+        // and the strip stops at the `+`'s trailing limit (750): tabs shrink
+        // before the strip runs out of room, then it scrolls.
+        let clipView = tabScrollView.contentView
+        let stackFitsViewport = tabStackView.widthAnchor.constraint(lessThanOrEqualTo: clipView.widthAnchor)
+        stackFitsViewport.priority = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.defaultHigh.rawValue - 1)
+        let stripHugsTabs = tabScrollView.widthAnchor.constraint(equalTo: tabStackView.widthAnchor)
+        stripHugsTabs.priority = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.defaultHigh.rawValue - 2)
 
         NSLayoutConstraint.activate([
             kindIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
@@ -127,12 +166,19 @@ final class PaneHeaderView: NSView {
 
             titleLabel.leadingAnchor.constraint(equalTo: kindIcon.trailingAnchor, constant: 6),
             titleLabel.centerYAnchor.constraint(equalTo: kindIcon.centerYAnchor),
-            titleTrailingConstraint,
 
-            tabStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            tabStackView.centerYAnchor.constraint(equalTo: kindIcon.centerYAnchor),
-            tabStackView.heightAnchor.constraint(equalToConstant: 22),
-            tabsTrailingConstraint,
+            tabScrollView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            tabScrollView.centerYAnchor.constraint(equalTo: kindIcon.centerYAnchor),
+            tabScrollView.heightAnchor.constraint(equalToConstant: 22),
+            tabStackView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+            tabStackView.topAnchor.constraint(equalTo: clipView.topAnchor),
+            tabStackView.bottomAnchor.constraint(equalTo: clipView.bottomAnchor),
+            stackFitsViewport,
+            stripHugsTabs,
+
+            addTabButton.centerYAnchor.constraint(equalTo: kindIcon.centerYAnchor),
+            addTabTrailingConstraint,
+            addTabAfterTitle,
 
             statusPill.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -6),
             statusPill.centerYAnchor.constraint(equalTo: kindIcon.centerYAnchor),
@@ -194,11 +240,25 @@ final class PaneHeaderView: NSView {
         let shouldShowTabs = tabCount > 1
         titleLabel.isHidden = shouldShowTabs
         kindIcon.isHidden = shouldShowTabs
-        tabStackView.isHidden = !shouldShowTabs
+        tabScrollView.isHidden = !shouldShowTabs
+        // Deactivate before activating so the button never holds both.
+        addTabAfterTitle.isActive = false
+        addTabAfterTabs.isActive = false
+        (shouldShowTabs ? addTabAfterTabs : addTabAfterTitle).isActive = true
+        addTabButton.isEnabled = tabCount < PaneState.maxTabsPerPane
+        addTabButton.toolTip = addTabButton.isEnabled
+            ? "New Pane Tab"
+            : "A pane holds at most \(PaneState.maxTabsPerPane) tabs"
         if shouldShowTabs, let pane {
             rebuildTabButtons(for: pane, palette: palette)
         } else {
             clearTabButtons()
+        }
+        let activeTabId = shouldShowTabs ? pane?.activeTab?.id : nil
+        if activeTabId != revealedActiveTabId {
+            revealedActiveTabId = activeTabId
+            revealActiveTab = true
+            needsLayout = true
         }
 
         layer?.backgroundColor = Self.background(
@@ -210,6 +270,25 @@ final class PaneHeaderView: NSView {
         bottomRule.layer?.backgroundColor = palette.border.cgColor
         focusRule.layer?.backgroundColor = palette.primary.cgColor
         refreshFocusMark()
+    }
+
+    /// Scrolls the tab strip so the active tab shows whenever it changes, the
+    /// tabs change, or the strip resizes.
+    override func layout() {
+        super.layout()
+        guard !tabScrollView.isHidden else { return }
+        let viewportWidth = tabScrollView.contentView.bounds.width
+        if viewportWidth != previousTabViewportWidth {
+            previousTabViewportWidth = viewportWidth
+            revealActiveTab = true
+        }
+        guard revealActiveTab, viewportWidth > 0,
+              let activeTabId = revealedActiveTabId,
+              let button = tabButtons.first(where: { $0.id == activeTabId })?.button
+        else { return }
+        tabScrollView.layoutSubtreeIfNeeded()
+        button.scrollToVisible(button.bounds)
+        revealActiveTab = false
     }
 
     /// Statuses that wash the header: someone has to answer, or it failed.
@@ -287,6 +366,66 @@ final class PaneHeaderView: NSView {
         agentManager.removeTabFromPane(paneId, tabId: activeTab.id)
     }
 
+    /// Shows what a tab in this pane can hold, like the sidebar's `+`: a
+    /// terminal, a browser, each agent as a terminal or a chat, or a
+    /// Markdown file. `⌃⌘T` (`⌃A` then `⇧T`) is the terminal without the menu.
+    @objc private func addTabAction() {
+        addTabMenu().popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: addTabButton.bounds.maxY + 4),
+            in: addTabButton
+        )
+    }
+
+    /// The `+` menu; each item opens its tab in this pane and focuses it.
+    func addTabMenu() -> NSMenu {
+        let menu = NSMenu(title: "New Tab in This Pane")
+        menu.autoenablesItems = false
+        func add(_ title: String, symbol: String, id: String, action: @escaping () -> Void) {
+            let item = NSMenuItem(title: title, action: #selector(addTabMenuItemClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.identifier = NSUserInterfaceItemIdentifier("pane-add-tab-\(id)")
+            item.image = NSImage.symbol(symbol, size: 13)
+            item.representedObject = AddTabMenuAction(action)
+            menu.addItem(item)
+        }
+        let paneId = paneId
+        add("Terminal", symbol: Icon.terminal, id: "terminal") { [weak self] in
+            _ = self?.agentManager.addTabToPane(paneId, type: .terminal)
+        }
+        add("Browser", symbol: Icon.globe, id: "browser") { [weak self] in
+            _ = self?.agentManager.addTabToPane(paneId, type: .browser)
+        }
+        menu.addItem(.separator())
+        for profile in AgentCatalog.all where profile.id != "terminal" {
+            add(profile.name, symbol: Icon.subagent, id: "agent-\(profile.id)") { [weak self] in
+                _ = self?.agentManager.addTabToPane(paneId, type: .agent, profileId: profile.id)
+            }
+        }
+        for profile in AgentChatLaunch.chatProfiles {
+            add("\(profile.name) Chat", symbol: "bubble.left.and.text.bubble.right", id: "chat-\(profile.id)") { [weak self] in
+                _ = self?.agentManager.addTabToPane(
+                    paneId,
+                    type: .agent,
+                    profileId: profile.id,
+                    contentKind: PaneContentKind.chat
+                )
+            }
+        }
+        menu.addItem(.separator())
+        add("Markdown File…", symbol: Icon.fileText, id: "markdown") { [weak self] in
+            guard let self, let window = self.window else { return }
+            MarkdownFilePicker.begin(relativeTo: window) { [weak self] fileURL in
+                _ = self?.agentManager.openMarkdown(fileURL: fileURL, in: paneId)
+            }
+        }
+        return menu
+    }
+
+    @objc private func addTabMenuItemClicked(_ sender: NSMenuItem) {
+        (sender.representedObject as? AddTabMenuAction)?.run()
+    }
+
     @objc private func tabClicked(_ sender: NSButton) {
         agentManager.switchTab(paneId, index: sender.tag)
     }
@@ -306,6 +445,8 @@ final class PaneHeaderView: NSView {
         let tabIds = pane.tabs.map(\.id)
         if tabButtons.map(\.id) != tabIds {
             clearTabButtons()
+            revealActiveTab = true
+            needsLayout = true
             tabButtons = pane.tabs.map { tab in
                 let button = PaneTabButton(
                     tabId: tab.id,
@@ -318,8 +459,7 @@ final class PaneHeaderView: NSView {
                 )
                 tabStackView.addArrangedSubview(button)
                 button.heightAnchor.constraint(equalTo: tabStackView.heightAnchor).isActive = true
-                // A tab never shrinks below its close button and a few letters.
-                button.widthAnchor.constraint(greaterThanOrEqualToConstant: 56).isActive = true
+                button.widthAnchor.constraint(greaterThanOrEqualToConstant: PaneTabButton.minWidth).isActive = true
                 return (tab.id, button)
             }
         }
@@ -376,6 +516,10 @@ private final class PaneTabButton: NSButton {
     static let padding: CGFloat = 8
     static let closeSize: CGFloat = 14
     static let closeGap: CGFloat = 4
+    /// Narrowest a tab gets: its padding, the close button (inset 4 pt from
+    /// the trailing edge) and 26 pt of title, enough for a letter or two and
+    /// an ellipsis.
+    static let minWidth: CGFloat = padding + 26 + closeGap + closeSize + 4
 
     private let closeButton = ShellGhostButton(
         symbol: "xmark",
@@ -524,5 +668,14 @@ private final class PaneTabButton: NSButton {
 
     @objc private func closeClicked() {
         onClose()
+    }
+}
+
+/// What one item of the pane header's `+` menu does.
+private final class AddTabMenuAction: NSObject {
+    let run: () -> Void
+
+    init(_ run: @escaping () -> Void) {
+        self.run = run
     }
 }
