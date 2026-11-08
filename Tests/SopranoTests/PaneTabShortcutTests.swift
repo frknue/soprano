@@ -4,6 +4,11 @@ import Testing
 
 @MainActor
 struct PaneTabShortcutTests {
+    /// `KeybindingManager.filter` looks up the event's window through `NSApp`.
+    init() {
+        _ = NSApplication.shared
+    }
+
     @Test func controlCommandTArrowsAndWOpenCycleAndCloseTabsInsideTheFocusedSplitOnly() throws {
         let manager = AgentManager()
         let leftPaneId = manager.activePaneId
@@ -28,6 +33,35 @@ struct PaneTabShortcutTests {
         #expect(keybindings.filter(try chord("w", keyCode: 13)) == nil)
         #expect(right.tabs.count == 2)
         #expect(!right.tabs.contains { $0.id == closedTabId })
+        #expect(manager.panes[leftPaneId]?.tabs.count == 1)
+    }
+
+    @Test func commandWAndPrefixXCloseOnlyTheActivePaneTabUntilTheLastOneTakesThePane() throws {
+        let manager = AgentManager()
+        let leftPaneId = manager.activePaneId
+        let rightPaneId = try #require(manager.splitPane(direction: .horizontal, paneId: leftPaneId))
+        _ = try #require(manager.addTabToPane(rightPaneId, type: .terminal))
+        _ = try #require(manager.addTabToPane(rightPaneId, type: .terminal))
+        let keybindings = KeybindingManager(agentManager: manager, config: DefaultKeybindings.config)
+        let right = try #require(manager.panes[rightPaneId])
+        #expect(right.tabs.count == 3)
+
+        let commandW = try keyEvent("w", [.command], keyCode: 13)
+        let firstClosed = try #require(right.activeTab?.id)
+        #expect(keybindings.filter(commandW) == nil)
+        #expect(manager.panes[rightPaneId] != nil)
+        #expect(right.tabs.count == 2)
+        #expect(!right.tabs.contains { $0.id == firstClosed })
+
+        let secondClosed = try #require(right.activeTab?.id)
+        #expect(keybindings.filter(try keyEvent("a", [.control], keyCode: 0)) == nil)
+        #expect(keybindings.filter(try keyEvent("x", [], keyCode: 7)) == nil)
+        #expect(manager.panes[rightPaneId] != nil)
+        #expect(right.tabs.count == 1)
+        #expect(!right.tabs.contains { $0.id == secondClosed })
+
+        #expect(keybindings.filter(commandW) == nil)
+        #expect(manager.panes[rightPaneId] == nil)
         #expect(manager.panes[leftPaneId]?.tabs.count == 1)
     }
 

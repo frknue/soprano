@@ -617,8 +617,10 @@ final class KeybindingManager: @unchecked Sendable {
         case "resize-right":
             agentManager.resizePane(direction: .right, tickPercent: config.resizeTickPercent)
 
-        case "close-pane", "kill-pane":
+        case "close-pane":
             agentManager.closePane(agentManager.activePaneId)
+        case "kill-pane", "close-active":
+            closeActivePaneTab()
         case "maximize-pane":
             agentManager.toggleMaximize()
         case "copy-mode", "copy-mode-right-bracket":
@@ -666,8 +668,6 @@ final class KeybindingManager: @unchecked Sendable {
             _ = agentManager.spawnTerminal()
         case "new-browser":
             _ = agentManager.spawnBrowser()
-        case "close-active":
-            agentManager.closePane(agentManager.activePaneId)
         case "save-session":
             invokeDelegate { $0.keybindingSaveSession() }
         case "toggle-sidebar":
@@ -693,12 +693,13 @@ final class KeybindingManager: @unchecked Sendable {
         }
     }
 
+    /// Closes the active pane's active tab; its last tab takes the pane with it.
     private func closeActivePaneTab() {
         let paneId = agentManager.activePaneId
-        guard let pane = agentManager.panes[paneId],
-              let tab = pane.activeTab
-        else { return }
-
+        guard let tab = agentManager.panes[paneId]?.activeTab else {
+            agentManager.closePane(paneId)
+            return
+        }
         agentManager.removeTabFromPane(paneId, tabId: tab.id)
     }
 

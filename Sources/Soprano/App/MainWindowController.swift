@@ -707,7 +707,7 @@ final class MainWindowController: NSWindowController {
                 icon: "xmark.square.fill",
                 label: "Close Pane Tab",
                 description: "Close the active tab inside the active pane",
-                shortcut: commandShortcut(for: "close-pane-tab-direct", "close-pane-tab"),
+                shortcut: commandShortcut(for: "close-active", "close-pane-tab-direct", "close-pane-tab"),
                 action: { [weak self] in
                     guard let self else { return }
                     let paneId = self.agentManager.activePaneId
@@ -720,7 +720,7 @@ final class MainWindowController: NSWindowController {
                 icon: "xmark.square",
                 label: "Close Pane",
                 description: "Close the active pane",
-                shortcut: commandShortcut(for: "close-pane", "close-active"),
+                shortcut: commandShortcut(for: "close-pane"),
                 action: { [weak self] in
                     guard let self else { return }
                     self.agentManager.closePane(self.agentManager.activePaneId)

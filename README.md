@@ -263,8 +263,7 @@ key; `Esc` keeps the current one.
 | `⌃A` → `H/J/K/L` | Resize the active pane left / down / up / right by 5% |
 | `⌃A` → `M` | Toggle maximize for the active pane |
 | `⌃A` → `Q` | Close the active pane |
-| `⌃A` → `X` | Kill the active pane and every pane tab in it |
-| `⌘W` | Close the active pane |
+| `⌃A` → `X` / `⌘W` | Close the active pane tab, or the pane when it has only one |
 
 **Sessions, windows, and tabs**
 
