@@ -20,3 +20,5 @@ Cleanups to do once the parallel crates land:
 - Cutover: README/AGENTS still describe Info.plist versioning, `build-ghostty.sh`, Ghostty resource
   search; delete `Support/Licenses/LICENSE-swift-cmark`, `Support/ghostty-version.txt`.
 - soprano-git ranges are byte offsets (Swift used UTF-16).
+- soprano-browser toolbar uses gpui-component theme colors directly (soprano-ui was not ready): switch it to soprano-ui tokens/widgets (ask BrowserUi once UiKit is done).
+- Cross-compiling C deps (bundled SQLite etc.) for Linux/Windows checks works with zig cc wrappers as CC_<target>/AR_<target> (AccountsPort did this).
