@@ -7,8 +7,8 @@
 
 use gpui::{
     AnyElement, App, AppContext, Context, DragMoveEvent, Empty, Entity, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder, px,
+    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    div, prelude::FluentBuilder, px,
 };
 use soprano_explorer::ExplorerDrag;
 use soprano_model::{SplitBranchSide, SplitDirection, SplitNode, TerminalTarget};
@@ -55,7 +55,13 @@ impl SplitTree {
         Self { workspace, content, shell }
     }
 
-    fn render_node(&self, node: &SplitNode, path: Vec<SplitBranchSide>, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_node(
+        &self,
+        node: &SplitNode,
+        path: Vec<SplitBranchSide>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         match node {
             SplitNode::Leaf(pane_id) => self.render_pane(pane_id, window, cx),
             SplitNode::Split(branch) => {
@@ -63,8 +69,10 @@ impl SplitTree {
                 let gap = theme.z(GAP);
                 let horizontal = branch.direction == SplitDirection::Horizontal;
                 let fraction = (branch.split_percentage.clamp(10.0, 90.0) / 100.0) as f32;
-                let first = self.render_node(&branch.first, child_path(&path, SplitBranchSide::First), window, cx);
-                let second = self.render_node(&branch.second, child_path(&path, SplitBranchSide::Second), window, cx);
+                let first =
+                    self.render_node(&branch.first, child_path(&path, SplitBranchSide::First), window, cx);
+                let second =
+                    self.render_node(&branch.second, child_path(&path, SplitBranchSide::Second), window, cx);
                 let drag = DividerDrag { path: path.clone(), direction: branch.direction };
                 let id = SharedString::from(format!("split-divider-{}", path_key(&path)));
                 let workspace = self.workspace.clone();
@@ -115,12 +123,14 @@ impl SplitTree {
         let workspace = self.workspace.read(cx);
         let Some(pane) = workspace.pane(pane_id) else { return Empty.into_any_element() };
         let focused = workspace.active_pane_id() == pane_id;
-        let attention = pane.tabs.iter().any(|tab| tab.agent.as_ref().is_some_and(|agent| agent.needs_attention));
+        let attention =
+            pane.tabs.iter().any(|tab| tab.agent.as_ref().is_some_and(|agent| agent.needs_attention));
         let active_tab = pane.active_tab().map(|tab| tab.id.clone());
         let theme = cx.soprano_theme();
-        let body: AnyElement = match active_tab.as_ref().and_then(|tab_id| {
-            self.content.read(cx).content(&TerminalTarget::new(pane_id, tab_id)).cloned()
-        }) {
+        let body: AnyElement = match active_tab
+            .as_ref()
+            .and_then(|tab_id| self.content.read(cx).content(&TerminalTarget::new(pane_id, tab_id)).cloned())
+        {
             Some(PaneContent::Failed(message)) => placeholder(message, cx),
             Some(content) => match content.view() {
                 Some(view) => view.into_any_element(),
@@ -174,7 +184,9 @@ impl Render for SplitTree {
         let layout = workspace.layout().cloned();
         // Maximize renders a single-leaf layout; the hidden panes' content stays cached.
         let effective = match (workspace.maximized_pane_id(), layout) {
-            (Some(maximized), Some(_)) if workspace.pane(maximized).is_some() => Some(SplitNode::Leaf(maximized.to_owned())),
+            (Some(maximized), Some(_)) if workspace.pane(maximized).is_some() => {
+                Some(SplitNode::Leaf(maximized.to_owned()))
+            }
             (_, layout) => layout,
         };
         let root = match effective {
@@ -228,6 +240,7 @@ pub fn percentage_for_divider_position(position: f64, total_size: f64, divider_t
 }
 
 /// The first side's length for a model percentage (`applyModelPercentage`).
+#[cfg(test)]
 pub fn divider_position(percentage: f64, total_size: f64, divider_thickness: f64) -> f64 {
     (total_size - divider_thickness).max(0.0) * percentage.clamp(10.0, 90.0) / 100.0
 }

@@ -1,104 +1,36 @@
-# soprano (app shell) — report from AppShell (stopped at request budget)
+# soprano (app shell) — report from AppShell2
 
-| 7. Tests | about 135 tests: content cache, launch specs, IPC, palette, menus, sizing, shell, keyboard, plus 30 sidebar, 22 tab-row/status-bar and 16 pane-header tests |
-| Acceptance | build: check passes. Tests: last full run was 101 passed, 7 failed; I fixed my 3 test expectations and SidebarPort fixed its own (I did not see a run of those fixes). ChromePort reports 22/22 passing, but its `agent_badges_show_the_most_urgent_status` failed in that full run and nobody has re-run it. A final `cargo test` + clippy run was still in progress at the deadline. Linux cross-check: not run |
+`crates/soprano` (bin `soprano`) integrates every content crate. `cargo test -p soprano`: 111 passed. Clippy (all targets): no warnings. Formatted.
 
 ## Architecture
-- **`app.rs`** — startup.
-- **`workspace.rs`** — `WorkspaceHandle { model: Entity<Workspace>, bus }`. `update()` drains `take_changes()` / `take_events()`, notifies, and publishes a `WorkspaceUpdate`.
-- **`shell.rs`** — `Entity<Shell>` holds chrome state (sidebar, keybinding mode, held Control, page, popups). The `Command` enum is the single path for app-level work; every close is `Command::Close(CloseTarget)`.
-- **`main_view.rs`** — window root: layout, command execution, closes, dialogs, pickers, Settings, Dashboard, toasts, keystroke interceptor, IPC handling, notification routing, clipboard prompts.
-- **`content.rs`** — `ContentHost`: content entities cached by pane/tab; terminal and chat events update the workspace; running-command sampling every second; the 2.5 s Codex readiness timer. A test-only terminal factory means no test spawns a shell.
-- **`views/`** — `split_tree.rs` (mine); `sidebar.rs` + `sidebar/model.rs` (SidebarPort), `tab_rows.rs` + `status_bar.rs` (ChromePort), `pane_header.rs` (PaneHeaderPort), all three delegated to sub-agents.
-- **Smaller modules** — `palette.rs`, `menus.rs`, `ipc.rs`, `keyboard.rs`, `sizing.rs`, `window_chrome.rs` (the only per-OS module).
+- **`app.rs`** — startup: settings.json, accounts, theme, key bindings (terminal, browser, editor, diff, reader), the workspace (restored with `restoreLastSession`), notifications, the CLI socket, then the window. One `EditorDocuments<TerminalTarget>` entity per app, owned by the content host. Quit (menu/⌘Q) goes to `MainView::request_quit`; closing the main window asks first when documents are unsaved.
+- **`workspace.rs`** — `WorkspaceHandle { model: Entity<Workspace>, bus }`. `update(cx, |ws| ..)` drains `take_changes()`/`take_events()`, notifies and publishes a `WorkspaceUpdate`. `update_with(cx, |ws, cx| ..)` does the same for work that also needs other entities (the automation host).
+- **`shell.rs`** — chrome state and the `Command` enum; every close is `Command::Close(CloseTarget)`.
+- **`main_view.rs`** — window root: layout, commands, closes (two-phase, see below), dialogs, pickers, Settings, the Dashboard and Automations pages, toasts, the keystroke interceptor, IPC, notification routing, clipboard prompts, the automation timers.
+- **`content.rs`** — `ContentHost`: per pane/tab content (`PaneContent::{Terminal, Browser, Chat, Editor, Diff, Reader, Stopped, Failed}`) cached across layout rebuilds. File tabs (`is_editor`/`is_diff`/`is_markdown`) get `EditorView`/`DiffView`/`MarkdownReaderView`; diffs are `set_shown(false)` while hidden; `WorkspaceChange::Document` re-points a reader and rebuilds an editor/diff whose file changed. It mirrors which tab shows which document and which are dirty (`UnsavedEditors`) and installs the model's close-confirmation predicate from it.
+- **`automations.rs`** — `AppHost` (the `AutomationHost` over the leased workspace + content host + notifications) and `drive(context, window, cx, |controller, host| ..)`, which runs a controller call, `cx.notify()`s the controller entity, then starts the terminals the call asked for (`ContentHost::start_background_terminal`, after the workspace lease ends). `create_controller` builds it with `AutomationEnvironment::for_app` and `<data dir>/automations.json`.
+- **`power.rs`** — the only new per-OS module: `display_is_awake()` (macOS `CGDisplayIsAsleep` over the online displays; Linux/Windows: true).
+- **`views/`**, `palette.rs`, `menus.rs`, `ipc.rs`, `keyboard.rs`, `sizing.rs`, `window_chrome.rs` — unchanged roles.
 
-## Content crates integrated
-soprano-term, -browser, -explorer, -settings, -notify, -chat-ui (+ -chat), -dashboard, -ui, plus every finished non-UI crate. **Not integrated:** soprano-editor and soprano-automations / -automations-ui.
+## What was integrated in this round
+- **soprano-editor:** editor, diff and reader as tab content; every open path ends in the model (`open_editor`/`open_diff`/`open_markdown`/`preview_markdown`/`spawn_markdown`), so explorer events, IPC `OpenMarkdown`, `soprano <file.md>`, the palette's Open Markdown… and the pane `+` menu all show these views. Editor events: title → tab title, `KeepTab` → `keep_editor_tab`, `OpenMarkdownPreview` → the file pane's reader, focus → `focus_tab`. Diff `OpenFile` → `open_editor` (toast `NO_ROOM_MESSAGE` on no room). Reader `DocumentChanged` → `update_file_document`, `OpenExternal` → browser pane for http(s), the system handler otherwise. Explorer `ItemMoved` → `EditorDocuments::relocate` + `relocate_file_tabs`. A file with unsaved changes never opens as a preview.
+- **Two-phase close:** `CloseOutcome::NeedsConfirmation` (tabs, panes, layout tabs, windows, sessions, Load Workspace) → `unsaved_when_closing(targets)` → `save_question` in `DialogContent::save_changes` (Don't Save / Cancel / Save or Save All) → `resolve_unsaved`; an overwrite conflict asks "Save Anyway" and continues with the rest; a failed save shows its error and keeps everything open; then `force_close`. Quit and closing the window use `unsaved_when_closing_all`.
+- **Automations:** controller created at startup; `tick` every 30 s, at startup and after every settings.json change; `drain` on each wake; `retry_waiting_terminals` every 15 s while `is_waiting_for_display`; `workspace_changed` after every workspace update; the controller entity is notified after each. `AutomationsPage` renders the Automations page (sidebar footer, palette, Commands menu) with RunNow / OpenRun (closes the page when `open_run` is true) / Delete (`show_write_failure` on false) / Dismiss. Banner clicks open the page on the run (`show_run`).
+- **Agent Dashboard:** a running chat tab is available (`dashboard_text` returns `Some("")`), and `Reply` to a chat tab goes through `ChatView::submit_prompt` (`reply_failed` on false).
+- **Terminal API:** every TerminalView gets the shared `ClipboardConfirmationCoordinator` (`set_clipboard_coordinator`), `Destroyed` also cancels its prompts, prompts are enqueued with `view.entity_id().as_u64()`; CommandFinished after 133;C is soprano-term's own; `LaunchContext::current(socket, shell_integration(&ghostty))`; `main` uses `run_cli_from_process()`.
+- **Explorer review items:** focus returns to the panes after a successful OpenFile/OpenDiff with `focus`; the panels follow `PaneTab::effective_working_directory()` and only when it changed; the available width is updated on every window resize.
 
-## Open gaps
-- **Unsaved-editor check on close:** the Save / Don't Save / Cancel step needs soprano-editor's `EditorDocuments`. Until it is wired, nothing ever asks before a close, and quitting does not ask about unsaved buffers.
-- **Chat tabs and the dashboard:** a reply typed in the dashboard to a chat tab fails, and the dashboard shows chat tabs as unavailable; only terminal agents work there.
-- **Automations:** banner clicks for an automation run open the placeholder page, and background starting of automation runs has no caller yet.
+## Tests added
+`file_tabs_show_the_editor_the_diff_and_the_reader`, `closing_the_only_tab_of_an_unsaved_file_asks_first`, `a_file_another_tab_still_shows_closes_without_asking`; fixed `a_stopped_agent_tab_starts_no_process_until_restarted` (it used profile id `claude`; the id is `claude-code`).
 
 ## Deviations
-- Zoom (`⌘=` / `⌘-` / `⌘0`) scales the whole UI including terminal font size, per the brief; Swift only changed the terminal font.
-- The saved window frame is stored in top-left coordinates under the same key, so a frame imported from the Swift app may come back clamped to the screen.
-- The keymap entries behind the Commands menu exist only so the menu shows its shortcuts; the keys themselves are handled by the resolver.
-- Several gpui widgets were added by the sub-agents and are covered in their reports: workspace delete in the session menu, a Close Window context-menu item, the `+` menu reading "Markdown File…", and the status bar keeping Swift's session/window/pane counts.
+- Wake from sleep has no OS notification hook in GPUI; the 30 s tick runs right after a wake, which is when Swift's wake tick ran at the latest.
+- Zoom, window frame and Commands-menu keymap: as in the previous report.
 
-## Commands run
-- `CARGO_TARGET_DIR=target/agent-soprano cargo check -p soprano --tests` → passes, with warnings for unused items (they belong to the Automations/editor wiring).
-- `cargo test -p soprano` → 101 passed, 7 failed in the last completed run, before the fixes above.
+## Commands
+- `CARGO_TARGET_DIR=target/agent-soprano cargo test -p soprano` → 111 passed.
+- `cargo clippy -p soprano --all-targets` → no warnings; `cargo fmt -p soprano` applied.
+- `cargo build -p soprano --release` → see the final report.
+- `cargo check --target x86_64-unknown-linux-gnu -p soprano` (zig cc/c++/ar wrappers, `RUST_FONTCONFIG_DLOPEN=1`) → blocked by `x11` (via soprano-browser → gpui-webview/lb-wry → gdkx11): its build script needs pkg-config for the Linux X11/GTK system libraries, and there is no Linux sysroot on this Mac.
 
-## What to do next
-1. Read the result of the final test + clippy run (job `bg_291`).
-2. Integrate soprano-editor: editor, diff and Markdown reader panes; the close-confirmation predicate with the Save / Don't Save / Cancel dialog; no preview tabs for dirty files.
-3. Integrate soprano-automations-ui: implement the automations host trait on the workspace + content host, start the controller, render `AutomationsPage`, and open a run from a banner click.
-4. Run `cargo fmt -p soprano`, `cargo clippy -p soprano --all-targets` and `cargo check --target x86_64-unknown-linux-gnu -p soprano`.
-
-[irc] Main → me: Lead: review notes for the app shell (docs/rust-rewrite/reviews/automations-explorer.md 'Outside these crates'): nothin…
-
-## assistant
-
-→ write(agent://Main) ⇒ ok · 1 line
-
-## assistant
-
-The app crate `crates/soprano` builds (`cargo check -p soprano --tests` passes), but it is not finished: the Automations page and the editor, diff and Markdown reader panes are not integrated. I stopped at the request budget.
-
-## Wiring you asked to confirm
-- **IPC server:** started at launch on `endpoint_for_pid` (`ipc.rs`, `app.rs`). Every request is handled on the UI thread in `MainView::handle_request`, and `SOPRANO_SOCKET` is passed to every pane through `LaunchContext`.
-- **NotificationManager:** created at startup and asks for permission once.
-  - It receives: CLI agent events, chat-tab agent events, OSC 9/777 terminal notifications, terminal focus, app activate/resign, workspace changes, and a 1 s tick.
-  - A banner click brings the app forward and focuses the tab it names.
-- **Browser automation:** `open`, `open-split` and `new` spawn a browser pane. Other commands find the target tab and focus it, look its view up in `BrowserRegistry` on the next turn, run `perform_automation`, and reply on the socket.
-- **AutomationController / AutomationsPage: not wired.** The Automations page still shows a placeholder title, and the controller is never started. Missing pieces:
-  - an implementation of soprano-automations' host trait over the workspace and the content host
-  - the 30 s tick, the 15 s retry while terminals wait, and the drain on wake
-  - the `workspace_changed` call after model changes
-  - rendering `AutomationsPage` and handling its four events
-  - opening a run when its banner is clicked
-
-## Other gaps
-- **soprano-editor:** not integrated. Editor, diff and Markdown tabs have no view, and closing a tab or quitting never asks about unsaved edits.
-- **Chat tabs from the Agent Dashboard:** typing a reply to a chat tab in the dashboard fails, and the dashboard shows chat tabs as unavailable. Terminal agents work.
-- **Never run on screen:** I did not launch the app, so layout, clicks, dragging and the Linux/Windows window buttons are untested beyond unit and window tests.
-
-## Integrated
-soprano-term (terminal panes, copy mode, clipboard prompts, drops), soprano-browser, soprano-explorer (Files/Changes sidebar), soprano-settings (Settings card, usage popover), soprano-notify, soprano-chat-ui with soprano-chat (chat tabs), soprano-dashboard, and soprano-ui throughout. The non-UI crates (model, keys, ipc, launch, config, accounts, git) are in use too.
-
-## How the crate is built
-- **`app.rs`:** startup order: settings.json, accounts, theme, workspace (restored when `restoreLastSession` is on), notifications, CLI socket, then the window. Closing the window or quitting saves the workspace and window frame.
-- **`workspace.rs`:** the model sits inside a GPUI entity. Every change goes through `WorkspaceHandle::update`, which drains the model's change log, notifies views, and publishes what changed.
-- **`shell.rs`:** shared chrome state (sidebar width and visibility, keybinding mode, held Control, the open page, popups). Its `Command` enum is the single path for app-level work; every close goes through `Command::Close`.
-- **`main_view.rs`:** the window root. It does the Herdr layout, runs commands, handles closes and dialogs, the command palette and pickers, Settings, the Dashboard and toasts.
-  - It also answers the CLI and routes notifications.
-  - A keystroke interceptor sends every key through the keybinding resolver before any pane sees it.
-- **`content.rs`:** each tab's terminal, browser or chat view, cached per pane and tab so a layout change never restarts a terminal. It turns terminal reports back into workspace updates and samples running commands every second.
-- **`views/`:** I wrote the split tree. Three helper agents wrote the sidebar, the tab rows and status bar, and the pane header.
-- **Smaller modules:** `palette.rs`, `menus.rs` (macOS menu bar), `ipc.rs`, `keyboard.rs`, `sizing.rs`, `window_chrome.rs` (the only per-OS module).
-
-## Swift ported
-`main.swift`, `AppDelegate`, `MainWindowController`, `MainContentViewController`, `MainWindowSizing`, `SidebarView`, `SplitTreeView`, `PaneHeaderView`, `StatusBarView`, `StatusCountBadgeView`, `LayoutTabBarView`, `WindowTabBarView`, `TabPillButton`, `MarkdownFilePicker`, the command palette and its pickers, the Commands menu, and the ThemeManager glue. `SidebarWidthStore` is reused from soprano-explorer, which already ported it; it is not copied here.
-
-Tests ported: `MainWindowSizingTests`, `SidebarResizeTests`, the sidebar test files, `LayoutTabBarTests`, `WindowTabBarTests`, `StatusBarViewTests`, `ActiveLocationIndicatorTests`, `RunningCommandIndicatorTests`, `PaneHeaderCloseButtonTests`, the `ThemedSplitView` divider maths, and the view parts of `TerminalSession` and `WorkspaceRestore`.
-
-## Test results
-- **Last full run:** 101 passed, 7 failed.
-- **Fixes since:** I fixed my three failing test expectations and the sidebar helper fixed its three, but I have not seen a run with those fixes. The tab-row helper says its 22 tests pass, yet `agent_badges_show_the_most_urgent_status` failed in that run and nobody re-ran it.
-- **Final run:** `cargo test` plus clippy (job `bg_291`) was still running when I stopped.
-- **Linux cross-check and formatting:** `cargo check --target x86_64-unknown-linux-gnu -p soprano` was not run, and neither was `cargo fmt -p soprano`.
-
-## Changes from the Swift app
-- **Zoom:** `⌘=`/`⌘-`/`⌘0` scales the whole UI including the terminal font, as the brief asked; Swift only changed the terminal font.
-- **Window frame:** stored in GPUI's top-left coordinates under the same key, so a frame carried over from the Swift app may come back clamped to the screen.
-- **Commands menu:** its key bindings exist only so the menu shows its shortcuts; the keys themselves are handled by the keybinding layer.
-- **Helper agents' changes:** these are in their reports, e.g. Load/Delete for saved workspaces, the pane `+` menu reading "Markdown File…", and the status bar keeping Swift's session/window/pane counts.
-
-## Next steps
-1. Read the result of job `bg_291`.
-2. Integrate soprano-editor: the three pane views, the Save / Don't Save / Cancel question before closes and quit, and never opening an edited file as a preview tab.
-3. Wire the Automations controller and page as listed above.
-4. Run `cargo fmt -p soprano`, `cargo clippy -p soprano --all-targets` and the Linux cross-check.
-
-Nothing was committed.
+Nothing was committed and the app was not launched.

@@ -18,6 +18,4 @@ pub struct Services {
     pub branches: Arc<GitBranchMonitor>,
     /// Saved named workspaces (`SessionManager`).
     pub sessions: Entity<SessionManager>,
-    /// The IPC endpoint (`SOPRANO_SOCKET`), when the server started.
-    pub socket: Option<String>,
 }

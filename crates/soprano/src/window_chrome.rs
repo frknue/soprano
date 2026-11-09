@@ -5,8 +5,8 @@
 //! (HERDR-UI §6), which `hideWindowBar` hides.
 
 use gpui::{
-    App, Bounds, InteractiveElement, IntoElement, ParentElement, Pixels, Point, RenderOnce, Size, Styled,
-    StatefulInteractiveElement, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds,
+    App, Bounds, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, Size,
+    StatefulInteractiveElement, Styled, TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds,
     WindowDecorations, WindowOptions, div, point, px, rgb,
 };
 use soprano_ui::{ActiveSopranoTheme, Icon, IconName};
@@ -46,7 +46,10 @@ pub fn main_window_options(frame: sizing::Frame) -> WindowOptions {
             traffic_light_position: Some(point(px(TRAFFIC_LIGHTS.0), px(TRAFFIC_LIGHTS.1))),
         }),
         app_owns_titlebar_drag: true,
-        window_min_size: Some(Size { width: px(sizing::MINIMUM_WIDTH as f32), height: px(sizing::MINIMUM_HEIGHT as f32) }),
+        window_min_size: Some(Size {
+            width: px(sizing::MINIMUM_WIDTH as f32),
+            height: px(sizing::MINIMUM_HEIGHT as f32),
+        }),
         window_decorations: Some(WindowDecorations::Client),
         window_background: WindowBackgroundAppearance::Opaque,
         app_id: Some(soprano_platform::AppIdentity::current().id),
@@ -84,7 +87,9 @@ pub fn visible_frames(cx: &App) -> Vec<sizing::Frame> {
 
 /// The visible frame of the primary display.
 pub fn main_visible_frame(cx: &App) -> sizing::Frame {
-    cx.primary_display().map(|display| frame_of(display.visible_bounds())).unwrap_or(sizing::FALLBACK_VISIBLE_FRAME)
+    cx.primary_display()
+        .map(|display| frame_of(display.visible_bounds()))
+        .unwrap_or(sizing::FALLBACK_VISIBLE_FRAME)
 }
 
 /// Linux/Windows client-side window buttons: minimize, maximize/restore, close (26×26).
@@ -147,7 +152,8 @@ pub fn window_drag_region<E: InteractiveElement>(element: E) -> E {
 }
 
 /// The point where the traffic lights start, for tests and layout.
-pub fn traffic_light_origin() -> Point<Pixels> {
+#[cfg(test)]
+pub fn traffic_light_origin() -> gpui::Point<Pixels> {
     point(px(TRAFFIC_LIGHTS.0), px(TRAFFIC_LIGHTS.1))
 }
 
@@ -165,7 +171,9 @@ mod macos {
         // SAFETY: GPUI hands out its live content view; we only message it on the main thread.
         let view: &NSView = unsafe { handle.ns_view.cast().as_ref() };
         let Some(ns_window) = view.window() else { return };
-        for kind in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
+        for kind in
+            [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton]
+        {
             if let Some(button) = ns_window.standardWindowButton(kind) {
                 button.setHidden(hidden);
             }

@@ -27,7 +27,9 @@ use crate::workspace::WorkspaceHandle;
 use crate::{ipc, menus, sizing, window_chrome};
 
 pub fn run() {
-    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).try_init();
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     let identity = AppIdentity::current();
     let state = StateStore::for_app(&identity);
 
@@ -48,7 +50,26 @@ pub fn run() {
         soprano_ui::init(cx, &settings.theme_id, theme_appearance(settings.appearance));
         cx.bind_keys(soprano_term::default_key_bindings());
         soprano_browser::bind_keys(cx);
-        cx.on_action(|_: &menus::Quit, cx| cx.quit());
+        let editor_keys = soprano_editor::editor::key_bindings(cx);
+        let diff_keys = soprano_editor::diff_view::key_bindings(cx);
+        let reader_keys = soprano_editor::reader::key_bindings(cx);
+        cx.bind_keys(editor_keys);
+        cx.bind_keys(diff_keys);
+        cx.bind_keys(reader_keys);
+        // Quit asks about unsaved editor changes first (the main view knows them).
+        let main_window: Rc<RefCell<Option<gpui::WindowHandle<Root>>>> = Rc::default();
+        let quit_window = main_window.clone();
+        cx.on_action(move |_: &menus::Quit, cx| {
+            let Some(window) = *quit_window.borrow() else { return cx.quit() };
+            let asked = window.update(cx, |root, window, cx| {
+                if let Ok(view) = root.view().clone().downcast::<MainView>() {
+                    view.update(cx, |view, cx| view.request_quit(window, cx));
+                }
+            });
+            if asked.is_err() {
+                cx.quit();
+            }
+        });
         menus::install(&keybindings, cx);
 
         let mut workspace = Workspace::new();
@@ -86,7 +107,6 @@ pub fn run() {
             accounts: accounts.clone(),
             branches,
             sessions: cx.new(|_| SessionManager::new(state.clone())),
-            socket: socket.clone(),
         };
         let shell = cx.new(|_| Shell::new(state.clone(), settings.clone(), keybindings.clone()));
 
@@ -100,12 +120,15 @@ pub fn run() {
             let mut terminal_settings = TerminalSettings { theme, ..TerminalSettings::default() };
             terminal_settings.apply_ghostty_config(&ghostty);
             let content = cx.new(|cx| {
+                let documents = cx.new(|_| soprano_editor::EditorDocuments::new());
                 let mut host = ContentHost::new(
                     workspace.clone(),
                     shell.clone(),
                     Rc::new(PtyTerminals),
                     launch_context,
                     terminal_settings,
+                    documents,
+                    state.clone(),
                     window,
                     cx,
                 );
@@ -117,8 +140,18 @@ pub fn run() {
             });
             let should_close = view.downgrade();
             window.on_window_should_close(cx, move |window, cx| {
-                should_close.update(cx, |view, cx| view.save_last_workspace_if_needed(window, cx)).ok();
-                true
+                // Closing the main window quits: unsaved editor changes are asked about first,
+                // and the window stays until the question is answered.
+                should_close
+                    .update(cx, |view, cx| {
+                        if view.has_unsaved_documents(cx) {
+                            view.request_quit(window, cx);
+                            return false;
+                        }
+                        view.save_last_workspace_if_needed(window, cx);
+                        true
+                    })
+                    .unwrap_or(true)
             });
             cx.new(|cx| Root::new(view, window, cx))
         });
@@ -130,6 +163,7 @@ pub fn run() {
                 return;
             }
         };
+        *main_window.borrow_mut() = Some(window);
         // applicationShouldTerminateAfterLastWindowClosed.
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
@@ -156,7 +190,8 @@ pub fn run() {
 /// `shell-integration-features` values applied in order (an empty value resets), and
 /// `cursor-style-blink`.
 pub fn shell_integration(config: &soprano_term::GhosttyConfig) -> ShellIntegrationConfig {
-    let mut integration = ShellIntegrationConfig { cursor_blink: config.cursor_style_blink.flatten(), ..Default::default() };
+    let mut integration =
+        ShellIntegrationConfig { cursor_blink: config.cursor_style_blink.flatten(), ..Default::default() };
     if let Some(Some(mode)) = &config.shell_integration
         && let Some(mode) = ShellIntegrationMode::parse(mode)
     {
@@ -179,11 +214,16 @@ mod tests {
     #[test]
     fn ghostty_shell_integration_keys_reach_the_launch_context() {
         let mut config = soprano_term::GhosttyConfig::default();
-        config.parse("shell-integration = zsh\nshell-integration-features = no-cursor\ncursor-style-blink = false\n");
+        config.parse(
+            "shell-integration = zsh\nshell-integration-features = no-cursor\ncursor-style-blink = false\n",
+        );
         let integration = shell_integration(&config);
         assert_eq!(integration.mode, ShellIntegrationMode::parse("zsh").expect("mode"));
         assert!(!integration.features.cursor);
         assert_eq!(integration.cursor_blink, Some(false));
-        assert_eq!(shell_integration(&soprano_term::GhosttyConfig::default()), ShellIntegrationConfig::default());
+        assert_eq!(
+            shell_integration(&soprano_term::GhosttyConfig::default()),
+            ShellIntegrationConfig::default()
+        );
     }
 }

@@ -91,7 +91,10 @@ pub fn open_markdown(
 }
 
 /// The browser tab a `soprano browser` command runs in, or the message why none does.
-pub fn browser_target(workspace: &Workspace, requested_pane_id: Option<&str>) -> Result<BrowserTarget, String> {
+pub fn browser_target(
+    workspace: &Workspace,
+    requested_pane_id: Option<&str>,
+) -> Result<BrowserTarget, String> {
     let leaves: Vec<String> = workspace.layout().map(|layout| layout.ordered_leaf_ids()).unwrap_or_default();
     soprano_browser::resolve_target(requested_pane_id, workspace.active_pane_id(), &leaves, |pane_id| {
         let pane = workspace.pane(pane_id)?;
@@ -147,13 +150,15 @@ mod tests {
         let mut workspace = Workspace::new();
         let pane = workspace.active_pane_id().to_owned();
         let tab = workspace.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
-        let Response::Ok { output } = open_markdown(&mut workspace, &path, false, Some(&pane), Some(&tab)) else {
+        let Response::Ok { output } = open_markdown(&mut workspace, &path, false, Some(&pane), Some(&tab))
+        else {
             panic!("preview failed")
         };
         assert!(!output.is_empty());
         assert!(workspace.panes().values().any(|p| p.tabs.iter().any(|t| t.is_markdown())));
         let panes_before = workspace.pane_count();
-        let Response::Ok { output } = open_markdown(&mut workspace, &path, true, Some(&pane), Some(&tab)) else {
+        let Response::Ok { output } = open_markdown(&mut workspace, &path, true, Some(&pane), Some(&tab))
+        else {
             panic!("reader failed")
         };
         assert_eq!(workspace.pane_count(), panes_before + 1);
@@ -174,24 +179,30 @@ mod tests {
     #[test]
     fn opening_a_browser_replies_with_its_pane_and_later_commands_find_it() {
         let mut workspace = Workspace::new();
-        let Response::Ok { output: pane } = open_browser(&mut workspace, &["https://example.com".into()]) else {
+        let Response::Ok { output: pane } = open_browser(&mut workspace, &["https://example.com".into()])
+        else {
             panic!("no browser")
         };
         let target = browser_target(&workspace, None).expect("target");
         assert_eq!(target.pane_id, pane);
-        assert_eq!(workspace.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.pane_type), Some(PaneType::Browser));
+        assert_eq!(
+            workspace.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.pane_type),
+            Some(PaneType::Browser)
+        );
     }
 
     #[test]
     fn navigation_from_a_background_terminal_is_ignored() {
         let mut workspace = Workspace::new();
         let first = workspace.active_pane_id().to_owned();
-        let first_tab = workspace.pane(&first).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
+        let first_tab =
+            workspace.pane(&first).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
         let second = workspace.spawn_terminal(None).expect("second pane");
         assert_eq!(workspace.active_pane_id(), second);
         navigate_pane(&mut workspace, &first, &first_tab, IpcDirection::Left);
         assert_eq!(workspace.active_pane_id(), second);
-        let second_tab = workspace.pane(&second).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
+        let second_tab =
+            workspace.pane(&second).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
         navigate_pane(&mut workspace, &second, &second_tab, IpcDirection::Left);
         assert_eq!(workspace.active_pane_id(), first);
     }

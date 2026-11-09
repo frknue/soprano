@@ -56,8 +56,11 @@ pub fn command_for(action: &dyn gpui::Action) -> Option<Command> {
     }
 }
 
+/// One Commands menu row: title, binding id (for the key equivalent), action.
+type MenuCommand = (&'static str, Option<&'static str>, Box<dyn gpui::Action>);
+
 /// The Commands menu's rows: title, binding id (for the key equivalent), action.
-fn commands() -> Vec<Option<(&'static str, Option<&'static str>, Box<dyn gpui::Action>)>> {
+fn commands() -> Vec<Option<MenuCommand>> {
     vec![
         Some(("Find Window…", Some("find-window"), Box::new(FindWindow))),
         Some(("Command Palette…", Some("command-palette"), Box::new(CommandPalette))),

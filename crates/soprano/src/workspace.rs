@@ -20,10 +20,6 @@ impl WorkspaceUpdate {
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty() && self.events.is_empty()
     }
-
-    pub fn layout_changed(&self) -> bool {
-        self.changes.iter().any(WorkspaceChange::layout_changed)
-    }
 }
 
 /// Emits a [`WorkspaceUpdate`] after each mutation that changed something.
@@ -51,7 +47,26 @@ impl WorkspaceHandle {
     pub fn update<R>(&self, cx: &mut App, f: impl FnOnce(&mut Workspace) -> R) -> R {
         let (result, update) = self.model.update(cx, |workspace, cx| {
             let result = f(workspace);
-            let update = WorkspaceUpdate { changes: workspace.take_changes(), events: workspace.take_events() };
+            let update =
+                WorkspaceUpdate { changes: workspace.take_changes(), events: workspace.take_events() };
+            if !update.is_empty() {
+                cx.notify();
+            }
+            (result, update)
+        });
+        if !update.is_empty() {
+            self.bus.update(cx, |_, cx| cx.emit(update));
+        }
+        result
+    }
+
+    /// [`Self::update`] for work that also needs the app (other entities) while it holds the
+    /// model: it must not read or update the workspace entity through `cx`.
+    pub fn update_with<R>(&self, cx: &mut App, f: impl FnOnce(&mut Workspace, &mut App) -> R) -> R {
+        let (result, update) = self.model.update(cx, |workspace, cx| {
+            let result = f(workspace, cx);
+            let update =
+                WorkspaceUpdate { changes: workspace.take_changes(), events: workspace.take_events() };
             if !update.is_empty() {
                 cx.notify();
             }

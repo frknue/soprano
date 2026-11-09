@@ -14,8 +14,12 @@
 //!   Herdr layout, command execution, closes with confirmation, prompts, pickers, Settings,
 //!   toasts, keyboard routing through `soprano_keys::KeybindingResolver` (a keystroke
 //!   interceptor ahead of every content view), IPC requests and notification routing.
-//! - [`content`]: each pane tab's content entity (terminal, browser, …) cached by exact
-//!   pane/tab target across layout rebuilds; terminal reports flow back into the workspace.
+//! - [`content`]: each pane tab's content entity (terminal, browser, chat, editor, diff,
+//!   Markdown reader) cached by exact pane/tab target across layout rebuilds; terminal reports
+//!   flow back into the workspace; it also mirrors unsaved editor documents for the model's
+//!   close-confirmation predicate (the main view asks Save / Don't Save / Cancel).
+//! - [`automations`]: the `AutomationHost` over the workspace and content host, and `drive`,
+//!   the one way the main view calls the automation controller.
 //! - [`views`]: the sidebar, the window and layout tab rows, the split tree, pane headers and
 //!   the status bar.
 //! - [`palette`], [`menus`], [`ipc`], [`keyboard`], [`sizing`], [`window_chrome`]: the command
@@ -23,12 +27,14 @@
 //!   conversion, window geometry, and the per-OS window frame.
 
 mod app;
+mod automations;
 mod content;
 mod ipc;
 mod keyboard;
 mod main_view;
 mod menus;
 mod palette;
+mod power;
 mod services;
 mod shell;
 mod sizing;

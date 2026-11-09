@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    KeystrokeEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, PathPromptOptions, Pixels, Render,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, canvas, div,
-    prelude::FluentBuilder, px,
+    KeystrokeEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, PathPromptOptions, Pixels,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, WeakEntity, Window, canvas,
+    div, prelude::FluentBuilder, px,
 };
 use soprano_config::ConfigSnapshot;
 use soprano_dashboard::{AgentDashboard, DashboardEvent, DashboardHost};
@@ -26,17 +26,20 @@ use soprano_keys::{
 };
 use soprano_model::{CloseOutcome, CloseRequest, SplitDirection, TerminalTarget, WorkspaceChange};
 use soprano_notify::{Authorization, BannerClick, NotificationManager, TerminalNotification};
-use soprano_settings::{NotificationAuthorization, NotificationStatusProvider, SettingsEvent, SettingsTab, SettingsView};
+use soprano_settings::{
+    NotificationAuthorization, NotificationStatusProvider, SettingsEvent, SettingsTab, SettingsView,
+};
 use soprano_term::{
     ClipboardConfirmationCoordinator, ClipboardConfirmationDecision, ClipboardConfirmationPresentation,
     ClipboardConfirmationPresenter, ClipboardConfirmationPrompt, TerminalView,
 };
 use soprano_types::AgentCatalog;
 use soprano_ui::{
-    ActiveSopranoTheme, Dialog, DialogButton, DialogContent, DialogResult, Picker, PickerEvent, SopranoTheme, Toast,
-    ToastLevel, ToastStack,
+    ActiveSopranoTheme, Dialog, DialogButton, DialogContent, DialogResult, Picker, PickerEvent, SopranoTheme,
+    Toast, ToastLevel, ToastStack,
 };
 
+use crate::automations::{self, AutomationContext};
 use crate::content::{ContentEvent, ContentHost, PaneContent, terminal_theme};
 use crate::palette::{self, PaletteAction, PaletteEntry};
 use crate::services::Services;
@@ -47,6 +50,15 @@ use crate::views::status_bar::StatusBar;
 use crate::views::tab_rows::{LayoutTabRow, WindowTabRow};
 use crate::workspace::{WorkspaceHandle, WorkspaceUpdate};
 use crate::{menus, sizing, window_chrome};
+use soprano_automations::AutomationController;
+use soprano_automations_ui::{AutomationsPage, AutomationsPageEvent};
+use soprano_text::DocumentId;
+use soprano_text::editor_store::{
+    CloseResolution, OVERWRITE_MESSAGE, SaveChoice, SaveOutcome, overwrite_question, save_question,
+};
+
+/// What runs once the unsaved-changes question is answered with Save or Don't Save.
+type Proceed = Box<dyn FnOnce(&mut MainView, &mut Window, &mut Context<MainView>)>;
 
 /// The sidebar's resize strip straddling its trailing edge.
 const SIDEBAR_HANDLE_WIDTH: f32 = 8.0;
@@ -68,7 +80,14 @@ impl NotificationStatusProvider for NotificationStatus {
 }
 
 /// Clipboard prompts go onto a channel the main view turns into dialogs.
-struct ClipboardPrompts(async_channel::Sender<(ClipboardConfirmationPrompt, Box<dyn FnOnce(ClipboardConfirmationDecision)>, Rc<RefCell<bool>>)>);
+struct ClipboardPrompts(async_channel::Sender<ClipboardPromptRequest>);
+
+/// A prompt to show, its answer, and whether the terminal withdrew it meanwhile.
+type ClipboardPromptRequest =
+    (ClipboardConfirmationPrompt, Box<dyn FnOnce(ClipboardConfirmationDecision)>, Rc<RefCell<bool>>);
+
+/// What runs when a queued dialog is answered.
+type DialogCompletion = Box<dyn FnOnce(DialogResult, &mut Window, &mut App)>;
 
 struct ClipboardPromptHandle(Rc<RefCell<bool>>);
 
@@ -117,9 +136,13 @@ pub struct MainView {
     picker: Option<Entity<Picker>>,
     palette_actions: HashMap<SharedString, PaletteAction>,
     dialog: Option<Entity<Dialog>>,
-    queued_dialogs: Vec<(DialogContent, Box<dyn FnOnce(DialogResult, &mut Window, &mut App)>)>,
+    queued_dialogs: Vec<(DialogContent, DialogCompletion)>,
     settings: Option<Entity<SettingsView>>,
     dashboard: Option<Entity<AgentDashboard>>,
+    automations: AutomationContext,
+    automations_page: Option<Entity<AutomationsPage>>,
+    /// The focused tab's folder the right sidebar last followed.
+    explorer_directory: Option<Option<String>>,
     notifications: Rc<RefCell<NotificationManager>>,
     resolver: KeybindingResolver,
     claims: PaneNavigationClaimRegistry,
@@ -143,6 +166,7 @@ impl Focusable for MainView {
 }
 
 impl MainView {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: WorkspaceHandle,
         shell: Entity<Shell>,
@@ -154,21 +178,44 @@ impl MainView {
         cx: &mut Context<Self>,
     ) -> Self {
         let split_tree = cx.new(|cx| SplitTree::new(workspace.clone(), content.clone(), shell.clone(), cx));
-        let sidebar = cx.new(|cx| Sidebar::new(workspace.clone(), shell.clone(), services.clone(), window, cx));
+        let sidebar =
+            cx.new(|cx| Sidebar::new(workspace.clone(), shell.clone(), services.clone(), window, cx));
         let right_sidebar = cx.new(|cx| RightSidebar::new(services.state.clone(), window, cx));
-        let window_tabs =
-            cx.new(|cx| WindowTabRow::new(workspace.clone(), shell.clone(), right_sidebar.clone(), window, cx));
-        let layout_tabs =
-            cx.new(|cx| LayoutTabRow::new(workspace.clone(), shell.clone(), right_sidebar.clone(), window, cx));
-        let status_bar = cx.new(|cx| StatusBar::new(workspace.clone(), shell.clone(), services.clone(), window, cx));
+        let window_tabs = cx
+            .new(|cx| WindowTabRow::new(workspace.clone(), shell.clone(), right_sidebar.clone(), window, cx));
+        let layout_tabs = cx
+            .new(|cx| LayoutTabRow::new(workspace.clone(), shell.clone(), right_sidebar.clone(), window, cx));
+        let status_bar =
+            cx.new(|cx| StatusBar::new(workspace.clone(), shell.clone(), services.clone(), window, cx));
         let toasts = ToastStack::new(cx);
 
         let (prompt_sender, prompt_receiver) = async_channel::unbounded();
         let clipboard = ClipboardConfirmationCoordinator::new(ClipboardPrompts(prompt_sender));
-        let (clipboard_answers, answer_receiver) = async_channel::unbounded::<(WeakEntity<TerminalView>, u64, bool)>();
+        let (clipboard_answers, answer_receiver) =
+            async_channel::unbounded::<(WeakEntity<TerminalView>, u64, bool)>();
         let terminal_font_size = content.read(cx).terminal_settings().font_size;
         let keybindings = shell.read(cx).keybindings.clone();
         let resolver = KeybindingResolver::new(keybindings, Platform::current());
+        content.update(cx, |content, cx| content.set_clipboard_coordinator(clipboard.clone(), cx));
+
+        let (wake_sender, wake_receiver) = async_channel::unbounded::<()>();
+        let controller = automations::create_controller(
+            &soprano_platform::AppIdentity::current(),
+            services.config.clone(),
+            &workspace,
+            &content,
+            &notifications,
+            move || {
+                let _ = wake_sender.try_send(());
+            },
+            cx,
+        );
+        let automations = AutomationContext {
+            controller,
+            workspace: workspace.clone(),
+            content: content.clone(),
+            notifications: notifications.clone(),
+        };
 
         let this_for_keys = cx.entity().downgrade();
         let mut subscriptions = vec![
@@ -186,8 +233,13 @@ impl MainView {
             }),
             cx.observe(&shell, |_, _, cx| cx.notify()),
             cx.observe(&right_sidebar, |_, _, cx| cx.notify()),
-            cx.observe_window_activation(window, |this, window, cx| this.window_activation_changed(window, cx)),
-            cx.observe_window_bounds(window, |this, window, cx| this.save_window_frame(window, cx)),
+            cx.observe_window_activation(window, |this, window, cx| {
+                this.window_activation_changed(window, cx)
+            }),
+            cx.observe_window_bounds(window, |this, window, cx| {
+                this.save_window_frame(window, cx);
+                this.update_right_sidebar_width(window, cx);
+            }),
             cx.observe_global_in::<SopranoTheme>(window, |this, _, cx| this.theme_changed(cx)),
             cx.intercept_keystrokes(move |event, window, cx| {
                 if let Some(this) = this_for_keys.upgrade() {
@@ -206,7 +258,10 @@ impl MainView {
         if let Some(receiver) = ipc_receiver {
             tasks.push(cx.spawn_in(window, async move |this, cx| {
                 while let Ok(incoming) = receiver.recv().await {
-                    if this.update_in(cx, |this, window, cx| this.handle_request(incoming, window, cx)).is_err() {
+                    if this
+                        .update_in(cx, |this, window, cx| this.handle_request(incoming, window, cx))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -215,7 +270,9 @@ impl MainView {
         tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok((prompt, completion, dismissed)) = prompt_receiver.recv().await {
                 if this
-                    .update_in(cx, |this, window, cx| this.present_clipboard_prompt(prompt, completion, dismissed, window, cx))
+                    .update_in(cx, |this, window, cx| {
+                        this.present_clipboard_prompt(prompt, completion, dismissed, window, cx)
+                    })
                     .is_err()
                 {
                     break;
@@ -225,7 +282,9 @@ impl MainView {
         tasks.push(cx.spawn(async move |_, cx| {
             while let Ok((terminal, id, allowed)) = answer_receiver.recv().await {
                 cx.update(|cx| {
-                    terminal.update(cx, |terminal, cx| terminal.resolve_clipboard_request(id, allowed, cx)).ok();
+                    terminal
+                        .update(cx, |terminal, cx| terminal.resolve_clipboard_request(id, allowed, cx))
+                        .ok();
                 });
             }
         }));
@@ -257,6 +316,44 @@ impl MainView {
                 }
             }
         }));
+        // Automations: due runs every half minute (a wake from sleep lands on the next one),
+        // background results whenever the worker wakes us, and runs waiting for a display.
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(AutomationController::CHECK_INTERVAL).await;
+                if this.update_in(cx, |this, window, cx| this.tick_automations(window, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            while wake_receiver.recv().await.is_ok() {
+                let drained = this.update_in(cx, |this, window, cx| {
+                    automations::drive(&this.automations, window, cx, |controller, host| {
+                        controller.drain(host)
+                    });
+                });
+                if drained.is_err() {
+                    break;
+                }
+            }
+        }));
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor().timer(AutomationController::DISPLAY_RETRY_INTERVAL).await;
+                let retried = this.update_in(cx, |this, window, cx| {
+                    if this.automations.controller.read(cx).is_waiting_for_display() {
+                        automations::drive(&this.automations, window, cx, |controller, host| {
+                            controller.retry_waiting_terminals(host)
+                        });
+                    }
+                });
+                if retried.is_err() {
+                    break;
+                }
+            }
+        }));
+        cx.defer_in(window, |this, window, cx| this.tick_automations(window, cx));
 
         let mut view = Self {
             workspace,
@@ -276,6 +373,9 @@ impl MainView {
             queued_dialogs: Vec::new(),
             settings: None,
             dashboard: None,
+            automations,
+            automations_page: None,
+            explorer_directory: None,
             notifications,
             resolver,
             claims: PaneNavigationClaimRegistry::new(),
@@ -296,14 +396,6 @@ impl MainView {
         view
     }
 
-    pub fn workspace(&self) -> &WorkspaceHandle {
-        &self.workspace
-    }
-
-    pub fn content(&self) -> &Entity<ContentHost> {
-        &self.content
-    }
-
     // MARK: - Commands
 
     pub fn run(&mut self, command: Command, window: &mut Window, cx: &mut Context<Self>) {
@@ -319,10 +411,18 @@ impl MainView {
                 self.show_picker(items, Some("Search sessions..."), Vec::new(), window, cx);
             }
             Command::OpenProjectSearch => self.open_project_search(window, cx),
-            Command::NewSession => self.prompt_for_session_name("New Session", String::new(), None, window, cx),
+            Command::NewSession => {
+                self.prompt_for_session_name("New Session", String::new(), None, window, cx)
+            }
             Command::RenameSession => {
                 let Some(session) = self.workspace.read(cx).active_session().cloned() else { return };
-                self.prompt_for_session_name("Rename Session", session.name.clone(), Some(session.id), window, cx);
+                self.prompt_for_session_name(
+                    "Rename Session",
+                    session.name.clone(),
+                    Some(session.id),
+                    window,
+                    cx,
+                );
             }
             Command::CloseSession => self.confirm_close_session(window, cx),
             Command::RenameWindow(id) => self.prompt_to_rename_window(id, window, cx),
@@ -376,7 +476,7 @@ impl MainView {
                     self.close_page(true, window, cx);
                 }
             }
-            Command::OpenAutomationRun(_run_id) => self.show_page(Page::Automations, window, cx),
+            Command::OpenAutomationRun(run_id) => self.open_automation_run(&run_id, window, cx),
             Command::OpenMarkdown { pane_id } => self.choose_markdown_file(pane_id, window, cx),
             Command::OpenInSopranoGit => {
                 let cwd = self.workspace.read(cx).active_working_directory();
@@ -400,7 +500,6 @@ impl MainView {
                 })
                 .detach();
             }
-            Command::FocusPanes => self.return_keyboard_focus_to_panes(window, cx),
             Command::ZoomIn => SopranoTheme::zoom_in(cx),
             Command::ZoomOut => SopranoTheme::zoom_out(cx),
             Command::ZoomReset => SopranoTheme::reset_zoom(cx),
@@ -411,14 +510,17 @@ impl MainView {
                     });
                 }
             }
-            Command::ShowNotice { title, message } => self.present_dialog(DialogContent::alert(title, message), |_, _, _| {}, window, cx),
-            Command::ShowError(message) => self.toast(ToastLevel::Error, message, cx),
+            Command::ShowNotice { title, message } => {
+                self.present_dialog(DialogContent::alert(title, message), |_, _, _| {}, window, cx)
+            }
         }
     }
 
     /// `KeybindingManager.executeBinding`.
     fn run_binding(&mut self, binding_id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(command) = BindingCommand::from_binding_id(binding_id, AgentCatalog::shared()) else { return };
+        let Some(command) = BindingCommand::from_binding_id(binding_id, AgentCatalog::shared()) else {
+            return;
+        };
         let tick = self.shell.read(cx).keybindings.resize_tick_percent;
         let ws = self.workspace.clone();
         match command {
@@ -449,7 +551,9 @@ impl MainView {
             BindingCommand::PreviousWindow => ws.update(cx, |ws| ws.activate_previous_window()),
             BindingCommand::NextWindow => ws.update(cx, |ws| ws.activate_next_window()),
             BindingCommand::LastWindow => ws.update(cx, |ws| ws.activate_last_window()),
-            BindingCommand::Resize(direction) => ws.update(cx, |ws| ws.resize_pane(model_direction(direction), tick)),
+            BindingCommand::Resize(direction) => {
+                ws.update(cx, |ws| ws.resize_pane(model_direction(direction), tick))
+            }
             BindingCommand::ClosePane => {
                 let pane = ws.read(cx).active_pane_id().to_owned();
                 self.close(CloseTarget::Pane(pane), window, cx);
@@ -545,6 +649,8 @@ impl MainView {
         self.confirm_closing(targets, request, window, cx);
     }
 
+    /// Closes `request` once the unsaved documents only its tabs show are saved or dropped
+    /// (Save / Don't Save / Cancel); Cancel keeps everything open.
     fn confirm_closing(
         &mut self,
         targets: Vec<TerminalTarget>,
@@ -552,11 +658,122 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let _ = (targets, window);
-        let outcome = self.workspace.update(cx, |ws| ws.force_close(request));
-        if let CloseOutcome::NeedsConfirmation { .. } = outcome {
-            tracing::warn!("a confirmed close asked for confirmation again");
+        let documents = self.documents(cx).read(cx).store().unsaved_when_closing(&targets);
+        self.ask_to_save(
+            documents,
+            Box::new(move |this, _, cx| {
+                let outcome = this.workspace.update(cx, |ws| ws.force_close(request));
+                if let CloseOutcome::NeedsConfirmation { .. } = outcome {
+                    tracing::warn!("a confirmed close asked for confirmation again");
+                }
+            }),
+            window,
+            cx,
+        );
+    }
+
+    /// Quit (⌘Q, the menu, closing the main window): asks about every unsaved document first.
+    pub fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let documents = self.documents(cx).read(cx).store().unsaved_when_closing_all();
+        self.ask_to_save(documents, Box::new(|_, _, cx| cx.quit()), window, cx);
+    }
+
+    /// Whether quitting has to ask about unsaved documents first.
+    pub fn has_unsaved_documents(&self, cx: &App) -> bool {
+        !self.documents(cx).read(cx).store().unsaved_when_closing_all().is_empty()
+    }
+
+    /// The save question for `documents` (`soprano_text::save_question`); `proceed` runs once
+    /// they are saved or discarded. Without documents it runs at once.
+    fn ask_to_save(
+        &mut self,
+        documents: Vec<DocumentId>,
+        proceed: Proceed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if documents.is_empty() {
+            proceed(self, window, cx);
+            return;
         }
+        let names = self.documents(cx).read(cx).store().names(&documents);
+        let (title, message, save_title) = save_question(&names);
+        let this = cx.entity().downgrade();
+        self.present_dialog(
+            DialogContent::save_changes(title, message, save_title),
+            move |result, window, cx| {
+                let choice = match result.index {
+                    Some(0) => SaveChoice::Discard,
+                    Some(2) => SaveChoice::Save,
+                    _ => SaveChoice::Cancel,
+                };
+                this.update(cx, |this, cx| this.resolve_saves(documents, choice, proceed, window, cx)).ok();
+            },
+            window,
+            cx,
+        );
+    }
+
+    /// Applies the answer; a save that needs an overwrite confirmation asks for it and goes
+    /// on with the rest, a failed save reports the error and keeps everything open.
+    fn resolve_saves(
+        &mut self,
+        documents: Vec<DocumentId>,
+        choice: SaveChoice,
+        proceed: Proceed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let store = self.documents(cx);
+        match store.update(cx, |store, cx| store.resolve_unsaved(&documents, choice, cx)) {
+            CloseResolution::Proceed => proceed(self, window, cx),
+            CloseResolution::Cancel => {}
+            CloseResolution::SaveBlocked { document, outcome: SaveOutcome::NeedsOverwriteConfirmation } => {
+                let name = store.read(cx).store().names(&[document]).pop().unwrap_or_default();
+                let this = cx.entity().downgrade();
+                self.present_dialog(
+                    DialogContent::confirm(
+                        overwrite_question(&name),
+                        OVERWRITE_MESSAGE,
+                        "Save Anyway",
+                        false,
+                    ),
+                    move |result, window, cx| {
+                        if result.index != Some(1) {
+                            return;
+                        }
+                        this.update(cx, |this, cx| {
+                            let store = this.documents(cx);
+                            match store.update(cx, |store, cx| store.save_anyway(document, cx)) {
+                                SaveOutcome::Saved => {
+                                    let rest: Vec<DocumentId> = documents
+                                        .into_iter()
+                                        .filter(|id| {
+                                            store.read(cx).document(*id).is_some_and(|d| d.is_dirty())
+                                        })
+                                        .collect();
+                                    this.resolve_saves(rest, SaveChoice::Save, proceed, window, cx);
+                                }
+                                SaveOutcome::Failed(error) => this.report_save_failure(&error, window, cx),
+                                SaveOutcome::NeedsOverwriteConfirmation => {}
+                            }
+                        })
+                        .ok();
+                    },
+                    window,
+                    cx,
+                );
+            }
+            CloseResolution::SaveBlocked { outcome: SaveOutcome::Failed(error), .. } => {
+                self.report_save_failure(&error, window, cx)
+            }
+            CloseResolution::SaveBlocked { outcome: SaveOutcome::Saved, .. } => proceed(self, window, cx),
+        }
+    }
+
+    /// A save error in an alert, its description as the title (as the editor reports it).
+    fn report_save_failure(&mut self, error: &std::io::Error, window: &mut Window, cx: &mut Context<Self>) {
+        self.present_dialog(DialogContent::alert(error.to_string(), ""), |_, _, _| {}, window, cx);
     }
 
     // MARK: - Prompts
@@ -606,7 +823,13 @@ impl MainView {
         cx: &mut Context<Self>,
     ) {
         let confirm = if initial.is_empty() { "Create" } else { "Rename" };
-        let content = DialogContent::prompt(title.to_owned(), "Name this group of windows.", "Session name", initial, confirm);
+        let content = DialogContent::prompt(
+            title.to_owned(),
+            "Name this group of windows.",
+            "Session name",
+            initial,
+            confirm,
+        );
         let workspace = self.workspace.clone();
         self.present_dialog(
             content,
@@ -645,7 +868,12 @@ impl MainView {
         );
     }
 
-    fn prompt_to_rename_window(&mut self, window_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    fn prompt_to_rename_window(
+        &mut self,
+        window_id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ws = self.workspace.read(cx);
         let id = window_id.unwrap_or_else(|| ws.active_window_id().to_owned());
         let Some(terminal_window) = ws.window(&id) else { return };
@@ -704,7 +932,8 @@ impl MainView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.palette_actions = entries.iter().map(|entry| (entry.item.id.clone(), entry.action.clone())).collect();
+        self.palette_actions =
+            entries.iter().map(|entry| (entry.item.id.clone(), entry.action.clone())).collect();
         let items = entries.into_iter().map(|entry| entry.item).collect();
         let picker = Picker::new(items, window, cx);
         picker.update(cx, |picker, cx| {
@@ -713,29 +942,32 @@ impl MainView {
             }
             picker.set_search_keycaps(search_keycaps);
         });
-        let subscription = cx.subscribe_in(&picker, window, |this, picker, event: &PickerEvent, window, cx| {
-            if this.picker.as_ref() != Some(picker) {
-                return;
-            }
-            this.picker = None;
-            let action = match event {
-                PickerEvent::Confirmed { id, query } => this.palette_actions.get(id).cloned().map(|a| (a, query.clone())),
-                PickerEvent::Dismissed => None,
-            };
-            this.palette_actions.clear();
-            cx.notify();
-            match action {
-                // The palette closes first; the action runs on the next turn so a picker or
-                // dialog it opens takes the keyboard.
-                Some((action, query)) => cx.defer_in(window, move |this, window, cx| {
-                    action(&query, window, cx);
-                    if this.picker.is_none() && this.dialog.is_none() {
-                        this.sync_keyboard_focus(window, cx);
+        let subscription =
+            cx.subscribe_in(&picker, window, |this, picker, event: &PickerEvent, window, cx| {
+                if this.picker.as_ref() != Some(picker) {
+                    return;
+                }
+                this.picker = None;
+                let action = match event {
+                    PickerEvent::Confirmed { id, query } => {
+                        this.palette_actions.get(id).cloned().map(|a| (a, query.clone()))
                     }
-                }),
-                None => this.sync_keyboard_focus(window, cx),
-            }
-        });
+                    PickerEvent::Dismissed => None,
+                };
+                this.palette_actions.clear();
+                cx.notify();
+                match action {
+                    // The palette closes first; the action runs on the next turn so a picker or
+                    // dialog it opens takes the keyboard.
+                    Some((action, query)) => cx.defer_in(window, move |this, window, cx| {
+                        action(&query, window, cx);
+                        if this.picker.is_none() && this.dialog.is_none() {
+                            this.sync_keyboard_focus(window, cx);
+                        }
+                    }),
+                    None => this.sync_keyboard_focus(window, cx),
+                }
+            });
         self._subscriptions.push(subscription);
         self.picker = Some(picker);
         cx.notify();
@@ -787,7 +1019,9 @@ impl MainView {
         let _ = window;
         cx.spawn(async move |_, cx| {
             let Ok(Ok(Some(paths))) = paths.await else { return };
-            let Some(path) = paths.first().map(|p| soprano_model::file_url::standardized_path(p)) else { return };
+            let Some(path) = paths.first().map(|p| soprano_model::file_url::standardized_path(p)) else {
+                return;
+            };
             cx.update(|cx| {
                 if !is_markdown(&path) {
                     if let Some(shell) = shell.upgrade() {
@@ -829,17 +1063,23 @@ impl MainView {
             }
             None => {
                 let store = self.services.config.clone();
-                let accounts: Rc<dyn soprano_accounts::AccountsSource> = Rc::new(self.services.accounts.clone());
-                let status: Rc<dyn NotificationStatusProvider> = Rc::new(NotificationStatus(self.notifications.clone()));
+                let accounts: Rc<dyn soprano_accounts::AccountsSource> =
+                    Rc::new(self.services.accounts.clone());
+                let status: Rc<dyn NotificationStatusProvider> =
+                    Rc::new(NotificationStatus(self.notifications.clone()));
                 let view = cx.new(|cx| SettingsView::new(store, accounts, status, window, cx));
-                let subscription = cx.subscribe_in(&view, window, |this, _, event: &SettingsEvent, window, cx| match event {
-                    SettingsEvent::Close => this.close_settings(window, cx),
-                    SettingsEvent::OpenSettingsFile { error } => {
-                        if let Some(error) = error {
-                            this.toast(ToastLevel::Error, error.clone(), cx);
+                let subscription = cx.subscribe_in(
+                    &view,
+                    window,
+                    |this, _, event: &SettingsEvent, window, cx| match event {
+                        SettingsEvent::Close => this.close_settings(window, cx),
+                        SettingsEvent::OpenSettingsFile { error } => {
+                            if let Some(error) = error {
+                                this.toast(ToastLevel::Error, error.clone(), cx);
+                            }
                         }
-                    }
-                });
+                    },
+                );
                 self._subscriptions.push(subscription);
                 self.settings = Some(view.clone());
                 view
@@ -864,11 +1104,33 @@ impl MainView {
         if self.settings.is_some() {
             self.close_settings(window, cx);
         }
+        if page != Page::Dashboard {
+            self.dashboard = None;
+        }
+        if page != Page::Automations {
+            self.automations_page = None;
+        }
+        if page == Page::Automations && self.automations_page.is_none() {
+            let controller = self.automations.controller.clone();
+            let model = self.workspace.model.clone();
+            let automations = cx.new(|cx| AutomationsPage::new(controller, model, window, cx));
+            let subscription = cx.subscribe_in(
+                &automations,
+                window,
+                |this, page, event: &AutomationsPageEvent, window, cx| {
+                    this.automations_event(page.clone(), event, window, cx)
+                },
+            );
+            self._subscriptions.push(subscription);
+            let handle = automations.focus_handle(cx);
+            window.focus(&handle, cx);
+            self.automations_page = Some(automations);
+        }
         if page == Page::Dashboard && self.dashboard.is_none() {
             let content = self.content.clone();
             let branches = self.services.branches.clone();
             let host = DashboardHost::new()
-                .terminal_text(move |target, cx| content.read(cx).visible_terminal_text(target, cx))
+                .terminal_text(move |target, cx| content.read(cx).dashboard_text(target, cx))
                 .notable_branch(move |cwd, _| branches.notable_branch(cwd));
             let model = self.workspace.model.clone();
             let dashboard = cx.new(|cx| AgentDashboard::new(model, host, window, cx));
@@ -889,6 +1151,7 @@ impl MainView {
 
     fn close_page(&mut self, restore_focus: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.dashboard = None;
+        self.automations_page = None;
         self.shell.update(cx, |shell, cx| {
             shell.page = None;
             cx.notify();
@@ -915,7 +1178,8 @@ impl MainView {
             DashboardEvent::Stop(target) => self.workspace.update(cx, |ws| ws.stop_agent(target)),
             DashboardEvent::Restart(target) => self.workspace.update(cx, |ws| ws.restart_agent(target)),
             DashboardEvent::Reply { target, text } => {
-                let sent = self.content.update(cx, |content, cx| content.submit_agent_prompt(text, target, cx));
+                let sent =
+                    self.content.update(cx, |content, cx| content.reply_to_agent(text, target, window, cx));
                 if !sent {
                     dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(target, text, window, cx));
                 }
@@ -924,37 +1188,67 @@ impl MainView {
         }
     }
 
+    /// The Automations page's requests (`AutomationsViewController`'s callbacks).
+    fn automations_event(
+        &mut self,
+        page: Entity<AutomationsPage>,
+        event: &AutomationsPageEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            AutomationsPageEvent::Dismiss => self.close_page(true, window, cx),
+            AutomationsPageEvent::RunNow { automation_id } => {
+                automations::drive(&self.automations, window, cx, |controller, host| {
+                    controller.run_now(host, automation_id)
+                });
+            }
+            AutomationsPageEvent::OpenRun { run_id } => {
+                let opened = automations::drive(&self.automations, window, cx, |controller, host| {
+                    controller.open_run(host, run_id)
+                });
+                if opened {
+                    self.close_page(true, window, cx);
+                }
+            }
+            AutomationsPageEvent::Delete { automation_id } => {
+                let deleted = automations::drive(&self.automations, window, cx, |controller, host| {
+                    controller.delete(host, automation_id)
+                });
+                if !deleted {
+                    page.update(cx, |page, cx| page.show_write_failure(window, cx));
+                }
+            }
+        }
+    }
+
+    /// A banner of an automation run: the Automations page on that run.
+    fn open_automation_run(&mut self, run_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_page(Page::Automations, window, cx);
+        if let Some(page) = self.automations_page.clone() {
+            page.update(cx, |page, cx| page.show_run(run_id, window, cx));
+        }
+    }
+
     // MARK: - Right sidebar
 
     fn sidebar_event(&mut self, event: &SidebarEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             SidebarEvent::OpenFile { path, preview, focus } => {
-                let (path, preview) = (path.clone(), *preview);
-                self.workspace.update(cx, |ws| ws.open_editor(&path, preview, None));
-                if *focus {
-                    self.sync_keyboard_focus(window, cx);
-                }
+                // A file with unsaved changes never opens as a preview the next file replaces.
+                let preview = *preview && !self.documents(cx).read(cx).store().has_unsaved_changes(path);
+                let path = path.clone();
+                let opened = self.workspace.update(cx, |ws| ws.open_editor(&path, preview, None));
+                self.file_opened(opened.is_some(), *focus, window, cx);
             }
             SidebarEvent::OpenDiff { path, staged, preview, focus } => {
                 let (path, staged, preview) = (path.clone(), *staged, *preview);
-                self.workspace.update(cx, |ws| ws.open_diff(&path, staged, preview, None));
-                if *focus {
-                    self.sync_keyboard_focus(window, cx);
-                }
+                let opened = self.workspace.update(cx, |ws| ws.open_diff(&path, staged, preview, None));
+                self.file_opened(opened.is_some(), *focus, window, cx);
             }
             SidebarEvent::OpenMarkdownPreview { path } => {
                 let path = path.clone();
-                self.workspace.update(cx, |ws| {
-                    let window_id = ws.active_window_id().to_owned();
-                    match ws.file_pane(&window_id) {
-                        Some(pane) => {
-                            ws.preview_markdown(&path, &pane);
-                        }
-                        None => {
-                            ws.spawn_markdown(&path, None);
-                        }
-                    }
-                });
+                self.workspace.update(cx, |ws| crate::content::preview_markdown_in_file_pane(ws, &path));
             }
             SidebarEvent::OpenInTerminal { directory } => {
                 let directory = directory.to_string_lossy().into_owned();
@@ -963,23 +1257,52 @@ impl MainView {
             SidebarEvent::FocusPane => self.return_keyboard_focus_to_panes(window, cx),
             SidebarEvent::ItemMoved { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
+                self.documents(cx).update(cx, |documents, cx| documents.relocate(&from, &to, cx));
                 self.workspace.update(cx, |ws| ws.relocate_file_tabs(&from, &to));
             }
             SidebarEvent::ShowError(message) => self.toast(ToastLevel::Error, message.clone(), cx),
         }
     }
 
-    /// The explorer follows the focused pane's folder; its width leaves panes their share.
+    fn documents(&self, cx: &App) -> Entity<soprano_editor::EditorDocuments<TerminalTarget>> {
+        self.content.read(cx).documents().clone()
+    }
+
+    /// After the explorer opened a file or diff: the keyboard follows it into the panes when
+    /// asked (`onReturnFocus`); no room for the tab says so.
+    fn file_opened(&mut self, opened: bool, focus: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !opened {
+            self.toast(ToastLevel::Error, soprano_explorer::NO_ROOM_MESSAGE, cx);
+        } else if focus {
+            self.return_keyboard_focus_to_panes(window, cx);
+        }
+    }
+
+    /// The explorer follows the focused tab's folder (`effectiveWorkingDirectory`, none for
+    /// file and browser tabs, which keep the roots); finding roots walks the disk, so only a
+    /// changed folder is passed on.
     fn sync_right_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let cwd = self.workspace.read(cx).active_working_directory();
+        self.update_right_sidebar_width(window, cx);
+        let cwd = {
+            let ws = self.workspace.read(cx);
+            ws.pane(ws.active_pane_id())
+                .and_then(|pane| pane.active_tab())
+                .and_then(|tab| tab.effective_working_directory())
+        };
+        if self.explorer_directory.as_ref() == Some(&cwd) {
+            return;
+        }
+        self.explorer_directory = Some(cwd.clone());
+        self.right_sidebar.update(cx, |sidebar, cx| sidebar.set_working_directory(cwd.as_deref(), cx));
+    }
+
+    /// The explorer's width leaves the panes their share of the window.
+    fn update_right_sidebar_width(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let shell = self.shell.read(cx);
         let left = if shell.sidebar_visible { shell.sidebar_width } else { 0.0 };
         let zoom = cx.soprano_theme().zoom();
         let available = f32::from(window.viewport_size().width) / zoom - left;
-        self.right_sidebar.update(cx, |sidebar, cx| {
-            sidebar.set_available_width(Some(available));
-            sidebar.set_working_directory(cwd.as_deref(), cx);
-        });
+        self.right_sidebar.update(cx, |sidebar, _| sidebar.set_available_width(Some(available)));
     }
 
     fn after_right_sidebar_toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -998,7 +1321,9 @@ impl MainView {
             let valid: HashSet<soprano_keys::TerminalTarget> = ws
                 .panes()
                 .values()
-                .flat_map(|pane| pane.tabs.iter().map(|tab| soprano_keys::TerminalTarget::new(&pane.id, &tab.id)))
+                .flat_map(|pane| {
+                    pane.tabs.iter().map(|tab| soprano_keys::TerminalTarget::new(&pane.id, &tab.id))
+                })
                 .collect();
             (valid, ws.workspace_restore_generation())
         };
@@ -1011,6 +1336,9 @@ impl MainView {
         if self.services.sessions.update(cx, |sessions, _| sessions.take_changed()) {
             cx.notify();
         }
+        automations::drive(&self.automations, window, cx, |controller, host| {
+            controller.workspace_changed(host)
+        });
         self.sync_right_sidebar(window, cx);
         if self.picker.is_none() && self.dialog.is_none() && self.settings.is_none() {
             self.sync_keyboard_focus(window, cx);
@@ -1033,15 +1361,23 @@ impl MainView {
                 let resolve = move |allowed: bool| {
                     let _ = answers.try_send((weak, id, allowed));
                 };
-                self.clipboard.enqueue(terminal.entity_id().as_u64(), request.kind, request.content.clone(), resolve);
+                self.clipboard.enqueue(
+                    terminal.entity_id().as_u64(),
+                    request.kind,
+                    request.content.clone(),
+                    resolve,
+                );
             }
             ContentEvent::DesktopNotification { target, title, body } => {
                 let notification =
                     TerminalNotification { target: target.clone(), title: title.clone(), body: body.clone() };
                 let notifications = self.notifications.clone();
-                self.workspace.update(cx, |ws| notifications.borrow_mut().handle_terminal_notification(ws, notification));
+                self.workspace.update(cx, |ws| {
+                    notifications.borrow_mut().handle_terminal_notification(ws, notification)
+                });
             }
             ContentEvent::TerminalDestroyed(id) => self.clipboard.cancel_requests(*id),
+            ContentEvent::ShowError(message) => self.toast(ToastLevel::Error, message.clone(), cx),
             ContentEvent::AgentEvent(event) => {
                 let notifications = self.notifications.clone();
                 let event = event.clone();
@@ -1071,7 +1407,10 @@ impl MainView {
         let content = DialogContent::new(
             prompt.title(),
             message,
-            vec![DialogButton::new(prompt.deny_button_title()), DialogButton::new(prompt.allow_button_title()).primary()],
+            vec![
+                DialogButton::new(prompt.deny_button_title()),
+                DialogButton::new(prompt.allow_button_title()).primary(),
+            ],
         );
         self.present_dialog(
             content,
@@ -1118,6 +1457,14 @@ impl MainView {
             view.update(cx, |view, cx| view.reload(window, cx));
         }
         self.apply_resolver_changes(window, cx);
+        // settings.json may have added, changed or removed automations.
+        self.tick_automations(window, cx);
+    }
+
+    /// `AutomationController.tick` now.
+    fn tick_automations(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = chrono::Utc::now();
+        automations::drive(&self.automations, window, cx, |controller, host| controller.tick(host, now));
     }
 
     fn theme_changed(&mut self, cx: &mut Context<Self>) {
@@ -1185,7 +1532,10 @@ impl MainView {
     fn keys_captured(&self, cx: &App) -> bool {
         self.picker.is_some()
             || self.dialog.is_some()
-            || self.settings.as_ref().is_some_and(|view| view.read(cx).captures_keys() || view.read(cx).is_confirming())
+            || self
+                .settings
+                .as_ref()
+                .is_some_and(|view| view.read(cx).captures_keys() || view.read(cx).is_confirming())
     }
 
     fn intercept_key(&mut self, event: &KeystrokeEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1219,7 +1569,9 @@ impl MainView {
         let outcome = self.resolver.handle(&key, &context);
         match outcome {
             KeyOutcome::PassThrough | KeyOutcome::LiteralPrefix => {}
-            KeyOutcome::Consumed | KeyOutcome::EnterPrefix | KeyOutcome::PaneHintPending(_) => cx.stop_propagation(),
+            KeyOutcome::Consumed | KeyOutcome::EnterPrefix | KeyOutcome::PaneHintPending(_) => {
+                cx.stop_propagation()
+            }
             KeyOutcome::Action(id) | KeyOutcome::MenuAction(id) => {
                 cx.stop_propagation();
                 self.run_binding(&id, window, cx);
@@ -1234,7 +1586,12 @@ impl MainView {
         self.apply_resolver_changes(window, cx);
     }
 
-    pub fn modifiers_changed(&mut self, modifiers: &gpui::Modifiers, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn modifiers_changed(
+        &mut self,
+        modifiers: &gpui::Modifiers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.resolver.modifiers_changed(crate::keyboard::modifiers(modifiers));
         self.apply_resolver_changes(window, cx);
     }
@@ -1274,7 +1631,11 @@ impl MainView {
     /// Keeps the keyboard on the active pane's content (`syncKeyboardFocus`): unless a page,
     /// overlay or another live view (the right sidebar, Settings) has it.
     pub fn sync_keyboard_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.shell.read(cx).page.is_some() || self.picker.is_some() || self.dialog.is_some() || self.settings.is_some() {
+        if self.shell.read(cx).page.is_some()
+            || self.picker.is_some()
+            || self.dialog.is_some()
+            || self.settings.is_some()
+        {
             return;
         }
         let content = self.content.read(cx);
@@ -1339,7 +1700,13 @@ impl MainView {
             }
             Request::OpenMarkdown { path, opens_new_pane, caller_pane_id, caller_tab_id } => {
                 let response = self.workspace.update(cx, |ws| {
-                    crate::ipc::open_markdown(ws, &path, opens_new_pane, caller_pane_id.as_deref(), caller_tab_id.as_deref())
+                    crate::ipc::open_markdown(
+                        ws,
+                        &path,
+                        opens_new_pane,
+                        caller_pane_id.as_deref(),
+                        caller_tab_id.as_deref(),
+                    )
                 });
                 respond(response);
             }
@@ -1349,17 +1716,19 @@ impl MainView {
                     respond(response);
                     return;
                 }
-                let target = match crate::ipc::browser_target(self.workspace.read(cx), target_pane_id.as_deref()) {
-                    Ok(target) => target,
-                    Err(message) => return respond(Response::failure(message)),
-                };
+                let target =
+                    match crate::ipc::browser_target(self.workspace.read(cx), target_pane_id.as_deref()) {
+                        Ok(target) => target,
+                        Err(message) => return respond(Response::failure(message)),
+                    };
                 self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, false));
                 // The tab's view exists once the layout has synced (next turn).
                 cx.defer_in(window, move |_, window, cx| {
                     let Some(view) = soprano_browser::BrowserRegistry::view(&target, cx) else {
                         return respond(Response::failure(soprano_browser::unavailable_message(&target)));
                     };
-                    let task = view.update(cx, |view, cx| view.perform_automation(&command, &arguments, window, cx));
+                    let task =
+                        view.update(cx, |view, cx| view.perform_automation(&command, &arguments, window, cx));
                     cx.spawn(async move |_, _| {
                         respond(match task.await {
                             Ok(output) => Response::success(output),
@@ -1411,7 +1780,15 @@ impl MainView {
                     .right(-handle_width / 2.)
                     .w(handle_width)
                     .cursor_col_resize()
-                    .child(div().absolute().top_0().bottom_0().left(handle_width / 2.).w(px(1.)).bg(handle_color))
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left(handle_width / 2.)
+                            .w(px(1.))
+                            .bg(handle_color),
+                    )
                     .tooltip(soprano_ui::tooltip("Drag to resize the sidebar, double-click to reset"))
                     .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                         if this.sidebar_drag.is_none() {
@@ -1447,7 +1824,11 @@ impl MainView {
                             let moved = entity.clone();
                             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                                 if phase.bubble() {
-                                    moved.update(cx, |this, cx| this.drag_sidebar_to(event.position.x, window, cx)).ok();
+                                    moved
+                                        .update(cx, |this, cx| {
+                                            this.drag_sidebar_to(event.position.x, window, cx)
+                                        })
+                                        .ok();
                                 }
                             });
                             let released = entity.clone();
@@ -1520,7 +1901,9 @@ impl MainView {
                         .p(gap)
                         .gap(gap)
                         .child(div().flex_1().min_w_0().h_full().child(self.split_tree.clone()))
-                        .when(self.right_sidebar.read(cx).is_open(), |body| body.child(self.right_sidebar.clone())),
+                        .when(self.right_sidebar.read(cx).is_open(), |body| {
+                            body.child(self.right_sidebar.clone())
+                        }),
                 )
                 .into_any_element(),
         };
@@ -1536,26 +1919,12 @@ impl MainView {
     }
 
     fn render_page(&mut self, page: Page, cx: &mut Context<Self>) -> AnyElement {
-        if page == Page::Dashboard
-            && let Some(dashboard) = &self.dashboard
-        {
-            return div().flex_1().min_h_0().child(dashboard.clone()).into_any_element();
-        }
-        let theme = cx.soprano_theme();
-        let title = match page {
-            Page::Dashboard => "Agent Dashboard",
-            Page::Automations => "Automations",
+        let view: Option<gpui::AnyView> = match page {
+            Page::Dashboard => self.dashboard.clone().map(Into::into),
+            Page::Automations => self.automations_page.clone().map(Into::into),
         };
-        div()
-            .flex_1()
-            .min_h_0()
-            .bg(theme.canvas)
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(theme.muted)
-            .child(title)
-            .into_any_element()
+        let theme = cx.soprano_theme();
+        div().flex_1().min_h_0().bg(theme.canvas).children(view).into_any_element()
     }
 }
 
@@ -1581,14 +1950,30 @@ impl Render for MainView {
             .on_modifiers_changed(cx.listener(|this, event: &gpui::ModifiersChangedEvent, window, cx| {
                 this.modifiers_changed(&event.modifiers, window, cx)
             }))
-            .on_action(cx.listener(|this, action: &menus::FindWindow, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::CommandPalette, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::OpenProject, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::OpenInSopranoGit, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::OpenMarkdown, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::AgentDashboard, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::Automations, window, cx| this.menu_action(action, window, cx)))
-            .on_action(cx.listener(|this, action: &menus::OpenSettingsFile, window, cx| this.menu_action(action, window, cx)))
+            .on_action(cx.listener(|this, action: &menus::FindWindow, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::CommandPalette, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::OpenProject, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::OpenInSopranoGit, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::OpenMarkdown, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::AgentDashboard, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::Automations, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::OpenSettingsFile, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &gpui_component::input::Copy, _, cx| {
                 if let Some(terminal) = this.content.read(cx).active_terminal(cx) {
                     terminal.update(cx, |terminal, cx| {
@@ -1638,10 +2023,12 @@ fn model_direction(direction: soprano_keys::NavigationDirection) -> soprano_mode
     }
 }
 
-pub fn theme_appearance(preference: soprano_config::AppearancePreference) -> soprano_ui::AppearancePreference {
-    soprano_ui::AppearancePreference::parse(preference.raw_value()).unwrap_or(soprano_ui::AppearancePreference::System)
+pub fn theme_appearance(
+    preference: soprano_config::AppearancePreference,
+) -> soprano_ui::AppearancePreference {
+    soprano_ui::AppearancePreference::parse(preference.raw_value())
+        .unwrap_or(soprano_ui::AppearancePreference::System)
 }
-
 
 pub fn is_markdown(path: &std::path::Path) -> bool {
     path.extension()

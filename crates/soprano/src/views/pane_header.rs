@@ -161,6 +161,7 @@ pub struct PaneTabModel {
 
 impl PaneTabModel {
     /// The tab's text, `● title` with a prefix (`PaneTabButton.render`).
+    #[cfg(test)]
     pub fn label(&self) -> String {
         match self.prefix {
             Some(_) => format!("● {}", self.title),

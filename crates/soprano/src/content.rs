@@ -7,23 +7,36 @@
 //! folders, running commands, agent input and exits, closes, copy mode.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    AnyView, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString, Subscription,
-    Task, Window,
+    AnyView, App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, SharedString,
+    Subscription, Task, Window,
 };
 use soprano_accounts::AccountLaunchState;
 use soprano_browser::{BrowserEvent, BrowserTarget, BrowserView};
-use soprano_launch::{AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec};
-use soprano_model::{PaneTab, PaneType, TerminalLifecycleAction, TerminalTarget, WorkspaceChange, WorkspaceEvent};
-use soprano_term::{ClipboardRequest, TerminalEvent, TerminalLaunch, TerminalSettings, TerminalTheme, TerminalView};
-use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, KeybindingState};
 use soprano_chat::session::AgentChatEvent;
 use soprano_chat_ui::{ChatView, ChatViewEvent};
+use soprano_editor::{
+    DiffEvent, DiffView, DocumentsEvent, EditorDocuments, EditorEvent, EditorView, MarkdownReaderView,
+    ReaderEvent,
+};
 use soprano_ipc::AgentEventState;
+use soprano_launch::{AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec};
+use soprano_model::file_url;
+use soprano_model::{
+    PaneTab, PaneType, TerminalLifecycleAction, TerminalTarget, WorkspaceChange, WorkspaceEvent,
+};
+use soprano_platform::StateStore;
+use soprano_term::ClipboardConfirmationCoordinator;
+use soprano_term::{
+    ClipboardRequest, TerminalEvent, TerminalLaunch, TerminalSettings, TerminalTheme, TerminalView,
+};
+use soprano_text::DocumentId;
+use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, KeybindingState};
 
 use crate::shell::{CloseTarget, Command, Shell, dispatch};
 use crate::workspace::{WorkspaceHandle, WorkspaceUpdate};
@@ -42,6 +55,12 @@ pub enum PaneContent {
     Browser(Entity<BrowserView>),
     /// A chat tab: the agent's ACP session in the chat view.
     Chat(Entity<ChatView>),
+    /// A file in the code editor.
+    Editor(Entity<EditorView<TerminalTarget>>),
+    /// The git diff of a file.
+    Diff(Entity<DiffView>),
+    /// A Markdown reader.
+    Reader(Entity<MarkdownReaderView>),
     /// An agent tab whose agent was stopped before this view existed: no process runs until
     /// it is restarted (Swift's surface-less terminal view).
     Stopped,
@@ -55,6 +74,9 @@ impl PaneContent {
             PaneContent::Terminal(view) => Some(view.clone().into()),
             PaneContent::Browser(view) => Some(view.clone().into()),
             PaneContent::Chat(view) => Some(view.clone().into()),
+            PaneContent::Editor(view) => Some(view.clone().into()),
+            PaneContent::Diff(view) => Some(view.clone().into()),
+            PaneContent::Reader(view) => Some(view.clone().into()),
             PaneContent::Stopped | PaneContent::Failed(_) => None,
         }
     }
@@ -64,6 +86,9 @@ impl PaneContent {
             PaneContent::Terminal(view) => Some(view.focus_handle(cx)),
             PaneContent::Browser(view) => Some(view.focus_handle(cx)),
             PaneContent::Chat(view) => Some(view.focus_handle(cx)),
+            PaneContent::Editor(view) => Some(view.focus_handle(cx)),
+            PaneContent::Diff(view) => Some(view.focus_handle(cx)),
+            PaneContent::Reader(view) => Some(view.focus_handle(cx)),
             PaneContent::Stopped | PaneContent::Failed(_) => None,
         }
     }
@@ -124,8 +149,40 @@ pub enum ContentEvent {
     SurfaceFocused(TerminalTarget),
     /// A terminal was destroyed or restarted: its pending clipboard prompts are denied.
     TerminalDestroyed(u64),
+    /// Something to tell the user in a toast (no room for a file's tab, …).
+    ShowError(String),
 }
 
+/// Which tab shows which editor document, and which documents have unsaved changes: what
+/// the workspace's close-confirmation predicate (which must be `Send + Sync`) reads.
+#[derive(Clone, Debug, Default)]
+pub struct UnsavedEditors {
+    shown: Vec<(TerminalTarget, DocumentId)>,
+    dirty: HashSet<DocumentId>,
+}
+
+impl UnsavedEditors {
+    pub fn new(shown: Vec<(TerminalTarget, DocumentId)>, dirty: HashSet<DocumentId>) -> Self {
+        Self { shown, dirty }
+    }
+
+    /// Whether closing `targets` loses unsaved changes: a dirty document no tab outside
+    /// `targets` still shows (`EditorDocumentStore::unsaved_when_closing` is not empty).
+    pub fn loses_changes(&self, targets: &[TerminalTarget]) -> bool {
+        self.shown.iter().any(|(target, document)| {
+            targets.contains(target)
+                && self.dirty.contains(document)
+                && !self.shown.iter().any(|(other, shown)| shown == document && !targets.contains(other))
+        })
+    }
+}
+
+pub type SharedUnsaved = Arc<Mutex<UnsavedEditors>>;
+
+/// The workspace predicate asking before tabs with unsaved editor changes close.
+pub fn close_confirmation(unsaved: SharedUnsaved) -> soprano_model::CloseConfirmation {
+    Box::new(move |targets| unsaved.lock().unwrap_or_else(|e| e.into_inner()).loses_changes(targets))
+}
 
 pub struct ContentHost {
     workspace: WorkspaceHandle,
@@ -133,31 +190,46 @@ pub struct ContentHost {
     terminals: Rc<dyn TerminalFactory>,
     launch_context: LaunchContext,
     terminal_settings: TerminalSettings,
+    documents: Entity<EditorDocuments<TerminalTarget>>,
+    state: StateStore,
+    unsaved: SharedUnsaved,
+    clipboard: Option<Rc<ClipboardConfirmationCoordinator>>,
     contents: HashMap<TerminalTarget, PaneContent>,
     subscriptions: HashMap<TerminalTarget, Subscription>,
     last_restore_generation: u64,
     copy_mode_target: Option<TerminalTarget>,
-    /// Whether Codex readiness fallbacks are scheduled (tests turn them off).
-    schedules_readiness: bool,
     _bus: Subscription,
+    _documents: Subscription,
     _sampler: Option<Task<()>>,
 }
-
 impl EventEmitter<ContentEvent> for ContentHost {}
 
 impl ContentHost {
+    /// Also installs the workspace's close-confirmation predicate: closing tabs whose editor
+    /// documents have unsaved changes returns `CloseOutcome::NeedsConfirmation`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace: WorkspaceHandle,
         shell: Entity<Shell>,
         terminals: Rc<dyn TerminalFactory>,
         launch_context: LaunchContext,
         terminal_settings: TerminalSettings,
+        documents: Entity<EditorDocuments<TerminalTarget>>,
+        state: StateStore,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let bus = cx.subscribe_in(&workspace.bus, window, |host, _, update: &WorkspaceUpdate, window, cx| {
             host.handle_update(update, window, cx);
         });
+        let documents_subscription = cx.subscribe(&documents, |host, _, event: &DocumentsEvent, cx| {
+            if let DocumentsEvent::Changed { .. } = event {
+                host.refresh_unsaved(cx);
+            }
+        });
+        let unsaved: SharedUnsaved = Arc::default();
+        let predicate = close_confirmation(unsaved.clone());
+        workspace.model.update(cx, |ws, _| ws.set_close_confirmation(Some(predicate)));
         let last_restore_generation = workspace.read(cx).workspace_restore_generation();
         let mut host = Self {
             workspace,
@@ -165,16 +237,59 @@ impl ContentHost {
             terminals,
             launch_context,
             terminal_settings,
+            documents,
+            state,
+            unsaved,
+            clipboard: None,
             contents: HashMap::new(),
             subscriptions: HashMap::new(),
             last_restore_generation,
             copy_mode_target: None,
-            schedules_readiness: true,
             _bus: bus,
+            _documents: documents_subscription,
             _sampler: None,
         };
         host.sync_visible_contents(window, cx);
         host
+    }
+
+    pub fn documents(&self) -> &Entity<EditorDocuments<TerminalTarget>> {
+        &self.documents
+    }
+
+    /// The app's clipboard prompt queue, handed to every terminal (existing and future) so a
+    /// destroyed terminal withdraws its own prompts.
+    pub fn set_clipboard_coordinator(
+        &mut self,
+        coordinator: Rc<ClipboardConfirmationCoordinator>,
+        cx: &mut Context<Self>,
+    ) {
+        for content in self.contents.values() {
+            if let PaneContent::Terminal(view) = content {
+                let coordinator = coordinator.clone();
+                view.update(cx, |view, _| view.set_clipboard_coordinator(Some(coordinator)));
+            }
+        }
+        self.clipboard = Some(coordinator);
+    }
+
+    /// Mirrors which tab shows which editor document and which are dirty for the predicate.
+    fn refresh_unsaved(&mut self, cx: &App) {
+        let documents = self.documents.read(cx);
+        let shown: Vec<(TerminalTarget, DocumentId)> = self
+            .contents
+            .iter()
+            .filter_map(|(target, content)| match content {
+                PaneContent::Editor(view) => Some((target.clone(), view.read(cx).document_id())),
+                _ => None,
+            })
+            .collect();
+        let dirty = shown
+            .iter()
+            .map(|(_, id)| *id)
+            .filter(|id| documents.document(*id).is_some_and(|d| d.is_dirty()))
+            .collect();
+        *self.unsaved.lock().unwrap_or_else(|e| e.into_inner()) = UnsavedEditors::new(shown, dirty);
     }
 
     /// Samples running commands every second (the app does this; tests drive it by hand).
@@ -187,10 +302,6 @@ impl ContentHost {
                 }
             }
         }));
-    }
-
-    pub fn set_schedules_readiness(&mut self, schedules: bool) {
-        self.schedules_readiness = schedules;
     }
 
     pub fn content(&self, target: &TerminalTarget) -> Option<&PaneContent> {
@@ -249,7 +360,7 @@ impl ContentHost {
         }
         for change in &update.changes {
             if let WorkspaceChange::Document(target) = change {
-                self.handle_document_change(target);
+                self.handle_document_change(target, cx);
             }
         }
         self.cancel_copy_mode_outside_active_terminal(cx);
@@ -260,16 +371,70 @@ impl ContentHost {
         }
         self.prune_orphans(cx);
         self.sync_visible_contents(window, cx);
+        self.sync_diff_visibility(cx);
+        self.refresh_unsaved(cx);
         cx.notify();
     }
 
-    /// A diff tab now shows another file: its view is rebuilt. Markdown and editor views
-    /// follow their documents themselves.
-    fn handle_document_change(&mut self, target: &TerminalTarget) {
-        let _ = target;
+    /// A file tab now shows another file (a rename or move, a reused preview): a reader
+    /// opens it in place; an editor or diff whose file differs is rebuilt. Editor documents
+    /// follow a move themselves (`EditorDocuments::relocate`), so their views stay.
+    fn handle_document_change(&mut self, target: &TerminalTarget, cx: &mut Context<Self>) {
+        let Some(path) = self
+            .workspace
+            .read(cx)
+            .tab(&target.pane_id, &target.tab_id)
+            .and_then(|tab| tab.url.as_deref().and_then(file_url::path_from_file_url))
+        else {
+            return;
+        };
+        let stale = match self.contents.get(target) {
+            Some(PaneContent::Reader(view)) => {
+                if view.read(cx).path() != path {
+                    view.update(cx, |view, cx| view.open_document(&path, None, false, cx));
+                }
+                false
+            }
+            Some(PaneContent::Editor(view)) => {
+                view.read(cx).path(cx).is_none_or(|shown| !same_file(&shown, &path))
+            }
+            Some(PaneContent::Diff(view)) => !same_file(view.read(cx).file(), &path),
+            _ => false,
+        };
+        if stale {
+            self.remove_content(target, cx);
+        }
     }
 
-    fn handle_lifecycle(&mut self, action: &TerminalLifecycleAction, window: &mut Window, cx: &mut Context<Self>) {
+    /// Diffs stop watching while their tab is hidden and reload when it shows again.
+    fn sync_diff_visibility(&mut self, cx: &mut Context<Self>) {
+        let shown: HashSet<TerminalTarget> = {
+            let workspace = self.workspace.read(cx);
+            workspace
+                .layout()
+                .map(|layout| layout.leaf_ids())
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|pane_id| {
+                    let tab = workspace.pane(&pane_id)?.active_tab()?;
+                    Some(TerminalTarget::new(&pane_id, &tab.id))
+                })
+                .collect()
+        };
+        for (target, content) in &self.contents {
+            if let PaneContent::Diff(view) = content {
+                let visible = shown.contains(target);
+                view.update(cx, |view, cx| view.set_shown(visible, cx));
+            }
+        }
+    }
+
+    fn handle_lifecycle(
+        &mut self,
+        action: &TerminalLifecycleAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match action {
             TerminalLifecycleAction::Stop(target) => match self.contents.get(target) {
                 Some(PaneContent::Terminal(view)) => view.update(cx, |view, cx| view.destroy(cx)),
@@ -282,7 +447,8 @@ impl ContentHost {
                 };
                 match self.contents.get(target).cloned() {
                     Some(PaneContent::Chat(view)) => {
-                        let conversation = tab.agent.as_ref().and_then(|a| a.conversation.as_ref()).map(|c| c.id.clone());
+                        let conversation =
+                            tab.agent.as_ref().and_then(|a| a.conversation.as_ref()).map(|c| c.id.clone());
                         view.update(cx, |view, cx| view.restart(conversation.as_deref(), window, cx));
                     }
                     Some(PaneContent::Terminal(view)) => {
@@ -377,14 +543,19 @@ impl ContentHost {
             return existing.clone();
         }
         let content = match tab.pane_type {
+            PaneType::Browser if tab.is_editor() || tab.is_diff() || tab.is_markdown() => {
+                self.make_file_view(tab, &target, window, cx)
+            }
             PaneType::Browser => self.make_browser(tab, &target, window, cx),
             PaneType::Agent if tab.is_chat() => match self.make_chat(tab, &target, window, cx) {
                 Some(chat) => chat,
                 None => self.make_terminal(tab, &target, window, cx),
             },
             PaneType::Terminal | PaneType::Agent => {
-                let starts = starts
-                    .unwrap_or(tab.pane_type != PaneType::Agent || tab.agent.as_ref().map(|a| a.status) != Some(AgentStatus::Stopped));
+                let starts = starts.unwrap_or(
+                    tab.pane_type != PaneType::Agent
+                        || tab.agent.as_ref().map(|a| a.status) != Some(AgentStatus::Stopped),
+                );
                 if starts { self.make_terminal(tab, &target, window, cx) } else { PaneContent::Stopped }
             }
         };
@@ -393,6 +564,82 @@ impl ContentHost {
             self.schedule_readiness(&target, cx);
         }
         content
+    }
+
+    /// An editor, diff or Markdown reader for a file tab.
+    fn make_file_view(
+        &mut self,
+        tab: &PaneTab,
+        target: &TerminalTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> PaneContent {
+        let Some(path) = tab.url.as_deref().and_then(file_url::path_from_file_url) else {
+            return PaneContent::Failed("This tab's file could not be found.".into());
+        };
+        let workspace = self.workspace.clone();
+        let events_target = target.clone();
+        let (content, subscription) = if tab.is_editor() {
+            let documents = self.documents.clone();
+            let view_target = target.clone();
+            let view = cx.new(|cx| EditorView::new(documents, view_target, path, window, cx));
+            let subscription = cx.subscribe(&view, move |host, _, event: &EditorEvent, cx| {
+                host.handle_editor_event(&events_target, event, cx)
+            });
+            (PaneContent::Editor(view), subscription)
+        } else if tab.is_diff() {
+            let staged = tab.content_kind.as_deref() == Some(soprano_model::PaneContentKind::STAGED_DIFF);
+            let state = self.state.clone();
+            let view = cx.new(|cx| DiffView::new(path, staged, state, window, cx));
+            let subscription = cx.subscribe(&view, move |host, _, event: &DiffEvent, cx| match event {
+                DiffEvent::OpenFile(path) => {
+                    let opened = workspace.update(cx, |ws| ws.open_editor(path, false, None));
+                    if opened.is_none() {
+                        cx.emit(ContentEvent::ShowError(soprano_explorer::NO_ROOM_MESSAGE.to_owned()));
+                    }
+                }
+                DiffEvent::FocusRequested => host.focus_tab(&events_target, cx),
+            });
+            (PaneContent::Diff(view), subscription)
+        } else {
+            let view = cx.new(|cx| MarkdownReaderView::new(&path, window, cx));
+            let subscription = cx.subscribe(&view, move |host, _, event: &ReaderEvent, cx| {
+                let (pane, tab) = (events_target.pane_id.as_str(), events_target.tab_id.as_str());
+                match event {
+                    ReaderEvent::TitleChanged(title) => {
+                        workspace.update(cx, |ws| ws.rename_tab(pane, tab, title))
+                    }
+                    ReaderEvent::DocumentChanged(path) => {
+                        workspace.update(cx, |ws| ws.update_file_document(pane, tab, path))
+                    }
+                    ReaderEvent::OpenExternal(url) => open_external(&workspace, url, cx),
+                    ReaderEvent::FocusRequested => host.focus_tab(&events_target, cx),
+                }
+            });
+            (PaneContent::Reader(view), subscription)
+        };
+        self.subscriptions.insert(target.clone(), subscription);
+        content
+    }
+
+    /// What an editor tab reports (`EditorPaneView`'s delegate).
+    fn handle_editor_event(&mut self, target: &TerminalTarget, event: &EditorEvent, cx: &mut Context<Self>) {
+        let (pane, tab) = (target.pane_id.as_str(), target.tab_id.as_str());
+        match event {
+            EditorEvent::TitleChanged(title) => {
+                self.workspace.update(cx, |ws| ws.rename_tab(pane, tab, title))
+            }
+            EditorEvent::ModifiedChanged(_) | EditorEvent::Saved => self.refresh_unsaved(cx),
+            EditorEvent::KeepTab => self.workspace.update(cx, |ws| ws.keep_editor_tab(pane, tab)),
+            EditorEvent::OpenMarkdownPreview(path) => {
+                self.workspace.update(cx, |ws| preview_markdown_in_file_pane(ws, path));
+            }
+            EditorEvent::FocusRequested => self.focus_tab(target, cx),
+        }
+    }
+
+    fn focus_tab(&self, target: &TerminalTarget, cx: &mut Context<Self>) {
+        self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, false));
     }
 
     fn make_browser(
@@ -440,7 +687,8 @@ impl ContentHost {
         let profile = AgentCatalog::shared().profile(&agent.profile_id)?;
         let cwd = agent.conversation.as_ref().and_then(|c| c.cwd.clone()).or_else(|| tab.cwd.clone());
         let adjustments = AccountLaunchState::shared().adjustments(&profile.id);
-        let accounts = AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
+        let accounts =
+            AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
         let ctx = &self.launch_context;
         let launch = soprano_launch::ChatLaunch::for_profile(
             &profile,
@@ -475,7 +723,13 @@ impl ContentHost {
 
     /// What a chat session reports turns into the tab's status, conversation and title
     /// (`handleChatEvent`).
-    fn handle_chat_event(&mut self, target: &TerminalTarget, agent_name: &str, event: &ChatViewEvent, cx: &mut Context<Self>) {
+    fn handle_chat_event(
+        &mut self,
+        target: &TerminalTarget,
+        agent_name: &str,
+        event: &ChatViewEvent,
+        cx: &mut Context<Self>,
+    ) {
         let (pane, tab) = (target.pane_id.as_str(), target.tab_id.as_str());
         match event {
             ChatViewEvent::Agent(AgentChatEvent::Status { status, waiting_reason, notify, message }) => {
@@ -488,7 +742,8 @@ impl ContentHost {
                     // the way a hook's stop does.
                     AgentStatus::Starting | AgentStatus::Stopped => {
                         let status = *status;
-                        self.workspace.update(cx, |ws| ws.update_agent_status(pane, tab, status, Some(false), None));
+                        self.workspace
+                            .update(cx, |ws| ws.update_agent_status(pane, tab, status, Some(false), None));
                         return;
                     }
                 };
@@ -529,6 +784,9 @@ impl ContentHost {
         let launch = self.launch_for(tab, &target.pane_id);
         match self.terminals.create(launch, self.terminal_settings.clone(), window, cx) {
             Ok(view) => {
+                if let Some(coordinator) = self.clipboard.clone() {
+                    view.update(cx, |view, _| view.set_clipboard_coordinator(Some(coordinator)));
+                }
                 let target_for_events = target.clone();
                 let subscription = cx.subscribe(&view, move |host, view, event: &TerminalEvent, cx| {
                     host.handle_terminal_event(&target_for_events, view, event, cx);
@@ -537,7 +795,11 @@ impl ContentHost {
                 PaneContent::Terminal(view)
             }
             Err(error) => {
-                tracing::error!("cannot start the terminal of {}/{}: {error:#}", target.pane_id, target.tab_id);
+                tracing::error!(
+                    "cannot start the terminal of {}/{}: {error:#}",
+                    target.pane_id,
+                    target.tab_id
+                );
                 PaneContent::Failed(format!("The terminal could not start: {error}").into())
             }
         }
@@ -549,10 +811,8 @@ impl ContentHost {
     }
 
     fn schedule_readiness(&mut self, target: &TerminalTarget, cx: &mut Context<Self>) {
-        if !self.schedules_readiness {
-            return;
-        }
-        let Some(generation) = self.workspace.update(cx, |ws| ws.begin_agent_readiness_generation(target)) else {
+        let Some(generation) = self.workspace.update(cx, |ws| ws.begin_agent_readiness_generation(target))
+        else {
             return;
         };
         let workspace = self.workspace.clone();
@@ -574,15 +834,19 @@ impl ContentHost {
     ) {
         let (pane, tab) = (target.pane_id.as_str(), target.tab_id.as_str());
         match event {
-            TerminalEvent::TitleChanged(title) => self.workspace.update(cx, |ws| ws.rename_tab(pane, tab, title)),
+            TerminalEvent::TitleChanged(title) => {
+                self.workspace.update(cx, |ws| ws.rename_tab(pane, tab, title))
+            }
             TerminalEvent::WorkingDirectoryChanged(path) => {
                 self.workspace.update(cx, |ws| ws.update_working_directory(pane, tab, path))
             }
-            TerminalEvent::DesktopNotification { title, body } => cx.emit(ContentEvent::DesktopNotification {
-                target: target.clone(),
-                title: title.clone(),
-                body: body.clone(),
-            }),
+            TerminalEvent::DesktopNotification { title, body } => {
+                cx.emit(ContentEvent::DesktopNotification {
+                    target: target.clone(),
+                    title: title.clone(),
+                    body: body.clone(),
+                })
+            }
             TerminalEvent::Bell => {}
             TerminalEvent::CommandFinished { exit_code } => {
                 let exit_code = *exit_code;
@@ -600,7 +864,10 @@ impl ContentHost {
             }
             TerminalEvent::CloseRequested => dispatch(
                 &self.shell,
-                Command::Close(CloseTarget::TerminalClosed { pane_id: pane.to_owned(), tab_id: tab.to_owned() }),
+                Command::Close(CloseTarget::TerminalClosed {
+                    pane_id: pane.to_owned(),
+                    tab_id: tab.to_owned(),
+                }),
                 cx,
             ),
             TerminalEvent::ClipboardConfirmationRequested(request) => {
@@ -652,7 +919,10 @@ impl ContentHost {
         let active = {
             let workspace = self.workspace.read(cx);
             let pane_id = workspace.active_pane_id();
-            workspace.pane(pane_id).and_then(|p| p.active_tab()).map(|tab| TerminalTarget::new(pane_id, &tab.id))
+            workspace
+                .pane(pane_id)
+                .and_then(|p| p.active_tab())
+                .map(|tab| TerminalTarget::new(pane_id, &tab.id))
         };
         if active.as_ref() == Some(&copy_target) {
             return;
@@ -668,8 +938,15 @@ impl ContentHost {
     // MARK: - Host queries (dashboard, automations)
 
     /// Starts the agent of a tab in a window nobody is looking at (an automation's run).
-    pub fn start_background_terminal(&mut self, target: &TerminalTarget, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else { return false };
+    pub fn start_background_terminal(
+        &mut self,
+        target: &TerminalTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else {
+            return false;
+        };
         if tab.pane_type != PaneType::Agent || tab.is_chat() {
             return false;
         }
@@ -685,9 +962,15 @@ impl ContentHost {
             }
             Some(_) => {
                 self.remove_content(target, cx);
-                matches!(self.ensure_content(&tab, &target.pane_id, Some(true), window, cx), PaneContent::Terminal(_))
+                matches!(
+                    self.ensure_content(&tab, &target.pane_id, Some(true), window, cx),
+                    PaneContent::Terminal(_)
+                )
             }
-            None => matches!(self.ensure_content(&tab, &target.pane_id, Some(true), window, cx), PaneContent::Terminal(_)),
+            None => matches!(
+                self.ensure_content(&tab, &target.pane_id, Some(true), window, cx),
+                PaneContent::Terminal(_)
+            ),
         }
     }
 
@@ -699,8 +982,39 @@ impl ContentHost {
         }
     }
 
+    /// What the Agent Dashboard shows for `target`: a live terminal's text, or an empty text
+    /// for a running chat tab (its transcript lives in the chat), so both count as available.
+    pub fn dashboard_text(&self, target: &TerminalTarget, cx: &App) -> Option<String> {
+        match self.contents.get(target)? {
+            PaneContent::Chat(view) if view.read(cx).session().borrow().is_running() => Some(String::new()),
+            _ => self.visible_terminal_text(target, cx),
+        }
+    }
+
+    /// A reply typed in the Agent Dashboard: a chat tab's prompt goes through its composer's
+    /// submit, a terminal agent gets it typed in. False when it could not be sent.
+    pub fn reply_to_agent(
+        &mut self,
+        prompt: &str,
+        target: &TerminalTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.contents.get(target).cloned() {
+            Some(PaneContent::Chat(view)) => {
+                view.update(cx, |view, cx| view.submit_prompt(prompt, window, cx))
+            }
+            _ => self.submit_agent_prompt(prompt, target, cx),
+        }
+    }
+
     /// Types `prompt` into an agent's terminal and submits it; the agent turns running.
-    pub fn submit_agent_prompt(&mut self, prompt: &str, target: &TerminalTarget, cx: &mut Context<Self>) -> bool {
+    pub fn submit_agent_prompt(
+        &mut self,
+        prompt: &str,
+        target: &TerminalTarget,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let Some(PaneContent::Terminal(view)) = self.contents.get(target).cloned() else { return false };
         if view.read(cx).has_exited() {
             return false;
@@ -714,16 +1028,14 @@ impl ContentHost {
         true
     }
 
-    /// Whether a target's terminal is live and what it shows (the dashboard's reply box).
-    pub fn interaction_state(&self, target: &TerminalTarget, cx: &App) -> soprano_term::TerminalInteractionState {
-        match self.contents.get(target) {
-            Some(PaneContent::Terminal(view)) if !view.read(cx).has_exited() => view.read(cx).interaction_state(),
-            _ => soprano_term::TerminalInteractionState::unavailable(),
-        }
-    }
-
     /// Drops `paths` onto the terminal of `target` as shell-escaped words.
-    pub fn drop_paths(&mut self, target: &TerminalTarget, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn drop_paths(
+        &mut self,
+        target: &TerminalTarget,
+        paths: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(PaneContent::Terminal(view)) = self.contents.get(target).cloned() {
             let payload = soprano_term::drop_content::DropPayload::files(paths);
             view.update(cx, |view, cx| view.drop_payload(&payload, window, cx));
@@ -744,7 +1056,8 @@ pub fn launch_spec(ctx: &LaunchContext, tab: &PaneTab, pane_id: &str) -> LaunchS
         && let Some(profile) = AgentCatalog::shared().profile(&agent.profile_id)
     {
         let adjustments = AccountLaunchState::shared().adjustments(&profile.id);
-        let accounts = AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
+        let accounts =
+            AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
         let mut request = AgentRequest::new(&profile, pane_id, &tab.id);
         request.cwd = cwd;
         request.conversation = agent.conversation.as_ref();
@@ -776,6 +1089,35 @@ pub fn terminal_theme(theme: &soprano_ui::theme::AppTheme) -> TerminalTheme {
         selection_background: colors.selection_background,
         palette: colors.ansi,
     }
+}
+
+/// Shows `path` in the window's file pane's reusable reader, or a new reader pane when the
+/// window has no file pane (the explorer's and the editor's Open Markdown Preview).
+pub fn preview_markdown_in_file_pane(ws: &mut soprano_model::Workspace, path: &Path) {
+    let window_id = ws.active_window_id().to_owned();
+    match ws.file_pane(&window_id) {
+        Some(pane) => {
+            ws.preview_markdown(path, &pane);
+        }
+        None => {
+            ws.spawn_markdown(path, None);
+        }
+    }
+}
+
+/// A reader's external link: web pages open in a browser pane, anything else (mailto) in
+/// the system's handler.
+fn open_external(workspace: &WorkspaceHandle, url: &str, cx: &mut App) {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        workspace.update(cx, |ws| ws.spawn_browser(Some(url)));
+    } else {
+        cx.open_url(url);
+    }
+}
+
+/// Whether two paths name the same file, compared the way the model compares tab files.
+fn same_file(a: &Path, b: &Path) -> bool {
+    file_url::comparable_path(a) == file_url::comparable_path(b)
 }
 
 #[cfg(test)]
@@ -839,7 +1181,11 @@ mod tests {
         let (workspace, host) = cx.update(|window, cx| {
             let workspace = WorkspaceHandle::new(workspace, cx);
             let shell = cx.new(|_| {
-                Shell::new(StateStore::in_memory(), AppSettings::default_settings(), DefaultKeybindings::config())
+                Shell::new(
+                    StateStore::in_memory(),
+                    AppSettings::default_settings(),
+                    DefaultKeybindings::config(),
+                )
             });
             let host = cx.new(|cx| {
                 ContentHost::new(
@@ -848,6 +1194,8 @@ mod tests {
                     factory,
                     context(),
                     TerminalSettings::default(),
+                    cx.new(|_| EditorDocuments::new()),
+                    StateStore::in_memory(),
                     window,
                     cx,
                 )
@@ -945,7 +1293,8 @@ mod tests {
     #[gpui::test]
     fn a_stopped_agent_tab_starts_no_process_until_restarted(cx: &mut TestAppContext) {
         let mut model = Workspace::new();
-        let pane = model.spawn_agent("claude", None, false).expect("agent pane");
+        let pane =
+            model.spawn_agent(soprano_types::DefaultAgents::CLAUDE_CODE, None, false).expect("agent pane");
         let tab = model.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
         let target = TerminalTarget::new(&pane, &tab);
         model.stop_agent(&target);
@@ -960,6 +1309,106 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(terminals.created.borrow().len(), started + 1);
         cx.update(|_, cx| assert!(matches!(host.read(cx).content(&target), Some(PaneContent::Failed(_)))));
+    }
+
+    fn editor_id(
+        host: &Entity<ContentHost>,
+        target: &TerminalTarget,
+        cx: &mut gpui::VisualTestContext,
+    ) -> DocumentId {
+        cx.update(|_, cx| match host.read(cx).content(target) {
+            Some(PaneContent::Editor(view)) => view.read(cx).document_id(),
+            _ => panic!("no editor for {target:?}"),
+        })
+    }
+
+    fn type_into(host: &Entity<ContentHost>, id: DocumentId, cx: &mut gpui::VisualTestContext) {
+        cx.update(|_, cx| {
+            let documents = host.read(cx).documents().clone();
+            documents.update(cx, |documents, cx| {
+                documents.update(id, cx, |document| document.replace(0..0, "edit "))
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn file_tabs_show_the_editor_the_diff_and_the_reader(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let folder = tempfile::tempdir().expect("folder");
+        let code = folder.path().join("main.rs");
+        let notes = folder.path().join("notes.md");
+        std::fs::write(&code, "fn main() {}\n").expect("write");
+        std::fs::write(&notes, "# Notes\n").expect("write");
+        let mut model = Workspace::new();
+        let editor = model.open_editor(&code, false, None).expect("editor");
+        let diff = model.open_diff(&code, false, false, None).expect("diff");
+        let reader = model.open_markdown(&notes, &editor.pane_id).expect("reader");
+        model.take_changes();
+        model.take_events();
+        let (workspace, host, _, cx) = host(model, cx);
+        for target in [&editor, &diff] {
+            cx.update(|_, cx| {
+                workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, false))
+            });
+            cx.run_until_parked();
+        }
+        cx.update(|_, cx| workspace.update(cx, |ws| ws.focus_tab(&reader.pane_id, &reader.tab_id, false)));
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            let host = host.read(cx);
+            assert!(matches!(host.content(&editor), Some(PaneContent::Editor(_))));
+            assert!(matches!(host.content(&diff), Some(PaneContent::Diff(_))));
+            assert!(matches!(host.content(&reader), Some(PaneContent::Reader(_))));
+        });
+    }
+
+    #[gpui::test]
+    fn closing_the_only_tab_of_an_unsaved_file_asks_first(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let folder = tempfile::tempdir().expect("folder");
+        let code = folder.path().join("main.rs");
+        std::fs::write(&code, "fn main() {}\n").expect("write");
+        let mut model = Workspace::new();
+        let editor = model.open_editor(&code, false, None).expect("editor");
+        model.take_changes();
+        model.take_events();
+        let (workspace, host, _, cx) = host(model, cx);
+        let id = editor_id(&host, &editor, cx);
+        type_into(&host, id, cx);
+        let outcome = cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.remove_tab_from_pane(&editor.pane_id, &editor.tab_id))
+        });
+        assert!(matches!(outcome, soprano_model::CloseOutcome::NeedsConfirmation { .. }));
+        // Don't Save: the document drops its changes and the close goes through.
+        cx.update(|_, cx| {
+            let documents = host.read(cx).documents().clone();
+            let unsaved = documents.read(cx).store().unsaved_when_closing(std::slice::from_ref(&editor));
+            assert_eq!(unsaved, vec![id]);
+            documents.update(cx, |documents, cx| {
+                documents.resolve_unsaved(&unsaved, soprano_text::editor_store::SaveChoice::Discard, cx)
+            });
+        });
+        cx.run_until_parked();
+        let outcome = cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.remove_tab_from_pane(&editor.pane_id, &editor.tab_id))
+        });
+        assert!(!matches!(outcome, soprano_model::CloseOutcome::NeedsConfirmation { .. }));
+    }
+
+    #[test]
+    fn a_file_another_tab_still_shows_closes_without_asking() {
+        let (first, second) =
+            (TerminalTarget::new("pane-1", "tab-1"), TerminalTarget::new("pane-2", "tab-2"));
+        let mut store: soprano_text::EditorDocumentStore<TerminalTarget, u8> =
+            soprano_text::EditorDocumentStore::new();
+        let id = store.open("/tmp/never-read.rs");
+        let unsaved =
+            UnsavedEditors::new(vec![(first.clone(), id), (second.clone(), id)], HashSet::from([id]));
+        assert!(!unsaved.loses_changes(std::slice::from_ref(&first)));
+        assert!(unsaved.loses_changes(&[first.clone(), second.clone()]));
+        let clean = UnsavedEditors::new(vec![(first.clone(), id)], HashSet::new());
+        assert!(!clean.loses_changes(&[first]));
     }
 
     #[test]

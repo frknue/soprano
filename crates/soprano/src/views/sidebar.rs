@@ -1042,7 +1042,6 @@ mod tests {
                 accounts: AccountsController::new(state.clone()),
                 branches: Arc::new(GitBranchMonitor::new()),
                 sessions: cx.new(|_| SessionManager::new(state.clone())),
-                socket: None,
             };
             (handle, shell, services)
         });

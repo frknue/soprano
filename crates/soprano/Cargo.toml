@@ -31,6 +31,9 @@ soprano-notify = { path = "../soprano-notify" }
 soprano-chat = { path = "../soprano-chat" }
 soprano-chat-ui = { path = "../soprano-chat-ui" }
 soprano-dashboard = { path = "../soprano-dashboard" }
+soprano-editor = { path = "../soprano-editor" }
+soprano-automations = { path = "../soprano-automations" }
+soprano-automations-ui = { path = "../soprano-automations-ui" }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true

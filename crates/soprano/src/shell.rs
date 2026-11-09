@@ -35,9 +35,15 @@ pub enum CloseTarget {
     Pane(String),
     LayoutTab(String),
     ActiveLayoutTab,
-    PaneTab { pane_id: String, tab_id: String },
+    PaneTab {
+        pane_id: String,
+        tab_id: String,
+    },
     /// A terminal's process is gone (and, with wait-after-command, a key was pressed).
-    TerminalClosed { pane_id: String, tab_id: String },
+    TerminalClosed {
+        pane_id: String,
+        tab_id: String,
+    },
 }
 
 /// Everything the chrome asks the app to do beyond a plain model mutation.
@@ -74,18 +80,19 @@ pub enum Command {
     /// Show the Automations page on a run's report.
     OpenAutomationRun(String),
     /// Choose a Markdown file: into a new reader pane (`None`) or as a tab of a pane.
-    OpenMarkdown { pane_id: Option<String> },
+    OpenMarkdown {
+        pane_id: Option<String>,
+    },
     OpenInSopranoGit,
-    /// Give the keyboard back to the focused pane.
-    FocusPanes,
     ZoomIn,
     ZoomOut,
     ZoomReset,
     StartCopyMode,
     /// A one-button notice over the window.
-    ShowNotice { title: String, message: String },
-    /// A toast (errors from content crates).
-    ShowError(String),
+    ShowNotice {
+        title: String,
+        message: String,
+    },
 }
 
 /// The chrome's shared state, an entity the views observe.
@@ -137,7 +144,12 @@ impl Shell {
 
     /// Shows `popup` (anything that dismisses itself, such as soprano-ui's `ContextMenu`) above
     /// the window and gives it the keyboard; it goes away on its `DismissEvent`.
-    pub fn show_popup<M: ManagedView>(&mut self, popup: Entity<M>, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn show_popup<M: ManagedView>(
+        &mut self,
+        popup: Entity<M>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let handle = popup.read(cx).focus_handle(cx);
         self.popup_subscription = Some(cx.subscribe(&popup, |shell, _, _: &DismissEvent, cx| {
             shell.popup = None;
@@ -147,13 +159,6 @@ impl Shell {
         self.popup = Some(popup.into());
         window.focus(&handle, cx);
         cx.notify();
-    }
-
-    pub fn dismiss_popup(&mut self, cx: &mut Context<Self>) {
-        if self.popup.take().is_some() {
-            self.popup_subscription = None;
-            cx.notify();
-        }
     }
 
     /// The keycaps of the first of `binding_ids` that is bound (Swift `commandShortcut(for:)`).
@@ -219,7 +224,8 @@ mod tests {
     #[test]
     fn a_dragged_width_survives_into_the_next_launch() {
         let state = StateStore::in_memory();
-        let mut shell = Shell::new(state.clone(), AppSettings::default_settings(), DefaultKeybindings::config());
+        let mut shell =
+            Shell::new(state.clone(), AppSettings::default_settings(), DefaultKeybindings::config());
         assert!(shell.drag_sidebar_width(280.0, Some(1400.0)));
         shell.save_sidebar_width();
         let relaunched = Shell::new(state, AppSettings::default_settings(), DefaultKeybindings::config());
@@ -255,9 +261,12 @@ mod tests {
     #[test]
     fn the_sidebar_visibility_survives_a_relaunch() {
         let state = StateStore::in_memory();
-        let mut shell = Shell::new(state.clone(), AppSettings::default_settings(), DefaultKeybindings::config());
+        let mut shell =
+            Shell::new(state.clone(), AppSettings::default_settings(), DefaultKeybindings::config());
         shell.set_sidebar_visible(false);
-        assert!(!Shell::new(state, AppSettings::default_settings(), DefaultKeybindings::config()).sidebar_visible);
+        assert!(
+            !Shell::new(state, AppSettings::default_settings(), DefaultKeybindings::config()).sidebar_visible
+        );
     }
 
     #[test]
@@ -273,6 +282,9 @@ mod tests {
         let shell = shell();
         assert!(!shell.shortcut(&["command-palette"]).is_empty());
         assert!(shell.shortcut(&["no-such-binding"]).is_empty());
-        assert_eq!(shell.shortcut(&["no-such-binding", "command-palette"]), shell.shortcut(&["command-palette"]));
+        assert_eq!(
+            shell.shortcut(&["no-such-binding", "command-palette"]),
+            shell.shortcut(&["command-palette"])
+        );
     }
 }

@@ -16,6 +16,7 @@ pub struct Frame {
 }
 
 impl Frame {
+    #[cfg(test)]
     pub const ZERO: Frame = Frame { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
 
     pub const fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
@@ -47,8 +48,12 @@ impl Frame {
         (max_x > x && max_y > y).then(|| Frame::new(x, y, max_x - x, max_y - y))
     }
 
+    #[cfg(test)]
     pub fn contains(&self, other: &Frame) -> bool {
-        other.x >= self.x && other.y >= self.y && other.max_x() <= self.max_x() && other.max_y() <= self.max_y()
+        other.x >= self.x
+            && other.y >= self.y
+            && other.max_x() <= self.max_x()
+            && other.max_y() <= self.max_y()
     }
 
     /// AppKit's `integral`: the smallest whole-pixel frame containing this one.
@@ -59,7 +64,7 @@ impl Frame {
     }
 
     /// `NSStringFromRect`: `{{x, y}, {w, h}}`.
-    pub fn to_rect_string(&self) -> String {
+    pub fn to_rect_string(self) -> String {
         format!("{{{{{}, {}}}, {{{}, {}}}}}", self.x, self.y, self.width, self.height)
     }
 
@@ -197,7 +202,10 @@ mod tests {
 
     #[test]
     fn frames_written_by_the_swift_app_parse_back() {
-        assert_eq!(Frame::from_rect_string("{{750, 120}, {3000, 1100}}"), Frame::new(750.0, 120.0, 3000.0, 1100.0));
+        assert_eq!(
+            Frame::from_rect_string("{{750, 120}, {3000, 1100}}"),
+            Frame::new(750.0, 120.0, 3000.0, 1100.0)
+        );
         assert_eq!(Frame::from_rect_string("{{-12.5, 3}, {800, 600}}"), Frame::new(-12.5, 3.0, 800.0, 600.0));
         assert_eq!(Frame::from_rect_string("garbage"), Frame::ZERO);
     }

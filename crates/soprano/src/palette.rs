@@ -34,7 +34,10 @@ struct ItemSpec<'a> {
 }
 
 fn entry(spec: ItemSpec<'_>, action: impl Fn(&str, &mut Window, &mut App) + 'static) -> PaletteEntry {
-    let mut item = PickerItem::new(spec.id, spec.label).icon(spec.icon).description(spec.description).keycaps(spec.shortcut);
+    let mut item = PickerItem::new(spec.id, spec.label)
+        .icon(spec.icon)
+        .description(spec.description)
+        .keycaps(spec.shortcut);
     if let Some(search) = spec.search {
         item = item.search_text(search);
     }
@@ -57,7 +60,14 @@ fn command(shell: &Entity<Shell>, command: Command) -> impl Fn(&str, &mut Window
 }
 
 fn spec<'a>(id: &str, icon: IconName, label: &str, description: &str, shortcut: Vec<String>) -> ItemSpec<'a> {
-    ItemSpec { id: id.into(), icon, label: label.into(), description: description.into(), shortcut, search: None }
+    ItemSpec {
+        id: id.into(),
+        icon,
+        label: label.into(),
+        description: description.into(),
+        shortcut,
+        search: None,
+    }
 }
 
 fn searchable<'a>(mut spec: ItemSpec<'a>, search: &'a str) -> ItemSpec<'a> {
@@ -125,8 +135,9 @@ pub fn command_items(
         let name = &profile.name;
         let search = format!("chat conversation gui {name}");
         let id = profile.id.clone();
-        let chat_shortcut = if Some(&profile.id) == default_chat.as_ref() { short(&["new-chat"]) } else { Vec::new() };
-        let rows: [(String, String, String, Vec<String>, Box<dyn Fn(&mut Workspace)>); 4] = [
+        let chat_shortcut =
+            if Some(&profile.id) == default_chat.as_ref() { short(&["new-chat"]) } else { Vec::new() };
+        let rows: [AgentRow; 4] = [
             (
                 format!("chat-pane-{id}"),
                 format!("New {name} Chat"),
@@ -209,65 +220,155 @@ pub fn command_items(
 
     entries.extend([
         entry(
-            spec("new-session", IconName::Layers, "New Session…", "Create a named group of windows", short(&["new-session"])),
+            spec(
+                "new-session",
+                IconName::Layers,
+                "New Session…",
+                "Create a named group of windows",
+                short(&["new-session"]),
+            ),
             command(shell, Command::NewSession),
         ),
         entry(
-            spec("find-session", IconName::Layers, "Switch Session…", "Return to a running session", short(&["find-session"])),
+            spec(
+                "find-session",
+                IconName::Layers,
+                "Switch Session…",
+                "Return to a running session",
+                short(&["find-session"]),
+            ),
             command(shell, Command::FindSession),
         ),
-        entry(spec("rename-session", IconName::SquarePen, "Rename Session…", "Rename the current session", Vec::new()), command(shell, Command::RenameSession)),
         entry(
-            spec("close-session", IconName::SquareMinus, "Close Session…", "Close the current session and its terminals", Vec::new()),
+            spec(
+                "rename-session",
+                IconName::SquarePen,
+                "Rename Session…",
+                "Rename the current session",
+                Vec::new(),
+            ),
+            command(shell, Command::RenameSession),
+        ),
+        entry(
+            spec(
+                "close-session",
+                IconName::SquareMinus,
+                "Close Session…",
+                "Close the current session and its terminals",
+                Vec::new(),
+            ),
             command(shell, Command::CloseSession),
         ),
         entry(
-            spec("new-window", IconName::AppWindow, "New Window", "Create a new logical window", short(&["new-window"])),
+            spec(
+                "new-window",
+                IconName::AppWindow,
+                "New Window",
+                "Create a new logical window",
+                short(&["new-window"]),
+            ),
             mutate(workspace, |ws| {
                 ws.create_window(None, None);
             }),
         ),
         entry(
-            spec("previous-window", IconName::ChevronLeft, "Previous Window", "Switch to the previous logical window", short(&["previous-window"])),
+            spec(
+                "previous-window",
+                IconName::ChevronLeft,
+                "Previous Window",
+                "Switch to the previous logical window",
+                short(&["previous-window"]),
+            ),
             mutate(workspace, |ws| ws.activate_previous_window()),
         ),
         entry(
-            spec("next-window", IconName::ChevronRight, "Next Window", "Switch to the next logical window", short(&["next-window"])),
+            spec(
+                "next-window",
+                IconName::ChevronRight,
+                "Next Window",
+                "Switch to the next logical window",
+                short(&["next-window"]),
+            ),
             mutate(workspace, |ws| ws.activate_next_window()),
         ),
         entry(
-            spec("last-window", IconName::Undo2, "Last Window", "Switch to the most recently active logical window", short(&["last-window"])),
+            spec(
+                "last-window",
+                IconName::Undo2,
+                "Last Window",
+                "Switch to the most recently active logical window",
+                short(&["last-window"]),
+            ),
             mutate(workspace, |ws| ws.activate_last_window()),
         ),
         entry(
-            spec("find-window", IconName::AppWindow, "Find Window…", "Search and switch to a logical window", short(&["find-window"])),
+            spec(
+                "find-window",
+                IconName::AppWindow,
+                "Find Window…",
+                "Search and switch to a logical window",
+                short(&["find-window"]),
+            ),
             command(shell, Command::FindWindow),
         ),
         entry(
-            spec("rename-window", IconName::SquarePen, "Rename Window…", "Rename the active logical window", short(&["rename-window"])),
+            spec(
+                "rename-window",
+                IconName::SquarePen,
+                "Rename Window…",
+                "Rename the active logical window",
+                short(&["rename-window"]),
+            ),
             command(shell, Command::RenameWindow(None)),
         ),
-        entry(spec("close-window", IconName::SquareX, "Close Window", "Close the active logical window", short(&["close-window"])), {
-            let workspace = workspace.clone();
-            let shell = shell.clone();
-            move |_, _, cx| {
-                let id = workspace.read(cx).active_window_id().to_owned();
-                dispatch(&shell, Command::Close(CloseTarget::Window(id)), cx);
-            }
-        }),
         entry(
-            spec("open-project", IconName::Folder, "Open Project…", "Search configured projects or choose a directory", short(&["open-project"])),
+            spec(
+                "close-window",
+                IconName::SquareX,
+                "Close Window",
+                "Close the active logical window",
+                short(&["close-window"]),
+            ),
+            {
+                let workspace = workspace.clone();
+                let shell = shell.clone();
+                move |_, _, cx| {
+                    let id = workspace.read(cx).active_window_id().to_owned();
+                    dispatch(&shell, Command::Close(CloseTarget::Window(id)), cx);
+                }
+            },
+        ),
+        entry(
+            spec(
+                "open-project",
+                IconName::Folder,
+                "Open Project…",
+                "Search configured projects or choose a directory",
+                short(&["open-project"]),
+            ),
             command(shell, Command::OpenProjectSearch),
         ),
         entry(
-            spec("new-terminal", IconName::Terminal, "Open Terminal", "Open a new terminal pane", short(&["new-terminal"])),
+            spec(
+                "new-terminal",
+                IconName::Terminal,
+                "Open Terminal",
+                "Open a new terminal pane",
+                short(&["new-terminal"]),
+            ),
             mutate(workspace, |ws| {
                 ws.spawn_terminal(None);
             }),
         ),
         entry(
             searchable(
-                spec("open-omp-web", IconName::Globe, "omp web", "Start the omp web workspace in your default browser", Vec::new()),
+                spec(
+                    "open-omp-web",
+                    IconName::Globe,
+                    "omp web",
+                    "Start the omp web workspace in your default browser",
+                    Vec::new(),
+                ),
                 "ompweb web ui browser coding agent",
             ),
             mutate(workspace, move |ws| {
@@ -275,21 +376,39 @@ pub fn command_items(
             }),
         ),
         entry(
-            spec("new-browser", IconName::Globe, "Open Browser", "Split a browser pane to the right", short(&["new-browser"])),
+            spec(
+                "new-browser",
+                IconName::Globe,
+                "Open Browser",
+                "Split a browser pane to the right",
+                short(&["new-browser"]),
+            ),
             mutate(workspace, |ws| {
                 ws.spawn_browser(None);
             }),
         ),
         entry(
             searchable(
-                spec("open-markdown", IconName::FileText, "Open Markdown…", "Open a local Markdown file in a live reader", Vec::new()),
+                spec(
+                    "open-markdown",
+                    IconName::FileText,
+                    "Open Markdown…",
+                    "Open a local Markdown file in a live reader",
+                    Vec::new(),
+                ),
                 "read preview documentation readme md",
             ),
             command(shell, Command::OpenMarkdown { pane_id: None }),
         ),
         entry(
             searchable(
-                spec("new-browser-pane-tab", IconName::Globe, "New Browser in This Pane", "Open a browser as a tab of the focused pane", Vec::new()),
+                spec(
+                    "new-browser-pane-tab",
+                    IconName::Globe,
+                    "New Browser in This Pane",
+                    "Open a browser as a tab of the focused pane",
+                    Vec::new(),
+                ),
                 "pane tab split web",
             ),
             mutate(workspace, |ws| {
@@ -318,29 +437,65 @@ pub fn command_items(
             },
         ),
         entry(
-            spec("split-horizontal", IconName::Rows2, "Split Horizontal", "Split the active pane horizontally", short(&["split-horizontal"])),
+            spec(
+                "split-horizontal",
+                IconName::Rows2,
+                "Split Horizontal",
+                "Split the active pane horizontally",
+                short(&["split-horizontal"]),
+            ),
             command(shell, Command::RunBinding("split-horizontal".into())),
         ),
         entry(
-            spec("split-vertical", IconName::Columns2, "Split Vertical", "Split the active pane vertically", short(&["split-vertical"])),
+            spec(
+                "split-vertical",
+                IconName::Columns2,
+                "Split Vertical",
+                "Split the active pane vertically",
+                short(&["split-vertical"]),
+            ),
             command(shell, Command::RunBinding("split-vertical".into())),
         ),
         entry(
-            spec("new-tab", IconName::SquarePlus, "New Tab", "Open a tab with a new terminal in the active window", short(&["new-tab-direct", "new-tab"])),
+            spec(
+                "new-tab",
+                IconName::SquarePlus,
+                "New Tab",
+                "Open a tab with a new terminal in the active window",
+                short(&["new-tab-direct", "new-tab"]),
+            ),
             mutate(workspace, |ws| {
                 ws.create_layout_tab(None, None);
             }),
         ),
         entry(
-            spec("next-tab", IconName::ArrowRight, "Next Tab", "Switch to the next tab of the active window", short(&["next-tab"])),
+            spec(
+                "next-tab",
+                IconName::ArrowRight,
+                "Next Tab",
+                "Switch to the next tab of the active window",
+                short(&["next-tab"]),
+            ),
             mutate(workspace, |ws| ws.activate_next_layout_tab()),
         ),
         entry(
-            spec("previous-tab", IconName::ArrowLeft, "Previous Tab", "Switch to the previous tab of the active window", short(&["previous-tab"])),
+            spec(
+                "previous-tab",
+                IconName::ArrowLeft,
+                "Previous Tab",
+                "Switch to the previous tab of the active window",
+                short(&["previous-tab"]),
+            ),
             mutate(workspace, |ws| ws.activate_previous_layout_tab()),
         ),
         entry(
-            spec("close-tab", IconName::SquareX, "Close Tab", "Close the active tab and every pane in it", short(&["close-tab"])),
+            spec(
+                "close-tab",
+                IconName::SquareX,
+                "Close Tab",
+                "Close the active tab and every pane in it",
+                short(&["close-tab"]),
+            ),
             command(shell, Command::Close(CloseTarget::ActiveLayoutTab)),
         ),
         entry(
@@ -405,16 +560,31 @@ pub fn command_items(
                 }
             },
         ),
-        entry(spec("close-pane", IconName::SquareX, "Close Pane", "Close the active pane", short(&["close-pane"])), {
-            let workspace = workspace.clone();
-            let shell = shell.clone();
-            move |_, _, cx| {
-                let pane = workspace.read(cx).active_pane_id().to_owned();
-                dispatch(&shell, Command::Close(CloseTarget::Pane(pane)), cx);
-            }
-        }),
         entry(
-            spec("restart-agent", IconName::RefreshCw, "Restart Agent", "Restart the active agent", Vec::new()),
+            spec(
+                "close-pane",
+                IconName::SquareX,
+                "Close Pane",
+                "Close the active pane",
+                short(&["close-pane"]),
+            ),
+            {
+                let workspace = workspace.clone();
+                let shell = shell.clone();
+                move |_, _, cx| {
+                    let pane = workspace.read(cx).active_pane_id().to_owned();
+                    dispatch(&shell, Command::Close(CloseTarget::Pane(pane)), cx);
+                }
+            },
+        ),
+        entry(
+            spec(
+                "restart-agent",
+                IconName::RefreshCw,
+                "Restart Agent",
+                "Restart the active agent",
+                Vec::new(),
+            ),
             mutate(workspace, |ws| {
                 let pane = ws.active_pane_id().to_owned();
                 ws.restart_agent_in_pane(&pane);
@@ -439,20 +609,38 @@ pub fn command_items(
         ),
         entry(
             searchable(
-                spec("agent-dashboard", IconName::ChartColumn, "Agent Dashboard", "Monitor every agent across all windows", short(&["agent-dashboard"])),
+                spec(
+                    "agent-dashboard",
+                    IconName::ChartColumn,
+                    "Agent Dashboard",
+                    "Monitor every agent across all windows",
+                    short(&["agent-dashboard"]),
+                ),
                 "agents monitor status attention working",
             ),
             command(shell, Command::OpenDashboard),
         ),
         entry(
             searchable(
-                spec("automations", IconName::AlarmClock, "Automations", "Scheduled prompts, their runs and reports", Vec::new()),
+                spec(
+                    "automations",
+                    IconName::AlarmClock,
+                    "Automations",
+                    "Scheduled prompts, their runs and reports",
+                    Vec::new(),
+                ),
                 "automation schedule scheduled cron prompt runs recurring",
             ),
             command(shell, Command::OpenAutomations),
         ),
         entry(
-            spec("toggle-sidebar", IconName::PanelLeft, "Toggle Sidebar", "Show or hide the sidebar", short(&["toggle-sidebar"])),
+            spec(
+                "toggle-sidebar",
+                IconName::PanelLeft,
+                "Toggle Sidebar",
+                "Show or hide the sidebar",
+                short(&["toggle-sidebar"]),
+            ),
             command(shell, Command::ToggleSidebar),
         ),
         entry(
@@ -466,7 +654,13 @@ pub fn command_items(
             command(shell, Command::ToggleRightSidebar),
         ),
         entry(
-            spec("toggle-explorer", IconName::Files, "Toggle Explorer", "Show the file explorer sidebar, or hide it", short(&["toggle-explorer"])),
+            spec(
+                "toggle-explorer",
+                IconName::Files,
+                "Toggle Explorer",
+                "Show the file explorer sidebar, or hide it",
+                short(&["toggle-explorer"]),
+            ),
             command(shell, Command::ToggleExplorer),
         ),
         entry(
@@ -483,19 +677,37 @@ pub fn command_items(
             command(shell, Command::ToggleSourceControl),
         ),
         entry(
-            spec("open-settings", IconName::Settings, "Settings", "Open the settings screen", short(&["open-settings"])),
+            spec(
+                "open-settings",
+                IconName::Settings,
+                "Settings",
+                "Open the settings screen",
+                short(&["open-settings"]),
+            ),
             command(shell, Command::OpenSettings),
         ),
         entry(
             searchable(
-                spec("open-accounts", IconName::User, "Accounts", "Claude and Codex logins and their usage", Vec::new()),
+                spec(
+                    "open-accounts",
+                    IconName::User,
+                    "Accounts",
+                    "Claude and Codex logins and their usage",
+                    Vec::new(),
+                ),
                 "account login usage claude codex omp switch",
             ),
             command(shell, Command::OpenAccountsSettings),
         ),
         entry(
             searchable(
-                spec("open-settings-json", IconName::Braces, "Open settings.json", settings_display_path, Vec::new()),
+                spec(
+                    "open-settings-json",
+                    IconName::Braces,
+                    "Open settings.json",
+                    settings_display_path,
+                    Vec::new(),
+                ),
                 "config json edit settings file",
             ),
             command(shell, Command::OpenSettingsFile),
@@ -512,7 +724,8 @@ pub fn session_items(workspace: &WorkspaceHandle, cx: &App) -> Vec<PaletteEntry>
         .map(|session| {
             let windows = ws.ordered_windows_in(&session.id);
             let current = if session.id == ws.active_session_id() { "Current · " } else { "" };
-            let description = format!("{current}{} window{}", windows.len(), if windows.len() == 1 { "" } else { "s" });
+            let description =
+                format!("{current}{} window{}", windows.len(), if windows.len() == 1 { "" } else { "s" });
             let search = windows.iter().map(|w| w.title.clone()).collect::<Vec<_>>().join(" ");
             let id = session.id.clone();
             let handle = workspace.clone();
@@ -544,10 +757,20 @@ pub fn window_items(workspace: &WorkspaceHandle, shell: &Entity<Shell>, cx: &App
                 .unwrap_or_else(|| "No active pane".into());
             let current = if window.id == ws.active_window_id() { "Current · " } else { "" };
             let count = panes.len();
-            let description =
-                format!("{current}{count} pane{} · Active: {active_title}", if count == 1 { "" } else { "s" });
-            let search = panes.iter().flat_map(|pane| pane.tabs.iter().flat_map(|tab| tab.search_terms())).collect::<Vec<_>>().join(" ");
-            let shortcut = if index < 9 { shell.shortcut(&[&format!("select-window-{}", index + 1)]) } else { Vec::new() };
+            let description = format!(
+                "{current}{count} pane{} · Active: {active_title}",
+                if count == 1 { "" } else { "s" }
+            );
+            let search = panes
+                .iter()
+                .flat_map(|pane| pane.tabs.iter().flat_map(|tab| tab.search_terms()))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let shortcut = if index < 9 {
+                shell.shortcut(&[&format!("select-window-{}", index + 1)])
+            } else {
+                Vec::new()
+            };
             let window_id = window.id.clone();
             let title = window.title.clone();
             let handle = workspace.clone();
@@ -593,26 +816,36 @@ pub fn projects(roots: &[String]) -> Vec<ProjectEntry> {
             if name.starts_with('.') || !child.path().is_dir() {
                 continue;
             }
-            let path = soprano_model::file_url::standardized_path(&child.path()).to_string_lossy().into_owned();
+            let path =
+                soprano_model::file_url::standardized_path(&child.path()).to_string_lossy().into_owned();
             by_path.insert(path.clone(), ProjectEntry { name, path });
         }
     }
     let mut projects: Vec<ProjectEntry> = by_path.into_values().collect();
     projects.sort_by(|a, b| {
-        a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.path.to_lowercase().cmp(&b.path.to_lowercase()))
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.path.to_lowercase().cmp(&b.path.to_lowercase()))
     });
     projects
 }
 
 /// "Open Project…": each project opens a terminal there; the last row picks any folder.
-pub fn project_items(workspace: &WorkspaceHandle, roots: &[String], choose_directory: PaletteAction) -> Vec<PaletteEntry> {
+pub fn project_items(
+    workspace: &WorkspaceHandle,
+    roots: &[String],
+    choose_directory: PaletteAction,
+) -> Vec<PaletteEntry> {
     let mut entries: Vec<PaletteEntry> = projects(roots)
         .into_iter()
         .map(|project| {
             let handle = workspace.clone();
             let path = project.path.clone();
             PaletteEntry {
-                item: PickerItem::new(format!("open-project-{}", project.path), project.name).icon(IconName::Folder).description(project.path),
+                item: PickerItem::new(format!("open-project-{}", project.path), project.name)
+                    .icon(IconName::Folder)
+                    .description(project.path),
                 action: Rc::new(move |_, _, cx| {
                     handle.update(cx, |ws| {
                         ws.spawn_terminal(Some(&path));
@@ -629,6 +862,9 @@ pub fn project_items(workspace: &WorkspaceHandle, roots: &[String], choose_direc
     });
     entries
 }
+
+/// An agent row: title, subtitle, search text, keycaps, and what it opens.
+type AgentRow = (String, String, String, Vec<String>, Box<dyn Fn(&mut Workspace)>);
 
 #[cfg(test)]
 mod tests {

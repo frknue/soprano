@@ -90,7 +90,7 @@ Tests ported:
 - **Store asks instead of blocking:** the Swift store called blocking alert callbacks. GPUI prompts are asynchronous, so the store returns what needs asking and takes the answer back through `resolve_unsaved` / `save_anyway`.
 - **Changes are queued, not observed:** the document queues `DocumentChange`s instead of calling observers, and highlighting is a request/apply pair that the UI debounces.
 - **No HTML output:** the reader is drawn natively, so `MarkdownHTMLRenderer`'s HTML string output was not ported; only its safety rules (unsafe links and image sources are refused, source HTML stays visible as text), heading slugs, task boxes, table alignment and code highlighting were.
-- **Extension lists replace UTType:** image detection, the "opens linked file" check and the size formatter use extension lists and `imagesize` instead of UTType and NSImage. Any file with an executable bit counts as not viewable.
+- **Extension lists replace UTType:** image detection, the "opens linked file" check and the size formatter use extension lists and `imagesize` instead of UTType and NSImage. As in Swift, the linked-file check goes by type alone: the execute bit does not matter, and extensionless executables and scripts are revealed, not opened.
 - **`folder_name` is duplicated:** `context_line` has a small local copy of `TerminalTitle.folderName` (same rules as `soprano_model::terminal_title::folder_name_in`) so it does not depend on `soprano-model`.
 - **Chat hunks:** they are split on `\n` only.
 - **`FileWatcher` reuses `soprano-config`'s `ConfigFileWatcher`,** as the Swift editor and reader used `ConfigFileWatcher`.
