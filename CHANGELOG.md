@@ -4,12 +4,17 @@ All notable changes to Soprano are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The number
-in each released heading matches `CFBundleShortVersionString` in `Support/Info.plist`,
-which is the single source of truth for the version shown in **Settings ▸ About**.
+in each released heading matches `[workspace.package] version` in `Cargo.toml`, which is
+the single source of truth for the version shown in **Settings ▸ About**.
 
 ## [Unreleased]
 
 ### Added
+- **Linux and Windows.** Soprano now runs on macOS, Linux (x86_64 and arm64) and Windows
+  10+. Releases ship a macOS DMG, Linux tarballs with a desktop entry, and a Windows zip.
+  On Linux and Windows `⌘` shortcuts are `Ctrl+Shift` (`⇧⌘` is `Ctrl+Shift+Alt`), `⌃`
+  shortcuts stay `Ctrl`, and pane jump hints use `Alt+Shift`; Settings, the palette and the
+  status bar show the real keys.
 - Splits get their own tabs from the mouse: every pane header has a **+** whose menu opens
   a terminal, browser, agent, agent chat, or Markdown file as a tab of that split (also
   **New … in This Pane** in the command palette). The palette lists **New Pane Tab**,
@@ -126,6 +131,17 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   `~/.config/opencode/plugins`.
 
 ### Changed
+
+- Soprano is rewritten in Rust with GPUI and Ghostty's terminal core (libghostty-vt), and
+  takes [Herdr](https://github.com/herdrdev/herdr-app)'s look: windows and agents listed in
+  a dark chrome sidebar, pill tabs with Files / Changes toggles, rounded pane cards with an
+  accent focus ring and a slim header, and a status bar along the bottom. Sessions,
+  windows, tabs, panes, keybindings, `settings.json`, agent hooks, the CLI and saved
+  workspaces work as before; workspaces, window size, sidebar widths and account choices
+  from the previous build carry over on first launch.
+- The interface uses the bundled Geist and JetBrains Mono fonts on every platform.
+- The in-app browser uses the platform web view: WebKit on macOS, WebView2 on Windows,
+  WebKitGTK on Linux.
 
 - Sidebar panes sit indented under their window's name, with a thin guide line from the
   name down to the window's last pane, so it is clear which window each terminal or agent
