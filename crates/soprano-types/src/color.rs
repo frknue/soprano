@@ -76,7 +76,12 @@ impl Color {
     pub fn mix(self, other: Color, fraction: f32) -> Self {
         let t = fraction.clamp(0.0, 1.0);
         let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
-        Self { r: lerp(self.r, other.r), g: lerp(self.g, other.g), b: lerp(self.b, other.b), a: lerp(self.a, other.a) }
+        Self {
+            r: lerp(self.r, other.r),
+            g: lerp(self.g, other.g),
+            b: lerp(self.b, other.b),
+            a: lerp(self.a, other.a),
+        }
     }
 
     /// Relative luminance (WCAG), 0 (black) to 1 (white).

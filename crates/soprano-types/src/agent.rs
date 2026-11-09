@@ -108,7 +108,14 @@ impl DefaultAgents {
     pub fn open_code() -> AgentProfile {
         AgentProfile {
             patterns: patterns(&[">", "Ready"], &["Error", "error:", "FAILED"]),
-            ..AgentProfile::builtin("opencode", "Open Code", "zap", "#58a6ff", "OpenCode terminal agent", "opencode")
+            ..AgentProfile::builtin(
+                "opencode",
+                "Open Code",
+                "zap",
+                "#58a6ff",
+                "OpenCode terminal agent",
+                "opencode",
+            )
         }
     }
 
@@ -122,7 +129,14 @@ impl DefaultAgents {
         let (command, args) = default_shell();
         AgentProfile {
             args,
-            ..AgentProfile::builtin("terminal", "Terminal", "terminal", "#fe8019", "Plain system login shell", &command)
+            ..AgentProfile::builtin(
+                "terminal",
+                "Terminal",
+                "terminal",
+                "#fe8019",
+                "Plain system login shell",
+                &command,
+            )
         }
     }
 
@@ -139,7 +153,8 @@ fn default_shell() -> (String, Vec<String>) {
     if cfg!(windows) {
         ("powershell.exe".into(), vec![])
     } else {
-        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
+        let shell =
+            std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
         (shell, vec!["--login".into()])
     }
 }
@@ -278,7 +293,8 @@ impl AgentConversation {
             .filter_map(|k| object.get(*k).and_then(|v| v.as_str()))
             .find(|v| Self::valid_id(v))?
             .to_owned();
-        let cwd = object.get("cwd").and_then(|v| v.as_str()).filter(|s| s.starts_with('/')).map(str::to_owned);
+        let cwd =
+            object.get("cwd").and_then(|v| v.as_str()).filter(|s| s.starts_with('/')).map(str::to_owned);
         let transcript_path = object
             .get("transcript_path")
             .and_then(|v| v.as_str())
@@ -309,7 +325,9 @@ impl AgentConversation {
                 if index < arguments.len() && !arguments[index].starts_with('-') {
                     index += 1;
                 }
-            } else if switches.contains(argument) || valued.iter().any(|v| argument.starts_with(&format!("{v}="))) {
+            } else if switches.contains(argument)
+                || valued.iter().any(|v| argument.starts_with(&format!("{v}=")))
+            {
                 index += 1;
             } else {
                 remaining.push(arguments[index].clone());
@@ -356,7 +374,8 @@ mod tests {
     #[test]
     fn resume_commands_target_the_saved_id_and_keep_other_options() {
         let c = AgentConversation::new("abc");
-        let args: Vec<String> = ["--continue", "--model", "opus", "--resume", "old"].map(String::from).to_vec();
+        let args: Vec<String> =
+            ["--continue", "--model", "opus", "--resume", "old"].map(String::from).to_vec();
         assert_eq!(c.resume_arguments("claude-code", &args), ["--resume", "abc", "--model", "opus"]);
         let args: Vec<String> = ["resume", "--last", "-m", "o3"].map(String::from).to_vec();
         assert_eq!(c.resume_arguments("codex", &args), ["resume", "abc", "-m", "o3"]);

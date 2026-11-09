@@ -125,7 +125,9 @@ fn legacy_value(value: plist::Value) -> Option<Value> {
         plist::Value::Data(bytes) => serde_json::from_slice(&bytes).ok()?,
         plist::Value::String(s) => Value::String(s),
         plist::Value::Boolean(b) => Value::Bool(b),
-        plist::Value::Integer(i) => i.as_signed().map(Value::from).or_else(|| i.as_unsigned().map(Value::from))?,
+        plist::Value::Integer(i) => {
+            i.as_signed().map(Value::from).or_else(|| i.as_unsigned().map(Value::from))?
+        }
         plist::Value::Real(r) => serde_json::Number::from_f64(r).map(Value::Number)?,
         plist::Value::Array(items) => Value::Array(items.into_iter().filter_map(legacy_value).collect()),
         plist::Value::Dictionary(dict) => {

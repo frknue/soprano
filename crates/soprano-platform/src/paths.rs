@@ -43,11 +43,8 @@ pub fn resources_dir() -> Option<PathBuf> {
 /// The resource-folder search behind [`resources_dir`], with the existence check injectable.
 pub fn resources_dir_for_executable(exe: &Path, is_dir: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     let exe_dir = exe.parent()?;
-    let mut candidates = vec![
-        exe_dir.join("../Resources"),
-        exe_dir.join("resources"),
-        exe_dir.join("../share/soprano"),
-    ];
+    let mut candidates =
+        vec![exe_dir.join("../Resources"), exe_dir.join("resources"), exe_dir.join("../share/soprano")];
     // target/{debug,release}/soprano → <repo>/resources
     if let Some(repo) = exe_dir.parent().and_then(Path::parent) {
         candidates.push(repo.join("resources"));
@@ -139,7 +136,8 @@ mod tests {
     #[test]
     fn a_cargo_build_finds_the_repository_resources_folder() {
         let exe = Path::new("/src/soprano/target/debug/soprano");
-        let found = resources_dir_for_executable(exe, |p| normalize(p) == Path::new("/src/soprano/resources"));
+        let found =
+            resources_dir_for_executable(exe, |p| normalize(p) == Path::new("/src/soprano/resources"));
         assert_eq!(found, Some(PathBuf::from("/src/soprano/resources")));
     }
 }
