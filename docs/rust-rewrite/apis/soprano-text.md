@@ -27,11 +27,11 @@ Every range in the crate is a UTF-8 byte range, so it can be used directly for G
   - `tokens()`, `image_bytes()`, `rope()`, `text()`, `len()`, `is_empty()`, `text_version()`
   - `take_changes() -> Vec<DocumentChange { WillReplaceContent, Content, State, Highlights, Location, Edited }>`
 - Toolbar helpers: `tab_title()` (adds `●` when dirty), `is_editable()`, `shows_reload()`, `shows_markdown_preview()`, `status() -> Option<EditorStatus { text, tone: StatusTone }>`.
-- Editing: `replace(range, text)`, `type_text(range, text)` (consecutive keystrokes join one undo step), `break_undo_coalescing()`, `insert_newline(selection) -> caret` (keeps the line's indentation), `undo()` / `redo() -> Option<Range>`, `can_undo()` / `can_redo()`, `line_number(offset)`, `line_count()`.
+- Editing: `replace(range, text)`, `type_text(range, text)` (keystrokes that continue at the typing caret — typing, backspace, forward delete — join one undo step), `break_undo_coalescing()`, `insert_newline(selection) -> caret` (keeps the line's indentation), `undo()` / `redo() -> Option<Range>`, `can_undo()` / `can_redo()`, `line_number(offset)`, `line_count()`, `clamp_offset(offset)` (clamp to the text and floor to a character boundary; use it for any offset a view kept across edits made elsewhere).
 - Find: `find_all`, `find_next(q, from)`, `find_previous(q, before)`. All wrap around and ignore case.
 - Highlighting: `highlight_request() -> Option<HighlightRequest { version, text, language }>`, `apply_highlights(version, tokens) -> bool`, `highlight_now()`.
 - Disk: `save() -> io::Result` (keeps permissions, writes through symlinks), `disk_changed_since_last_sync()`, `disk_did_change()`, `reload_from_disk()`, `discard_changes()`, `relocate(path)`.
-- Free functions: `restore_selection`, `format_file_size`, `is_image_file`, `number_column_width(largest, digit_width)` (gutter width).
+- Free functions: `restore_selection(&selection, &Rope)` (clamped and floored to character boundaries), `format_file_size`, `is_image_file`, `number_column_width(largest, digit_width)` (gutter width).
 - Constants: `MAXIMUM_TEXT_BYTES` (8 MB), `MAXIMUM_IMAGE_BYTES` (64 MB), `MAXIMUM_HIGHLIGHTED_LENGTH`, `HIGHLIGHT_DELAY_MS`, `WATCH_DEBOUNCE_MS`, `LINE_HEIGHT`, `GUTTER_PADDING`.
 
 **`editor_store`** (port of `EditorDocumentStore`)
@@ -43,7 +43,7 @@ Every range in the crate is a UTF-8 byte range, so it can be used directly for G
 
 **`find`**: `find_all`, `find_next`, `find_previous` over `&str`.
 
-**`watch`**: `FileWatcher::new(path, debounce, on_change) -> notify::Result<FileWatcher>`. It watches the file's folder and calls `on_change` once after a quiet spell. The callback runs on the watcher thread, so forward it to the UI thread. Dropping the watcher stops it.
+**`watch`**: `FileWatcher::new(path, debounce, on_change) -> FileWatcher`, the Swift editor's and reader's `ConfigFileWatcher` (`soprano_config::ConfigFileWatcher`): it watches the file's folder and a symlink target's folder, re-arms when the folder is replaced or the link re-pointed, and retries every `REARM_INTERVAL` (2 s) while the folder is missing. It calls `on_change` once after a quiet spell, on the watcher thread, so forward it to the UI thread. Dropping the watcher stops it.
 
 **`diff`** (`DiffTextViews`, the logic parts of `DiffPaneView` and `SurfaceDiffRows`, built on `soprano_git::changes`)
 - `DiffDocument::new(path, Vec<GitDiffLine>, language)` with fields `lines`, `unified`, `old`, `new`, `highlights`, `additions`, `deletions`, `max_line`, `max_columns`, `change: FileChange`. Methods: `emphasis(row)`, `tokens(row, old_side)`, `side(row, old_side) -> Option<DiffSide { kind, number, text: StyledLine }>`.
@@ -51,7 +51,7 @@ Every range in the crate is a UTF-8 byte range, so it can be used directly for G
 - `DiffList::build(doc, DiffListLayout, collapsed, &expanded)` produces `{ rows: Vec<DiffListRow>, change_rows }` with three lines of context and folds. Methods: `section`, `line`, `text(&DiffSelection, doc)`, `select_all`, `next_change` / `previous_change`, `anchor_line`, `row_for_line`, `wrapped_height`.
 - Fold and selection types: `DiffFold { id, rows, range, section }` with `hidden_lines()` and `label()`; `DiffSelection { anchor, head, old_side }`.
 - Layout math: `columns`, `wrapped_lines`, `code_width`, `split_divider_x`, plus row and header height constants.
-- Loading: `load_diff(path, staged) -> DiffLoadResult { location, file_exists, content: DiffContent { Text, Message } }`, `diff_message(&GitFileDiff, staged)` (binary, too large, no changes, empty file notes), `DiffLocation::is_relevant` / `watched_paths`, `relative_path`, `resolved_path`.
+- Loading: `load_diff(path, staged) -> DiffLoadResult { location, file_exists, content: DiffContent { Text, Message } }` (the path is standardized first), `diff_message(&GitFileDiff, staged)` (binary, too large, no changes, empty file notes), `DiffLocation::is_relevant` / `needs_reload(&paths, needs_rescan, external_git_dir)` / `watched_paths`, `relative_path`, `resolved_path` (no `\\?\` prefix on Windows).
 
 **`hunks`** (chat edit diffs: `InlineDiffDrawing` and the model from `FileDiffRowView`)
 - `parse_hunks(text) -> Vec<DiffHunk { old_start, new_start, section, lines: Vec<HunkLine> }>`.
@@ -59,10 +59,10 @@ Every range in the crate is a UTF-8 byte range, so it can be used directly for G
 - `InlineDiff::new(diff, path, full_content)` with `lines: Vec<InlineDiffLine { Separator, Line{line, numbered} }>`, `additions`, `deletions`, `max_number`. Methods: `highlight()`, `is_highlighted()`, `tokens(line)`.
 
 **`markdown`** (`MarkdownDocument`, plus the model rules of `MarkdownRenderer`, `MarkdownHTMLRenderer` and `MarkdownPaneView`)
-- `parse(text, line_breaks) -> Vec<MarkdownBlock>`. Blocks: `Paragraph`, `Heading{level, inlines, anchor}`, `List{ordered, start, items}`, `Blockquote`, `Code{language, code, tokens}`, `Table(MarkdownTable)`, `ThematicBreak`, `Html(source)`.
-- Inline model is `MarkdownInline`. Helpers: `plain_text`, `highlighted_code`, `bullet(depth)`, `ordered_marker(n, depth)`, `heading_slug`.
+- `parse(text, line_breaks) -> Vec<MarkdownBlock>` with smart punctuation (’ “” – — …, as swift-markdown). Blocks: `Paragraph`, `Heading{level, inlines, anchor}`, `List{ordered, start, items}`, `Blockquote`, `Code{language, code, tokens}`, `Table(MarkdownTable { alignments, header: Vec<TableCell>, rows: Vec<Vec<TableCell>> })`, `ThematicBreak`, `Html(source)`. `TableCell { inlines, colspan, rowspan }` models GFM `||` / `^` spans; skip `is_covered()` cells.
+- Inline model is `MarkdownInline`. Helpers: `plain_text`, `highlighted_code`, `bullet(depth)`, `ordered_marker(n, depth)`, `heading_slug` (full case folding, diacritics stripped, recomposed).
 - Links and images: `resolve_link(dest, doc, root) -> Option<LinkTarget { Anchor, Markdown{path, fragment}, File, External }>`, `resolve_image(..) -> Option<ImageSource { File, Remote, Data }>`, `access_root(doc)`, `is_markdown`, `opens_linked_file`.
-- Reader: `ReaderHistory` (`record`, `back`, `forward`, `current`, `can_go_back`, `can_go_forward`) and `unreadable_document(path, err)`.
+- Reader: `ReaderHistory` (`record(path) -> bool` — false when the path is already the current document: only scroll to the fragment —, `back`, `forward`, `current`, `can_go_back`, `can_go_forward`) and `unreadable_document(path, err)`.
 
 **`context_line`** (port of `PaneContextLine.swift`)
 - `ContextLine { context, branch, tab_count }` with `for_title(title, agent_name, cwd, branch, tab_count, home)`, `is_empty()`, `parts() -> Vec<ContextPart { Text, Branch }>` and `SEPARATOR`.
@@ -84,15 +84,15 @@ Tests ported:
 
 ## Deviations and why
 - **Diff layout lives in `soprano-git`:** per your note, I depend on `soprano-git` and reuse `GitDiffLine`, `GitDiffLayout`, `GitDiffHighlights` and `GitFileDiff`. The `similar` crate is not used: Swift's diffs come from git, and its intra-line ranges are a prefix/suffix comparison that `soprano-git` already ports.
-- **Byte ranges instead of UTF-16:** the Swift code counted UTF-16 units. Only the 1.5M highlight limit still counts UTF-16 units, as Swift did.
+- **Byte ranges instead of UTF-16:** the Swift code counted UTF-16 units. The 1.5M highlight limits (editor and chat hunks) still count UTF-16 units, as Swift did.
 - **No shebang detection:** the brief mentions it, but the Swift app never detects languages by shebang, so I did not add it.
 - **Store asks instead of blocking:** the Swift store called blocking alert callbacks. GPUI prompts are asynchronous, so the store returns what needs asking and takes the answer back through `resolve_unsaved` / `save_anyway`.
 - **Changes are queued, not observed:** the document queues `DocumentChange`s instead of calling observers, and highlighting is a request/apply pair that the UI debounces.
 - **No HTML output:** the reader is drawn natively, so `MarkdownHTMLRenderer`'s HTML string output was not ported; only its safety rules (unsafe links and image sources are refused, source HTML stays visible as text), heading slugs, task boxes, table alignment and code highlighting were.
 - **Extension lists replace UTType:** image detection, the "opens linked file" check and the size formatter use extension lists and `imagesize` instead of UTType and NSImage. Any file with an executable bit counts as not viewable.
-- **`folder_name` is duplicated:** `context_line` has a small local copy of `TerminalTitle.folderName` so it does not depend on `soprano-model`.
+- **`folder_name` is duplicated:** `context_line` has a small local copy of `TerminalTitle.folderName` (same rules as `soprano_model::terminal_title::folder_name_in`) so it does not depend on `soprano-model`.
 - **Chat hunks:** they are split on `\n` only.
-- **`FileWatcher` is new:** it is a small `notify`-based watcher written for this crate; I did not reuse a port of the Swift `ConfigFileWatcher`.
+- **`FileWatcher` reuses `soprano-config`'s `ConfigFileWatcher`,** as the Swift editor and reader used `ConfigFileWatcher`.
 
 ## Commands run
 - `cargo test -p soprano-text`: 71 passed. The watcher test was flaky at first because the backend reported events from before the burst; it now drains those first and passed 8 runs in a row.
