@@ -101,7 +101,7 @@ try {
     New-Item -ItemType Directory -Force -Path $resources | Out-Null
 
     Copy-Item $binary (Join-Path $staged 'soprano.exe')
-    foreach ($item in @('Soprano_Soprano.bundle', 'AgentHooks', 'bin', 'fonts', 'icons')) {
+    foreach ($item in @('Soprano_Soprano.bundle', 'AgentHooks', 'bin', 'fonts', 'icons', 'licenses')) {
         Copy-Item -Recurse (Join-Path $repoResources $item) (Join-Path $resources $item)
     }
     Get-ChildItem -Recurse -Force -Path $resources -Filter '.DS_Store' | Remove-Item -Force

@@ -99,7 +99,7 @@ fi
 mkdir -p "$destination"
 
 tar -C "$repo_resources" --exclude '.DS_Store' -cf - \
-    Soprano_Soprano.bundle AgentHooks bin fonts icons \
+    Soprano_Soprano.bundle AgentHooks bin fonts icons licenses \
     | tar -C "$destination" -xf -
 chmod +x "$destination/bin/omp"
 
