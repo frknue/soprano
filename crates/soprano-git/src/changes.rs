@@ -554,7 +554,9 @@ impl<K> Default for GitDiffHighlights<K> {
 }
 
 impl<K: Clone> GitDiffHighlights<K> {
-    /// Larger sides stay uncolored, like large files in the editor.
+    /// Larger sides stay uncolored, like large files in the editor. Counted in UTF-16
+    /// code units, as the Swift app (and the editor's limit) counts text length; token
+    /// ranges are still bytes.
     pub const MAXIMUM_LENGTH: usize = 1_500_000;
 
     /// `tokenize` highlights a whole text, returning byte ranges with their kinds; `None`
@@ -585,15 +587,18 @@ fn side<K: Clone>(
     let mut starts = Vec::new();
     let mut lengths = Vec::new();
     let mut text = String::new();
+    let mut utf16_length = 0;
     for (index, line) in lines.iter().enumerate().filter(|(_, line)| line.kind != excluded) {
         if !indices.is_empty() {
             text.push('\n');
+            utf16_length += 1;
         }
         indices.push(index);
         starts.push(text.len());
         lengths.push(line.text.len());
         text.push_str(&line.text);
-        if text.len() > GitDiffHighlights::<K>::MAXIMUM_LENGTH {
+        utf16_length += line.text.encode_utf16().count();
+        if utf16_length > GitDiffHighlights::<K>::MAXIMUM_LENGTH {
             return result;
         }
     }
@@ -868,5 +873,30 @@ mod tests {
         assert!(highlights.new[0].is_empty());
         assert_eq!(highlights.new[1].first().map(|t| t.kind.clone()), Some(Kind::Keyword));
         assert!(!highlights.new[2].iter().any(|t| t.kind == Kind::Comment));
+    }
+
+    #[test]
+    fn the_highlight_limit_counts_utf16_units_not_bytes() {
+        let tokenize = |text: &str| vec![(0..text.len().min(1), ())];
+        let limit = GitDiffHighlights::<()>::MAXIMUM_LENGTH;
+        // Three bytes but one UTF-16 unit each: well over the limit in bytes, under it in
+        // UTF-16 units, so Swift colored it.
+        let wide = "€".repeat(limit - 10);
+        let lines = vec![line(Context, Some(1), Some(1), &wide)];
+
+        let highlights = GitDiffHighlights::compute(&lines, Some(tokenize));
+
+        assert_eq!(highlights.old[0].len(), 1);
+        assert_eq!(highlights.new[0].len(), 1);
+
+        // One unit over the limit stays uncolored; the joining newline counts too.
+        let over = vec![
+            line(Context, Some(1), Some(1), &"€".repeat(limit - 1)),
+            line(Context, Some(2), Some(2), "x"),
+        ];
+        let highlights = GitDiffHighlights::compute(&over, Some(tokenize));
+        assert!(highlights.old.iter().all(Vec::is_empty));
+        let at_limit = vec![line(Context, Some(1), Some(1), &"€".repeat(limit))];
+        assert_eq!(GitDiffHighlights::compute(&at_limit, Some(tokenize)).old[0].len(), 1);
     }
 }
