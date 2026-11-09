@@ -474,7 +474,7 @@ enum Pending {
 
 type MakePeer = Box<dyn FnMut(&AgentChatLaunch) -> Box<dyn JsonRpcPeer>>;
 type EventCallback = Box<dyn FnMut(&AgentChatEvent)>;
-type Waker = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
+type Waker = crate::rpc::WakerSlot;
 
 /// One conversation with an agent over the Agent Client Protocol: starts its server, opens or
 /// reloads the session, sends prompts, and keeps what the chat tab shows — the turns, what the
@@ -715,6 +715,15 @@ impl AgentChatSession {
         self.phase = ChatPhase::Starting;
         self.report(AgentChatEvent::status(AgentStatus::Starting));
         self.changed();
+        // A start while an agent still runs replaces it: that process is asked to end and
+        // retired, so its requests get "Session closed" and the new one waits for it to exit.
+        if let Some((peer_id, mut peer)) = self.peer.take() {
+            peer.terminate();
+            self.pending.retain(|(id, _), _| *id != peer_id);
+            if !peer.has_exited() {
+                self.retiring.insert(peer_id, peer);
+            }
+        }
         self.retiring.retain(|_, peer| !peer.has_exited());
         // A stop or another start while waiting wins.
         self.pending_start = Some(resuming.map(str::to_owned));
@@ -734,8 +743,8 @@ impl AgentChatSession {
         let peer_id = self.next_peer_id;
         self.next_peer_id += 1;
         let mut peer = (self.make_peer)(&self.launch);
-        let waker = self.waker.lock().ok().and_then(|w| w.clone());
-        let started = peer.start(PeerSink::new(peer_id, self.sender.clone(), waker));
+        // The sink reads the session's waker slot on every delivery, so a waker set later is used.
+        let started = peer.start(PeerSink::with_waker(peer_id, self.sender.clone(), Arc::clone(&self.waker)));
         self.peer = Some((peer_id, peer));
         if let Err(error) = started {
             self.did_exit(-1, &error.to_string());

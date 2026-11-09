@@ -351,17 +351,38 @@ pub(crate) fn prefix_chars(text: &str, count: usize) -> &str {
     }
 }
 
-/// `path` relative to `cwd` when it lies inside it, else with `~` for home.
+/// `path` relative to `cwd` when it lies inside it, else with `~` for home (unchanged when there
+/// is no home directory at all).
 pub fn display_path(path: &str, cwd: Option<&str>) -> String {
-    if let Some(cwd) = cwd.filter(|c| !c.is_empty()) {
-        let base = if cwd.ends_with('/') { cwd.to_owned() } else { format!("{cwd}/") };
-        if let Some(rest) = path.strip_prefix(&base)
-            && !rest.is_empty()
-        {
-            return rest.to_owned();
-        }
+    if let Some(rest) = cwd.and_then(|cwd| relative_inside(path, cwd, cfg!(windows))) {
+        return rest.to_owned();
     }
-    soprano_platform::paths::abbreviate_home(Path::new(path))
+    match dirs::home_dir() {
+        Some(home) => soprano_platform::paths::abbreviate_home_in(Path::new(path), &home),
+        None => path.to_owned(),
+    }
+}
+
+/// The part of `path` after the directory `cwd`, when `path` lies strictly inside it. On
+/// Windows (`windows`) `\` and `/` both separate and letters compare without case, so
+/// `C:\proj\src\a.rs` lies inside `c:/proj`.
+pub(crate) fn relative_inside<'a>(path: &'a str, cwd: &str, windows: bool) -> Option<&'a str> {
+    if cwd.is_empty() {
+        return None;
+    }
+    let is_separator = |c: char| c == '/' || (windows && c == '\\');
+    let base = cwd.strip_suffix(is_separator).unwrap_or(cwd);
+    let head = path.get(..base.len())?;
+    let same = if windows {
+        let separator = |b: u8| b == b'/' || b == b'\\';
+        head.bytes()
+            .zip(base.bytes())
+            .all(|(a, b)| a.eq_ignore_ascii_case(&b) || (separator(a) && separator(b)))
+    } else {
+        head == base
+    };
+    let rest = path[base.len()..].strip_prefix(is_separator)?;
+    (same && !rest.is_empty()).then_some(rest)
 }
 
 /// The first non-empty line of `text`, trimmed and cut to 160 characters.
@@ -441,4 +462,29 @@ pub fn date_from_millis(milliseconds: f64) -> Option<Date> {
     }
     let micros = (milliseconds * 1_000.0).round() as i64;
     Utc.timestamp_micros(micros).single()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relative_inside;
+
+    #[test]
+    fn windows_paths_inside_the_project_are_shown_relative_to_it_whatever_the_separator_or_case() {
+        assert_eq!(relative_inside(r"C:\proj\src\a.rs", r"C:\proj", true), Some(r"src\a.rs"));
+        assert_eq!(relative_inside(r"c:\Proj\src\a.rs", "C:/proj/", true), Some(r"src\a.rs"));
+        assert_eq!(relative_inside(r"C:\project\a.rs", r"C:\proj", true), None);
+        assert_eq!(relative_inside(r"C:\proj", r"C:\proj", true), None);
+    }
+
+    #[test]
+    fn unix_paths_keep_the_swift_byte_wise_comparison() {
+        assert_eq!(
+            relative_inside("/tmp/repo/Sources/App.swift", "/tmp/repo", false),
+            Some("Sources/App.swift")
+        );
+        assert_eq!(relative_inside("/tmp/repo/x", "/tmp/repo/", false), Some("x"));
+        assert_eq!(relative_inside("/tmp/Repo/x", "/tmp/repo", false), None);
+        assert_eq!(relative_inside(r"/tmp/repo\x", r"/tmp/repo", false), None);
+        assert_eq!(relative_inside("/x", "/", false), Some("x"));
+    }
 }

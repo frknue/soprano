@@ -805,29 +805,64 @@ pub fn content_text(content: Option<&Value>) -> Option<String> {
     }
 }
 
-/// Pretty-printed tool arguments with sorted keys; `None` for none.
+/// Pretty-printed tool arguments as `JSONSerialization` writes them with `.prettyPrinted`,
+/// `.sortedKeys` and `.withoutEscapingSlashes`: two-space indents, `"key" : value`, one array
+/// element per line; integral numbers without a fraction. `None` for none.
 pub fn input_text(args: &Value) -> Option<String> {
     match args {
         Value::Null => None,
         Value::Object(object) if object.is_empty() => None,
-        other => serde_json::to_string_pretty(&sorted(other)).ok(),
+        other => {
+            let mut text = String::new();
+            write_pretty(other, 0, &mut text);
+            Some(text)
+        }
     }
 }
 
-fn sorted(value: &Value) -> Value {
+fn write_pretty(value: &Value, depth: usize, out: &mut String) {
+    let indent = |out: &mut String, depth: usize| out.push_str(&"  ".repeat(depth));
     match value {
+        Value::Object(object) if object.is_empty() => out.push_str("{}"),
+        Value::Array(values) if values.is_empty() => out.push_str("[]"),
         Value::Object(object) => {
             let mut keys: Vec<&String> = object.keys().collect();
             keys.sort();
-            Value::Object(keys.into_iter().map(|k| (k.clone(), sorted(&object[k]))).collect())
+            out.push_str("{\n");
+            for (index, key) in keys.iter().enumerate() {
+                indent(out, depth + 1);
+                out.push_str(&Value::String((*key).clone()).to_string());
+                out.push_str(" : ");
+                write_pretty(&object[key.as_str()], depth + 1, out);
+                out.push_str(if index + 1 < keys.len() { ",\n" } else { "\n" });
+            }
+            indent(out, depth);
+            out.push('}');
         }
-        Value::Array(values) => Value::Array(values.iter().map(sorted).collect()),
-        other => other.clone(),
+        Value::Array(values) => {
+            out.push_str("[\n");
+            for (index, element) in values.iter().enumerate() {
+                indent(out, depth + 1);
+                write_pretty(element, depth + 1, out);
+                out.push_str(if index + 1 < values.len() { ",\n" } else { "\n" });
+            }
+            indent(out, depth);
+            out.push(']');
+        }
+        // Swift hands integral doubles over as `Int`, so `2.0` reads `2`.
+        Value::Number(number) => match number.as_f64() {
+            Some(float) if number.is_f64() && float.fract() == 0.0 && float.abs() < 1e15 => {
+                out.push_str(&(float as i64).to_string());
+            }
+            _ => out.push_str(&number.to_string()),
+        },
+        other => out.push_str(&other.to_string()),
     }
 }
 
 /// The file a write or edit call names: `path`, else the `[path#TAG]` header of a hashline
-/// edit's `input`.
+/// edit's `input`. Like Swift's `split(separator: "#", maxSplits: 1)`, empty pieces are skipped,
+/// so `[#TAG]` names `TAG`.
 pub fn argument_path(args: &Value) -> Option<String> {
     if let Some(path) = args.get("path").and_then(Value::non_empty_string) {
         return Some(path.to_owned());
@@ -835,7 +870,7 @@ pub fn argument_path(args: &Value) -> Option<String> {
     let input = args.get("input").and_then(Value::as_str)?;
     let rest = input.strip_prefix('[')?;
     let close = rest.find(']')?;
-    let header = &rest[..close];
+    let header = rest[..close].trim_start_matches('#');
     let path = header.split('#').next().unwrap_or(header);
     (!path.is_empty()).then(|| path.to_owned())
 }

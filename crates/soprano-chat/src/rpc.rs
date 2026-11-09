@@ -8,11 +8,11 @@
 //! [`PeerEvent::Response`].
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -73,15 +73,20 @@ pub enum PeerEvent {
 pub struct PeerSink {
     peer_id: u64,
     sender: Sender<(u64, PeerEvent)>,
-    waker: Option<Arc<dyn Fn() + Send + Sync>>,
+    waker: WakerSlot,
 }
 
+/// The owner's waker slot. A peer reads it on every delivery, so a waker set after the peer
+/// started is still used.
+pub type WakerSlot = Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>>;
+
 impl PeerSink {
-    pub fn new(
-        peer_id: u64,
-        sender: Sender<(u64, PeerEvent)>,
-        waker: Option<Arc<dyn Fn() + Send + Sync>>,
-    ) -> Self {
+    /// A sink without a waker: the owner polls its channel.
+    pub fn new(peer_id: u64, sender: Sender<(u64, PeerEvent)>) -> Self {
+        Self { peer_id, sender, waker: WakerSlot::default() }
+    }
+
+    pub fn with_waker(peer_id: u64, sender: Sender<(u64, PeerEvent)>, waker: WakerSlot) -> Self {
         Self { peer_id, sender, waker }
     }
 
@@ -90,9 +95,11 @@ impl PeerSink {
     }
 
     pub fn send(&self, event: PeerEvent) {
-        if self.sender.send((self.peer_id, event)).is_ok()
-            && let Some(waker) = &self.waker
-        {
+        if self.sender.send((self.peer_id, event)).is_err() {
+            return;
+        }
+        let waker = lock(&self.waker).clone();
+        if let Some(waker) = waker {
             waker();
         }
     }
@@ -117,7 +124,8 @@ pub trait JsonRpcPeer: Send {
     fn has_exited(&self) -> bool;
 }
 
-/// Splits a byte stream into lines, without their newlines; empty lines are dropped.
+/// Splits a byte stream into lines, without their newlines; empty lines are dropped. Each byte
+/// is scanned once, however many chunks a long line arrives in.
 #[derive(Default)]
 pub struct LineSplitter {
     buffer: Vec<u8>,
@@ -126,15 +134,26 @@ pub struct LineSplitter {
 impl LineSplitter {
     /// The complete lines `chunk` finishes.
     pub fn append(&mut self, chunk: &[u8]) -> Vec<Vec<u8>> {
+        // Bytes already in the buffer hold no newline: they were scanned by an earlier call.
+        let mut search_from = self.buffer.len();
         self.buffer.extend_from_slice(chunk);
         let mut lines = Vec::new();
-        while let Some(newline) = self.buffer.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=newline).take(newline).collect();
-            if !line.is_empty() {
-                lines.push(line);
+        let mut line_start = 0;
+        while let Some(offset) = self.buffer[search_from..].iter().position(|&b| b == b'\n') {
+            let newline = search_from + offset;
+            if newline > line_start {
+                lines.push(self.buffer[line_start..newline].to_vec());
             }
+            line_start = newline + 1;
+            search_from = line_start;
         }
+        self.buffer.drain(..line_start);
         lines
+    }
+
+    /// Bytes of the line still waiting for its end.
+    pub fn pending_len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
@@ -218,6 +237,8 @@ impl JsonRpcConnection {
     /// Characters of stderr kept to explain an unexpected exit.
     pub const STDERR_LIMIT: usize = 4_000;
     pub const DEFAULT_EXIT_GRACE_PERIOD: Duration = Duration::from_secs(3);
+    /// How long the exit report waits for the output pipes to close after the process ended.
+    pub const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(250);
 
     /// `argv[0]` is the executable. `env`, when given, replaces the whole environment.
     pub fn new(argv: Vec<String>, cwd: Option<PathBuf>, env: Option<Vec<(String, String)>>) -> Self {
@@ -271,6 +292,7 @@ impl JsonRpcConnection {
         };
         let mut command = Command::new(program);
         command.args(arguments).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        platform::configure(&mut command);
         if let Some(cwd) = &self.cwd {
             command.current_dir(cwd);
         }
@@ -292,34 +314,52 @@ impl JsonRpcPeer for JsonRpcConnection {
         let stderr = child.stderr.take();
         let tail = Arc::new(StderrTail::new(Self::STDERR_LIMIT));
 
-        let reader = stdout.map(|stdout| {
+        // Each output reader says when it reached the end of its pipe.
+        let (finished, finished_readers) = mpsc::channel::<()>();
+        let mut readers = 0;
+        if let Some(stdout) = stdout {
             let shared = Arc::clone(&self.shared);
             let sink = sink.clone();
-            std::thread::spawn(move || read_messages(stdout, &shared, &sink))
-        });
-        let stderr_reader = stderr.map(|mut stderr| {
+            let finished = finished.clone();
+            readers += 1;
+            std::thread::spawn(move || {
+                read_messages(stdout, &shared, &sink);
+                let _ = finished.send(());
+            });
+        }
+        if let Some(mut stderr) = stderr {
             let tail = Arc::clone(&tail);
+            let finished = finished.clone();
+            readers += 1;
             std::thread::spawn(move || {
                 let mut buffer = [0u8; 4096];
-                while let Ok(count) = stderr.read(&mut buffer) {
-                    if count == 0 {
-                        break;
+                loop {
+                    match stderr.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(count) => tail.append(&buffer[..count]),
+                        Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                        Err(_) => break,
                     }
-                    tail.append(&buffer[..count]);
                 }
-            })
-        });
+                let _ = finished.send(());
+            });
+        }
+        drop(finished);
 
         let shared = Arc::clone(&self.shared);
         let grace = self.exit_grace_period;
         let waiter = std::thread::spawn(move || {
             let status = wait_child(&mut child, &shared, grace);
-            // After the output reader's last delivery, so no reply is lost.
-            if let Some(reader) = reader {
-                let _ = reader.join();
-            }
-            if let Some(stderr_reader) = stderr_reader {
-                let _ = stderr_reader.join();
+            // Lets the readers deliver what the agent wrote before it ended, so no reply is
+            // lost, but only briefly: a tool child, language server or background job that
+            // inherited the pipes can hold them open forever, and Swift reported the exit as
+            // soon as the process ended.
+            let deadline = Instant::now() + Self::OUTPUT_DRAIN_TIMEOUT;
+            for _ in 0..readers {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if finished_readers.recv_timeout(left).is_err() {
+                    break;
+                }
             }
             shared.exited.store(true, Ordering::SeqCst);
             *lock(&shared.stdin) = None;
@@ -393,6 +433,7 @@ fn read_messages(stdout: impl Read, shared: &Shared, sink: &PeerSink) {
     let mut splitter = LineSplitter::default();
     loop {
         let chunk = match reader.fill_buf() {
+            Err(error) if error.kind() == ErrorKind::Interrupted => continue,
             Ok([]) | Err(_) => return,
             Ok(chunk) => chunk.to_vec(),
         };
@@ -404,7 +445,11 @@ fn read_messages(stdout: impl Read, shared: &Shared, sink: &PeerSink) {
 }
 
 fn receive(line: &[u8], shared: &Shared, sink: &PeerSink) {
-    let Ok(message) = serde_json::from_slice::<Value>(line) else { return };
+    // A process the agent left behind may keep writing after its exit was reported.
+    if shared.exited.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some(message) = soprano_agents::json::parse_value(line) else { return };
     if !message.is_object() {
         return;
     }
@@ -452,7 +497,7 @@ fn wait_child(child: &mut Child, shared: &Shared, grace: Duration) -> i32 {
                 platform::terminate(child);
             } else if !killed && at.elapsed() >= grace {
                 killed = true;
-                let _ = child.kill();
+                platform::kill(child);
             }
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -469,10 +514,12 @@ fn exit_code(status: std::process::ExitStatus) -> i32 {
 #[cfg(unix)]
 mod platform {
     use std::os::unix::process::ExitStatusExt;
-    use std::process::Child;
+    use std::process::{Child, Command};
+
+    pub fn configure(_command: &mut Command) {}
 
     /// SIGTERM, which lets the agent save its session before it exits.
-    pub fn terminate(child: &Child) {
+    pub fn terminate(child: &mut Child) {
         if let Ok(pid) = libc::pid_t::try_from(child.id()) {
             // SAFETY: `kill` takes a pid and a signal number and touches no memory.
             unsafe {
@@ -481,18 +528,44 @@ mod platform {
         }
     }
 
+    /// SIGKILL once the grace period passed.
+    pub fn kill(child: &mut Child) {
+        let _ = child.kill();
+    }
+
     pub fn signal_of(status: std::process::ExitStatus) -> Option<i32> {
         status.signal()
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 mod platform {
-    use std::process::Child;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
 
-    /// Windows has no SIGTERM for a console child: it is ended at once (TerminateProcess).
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// No console window per chat tab.
+    pub fn configure(command: &mut Command) {
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    /// Windows has no SIGTERM for a console child. The agent runs under a shell
+    /// (`pwsh -Command "& 'omp' …"`, no `exec`), so the whole tree is ended (`taskkill /T`), else
+    /// an orphaned `omp acp` keeps the conversation open.
     pub fn terminate(child: &mut Child) {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
         let _ = child.kill();
+    }
+
+    pub fn kill(child: &mut Child) {
+        terminate(child);
     }
 
     pub fn signal_of(_status: std::process::ExitStatus) -> Option<i32> {

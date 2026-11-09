@@ -7,10 +7,11 @@
 //! transcript that does not exist yet. Change callbacks run on the worker thread; the UI hops
 //! them onto its own executor.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
@@ -89,6 +90,7 @@ struct Shared {
     timelines: HashMap<String, AgentTimeline>,
 }
 
+#[derive(Debug, PartialEq)]
 enum Command {
     Track(HashMap<String, AgentTranscriptSource>),
     Read(Option<Vec<String>>),
@@ -106,6 +108,7 @@ pub struct AgentTranscriptStore {
     commands: Sender<Command>,
     worker: Option<JoinHandle<()>>,
     poller: Option<(Sender<()>, JoinHandle<()>)>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl AgentTranscriptStore {
@@ -114,7 +117,8 @@ impl AgentTranscriptStore {
 
     /// A store reading the CLIs' data under the user's home directory.
     pub fn new() -> Self {
-        Self::with_home(soprano_platform::paths::home_dir())
+        // No home at all: the CLIs' folders cannot be found, but reported paths still work.
+        Self::with_home(dirs::home_dir().unwrap_or_default())
     }
 
     /// A store reading the CLIs' data under `home`, with no polling until
@@ -123,16 +127,18 @@ impl AgentTranscriptStore {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let on_change: Arc<Mutex<Option<ChangeCallback>>> = Arc::new(Mutex::new(None));
         let (commands, receiver) = mpsc::channel();
+        let stopped = Arc::new(AtomicBool::new(false));
         let worker = {
             let shared = Arc::clone(&shared);
             let on_change = Arc::clone(&on_change);
             let sender = commands.clone();
+            let stopped = Arc::clone(&stopped);
             std::thread::Builder::new()
                 .name("soprano-agent-transcripts".into())
-                .spawn(move || Worker::new(home, shared, on_change, sender).run(receiver))
+                .spawn(move || Worker::new(home, shared, on_change, sender, stopped).run(receiver))
                 .ok()
         };
-        Self { shared, on_change, commands, worker, poller: None }
+        Self { shared, on_change, commands, worker, poller: None, stopped }
     }
 
     /// Called with a dashboard entry id whenever that agent's timeline changed. Runs on the
@@ -206,15 +212,15 @@ impl Default for AgentTranscriptStore {
 }
 
 impl Drop for AgentTranscriptStore {
+    /// Never blocks the caller (the UI thread) on a read in progress: the worker is told to stop
+    /// and left to finish on its own.
     fn drop(&mut self) {
-        if let Some((stop, handle)) = self.poller.take() {
+        self.stopped.store(true, Ordering::SeqCst);
+        if let Some((stop, _poller)) = self.poller.take() {
             let _ = stop.send(());
-            let _ = handle.join();
         }
         let _ = self.commands.send(Command::Stop);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        self.worker.take();
     }
 }
 
@@ -231,6 +237,8 @@ struct Worker {
     /// Directories watched, with the files in them whose changes matter.
     watched: HashMap<PathBuf, HashSet<PathBuf>>,
     sender: Option<Sender<Command>>,
+    /// Set when the store is dropped; checked between reads.
+    stopped: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -239,6 +247,7 @@ impl Worker {
         shared: Arc<Mutex<Shared>>,
         on_change: Arc<Mutex<Option<ChangeCallback>>>,
         sender: Sender<Command>,
+        stopped: Arc<AtomicBool>,
     ) -> Self {
         Self {
             home,
@@ -248,6 +257,7 @@ impl Worker {
             watcher: None,
             watched: HashMap::new(),
             sender: Some(sender),
+            stopped,
         }
     }
 
@@ -255,27 +265,33 @@ impl Worker {
         if let Some(sender) = self.sender.take() {
             self.watcher = make_watcher(sender);
         }
-        while let Ok(command) = receiver.recv() {
-            match command {
-                Command::Stop => return,
-                Command::Track(sources) => self.track(sources),
-                Command::Read(ids) => {
-                    let ids = ids.unwrap_or_else(|| self.readers.keys().cloned().collect());
-                    for id in ids {
-                        self.read(&id);
-                    }
+        while let Ok(first) = receiver.recv() {
+            let batch = std::iter::once(first).chain(std::iter::from_fn(|| receiver.try_recv().ok()));
+            let Some(steps) = plan(batch) else { return };
+            for step in steps {
+                if self.stopped.load(Ordering::SeqCst) {
+                    return;
                 }
-                Command::FileChanged(path) => {
-                    let ids: Vec<String> = self
-                        .readers
-                        .iter()
-                        .filter(|(_, reader)| {
-                            reader.watched_path().is_some_and(|watched| is_related(&path, &watched))
-                        })
-                        .map(|(id, _)| id.clone())
-                        .collect();
-                    for id in ids {
-                        self.read(&id);
+                match step {
+                    Step::Track(sources) => self.track(sources),
+                    Step::Read { all, ids, paths } => {
+                        let ids: Vec<String> = self
+                            .readers
+                            .iter()
+                            .filter(|(id, reader)| {
+                                all || ids.contains(*id)
+                                    || reader
+                                        .watched_path()
+                                        .is_some_and(|watched| paths.iter().any(|p| is_related(p, &watched)))
+                            })
+                            .map(|(id, _)| id.clone())
+                            .collect();
+                        for id in ids {
+                            if self.stopped.load(Ordering::SeqCst) {
+                                return;
+                            }
+                            self.read(&id);
+                        }
                     }
                 }
             }
@@ -339,15 +355,69 @@ impl Worker {
                 let _ = watcher.unwatch(directory);
             }
         }
-        for directory in wanted.keys() {
-            if !self.watched.contains_key(directory)
-                && let Err(error) = watcher.watch(directory, RecursiveMode::NonRecursive)
-            {
-                tracing::debug!(?error, ?directory, "cannot watch transcript directory; polling covers it");
+        let mut watched = HashMap::new();
+        for (directory, files) in wanted {
+            // Only directories watched successfully count, so a failed watch (a folder that
+            // does not exist yet) is tried again on the next read; the refresh covers it
+            // meanwhile.
+            if self.watched.contains_key(&directory) {
+                watched.insert(directory, files);
+                continue;
+            }
+            match watcher.watch(&directory, RecursiveMode::NonRecursive) {
+                Ok(()) => {
+                    watched.insert(directory, files);
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        ?error,
+                        ?directory,
+                        "cannot watch transcript directory; polling covers it"
+                    );
+                }
             }
         }
-        self.watched = wanted;
+        self.watched = watched;
     }
+}
+
+/// One step of a batch of commands: a `Track`, or every read the commands between two tracks
+/// asked for, done once per reader.
+#[derive(Debug, PartialEq)]
+enum Step {
+    Track(HashMap<String, AgentTranscriptSource>),
+    Read { all: bool, ids: BTreeSet<String>, paths: BTreeSet<PathBuf> },
+}
+
+/// Folds the queued commands into steps, in order: reads queued while a reader is already due
+/// to be read are skipped (Swift dropped a read request while that follower was queued or
+/// reading), so a streaming agent's events and the 1 s refresh never pile up. `None` once a
+/// `Stop` arrives.
+fn plan(commands: impl IntoIterator<Item = Command>) -> Option<Vec<Step>> {
+    let mut steps = Vec::new();
+    for command in commands {
+        let read = match command {
+            Command::Stop => return None,
+            Command::Track(sources) => {
+                steps.push(Step::Track(sources));
+                continue;
+            }
+            other => other,
+        };
+        if !matches!(steps.last(), Some(Step::Read { .. })) {
+            steps.push(Step::Read { all: false, ids: BTreeSet::new(), paths: BTreeSet::new() });
+        }
+        let Some(Step::Read { all, ids, paths }) = steps.last_mut() else { continue };
+        match read {
+            Command::Read(None) => *all = true,
+            Command::Read(Some(more)) => ids.extend(more),
+            Command::FileChanged(path) => {
+                paths.insert(path);
+            }
+            Command::Track(_) | Command::Stop => {}
+        }
+    }
+    Some(steps)
 }
 
 fn make_watcher(sender: Sender<Command>) -> Option<RecommendedWatcher> {
@@ -366,6 +436,8 @@ fn make_watcher(sender: Sender<Command>) -> Option<RecommendedWatcher> {
 }
 
 /// `changed` is the watched file or one of its SQLite companions (`-wal`, `-shm`, `-journal`).
+/// Folders are compared resolved as well: watchers report real paths (macOS's FSEvents says
+/// `/private/var/…` for a file under `/var/…`).
 fn is_related(changed: &Path, watched: &Path) -> bool {
     if changed == watched {
         return true;
@@ -373,8 +445,17 @@ fn is_related(changed: &Path, watched: &Path) -> bool {
     let (Some(changed_name), Some(watched_name)) = (changed.file_name(), watched.file_name()) else {
         return false;
     };
-    changed.parent() == watched.parent()
-        && changed_name.to_string_lossy().starts_with(watched_name.to_string_lossy().as_ref())
+    if !changed_name.to_string_lossy().starts_with(watched_name.to_string_lossy().as_ref()) {
+        return false;
+    }
+    let (Some(changed_folder), Some(watched_folder)) = (changed.parent(), watched.parent()) else {
+        return false;
+    };
+    changed_folder == watched_folder
+        || match (changed_folder.canonicalize(), watched_folder.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
 }
 
 /// One JSON Lines transcript being followed. Only the store's worker touches it.
@@ -649,4 +730,40 @@ fn newest_file(root: &Path, matches: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
         }
     }
     newest.map(|(path, _)| path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_reads_collapse_into_one_read_per_reader_between_tracks() {
+        let mut commands = vec![Command::Read(Some(vec!["a".into()]))];
+        for _ in 0..50 {
+            commands.push(Command::FileChanged(PathBuf::from("/t/x.db-wal")));
+            commands.push(Command::Read(Some(vec!["a".into(), "b".into()])));
+        }
+        commands.push(Command::Track(HashMap::new()));
+        commands.push(Command::Read(None));
+        commands.push(Command::Read(None));
+
+        let steps = plan(commands).expect("no stop");
+        assert_eq!(
+            steps,
+            vec![
+                Step::Read {
+                    all: false,
+                    ids: BTreeSet::from(["a".to_owned(), "b".to_owned()]),
+                    paths: BTreeSet::from([PathBuf::from("/t/x.db-wal")]),
+                },
+                Step::Track(HashMap::new()),
+                Step::Read { all: true, ids: BTreeSet::new(), paths: BTreeSet::new() },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_stop_ends_the_batch_without_running_what_was_queued_before_it() {
+        assert_eq!(plan([Command::Read(None), Command::Stop, Command::Read(None)]), None);
+    }
 }

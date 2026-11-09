@@ -481,3 +481,15 @@ fn the_page_column_caps_at_768_and_narrows_with_the_card() {
     assert_eq!(page_width(900.0 - CARD_MARGIN * 2.0), 900.0 - 64.0 - 240.0 - 48.0);
     assert_eq!(page_width(400.0), 320.0);
 }
+
+#[gpui::test]
+fn editing_the_resize_step_clamps_and_writes_a_number(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    h.view.update_in(cx, |view, window, cx| {
+        view.resize_input.update(cx, |state, cx| state.set_value("40", window, cx));
+        view.commit_resize_step(window, cx);
+    });
+    assert_eq!(h.store.keybindings().resize_tick_percent, 25.0);
+    assert!(file_text(&h.store).contains("\"resizeTickPercent\": 25"), "{}", file_text(&h.store));
+    assert!(h.store.issues().is_empty());
+}

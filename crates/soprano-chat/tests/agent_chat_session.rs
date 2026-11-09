@@ -716,3 +716,46 @@ fn the_chat_reports_status_conversation_and_title_to_its_tab() {
     assert_eq!(events.borrow().last(), Some(&AgentChatEvent::status(AgentStatus::Stopped)));
     assert_eq!(session.thread().turns.last().map(|t| t.status), Some(TurnStatus::Interrupted));
 }
+
+#[test]
+fn a_waker_set_after_the_agent_started_is_still_woken() {
+    let (mut session, agent, _) = started();
+    let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = Arc::clone(&woken);
+    session.set_waker(move || {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    agent.send(json!({"sessionUpdate": "session_info_update", "title": "Hi"}));
+    assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn starting_while_an_agent_runs_retires_it_and_waits_for_it_to_exit() {
+    let first = FakeAgent::default();
+    let second = FakeAgent::default();
+    let peers = Rc::new(RefCell::new(vec![first.clone(), second.clone()]));
+    let factory_peers = Rc::clone(&peers);
+    let mut session = AgentChatSession::with_peer_factory(
+        launch(),
+        Box::new(move |_| Box::new(factory_peers.borrow_mut().remove(0))),
+    );
+    session.start(None);
+    settle(&mut session);
+    assert_eq!(session.phase(), &ChatPhase::Ready);
+
+    session.start(None);
+    assert!(first.is_terminated());
+    let id = first
+        .ask("session/request_permission", json!({"options": [{"optionId": "a", "kind": "allow_once"}]}));
+    settle(&mut session);
+    assert_eq!(
+        first.answer(&id),
+        Some(Err(JsonRpcError::new(JsonRpcError::INTERNAL_ERROR, "Session closed")))
+    );
+    assert!(second.requests().is_empty());
+
+    first.exit(0, "");
+    settle(&mut session);
+    assert_eq!(session.phase(), &ChatPhase::Ready);
+    assert_eq!(second.methods(), vec!["initialize", "session/new"]);
+}

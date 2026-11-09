@@ -127,3 +127,59 @@ fn the_store_reports_a_tracked_transcript_and_picks_up_what_it_gains() {
     assert!(!store.is_tracking("pane:tab"));
     assert_eq!(store.timeline("pane:tab"), None);
 }
+
+#[test]
+fn closing_the_store_does_not_wait_for_queued_reads() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let file = directory.path().join("session.jsonl");
+    let line = "{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{\"role\":\"user\",\"content\":\"One\"}}\n";
+    std::fs::write(&file, line.repeat(20_000)).expect("write");
+    let store = AgentTranscriptStore::with_home(directory.path().to_path_buf());
+    let sources: HashMap<String, AgentTranscriptSource> = (0..20)
+        .map(|i| {
+            let source = AgentTranscriptSource::new("omp", Some(&conversation(&format!("s{i}"), &file)))
+                .expect("source");
+            (format!("entry-{i}"), source)
+        })
+        .collect();
+    store.track(sources);
+    for _ in 0..1_000 {
+        store.refresh();
+    }
+    let started = std::time::Instant::now();
+    drop(store);
+    assert!(started.elapsed() < Duration::from_millis(100), "drop took {:?}", started.elapsed());
+}
+
+#[test]
+fn a_transcript_folder_that_appears_later_is_watched_once_it_exists() {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let folder = directory.path().join("later");
+    let file = folder.join("session.jsonl");
+    let store = AgentTranscriptStore::with_home(directory.path().to_path_buf());
+    let (changed, changes) = mpsc::channel::<String>();
+    store.set_on_change(move |id| {
+        let _ = changed.send(id.to_owned());
+    });
+    let source = AgentTranscriptSource::new("omp", Some(&conversation("sess-4", &file))).expect("source");
+    store.track(HashMap::from([("pane:tab".to_owned(), source)]));
+    // The folder is missing, so watching it fails; the next read tries again.
+    std::thread::sleep(Duration::from_millis(200));
+
+    std::fs::create_dir_all(&folder).expect("folder");
+    std::fs::write(&file, "{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"message\":{\"role\":\"user\",\"content\":\"One\"}}\n")
+        .expect("write");
+    store.refresh();
+    assert_eq!(changes.recv_timeout(Duration::from_secs(5)).ok().as_deref(), Some("pane:tab"));
+
+    // No refresh from here on: only the watch can report the append.
+    std::thread::sleep(Duration::from_millis(500));
+    use std::io::Write;
+    let mut handle = std::fs::OpenOptions::new().append(true).open(&file).expect("open");
+    handle
+        .write_all(b"{\"type\":\"message\",\"id\":\"u2\",\"parentId\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"Two\"}}\n")
+        .expect("append");
+    drop(handle);
+    assert_eq!(changes.recv_timeout(Duration::from_secs(10)).ok().as_deref(), Some("pane:tab"));
+    assert_eq!(store.timeline("pane:tab").map(|t| t.items.len()), Some(2));
+}

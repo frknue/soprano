@@ -226,3 +226,17 @@ fn rewinding_shows_only_the_newer_branch() {
         vec![prompt("Start"), reply("Ready"), prompt("Try plan B instead"), reply("Plan B done")]
     );
 }
+
+#[test]
+fn a_deeply_nested_record_still_decodes_and_keeps_the_history_before_it() {
+    let nested = format!("{}1{}", "[".repeat(300), "]".repeat(300));
+    let deep = format!(
+        r#"{{"type":"assistant","uuid":"r1","parentUuid":"u1","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t1","name":"Custom","input":{{"deep":{nested}}}}}]}}}}"#
+    );
+    let timeline = timeline(&[
+        r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Go"}}"#,
+        &deep,
+        r#"{"type":"assistant","uuid":"r2","parentUuid":"r1","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]}}"#,
+    ]);
+    assert_eq!(timeline.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), vec!["u1", "t1", "r2"]);
+}

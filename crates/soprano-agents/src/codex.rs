@@ -382,8 +382,8 @@ pub fn first_cmd_literal(source: &str) -> Option<String> {
     Some(result)
 }
 
+/// A fresh id, like Swift's `UUID().uuidString`, so two aborted turns without an id never share
+/// one (and one "Interrupted" notice never replaces the other).
 fn random_id() -> String {
-    let nanos =
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    format!("{nanos:032X}")
+    uuid::Uuid::new_v4().to_string().to_uppercase()
 }

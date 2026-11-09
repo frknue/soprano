@@ -356,3 +356,16 @@ fn omp_write_and_hashline_edit_previews_show_their_code_before_the_result() {
     assert_eq!(relative_path("/private/tmp/x/a.txt", Some("/tmp/x")), "a.txt");
     assert_eq!(relative_path("/tmp/x", Some("/tmp/x")), ".");
 }
+
+#[test]
+fn tool_input_reads_as_foundation_pretty_prints_it() {
+    let args = serde_json::json!({"path": "/r/a.swift", "edits": [{"op": "create", "n": 2.0}], "empty": [], "url": "a/b"});
+    assert_eq!(
+        input_text(&args).as_deref(),
+        Some(
+            "{\n  \"edits\" : [\n    {\n      \"n\" : 2,\n      \"op\" : \"create\"\n    }\n  ],\n  \"empty\" : [],\n  \"path\" : \"/r/a.swift\",\n  \"url\" : \"a/b\"\n}"
+        )
+    );
+    assert_eq!(input_text(&serde_json::json!({})), None);
+    assert_eq!(argument_path(&serde_json::json!({"input": "[#1A2B]\nPUT 1:"})).as_deref(), Some("1A2B"));
+}

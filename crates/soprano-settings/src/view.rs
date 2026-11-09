@@ -424,44 +424,40 @@ impl SettingsView {
         self.reload(window, cx);
     }
 
+    /// Reads a number field, clamps it into `range` and shows the result; returns the value
+    /// when it differs from `current` (text that is not a number reverts to `current`).
     fn commit_number(
         &mut self,
         input: Entity<InputState>,
         range: std::ops::RangeInclusive<i64>,
         current: i64,
-        path: &[&str],
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<i64> {
         let text = input.read(cx).value().to_string();
-        match general::committed_integer(&text, &range) {
-            Some(value) => {
-                input.update(cx, |state, cx| state.set_value(value.to_string(), window, cx));
-                if value != current {
-                    self.write(value, path, window, cx);
-                }
-            }
-            None => input.update(cx, |state, cx| state.set_value(current.to_string(), window, cx)),
-        }
+        let shown = general::committed_integer(&text, &range);
+        let value = shown.unwrap_or(current);
+        input.update(cx, |state, cx| state.set_value(value.to_string(), window, cx));
+        shown.filter(|value| *value != current)
     }
 
     pub(crate) fn commit_prefix_timeout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.snapshot.resolved.keybindings.prefix_timeout_ms;
         let input = self.timeout_input.clone();
-        self.commit_number(
-            input,
-            Limits::PREFIX_TIMEOUT_MS,
-            current,
-            general::PREFIX_TIMEOUT_KEY,
-            window,
-            cx,
-        );
+        if let Some(value) = self.commit_number(input, Limits::PREFIX_TIMEOUT_MS, current, window, cx) {
+            self.write(value, general::PREFIX_TIMEOUT_KEY, window, cx);
+        }
     }
 
+    /// `resizeTickPercent` is a float key, so it goes through `write_number`, which refuses
+    /// non-finite values with an issue.
     pub(crate) fn commit_resize_step(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.snapshot.resolved.keybindings.resize_tick_percent as i64;
         let input = self.resize_input.clone();
-        self.commit_number(input, Limits::RESIZE_TICK_PERCENT, current, general::RESIZE_STEP_KEY, window, cx);
+        if let Some(value) = self.commit_number(input, Limits::RESIZE_TICK_PERCENT, current, window, cx) {
+            self.store.write_number(value as f64, general::RESIZE_STEP_KEY);
+            self.reload(window, cx);
+        }
     }
 
     // MARK: - Recording

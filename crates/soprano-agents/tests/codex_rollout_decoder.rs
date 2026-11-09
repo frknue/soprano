@@ -208,3 +208,11 @@ fn a_finished_command_sharing_its_call_id_with_the_provisional_call_survives_the
     assert_eq!(call.state, ToolCallState::Succeeded);
     assert_eq!(call.output.as_deref(), Some("clean"));
 }
+
+#[test]
+fn aborted_turns_without_an_id_each_keep_their_own_notice() {
+    let aborted = r#"{"timestamp":"2026-10-12T09:00:06.000Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
+    let result = items(&[aborted.to_owned(), aborted.to_owned()]);
+    assert_eq!(result.len(), 2);
+    assert_ne!(result[0].id, result[1].id);
+}

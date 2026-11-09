@@ -94,7 +94,11 @@ impl OpenCodeTranscriptReader {
     pub const BUSY_TIMEOUT: Duration = Duration::from_millis(2_000);
 
     pub fn new(source: AgentTranscriptSource, home: &Path) -> Self {
-        Self::with_environment(source, home, std::env::vars().collect())
+        // `vars()` panics on a non-UTF-8 variable; such variables are skipped.
+        let environment = std::env::vars_os()
+            .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+            .collect();
+        Self::with_environment(source, home, environment)
     }
 
     /// A reader that takes `XDG_DATA_HOME` from `environment` instead of the process.
