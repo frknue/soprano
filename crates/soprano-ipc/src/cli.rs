@@ -2,6 +2,7 @@
 //! browser, agent-event, pane navigation, then the launch decision.
 
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
@@ -90,8 +91,43 @@ impl CliHost for SystemHost {
 
 /// Runs the CLI subcommand `args` names (`args[0]` is the program), printing its output. Text,
 /// exit codes and help match the Swift app.
-pub fn run_cli(args: &[String], env: &HashMap<String, String>) -> CliOutcome {
-    run_cli_with(args, env, &mut SystemHost)
+///
+/// Accepts anything string-like, including `OsString` straight from `std::env::args_os()` and
+/// `std::env::vars_os()`: a value that isn't valid Unicode is converted lossily (invalid bytes
+/// become U+FFFD) instead of panicking, as Swift's `CommandLine.arguments` never traps either.
+/// The app's `main` calls [`run_cli_from_process`], which does exactly that.
+pub fn run_cli<A, K, V>(
+    args: impl IntoIterator<Item = A>,
+    env: impl IntoIterator<Item = (K, V)>,
+) -> CliOutcome
+where
+    A: AsRef<OsStr>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let (args, env) = lossy_invocation(args, env);
+    run_cli_with(&args, &env, &mut SystemHost)
+}
+
+/// [`run_cli`] with this process's `args_os()` and `vars_os()`.
+pub fn run_cli_from_process() -> CliOutcome {
+    run_cli(std::env::args_os(), std::env::vars_os())
+}
+
+/// Converts an OS-level invocation to the `String` form the parsers use, lossily.
+pub fn lossy_invocation<A, K, V>(
+    args: impl IntoIterator<Item = A>,
+    env: impl IntoIterator<Item = (K, V)>,
+) -> (Vec<String>, HashMap<String, String>)
+where
+    A: AsRef<OsStr>,
+    K: AsRef<OsStr>,
+    V: AsRef<OsStr>,
+{
+    let lossy = |value: &OsStr| value.to_string_lossy().into_owned();
+    let args = args.into_iter().map(|arg| lossy(arg.as_ref())).collect();
+    let env = env.into_iter().map(|(key, value)| (lossy(key.as_ref()), lossy(value.as_ref()))).collect();
+    (args, env)
 }
 
 pub fn run_cli_with(args: &[String], env: &HashMap<String, String>, host: &mut dyn CliHost) -> CliOutcome {

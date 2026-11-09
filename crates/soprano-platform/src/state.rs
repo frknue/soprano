@@ -139,19 +139,23 @@ impl Inner {
     fn flush(&self) {
         let Some(path) = &self.path else { return };
         let Ok(bytes) = serde_json::to_vec_pretty(&self.values) else { return };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let _ = write_atomically(path, &bytes);
     }
 }
 
 /// Writes `bytes` to a sibling temp file and renames it over `path`, so readers never see a
-/// half-written file.
+/// half-written file. The folder must exist (a save into a deleted folder fails, as Foundation's
+/// atomic write does); the temp file is removed when the write or rename fails.
 pub fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
+    let result = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 #[cfg(test)]

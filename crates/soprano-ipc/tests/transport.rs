@@ -72,6 +72,121 @@ fn sending_to_an_app_that_is_not_running_fails() {
     assert!(send(&unique_endpoint(), &browser_request()).is_err());
 }
 
+#[test]
+fn a_reply_far_larger_than_the_request_cap_still_arrives_whole() {
+    let (server, incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    let big = "x".repeat(16 * 1024 * 1024);
+    let expected = big.clone();
+    let app = thread::spawn(move || {
+        let message = incoming.recv_timeout(Duration::from_secs(5)).expect("request");
+        message.reply.expect("replier").send(&Response::success(big)).expect("reply");
+    });
+    let response = send(server.endpoint(), &browser_request()).expect("send");
+    assert_eq!(response, Some(Response::success(expected)));
+    app.join().expect("app thread");
+}
+
+#[test]
+fn an_oversized_request_gets_an_error_reply_instead_of_a_timeout() {
+    let (server, incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    let request = Request::Browser {
+        command: "eval".into(),
+        arguments: vec!["y".repeat(soprano_ipc::transport::MAX_REQUEST_BYTES + 1)],
+        target_pane_id: None,
+        caller_pane_id: None,
+        caller_tab_id: None,
+    };
+    let started = std::time::Instant::now();
+    let response = send(server.endpoint(), &request).expect("send");
+    assert_eq!(response, Some(Response::failure(soprano_ipc::transport::REQUEST_TOO_LARGE)));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(incoming.try_recv().is_err());
+}
+
+#[test]
+fn a_line_that_does_not_decode_gets_an_error_reply() {
+    use interprocess::local_socket::prelude::*;
+    use interprocess::local_socket::{GenericFilePath, Stream};
+    use std::io::{BufRead, BufReader, Write};
+
+    let (server, _incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    let name = server.endpoint().as_str().to_fs_name::<GenericFilePath>().expect("name");
+    let mut stream = Stream::connect(name).expect("connect");
+    stream.write_all(b"{not json}\n").expect("write");
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line).expect("read");
+    let response: Response = serde_json::from_str(&line).expect("response");
+    assert_eq!(response, Response::failure(soprano_ipc::transport::REQUEST_UNREADABLE));
+}
+
+#[test]
+fn a_client_that_never_writes_does_not_stop_other_requests() {
+    use interprocess::local_socket::prelude::*;
+    use interprocess::local_socket::{GenericFilePath, Stream};
+
+    let (server, incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    let name = server.endpoint().as_str().to_fs_name::<GenericFilePath>().expect("name");
+    let _silent = Stream::connect(name).expect("connect");
+    let request = Request::NavigatePane {
+        pane_id: "p".into(),
+        tab_id: "t".into(),
+        direction: NavigationDirection::Down,
+    };
+    send(server.endpoint(), &request).expect("send");
+    assert_eq!(incoming.recv_timeout(Duration::from_secs(5)).expect("request").request, request);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_socket_directory_that_is_not_private_to_this_user_is_refused() {
+    use soprano_ipc::transport::verify_private_dir;
+    use std::os::unix::fs::PermissionsExt;
+
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    let root = tempfile::tempdir().expect("dir");
+    let private = root.path().join("private");
+    std::fs::create_dir(&private).expect("mkdir");
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    assert!(verify_private_dir(&private, uid).is_ok());
+    // Someone else's directory.
+    assert!(verify_private_dir(&private, uid.wrapping_add(1)).is_err());
+    // A symlink to a private directory.
+    let link = root.path().join("link");
+    std::os::unix::fs::symlink(&private, &link).expect("symlink");
+    assert!(verify_private_dir(&link, uid).is_err());
+    // Readable by others.
+    let open = root.path().join("open");
+    std::fs::create_dir(&open).expect("mkdir");
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    assert!(verify_private_dir(&open, uid).is_err());
+    // A plain file.
+    let file = root.path().join("file");
+    std::fs::write(&file, b"").expect("write");
+    assert!(verify_private_dir(&file, uid).is_err());
+}
+
+#[test]
+fn non_unicode_arguments_and_environment_are_converted_instead_of_panicking() {
+    #[cfg(unix)]
+    let bad = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(vec![b'n', 0xE9, b'.', b't', b'x', b't'])
+    };
+    #[cfg(windows)]
+    let bad = {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0x6E, 0xD800, 0x2E])
+    };
+    let (args, env) = soprano_ipc::cli::lossy_invocation(
+        [std::ffi::OsString::from("soprano"), bad.clone()],
+        [(std::ffi::OsString::from("LATIN1"), bad)],
+    );
+    assert_eq!(args.len(), 2);
+    assert!(args[1].contains('\u{FFFD}'));
+    assert!(env["LATIN1"].contains('\u{FFFD}'));
+}
+
 #[cfg(unix)]
 #[test]
 fn the_socket_lives_in_a_short_per_user_directory_and_is_removed_on_drop() {
@@ -80,9 +195,14 @@ fn the_socket_lives_in_a_short_per_user_directory_and_is_removed_on_drop() {
     assert!(endpoint.as_str().ends_with("/4294967295.sock"));
     // SAFETY: getuid has no preconditions.
     let uid_dir = format!("soprano-{}", unsafe { libc::getuid() });
-    assert!(endpoint.as_str().contains(&uid_dir));
+    let xdg = cfg!(target_os = "linux") && std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|d| !d.is_empty());
+    assert!(xdg || endpoint.as_str().contains(&uid_dir));
+    let dir = PathBuf::from(endpoint.as_str()).parent().expect("dir").to_path_buf();
 
     let (server, _incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    // SAFETY: getuid has no preconditions.
+    soprano_ipc::transport::verify_private_dir(&dir, unsafe { libc::getuid() }).expect("private dir");
+
     let path = PathBuf::from(server.endpoint().as_str());
     assert!(path.exists());
     drop(server);
@@ -294,4 +414,12 @@ fn requests_serialize_as_tagged_json_lines() {
         serde_json::to_value(Response::failure("x")).expect("json"),
         serde_json::json!({"status": "error", "error": "x"})
     );
+}
+
+#[test]
+fn run_cli_accepts_both_the_string_and_os_string_forms_main_passes() {
+    // Type-checks only: `main` may pass collected `String`s or `args_os()`/`vars_os()` directly.
+    let _strings: fn(&Vec<String>, &HashMap<String, String>) -> CliOutcome =
+        |args, env| soprano_ipc::run_cli(args, env);
+    let _os: fn() -> CliOutcome = || soprano_ipc::run_cli(std::env::args_os(), std::env::vars_os());
 }

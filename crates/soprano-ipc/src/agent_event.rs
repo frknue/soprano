@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use serde_json::{Map, Value};
 use soprano_types::{AgentConversation, AgentWaitingReason};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::protocol::{AgentEvent, AgentEventState, Request};
 
@@ -117,7 +118,7 @@ pub fn agent_event_request(
     let message = payloads
         .iter()
         .find_map(|payload| agent_message_text(payload))
-        .map(|message| message.chars().take(FULL_MESSAGE_LIMIT).collect());
+        .map(|message| message.graphemes(true).take(FULL_MESSAGE_LIMIT).collect());
     let reason = if state == AgentEventState::NeedsInput {
         reason.or_else(|| payloads.iter().find_map(|payload| waiting_reason(payload)))
     } else {
@@ -219,16 +220,17 @@ pub fn waiting_reason(payload: &str) -> Option<AgentWaitingReason> {
     None
 }
 
-/// Agent output is multi-line and unbounded; a banner is one line.
+/// Agent output is multi-line and unbounded; a banner is one line. The limit counts user-visible
+/// characters (grapheme clusters, as Swift's `String.count`), so a flag or emoji is never cut.
 pub fn summarize(raw: &str) -> Option<String> {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return None;
     }
-    if collapsed.chars().count() <= MESSAGE_LIMIT {
+    if collapsed.graphemes(true).count() <= MESSAGE_LIMIT {
         return Some(collapsed);
     }
-    let clipped: String = collapsed.chars().take(MESSAGE_LIMIT).collect();
+    let clipped: String = collapsed.graphemes(true).take(MESSAGE_LIMIT).collect();
     Some(format!("{}…", clipped.trim()))
 }
 
@@ -293,26 +295,29 @@ pub mod process {
         None
     }
 
-    /// The parent pid and short executable name (at most 16 bytes on macOS, as `p_comm`).
+    /// The parent pid and short executable name (at most 16 bytes, as `p_comm`). The short info
+    /// flavor is readable for every process, like Swift's `sysctl(KERN_PROC_PID)`; the full
+    /// `PROC_PIDTBSDINFO` is refused for processes of other users.
     #[cfg(target_os = "macos")]
     pub fn parent_and_name(pid: i32) -> Option<(i32, String)> {
-        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-        // SAFETY: `info` is a correctly sized, writable `proc_bsdinfo`.
+        // SAFETY: `proc_bsdshortinfo` is plain old data; all-zero is a valid value.
+        let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int;
+        // SAFETY: `info` is a correctly sized, writable `proc_bsdshortinfo`.
         let written = unsafe {
             libc::proc_pidinfo(
                 pid,
-                libc::PROC_PIDTBSDINFO,
+                libc::PROC_PIDT_SHORTBSDINFO,
                 0,
-                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                (&mut info as *mut libc::proc_bsdshortinfo).cast(),
                 size,
             )
         };
         if written != size {
             return None;
         }
-        let bytes: Vec<u8> = info.pbi_comm.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
-        Some((info.pbi_ppid as i32, String::from_utf8_lossy(&bytes).into_owned()))
+        let bytes: Vec<u8> = info.pbsi_comm.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
+        Some((info.pbsi_ppid as i32, String::from_utf8_lossy(&bytes).into_owned()))
     }
 
     #[cfg(target_os = "linux")]
@@ -580,6 +585,15 @@ mod tests {
     }
 
     #[test]
+    fn the_banner_limit_counts_user_visible_characters_and_never_splits_a_flag() {
+        let flags = "🇩🇪".repeat(MESSAGE_LIMIT + 5);
+        let summary = summarize(&flags).expect("summary");
+        assert_eq!(summary, format!("{}…", "🇩🇪".repeat(MESSAGE_LIMIT)));
+        let exact = "👍🏽".repeat(MESSAGE_LIMIT);
+        assert_eq!(summarize(&exact), Some(exact));
+    }
+
+    #[test]
     fn the_body_no_longer_quotes_the_agent_so_the_banner_stays_one_clean_line() {
         assert_eq!(
             body(
@@ -669,5 +683,14 @@ mod tests {
     fn the_current_process_table_names_this_test_runners_parent() {
         let parent = process::parent_id().expect("parent pid");
         assert!(process::parent_and_name(parent).is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn processes_of_other_users_are_readable_like_swifts_sysctl() {
+        // launchd runs as root; the full BSD info flavor is refused for it, the short one is not.
+        let (parent, name) = process::parent_and_name(1).expect("launchd");
+        assert_eq!(parent, 0);
+        assert_eq!(name, "launchd");
     }
 }
