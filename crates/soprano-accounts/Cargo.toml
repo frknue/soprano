@@ -6,3 +6,25 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+soprano-platform = { path = "../soprano-platform" }
+serde.workspace = true
+serde_json.workspace = true
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
+regex = "1.13.1"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+ureq = "3"
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
+thiserror = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+junction = "1"
+
+[dev-dependencies]
+tempfile = "3"
