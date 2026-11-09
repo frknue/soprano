@@ -4,15 +4,17 @@
 
 # Soprano
 
-**A native macOS tiling multiplexer for running a room full of AI coding agents.**
+**A native tiling multiplexer for running a room full of AI coding agents — on macOS, Linux
+and Windows.**
 
 Codex, Claude Code, and OpenCode side by side in real GPU-rendered terminals — every
-pane says what its agent is doing, and macOS tells you which one is waiting on you.
+pane says what its agent is doing, and your desktop tells you which one is waiting on you.
 
 <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-111111?logo=apple&logoColor=white">
-<img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
-<img alt="AppKit, programmatic" src="https://img.shields.io/badge/AppKit-programmatic-2b6cb0">
-<img alt="libghostty" src="https://img.shields.io/badge/terminal-libghostty-8f3f71">
+<img alt="Linux" src="https://img.shields.io/badge/Linux-x86__64%20%7C%20arm64-111111?logo=linux&logoColor=white">
+<img alt="Windows 10+" src="https://img.shields.io/badge/Windows-10%2B-111111?logo=windows&logoColor=white">
+<img alt="Rust" src="https://img.shields.io/badge/Rust-GPUI-b7410e?logo=rust&logoColor=white">
+<img alt="libghostty-vt" src="https://img.shields.io/badge/terminal-libghostty--vt-8f3f71">
 <img alt="MIT" src="https://img.shields.io/badge/license-MIT-b8bb26">
 
 **[frknue.github.io/soprano-site](https://frknue.github.io/soprano-site/)** ·
@@ -53,18 +55,22 @@ right now?*
   output scraping.
 - **Notifications say what happened, and where.** `Claude Code needs approval` over the
   conversation's name; clicking one activates Soprano and focuses that exact tab.
-- **A real terminal.** Every pane is a [libghostty](https://github.com/ghostty-org/ghostty)
-  surface hosted in AppKit. No Electron, no web view, no reimplemented VT parser.
+- **A real terminal.** Every pane runs [libghostty-vt](https://github.com/ghostty-org/ghostty),
+  Ghostty's terminal core, drawn on the GPU with [GPUI](https://www.gpui.rs). No Electron,
+  no web view, no reimplemented VT parser.
 - **Tabs.** Every window holds a row of tabs, each with its own split layout, so one
   window can carry several complete layouts while every agent in them keeps running.
-- **A browser your agents can drive.** `⌘B` splits a WebKit pane;
-  `"$SOPRANO_BIN" browser click @e1` works from inside any terminal.
+- **A browser your agents can drive.** `⌘B` splits a native web view pane (WebKit on
+  macOS and Linux, WebView2 on Windows); `"$SOPRANO_BIN" browser click @e1` works from
+  inside any terminal.
 - **Documentation beside the work.** Open a local Markdown file in a themed reader that
   follows edits as an agent writes them.
 - **Layouts that come back.** The last workspace restores on launch, and `⇧⌘S` saves
   named sessions.
 
 ## Install
+
+### macOS
 
 Install the latest universal build with Homebrew:
 
@@ -83,52 +89,61 @@ Soprano into **Applications**.
 > **Open Anyway** for Soprano, then confirm **Open**. Apple documents this
 > [one-time override](https://support.apple.com/guide/mac-help/mh40616/mac).
 
-**Requirements:** macOS 14 Sonoma or newer on Apple Silicon or Intel. The release
-contains Soprano, libghostty, and Ghostty's runtime resources; installing it does not
-require Xcode, Swift, Zig, Ghostty, or a source checkout.
+**Requirements:** macOS 14 Sonoma or newer on Apple Silicon or Intel.
+
+### Linux
+
+Download `soprano-<version>-linux-<arch>.tar.gz` (x86_64 or aarch64) from
+[GitHub Releases](https://github.com/frknue/soprano/releases/latest) and unpack it into a
+prefix, for example `~/.local`:
+
+```bash
+tar -xzf soprano-*-linux-x86_64.tar.gz -C ~/.local
+```
+
+That installs `bin/soprano`, its resources under `share/soprano`, and a desktop entry.
+Soprano needs a desktop session with Vulkan; the browser pane uses WebKitGTK
+(`libwebkit2gtk-4.1`) and runs under X11 or XWayland.
+
+### Windows
+
+Download `soprano-<version>-windows-x64.zip` from
+[GitHub Releases](https://github.com/frknue/soprano/releases/latest), unpack it anywhere,
+and run `soprano.exe`. Windows 10 1809 or newer; the browser pane uses the WebView2
+runtime that ships with Windows 11 and current Windows 10.
+
+Every release contains Soprano, libghostty-vt, and Ghostty's shell integration and
+terminfo; installing it does not require Rust, Zig, Ghostty, or a source checkout.
 
 <details>
 <summary><b>Build from source</b></summary>
 
-Homebrew Swift is required because the system CLT Swift has broken SPM. Full Xcode with
-the Metal Toolchain is required to compile libghostty. Packaging the web app also
-requires Node.js 22.19.0 or newer and npm.
+You need stable Rust (see `rust-toolchain.toml`), Zig 0.16 for libghostty-vt, and, to
+package the omp web app, Node.js 22.19.0 or newer with npm. Linux also needs the GPUI and
+WebKitGTK development packages listed in `.github/workflows/ci.yml`.
 
 ```bash
-brew install swift zig@0.15 node
-xcodebuild -downloadComponent MetalToolchain
-
+brew install zig@0.16 node            # macOS; elsewhere install Zig 0.16 from ziglang.org
 git clone --recurse-submodules https://github.com/frknue/soprano.git
 cd soprano
-
-PATH="/opt/homebrew/opt/zig@0.15/bin:$PATH" ./scripts/build-ghostty.sh
-./scripts/install.sh
+./scripts/prefetch-zig-deps.sh        # fetches Ghostty's Codeberg dependency over git
+cargo build --release -p soprano
 ```
 
-`lib/` is not tracked, so the Ghostty build is mandatory on a fresh clone. Repeat it
-when the ghostty submodule or a patch in `scripts/patches/` changes. The build applies
-Soprano's static-shader redraw fix and restores the upstream source afterward; an
-already-applied patch is left in place. This keeps custom shaders — including one set in
-your Ghostty config — change-driven instead of redrawing unchanged terminals on every
-display refresh.
+`crates/ghostty-sys` builds libghostty-vt from the `ghostty` submodule with Zig on the first
+build (it finds Homebrew's keg-only `zig@0.16`, or set `ZIG`). To move Ghostty, check out
+another commit in the submodule, run the prefetch script again, and commit the pin.
 
-To move Ghostty, hand the script a ref (`./scripts/build-ghostty.sh v1.3.1`) and commit
-the submodule pin: it refreshes the library, the C header, and the recorded version
-together, and `swift test` fails if they ever disagree. A patch conflict stops the
-build rather than silently omitting the fix. Ghostty requires the exact Zig version
-declared by `ghostty/build.zig.zon`; update the versioned Homebrew formula and `PATH`
-above when that declaration changes. Packaging also needs Ghostty's *runtime*
-resources (themes, shell
-integration, terminfo); the Ghostty build produces them, an installed
-`/Applications/Ghostty.app` works too, and `SOPRANO_GHOSTTY_RESOURCES_DIR` overrides
-both. Packaging says which source it used and warns when that source is a different
-Ghostty version than the library Soprano links.
+Install the result:
 
-`scripts/install.sh` puts the Homebrew toolchain on `PATH` itself, signs the bundle with a
-stable local identity so macOS keeps your notification permission across rebuilds, and
-replaces `/Applications/Soprano.app` **without** stopping a running instance — the
-update applies on the next launch. Install elsewhere with
-`SOPRANO_INSTALL_DIR="$HOME/Applications" ./scripts/install.sh`.
+- macOS: `./scripts/install.sh` builds a release, packages `Soprano.app`, signs it with a
+  stable local identity so macOS keeps your notification permission across rebuilds, and
+  replaces `/Applications/Soprano.app` **without** stopping a running instance — the
+  update applies on the next launch. Install elsewhere with
+  `SOPRANO_INSTALL_DIR="$HOME/Applications" ./scripts/install.sh`.
+- Linux: `./scripts/install-linux.sh` installs into `~/.local` (`SOPRANO_INSTALL_PREFIX`
+  picks another prefix).
+- Windows: `pwsh scripts/package-windows.ps1` writes the release zip to `dist\`.
 
 </details>
 
@@ -144,7 +159,7 @@ Launch Soprano, then:
 | `⌘4` | omp (Oh My Pi) starts in a new agent pane |
 | `⌘I` | omp opens as a chat beside the pane: the same agent as a conversation with a composer instead of a terminal |
 | `⌃H` `⌃J` `⌃K` `⌃L` | Move between panes — no prefix needed |
-| `⌘B` | A WebKit browser pane splits off to the right |
+| `⌘B` | A browser pane splits off to the right |
 | *drag a file from Finder onto a terminal* | Its shell-safe path is inserted at the cursor |
 | `⌃A` then `M` | Maximize the active pane, and again to restore it |
 | `⌃A` then `I` | Dive into that pane's private inner workspace; `O` comes back out |
@@ -152,7 +167,7 @@ Launch Soprano, then:
 | `⌃A` then `C` | Create a window inside the current session; `P` / `N` moves between its windows |
 | `⌃A` then `S` | Switch sessions while their terminals keep running |
 | *hold* `⌃` | The sidebar reveals its window and pane jump hints |
-| *switch away, let an agent finish* | macOS notification such as `Claude Code finished`, plus an attention outline on the pane |
+| *switch away, let an agent finish* | A desktop notification such as `Claude Code finished`, plus an attention outline on the pane |
 | `⌘P` | Command palette for everything above |
 
 ## Agents that report in
@@ -253,6 +268,15 @@ with its id; rebind one under `keybindings.bindings` in [`settings.json`](#setti
 prefix key, its timeout, and the resize step sit under **Settings ▸ General ▸ Keybindings**:
 click the prefix keycap (or focus it and press `Space`), then press the new
 key; `Esc` keeps the current one.
+
+The tables use macOS keys. On Linux and Windows, `⌘` means `Ctrl+Shift` (the convention
+terminal emulators use there, so plain `Ctrl` chords stay with the shell), `⇧⌘` means
+`Ctrl+Shift+Alt`, and `⌃⌘` means `Ctrl+Alt`; Settings, the command palette and the status
+bar show the real keys. `⌃` chords — the `⌃A` prefix, `⌃H/J/K/L`, `⌃1`…`⌃9`, `⌃Tab` — are
+`Ctrl` everywhere. Pane jump hints use `Alt+Shift` there, because `Ctrl+Shift`+letter is
+already every `⌘`+letter shortcut. Where two shortcuts land on the same keys, the first
+one in **Settings → Keyboard Shortcuts** wins (`⌘L`, toggle right sidebar, has no default
+there; bind one in `settings.json`).
 
 **Panes**
 
@@ -802,7 +826,8 @@ runtime dependency.
 ## In-app browser
 
 `⌘B`, the sidebar add menu, and **Open Browser** in the command palette split a native
-WebKit browser to the right of the active pane. Browser URLs and page titles are saved
+web view to the right of the active pane (WebKit on macOS, WebView2 on Windows, WebKitGTK
+on Linux). Browser URLs and page titles are saved
 with workspace sessions. Bare local development addresses such as `localhost:5173` use
 HTTP; normal hostnames use HTTPS, and other text is sent to web search.
 
@@ -829,7 +854,7 @@ Copy mode starts at the terminal cursor and keeps navigation keys out of the run
 shell or TUI. Move with `h/j/k/l` or the arrow keys, use `0`/`$` for line boundaries,
 `H/M/L` for viewport positions, `gg`/`G` for scrollback boundaries, and `Ctrl+U/D` or
 `Ctrl+B/F` for paging. Press `v` to begin a character selection or `Shift+V` to select
-whole lines, then `y` or Enter to copy it to the macOS clipboard and exit. Escape, `q`,
+whole lines, then `y` or Enter to copy it to the clipboard and exit. Escape, `q`,
 or `Ctrl+C` cancels. You can also select text with the mouse without leaving copy mode.
 Outside copy mode, `y` copies highlighted text too; with no selection, it types normally.
 

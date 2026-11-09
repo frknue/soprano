@@ -62,7 +62,8 @@ jobs:
             pkg-config clang libclang-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev mesa-vulkan-drivers libfontconfig-dev libfreetype-dev \
-            libdbus-1-dev libssl-dev
+            libdbus-1-dev libssl-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
 
       # bindgen's libclang: the runner image's LLVM.
       - name: Windows build dependencies
