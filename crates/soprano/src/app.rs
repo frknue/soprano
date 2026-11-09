@@ -49,6 +49,8 @@ pub fn run() {
         let keybindings = config.keybindings();
         soprano_ui::init(cx, &settings.theme_id, theme_appearance(settings.appearance));
         cx.bind_keys(soprano_term::default_key_bindings());
+        // Tab and Shift-Tab belong to terminals and the dashboard, not Root's focus traversal.
+        cx.bind_keys(crate::keyboard::tab_passthrough_bindings());
         soprano_browser::bind_keys(cx);
         let editor_keys = soprano_editor::editor::key_bindings(cx);
         let diff_keys = soprano_editor::diff_view::key_bindings(cx);

@@ -176,7 +176,8 @@ impl UnsavedEditors {
         Self { shown, dirty }
     }
 
-    /// Whether any open document has unsaved changes (quitting asks first).
+    /// Whether any open document has unsaved changes (a system quit on macOS asks first).
+    #[cfg(target_os = "macos")]
     pub fn has_unsaved(&self) -> bool {
         !self.dirty.is_empty()
     }
@@ -1154,7 +1155,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::cell::RefCell;
     use std::collections::BTreeMap;
 
@@ -1190,7 +1191,7 @@ mod tests {
         }
     }
 
-    fn context() -> LaunchContext {
+    pub(crate) fn context() -> LaunchContext {
         LaunchContext {
             soprano_bin: "/Applications/Soprano.app/Contents/MacOS/Soprano".into(),
             app_pid: 42,
