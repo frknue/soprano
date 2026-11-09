@@ -24,6 +24,7 @@ use soprano_chat_ui::{ActivityLine, TimelineSource, TimelineView, TranscriptSour
 use soprano_editor::rich::RichText;
 use soprano_model::{TerminalTarget, Workspace};
 use soprano_text::context_line::{ContextLine, ContextPart};
+use soprano_types::AgentStatus;
 use soprano_ui::button::{Button, ButtonSize};
 use soprano_ui::chrome::{ScrollList, SectionHeader, SidebarRow};
 use soprano_ui::controls::SegmentedControl;
@@ -140,8 +141,9 @@ pub struct AgentDashboard {
     /// The live terminal text, focused by a click into it.
     terminal_focus: FocusHandle,
     reply: Entity<InputState>,
-    /// The last reply could not be delivered.
-    reply_failed: bool,
+    /// The last reply could not be delivered: the status and terminal availability it failed
+    /// under; either changing clears it.
+    reply_failed: Option<(Option<AgentStatus>, bool)>,
     /// The agent the detail shows; its draft is cleared when another is selected.
     detail_id: Option<String>,
     /// The selected agent's terminal text (`None`: unavailable).
@@ -236,7 +238,7 @@ impl AgentDashboard {
             focus: cx.focus_handle(),
             terminal_focus: cx.focus_handle(),
             reply,
-            reply_failed: false,
+            reply_failed: None,
             detail_id: None,
             terminal: None,
             prefers_terminal: false,
@@ -356,6 +358,17 @@ impl AgentDashboard {
             self.terminal = terminal;
             self.terminal_scroll_to_end = true;
         }
+        // Like Swift's `updateControls`, a new status or terminal availability puts the
+        // status hint back in place of "Could not send".
+        if self.reply_failed.is_some_and(|state| state != self.reply_state()) {
+            self.reply_failed = None;
+        }
+    }
+
+    /// What the reply hint depends on: the selected agent's status and whether its terminal
+    /// is available.
+    fn reply_state(&self) -> (Option<AgentStatus>, bool) {
+        (self.selected().map(DashboardEntry::status), self.terminal.is_some())
     }
 
     /// Follows the selection into the detail view.
@@ -365,7 +378,7 @@ impl AgentDashboard {
         self.read_terminal(cx);
         if selection_changed {
             self.detail_id = selected;
-            self.reply_failed = false;
+            self.reply_failed = None;
             self.terminal_scroll_to_end = true;
             self.reply.update(cx, |reply, cx| reply.set_value("", window, cx));
         }
@@ -512,7 +525,7 @@ impl AgentDashboard {
             return;
         }
         let Some(text) = state::reply_text(&self.reply.read(cx).value()) else { return };
-        self.reply_failed = false;
+        self.reply_failed = None;
         self.reply.update(cx, |reply, cx| reply.set_value("", window, cx));
         cx.emit(DashboardEvent::Reply { target, text });
         cx.notify();
@@ -530,7 +543,7 @@ impl AgentDashboard {
         if self.selected().map(DashboardEntry::target).as_ref() != Some(target) {
             return;
         }
-        self.reply_failed = true;
+        self.reply_failed = Some(self.reply_state());
         if self.reply.read(cx).value().is_empty() {
             self.reply.update(cx, |reply, cx| reply.set_value(text.to_owned(), window, cx));
         }
@@ -609,7 +622,7 @@ impl AgentDashboard {
 
     /// The line under the reply field.
     pub fn reply_hint(&self) -> &'static str {
-        if self.reply_failed {
+        if self.reply_failed.is_some() {
             return state::SEND_FAILED;
         }
         state::reply_hint(self.selected(), self.terminal.is_some())
@@ -1158,7 +1171,7 @@ impl AgentDashboard {
     ) -> impl IntoElement {
         let reply_focused = self.reply.read(cx).focus_handle(cx).contains_focused(window, cx);
         let can_send = controls.reply && state::reply_text(&self.reply.read(cx).value()).is_some();
-        let hint_color = if self.reply_failed { theme.failed } else { theme.muted };
+        let hint_color = if self.reply_failed.is_some() { theme.failed } else { theme.muted };
         div().flex().flex_row().flex_none().justify_center().px(theme.z(GUTTER)).mt(theme.z(16.)).child(
             div()
                 .flex()

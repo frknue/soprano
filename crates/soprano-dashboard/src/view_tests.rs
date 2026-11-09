@@ -577,3 +577,110 @@ fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_
     cx.simulate_keystrokes("t");
     assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_showing_terminal()));
 }
+
+#[gpui::test]
+fn a_chat_tab_takes_replies_through_the_host_and_a_failure_gives_way_to_the_status_hint(
+    cx: &mut TestAppContext,
+) {
+    let mut workspace = Workspace::new();
+    let pane = workspace.spawn_agent("omp", Some("/tmp/projects/a"), true).expect("chat pane");
+    let tab =
+        workspace.pane(&pane).and_then(|pane| pane.active_tab()).map(|tab| tab.id.clone()).expect("tab");
+    let chat = TerminalTarget::new(pane, tab);
+    set_status(&mut workspace, &chat, AgentStatus::Running);
+    // The shell reports a running chat as available with no terminal text.
+    let host = DashboardHost::new().terminal_text(|_, _| Some(String::new()));
+    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+
+    // A chat always shows its conversation, never a terminal.
+    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_showing_terminal()));
+    cx.simulate_keystrokes("r");
+    assert!(reply_focused(cx, &harness));
+    cx.simulate_input("Summarize the diff");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(
+        harness.events.borrow().last(),
+        Some(&DashboardEvent::Reply { target: chat.clone(), text: "Summarize the diff".into() })
+    );
+
+    let dashboard = harness.dashboard.clone();
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(&chat, "Summarize the diff", window, cx))
+    });
+    assert_eq!(
+        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
+        "Could not send to this terminal."
+    );
+    // A new status puts the status hint back, as Swift's `updateControls` does.
+    change(cx, &harness, |workspace| set_status(workspace, &chat, AgentStatus::Waiting));
+    assert_eq!(
+        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
+        "Press Return to send this single-line reply."
+    );
+    assert_eq!(reply_draft(cx, &harness), "Summarize the diff");
+}
+
+#[gpui::test]
+fn a_failed_send_gives_way_when_the_terminal_goes_away(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    set_status(&mut workspace, &target, AgentStatus::Idle);
+    let available = Rc::new(std::cell::Cell::new(true));
+    let live = available.clone();
+    let host = DashboardHost::new().terminal_text(move |_, _| live.get().then(|| "$".to_owned()));
+    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+
+    let dashboard = harness.dashboard.clone();
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(&target, "x", window, cx))
+    });
+    assert_eq!(
+        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
+        "Could not send to this terminal."
+    );
+    available.set(false);
+    change(cx, &harness, |_| {});
+    assert_eq!(
+        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
+        "Open the agent to initialize its terminal."
+    );
+}
+
+#[gpui::test]
+fn selecting_another_agent_clears_the_reply_draft(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let first = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    let second = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
+    for target in [&first, &second] {
+        set_status(&mut workspace, target, AgentStatus::Waiting);
+    }
+    let host = DashboardHost::new().terminal_text(|_, _| Some("waiting".to_owned()));
+    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("Half-written reply");
+    cx.simulate_keystrokes("shift-tab");
+    assert_eq!(reply_draft(cx, &harness), "Half-written reply");
+    cx.simulate_keystrokes("j");
+    assert_eq!(selected_target(cx, &harness), Some(second));
+    assert_eq!(reply_draft(cx, &harness), "");
+    cx.simulate_keystrokes("k");
+    assert_eq!(selected_target(cx, &harness), Some(first));
+    assert_eq!(reply_draft(cx, &harness), "");
+}
+
+#[gpui::test]
+fn escape_in_the_reply_field_closes_the_dashboard_without_sending(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    set_status(&mut workspace, &target, AgentStatus::Waiting);
+    let host = DashboardHost::new().terminal_text(|_, _| Some("waiting".to_owned()));
+    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("Never mind");
+    assert!(reply_focused(cx, &harness));
+    cx.simulate_keystrokes("escape");
+    assert_eq!(*harness.events.borrow(), [DashboardEvent::Close]);
+}

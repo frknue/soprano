@@ -1037,37 +1037,36 @@ in **Settings ▸ General**.
 ## Development
 
 ```bash
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build          # debug build / type-check
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift test           # swift-testing suite
-PATH="/opt/homebrew/opt/swift/bin:$PATH" swift build -c release
-./scripts/dev.sh                 # build, package, and launch an isolated Soprano Dev.app
+./scripts/prefetch-zig-deps.sh   # once per ghostty pin
+cargo build                      # debug build (com.soprano.dev identity)
+cargo test                       # every crate
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build --release -p soprano
+./scripts/dev.sh                 # macOS: package and launch an isolated Soprano Dev.app
 ./scripts/dev.sh --build-only    # same, without launching
-./scripts/install.sh             # release build → /Applications/Soprano.app
+./scripts/install.sh             # macOS: release build → /Applications/Soprano.app
+./scripts/install-linux.sh       # Linux: release build → ~/.local
 ```
 
-`scripts/dev.sh` produces `.build/debug/Soprano Dev.app` under the separate `com.soprano.dev`
-bundle identifier, so its preferences, window state, sessions, and notification
-permission stay isolated from the installed app. Both bundles embed the same Ghostty
-runtime resources, so themes and terminal behavior do not depend on how you launched
-them. The legacy `scripts/run.sh` forwards to `scripts/dev.sh`.
+`scripts/dev.sh` produces `target/debug/Soprano Dev.app` under the separate `com.soprano.dev`
+identity, so its state, window frame, sessions, IPC socket and notification permission stay
+isolated from the installed app. A debug `cargo run -p soprano` uses the same dev identity.
+The legacy `scripts/run.sh` forwards to `scripts/dev.sh`.
 
-macOS requires a real application bundle for native notifications. `swift run` and the
-raw `.build/debug/Soprano` executable are still useful for debugging, but notifications
-are silently disabled for those unbundled launches.
-
-The `ld: warning: building for macOS-14.0 …` and `could not find symbol '_ImGui…'` link
-warnings appear on every build and are expected.
+macOS requires a real application bundle for native notifications. `cargo run` and the raw
+`target/debug/soprano` executable are useful for debugging, but notifications are silently
+disabled for those unbundled launches.
 
 Release history lives in [`CHANGELOG.md`](CHANGELOG.md); user-visible changes land under
 `Unreleased` until a release is cut. [`AGENTS.md`](AGENTS.md) is the full contributor
 briefing — architecture and conventions — and
-[`docs/RELEASING.md`](docs/RELEASING.md) documents the signed release workflow.
+[`docs/RELEASING.md`](docs/RELEASING.md) documents the release workflow.
 
 The website at **[frknue.github.io/soprano-site](https://frknue.github.io/soprano-site/)**
 lives in its own repository,
 [`frknue/soprano-site`](https://github.com/frknue/soprano-site) — one self-contained
 `index.html` with no build step, so fixing a typo there needs none of this toolchain. Its
-palette is copied from `Sources/Soprano/Config/Theme.swift`, so the site and the app stay
+palette is copied from `crates/soprano-ui/src/theme/palettes.rs`, so the site and the app stay
 in the same colors.
 
 <details>
@@ -1075,30 +1074,32 @@ in the same colors.
 
 ```
 soprano/
-├── Package.swift                 # SPM package (swift-tools-version: 6.0, macOS 14+)
-├── lib/libghostty.a              # Pre-built ghostty library (not tracked; build from source)
-├── Sources/
-│   ├── Soprano/
-│   │   ├── main.swift            # CLI subcommand dispatch, then NSApplication
-│   │   ├── App/                  # AppDelegate, MainWindowController, MainContentViewController
-│   │   ├── Models/               # SplitNode layout tree, PaneState, AgentProfile, sessions
-│   │   ├── Controllers/          # AgentManager, KeybindingManager, SessionManager, ThemeManager
-│   │   ├── Views/                # AppKit views (SplitTreeView, SidebarView, CommandPalette, …)
-│   │   ├── Config/               # Default agents, keybindings, themes
-│   │   ├── Terminal/             # GhosttyAppManager, TerminalSurfaceView, copy mode
-│   │   └── Utilities/            # NSColor+Hex extension
-│   └── GhosttyKit/
-│       ├── module.modulemap      # System library module map
-│       └── include/ghostty.h     # libghostty C API header (see Build from source)
-├── Support/                      # Info.plist, agent hook templates, ghostty-version.txt
-├── .github/workflows/release.yml # universal release and cask-asset automation
-├── scripts/                      # build, packaging, installation, and signing scripts
-└── ghostty/                      # Ghostty submodule (source for libghostty)
+├── Cargo.toml                    # workspace; [workspace.package] version is the app version
+├── crates/
+│   ├── soprano/                  # the binary: CLI dispatch, then the GPUI app shell
+│   ├── soprano-model/            # Workspace (sessions, windows, tabs, SplitNode, pane tabs)
+│   ├── soprano-config/           # settings.json, default keybindings, KeyChord, cron
+│   ├── soprano-keys/             # keybinding resolver (prefix chords, pane hints)
+│   ├── soprano-term/             # libghostty-vt terminal + PTY + GPUI view
+│   ├── soprano-launch/           # agent/shell command lines, hooks, shell integration
+│   ├── soprano-ipc/              # CLI subcommands and the app's local socket
+│   ├── soprano-ui/               # design system: Herdr tokens over Soprano themes, widgets
+│   ├── soprano-{editor,explorer,chat-ui,dashboard,settings,browser,automations-ui}/
+│   ├── soprano-{agents,chat,accounts,automations,git,files,text,notify}/
+│   ├── soprano-{types,platform}/ # shared types; per-OS paths, state store, file services
+│   └── ghostty-sys/              # builds libghostty-vt from ghostty/ with Zig
+├── resources/                    # shipped with every package: hooks, plugins, fonts, icons
+├── Support/                      # Info.plist template, entitlements, Ghostty license
+├── packaging/                    # terminfo emitter
+├── scripts/                      # build, packaging, installation and signing scripts
+├── docs/rust-rewrite/            # Herdr look spec, screen map, per-crate API notes
+└── ghostty/                      # Ghostty submodule (source for libghostty-vt)
 ```
 
 `SplitNode` is where every pane geometry question is answered; the views render it.
-`AgentManager` owns the mutable state — panes, tabs, pane tabs, splits. The app binary
-doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
+`soprano_model::Workspace` owns the mutable state — panes, tabs, pane tabs, splits. The
+binary doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into
+`soprano_ipc::cli`.
 
 </details>
 
@@ -1106,11 +1107,15 @@ doubles as the `$SOPRANO_BIN` CLI, so new subcommands hook into `main.swift`.
 
 [MIT](LICENSE).
 
-Soprano statically links [libghostty](https://github.com/ghostty-org/ghostty) and bundles
-Ghostty's runtime resources (themes, shell integration, terminfo), which are MIT licensed —
-Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors. Their license travels with the
-packaged app in `Soprano.app/Contents/Resources/LICENSE-ghostty`.
+Soprano statically links libghostty-vt from [Ghostty](https://github.com/ghostty-org/ghostty)
+and bundles Ghostty's shell integration and terminfo, which are MIT licensed — Copyright
+(c) 2024 Mitchell Hashimoto, Ghostty contributors. Their license travels with every package
+as `LICENSE-ghostty`.
 
-Markdown parsing uses [Swift Markdown](https://github.com/swiftlang/swift-markdown) and
-its cmark-gfm backend. The cmark notices travel with the packaged app in
-`Soprano.app/Contents/Resources/LICENSE-swift-cmark`.
+The GPUI terminal renderer and the libghostty-vt bindings are adapted from
+[Herdr](https://github.com/herdrdev/herdr-app) (Apache-2.0); its license ships in
+`resources/licenses/LICENSE-herdr-app`. The interface uses
+[GPUI](https://github.com/zed-industries/zed) and
+[gpui-component](https://github.com/longbridge/gpui-kit) (Apache-2.0), the Geist and
+JetBrains Mono fonts (OFL), and Lucide (ISC) and LobeHub (MIT) icons; their notices are in
+`resources/fonts` and `resources/icons`.

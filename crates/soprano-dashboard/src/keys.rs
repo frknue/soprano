@@ -50,7 +50,9 @@ pub fn key_action(keystroke: &Keystroke, reply_focused: bool) -> Option<KeyActio
             _ => None,
         };
     }
-    if modifiers.platform || modifiers.control || modifiers.alt || modifiers.function {
+    // As Swift: only ⌘, ⌃ and ⌥ make a chord. Fn stays allowed, which keypad Enter and fn+Return
+    // carry.
+    if modifiers.platform || modifiers.control || modifiers.alt {
         return None;
     }
     let shifted = modifiers.shift;
@@ -117,6 +119,12 @@ mod tests {
         assert_eq!(action("r", false), Some(KeyAction::FocusReply));
         assert_eq!(action("shift-tab", false), None);
         assert_eq!(action("shift-tab", true), Some(KeyAction::LeaveReply));
+    }
+
+    #[test]
+    fn keypad_enter_and_fn_return_open_the_agent() {
+        assert_eq!(action("fn-enter", false), Some(KeyAction::Activate));
+        assert_eq!(action("fn-j", false), Some(KeyAction::Move(1)));
     }
 
     #[test]
