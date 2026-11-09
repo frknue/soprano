@@ -1,8 +1,20 @@
 [package]
 name = "soprano-config"
+description = "settings.json: JSONC reading and surgical writes, resolution over built-in defaults, the live config store, key chords and default keybindings, automation entries."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+notify = "8.2"
+chrono = "0.4.45"
+serde_path_to_error = "0.1.20"
+
+[dev-dependencies]
+tempfile = "3"
+chrono-tz = "0.10"
