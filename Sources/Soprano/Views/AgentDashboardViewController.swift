@@ -1785,6 +1785,9 @@ private final class AgentDashboardRowView: NSControl {
         activityLabel.identifier = NSUserInterfaceItemIdentifier("agent-dashboard-activity")
         for label in [titleLabel, elapsedLabel, statusLabel, activityLabel] {
             label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            label.cell?.wraps = false
+            label.cell?.isScrollable = false
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
         }
@@ -1854,9 +1857,14 @@ private final class AgentDashboardRowView: NSControl {
         monogram.projectName = folder ?? entry.profileName
         let title = entry.title
         if previous?.title != title {
+            // An attributed string without a paragraph style wraps by word,
+            // overriding the label's truncation; keep the title on one line.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byTruncatingTail
             titleLabel.attributedStringValue = NSAttributedString(string: title, attributes: [
                 .font: Typography.ui(Typography.bodySize, weight: .medium),
                 .foregroundColor: palette.sidebarForeground,
+                .paragraphStyle: paragraph,
             ])
         }
         let context = entry.context

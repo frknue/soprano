@@ -216,6 +216,8 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- A long agent title in the Agent Dashboard stays on one line and truncates instead of
+  wrapping over the line below it.
 - `⌘W` and `⌃A` → `X` close only the active pane tab, like the pane header's `×`; the pane
   closes with its last tab. `⌃A` → `Q` still closes the whole pane.
 - An agent started by typing it into a terminal (such as `codex` through a shell
