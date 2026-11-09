@@ -1,0 +1,11 @@
+[package]
+name = "ghostty-sys"
+version = "0.0.0"
+description = "Generated bindings to libghostty-vt (the ghostty submodule)"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+links = "ghostty-vt"
+
+[build-dependencies]
+bindgen = "0.72"

@@ -39,3 +39,4 @@ docs/notes/
 
 # Pre-built libghostty (rebuild from ghostty/ submodule)
 /lib/
+/target
