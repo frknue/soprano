@@ -63,8 +63,8 @@ pub struct ChangesPanel {
     target: Option<Target>,
     shown_target: Option<Target>,
     root: Option<PathBuf>,
-    root_text: String,
-    real_root: Option<String>,
+    /// The root fully resolved through symlinks, which file watchers report.
+    real_root: Option<PathBuf>,
     external_git_directory: Option<PathBuf>,
     ignored: GitStatusSnapshot,
     /// `None` until the first read for the current root finishes; false when git failed.
@@ -97,7 +97,6 @@ impl ChangesPanel {
             target: None,
             shown_target: None,
             root: None,
-            root_text: String::new(),
             real_root: None,
             external_git_directory: None,
             ignored: GitStatusSnapshot::empty(),
@@ -198,8 +197,7 @@ impl ChangesPanel {
 
     fn set_root(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
         self.generation += 1;
-        self.root_text = path.as_ref().map(|path| path.to_string_lossy().into_owned()).unwrap_or_default();
-        self.real_root = path.as_deref().and_then(real_path).map(|path| path.to_string_lossy().into_owned());
+        self.real_root = path.as_deref().and_then(real_path);
         self.external_git_directory = path.as_deref().and_then(external_git_directory);
         self.root = path;
         self.ignored = GitStatusSnapshot::empty();
@@ -247,15 +245,15 @@ impl ChangesPanel {
     /// Whether any changed path can change `git status`: the git directory, or a working
     /// tree path outside ignored folders (build output).
     fn affects_status(&self, paths: &[PathBuf]) -> bool {
-        let roots: Vec<&str> =
-            std::iter::once(self.root_text.as_str()).chain(self.real_root.as_deref()).collect();
+        let roots: Vec<&Path> =
+            self.root.iter().map(PathBuf::as_path).chain(self.real_root.as_deref()).collect();
         paths.iter().any(|path| {
             if let Some(git_directory) = &self.external_git_directory
                 && path.starts_with(git_directory)
             {
                 return true;
             }
-            let Some(relative) = relative_path_in_roots(&path.to_string_lossy(), &roots) else {
+            let Some(relative) = relative_path_in_roots(path, &roots) else {
                 return false;
             };
             relative == ".git" || relative.starts_with(".git/") || !self.ignored.is_ignored(&relative)

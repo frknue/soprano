@@ -24,7 +24,7 @@ use gpui_component::input::{Escape, Input, InputEvent, InputState};
 use soprano_files::listing::{self, committed_name, filter_tokens, stem_range};
 use soprano_files::operations::OperationError;
 use soprano_files::root::{
-    child_path, external_git_directory, parent_path, real_path, relative_path_in_roots,
+    absolute_path, child_path, external_git_directory, parent_path, real_path, relative_path_in_roots,
 };
 use soprano_files::tree::{
     DropOperation, ENUMERATED_FILE_LIMIT, FilterNode, build_filter_tree, copied_paths, drop_folder,
@@ -74,23 +74,24 @@ struct Row {
 
 struct RootState {
     root: ExplorerRoot,
-    root_text: String,
-    real_root: Option<String>,
+    /// The root fully resolved through symlinks, which file watchers report.
+    real_root: Option<PathBuf>,
     external_git_directory: Option<PathBuf>,
     tree: FileExplorerTree,
 }
 
 impl RootState {
     fn absolute(&self, relative: &str) -> PathBuf {
-        if relative.is_empty() { self.root.path.clone() } else { self.root.path.join(relative) }
+        absolute_path(&self.root.path, relative)
+    }
+
+    /// Both forms of the root, for matching absolute paths.
+    fn roots(&self) -> Vec<&Path> {
+        std::iter::once(self.root.path.as_path()).chain(self.real_root.as_deref()).collect()
     }
 
     fn relative(&self, path: &Path) -> Option<String> {
-        let path = soprano_platform::paths::normalize(path);
-        let text = path.to_string_lossy();
-        let roots: Vec<&str> =
-            std::iter::once(self.root_text.as_str()).chain(self.real_root.as_deref()).collect();
-        relative_path_in_roots(&text, &roots)
+        relative_path_in_roots(&soprano_platform::paths::normalize(path), &self.roots())
     }
 }
 
@@ -347,14 +348,12 @@ impl FilesPanel {
             self.remembered_expansions.insert(old.root.path.clone(), old.tree.expanded_paths().clone());
         }
         self.generation += 1;
-        let root_text = root.path.to_string_lossy().into_owned();
-        let real_root = real_path(&root.path).map(|path| path.to_string_lossy().into_owned());
+        let real_root = real_path(&root.path);
         let external = if root.is_git_repository { external_git_directory(&root.path) } else { None };
         self.restore_expansions = self.remembered_expansions.get(&root.path).cloned().unwrap_or_default();
         self.state = Some(RootState {
             tree: FileExplorerTree::new(root.path.clone()),
             root,
-            root_text,
             real_root,
             external_git_directory: external,
         });
@@ -616,9 +615,8 @@ impl FilesPanel {
             self.refresh_all(cx);
             return;
         }
-        let roots: Vec<&str> =
-            std::iter::once(state.root_text.as_str()).chain(state.real_root.as_deref()).collect();
-        let routing = route_events(paths, &roots, state.external_git_directory.as_deref(), &self.git_status);
+        let routing =
+            route_events(paths, &state.roots(), state.external_git_directory.as_deref(), &self.git_status);
         self.pending_reloads.extend(routing.reload_paths);
         self.flush_pending_reloads(cx);
         if routing.changed_working_tree || routing.changed_git_directory {
