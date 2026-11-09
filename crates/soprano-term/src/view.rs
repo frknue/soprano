@@ -1708,10 +1708,15 @@ fn macos_wheel_steps(ticks: f32) -> i32 {
     (ticks.signum() * ticks.abs().max(1.0) * 3.0).trunc() as i32
 }
 
+/// The bundled icon font every terminal falls back to, as Ghostty's embedded Nerd Font
+/// symbols do: prompts draw their Powerline/devicon glyphs under any configured font.
+const SYMBOLS_FALLBACK: &str = "Symbols Nerd Font";
+
 fn cell_font(settings: &TerminalSettings, bold: bool, italic: bool) -> Font {
     let mut f = font(settings.font_family.clone());
     // Ligatures off: every character keeps its own cell.
     f.features = FontFeatures(Arc::new(vec![("calt".into(), 0), ("liga".into(), 0), ("dlig".into(), 0)]));
+    f.fallbacks = Some(FontFallbacks::from_fonts(vec![SYMBOLS_FALLBACK.to_owned()]));
     f.weight = if bold { FontWeight::BOLD } else { FontWeight::NORMAL };
     f.style = if italic { FontStyle::Italic } else { FontStyle::Normal };
     f

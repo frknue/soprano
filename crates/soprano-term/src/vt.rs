@@ -787,6 +787,20 @@ impl Vt {
                 GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
                 &cluster as *const _ as *const c_void,
             );
+            // Ghostty clears a shell's prompt when the terminal resizes, so the shell, which
+            // redraws it on SIGWINCH, doesn't print it a second time below the old one
+            // (`Screen.clearPromptForRedraw`). That follows `shell_redraws_prompt`, true by
+            // default in Ghostty, but libghostty-vt's constructor forces it to false since
+            // embedders don't necessarily install Ghostty's shell integration. Soprano does,
+            // and a shell can only change the flag with `OSC 133;A;redraw=…`, which Ghostty's
+            // zsh integration doesn't send (and themes that rebuild PS1 leave it marking
+            // prompts with `133;P;k=i` only). A full reset restores every flag to Ghostty's
+            // defaults, and on a terminal that has printed nothing it touches nothing else:
+            // no row is marked as a prompt, and the modes return to their defaults (the
+            // grapheme-cluster default above included). It runs before any callback is
+            // installed, so it reports nothing. A program that marks no prompts is still
+            // never cleared: the cursor holds command output until a mark says otherwise.
+            ghostty_terminal_reset(term);
             let mut state = std::ptr::null_mut();
             ok(ghostty_render_state_new(std::ptr::null(), &mut state), "render_state_new");
             let mut rows_it = std::ptr::null_mut();
@@ -2931,5 +2945,80 @@ mod tests {
         let frame = vt.frame();
         assert!(row_text(&frame, 0).starts_with("after"));
         assert_eq!(vt.render_hold_deadline(), None);
+    }
+
+    /// A two-line prompt as zsh with Ghostty's integration marks it when a theme rebuilt
+    /// PS1 after the integration ran: the prompt is printed unmarked, then zle's line-init
+    /// hook marks the input with `133;P;k=i` and `133;B`. No `133;A` ever arrives.
+    const PROMPT: &[u8] = b"~/proj on main\r\n\xe2\x9d\xaf \x1b]133;P;k=i\x07\x1b]133;B\x07";
+
+    fn count(vt: &Vt, needle: &str) -> usize {
+        vt.screen_text(100).text.matches(needle).count()
+    }
+
+    #[test]
+    fn prompts_redraw_on_resize_as_in_ghostty_from_the_start() {
+        let mut vt = vt(40, 6);
+        vt.resize(40, 6, 8, 16);
+        vt.write(PROMPT);
+        // Exactly the shell's own two marks.
+        assert_eq!(
+            vt.take_events(),
+            vec![
+                VtEvent::Prompt { step: PromptStep::PromptStart, exit_code: None },
+                VtEvent::Prompt { step: PromptStep::InputStart, exit_code: None },
+            ]
+        );
+        vt.resize(30, 6, 8, 16);
+        assert!(vt.take_events().is_empty(), "resizing reports nothing");
+        // The marked prompt line is cleared for the shell to draw again.
+        assert_eq!(count(&vt, "\u{276f}"), 0, "{:?}", vt.screen_text(100).text);
+        // zsh redraws from where its prompt began, one line up.
+        vt.write(b"\r\x1b[1A~/proj on main\r\n\xe2\x9d\xaf \x1b]133;P;k=i\x07\x1b]133;B\x07");
+        assert_eq!(count(&vt, "~/proj on main"), 1, "{:?}", vt.screen_text(100).text);
+        assert_eq!(count(&vt, "\u{276f}"), 1, "{:?}", vt.screen_text(100).text);
+    }
+
+    #[test]
+    fn a_shell_that_opts_out_of_redraw_keeps_its_old_prompt_on_resize() {
+        // `redraw=0` is what libghostty-vt's own default amounts to: nothing is cleared.
+        let mut vt = vt(40, 6);
+        vt.resize(40, 6, 8, 16);
+        vt.write(b"\x1b]133;A;redraw=0\x07~/proj on main\r\n\xe2\x9d\xaf \x1b]133;P;k=i\x07\x1b]133;B\x07");
+        vt.resize(30, 6, 8, 16);
+        assert_eq!(count(&vt, "\u{276f}"), 1, "{:?}", vt.screen_text(100).text);
+    }
+
+    #[test]
+    fn a_program_that_marks_no_prompts_is_never_cleared_on_resize() {
+        // An agent started as the pane's own command draws its input box unmarked.
+        let mut vt = vt(40, 6);
+        vt.resize(40, 6, 8, 16);
+        vt.write("\u{256d}\u{2500} Claude \u{2500}\u{256e}\r\n\u{2502} > fix the tests".as_bytes());
+        vt.resize(30, 6, 8, 16);
+        assert_eq!(count(&vt, "fix the tests"), 1);
+        assert_eq!(count(&vt, "Claude"), 1);
+    }
+
+    #[test]
+    fn command_output_is_not_cleared_on_resize() {
+        let mut vt = vt(40, 6);
+        vt.resize(40, 6, 8, 16);
+        vt.write(PROMPT);
+        vt.write(b"ls\r\n\x1b]133;C\x07~/proj on main is output");
+        vt.resize(30, 6, 8, 16);
+        assert_eq!(count(&vt, "~/proj on main"), 2, "{:?}", vt.screen_text(100).text);
+    }
+
+    #[test]
+    fn the_reset_at_creation_keeps_the_grapheme_cluster_default_and_reports_nothing() {
+        let mut vt = vt(10, 2);
+        assert!(vt.take_events().is_empty());
+        assert!(vt.take_replies().is_empty());
+        // VS16 makes the emoji two cells wide only with grapheme clustering on.
+        vt.write("\u{270d}\u{fe0f}!".as_bytes());
+        let frame = vt.frame();
+        assert!(frame.rows[0][0].wide);
+        assert_eq!(frame.rows[0][2].text, "!");
     }
 }
