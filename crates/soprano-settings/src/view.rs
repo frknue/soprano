@@ -424,8 +424,10 @@ impl SettingsView {
         self.reload(window, cx);
     }
 
-    /// Reads a number field, clamps it into `range` and shows the result; returns the value
-    /// when it differs from `current` (text that is not a number reverts to `current`).
+    /// Reads a number field, clamps it into `range` and shows the result; returns the value to
+    /// write (text that is not a number reverts to `current` and writes nothing). Like Swift,
+    /// the clamped value is always written, so committing fixes an out-of-range value the
+    /// file still holds.
     fn commit_number(
         &mut self,
         input: Entity<InputState>,
@@ -438,7 +440,7 @@ impl SettingsView {
         let shown = general::committed_integer(&text, &range);
         let value = shown.unwrap_or(current);
         input.update(cx, |state, cx| state.set_value(value.to_string(), window, cx));
-        shown.filter(|value| *value != current)
+        shown
     }
 
     pub(crate) fn commit_prefix_timeout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -600,6 +602,12 @@ impl SettingsView {
         self.subscriptions.push(subscription);
     }
 
+    /// Whether the theme menu is open.
+    #[cfg(test)]
+    pub(crate) fn is_showing_menu(&self) -> bool {
+        self.menu.is_some()
+    }
+
     /// The account-removal confirmation on screen, if any.
     pub fn is_confirming(&self) -> bool {
         self.dialog.is_some()
@@ -646,10 +654,12 @@ impl SettingsView {
 
     // MARK: - Esc
 
-    /// Esc while the shortcut filter holds a query clears the query first; otherwise it
+    /// Esc in the focused shortcut filter while it holds a query clears the query first; otherwise it
     /// closes the screen. Recorders and dialogs take their own Esc before it gets here.
     pub(crate) fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tab == SettingsTab::KeyboardShortcuts && !self.shortcut_query(cx).is_empty() {
+        let query_focused = self.shortcut_query.read(cx).focus_handle(cx).is_focused(window);
+        if self.tab == SettingsTab::KeyboardShortcuts && query_focused && !self.shortcut_query(cx).is_empty()
+        {
             self.set_shortcut_query("", window, cx);
             return;
         }
@@ -842,7 +852,16 @@ impl Render for SettingsView {
                     this.escape(window, cx);
                 }
             }))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close(cx)))
+            // A click that cancels the dialog or closes the theme menu stops there; only a
+            // click on the bare backdrop closes Settings.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.dialog.is_none() && this.menu.is_none() {
+                        this.close(cx);
+                    }
+                }),
+            )
             // The workspace underneath must not take scroll.
             .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(card)

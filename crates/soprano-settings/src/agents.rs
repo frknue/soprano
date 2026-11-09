@@ -95,6 +95,22 @@ impl AgentField {
         }
     }
 
+    /// The field's value in `entry` as `settings.json` stores it; `None` when unset.
+    fn json_value(self, entry: &AgentConfig) -> Option<serde_json::Value> {
+        let text = |value: &Option<String>| value.clone().map(serde_json::Value::String);
+        match self {
+            Self::Name => text(&entry.name),
+            Self::Description => text(&entry.description),
+            Self::Command => text(&entry.command),
+            Self::Arguments => {
+                entry.args.clone().map(|args| args.into_iter().map(serde_json::Value::String).collect())
+            }
+            Self::WorkingDirectory => text(&entry.cwd),
+            Self::LaunchKey => text(&entry.launch_key),
+            Self::Color => text(&entry.color),
+        }
+    }
+
     /// Sets the field on `entry`; empty text removes the key so the built-in value (or the
     /// default) applies again.
     fn apply(self, entry: &mut AgentConfig, text: &str) {
@@ -123,11 +139,13 @@ pub fn configured_entry(config: &SopranoConfig, id: &str) -> Option<AgentConfig>
     config.agents.as_ref()?.iter().find(|entry| entry.id.trim() == id).cloned()
 }
 
-/// Writes `field` of agent `id` from `text`, creating the entry when the file has none, and
-/// dropping it when nothing is left to patch on a built-in. Unchanged text writes nothing.
+/// Writes `field` of agent `id` from `text` at that field's own path
+/// (`agents.<index>.<field>`), so comments, key order and keys `AgentConfig` does not model
+/// survive. The file gains an entry when it has none, and a built-in's entry goes away when
+/// nothing is left in it but its id. Unchanged text writes nothing.
 pub fn set_agent_field(store: &ConfigStore, id: &str, field: AgentField, text: &str) -> bool {
     let config = store.config();
-    let mut entries = config.agents.clone().unwrap_or_default();
+    let entries = config.agents.clone().unwrap_or_default();
     let index = entries.iter().position(|entry| entry.id.trim() == id);
     let mut entry = index
         .map_or_else(|| AgentConfig { id: id.to_owned(), ..AgentConfig::default() }, |i| entries[i].clone());
@@ -146,29 +164,34 @@ pub fn set_agent_field(store: &ConfigStore, id: &str, field: AgentField, text: &
     if entry == before {
         return true;
     }
-    let is_empty_patch =
-        is_built_in(id) && entry == AgentConfig { id: entry.id.clone(), ..AgentConfig::default() };
-    match (index, is_empty_patch) {
-        (Some(i), true) => {
-            entries.remove(i);
+    let value = field.json_value(&entry);
+    let Some(index) = index else {
+        // Nothing to patch on a built-in: the file stays as it is.
+        if is_built_in(id) && value.is_none() {
+            return true;
         }
-        (Some(i), false) => entries[i] = entry,
-        (None, true) => return true,
-        (None, false) => entries.push(entry),
+        return append_entry(store, &entry, entries.len());
+    };
+    let position = index.to_string();
+    let path = ["agents", position.as_str(), field.json_key()];
+    match value {
+        Some(value) => store.write(value, &path),
+        // A built-in entry left with only its id patches nothing: drop the whole element.
+        None if is_built_in(id) && entry_has_only_keys(store, index, &["id", field.json_key()]) => {
+            remove_element(store, index, entries.len())
+        }
+        None => store.remove(&path),
     }
-    write_entries(store, &entries)
 }
 
 /// Removes the file's entry for `id`: a built-in goes back to its defaults, a declared agent
-/// disappears.
+/// disappears. Only that element of `agents` changes.
 pub fn remove_agent_entry(store: &ConfigStore, id: &str) -> bool {
-    let mut entries = store.config().agents.unwrap_or_default();
-    let before = entries.len();
-    entries.retain(|entry| entry.id.trim() != id);
-    if entries.len() == before {
-        return true;
+    let entries = store.config().agents.unwrap_or_default();
+    match entries.iter().position(|entry| entry.id.trim() == id) {
+        Some(index) => remove_element(store, index, entries.len()),
+        None => true,
     }
-    write_entries(store, &entries)
 }
 
 /// Why a new agent could not be added.
@@ -208,7 +231,7 @@ pub fn add_agent(
     if !id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') || id.starts_with('-') {
         return Err(AddAgentError::InvalidId);
     }
-    let mut entries = store.config().agents.unwrap_or_default();
+    let entries = store.config().agents.unwrap_or_default();
     if existing.iter().any(|profile| profile.id == id) || entries.iter().any(|entry| entry.id.trim() == id) {
         return Err(AddAgentError::DuplicateId);
     }
@@ -217,23 +240,47 @@ pub fn add_agent(
         return Err(AddAgentError::MissingCommand);
     }
     let name = name.trim();
-    entries.push(AgentConfig {
+    let entry = AgentConfig {
         id: id.to_owned(),
         name: (!name.is_empty()).then(|| name.to_owned()),
         command: Some(command.to_owned()),
         ..AgentConfig::default()
-    });
-    if write_entries(store, &entries) { Ok(()) } else { Err(AddAgentError::WriteFailed) }
+    };
+    if append_entry(store, &entry, entries.len()) { Ok(()) } else { Err(AddAgentError::WriteFailed) }
 }
 
-fn write_entries(store: &ConfigStore, entries: &[AgentConfig]) -> bool {
-    if entries.is_empty() {
+/// Appends `entry` as element `len` of `agents` (creating the list when the file has none),
+/// leaving the existing elements untouched.
+fn append_entry(store: &ConfigStore, entry: &AgentConfig, len: usize) -> bool {
+    let Ok(value) = serde_json::to_value(entry) else { return false };
+    if store.config().agents.is_none() {
+        return store.write(serde_json::Value::Array(vec![value]), AGENTS_KEY);
+    }
+    let position = len.to_string();
+    store.write(value, &["agents", position.as_str()])
+}
+
+/// Removes element `index` of `agents`; the last one takes the `agents` key with it, as an
+/// empty list configures nothing.
+fn remove_element(store: &ConfigStore, index: usize, len: usize) -> bool {
+    if len <= 1 {
         return store.remove(AGENTS_KEY);
     }
-    match serde_json::to_value(entries) {
-        Ok(value) => store.write(value, AGENTS_KEY),
-        Err(_) => false,
-    }
+    let position = index.to_string();
+    store.remove(&["agents", position.as_str()])
+}
+
+/// Whether element `index` of the file's `agents` holds exactly `keys` — read from the raw
+/// document, so keys `AgentConfig` does not model count too and are never dropped.
+fn entry_has_only_keys(store: &ConfigStore, index: usize, keys: &[&str]) -> bool {
+    let Ok(json) = soprano_config::jsonc::strict_json(&store.text()) else { return false };
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(&json) else { return false };
+    let Some(element) =
+        document.get("agents").and_then(|agents| agents.get(index)).and_then(|e| e.as_object())
+    else {
+        return false;
+    };
+    element.len() == keys.len() && keys.iter().all(|key| element.contains_key(*key))
 }
 
 /// `$ claude --model opus`
@@ -403,5 +450,48 @@ mod tests {
         assert_eq!(command_line(&claude), "$ claude");
         assert_eq!(patterns_line(&claude), "Ready: Claude, >, ❯  ·  Error: Error, error:, FAILED");
         assert_eq!(patterns_line(&DefaultAgents::omp()), "Ready: –  ·  Error: –");
+    }
+
+    #[test]
+    fn editing_a_profile_keeps_comments_and_unmodelled_keys_in_agents() {
+        let (store, _dir) = store();
+        let text = r#"{
+  "agents": [
+    // Aider, tuned by hand.
+    { "id": "aider", "command": "aider", "autoRestart": true, "patterns": { "ready": [">"] } },
+    /* Codex tweaks */
+    { "id": "codex", "args": ["--model", "o3"] }
+  ]
+}
+"#;
+        soprano_config::config_file::write(text, store.file_path()).expect("write");
+        store.reload_from_disk();
+
+        assert!(set_agent_field(&store, "aider", AgentField::Name, "Aider Pro"));
+        assert!(set_agent_field(&store, "codex", AgentField::Arguments, ""));
+        let written = std::fs::read_to_string(store.file_path()).expect("file");
+        assert!(written.contains("// Aider, tuned by hand."), "{written}");
+        assert!(written.contains("/* Codex tweaks */"), "{written}");
+        assert!(written.contains("\"autoRestart\": true"), "{written}");
+        assert!(written.contains("\"patterns\""), "{written}");
+        assert!(written.contains("\"name\": \"Aider Pro\""), "{written}");
+        // Codex had nothing left to patch, so its element went; aider's stayed.
+        assert_eq!(configured_entry(&store.config(), "codex"), None);
+        assert_eq!(agent(&store, "aider").name, "Aider Pro");
+
+        assert!(remove_agent_entry(&store, "aider"));
+        assert!(!std::fs::read_to_string(store.file_path()).expect("file").contains("\"agents\""));
+    }
+
+    #[test]
+    fn a_built_in_entry_with_unmodelled_keys_survives_clearing_its_last_field() {
+        let (store, _dir) = store();
+        let text = r#"{ "agents": [ { "id": "codex", "name": "X", "autoRestart": true } ] }"#;
+        soprano_config::config_file::write(text, store.file_path()).expect("write");
+        store.reload_from_disk();
+        assert!(set_agent_field(&store, "codex", AgentField::Name, ""));
+        let written = std::fs::read_to_string(store.file_path()).expect("file");
+        assert!(written.contains("\"autoRestart\": true"), "{written}");
+        assert!(!written.contains("\"name\""), "{written}");
     }
 }

@@ -140,6 +140,11 @@ fn strip_position(message: &str) -> String {
 /// Surgically set the value at the given key path, preserving every comment, blank line, key
 /// order and indentation style in the rest of the document. Missing intermediate objects are
 /// created. `Value::Null` writes JSON `null`.
+///
+/// Where the value at a point of the path is an array, the next segment is a decimal index
+/// (`["agents", "2", "name"]`): an existing element is edited in place, index == length
+/// appends a new element, and a larger index (or a non-numeric segment) is an error. Under an
+/// object, or where the path runs past what exists, a numeric segment is an ordinary key.
 pub fn setting(value: &Value, path: &[&str], text: &str) -> Result<String, ParseError> {
     if path.is_empty() {
         return Err(ParseError::at_start("Cannot set a value without a key path"));
@@ -164,7 +169,8 @@ pub fn setting(value: &Value, path: &[&str], text: &str) -> Result<String, Parse
     Ok(apply(&edit, &source))
 }
 
-/// Surgically remove the key at the given path. No-op when absent.
+/// Surgically remove the key — or, inside an array, the element at a decimal index — at the
+/// given path, with exactly one adjacent comma. No-op when absent.
 pub fn removing(path: &[&str], text: &str) -> Result<String, ParseError> {
     if path.is_empty() {
         return Err(ParseError::at_start("Cannot remove a value without a key path"));
@@ -294,7 +300,7 @@ struct ParsedValue {
 
 enum Kind {
     Object(Vec<ParsedMember>),
-    Array,
+    Array(Vec<ParsedValue>),
     Scalar,
 }
 
@@ -427,6 +433,7 @@ impl<'a> Parser<'a> {
         let start = self.index;
         self.index += 1;
         let end_of_input = self.characters.len();
+        let mut elements = Vec::new();
 
         loop {
             self.skip_whitespace();
@@ -438,7 +445,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(_) => {}
             }
-            self.parse_value()?;
+            elements.push(self.parse_value()?);
             self.skip_whitespace();
             match self.peek() {
                 None => return Err(self.error("Unexpected end of input, expected ']'", Some(end_of_input))),
@@ -457,7 +464,7 @@ impl<'a> Parser<'a> {
                 Some(_) => return Err(self.error("Expected ','", None)),
             }
         }
-        Ok(ParsedValue { kind: Kind::Array, start, end: self.index })
+        Ok(ParsedValue { kind: Kind::Array(elements), start, end: self.index })
     }
 
     fn parse_literal(&mut self, literal: &str) -> Result<ParsedValue, ParseError> {
@@ -617,82 +624,139 @@ fn collect(chars: &[char]) -> String {
     chars.iter().collect()
 }
 
+/// A path segment as an array index: plain decimal digits. Only consulted where the current
+/// value is an array; under an object a numeric segment is an ordinary key.
+fn array_index(segment: &str) -> Option<usize> {
+    if segment.is_empty() || !segment.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    segment.parse().ok()
+}
+
+/// Whether the edit can continue inside `value` for the next path segment: any object, or an
+/// array addressed by an index.
+fn can_descend(value: &ParsedValue, next: &str) -> bool {
+    match value.kind {
+        Kind::Object(_) => true,
+        Kind::Array(_) => array_index(next).is_some(),
+        Kind::Scalar => false,
+    }
+}
+
 fn setting_edit(
     value: &Value,
     path: &[&str],
-    object: &ParsedValue,
+    container: &ParsedValue,
     context: &EditContext<'_>,
 ) -> Result<Edit, ParseError> {
-    let (Some((key, rest)), Kind::Object(members)) = (path.split_first(), &object.kind) else {
-        return Err(parse_error("Expected a JSON object", object.start, context.source));
+    let Some((segment, rest)) = path.split_first() else {
+        return Err(parse_error("Expected a JSON object", container.start, context.source));
     };
-
-    let Some(member) = members.iter().find(|m| m.key == *key) else {
-        return insertion(&nested(value, rest), key, object, members, context);
-    };
-
-    if rest.is_empty() {
-        let indent = line_indent(member.key_start, context.source);
-        return Ok(Edit {
-            start: member.value.start,
-            end: member.value.end,
-            text: format_value(value, &indent, context.unit),
-        });
+    match &container.kind {
+        Kind::Object(members) => match members.iter().find(|m| m.key == *segment) {
+            Some(member) => setting_existing(value, rest, member.key_start, &member.value, context),
+            None => {
+                let last = members.last().map(|m| (m.key_start, m.value.end));
+                let entry = nested(value, rest);
+                insertion(container, last, context, |indent| {
+                    entry_text(segment, &entry, indent, context.unit)
+                })
+            }
+        },
+        Kind::Array(elements) => {
+            let Some(index) = array_index(segment) else {
+                return Err(parse_error(
+                    format!("Expected an array index, found \"{segment}\""),
+                    container.start,
+                    context.source,
+                ));
+            };
+            if let Some(element) = elements.get(index) {
+                return setting_existing(value, rest, element.start, element, context);
+            }
+            if index > elements.len() {
+                return Err(parse_error(
+                    format!("Index {index} is past the end of an array of {} elements", elements.len()),
+                    container.start,
+                    context.source,
+                ));
+            }
+            // One past the end appends.
+            let last = elements.last().map(|e| (e.start, e.end));
+            let entry = nested(value, rest);
+            insertion(container, last, context, |indent| format_value(&entry, indent, context.unit))
+        }
+        Kind::Scalar => Err(parse_error("Expected a JSON object", container.start, context.source)),
     }
-    if matches!(member.value.kind, Kind::Object(_)) {
-        return setting_edit(value, rest, &member.value, context);
+}
+
+/// Sets `rest` inside an existing value whose entry starts at `anchor` (a key's quote, or the
+/// element itself).
+fn setting_existing(
+    value: &Value,
+    rest: &[&str],
+    anchor: usize,
+    existing: &ParsedValue,
+    context: &EditContext<'_>,
+) -> Result<Edit, ParseError> {
+    if let Some(next) = rest.first()
+        && can_descend(existing, next)
+    {
+        return setting_edit(value, rest, existing, context);
     }
-    // The path continues but the existing value cannot hold it (a string where an object is
-    // needed): replace it wholesale.
-    let indent = line_indent(member.key_start, context.source);
+    // Either the path ends here, or it continues but the existing value cannot hold it (a
+    // string where an object is needed): replace it wholesale.
+    let indent = line_indent(anchor, context.source);
     Ok(Edit {
-        start: member.value.start,
-        end: member.value.end,
+        start: existing.start,
+        end: existing.end,
         text: format_value(&nested(value, rest), &indent, context.unit),
     })
 }
 
+/// Adds an entry at the end of `container` (an object member or an array element), after the
+/// entry spanning `last` (start, end) if any. `render` formats the entry at an indent.
 fn insertion(
-    value: &Value,
-    key: &str,
-    object: &ParsedValue,
-    members: &[ParsedMember],
+    container: &ParsedValue,
+    last: Option<(usize, usize)>,
     context: &EditContext<'_>,
+    render: impl Fn(&str) -> String,
 ) -> Result<Edit, ParseError> {
     let EditContext { source, stripped, is_comment, unit } = *context;
-    let object_indent = line_indent(object.start, source);
-    let close_index = object.end - 1;
-    let single_line = !stripped[object.start..object.end].iter().any(|&c| is_newline(c));
+    let container_indent = line_indent(container.start, source);
+    let close_index = container.end - 1;
+    let single_line = !stripped[container.start..container.end].iter().any(|&c| is_newline(c));
 
-    let Some(last) = members.last() else {
-        let child_indent = format!("{object_indent}{unit}");
-        let entry = entry_text(key, value, &child_indent, unit);
+    let Some((last_start, last_end)) = last else {
+        let child_indent = format!("{container_indent}{unit}");
+        let entry = render(&child_indent);
         let line_start = line_start_index(close_index, source);
         if source[line_start..close_index].iter().all(|&c| is_indent_character(c)) {
-            // The `}` already owns its line, so the new entry gets the line above.
+            // The closing bracket already owns its line, so the new entry gets the line above.
             return Ok(Edit { start: line_start, end: line_start, text: format!("{child_indent}{entry}\n") });
         }
         return Ok(Edit {
             start: close_index,
             end: close_index,
-            text: format!("\n{child_indent}{entry}\n{object_indent}"),
+            text: format!("\n{child_indent}{entry}\n{container_indent}"),
         });
     };
 
-    let mut position = last.value.end;
+    let mut position = last_end;
     let mut needs_comma = true;
     let mut scan = position;
     while scan < stripped.len() && is_whitespace(stripped[scan]) {
         scan += 1;
     }
     if scan < stripped.len() && stripped[scan] == ',' {
-        // Any comma after the last member is a trailing comma; write after it.
+        // Any comma after the last entry is a trailing comma; write after it.
         position = scan + 1;
         needs_comma = false;
     }
 
-    let child_indent = sibling_indent(last, source).unwrap_or_else(|| format!("{object_indent}{unit}"));
-    let entry = entry_text(key, value, &child_indent, unit);
+    let child_indent =
+        sibling_indent(last_start, source).unwrap_or_else(|| format!("{container_indent}{unit}"));
+    let entry = render(&child_indent);
     if single_line {
         let separator = if needs_comma { ", " } else { " " };
         return Ok(Edit { start: position, end: position, text: format!("{separator}{entry}") });
@@ -711,29 +775,51 @@ fn insertion(
     Ok(Edit { start: position, end: tail, text: format!("{comma}{preserved}\n{child_indent}{entry}") })
 }
 
-fn removal_edit(path: &[&str], object: &ParsedValue, context: &EditContext<'_>) -> Option<Edit> {
-    let EditContext { source, stripped, is_comment, .. } = *context;
-    let (key, rest) = path.split_first()?;
-    let Kind::Object(members) = &object.kind else { return None };
-    let member = members.iter().find(|m| m.key == *key)?;
+fn removal_edit(path: &[&str], container: &ParsedValue, context: &EditContext<'_>) -> Option<Edit> {
+    let (segment, rest) = path.split_first()?;
+    let (entry_start, value, count, empty) = match &container.kind {
+        Kind::Object(members) => {
+            let member = members.iter().find(|m| m.key == *segment)?;
+            (member.key_start, &member.value, members.len(), "{}")
+        }
+        Kind::Array(elements) => {
+            let element = elements.get(array_index(segment)?)?;
+            (element.start, element, elements.len(), "[]")
+        }
+        Kind::Scalar => return None,
+    };
 
     if !rest.is_empty() {
-        return removal_edit(rest, &member.value, context);
+        return removal_edit(rest, value, context);
     }
+    Some(entry_removal(container, entry_start, value.end, count, empty, context))
+}
 
-    // Sole member and nothing else inside the braces: collapse to `{}` rather than leaving a
-    // hollow, oddly indented shell.
-    if members.len() == 1 {
-        let interior_is_blank = ((object.start + 1)..(object.end - 1))
-            .filter(|&i| i < member.key_start || i >= member.value.end)
+/// Removes the entry spanning `entry_start..entry_end` from `container`, which holds `count`
+/// entries; `empty` is what the container becomes when nothing else is inside it.
+fn entry_removal(
+    container: &ParsedValue,
+    entry_start: usize,
+    entry_end: usize,
+    count: usize,
+    empty: &str,
+    context: &EditContext<'_>,
+) -> Edit {
+    let EditContext { source, stripped, is_comment, .. } = *context;
+
+    // Sole entry and nothing else inside the brackets: collapse to `{}`/`[]` rather than
+    // leaving a hollow, oddly indented shell.
+    if count == 1 {
+        let interior_is_blank = ((container.start + 1)..(container.end - 1))
+            .filter(|&i| i < entry_start || i >= entry_end)
             .all(|i| is_whitespace(source[i]));
         if interior_is_blank {
-            return Some(Edit { start: object.start, end: object.end, text: "{}".into() });
+            return Edit { start: container.start, end: container.end, text: empty.into() };
         }
     }
 
-    let mut start = member.key_start;
-    let mut end = member.value.end;
+    let mut start = entry_start;
+    let mut end = entry_end;
 
     // The comma that goes with the entry: the one after it, or — for the last entry — the one
     // before it.
@@ -775,16 +861,16 @@ fn removal_edit(path: &[&str], object: &ParsedValue, context: &EditContext<'_>) 
 
     // Only the preceding comma goes: what sits between it and the entry — a comment
     // documenting the entry before, the line break that ends that entry's line — stays.
-    let Some(comma) = preceding_comma else { return Some(Edit { start, end, text: String::new() }) };
+    let Some(comma) = preceding_comma else { return Edit { start, end, text: String::new() } };
     let between = (comma + 1)..start;
     if owns_line {
-        return Some(Edit { start: comma, end, text: collect(&source[between]) });
+        return Edit { start: comma, end, text: collect(&source[between]) };
     }
     if !between.clone().any(|i| is_comment[i]) {
-        return Some(Edit { start: comma, end, text: String::new() });
+        return Edit { start: comma, end, text: String::new() };
     }
     let mut kept = &source[between];
-    // Spaces only: the line break after a `//` comment ends it, and the closing brace may
+    // Spaces only: the line break after a `//` comment ends it, and the closing bracket may
     // follow on the same line as the removed entry.
     while let Some((&last, rest)) = kept.split_last() {
         if !is_indent_character(last) {
@@ -792,7 +878,7 @@ fn removal_edit(path: &[&str], object: &ParsedValue, context: &EditContext<'_>) 
         }
         kept = rest;
     }
-    Some(Edit { start: comma, end, text: collect(kept) })
+    Edit { start: comma, end, text: collect(kept) }
 }
 
 /// Builds the document for an empty (or comment-only) file, keeping whatever the user already
@@ -941,11 +1027,11 @@ fn line_indent(index: usize, source: &[char]) -> String {
     collect(&source[start..scan])
 }
 
-/// The indentation a sibling entry uses, or `None` when the member shares its line with other
-/// content and therefore teaches us nothing.
-fn sibling_indent(member: &ParsedMember, source: &[char]) -> Option<String> {
-    let line_start = line_start_index(member.key_start, source);
-    let prefix = &source[line_start..member.key_start];
+/// The indentation a sibling entry starting at `entry_start` uses, or `None` when it shares
+/// its line with other content and therefore teaches us nothing.
+fn sibling_indent(entry_start: usize, source: &[char]) -> Option<String> {
+    let line_start = line_start_index(entry_start, source);
+    let prefix = &source[line_start..entry_start];
     prefix.iter().all(|&c| is_indent_character(c)).then(|| collect(prefix))
 }
 
@@ -1062,6 +1148,70 @@ mod tests {
         let text = "{\n  \"theme\": \"nord\",\n  \"theme\": \"dracula\"\n}";
         let updated = set(json!("gruvbox-dark"), &["theme"], text);
         assert_eq!(top_level_object(&updated)["theme"], "gruvbox-dark");
+    }
+
+    // MARK: - Array elements
+
+    const AGENTS: &str = "{\n  \"agents\": [\n    // the first\n    { \"id\": \"a\" },\n    {\n      \"id\": \"b\", // keep\n      \"name\": \"B\"\n    },\n    { \"id\": \"c\", \"x\": 1 }\n  ]\n}";
+
+    #[test]
+    fn setting_a_key_inside_an_array_element_edits_only_that_element() {
+        let renamed = set(json!("Bee"), &["agents", "1", "name"], AGENTS);
+        assert_eq!(renamed, AGENTS.replace("\"name\": \"B\"", "\"name\": \"Bee\""));
+
+        let added = set(json!("A"), &["agents", "0", "name"], AGENTS);
+        assert!(added.contains("{ \"id\": \"a\", \"name\": \"A\" }"), "{added}");
+        assert!(added.contains("// the first") && added.contains("// keep"));
+        assert_eq!(top_level_object(&added)["agents"][0]["name"], "A");
+
+        let replaced = set(json!({"id": "z"}), &["agents", "2"], AGENTS);
+        assert_eq!(top_level_object(&replaced)["agents"][2], json!({"id": "z"}));
+        assert!(replaced.contains("// keep"));
+    }
+
+    #[test]
+    fn setting_one_past_the_end_appends_and_further_is_an_error() {
+        let appended = set(json!({"command": "d", "id": "d"}), &["agents", "3"], AGENTS);
+        assert!(
+            appended.ends_with(
+                "    { \"id\": \"c\", \"x\": 1 },\n    {\n      \"command\": \"d\",\n      \"id\": \"d\"\n    }\n  ]\n}"
+            ),
+            "{appended}"
+        );
+        assert!(appended.contains("// the first") && appended.contains("// keep"));
+        assert_eq!(top_level_object(&appended)["agents"].as_array().map(Vec::len), Some(4));
+
+        assert_eq!(set(json!("x"), &["l", "0"], "{ \"l\": [] }"), "{ \"l\": [\n    \"x\"\n  ] }");
+        assert_eq!(set(json!(3), &["l", "2"], "{ \"l\": [1, 2] }"), "{ \"l\": [1, 2, 3] }");
+        assert!(setting(&json!(1), &["agents", "5"], AGENTS).is_err());
+        assert!(setting(&json!(1), &["agents", "name"], AGENTS).is_err());
+    }
+
+    #[test]
+    fn a_numeric_segment_under_an_object_or_a_missing_parent_is_a_key() {
+        assert_eq!(top_level_object(&set(json!(1), &["m", "0"], "{ \"m\": {} }"))["m"]["0"], 1);
+        assert_eq!(top_level_object(&set(json!(1), &["new", "0"], "{}"))["new"]["0"], 1);
+    }
+
+    #[test]
+    fn removing_inside_an_array_drops_a_key_or_a_whole_element_with_one_comma() {
+        let without_name = remove(&["agents", "1", "name"], AGENTS);
+        assert_eq!(without_name, AGENTS.replace(", // keep\n      \"name\": \"B\"", " // keep"));
+        assert!(top_level_object(&without_name)["agents"][1].get("name").is_none());
+
+        let without_middle = remove(&["agents", "1"], AGENTS);
+        assert_eq!(
+            without_middle,
+            "{\n  \"agents\": [\n    // the first\n    { \"id\": \"a\" },\n    { \"id\": \"c\", \"x\": 1 }\n  ]\n}"
+        );
+        let without_last = remove(&["agents", "2"], AGENTS);
+        assert_eq!(top_level_object(&without_last)["agents"].as_array().map(Vec::len), Some(2));
+        assert!(without_last.contains("// keep") && without_last.contains("// the first"));
+
+        assert_eq!(remove(&["l", "0"], "{ \"l\": [1] }"), "{ \"l\": [] }");
+        assert_eq!(remove(&["l", "1"], "{ \"l\": [1, 2, 3] }"), "{ \"l\": [1, 3] }");
+        assert_eq!(remove(&["agents", "9"], AGENTS), AGENTS);
+        assert_eq!(remove(&["agents", "x"], AGENTS), AGENTS);
     }
 
     #[test]

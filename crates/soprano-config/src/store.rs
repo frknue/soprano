@@ -902,6 +902,36 @@ mod tests {
         assert!(error.message.contains("agents.[0] is missing \"id\""), "{}", error.message);
     }
 
+    /// Editing one field of one `agents` entry writes only that field: comments and keys the
+    /// app does not know about stay.
+    #[test]
+    fn one_agent_field_is_written_without_rewriting_the_agents_array() {
+        let (store, _directory) = make_store();
+        write_file(
+            &store,
+            "{\n  \"agents\": [\n    // my aider\n    { \"id\": \"aider\", \"command\": \"aider\", \"futureKey\": true },\n    { \"id\": \"codex\", \"cwd\": \"~\" }\n  ]\n}",
+        );
+        start(&store);
+
+        assert!(store.write("aider --yes", &["agents", "0", "command"]));
+        assert!(store.remove(&["agents", "1", "cwd"]));
+        assert!(store.write(serde_json::json!({"id": "goose", "command": "goose"}), &["agents", "2"]));
+
+        let text = file_text(&store);
+        assert!(text.contains("// my aider"));
+        assert!(text.contains("\"futureKey\": true"));
+        let agents = store.config().agents.expect("agents");
+        assert_eq!(agents[0].command.as_deref(), Some("aider --yes"));
+        assert_eq!(agents[1].cwd, None);
+        assert_eq!(agents[2].id, "goose");
+
+        assert!(store.remove(&["agents", "1"]));
+        assert_eq!(store.config().agents.map(|a| a.len()), Some(2));
+        assert!(file_text(&store).contains("// my aider"));
+
+        assert!(!store.write("x", &["agents", "7", "command"]));
+    }
+
     #[test]
     fn writing_a_non_finite_number_is_refused_instead_of_writing_null() {
         let (store, _directory) = make_store();

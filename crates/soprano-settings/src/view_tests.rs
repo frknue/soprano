@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui::{Entity, TestAppContext, VisualTestContext};
+use gpui::{Entity, Focusable as _, TestAppContext, VisualTestContext};
 use soprano_accounts::chrono::{Duration, Utc};
 use soprano_accounts::models::{
     AccountIdentity, AccountList, AccountListId, AccountRow, AccountUsage, AccountsSnapshot, UsageWindow,
@@ -208,6 +208,7 @@ fn esc_in_the_shortcut_filter_clears_the_query_before_closing(cx: &mut TestAppCo
     h.view.update_in(cx, |view, window, cx| {
         view.switch_tab(SettingsTab::KeyboardShortcuts, window, cx);
         view.set_shortcut_query("split", window, cx);
+        view.shortcut_query.update(cx, |state, cx| state.focus(window, cx));
     });
     cx.simulate_keystrokes("escape");
     assert!(h.events.borrow().is_empty());
@@ -492,4 +493,77 @@ fn editing_the_resize_step_clamps_and_writes_a_number(cx: &mut TestAppContext) {
     assert_eq!(h.store.keybindings().resize_tick_percent, 25.0);
     assert!(file_text(&h.store).contains("\"resizeTickPercent\": 25"), "{}", file_text(&h.store));
     assert!(h.store.issues().is_empty());
+}
+
+#[gpui::test]
+fn esc_closes_settings_when_the_shortcut_filter_holds_a_query_but_lacks_focus(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    h.view.update_in(cx, |view, window, cx| {
+        view.switch_tab(SettingsTab::KeyboardShortcuts, window, cx);
+        view.set_shortcut_query("split", window, cx);
+        view.focus_handle(cx).focus(window, cx);
+    });
+    cx.simulate_keystrokes("escape");
+    assert_eq!(*h.events.borrow(), vec![SettingsEvent::Close]);
+    assert_eq!(h.view.read_with(cx, |view, cx| view.shortcut_query(cx)), "split");
+}
+
+#[gpui::test]
+fn committing_the_clamped_number_fixes_an_out_of_range_value_in_the_file(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    assert!(h.store.write(99999, crate::general::PREFIX_TIMEOUT_KEY));
+    cx.run_until_parked();
+    assert_eq!(h.store.keybindings().prefix_timeout_ms, 5000);
+    assert!(!h.store.issues().is_empty());
+    // The field shows the clamped value; committing it as shown writes it.
+    h.view.update_in(cx, |view, window, cx| view.commit_prefix_timeout(window, cx));
+    assert!(file_text(&h.store).contains("\"prefixTimeoutMs\": 5000"), "{}", file_text(&h.store));
+    assert!(h.store.issues().is_empty());
+}
+
+fn backdrop_corner() -> gpui::Point<gpui::Pixels> {
+    gpui::point(gpui::px(2.), gpui::px(2.))
+}
+
+#[gpui::test]
+fn a_click_on_the_bare_backdrop_closes_settings(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    cx.simulate_click(backdrop_corner(), gpui::Modifiers::none());
+    assert_eq!(*h.events.borrow(), vec![SettingsEvent::Close]);
+}
+
+#[gpui::test]
+fn a_click_that_cancels_the_remove_dialog_keeps_settings_open(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    h.view.update_in(cx, |view, window, cx| {
+        view.perform_account_action(
+            PageAction::ConfirmRemove {
+                list: AccountListId::OMP_CLAUDE,
+                account_id: "ada@example.com".into(),
+                email: "ada@example.com".into(),
+            },
+            window,
+            cx,
+        );
+    });
+    cx.run_until_parked();
+    cx.simulate_click(backdrop_corner(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(!h.view.read_with(cx, |view, _| view.is_confirming()));
+    assert!(h.events.borrow().is_empty());
+    assert!(h.accounts.calls().is_empty());
+}
+
+#[gpui::test]
+fn a_click_that_closes_the_theme_menu_keeps_settings_open(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    h.view.update_in(cx, |view, window, cx| {
+        view.open_theme_menu(gpui::point(gpui::px(400.), gpui::px(300.)), window, cx)
+    });
+    cx.run_until_parked();
+    assert!(h.view.read_with(cx, |view, _| view.is_showing_menu()));
+    cx.simulate_click(backdrop_corner(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(!h.view.read_with(cx, |view, _| view.is_showing_menu()));
+    assert!(h.events.borrow().is_empty());
 }
