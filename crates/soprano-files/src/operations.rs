@@ -374,9 +374,6 @@ impl FileExplorerOperations {
                 }
                 crate::trash::restore_system(item).map_err(OperationError::Failed)
             }
-            TrashedItem::Unlocated(name) => Err(OperationError::Failed(format!(
-                "'{name}' is in the trash, but the trash didn't list it, so it can't be put back"
-            ))),
         }
     }
 

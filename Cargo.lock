@@ -7782,11 +7782,14 @@ dependencies = [
  "serde_json",
  "soprano-accounts",
  "soprano-agents",
+ "soprano-automations",
+ "soprano-automations-ui",
  "soprano-browser",
  "soprano-chat",
  "soprano-chat-ui",
  "soprano-config",
  "soprano-dashboard",
+ "soprano-editor",
  "soprano-explorer",
  "soprano-git",
  "soprano-ipc",
@@ -7984,12 +7987,16 @@ dependencies = [
 name = "soprano-editor"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "base64 0.22.1",
+ "futures",
  "gpui-base",
  "gpui-component",
  "gpui-pre",
+ "gpui-pre-http-client",
  "gpui-pre-platform",
+ "percent-encoding",
  "soprano-files",
  "soprano-git",
  "soprano-keys",
@@ -7999,6 +8006,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "unicode-segmentation",
+ "ureq",
 ]
 
 [[package]]

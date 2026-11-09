@@ -74,12 +74,19 @@ pub fn relative_path_in_roots(path: &Path, roots: &[&Path]) -> Option<String> {
 }
 
 /// The absolute path of a root-relative tree path (`a/b`, always `/`-separated) under
-/// `root`, with the platform's separators.
+/// `root`, with the platform's separators. Tree paths are lossy for names that aren't
+/// valid UTF-8, so file operations use a node's exact `path` instead.
 pub fn absolute_path(root: &Path, relative_path: &str) -> PathBuf {
     relative_path
         .split('/')
         .filter(|segment| !segment.is_empty())
         .fold(root.to_path_buf(), |path, segment| path.join(segment))
+}
+
+/// The `/`-separated tree path (lossy for names that aren't valid UTF-8) of an exact
+/// root-relative path; `None` if it climbs out or is absolute.
+pub fn tree_path(relative: &Path) -> Option<String> {
+    join_components(relative)
 }
 
 /// `a/b/c` from a relative path's normal components; `None` if it climbs or is absolute.

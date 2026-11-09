@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::sync::LazyLock;
 
 use crate::changes::{GitChangeArea, GitChangeList, GitFileDiff};
-use crate::status::{GitStatusSnapshot, nul_records};
+use crate::status::GitStatusSnapshot;
 
 /// Larger diffs are not shown, like files over the editor's size limit.
 pub const MAXIMUM_DIFF_BYTES: usize = 8 * 1024 * 1024;
@@ -161,11 +161,25 @@ pub fn diff(root: &Path, relative_path: &str, staged: bool) -> GitFileDiff {
     }
 }
 
-/// Root-relative paths of every tracked or untracked, non-ignored file,
-/// or `None` when `root` is not a git working tree.
-pub fn list_files(root: &Path) -> Option<Vec<String>> {
+/// Exact root-relative paths of every tracked or untracked, non-ignored file (names
+/// that aren't valid UTF-8 kept as they are on disk), or `None` when `root` is not a git
+/// working tree.
+pub fn list_files(root: &Path) -> Option<Vec<PathBuf>> {
     let data = run(&["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"], root)?;
-    Some(nul_records(&data))
+    Some(data.split(|byte| *byte == 0).filter(|record| !record.is_empty()).map(path_from_git).collect())
+}
+
+/// git prints paths as raw bytes with `-z`: exact on Unix; UTF-8 on Windows.
+fn path_from_git(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
 /// Runs git in `directory`, returning stdout on a zero exit status.
@@ -393,7 +407,7 @@ pub(crate) mod tests {
         assert!(snapshot.is_ignored("ignored/cache.bin"));
         let mut files = list_files(root).expect("files");
         files.sort();
-        assert_eq!(files, [".gitignore", "fresh.txt", "tracked.txt"]);
+        assert_eq!(files, [".gitignore", "fresh.txt", "tracked.txt"].map(PathBuf::from));
     }
 
     #[cfg(unix)]
@@ -414,5 +428,26 @@ pub(crate) mod tests {
 
         let link = list.changes.iter().find(|c| c.path == "link.txt").expect("listed");
         assert_eq!((link.lines_added, link.lines_deleted), (None, None));
+    }
+
+    /// Names that aren't valid UTF-8 (possible on Linux) come back exactly as on disk.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn listed_files_keep_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        if executable().is_none() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        git(&["init", "-q"], temp.path());
+        let name = std::ffi::OsStr::from_bytes(b"bad\xffname.txt");
+        std::fs::write(temp.path().join(name), "x").expect("write");
+
+        assert_eq!(list_files(temp.path()), Some(vec![PathBuf::from(name)]));
+    }
+
+    #[test]
+    fn git_paths_keep_their_bytes() {
+        assert_eq!(path_from_git(b"src/a b.rs"), PathBuf::from("src/a b.rs"));
     }
 }

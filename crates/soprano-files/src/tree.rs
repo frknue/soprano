@@ -10,7 +10,7 @@ use std::time::Duration;
 use soprano_git::GitStatusSnapshot;
 
 use crate::listing::{self, FileExplorerEntry};
-use crate::root::{child_path, parent_path, relative_path, relative_path_in_roots};
+use crate::root::{child_path, parent_path, relative_path_in_roots, tree_path};
 
 /// Name-filter results are capped so a one-letter query in a huge
 /// repository cannot build an unbounded tree.
@@ -447,46 +447,60 @@ pub fn drop_operation(
 /// One node of the filtered tree; folders are created for the matches' ancestors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FilterNode {
+    /// Display name (lossy for names that aren't valid UTF-8).
     pub name: String,
+    /// The `/`-separated tree path (lossy, like the tree's keys).
     pub relative_path: String,
+    /// The exact absolute path on disk: what opening, renaming or trashing must use.
+    pub path: PathBuf,
     pub is_directory: bool,
     pub children: Vec<FilterNode>,
 }
 
-/// The tree the name filter shows: every listed file matching all `tokens`, minus
+/// The tree the name filter shows: every listed file (exact root-relative paths, from
+/// [`enumerate_files`] or `soprano_git::reader::list_files`) matching all `tokens`, minus
 /// deleted, hidden-dotfile and hidden-ignored files, at most [`FILTER_RESULT_LIMIT`],
 /// each folder sorted folders-first in natural order.
-pub fn build_filter_tree(files: &[String], tokens: &[String], rules: &VisibilityRules<'_>) -> FilterNode {
-    let mut root = FilterNode {
+pub fn build_filter_tree(
+    root: &Path,
+    files: &[PathBuf],
+    tokens: &[String],
+    rules: &VisibilityRules<'_>,
+) -> FilterNode {
+    let mut tree = FilterNode {
         name: String::new(),
         relative_path: String::new(),
+        path: root.to_path_buf(),
         is_directory: true,
         children: vec![],
     };
     let mut matches = 0;
-    for path in files {
+    for file in files {
         if matches >= FILTER_RESULT_LIMIT {
             break;
         }
-        if !listing::filter_matches(path, tokens)
-            || rules.git_status.file_statuses.get(path) == Some(&soprano_git::GitFileStatus::Deleted)
-            || (!rules.shows_dotfiles && listing::is_dotfile(path))
-            || (!rules.shows_ignored_files && rules.git_status.is_ignored(path))
+        let Some(path) = tree_path(file).filter(|path| !path.is_empty()) else { continue };
+        if !listing::filter_matches(&path, tokens)
+            || rules.git_status.file_statuses.get(&path) == Some(&soprano_git::GitFileStatus::Deleted)
+            || (!rules.shows_dotfiles && listing::is_dotfile(&path))
+            || (!rules.shows_ignored_files && rules.git_status.is_ignored(&path))
         {
             continue;
         }
         matches += 1;
-        let segments: Vec<&str> = path.split('/').filter(|segment| !segment.is_empty()).collect();
-        let Some((file, folders)) = segments.split_last() else { continue };
-        let mut parent = &mut root;
+        let segments: Vec<&std::ffi::OsStr> = file.iter().collect();
+        let Some((file_name, folders)) = segments.split_last() else { continue };
+        let mut parent = &mut tree;
         for segment in folders {
-            let folder_path = child_path(&parent.relative_path, segment);
-            let index = match parent.children.iter().position(|c| c.is_directory && c.name == *segment) {
+            let name = segment.to_string_lossy().into_owned();
+            let segment_path = parent.path.join(segment);
+            let index = match parent.children.iter().position(|c| c.is_directory && c.path == segment_path) {
                 Some(index) => index,
                 None => {
                     parent.children.push(FilterNode {
-                        name: (*segment).to_owned(),
-                        relative_path: folder_path,
+                        relative_path: child_path(&parent.relative_path, &name),
+                        name,
+                        path: segment_path,
                         is_directory: true,
                         children: vec![],
                     });
@@ -495,15 +509,17 @@ pub fn build_filter_tree(files: &[String], tokens: &[String], rules: &Visibility
             };
             parent = &mut parent.children[index];
         }
+        let child = parent.path.join(file_name);
         parent.children.push(FilterNode {
-            name: (*file).to_owned(),
-            relative_path: path.clone(),
+            name: file_name.to_string_lossy().into_owned(),
+            relative_path: path,
+            path: child,
             is_directory: false,
             children: vec![],
         });
     }
-    sort_filter_tree(&mut root);
-    root
+    sort_filter_tree(&mut tree);
+    tree
 }
 
 fn sort_filter_tree(node: &mut FilterNode) {
@@ -511,9 +527,10 @@ fn sort_filter_tree(node: &mut FilterNode) {
     node.children.iter_mut().for_each(sort_filter_tree);
 }
 
-/// Every file under `root` outside git, skipping the always-hidden folders, at most
-/// `limit`. Inside a repository the filter lists files with `soprano_git::reader::list_files`.
-pub fn enumerate_files(root: &Path, limit: usize) -> Vec<String> {
+/// Every file under `root` outside git as exact root-relative paths, skipping the
+/// always-hidden folders, at most `limit`. Inside a repository the filter lists files
+/// with `soprano_git::reader::list_files`.
+pub fn enumerate_files(root: &Path, limit: usize) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -541,8 +558,8 @@ pub fn enumerate_files(root: &Path, limit: usize) -> Vec<String> {
             if std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
                 continue;
             }
-            if let Some(relative) = relative_path(&path, root) {
-                files.push(relative);
+            if let Ok(relative) = path.strip_prefix(root) {
+                files.push(relative.to_path_buf());
             }
         }
     }
@@ -781,21 +798,23 @@ mod tests {
 
     #[test]
     fn the_filter_tree_keeps_matches_under_sorted_folders_and_skips_hidden_files() {
-        let files: Vec<String> =
+        let files: Vec<PathBuf> =
             ["src/view10.rs", "src/view2.rs", "README_view.md", ".github/view.yml", "gone_view.rs"]
-                .map(String::from)
+                .map(PathBuf::from)
                 .to_vec();
         let snapshot =
             GitStatusSnapshot::new(&[("gone_view.rs".to_owned(), GitFileStatus::Deleted)], HashSet::new());
         let mut hiding = rules(&snapshot);
         hiding.shows_dotfiles = false;
 
-        let tree = build_filter_tree(&files, &listing::filter_tokens("VIEW"), &hiding);
+        let tree = build_filter_tree(Path::new("/repo"), &files, &listing::filter_tokens("VIEW"), &hiding);
 
         let top: Vec<&str> = tree.children.iter().map(|c| c.relative_path.as_str()).collect();
         assert_eq!(top, ["src", "README_view.md"]);
         let src: Vec<&str> = tree.children[0].children.iter().map(|c| c.relative_path.as_str()).collect();
         assert_eq!(src, ["src/view2.rs", "src/view10.rs"]);
+        assert_eq!(tree.children[0].path, Path::new("/repo/src"));
+        assert_eq!(tree.children[0].children[0].path, Path::new("/repo/src/view2.rs"));
     }
 
     #[test]
@@ -810,7 +829,7 @@ mod tests {
         let mut files = enumerate_files(temp.path(), ENUMERATED_FILE_LIMIT);
         files.sort();
 
-        assert_eq!(files, ["b.txt", "src/a.rs"]);
+        assert_eq!(files, [PathBuf::from("b.txt"), Path::new("src").join("a.rs")]);
         assert_eq!(enumerate_files(temp.path(), 1).len(), 1);
     }
 
@@ -855,7 +874,7 @@ mod tests {
         std::fs::write(temp.path().join("App.xcodeproj/project.pbxproj"), "").expect("write");
         std::fs::write(temp.path().join("main.swift"), "").expect("write");
 
-        assert_eq!(enumerate_files(temp.path(), ENUMERATED_FILE_LIMIT), ["main.swift"]);
+        assert_eq!(enumerate_files(temp.path(), ENUMERATED_FILE_LIMIT), [PathBuf::from("main.swift")]);
     }
 
     /// Linux allows names that aren't UTF-8; the tree's node keeps the real name in its
@@ -875,5 +894,45 @@ mod tests {
         let node = tree.node(&relative).expect("node");
         assert_eq!(node.path, temp.path().join(name));
         assert!(node.path.exists());
+    }
+
+    /// Linux allows names that aren't UTF-8: the filter's listing and tree keep the exact
+    /// name for the node's path, with a lossy display name and tree path.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn find_files_keeps_exact_paths_for_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let folder = std::ffi::OsStr::from_bytes(b"dir\xfe");
+        let name = std::ffi::OsStr::from_bytes(b"bad\xffname.txt");
+        std::fs::create_dir(temp.path().join(folder)).expect("mkdir");
+        std::fs::write(temp.path().join(folder).join(name), "x").expect("write");
+        let snapshot = GitStatusSnapshot::empty();
+
+        let files = enumerate_files(temp.path(), ENUMERATED_FILE_LIMIT);
+        assert_eq!(files, [Path::new(folder).join(name)]);
+        let tree = build_filter_tree(temp.path(), &files, &listing::filter_tokens("name"), &rules(&snapshot));
+
+        let file = &tree.children[0].children[0];
+        assert_eq!(file.path, temp.path().join(folder).join(name));
+        assert!(file.path.exists());
+        assert_eq!(file.relative_path, "dir\u{fffd}/bad\u{fffd}name.txt");
+    }
+
+    /// Paths are built from exact names, not from the lossy tree paths.
+    #[test]
+    fn filter_nodes_and_tree_nodes_build_paths_from_listed_names() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("a b")).expect("mkdir");
+        std::fs::write(temp.path().join("a b/c.txt"), "").expect("write");
+        let mut tree = FileExplorerTree::new(temp.path().to_path_buf());
+        tree.load("");
+        tree.expand("a b");
+        tree.load("a b");
+
+        assert_eq!(
+            tree.node("a b/c.txt").map(|n| n.path.clone()),
+            Some(temp.path().join("a b").join("c.txt"))
+        );
     }
 }
