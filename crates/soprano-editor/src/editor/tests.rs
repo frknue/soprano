@@ -194,3 +194,132 @@ async fn binary_files_show_a_note_instead_of_text(cx: &mut TestAppContext) {
     assert_eq!(content, Some(DocumentContent::Unavailable("“blob.bin” isn't a UTF-8 text file.".into())));
     assert!(!view.read_with(cx, |view, cx| view.is_editable(cx)));
 }
+
+#[gpui::test]
+async fn an_edit_in_one_tab_moves_the_other_tabs_selection(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = file("shared.txt", "alpha beta gamma\n");
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (first, _, mut first_cx) = open(cx, &documents, "tab-1", &path);
+    let (second, _, mut second_cx) = open(cx, &documents, "tab-2", &path);
+    let (cx_first, cx_second) = (&mut first_cx, &mut second_cx);
+    // The first tab selects "gamma".
+    first.update(cx_first, |view, cx| view.select(11..16, cx));
+
+    // The second tab types before it: the selection moves with the text.
+    second.update_in(cx_second, |view, window, cx| {
+        view.select(0..0, cx);
+        view.replace_text_in_range(None, ">> ", window, cx);
+    });
+    assert_eq!(first.read_with(cx_first, |view, _| view.selected_range()), 14..19);
+    assert_eq!(first.read_with(cx_first, |view, cx| view.text(cx))[14..19].to_string(), "gamma");
+
+    // An edit after it leaves it; deleting text that holds it collapses it to the edit's end.
+    second.update_in(cx_second, |view, window, cx| {
+        view.select(19..19, cx);
+        view.replace_text_in_range(None, "!", window, cx);
+    });
+    assert_eq!(first.read_with(cx_first, |view, _| view.selected_range()), 14..19);
+    second.update_in(cx_second, |view, window, cx| {
+        view.select(9..20, cx);
+        view.replace_text_in_range(None, "", window, cx);
+    });
+    assert_eq!(first.read_with(cx_first, |view, _| view.selected_range()), 9..9);
+
+    // Undo in the second tab puts the text back at the caret: text inserted where a caret
+    // stands goes after it.
+    second.update_in(cx_second, |view, window, cx| view.undo(&Undo, window, cx));
+    assert_eq!(first.read_with(cx_first, |view, _| view.selected_range()), 9..9);
+    assert_eq!(first.read_with(cx_first, |view, cx| view.text(cx)), ">> alpha beta gamma!\n");
+}
+
+fn long_file(lines: usize) -> (tempfile::TempDir, PathBuf) {
+    let text: String = (1..=lines).map(|n| format!("line {n}\n")).collect();
+    file("long.txt", &text)
+}
+
+fn laid_out(
+    view: &Entity<EditorView<&'static str>>,
+    cx: &mut VisualTestContext,
+) -> gpui::Bounds<gpui::Pixels> {
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| view.layout.as_ref().map(|layout| layout.bounds))
+        .expect("the editor painted")
+}
+
+#[gpui::test]
+async fn the_scroll_bar_drags_and_pages_like_a_scroller(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = long_file(400);
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    let bounds = laid_out(&view, cx);
+    let lane_x = bounds.right() - gpui::px(5.0);
+    let scroll = |view: &Entity<EditorView<&'static str>>, cx: &mut VisualTestContext| {
+        view.read_with(cx, |view, _| f32::from(view.scroll.y))
+    };
+
+    // A click in the track below the thumb pages down by the viewport's height.
+    cx.simulate_mouse_down(
+        gpui::point(lane_x, bounds.bottom() - gpui::px(4.0)),
+        MouseButton::Left,
+        Default::default(),
+    );
+    cx.simulate_mouse_up(
+        gpui::point(lane_x, bounds.bottom() - gpui::px(4.0)),
+        MouseButton::Left,
+        Default::default(),
+    );
+    let page = f32::from(bounds.size.height);
+    assert!((scroll(&view, cx) - page).abs() < 1.0, "paged to {}", scroll(&view, cx));
+
+    // Dragging the thumb down scrolls in proportion.
+    cx.run_until_parked();
+    let (top, length, max) = view.read_with(cx, |view, _| {
+        let layout = view.layout.as_ref().expect("laid out");
+        let bar = layout.scrollbar(layout.max_scroll(view.widest_columns).y).expect("scrolls");
+        (bar.thumb_top(f32::from(view.scroll.y)), bar.thumb_length(), bar.max_scroll)
+    });
+    let grab = gpui::point(lane_x, gpui::px(top + length / 2.0));
+    cx.simulate_mouse_down(grab, MouseButton::Left, Default::default());
+    let travel = f32::from(bounds.size.height) - length;
+    cx.simulate_mouse_move(
+        gpui::point(lane_x, grab.y + gpui::px(travel)),
+        MouseButton::Left,
+        Default::default(),
+    );
+    assert!((scroll(&view, cx) - max).abs() < 1.0, "dragged to {}", scroll(&view, cx));
+    cx.simulate_mouse_up(
+        gpui::point(lane_x, grab.y + gpui::px(travel)),
+        MouseButton::Left,
+        Default::default(),
+    );
+    assert!(view.read_with(cx, |view, _| view.thumb_grab.is_none()));
+}
+
+#[gpui::test]
+async fn a_drag_selection_past_the_bottom_keeps_scrolling(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = long_file(400);
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    let bounds = laid_out(&view, cx);
+    let start = gpui::point(bounds.left() + gpui::px(80.0), bounds.top() + gpui::px(15.0));
+    cx.simulate_mouse_down(start, MouseButton::Left, Default::default());
+    let below = gpui::point(start.x, bounds.bottom() + gpui::px(40.0));
+    cx.simulate_mouse_move(below, MouseButton::Left, Default::default());
+    cx.executor().advance_clock(std::time::Duration::from_millis(500));
+    cx.run_until_parked();
+    let (scrolled, head) = view.read_with(cx, |view, _| (f32::from(view.scroll.y), view.head));
+    assert!(scrolled >= 200.0, "scrolled {scrolled}");
+    // The selection reaches past the first screen of lines.
+    let rows_on_screen = (f32::from(bounds.size.height) / 20.0) as usize;
+    assert!(head > rows_on_screen * "line 10\n".len(), "head {head}");
+    cx.simulate_mouse_up(below, MouseButton::Left, Default::default());
+    let after = view.read_with(cx, |view, _| f32::from(view.scroll.y));
+    cx.executor().advance_clock(std::time::Duration::from_millis(500));
+    cx.run_until_parked();
+    assert_eq!(view.read_with(cx, |view, _| f32::from(view.scroll.y)), after);
+}

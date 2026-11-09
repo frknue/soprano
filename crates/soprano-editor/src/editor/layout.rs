@@ -116,6 +116,80 @@ pub fn content_height(line_count: usize, line_height: f32) -> f32 {
     line_count.max(1) as f32 * line_height + TEXT_INSET_Y * 2.0
 }
 
+// MARK: - Scroll bar and drag scrolling
+
+/// The vertical scroll bar's geometry (Herdr's: a 6 px thumb in a 16 px lane, 48 px long at
+/// least), in pixels along the track.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollbarGeometry {
+    /// The track's top and length (the viewport's).
+    pub track_top: f32,
+    pub track_length: f32,
+    /// How far the content scrolls (content height − viewport height).
+    pub max_scroll: f32,
+}
+
+/// The scroll bar's minimum thumb length.
+pub const MINIMUM_THUMB: f32 = 48.0;
+
+impl ScrollbarGeometry {
+    /// Shows only when the content is taller than the viewport.
+    pub fn new(track_top: f32, track_length: f32, max_scroll: f32) -> Option<Self> {
+        (max_scroll > 0.0 && track_length > 0.0).then_some(Self { track_top, track_length, max_scroll })
+    }
+
+    pub fn thumb_length(&self) -> f32 {
+        let content = self.track_length + self.max_scroll;
+        (self.track_length * self.track_length / content).max(MINIMUM_THUMB).min(self.track_length)
+    }
+
+    /// The thumb's top at `scroll`.
+    pub fn thumb_top(&self, scroll: f32) -> f32 {
+        let travel = self.track_length - self.thumb_length();
+        self.track_top + travel * (scroll / self.max_scroll).clamp(0.0, 1.0)
+    }
+
+    /// The scroll that puts the thumb's top at `thumb_top` (dragging the thumb).
+    pub fn scroll_for_thumb_top(&self, thumb_top: f32) -> f32 {
+        let travel = self.track_length - self.thumb_length();
+        if travel <= 0.0 {
+            return 0.0;
+        }
+        ((thumb_top - self.track_top) / travel * self.max_scroll).clamp(0.0, self.max_scroll)
+    }
+
+    /// A click in the track outside the thumb: one page toward the click, as NSScroller's
+    /// default "jump to the next page" does.
+    pub fn page_toward(&self, scroll: f32, y: f32) -> f32 {
+        let top = self.thumb_top(scroll);
+        let page = self.track_length;
+        if y < top {
+            (scroll - page).max(0.0)
+        } else if y > top + self.thumb_length() {
+            (scroll + page).min(self.max_scroll)
+        } else {
+            scroll
+        }
+    }
+
+    pub fn thumb_contains(&self, scroll: f32, y: f32) -> bool {
+        let top = self.thumb_top(scroll);
+        y >= top && y <= top + self.thumb_length()
+    }
+}
+
+/// While a drag selection is outside the visible area: how far to scroll this tick, the
+/// pointer's distance past the edge (negative above or left, positive below or right).
+pub fn edge_scroll(position: f32, start: f32, end: f32) -> f32 {
+    if position < start {
+        position - start
+    } else if position > end {
+        position - end
+    } else {
+        0.0
+    }
+}
+
 // MARK: - Motion
 
 /// The character boundary before `offset`.
@@ -205,6 +279,33 @@ mod tests {
         // A short file stops at its last line.
         assert_eq!(visible_rows(0.0, 500.0, 20.0, 3), 0..3);
         assert_eq!(content_height(40, 20.0), 816.0);
+    }
+
+    #[test]
+    fn the_scroll_bar_thumb_tracks_and_drives_the_scroll() {
+        // A 200 px viewport over 1000 px of content.
+        let bar = ScrollbarGeometry::new(0.0, 200.0, 800.0).expect("content overflows");
+        assert_eq!(bar.thumb_length(), 48.0);
+        assert_eq!(bar.thumb_top(0.0), 0.0);
+        assert_eq!(bar.thumb_top(800.0), 152.0);
+        assert_eq!(bar.thumb_top(400.0), 76.0);
+        // Dragging the thumb to the middle of its travel scrolls halfway.
+        assert_eq!(bar.scroll_for_thumb_top(76.0), 400.0);
+        assert_eq!(bar.scroll_for_thumb_top(-20.0), 0.0);
+        assert_eq!(bar.scroll_for_thumb_top(500.0), 800.0);
+        // Clicking the track pages toward the click.
+        assert_eq!(bar.page_toward(0.0, 150.0), 200.0);
+        assert_eq!(bar.page_toward(400.0, 10.0), 200.0);
+        assert_eq!(bar.page_toward(400.0, 90.0), 400.0);
+        assert!(bar.thumb_contains(400.0, 90.0));
+        assert!(ScrollbarGeometry::new(0.0, 200.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn a_drag_past_the_edge_scrolls_by_the_distance_past_it() {
+        assert_eq!(edge_scroll(-30.0, 0.0, 400.0), -30.0);
+        assert_eq!(edge_scroll(450.0, 0.0, 400.0), 50.0);
+        assert_eq!(edge_scroll(200.0, 0.0, 400.0), 0.0);
     }
 
     #[test]

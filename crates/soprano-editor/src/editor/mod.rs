@@ -23,8 +23,8 @@ use std::sync::Arc;
 use gpui::{
     App, AppContext as _, ClipboardItem, Context, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, Image, ImageFormat, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ObjectFit, ParentElement, Pixels, Point, Render, ScrollEvent, SharedString,
-    Styled, StyledImage, Subscription, UTF16Selection, Window, actions, anchored, deferred, div, img,
+    MouseMoveEvent, ObjectFit, ParentElement, Pixels, Point, Render, ScrollEvent, SharedString, Styled,
+    StyledImage, Subscription, Task, UTF16Selection, Window, actions, anchored, deferred, div, img,
     prelude::FluentBuilder, px,
 };
 use soprano_text::editor::{DocumentChange, DocumentContent, StatusTone, restore_selection};
@@ -37,7 +37,7 @@ use soprano_ui::{ActiveSopranoTheme, IconName};
 use soprano_ui::{InputEvent, InputState, TextInput};
 
 use crate::colors::SurfaceColors;
-use crate::documents::{DocumentsEvent, EditorDocuments};
+use crate::documents::{DocumentsEvent, EditorDocuments, TextEdit};
 use crate::keys;
 use crate::surface::{SurfaceMessage, SurfaceToolbar, breadcrumbs, display_path, toolbar_button};
 use element::{EditorElement, EditorLayout};
@@ -45,6 +45,9 @@ use layout::{DisplayLine, next_boundary, previous_boundary, word_end, word_range
 
 /// The key context of a focused editor.
 pub const EDITOR_CONTEXT: &str = "SopranoEditor";
+/// How often a drag selection past the edge scrolls.
+const DRAG_SCROLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
 /// The key context of the editor's find field.
 pub const FIND_CONTEXT: &str = "SopranoEditorFind";
 
@@ -224,6 +227,12 @@ pub struct EditorView<T: Clone + Eq + Hash + 'static> {
     widest_columns: usize,
     autoscroll: bool,
     selecting: bool,
+    /// Grabbing the scroll bar's thumb: the grab's distance below the thumb's top.
+    thumb_grab: Option<f32>,
+    /// Where a drag selection's pointer is, and the loop scrolling while it is past an edge.
+    drag_point: Option<Point<Pixels>>,
+    drag_scrolling: bool,
+    drag_scroll: Option<Task<()>>,
     layout: Option<EditorLayout>,
     find: FindBar,
     pending_restore: Option<(Vec<Range<usize>>, Point<Pixels>)>,
@@ -264,7 +273,12 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
                     DocumentsEvent::Changed { document: changed, changes } if *changed == this.document => {
                         this.document_did_change(changes, cx);
                     }
-                    DocumentsEvent::Changed { .. } => {}
+                    DocumentsEvent::Edited { document: edited, edit, source }
+                        if *edited == this.document && *source != view =>
+                    {
+                        this.text_edited_elsewhere(edit, cx);
+                    }
+                    DocumentsEvent::Changed { .. } | DocumentsEvent::Edited { .. } => {}
                 }),
                 cx.subscribe_in(&input, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                     match event {
@@ -299,6 +313,10 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             widest_columns: 0,
             autoscroll: false,
             selecting: false,
+            thumb_grab: None,
+            drag_point: None,
+            drag_scrolling: false,
+            drag_scroll: None,
             layout: None,
             find: FindBar { visible: false, input, matches: Vec::new(), current: None },
             pending_restore: None,
@@ -362,6 +380,25 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     fn edit<R>(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut EditorDocument) -> R) -> Option<R> {
         let id = self.document;
         self.documents.update(cx, |documents, cx| documents.update(id, cx, edit))
+    }
+
+    /// An edit of the text: the other tabs of the document move their selections with it.
+    fn edit_text(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut EditorDocument) -> Option<Range<usize>>,
+    ) -> Option<Range<usize>> {
+        let (id, source) = (self.document, cx.entity_id());
+        self.documents.update(cx, |documents, cx| documents.edit_text(id, source, cx, edit))
+    }
+
+    /// Another tab of the document edited its text: the selection moves with the edit.
+    fn text_edited_elsewhere(&mut self, edit: &TextEdit, cx: &mut Context<Self>) {
+        self.anchor = edit.shift(self.anchor);
+        self.head = edit.shift(self.head);
+        self.marked = None;
+        self.goal_column = None;
+        cx.notify();
     }
 
     fn is_editable(&self, cx: &App) -> bool {
@@ -605,8 +642,8 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             return;
         }
         let range = self.marked.take().unwrap_or_else(|| self.selected_range());
-        let inserted = self.edit(cx, |document| {
-            if typing { document.type_text(range, text) } else { document.replace(range, text) }
+        let inserted = self.edit_text(cx, |document| {
+            Some(if typing { document.type_text(range, text) } else { document.replace(range, text) })
         });
         if let Some(inserted) = inserted {
             self.anchor = inserted.end;
@@ -622,7 +659,11 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             return;
         }
         let selection = self.selected_range();
-        if let Some(caret) = self.edit(cx, |document| document.insert_newline(selection)) {
+        let inserted = self.edit_text(cx, |document| {
+            let start = document.clamp_offset(selection.start);
+            Some(start..document.insert_newline(selection))
+        });
+        if let Some(caret) = inserted.map(|range| range.end) {
             self.anchor = caret;
             self.head = caret;
             self.goal_column = None;
@@ -650,7 +691,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         if range.is_empty() {
             return;
         }
-        if let Some(inserted) = self.edit(cx, |document| document.type_text(range, "")) {
+        if let Some(inserted) = self.edit_text(cx, |document| Some(document.type_text(range, ""))) {
             self.anchor = inserted.start;
             self.head = inserted.start;
             self.goal_column = None;
@@ -681,7 +722,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(range) = self.edit(cx, EditorDocument::undo).flatten() {
+        if let Some(range) = self.edit_text(cx, EditorDocument::undo) {
             self.anchor = range.start;
             self.head = range.end;
             self.autoscroll = true;
@@ -690,7 +731,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(range) = self.edit(cx, EditorDocument::redo).flatten() {
+        if let Some(range) = self.edit_text(cx, EditorDocument::redo) {
             self.anchor = range.start;
             self.head = range.end;
             self.autoscroll = true;
@@ -857,6 +898,9 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.emit(EditorEvent::FocusRequested);
         self.focus.focus(window, cx);
+        if self.scrollbar_down(event.position, cx) {
+            return;
+        }
         let Some(offset) = self.layout.as_ref().and_then(|layout| layout.offset_for_point(event.position))
         else {
             return;
@@ -892,20 +936,97 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         cx.notify();
     }
 
-    fn mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.selecting || event.pressed_button != Some(MouseButton::Left) {
+    /// A press in the scroll bar's lane: on the thumb it starts dragging it, elsewhere in the
+    /// track it pages toward the press. False when the press is not on the scroll bar.
+    fn scrollbar_down(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(layout) = self.layout.as_ref() else { return false };
+        let max = layout.max_scroll(self.widest_columns);
+        let Some(bar) = layout.scrollbar(max.y).filter(|_| layout.in_scrollbar_lane(position)) else {
+            return false;
+        };
+        let (scroll, y) = (f32::from(self.scroll.y), f32::from(position.y));
+        if bar.thumb_contains(scroll, y) {
+            self.thumb_grab = Some(y - bar.thumb_top(scroll));
+        } else {
+            self.scroll.y = px(bar.page_toward(scroll, y));
+        }
+        cx.notify();
+        true
+    }
+
+    /// The pointer moved with the button down, anywhere in the window: drags the thumb, or
+    /// extends the selection and scrolls while the pointer is past the text's edges.
+    pub(crate) fn drag_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if event.pressed_button != Some(MouseButton::Left) {
             return;
         }
+        if let Some(grab) = self.thumb_grab {
+            let Some(layout) = self.layout.as_ref() else { return };
+            if let Some(bar) = layout.scrollbar(layout.max_scroll(self.widest_columns).y) {
+                self.scroll.y = px(bar.scroll_for_thumb_top(f32::from(event.position.y) - grab));
+                cx.notify();
+            }
+            return;
+        }
+        if !self.selecting {
+            return;
+        }
+        self.drag_point = Some(event.position);
         if let Some(offset) = self.layout.as_ref().and_then(|layout| layout.offset_for_point(event.position))
         {
             self.head = offset;
-            self.autoscroll = true;
             cx.notify();
+        }
+        if !self.drag_scrolling && self.edge_distance().is_some() {
+            self.drag_scrolling = true;
+            self.drag_scroll = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(DRAG_SCROLL_INTERVAL).await;
+                    let keep = this.update(cx, |this, cx| this.drag_scroll_tick(cx)).unwrap_or(false);
+                    if !keep {
+                        break;
+                    }
+                }
+            }));
         }
     }
 
-    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    /// How far the pointer of a drag selection is past the text area's edges, if it is.
+    fn edge_distance(&self) -> Option<Point<Pixels>> {
+        let (layout, point) = (self.layout.as_ref()?, self.drag_point?);
+        let area = layout.text_area();
+        let dx = layout::edge_scroll(point.x.into(), area.left().into(), area.right().into());
+        let dy = layout::edge_scroll(point.y.into(), area.top().into(), area.bottom().into());
+        (dx != 0.0 || dy != 0.0).then(|| Point::new(px(dx), px(dy)))
+    }
+
+    /// One step of scrolling while a drag selection is past the edge: scrolls by the distance
+    /// past it and extends the selection to the line now at that edge. False ends the loop.
+    fn drag_scroll_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(distance) = self.edge_distance().filter(|_| self.selecting) else {
+            self.drag_scrolling = false;
+            return false;
+        };
+        let Some(layout) = self.layout.as_ref() else { return false };
+        let max = layout.max_scroll(self.widest_columns);
+        self.scroll = Point::new(
+            (self.scroll.x + distance.x).clamp(px(0.0), max.x),
+            (self.scroll.y + distance.y).clamp(px(0.0), max.y),
+        );
+        if let Some(offset) = self.drag_point.and_then(|point| layout.offset_for_point(point)) {
+            self.head = offset;
+        }
+        cx.notify();
+        true
+    }
+
+    /// The button came up: drags end.
+    pub(crate) fn drag_end(&mut self) {
         self.selecting = false;
+        self.thumb_grab = None;
+        self.drag_point = None;
+        self.drag_scrolling = false;
+        self.drag_scroll = None;
     }
 
     fn scroll_wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1035,7 +1156,9 @@ impl<T: Clone + Eq + Hash + 'static> EntityInputHandler for EditorView<T> {
             .and_then(|range| self.with_document(cx, |document| utf16_to_bytes(document, range)))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selected_range());
-        let Some(inserted) = self.edit(cx, |document| document.type_text(range, text)) else { return };
+        let Some(inserted) = self.edit_text(cx, |document| Some(document.type_text(range, text))) else {
+            return;
+        };
         self.marked = (!text.is_empty()).then(|| inserted.clone());
         let caret = match selected {
             Some(selected) => {
@@ -1190,8 +1313,6 @@ impl<T: Clone + Eq + Hash + 'static> Render for EditorView<T> {
                 .w_full()
                 .cursor_text()
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
-                .on_mouse_move(cx.listener(Self::mouse_move))
-                .on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
                 .on_scroll(cx.listener(Self::scroll_wheel))
                 .child(EditorElement::new(entity))
                 .when(self.find.visible, |body| body.child(self.render_find_bar(cx)))

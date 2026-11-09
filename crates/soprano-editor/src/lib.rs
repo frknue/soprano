@@ -17,6 +17,6 @@ pub mod surface;
 
 pub use colors::SurfaceColors;
 pub use diff_view::{DiffEvent, DiffView};
-pub use documents::{DocumentsEvent, EditorDocuments};
+pub use documents::{DocumentsEvent, EditorDocuments, TextEdit};
 pub use editor::{EditorEvent, EditorView};
 pub use reader::{MarkdownReaderView, ReaderEvent};

@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -21,8 +22,43 @@ use soprano_text::{DocumentId, EditorDocument, EditorDocumentStore, syntax};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DocumentsEvent {
+    /// The text of `document` was edited through `source` (a view's entity id): the other
+    /// views of the document move their selections with the edit, as NSTextView did over a
+    /// shared text storage. Sent before the matching [`DocumentsEvent::Changed`].
+    Edited { document: DocumentId, edit: TextEdit, source: EntityId },
     /// `document` changed (oldest change first); its views update.
     Changed { document: DocumentId, changes: Vec<DocumentChange> },
+}
+
+/// One replacement in a document's text: `range` (bytes of the text before the edit) now
+/// holds `new_len` bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextEdit {
+    pub range: Range<usize>,
+    pub new_len: usize,
+}
+
+impl TextEdit {
+    /// The edit that turned a text of `old_len` bytes into one of `new_len_total` bytes, where
+    /// `new_range` is the replacement's range in the new text (what the document's editing
+    /// calls return).
+    pub fn from_result(new_range: Range<usize>, old_len: usize, new_len_total: usize) -> Self {
+        let removed =
+            (new_range.len() as isize - (new_len_total as isize - old_len as isize)).max(0) as usize;
+        Self { range: new_range.start..new_range.start + removed, new_len: new_range.len() }
+    }
+
+    /// Where `offset` (in the text before the edit) is afterwards: unchanged before the edit,
+    /// moved by the change in length after it, and at the replacement's end inside it.
+    pub fn shift(&self, offset: usize) -> usize {
+        if offset <= self.range.start {
+            offset
+        } else if offset >= self.range.end {
+            offset - self.range.len() + self.new_len
+        } else {
+            self.range.start + self.new_len
+        }
+    }
 }
 
 /// Fields drop in order: the task that listens to the watcher goes before the watcher, so
@@ -92,6 +128,29 @@ impl<T: Clone + Eq + Hash + 'static> EditorDocuments<T> {
         let result = edit(self.store.get_mut(id)?);
         self.flush(id, cx);
         Some(result)
+    }
+
+    /// Runs `edit`, an edit of the text that returns the replacement's range in the new text
+    /// (`replace`, `type_text`, `undo`, …), and tells the other views of the document where
+    /// the text moved.
+    pub fn edit_text(
+        &mut self,
+        id: DocumentId,
+        source: EntityId,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut EditorDocument) -> Option<Range<usize>>,
+    ) -> Option<Range<usize>> {
+        let document = self.store.get_mut(id)?;
+        let (before, version) = (document.len(), document.text_version());
+        let result = edit(document);
+        if let Some(range) = result.clone()
+            && document.text_version() != version
+        {
+            let edit = TextEdit::from_result(range, before, document.len());
+            cx.emit(DocumentsEvent::Edited { document: id, edit, source });
+        }
+        self.flush(id, cx);
+        result
     }
 
     /// Saves, unless another program changed the file since it was read.
@@ -211,5 +270,34 @@ impl<T: Clone + Eq + Hash + 'static> EditorDocuments<T> {
     /// The paths of the open documents (for tests and the app's window title checks).
     pub fn open_paths(&self) -> Vec<PathBuf> {
         self.upkeep.keys().filter_map(|id| self.store.get(*id)).map(|d| d.path().to_path_buf()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_edit_is_read_back_from_the_replacement_and_the_lengths() {
+        // "one two" → "one 2" by replacing 4..7 ("two") with "2".
+        let edit = TextEdit::from_result(4..5, 7, 5);
+        assert_eq!(edit, TextEdit { range: 4..7, new_len: 1 });
+        // An insertion of 4 bytes at 3.
+        assert_eq!(TextEdit::from_result(3..7, 4, 8), TextEdit { range: 3..3, new_len: 4 });
+        // A deletion of 2..5 returns an empty range at 2.
+        assert_eq!(TextEdit::from_result(2..2, 9, 6), TextEdit { range: 2..5, new_len: 0 });
+    }
+
+    #[test]
+    fn offsets_move_with_an_edit_made_in_another_tab() {
+        let edit = TextEdit { range: 4..7, new_len: 1 };
+        assert_eq!(edit.shift(2), 2);
+        assert_eq!(edit.shift(4), 4);
+        assert_eq!(edit.shift(5), 5);
+        assert_eq!(edit.shift(7), 5);
+        assert_eq!(edit.shift(10), 8);
+        let insertion = TextEdit { range: 3..3, new_len: 4 };
+        assert_eq!(insertion.shift(3), 3);
+        assert_eq!(insertion.shift(6), 10);
     }
 }

@@ -9,9 +9,10 @@ use std::hash::Hash;
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ContentMask, Element, ElementId, ElementInputHandler, Entity, Font, FontStyle, FontWeight,
-    GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, Point, ShapedLine, SharedString,
-    Style, TextAlign, TextRun, Window, fill, point, px, relative, size,
+    App, Bounds, ContentMask, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, Font,
+    FontStyle, FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, MouseButton,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ShapedLine, SharedString, Style, TextAlign, TextRun, Window,
+    fill, point, px, relative, size,
 };
 use soprano_text::editor::{GUTTER_PADDING, LINE_HEIGHT, number_column_width};
 use soprano_text::{EditorDocument, SyntaxToken};
@@ -20,8 +21,14 @@ use soprano_ui::fonts::TERMINAL_FONT_FAMILY;
 
 use super::EditorView;
 use super::layout::{
-    self, DisplayLine, FONT_SIZE, GUTTER_FONT_SIZE, TEXT_INSET_X, TEXT_INSET_Y, visible_rows,
+    self, DisplayLine, FONT_SIZE, GUTTER_FONT_SIZE, ScrollbarGeometry, TEXT_INSET_X, TEXT_INSET_Y,
+    visible_rows,
 };
+
+/// The scroll bar's lane along the right edge (presses there go to the scroll bar) and the
+/// thumb's distance from the edge.
+pub(super) const SCROLLBAR_LANE: f32 = 16.0;
+pub(super) const SCROLLBAR_INSET: f32 = 4.0;
 use crate::colors::SurfaceColors;
 use crate::rich::diff::digit_width;
 
@@ -64,6 +71,24 @@ impl EditorLayout {
         point(
             (content_width - self.bounds.size.width).max(px(0.0)),
             (content_height - self.bounds.size.height).max(px(0.0)),
+        )
+    }
+
+    /// The vertical scroll bar when the text scrolls (`max_y` from [`Self::max_scroll`]).
+    pub fn scrollbar(&self, max_y: Pixels) -> Option<ScrollbarGeometry> {
+        ScrollbarGeometry::new(self.bounds.top().into(), self.bounds.size.height.into(), max_y.into())
+    }
+
+    /// Whether `position` is in the scroll bar's lane.
+    pub fn in_scrollbar_lane(&self, position: Point<Pixels>) -> bool {
+        position.x >= self.bounds.right() - px(SCROLLBAR_LANE) && position.x <= self.bounds.right()
+    }
+
+    /// The text area (right of the gutter).
+    pub fn text_area(&self) -> Bounds<Pixels> {
+        Bounds::from_corners(
+            point(self.bounds.left() + self.gutter_width, self.bounds.top()),
+            self.bounds.bottom_right(),
         )
     }
 
@@ -443,21 +468,47 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
             }
         });
 
-        // A scroll indicator when the text is taller than the view (Herdr's 6 px thumb).
+        // The scroll bar (Herdr's: a 6 px thumb, 8 px while hovered or dragged, in a 16 px
+        // lane, foreground at 35 % / 55 %). Pressing it is handled by the view.
         let max = layout.max_scroll(widest_columns);
-        if max.y > px(0.0) {
-            let height = bounds.size.height;
-            let content = height + max.y;
-            let thumb = (height * (height / content)).max(px(48.0)).min(height);
-            let y = bounds.top() + (height - thumb) * (scroll.y / max.y);
-            let rect = Bounds::new(point(bounds.right() - px(10.0), y), size(px(6.0), thumb));
-            window.paint_quad(fill(rect, colors.foreground.opacity(0.35)));
+        if let Some(bar) = layout.scrollbar(max.y) {
+            let (dragging, hovered) = {
+                let view = self.view.read(cx);
+                let mouse = window.mouse_position();
+                (view.thumb_grab.is_some(), layout.in_scrollbar_lane(mouse) && bounds.contains(&mouse))
+            };
+            let wide = dragging || hovered;
+            let width = px(if wide { 8.0 } else { 6.0 });
+            let top = px(bar.thumb_top(f32::from(scroll.y)));
+            let rect = Bounds::new(
+                point(bounds.right() - px(SCROLLBAR_INSET) - width, top),
+                size(width, px(bar.thumb_length())),
+            );
+            window.paint_quad(fill(rect, colors.foreground.opacity(if wide { 0.55 } else { 0.35 })));
         }
 
         if focused {
             let focus = self.view.read(cx).focus.clone();
             window.handle_input(&focus, ElementInputHandler::new(bounds, self.view.clone()), cx);
         }
+        // A drag (selecting, or the scroll bar's thumb) follows the pointer anywhere in the
+        // window, also past the text's edges.
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Bubble {
+                    view.update(cx, |view, cx| view.drag_move(event, window, cx));
+                }
+            }
+        });
+        window.on_mouse_event({
+            let view = self.view.clone();
+            move |event: &MouseUpEvent, phase, _, cx| {
+                if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                    view.update(cx, |view, _| view.drag_end());
+                }
+            }
+        });
         let stored = layout;
         self.view.update(cx, |view, _| {
             view.layout = Some(stored);

@@ -17,7 +17,7 @@ use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, MouseButton,
     MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollEvent, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, Window, actions, div, list,
+    StatefulInteractiveElement, Styled, Subscription, Task, Window, actions, canvas, div, list,
     prelude::FluentBuilder, px,
 };
 use soprano_files::watcher::{DEFAULT_LATENCY, FileSystemWatcher};
@@ -39,6 +39,9 @@ use crate::rich::diff::{
     DIFF_FONT_SIZE, DiffFoldRow, DiffLineRow, DiffRowLayout, DiffSplitRow, DiffStat, digit_width,
 };
 use crate::surface::{SurfaceMessage, toolbar_button};
+
+/// How often a drag selection past the list's edge scrolls.
+const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// The key context of a diff view.
 pub const DIFF_CONTEXT: &str = "SopranoDiff";
@@ -117,6 +120,10 @@ pub struct DiffView {
     path_copied: Option<Task<()>>,
     menu: Option<(Entity<ContextMenu>, Subscription)>,
     dragging: bool,
+    /// Where a drag selection's pointer is, and the loop scrolling while it is past an edge.
+    drag_point: Option<Point<Pixels>>,
+    drag_scrolling: bool,
+    drag_scroll: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -179,6 +186,9 @@ impl DiffView {
             path_copied: None,
             menu: None,
             dragging: false,
+            drag_point: None,
+            drag_scrolling: false,
+            drag_scroll: None,
             _subscriptions: vec![activation],
         };
         view.load(cx);
@@ -469,6 +479,64 @@ impl DiffView {
         cx.notify();
     }
 
+    // MARK: - Dragging
+
+    /// The pointer moved with the button down, anywhere in the window: the selection follows
+    /// it, and the list scrolls while it is above or below the list.
+    fn drag_move(&mut self, event: &gpui::MouseMoveEvent, cx: &mut Context<Self>) {
+        if !self.dragging || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+        self.drag_point = Some(event.position);
+        if let Some(row) = self.row_at(event.position.y) {
+            self.extend_selection(row, cx);
+        }
+        if !self.drag_scrolling && self.edge_distance() != 0.0 {
+            self.drag_scrolling = true;
+            self.drag_scroll = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(DRAG_SCROLL_INTERVAL).await;
+                    let keep = this.update(cx, |this, cx| this.drag_scroll_tick(cx)).unwrap_or(false);
+                    if !keep {
+                        break;
+                    }
+                }
+            }));
+        }
+    }
+
+    /// How far the drag's pointer is above (negative) or below the list.
+    fn edge_distance(&self) -> f32 {
+        let Some(point) = self.drag_point else { return 0.0 };
+        let viewport = self.list_state.viewport_bounds();
+        crate::editor::layout::edge_scroll(point.y.into(), viewport.top().into(), viewport.bottom().into())
+    }
+
+    /// One step of scrolling while the drag is past an edge: scrolls by the distance past it
+    /// and extends the selection to the row now at that edge. False ends the loop.
+    fn drag_scroll_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let distance = self.edge_distance();
+        if !self.dragging || distance == 0.0 {
+            self.drag_scrolling = false;
+            return false;
+        }
+        self.list_state.scroll_by(px(distance));
+        let viewport = self.list_state.viewport_bounds();
+        let edge = if distance < 0.0 { viewport.top() + px(1.0) } else { viewport.bottom() - px(1.0) };
+        if let Some(row) = self.row_at(edge) {
+            self.extend_selection(row, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn drag_end(&mut self) {
+        self.dragging = false;
+        self.drag_point = None;
+        self.drag_scrolling = false;
+        self.drag_scroll = None;
+    }
+
     // MARK: - Navigation
 
     /// The list row at window y, from what the list laid out last.
@@ -699,11 +767,6 @@ impl DiffView {
                     this.context_menu(index, event.position, window, cx);
                 }),
             )
-            .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _, cx| {
-                if this.dragging && event.pressed_button == Some(MouseButton::Left) {
-                    this.extend_selection(index, cx);
-                }
-            }))
             .child(element)
             .into_any_element()
     }
@@ -886,6 +949,34 @@ impl DiffView {
     }
 }
 
+impl DiffView {
+    /// Follows a drag selection's pointer anywhere in the window (also past the list's
+    /// edges), until the button comes up.
+    fn drag_tracker(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let entity = cx.entity();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                window.on_mouse_event({
+                    let entity = entity.clone();
+                    move |event: &gpui::MouseMoveEvent, phase, _, cx| {
+                        if phase == gpui::DispatchPhase::Bubble {
+                            entity.update(cx, |this, cx| this.drag_move(event, cx));
+                        }
+                    }
+                });
+                window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, cx| {
+                    if phase == gpui::DispatchPhase::Bubble && event.button == MouseButton::Left {
+                        entity.update(cx, |this, _| this.drag_end());
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_0()
+    }
+}
+
 /// `a` mixed toward `b` by `t`, in RGB.
 fn mix(a: gpui::Hsla, b: gpui::Hsla, t: f32) -> gpui::Hsla {
     let (a, b) = (a.to_rgb(), b.to_rgb());
@@ -923,11 +1014,9 @@ impl Render for DiffView {
                             .min_h_0()
                             .w_full()
                             .on_scroll(cx.listener(Self::scroll_text))
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, _| this.dragging = false),
-                            )
-                            .child(rows),
+                            .relative()
+                            .child(rows)
+                            .child(self.drag_tracker(cx)),
                     )
                     .into_any_element()
             }
@@ -1050,6 +1139,50 @@ mod tests {
         assert_eq!(second.read_with(cx, |view, _| view.selected_text()), Some("line three".to_string()));
         second.update(cx, |view, cx| view.begin_selection(row, true, false, cx));
         assert_eq!(second.read_with(cx, |view, _| view.selected_text()), Some("line 3".to_string()));
+    }
+
+    #[gpui::test]
+    async fn a_drag_selection_past_the_bottom_keeps_scrolling_the_list(cx: &mut TestAppContext) {
+        setup(cx);
+        if soprano_git::reader::executable().is_none() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), &["init", "-q"]);
+        let path = root.path().join("a.txt");
+        let original: String = (1..=400).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(&path, &original).unwrap();
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-q", "-m", "one"]);
+        // Every line changed: one long run of rows, nothing folded.
+        std::fs::write(&path, original.replace("line", "row")).unwrap();
+        let state = StateStore::in_memory();
+        let (view, cx) =
+            cx.add_window_view(|window, cx| DiffView::new(path.clone(), false, state.clone(), window, cx));
+        cx.run_until_parked();
+        let (viewport, first_row) = view.read_with(cx, |view, _| {
+            let first = view.list.rows.iter().position(DiffListRow::is_line).expect("line rows");
+            (view.list_state.viewport_bounds(), first)
+        });
+        let row_bounds =
+            view.read_with(cx, |view, _| view.list_state.bounds_for_item(first_row)).expect("drawn");
+        let start = gpui::point(row_bounds.left() + px(40.0), row_bounds.center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Default::default());
+        let below = gpui::point(start.x, viewport.bottom() + px(60.0));
+        cx.simulate_mouse_move(below, MouseButton::Left, Default::default());
+        cx.executor().advance_clock(Duration::from_millis(600));
+        cx.run_until_parked();
+        let (top, selection) =
+            view.read_with(cx, |view, _| (view.list_state.logical_scroll_top().item_ix, view.selection));
+        assert!(top > 0, "the list scrolled");
+        let selection = selection.expect("a selection");
+        assert_eq!(selection.anchor, first_row);
+        assert!(selection.head > first_row + 10, "the selection followed: {selection:?}");
+        cx.simulate_mouse_up(below, MouseButton::Left, Default::default());
+        let after = view.read_with(cx, |view, _| view.list_state.logical_scroll_top());
+        cx.executor().advance_clock(Duration::from_millis(600));
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |view, _| view.list_state.logical_scroll_top()), after);
     }
 
     #[test]
