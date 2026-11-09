@@ -6,3 +6,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+soprano-agents = { path = "../soprano-agents" }
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+serde_json.workspace = true
+tracing.workspace = true
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

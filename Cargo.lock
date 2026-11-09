@@ -1093,6 +1093,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
+name = "clipboard-win"
+version = "5.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "052af7878466feccda12ba7a6a67d019d712f296809559b47c12c8cc196d3a9a"
+dependencies = [
+ "error-code",
+]
+
+[[package]]
 name = "cocoa"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1913,6 +1922,12 @@ dependencies = [
  "libc",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "error-code"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
 
 [[package]]
 name = "etagere"
@@ -7816,12 +7831,16 @@ version = "0.6.0"
 name = "soprano-browser"
 version = "0.6.0"
 dependencies = [
- "futures-channel",
+ "async-channel",
+ "block2 0.6.2",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-webview",
  "lb-wry",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-web-kit",
  "serde_json",
  "url",
 ]
@@ -7851,6 +7870,28 @@ dependencies = [
  "serde_path_to_error",
  "soprano-platform",
  "soprano-types",
+ "tempfile",
+]
+
+[[package]]
+name = "soprano-explorer"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "clipboard-win",
+ "futures",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "plist",
+ "smallvec",
+ "soprano-files",
+ "soprano-git",
+ "soprano-platform",
+ "soprano-ui",
  "tempfile",
 ]
 
@@ -7941,6 +7982,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "soprano-settings"
+version = "0.6.0"
+dependencies = [
+ "async-channel",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "serde_json",
+ "soprano-accounts",
+ "soprano-config",
+ "soprano-platform",
+ "soprano-types",
+ "soprano-ui",
+ "tempfile",
+]
+
+[[package]]
 name = "soprano-term"
 version = "0.6.0"
 dependencies = [
@@ -8002,6 +8060,7 @@ dependencies = [
  "soprano-platform",
  "soprano-types",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
