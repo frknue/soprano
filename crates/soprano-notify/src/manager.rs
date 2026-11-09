@@ -77,16 +77,19 @@ impl Shared {
                     tracing::error!("Soprano: could not post notification for {}: {error}", target.pane_id);
                     return;
                 }
-                if shared.focused_target().as_ref() == Some(&target) {
+                // Checked and recorded under the `delivered` lock: focusing sets the focus first
+                // and then takes this lock to withdraw, so either this sees the tab focused or
+                // the withdrawal sees the record. (Swift got the same from the main queue.)
+                let focused = {
+                    let mut delivered = shared.delivered.lock().expect("delivered lock");
+                    let focused = shared.focused_target().as_ref() == Some(&target);
+                    if !focused {
+                        delivered.entry(target).or_default().insert(identifier.clone());
+                    }
+                    focused
+                };
+                if focused {
                     backend.remove_delivered(&[identifier]);
-                } else {
-                    shared
-                        .delivered
-                        .lock()
-                        .expect("delivered lock")
-                        .entry(target)
-                        .or_default()
-                        .insert(identifier);
                 }
             }),
         );

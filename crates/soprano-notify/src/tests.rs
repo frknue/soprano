@@ -776,6 +776,36 @@ fn a_banner_posted_after_its_tab_got_focus_is_withdrawn_at_once() {
     assert_eq!(fake.removed(), [Banner::identifier(&target)]);
 }
 
+/// The OS finishes a post on its own thread while the UI thread focuses the tab: whichever
+/// wins, the banner ends up withdrawn exactly once and nothing stays recorded for it.
+#[test]
+fn a_banner_finishing_while_its_tab_gets_focus_is_always_withdrawn() {
+    for _ in 0..500 {
+        let mut workspace = Workspace::new();
+        let target = agent_tab(&mut workspace, "codex");
+        let fake = Fake::with(SystemAuthorization::Authorized, true, true);
+        let mut notifications = manager(&fake);
+        notifications
+            .handle_agent_event(&mut workspace, event(&["ready", "--profile", "codex", "--notify"], &target));
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let os = {
+            let (fake, start) = (fake.clone(), start.clone());
+            std::thread::spawn(move || {
+                start.wait();
+                fake.complete_posts();
+            })
+        };
+        start.wait();
+        notifications.surface_did_focus(&mut workspace, target.clone());
+        os.join().expect("completion thread");
+
+        assert_eq!(fake.removed(), [Banner::identifier(&target)]);
+        // Focusing again finds nothing left to withdraw.
+        notifications.surface_did_focus(&mut workspace, target.clone());
+        assert_eq!(fake.removed().len(), 1);
+    }
+}
+
 #[test]
 fn an_automation_runs_agent_gets_no_banner_of_its_own() {
     let mut workspace = Workspace::new();
