@@ -1,6 +1,7 @@
 //! Errors of account actions. Each displays as the message Settings shows.
 
-use crate::command::CommandError;
+use soprano_launch::command_runner::CommandError;
+
 use crate::files::AccountFileError;
 use crate::secrets::SecretStoreError;
 

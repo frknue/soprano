@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 soprano-platform = { path = "../soprano-platform" }
+soprano-launch = { path = "../soprano-launch" }
 serde.workspace = true
 serde_json.workspace = true
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
@@ -17,8 +18,12 @@ base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 ureq = "3"
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
 thiserror = "2"
+
+# Soprano's stored logins: the `security` CLI on macOS (like the Swift app), the OS secret
+# store elsewhere.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust", "vendored"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

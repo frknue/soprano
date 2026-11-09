@@ -13,7 +13,6 @@ use rusqlite::{Connection, OpenFlags, params};
 use serde_json::Value;
 
 use crate::codex::create_private_directory;
-use crate::command::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 use crate::error::{AccountResult, OmpAccountError};
 use crate::files::{self, JsonObject};
 use crate::models::{
@@ -22,6 +21,7 @@ use crate::models::{
 };
 use crate::state::{AccountPaths, AccountStateStore, OmpPreference};
 use crate::usage_api::number;
+use soprano_launch::command_runner::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 
 /// One omp login as `omp usage --json` reports it.
 #[derive(Debug, Clone, PartialEq)]
@@ -108,12 +108,9 @@ impl OmpAccountManager {
     }
 
     fn fetch_usage(&self) -> AccountResult<Vec<OmpAccount>> {
-        let result = self.runner.run_cli(
-            &["omp", "usage", "--json"],
-            &BTreeMap::new(),
-            Duration::from_secs(90),
-            RunOptions::default(),
-        )?;
+        let arguments = ["omp", "usage", "--json"].map(String::from);
+        let options = RunOptions::with_timeout(Duration::from_secs(90));
+        let result = self.runner.run_cli(&arguments, &BTreeMap::new(), options)?;
         if !result.succeeded() {
             return Err(OmpAccountError::Unavailable(result.failure_message_running("omp")).into());
         }
@@ -166,14 +163,10 @@ impl OmpAccountManager {
             keep_stdin_open: true,
             on_output_line: Some(on_line),
             cancel: Some(cancel.clone()),
-            ..RunOptions::default()
+            ..RunOptions::with_timeout(Duration::from_secs(600))
         };
-        let result = self.runner.run_cli(
-            &["omp", "login", provider.omp_provider_id()],
-            &BTreeMap::new(),
-            Duration::from_secs(600),
-            options,
-        )?;
+        let arguments = ["omp", "login", provider.omp_provider_id()].map(String::from);
+        let result = self.runner.run_cli(&arguments, &BTreeMap::new(), options)?;
         if !result.succeeded() {
             return Err(OmpAccountError::LoginFailed(result.failure_message_running("omp")).into());
         }
@@ -255,12 +248,9 @@ impl OmpAccountManager {
         if let Some(directory) = lock(&self.agent_directory).clone() {
             return Ok(directory);
         }
-        let result = self.runner.run_cli(
-            &["omp", "config", "path"],
-            &BTreeMap::new(),
-            Duration::from_secs(60),
-            RunOptions::default(),
-        )?;
+        let arguments = ["omp", "config", "path"].map(String::from);
+        let options = RunOptions::with_timeout(Duration::from_secs(60));
+        let result = self.runner.run_cli(&arguments, &BTreeMap::new(), options)?;
         let path = result
             .stdout
             .lines()
@@ -760,9 +750,9 @@ mod tests {
         for (name, text) in scripts {
             let path = root.join(name);
             std::fs::write(&path, text).unwrap();
-            crate::command::tests::make_executable(&path);
+            crate::test_support::make_executable(&path);
         }
-        CommandRunner::with_shell(root.join("shell").to_string_lossy())
+        CommandRunner::new(root.join("shell").to_string_lossy())
     }
 
     #[cfg(unix)]

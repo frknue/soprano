@@ -98,3 +98,8 @@ There are also new tests for the controller, the command runner, files, the usag
 All of the above ran in the isolated workspace copy. Once `soprano-explorer` has a `src/lib.rs`, rerun `CARGO_TARGET_DIR=target/agent-soprano-accounts cargo test -p soprano-accounts` in the real worktree to confirm.
 
 Dependencies I added: `chrono`, `regex`, `sha2`, `unicode-normalization`, `base64`, `uuid`, `rusqlite` 0.37 (bundled), `ureq` 3, `keyring` 3, `thiserror`, plus `libc` on Unix and `junction` on Windows.
+## Update after review (lead)
+
+- macOS stores Soprano's Claude Code logins through the `security` CLI again (like Swift); `keyring` is used on Linux/Windows only (secrets over 1,280 UTF-16 units are chunked on Windows).
+- The private command runner is gone: accounts uses `soprano_launch::command_runner` (`CommandError` re-exported from there); on Windows CLIs run through soprano-launch's PowerShell path, not cmd.exe.
+- Observers run with no lock held, one delivery at a time, newest last; select/remove are queued FIFO per controller.

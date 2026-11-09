@@ -12,7 +12,6 @@ use std::time::{Duration, SystemTime};
 use chrono::Utc;
 use serde_json::Value;
 
-use crate::command::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 use crate::error::{AccountResult, CodexAccountError};
 use crate::files::{self, jwt_claims};
 use crate::models::{
@@ -20,6 +19,7 @@ use crate::models::{
 };
 use crate::state::{AccountPaths, AccountStateStore, ManagedAccountRecord, ManagedAccountsState};
 use crate::usage_api::{UsageCredential, number};
+use soprano_launch::command_runner::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 
 /// What a Codex `auth.json` says about its login.
 #[derive(Debug, Clone, PartialEq)]
@@ -304,10 +304,9 @@ impl CodexAccountManager {
         let options = RunOptions {
             on_output_line: Some(on_line),
             cancel: Some(cancel.clone()),
-            ..RunOptions::default()
+            ..RunOptions::with_timeout(Duration::from_secs(600))
         };
-        let result =
-            self.runner.run_cli(&["codex", "login"], &environment, Duration::from_secs(600), options)?;
+        let result = self.runner.run_cli(&["codex".into(), "login".into()], &environment, options)?;
         if !result.succeeded() {
             return Err(CodexAccountError::LoginFailed(result.failure_message_running("codex")).into());
         }
@@ -466,11 +465,14 @@ mod links {
         }
     }
 
-    /// Removes the link itself, never what it points to.
+    /// Removes the link itself, never what it points to. On Windows a junction or a
+    /// folder symlink is removed as a directory: its metadata's `is_dir()` is false, so
+    /// `FileTypeExt::is_symlink_dir` decides (review #18).
     pub fn remove(link: &Path) -> io::Result<()> {
         #[cfg(windows)]
         {
-            if fs::symlink_metadata(link)?.is_dir() {
+            use std::os::windows::fs::FileTypeExt;
+            if fs::symlink_metadata(link)?.file_type().is_symlink_dir() {
                 return fs::remove_dir(link);
             }
         }
@@ -648,7 +650,7 @@ mod tests {
         for (name, text) in scripts {
             let path = root.join(name);
             fs::write(&path, text).unwrap();
-            crate::command::tests::make_executable(&path);
+            crate::test_support::make_executable(&path);
         }
         let store = AccountStateStore::new(StateStore::in_memory());
         store.update(|state| {
@@ -663,7 +665,7 @@ mod tests {
         });
         let manager = CodexAccountManager::new(
             store,
-            CommandRunner::with_shell(root.join("shell").to_string_lossy()),
+            CommandRunner::new(root.join("shell").to_string_lossy()),
             AccountPaths::new(root.join("home"), root.join("support")),
         );
 
@@ -689,5 +691,26 @@ mod tests {
             Err(crate::AccountError::Codex(CodexAccountError::NotManaged(_)))
         ));
         assert!(manager.home("x").exists());
+    }
+
+    /// Review #18: a stale junction is replaced instead of failing the sync, and the
+    /// folder it pointed at is left alone.
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_pointing_elsewhere_is_replaced_and_its_old_target_kept() {
+        let dirs = make_directories();
+        fs::create_dir_all(dirs.source.join("sessions")).unwrap();
+        let elsewhere = dirs._root.path().join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        let link = dirs.home.join("sessions");
+        junction::create(&elsewhere, &link).unwrap();
+
+        CodexHomeLinker::sync(&dirs.home, &dirs.source).unwrap();
+
+        assert!(links::points_to(&link, &dirs.source.join("sessions")));
+        assert!(elsewhere.is_dir());
+        links::remove(&link).unwrap();
+        assert!(fs::symlink_metadata(&link).is_err());
+        assert!(dirs.source.join("sessions").is_dir());
     }
 }

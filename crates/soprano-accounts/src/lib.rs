@@ -10,7 +10,6 @@
 
 mod claude;
 mod codex;
-mod command;
 mod controller;
 mod error;
 pub mod files;
@@ -20,11 +19,12 @@ mod omp;
 pub mod presentation;
 mod secrets;
 mod state;
+#[cfg(test)]
+mod test_support;
 pub mod usage_api;
 
 pub use claude::{LIVE_SERVICE, MANAGED_SERVICE, keychain_user, scoped_service};
 pub use codex::{CodexAuth, CodexHomeLinker};
-pub use command::CommandError;
 pub use controller::{
     AccountsController, MINIMUM_REFRESH_INTERVAL_SECONDS, POLL_INTERVAL_SECONDS, SnapshotObserver,
 };
@@ -36,7 +36,11 @@ pub use models::{
     AccountsSnapshot, PendingLogin, Timestamp, UsageSeverity, UsageWindow, usage_format,
 };
 pub use presentation::AccountsSource;
-pub use secrets::{KeyringStore, SecretStore, SecretStoreError};
+#[cfg(not(target_os = "macos"))]
+pub use secrets::KeyringStore;
+pub use secrets::{SecretStore, SecretStoreError};
+/// Commands run through `soprano_launch::command_runner`, shared with the rest of the app.
+pub use soprano_launch::command_runner::CommandError;
 pub use state::{
     AccountPaths, AccountState, AccountStateStore, ManagedAccountRecord, ManagedAccountsState, OmpPreference,
 };

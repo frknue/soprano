@@ -8,7 +8,7 @@
 //! is in front, and when it becomes active).
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,7 +17,8 @@ use soprano_platform::StateStore;
 
 use crate::claude::{ClaudeCodeAccountManager, ProfileLookup};
 use crate::codex::CodexAccountManager;
-use crate::command::{CancelToken, CommandRunner, LineHandler};
+use soprano_launch::command_runner::{CancelToken, CommandRunner, LineHandler};
+
 use crate::error::AccountResult;
 use crate::launch::AccountLaunchState;
 use crate::models::{
@@ -25,7 +26,7 @@ use crate::models::{
     PendingLogin, Timestamp, seconds_between,
 };
 use crate::omp::OmpAccountManager;
-use crate::secrets::{KeychainCli, KeyringStore, SecretStore};
+use crate::secrets::{SecretStore, platform_stores};
 use crate::state::{AccountPaths, AccountStateStore};
 use crate::usage_api::{self, UsageCredential};
 
@@ -43,6 +44,9 @@ pub type SnapshotObserver = Arc<dyn Fn(&AccountsSnapshot) + Send + Sync>;
 pub(crate) type UsageFetcher =
     Arc<dyn Fn(AccountProvider, &UsageCredential) -> Option<AccountUsage> + Send + Sync>;
 
+/// One user action (select, remove) run on the action queue.
+type Action = Box<dyn FnOnce(&Arc<Inner>) + Send>;
+
 /// A cheap handle; clones control the same accounts.
 #[derive(Clone)]
 pub struct AccountsController {
@@ -53,8 +57,10 @@ struct Inner {
     shared: Mutex<Shared>,
     idle: Condvar,
     observers: Mutex<BTreeMap<String, SnapshotObserver>>,
-    /// Held while observers run, so they see snapshots in order.
-    notifying: Mutex<()>,
+    /// Runs actions one after another in the order they were asked for, so two
+    /// quick selections never apply out of order (Swift's `AsyncSerialQueue`).
+    /// Started with the first action.
+    actions: Mutex<Option<mpsc::Sender<Action>>>,
     store: AccountStateStore,
     paths: AccountPaths,
     launch_state: Arc<AccountLaunchState>,
@@ -76,6 +82,10 @@ struct Shared {
     /// Usage fetched straight from a provider, by "<tool>|<row id>", so a
     /// refresh does not ask again for logins omp does not cover.
     direct_usage: HashMap<String, (Timestamp, Option<AccountUsage>)>,
+    /// Snapshots changed since observers were last told.
+    notify_pending: bool,
+    /// A thread is telling observers; others leave the newest snapshot to it.
+    is_notifying: bool,
     /// Background jobs still running.
     jobs: usize,
 }
@@ -100,14 +110,13 @@ impl AccountsController {
     /// `AccountLaunchState::shared()`. Create one and keep it for the app's
     /// lifetime; call `start()` once.
     pub fn new(store: StateStore) -> Self {
-        let claude_keychain: Option<Arc<dyn SecretStore>> =
-            if cfg!(target_os = "macos") { Some(Arc::new(KeychainCli::default())) } else { None };
+        let stores = platform_stores();
         Self::with_parts(ControllerParts {
             store: AccountStateStore::new(store),
             paths: AccountPaths::live(),
             runner: CommandRunner::default(),
-            claude_keychain,
-            secrets: Arc::new(KeyringStore),
+            claude_keychain: stores.claude_keychain,
+            secrets: stores.secrets,
             launch_state: AccountLaunchState::shared(),
             profile: Arc::new(|token: &str| usage_api::claude_profile(token).ok()),
             usage: Arc::new(|provider: AccountProvider, credential: &UsageCredential| match provider {
@@ -135,7 +144,7 @@ impl AccountsController {
                 shared: Mutex::new(Shared::default()),
                 idle: Condvar::new(),
                 observers: Mutex::new(BTreeMap::new()),
-                notifying: Mutex::new(()),
+                actions: Mutex::new(None),
                 store: parts.store,
                 paths: parts.paths,
                 launch_state: parts.launch_state,
@@ -295,13 +304,34 @@ impl Inner {
         result
     }
 
+    /// Tells observers about the newest snapshot without holding any lock while
+    /// they run, so an observer may call back into the controller (review #9).
+    /// One thread delivers at a time; a change made meanwhile — by an observer
+    /// or another thread — is delivered by that same loop afterwards, so
+    /// observers see snapshots in order and the last one they see is current.
     fn notify(&self) {
-        let _order = lock(&self.notifying);
-        // The newest snapshot, so the last one an observer sees is current.
-        let snapshot = self.lock().snapshot.clone();
-        let observers: Vec<SnapshotObserver> = lock(&self.observers).values().cloned().collect();
-        for observer in observers {
-            observer(&snapshot);
+        {
+            let mut shared = self.lock();
+            shared.notify_pending = true;
+            if shared.is_notifying {
+                return;
+            }
+            shared.is_notifying = true;
+        }
+        loop {
+            let snapshot = {
+                let mut shared = self.lock();
+                if !shared.notify_pending {
+                    shared.is_notifying = false;
+                    return;
+                }
+                shared.notify_pending = false;
+                shared.snapshot.clone()
+            };
+            let observers: Vec<SnapshotObserver> = lock(&self.observers).values().cloned().collect();
+            for observer in observers {
+                observer(&snapshot);
+            }
         }
     }
 
@@ -310,10 +340,34 @@ impl Inner {
         let inner = Arc::clone(self);
         thread::spawn(move || {
             job(&inner);
-            let mut shared = inner.lock();
-            shared.jobs -= 1;
-            inner.idle.notify_all();
+            inner.job_finished();
         });
+    }
+
+    /// Queues `action` behind every earlier one.
+    fn enqueue(self: &Arc<Self>, action: Action) {
+        self.lock().jobs += 1;
+        let mut sender = lock(&self.actions);
+        let queue = sender.get_or_insert_with(|| {
+            let (send, receive) = mpsc::channel::<Action>();
+            let weak = Arc::downgrade(self);
+            thread::spawn(move || run_actions(&weak, &receive));
+            send
+        });
+        if let Err(mpsc::SendError(action)) = queue.send(action) {
+            // The worker is gone (it never is while `self` lives); run on a thread instead.
+            let inner = Arc::clone(self);
+            thread::spawn(move || {
+                action(&inner);
+                inner.job_finished();
+            });
+        }
+    }
+
+    fn job_finished(&self) {
+        let mut shared = self.lock();
+        shared.jobs -= 1;
+        self.idle.notify_all();
     }
 
     fn refresh(self: &Arc<Self>, force: bool) {
@@ -489,7 +543,7 @@ impl Inner {
         self.mutate(|snapshot| {
             snapshot.errors.remove(&list);
         });
-        self.spawn(move |inner| {
+        self.enqueue(Box::new(move |inner: &Arc<Inner>| {
             if let Err(error) = action(inner) {
                 inner.mutate(|snapshot| {
                     snapshot.errors.insert(list, error.to_string());
@@ -497,7 +551,7 @@ impl Inner {
             }
             inner.publish_launch_state();
             inner.refresh(true);
-        });
+        }));
     }
 
     fn publish_launch_state(&self) {
@@ -508,6 +562,15 @@ impl Inner {
             // starting for anyone who never picks one.
             (!self.store.state().omp_preferred.is_empty()).then(|| self.paths.omp_overlay_file()),
         );
+    }
+}
+
+/// The action queue's worker: runs each action as long as the controller lives.
+fn run_actions(inner: &Weak<Inner>, actions: &mpsc::Receiver<Action>) {
+    while let Ok(action) = actions.recv() {
+        let Some(inner) = inner.upgrade() else { return };
+        action(&inner);
+        inner.job_finished();
     }
 }
 
@@ -548,11 +611,11 @@ mod tests {
             ),
         )
         .unwrap();
-        crate::command::tests::make_executable(&shell);
+        crate::test_support::make_executable(&shell);
         for (name, body) in scripts {
             let path = bin.join(name);
             fs::write(&path, format!("#!/bin/bash\n{body}\n")).unwrap();
-            crate::command::tests::make_executable(&path);
+            crate::test_support::make_executable(&path);
         }
         let store = AccountStateStore::new(StateStore::in_memory());
         let paths = AccountPaths::new(root.path().join("home"), root.path().join("support"));
@@ -562,7 +625,7 @@ mod tests {
         let controller = AccountsController::with_parts(ControllerParts {
             store: store.clone(),
             paths: paths.clone(),
-            runner: CommandRunner::with_shell(shell.to_string_lossy()),
+            runner: CommandRunner::new(shell.to_string_lossy()),
             claude_keychain: None,
             secrets: Arc::new(MemorySecretStore::default()),
             launch_state: Arc::clone(&launch),
@@ -673,6 +736,77 @@ mod tests {
         );
         fixture.controller.dismiss_error(AccountListId::CODEX_CLI);
         assert!(fixture.controller.snapshot().errors.is_empty());
+    }
+
+    fn codex_record(id: &str) -> ManagedAccountRecord {
+        let now = Utc::now();
+        ManagedAccountRecord {
+            id: id.into(),
+            identity: AccountIdentity::new(format!("{id}@own.dev"), None),
+            organization_name: None,
+            plan: None,
+            created_at: now,
+            last_authenticated_at: now,
+        }
+    }
+
+    /// Review #10: actions run first-in, first-out, so the last choice wins.
+    #[test]
+    fn quick_selections_apply_in_the_order_they_were_made() {
+        let fixture = make_fixture(&[]);
+        fixture.store.update(|state| state.codex_cli.accounts = vec![codex_record("c1"), codex_record("c2")]);
+
+        for round in 0..20 {
+            fixture.controller.select(Some("c1"), AccountListId::CODEX_CLI);
+            fixture.controller.select(None, AccountListId::CODEX_CLI);
+            let last = if round % 2 == 0 { "c2" } else { "c1" };
+            fixture.controller.select(Some(last), AccountListId::CODEX_CLI);
+        }
+        fixture.controller.select(Some("c2"), AccountListId::CODEX_CLI);
+        wait(&fixture);
+
+        assert_eq!(fixture.store.state().codex_cli.active_account_id.as_deref(), Some("c2"));
+        assert_eq!(
+            fixture.controller.snapshot().lists[&AccountListId::CODEX_CLI].selected_account_id.as_deref(),
+            Some("c2")
+        );
+    }
+
+    /// Review #9: an observer that calls back into the controller from inside its
+    /// callback does not deadlock, and still sees the snapshot that call produced.
+    #[test]
+    fn an_observer_may_call_back_into_the_controller() {
+        let fixture = make_fixture(&[]);
+        let controller = fixture.controller.clone();
+        let dismissed = Arc::new(AtomicUsize::new(0));
+        let seen_clean = Arc::new(AtomicUsize::new(0));
+        let (dismissed_count, clean_count) = (Arc::clone(&dismissed), Arc::clone(&seen_clean));
+        fixture.controller.add_observer(
+            "reentrant",
+            Arc::new(move |snapshot: &AccountsSnapshot| {
+                let _ = controller.snapshot();
+                if snapshot.errors.contains_key(&AccountListId::CODEX_CLI) {
+                    dismissed_count.fetch_add(1, Ordering::SeqCst);
+                    controller.dismiss_error(AccountListId::CODEX_CLI);
+                } else {
+                    clean_count.fetch_add(1, Ordering::SeqCst);
+                }
+            }),
+        );
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let selecting = fixture.controller.clone();
+        thread::spawn(move || {
+            selecting.select(Some("gone"), AccountListId::CODEX_CLI);
+            let _ = done.send(());
+        });
+        finished.recv_timeout(Duration::from_secs(10)).expect("select returned");
+        wait(&fixture);
+
+        assert_eq!(dismissed.load(Ordering::SeqCst), 1);
+        assert!(seen_clean.load(Ordering::SeqCst) >= 1);
+        assert!(fixture.controller.snapshot().errors.is_empty());
+        fixture.controller.remove_observer("reentrant");
     }
 
     #[cfg(unix)]

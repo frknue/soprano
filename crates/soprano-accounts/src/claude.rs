@@ -32,7 +32,6 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::codex::create_private_directory;
-use crate::command::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 use crate::error::{AccountResult, ClaudeAccountError};
 use crate::files::{self, JsonObject, json_object, json_object_at, json_string};
 use crate::models::{
@@ -41,6 +40,7 @@ use crate::models::{
 use crate::secrets::SecretStore;
 use crate::state::{AccountPaths, AccountStateStore, ManagedAccountRecord, ManagedAccountsState};
 use crate::usage_api::{UsageCredential, number};
+use soprano_launch::command_runner::{CancelToken, CommandRunner, LineHandler, RunOptions, first_url};
 
 /// Soprano's secret-store service: one item per managed account, plus the System default.
 pub const MANAGED_SERVICE: &str = "Soprano Claude Code Accounts";
@@ -99,11 +99,43 @@ struct CapturedLogin {
 static VALID_KEYCHAIN_USER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("^[a-zA-Z0-9._-]+$").expect("valid pattern"));
 
-/// The Keychain account Claude Code files its item under: the user name, or a
-/// fixed fallback for names it rejects (SSO user names with "@").
+/// The Keychain account Claude Code files its item under: `$USER`, else the
+/// account's name (Swift's `NSUserName()`), or a fixed fallback for names it
+/// rejects (SSO user names with "@").
+///
+/// Without the account-name fallback a session missing `$USER` would look up
+/// the wrong item, find no login, take Claude Code for signed out and
+/// overwrite the saved System default (review #5).
 pub fn keychain_user() -> String {
-    let user = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
+    keychain_user_from(std::env::var("USER").ok(), account_user_name)
+}
+
+fn keychain_user_from(user: Option<String>, account_name: impl FnOnce() -> Option<String>) -> String {
+    let user = user.or_else(account_name).unwrap_or_default();
     if VALID_KEYCHAIN_USER.is_match(&user) { user } else { "claude-code-user".into() }
+}
+
+/// The login name of the account this process runs as.
+#[cfg(unix)]
+fn account_user_name() -> Option<String> {
+    let mut buffer = vec![0 as libc::c_char; 16 * 1024];
+    // SAFETY: an all-zero `passwd` is a valid out-parameter; `getpwuid_r` writes only into
+    // `entry` and `buffer`, whose length it is given, and `pw_name` then points into `buffer`.
+    unsafe {
+        let mut entry: libc::passwd = std::mem::zeroed();
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        let status =
+            libc::getpwuid_r(libc::getuid(), &mut entry, buffer.as_mut_ptr(), buffer.len(), &mut found);
+        if status != 0 || found.is_null() || entry.pw_name.is_null() {
+            return None;
+        }
+        Some(std::ffi::CStr::from_ptr(entry.pw_name).to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(not(unix))]
+fn account_user_name() -> Option<String> {
+    std::env::var("USERNAME").ok()
 }
 
 /// The item Claude Code 2.1+ uses when `CLAUDE_CONFIG_DIR` points at
@@ -554,14 +586,10 @@ impl ClaudeCodeAccountManager {
             keep_stdin_open: true,
             on_output_line: Some(on_line),
             cancel: Some(cancel.clone()),
-            ..RunOptions::default()
+            ..RunOptions::with_timeout(Duration::from_secs(600))
         };
-        let result = self.runner.run_cli(
-            &["claude", "auth", "login", "--claudeai"],
-            environment,
-            Duration::from_secs(600),
-            options,
-        )?;
+        let arguments = ["claude", "auth", "login", "--claudeai"].map(String::from);
+        let result = self.runner.run_cli(&arguments, environment, options)?;
         if !result.succeeded() {
             return Err(ClaudeAccountError::LoginFailed(result.failure_message_running("claude")).into());
         }
@@ -609,13 +637,10 @@ impl ClaudeCodeAccountManager {
         environment: &BTreeMap<String, String>,
         cancel: &CancelToken,
     ) -> AccountResult<Option<JsonObject>> {
-        let options = RunOptions { cancel: Some(cancel.clone()), ..RunOptions::default() };
-        let result = self.runner.run_cli(
-            &["claude", "auth", "status", "--json"],
-            environment,
-            Duration::from_secs(60),
-            options,
-        )?;
+        let options =
+            RunOptions { cancel: Some(cancel.clone()), ..RunOptions::with_timeout(Duration::from_secs(60)) };
+        let arguments = ["claude", "auth", "status", "--json"].map(String::from);
+        let result = self.runner.run_cli(&arguments, environment, options)?;
         if !result.succeeded() {
             return Ok(None);
         }
@@ -1014,11 +1039,11 @@ mod tests {
         for (name, text) in scripts {
             let path = root.path().join(name);
             fs::write(&path, text).unwrap();
-            crate::command::tests::make_executable(&path);
+            crate::test_support::make_executable(&path);
         }
         let fixture = make_fixture_with(
             HashMap::new(),
-            CommandRunner::with_shell(root.path().join("shell").to_string_lossy()),
+            CommandRunner::new(root.path().join("shell").to_string_lossy()),
             true,
         );
         let opened = Arc::new(AtomicUsize::new(0));
@@ -1053,6 +1078,18 @@ mod tests {
         assert!(result.is_err_and(|error| error.is_cancelled()));
         assert!(fixture.keychain.items.lock().unwrap().is_empty());
         assert!(fixture.store.state().claude_code.accounts.is_empty());
+    }
+
+    /// Review #5: without `$USER` the account's own name is used, never the fallback
+    /// item, which would make an active login look signed out.
+    #[test]
+    fn a_missing_user_variable_falls_back_to_the_accounts_name_before_the_fixed_one() {
+        assert_eq!(keychain_user_from(Some("ada".into()), || Some("other".into())), "ada");
+        assert_eq!(keychain_user_from(None, || Some("ada".into())), "ada");
+        assert_eq!(keychain_user_from(None, || None), "claude-code-user");
+        assert_eq!(keychain_user_from(Some("ada@corp.example".into()), || None), "claude-code-user");
+        #[cfg(unix)]
+        assert!(account_user_name().is_some_and(|name| !name.is_empty()));
     }
 
     #[test]
