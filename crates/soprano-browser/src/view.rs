@@ -3,19 +3,15 @@
 use std::path::PathBuf;
 
 use gpui::{
-    App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, actions, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _,
-    input::{Input, InputEvent, InputState},
-    spinner::Spinner,
-    tooltip::Tooltip,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, KeyBinding, ParentElement, Render, SharedString, Styled, Subscription, Task, Window,
+    actions, div, prelude::FluentBuilder as _,
 };
 use gpui_webview::WebView;
 use serde_json::Value;
+use soprano_ui::{
+    ActiveSopranoTheme as _, IconButton, IconName, InputEvent, InputState, StatusGlyph, icon, text_input,
+};
 
 use crate::{
     BrowserRegistry, BrowserTarget, address, screenshot, scripts,
@@ -553,7 +549,7 @@ impl BrowserView {
     }
 
     fn apply_page_theme(&mut self, cx: &mut Context<Self>) {
-        let dark = cx.theme().is_dark();
+        let dark = cx.soprano_theme().theme().appearance().is_dark();
         if self.applied_dark == Some(dark) {
             return;
         }
@@ -564,102 +560,66 @@ impl BrowserView {
         }
     }
 
+    /// Back, forward and reload: Herdr's chrome icon buttons.
     fn toolbar_button(
-        &self,
         id: &'static str,
-        icon: IconName,
+        name: IconName,
         label: &'static str,
         enabled: bool,
-        on_click: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
+        action: fn(&mut Self, &mut Context<Self>),
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let theme = cx.theme();
-        let (foreground, hover_background) = (theme.foreground, theme.secondary_hover);
-        div()
-            .id(id)
-            .flex_none()
-            .size(px(26.))
-            .rounded(px(6.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(theme.muted_foreground)
-            .child(Icon::new(icon).size(px(14.)))
-            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
-            .when(enabled, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(move |style| style.bg(hover_background).text_color(foreground))
-                    .on_click(cx.listener(on_click))
-            })
-            .when(!enabled, |button| button.opacity(0.4))
+    ) -> IconButton {
+        let this = cx.weak_entity();
+        IconButton::new(id, name).tooltip(label).disabled(!enabled).on_click(move |_, _, cx| {
+            let _ = this.update(cx, action);
+        })
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let resting_fill = theme.foreground.opacity(if theme.is_dark() { 0.06 } else { 0.05 });
-        let field_border = if self.address_focused { theme.ring } else { gpui::transparent_black() };
-        let (background, border, muted) = (theme.background, theme.border, theme.muted_foreground);
-        let (reload_icon, reload_label) =
-            if self.loading { (IconName::Close, "Stop") } else { (IconName::RotateCw, "Reload") };
-        let reload_id = if self.loading { "browser-stop" } else { "browser-reload" };
+        let (reload_icon, reload_label, reload_id) = if self.loading {
+            (IconName::X, "Stop", "browser-stop")
+        } else {
+            (IconName::RefreshCw, "Reload", "browser-reload")
+        };
+        let back = Self::toolbar_button(
+            "browser-back",
+            IconName::ChevronLeft,
+            "Back",
+            self.can_go_back,
+            Self::go_back,
+            cx,
+        );
+        let forward = Self::toolbar_button(
+            "browser-forward",
+            IconName::ChevronRight,
+            "Forward",
+            self.can_go_forward,
+            Self::go_forward,
+            cx,
+        );
+        let reload = Self::toolbar_button(reload_id, reload_icon, reload_label, true, Self::reload, cx);
+        let theme = cx.soprano_theme();
+        let address =
+            text_input(&self.address).small().prefix(icon(IconName::Globe).size(12.).color(theme.muted));
 
         div()
             .flex()
             .flex_none()
             .items_center()
-            .h(px(41.))
-            .pl(px(8.))
-            .pr(px(8.))
-            .gap(px(2.))
-            .bg(background)
+            .h(theme.z(41.))
+            .pl(theme.z(8.))
+            .pr(theme.z(8.))
+            .gap(theme.z(2.))
+            .bg(theme.background)
             .border_b_1()
-            .border_color(border)
-            .child(self.toolbar_button(
-                "browser-back",
-                IconName::ChevronLeft,
-                "Back",
-                self.can_go_back,
-                |this, _, _, cx| this.go_back(cx),
-                cx,
-            ))
-            .child(self.toolbar_button(
-                "browser-forward",
-                IconName::ChevronRight,
-                "Forward",
-                self.can_go_forward,
-                |this, _, _, cx| this.go_forward(cx),
-                cx,
-            ))
-            .child(self.toolbar_button(
-                reload_id,
-                reload_icon,
-                reload_label,
-                true,
-                |this, _, _, cx| this.reload(cx),
-                cx,
-            ))
-            .child(
-                div()
-                    .ml(px(4.))
-                    .flex()
-                    .flex_1()
-                    .min_w_0()
-                    .items_center()
-                    .gap(px(6.))
-                    .h(px(28.))
-                    .pl(px(8.))
-                    .pr(px(8.))
-                    .rounded(px(6.))
-                    .bg(resting_fill)
-                    .border_1()
-                    .border_color(field_border)
-                    .child(Icon::new(IconName::Globe).size(px(12.)).text_color(muted))
-                    .child(
-                        div().flex_1().min_w_0().child(Input::new(&self.address).appearance(false).small()),
-                    ),
-            )
-            .when(self.loading, |toolbar| toolbar.child(div().ml(px(6.)).child(Spinner::new().xsmall())))
+            .border_color(theme.border)
+            .child(back)
+            .child(forward)
+            .child(reload)
+            .child(div().ml(theme.z(4.)).flex_1().min_w_0().child(address))
+            .when(self.loading, |toolbar| {
+                toolbar.child(div().ml(theme.z(6.)).child(StatusGlyph::spinner().color(theme.muted)))
+            })
     }
 }
 
@@ -672,8 +632,8 @@ impl Focusable for BrowserView {
 impl Render for BrowserView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.apply_page_theme(cx);
-        let theme = cx.theme();
-        let (background, muted) = (theme.background, theme.muted_foreground);
+        let theme = cx.soprano_theme();
+        let (background, muted, padding) = (theme.background, theme.muted, theme.z(16.));
         let page = match &self.webview {
             Ok(webview) => div().flex_1().min_h_0().child(webview.clone()),
             Err(message) => div()
@@ -681,7 +641,7 @@ impl Render for BrowserView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .p(px(16.))
+                .p(padding)
                 .text_color(muted)
                 .child(SharedString::from(message.clone())),
         };

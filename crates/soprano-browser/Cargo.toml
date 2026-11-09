@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 gpui.workspace = true
 gpui-component.workspace = true
+soprano-ui = { path = "../soprano-ui" }
 gpui-webview = "=0.9.1"
 wry = { package = "lb-wry", version = "0.53.3" }
 serde_json.workspace = true
