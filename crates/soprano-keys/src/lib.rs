@@ -16,7 +16,7 @@ pub use command::{
     BindingCommand, FocusedContent, SplitDirection, dispatches_through_main_menu, launched_agent_id,
     split_direction,
 };
-pub use event::{ESCAPE, KeyEvent, Modifiers, Platform, binding_key};
+pub use event::{ESCAPE, KeyEvent, Modifiers, Platform, SHIFTED_SYMBOLS, binding_key, is_shifted_symbol};
 pub use hints::{PaneHintAssignment, PaneHintStep, pane_hint_step};
 pub use resolver::{
     KeyContext, KeyOutcome, KeybindingResolver, PANE_NAVIGATION_BINDING_IDS, ResolverChange,

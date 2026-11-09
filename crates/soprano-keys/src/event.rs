@@ -51,11 +51,28 @@ impl Platform {
         }
     }
 
+    /// The physical modifiers `binding` needs on this platform: [`Platform::binding_modifiers`],
+    /// except that on Linux/Windows a `cmd` chord on a symbol that needs Shift to type (`+`,
+    /// `|`, `?`, … see [`SHIFTED_SYMBOLS`]) is pressed without Alt: its Shift is the symbol's,
+    /// so ⌘+ is Ctrl+Shift++ and ⌃⌘+ is Ctrl+Alt+Shift++ (soprano-config renders it the same).
+    pub fn required_modifiers(self, binding: &KeyBinding) -> Modifiers {
+        let ctrl = binding.ctrl == Some(true);
+        let meta = binding.meta == Some(true);
+        if self != Platform::MacOs && meta && is_shifted_symbol(&binding.key) {
+            return Modifiers { ctrl: true, alt: ctrl, shift: true, cmd: false };
+        }
+        self.binding_modifiers(ctrl, meta, binding.shift == Some(true))
+    }
+
     /// Whether this platform presses Shift for `binding` although the binding itself has no
     /// Shift (`cmd` → Ctrl+Shift). The binding's key is then the unshifted key: ⌘1 is
-    /// Ctrl+Shift+1, which reports `!` with Shift applied.
+    /// Ctrl+Shift+1, which reports `!` with Shift applied. A symbol that needs Shift anyway is
+    /// compared as reported.
     pub fn adds_shift(self, binding: &KeyBinding) -> bool {
-        self != Platform::MacOs && binding.meta == Some(true) && binding.ctrl != Some(true)
+        self != Platform::MacOs
+            && binding.meta == Some(true)
+            && binding.ctrl != Some(true)
+            && !is_shifted_symbol(&binding.key)
     }
 
     /// Whether `modifiers` are the pane-hint chord: ⌃⇧ on macOS. On Linux/Windows ⌃⇧ is how
@@ -190,6 +207,17 @@ impl KeyEvent {
 
 /// The escape character, the binding key of the Escape key.
 pub const ESCAPE: &str = "\u{1B}";
+
+/// Keys that cannot be typed without Shift (Swift `KeyChord.shiftedSymbols`): a chord on one of
+/// them has Shift whether or not it says so.
+pub const SHIFTED_SYMBOLS: [&str; 21] = [
+    "~", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "_", "+", "{", "}", "|", ":", "\"", "<", ">", "?",
+];
+
+/// Whether `key` is one of [`SHIFTED_SYMBOLS`].
+pub fn is_shifted_symbol(key: &str) -> bool {
+    SHIFTED_SYMBOLS.contains(&key)
+}
 
 /// The key a reported key names for binding lookups: lowercased, with named keys turned into
 /// the character AppKit reports for them, which is what `settings.json` bindings store

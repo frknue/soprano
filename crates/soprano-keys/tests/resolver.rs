@@ -557,3 +557,22 @@ fn focused_content_owns_command_chords_on_linux_as_their_mapped_keys() {
     assert_eq!(keys.handle(&key("f").with_ctrl().with_shift(), &editor), KeyOutcome::PassThrough);
     assert_eq!(keys.handle(&key("g").with_ctrl().with_shift().with_alt(), &editor), KeyOutcome::PassThrough);
 }
+
+#[test]
+fn a_command_chord_on_a_shifted_symbol_is_control_shift_without_alt_on_linux() {
+    let mut config = default_config();
+    config.bindings.retain(|binding| binding.id != "zoom-in");
+    let mut plus = config.bindings[0].clone();
+    plus.id = "custom-plus".into();
+    plus.mode = KeyBindingMode::Direct;
+    plus.key = "+".into();
+    plus.ctrl = None;
+    plus.meta = Some(true);
+    plus.shift = Some(true);
+    config.bindings.insert(0, plus);
+    let mut keys = KeybindingResolver::new(config, Platform::Linux);
+
+    let control_shift_plus = key("+").with_base_key("=").with_ctrl().with_shift();
+    assert_eq!(press(&mut keys, control_shift_plus.clone()), action("custom-plus"));
+    assert_eq!(press(&mut keys, control_shift_plus.with_alt()), KeyOutcome::PassThrough);
+}

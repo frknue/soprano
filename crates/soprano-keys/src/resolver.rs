@@ -302,11 +302,7 @@ impl KeybindingResolver {
             return false;
         }
 
-        let required = self.platform.binding_modifiers(
-            binding.ctrl == Some(true),
-            binding.meta == Some(true),
-            binding.shift == Some(true),
-        );
+        let required = self.platform.required_modifiers(binding);
         self.platform.modifiers_match(event.modifiers(), required, is_zoom_in_alias)
     }
 
