@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use soprano_launch::integrations::{opencode_cli_config_content, opencode_config_content};
 use soprano_launch::{
-    AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec, Resources, launch_arguments,
+    AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec, Platform, Resources, ShellFeatures,
+    ShellIntegrationConfig, ShellIntegrationMode, launch_arguments,
 };
 use soprano_types::{AgentConversation, AgentLaunch, AgentProfile, DefaultAgents};
 
@@ -34,6 +35,8 @@ fn context(login_shell: &str) -> LaunchContext {
         resources: Resources::at(Some(resources_root())).without_ghostty(),
         base_env: BTreeMap::new(),
         home: PathBuf::from("/home/me"),
+        platform: Platform::Unix,
+        shell_integration: ShellIntegrationConfig::default(),
     }
 }
 
@@ -146,6 +149,7 @@ fn a_resumed_codex_automation_in_a_chosen_account_keeps_its_autonomy_but_not_its
             ("SOPRANO_AGENT_NAME", "Codex"),
             ("SOPRANO_RESUME_SESSION_ID", "saved-chat"),
             ("CODEX_HOME", "/acc/codex"),
+            ("PWD", "/tmp/repo"),
         ])
     );
     assert_eq!(spec.cwd.as_deref(), Some(Path::new("/tmp/repo")));
@@ -273,7 +277,7 @@ fn omp_gets_its_extension_and_the_accounts_preference_overlay() {
 fn a_plain_terminal_is_the_login_shell_with_the_pane_identity_only() {
     let spec = LaunchSpec::default_shell(&context("/bin/zsh"), Some("~/repo"), "pane-1", "tab-2");
     assert_eq!(spec.argv, vec!["/bin/zsh", "-l"]);
-    assert_eq!(spec.env, pane_env(&[]));
+    assert_eq!(spec.env, pane_env(&[("PWD", "/home/me/repo")]));
     assert_eq!(spec.cwd.as_deref(), Some(Path::new("/home/me/repo")));
 }
 
@@ -340,6 +344,82 @@ fn ghostty_shell_integration_and_the_app_environment_reach_the_pane() {
     assert_eq!(spec.env["LANG"], "en_US.UTF-8");
     // Another pane's agent identity never leaks into a plain shell.
     assert!(!spec.env.contains_key("SOPRANO_AGENT_PROFILE"));
+}
+
+#[test]
+fn the_profiles_environment_wins_over_the_terminal_variables_and_shell_integration() {
+    let mut ctx = context("/bin/zsh");
+    ctx.resources = Resources::at(Some(resources_root()));
+    ctx.base_env = env_of(&[("ZDOTDIR", "/home/me/.config/zsh"), ("PWD", "/somewhere/else")]);
+    let profile = AgentProfile {
+        env: Some(env_of(&[
+            ("TERM", "xterm-kitty"),
+            ("ZDOTDIR", "/profile/zsh"),
+            ("TERM_PROGRAM_VERSION", "9"),
+        ])),
+        ..DefaultAgents::omp()
+    };
+    let mut request = AgentRequest::new(&profile, "p", "t");
+    request.cwd = Some("/work/repo");
+    let spec = LaunchSpec::for_agent(&ctx, &request);
+    assert_eq!(spec.env["TERM"], "xterm-kitty");
+    assert_eq!(spec.env["TERM_PROGRAM_VERSION"], "9");
+    // Shell integration saw the inherited ZDOTDIR; the profile's then overrides it.
+    assert_eq!(spec.env["ZDOTDIR"], "/profile/zsh");
+    assert_eq!(spec.env["GHOSTTY_ZSH_ZDOTDIR"], "/home/me/.config/zsh");
+    assert_eq!(spec.env["PWD"], "/work/repo");
+}
+
+#[test]
+fn windows_prepends_the_cli_folder_to_the_existing_path_spelling() {
+    let root = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(root.path().join("bin")).expect("mkdir");
+    std::fs::write(root.path().join("bin/soprano.cmd"), "@echo off\r\n").expect("write");
+    let cli = root.path().join("bin").to_string_lossy().into_owned();
+
+    let mut ctx = context("pwsh.exe");
+    ctx.platform = Platform::Windows;
+    ctx.resources = Resources::at(Some(root.path().to_path_buf()));
+    ctx.base_env = env_of(&[("Path", r"C:\Windows;C:\Tools")]);
+    let spec = LaunchSpec::default_shell(&ctx, None, "p", "t");
+    assert_eq!(spec.env["Path"], format!(r"{cli};C:\Windows;C:\Tools"));
+    assert!(!spec.env.contains_key("PATH"));
+
+    // A profile's differently cased PATH replaces the inherited one instead of sitting beside it.
+    let profile = AgentProfile { env: Some(env_of(&[("PATH", r"D:\bin")])), ..DefaultAgents::codex() };
+    let spec = LaunchSpec::for_agent(&ctx, &AgentRequest::new(&profile, "p", "t"));
+    assert_eq!(spec.env["PATH"], format!(r"{cli};D:\bin"));
+    assert!(!spec.env.contains_key("Path"));
+
+    // No Unix default when nothing sets a path.
+    ctx.base_env = BTreeMap::new();
+    let spec = LaunchSpec::default_shell(&ctx, None, "p", "t");
+    assert_eq!(spec.env["PATH"], cli);
+}
+
+#[test]
+fn the_terminal_settings_shape_the_shell_features_and_can_turn_integration_off() {
+    let mut ctx = context("/bin/zsh");
+    ctx.resources = Resources::at(Some(resources_root()));
+    let mut features = ShellFeatures::default();
+    features.apply("sudo");
+    ctx.shell_integration =
+        ShellIntegrationConfig { mode: ShellIntegrationMode::None, features, cursor_blink: Some(false) };
+    let spec = LaunchSpec::default_shell(&ctx, None, "p", "t");
+    assert_eq!(spec.env["GHOSTTY_SHELL_FEATURES"], "cursor:steady,path,sudo,title");
+    assert!(!spec.env.contains_key("ZDOTDIR"));
+    assert!(spec.env.contains_key("GHOSTTY_RESOURCES_DIR"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_variable_that_is_not_utf8_does_not_stop_a_pane_from_starting() {
+    use std::os::unix::ffi::OsStringExt;
+    let env = soprano_launch::spec::lossy_environment([(
+        std::ffi::OsString::from("LATIN1"),
+        std::ffi::OsString::from_vec(b"caf\xe9".to_vec()),
+    )]);
+    assert_eq!(env["LATIN1"], "caf\u{FFFD}");
 }
 
 // MARK: Ported Swift tests

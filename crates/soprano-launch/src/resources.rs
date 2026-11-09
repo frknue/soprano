@@ -91,10 +91,13 @@ impl Resources {
         self.root.as_ref().map(|r| r.join("AgentHooks")).filter(|p| p.is_dir())
     }
 
-    /// `<root>/bin` when it holds the `soprano` CLI: the folder panes get on PATH.
+    /// `<root>/bin` when it holds the `soprano` CLI: the folder panes get on PATH. Windows
+    /// packages ship it as `bin\soprano.cmd` (or `.exe`), which need no execute bit.
     pub fn cli_dir(&self) -> Option<PathBuf> {
         let dir = self.root.as_ref()?.join("bin");
-        ["soprano", "soprano.exe"].iter().any(|name| is_executable(&dir.join(name))).then_some(dir)
+        let found = is_executable(&dir.join("soprano"))
+            || ["soprano.exe", "soprano.cmd"].iter().any(|name| dir.join(name).is_file());
+        found.then_some(dir)
     }
 
     /// `GHOSTTY_RESOURCES_DIR`: the folder holding `shell-integration/`.
@@ -144,6 +147,16 @@ mod tests {
     fn packaged_resource_bundle_is_unavailable_without_app_resources() {
         assert_eq!(packaged_bundle_dir(None, |_| true), None);
         assert_eq!(packaged_bundle_dir(Some(Path::new("/nowhere")), |p| p.exists()), None);
+    }
+
+    #[test]
+    fn a_windows_package_puts_its_soprano_cmd_folder_on_path() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let resources = Resources::at(Some(root.path().to_path_buf()));
+        assert_eq!(resources.cli_dir(), None);
+        std::fs::create_dir_all(root.path().join("bin")).expect("mkdir");
+        std::fs::write(root.path().join("bin/soprano.cmd"), "@echo off\r\n").expect("write");
+        assert_eq!(resources.cli_dir(), Some(root.path().join("bin")));
     }
 
     #[test]

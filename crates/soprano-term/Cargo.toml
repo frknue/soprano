@@ -1,8 +1,28 @@
 [package]
 name = "soprano-term"
+description = "Soprano's terminal: libghostty-vt state, an in-process PTY, and the GPUI terminal view."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+ghostty-sys = { path = "../ghostty-sys" }
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+gpui.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+portable-pty = "0.9"
+async-channel = "2"
+base64 = "0.22"
+png = "0.17"
+image = { version = "0.25", default-features = false }
+smallvec = "1"
+fancy-regex = "0.19"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+gpui_platform.workspace = true

@@ -1,281 +1,145 @@
 # Soprano
 
-Native macOS tiling terminal multiplexer for AI coding agents: Swift 6 + AppKit
-(fully programmatic, no storyboards/xibs) rendering terminals through
-[libghostty](https://github.com/ghostty-org/ghostty)'s C API. Built with SPM,
-shipped as a hand-packaged `.app` bundle via `scripts/package-app.sh`.
+Tiling terminal multiplexer for AI coding agents on macOS, Linux and Windows: a Rust
+workspace with a GPUI interface in Herdr's look (`gpui-pre` + `gpui-component`) and terminals
+from Ghostty's terminal core, libghostty-vt (`ghostty` submodule, built by
+`crates/ghostty-sys` with Zig). The Swift/AppKit app it replaces is in git history; its
+behavior is the spec for everything except the look.
 
 ## Commands
 
-Homebrew Swift is required — the system CLT Swift has broken SPM. Homebrew Swift
-6.2 also cannot read the macOS 27 SDK Xcode selects by default (`unknown argument:
-'-target-arch-variant'`), and Xcode's own Swift builds the app but cannot compile
-the tests against the CLT `Testing.framework` that `Package.swift` hardcodes. Run
-every Swift command, `scripts/install.sh`, and `scripts/dev.sh` with the Homebrew
-toolchain on the CLT macOS 26 SDK:
-
 ```bash
-export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk
-export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-export PATH="/opt/homebrew/opt/swift/bin:$PATH"
+./scripts/prefetch-zig-deps.sh                  # once per ghostty pin: Codeberg deps via git
+cargo build                                     # debug build (com.soprano.dev identity)
+cargo test                                      # whole workspace
+cargo test -p soprano-model closing             # one crate, filtered
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all
+./scripts/dev.sh [--build-only]                 # macOS: package + launch Soprano Dev.app (user-driven only)
+./scripts/install.sh                            # macOS: release build → /Applications/Soprano.app
+./scripts/install-linux.sh                      # Linux: release build → ~/.local
 ```
 
-Then:
-
-```bash
-swift build                       # debug build / type-check
-swift build -c release
-swift test
-swift test --filter SplitNodeTests
-./scripts/dev.sh [--build-only]   # package + launch isolated Soprano Dev.app (user-driven only)
-./scripts/install.sh              # release build → /Applications/Soprano.app
-bash Tests/Signing/LocalCodeSigningTests.sh   # signing-identity helper tests (mutates user keychain list)
-```
-
-The `ld: warning: building for macOS-14.0 …` and `could not find symbol
-'_ImGui…'` link warnings are expected on every build; ignore them.
-
-There is no linter or formatter configured. Match surrounding style.
+Zig 0.16 is required (`brew install zig@0.16`; `ghostty-sys` finds the keg-only formula, or
+set `ZIG`). Cross-check cfg'd code from a Mac with
+`cargo clippy --target x86_64-unknown-linux-gnu|x86_64-pc-windows-msvc -p <crate>`; crates
+with C dependencies need `zig cc` wrappers as `CC_<target>`/`AR_<target>`.
 
 ## Build and verification
 
-- Verify source changes with `swift build`, and run `swift test` when touching
-  anything a test covers. Do not launch the Soprano GUI during automated
-  verification; launching terminal panes can trigger macOS permission prompts
-  through the user's shell startup files.
-- `./scripts/dev.sh` builds, packages, and launches the isolated `Soprano Dev.app` with
-  bundle identifier `com.soprano.dev`. It is for user-driven GUI testing. Agents
-  must not run it unless the user explicitly requests a launch. Use
-  `./scripts/dev.sh --build-only` only when the development bundle itself needs testing.
+- Verify changes with `cargo build` and the affected crates' tests; run the workspace tests
+  before handing off. Do not launch the app during automated verification: panes run the
+  user's shell startup files and can trigger OS permission prompts.
+- `./scripts/dev.sh` (macOS) builds, packages and launches `Soprano Dev.app`
+  (`com.soprano.dev`). Agents run it only when the user asks for a launch;
+  `--build-only` when the bundle itself needs testing.
+- After completing and verifying a task that changes the app or its packaging, run
+  `./scripts/install.sh` as the final step unless the user asks not to. The user has
+  authorized it: it replaces `/Applications/Soprano.app` and never stops or launches a
+  running instance. Never use `sudo`; report a permission problem instead.
+  Documentation-only or read-only tasks skip installation.
 
 ## GitHub development workflow
 
-`main` is the only long-lived branch and must stay releasable. Do not create
-`develop`, permanent release branches, or permanent hotfix branches.
+`main` is the only long-lived branch and stays releasable. Use short-lived branches named
+`feat/<topic>`, `fix/<topic>`, `docs/<topic>`, `chore/<topic>` or `refactor/<topic>`;
+preserve the current branch and any user work in the worktree. Merge with a squash merge
+and delete the branch; the PR title becomes the commit subject (short, imperative, `feat:` /
+`fix:` when it fits). CI (`.github/workflows/ci.yml`: fmt, clippy, tests on all three OSes)
+is the merge gate; never merge while it fails. Mutate GitHub (commit, push, PR, merge, tag)
+only when the user asked for that remote action. Fast path once authorized:
 
-- Use a short-lived branch for each GitHub-bound change, named
-  `feat/<topic>`, `fix/<topic>`, `docs/<topic>`, `chore/<topic>`, or
-  `refactor/<topic>`. Preserve the current branch and any user work already in
-  the worktree; do not switch branches just to satisfy this convention.
-- Routine maintainer work does not need an issue, design document, or approval.
-  Use a draft PR only when a larger change benefits from early discussion.
-- Merge into `main` with a squash merge and delete the topic branch. The PR
-  title becomes the commit subject, so keep it short and imperative; the
-  existing `feat:` / `fix:` style is preferred when it fits.
-- Once auto-merge is enabled in the repository settings, enable it after local
-  verification instead of waiting synchronously on CI. Do not require a branch
-  to be rebased merely because `main` advanced unless the changes conflict or
-  interact.
-- Keep unfinished work on its topic branch. For dependent work, stack a
-  temporary branch or draft PR rather than introducing another long-lived
-  integration branch.
-- Before PR CI exists, the local build and test requirements above are the
-  merge gate. Once CI reports a required check, never merge while it is failing.
-- Do not commit, push, open a PR, merge, tag, or otherwise mutate GitHub unless
-  the user requested that remote action. When authorized and auto-merge is
-  available, the fast path is:
-
-  ```bash
-  git push -u origin HEAD
-  gh pr create --fill
-  gh pr merge --auto --squash --delete-branch
-  ```
-
-## Installing completed changes
-
-- After completing and successfully verifying a task that changes the app or its
-  packaging, run `./scripts/install.sh` as the final step unless the user asks not to.
-- The user has explicitly authorized this installation. The script builds the
-  release configuration and replaces `/Applications/Soprano.app`, but does not
-  terminate or launch Soprano. The running instance remains untouched and the
-  installed update is used on the next launch.
-- Do not use `sudo` if installation fails. Report the permission problem instead.
-- Documentation-only or read-only tasks do not require installation.
+```bash
+git push -u origin HEAD
+gh pr create --fill
+gh pr merge --auto --squash --delete-branch
+```
 
 ## Changelog and versioning
 
-`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the
-project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+`CHANGELOG.md` follows Keep a Changelog; versions follow SemVer. After a user-visible
+change, add one line under `## [Unreleased]` in its group (`Added`, `Changed`,
+`Deprecated`, `Removed`, `Fixed`, `Security`, in that order), written for the person using
+the app and naming the keybinding, CLI subcommand or setting. Skip it for refactors, tests
+and internal docs. Never add a version heading during feature work.
 
-- After finishing a user-visible change, add a line under `## [Unreleased]` in the
-  matching group — `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security` —
-  creating the group if it is missing and keeping the groups in that order.
-- Write for the person using the app, not for the diff: one line describing the effect,
-  naming the keybinding, CLI subcommand, or setting when there is one.
-- Skip the changelog when nothing user-visible changed: refactors, test-only work,
-  internal documentation, and the plans and specs under `docs/`.
-- Never add a version heading as part of feature work. Day-to-day changes only ever touch
-  `## [Unreleased]`; releases are cut deliberately.
-
-### Cutting a release
-
-Scale for this app:
-
-- **major** — a workspace or session format older builds cannot read, or a documented
-  keybinding or CLI subcommand removed.
-- **minor** — new panes, keybindings, CLI subcommands, agent integrations, or settings.
-- **patch** — fixes and polish that add no new surface.
-
-1. Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and add a fresh, empty
-   `## [Unreleased]` above it.
-2. Bump `CFBundleShortVersionString` **and** `CFBundleVersion` in `Support/Info.plist`.
-   That plist is the single source of truth — `AppVersion` reads it at runtime, so no
-   Swift file carries the number. `ChangelogVersionTests` fails if the two drift apart.
-3. `swift build && swift test`, then `./scripts/install.sh`.
-4. Commit as `release: vX.Y.Z` and push tag `vX.Y.Z`.
-5. `.github/workflows/release.yml` builds arm64 and x86_64, creates an ad-hoc-signed
-   universal DMG, and publishes the DMG, checksum, and generated cask to GitHub Releases.
-   The updater in `frknue/homebrew-tap` imports the latest cask. See
-   `docs/RELEASING.md`.
+Releases: major = a workspace/session format older builds cannot read, or a documented
+keybinding or CLI subcommand removed; minor = new panes, keybindings, subcommands, agent
+integrations or settings; patch = fixes. The version lives only in the root `Cargo.toml`
+(`[workspace.package] version`); `scripts/package-app.sh` writes it into `Info.plist`, and
+a soprano-config test fails if `CHANGELOG.md` gets ahead of it. Steps: `docs/RELEASING.md`.
 
 ## Architecture
 
-`Sources/Soprano/` — single executable target:
+Crates in `crates/`, lowest first; non-UI crates have no gpui dependency and test without
+an app:
 
-- `main.swift` — dispatches CLI subcommands **before** starting `NSApplication`.
-  `BrowserCommand`, `AgentEventCommand`, and `PaneNavigationCommand` each claim
-  the invocation and exit. The app binary doubles as the `$SOPRANO_BIN` CLI that
-  panes use to drive the running instance, so new subcommands hook in here.
-- `Models/` — plain `Codable` value types. `SplitNode` is the recursive layout
-  tree (every pane geometry question is answered here, not in views);
-  `WorkspaceSession` / `WorkspaceWindowState` are the persistence formats.
-- `Controllers/` — `AgentManager` is the central mutable state owner (panes,
-  layout tabs, pane tabs, splits) and the largest source of coupling. "Tab" has
-  two levels: a window's layout tabs (`LayoutTab`, each a whole split layout,
-  the `*LayoutTab` APIs) and pane tabs (`PaneState.tabs`, inside one pane).
-  `SessionManager` persists/restores workspaces, `KeybindingManager` resolves the
-  `Ctrl+A` prefix chords, `AgentNotificationManager` maps agent lifecycle hooks
-  to pane status + notifications.
-- `Terminal/` — `TerminalSurfaceView` wraps a libghostty surface (keyboard
-  routing, drag-and-drop, env export, copy mode); `GhosttyAppManager` owns the
-  single global `ghostty_app_t`.
-- `Views/` — `SplitTreeView` renders a `SplitNode`; browser panes are WebKit.
-  `Views/AgentsStyle/` is the look Soprano shares with Soprano Agents
-  (`~/git/private/soprano-agents`), ported from its `Theme/`: `Palette` (tokens
-  derived from the Soprano theme by `Palette(soprano:)`), `PaletteCenter.shared`
-  (fed by the app's `ThemeManager`), `Typography`, `Metrics`, `Radius`, `Icon`,
-  `PaletteView`, `InteractiveView`, `GhostIconButton`, `TextButton`. Keep these
-  files identical to Soprano Agents'. `Views/Shell/` holds the Agents-style
-  chrome widgets (monograms, status pills, tabs, title-bar helpers) the
-  sidebars, tab rows and pane headers use, and `ShellDialogs` — every confirm,
-  prompt and alert is an Agents dialog card from there, never an `NSAlert`
-  (it falls back to one only without a visible window); `Views/Chat/` the chat tab's
-  timeline, Markdown and composer, ported from Soprano Agents' `Views/Timeline`
-  and `Views/Composer`; the Agent Dashboard shows transcripts with the same
-  timeline (`Chat/TranscriptThread.swift`). `Views/Settings/`, `Views/Surfaces/` and
-  `Views/Automations/` hold the Agents-style form controls and file-surface
-  pieces of those screens. `Chrome.swift` is the older Folio component set,
-  kept because the sibling apps vendor it with `CommandPalettePanel.swift` (the
-  palette Soprano Agents shares); new UI does not use it. It depends only on
-  AppKit, `Config/Theme.swift`, and `Utilities/NSColor+Hex.swift`, because the
-  sibling apps vendor those three files. `Theme.swift` holds the palettes and
-  derived tokens; the `folio` id resolves to Folio Paper or Folio Ink from the
-  effective appearance, and the seven third-party themes are dark.
-- `Chat/` — the chat tab's agent connection: `AgentChatSession` drives an agent's
-  Agent Client Protocol server (`omp acp`) over `JSONRPCConnection`, and
-  `ACPTurnBuilder` folds its `session/update`s into the turns (`ChatTurns`) the
-  timeline shows.
-- `Config/` — built-in defaults (agent profiles, keybindings, themes) **and** the
-  user configuration layer. `ConfigStore` is the runtime authority for every
-  user-facing setting: it loads `~/.config/soprano/settings.json`, resolves it
-  over the built-in defaults (`SopranoConfig.resolved()`), publishes the result,
-  and writes changes back through `JSONCText` so comments and key order survive.
-  `AgentCatalog` is the merged agent registry every other file reads;
-  `KeyChord` converts between chord text and `KeyBinding` fields.
-- `Sources/GhosttyKit/` — modulemap + `ghostty.h` only, both tracked so a clone can
-  compile before anyone builds libghostty. Regenerate the header with
-  `scripts/build-ghostty.sh`; never hand-edit it and never copy it in on its own.
+- `soprano-types` (agent profiles/status, keybinding types, `Color`) and `soprano-platform`
+  (app identity, data/resource paths, `StateStore` for app state, shell, open/reveal/trash).
+- `soprano-config`: `settings.json` (`ConfigStore` is the runtime authority; `jsonc` writes
+  keys preserving comments), default keybindings, `KeyChord` display, automation entries,
+  cron. `soprano-keys`: the keybinding resolver (prefix chords, pane hints, passthrough).
+- `soprano-model`: `Workspace` (sessions → logical windows → layout tabs → split panes →
+  pane tabs; every geometry question is `SplitNode`'s) with a drained change log and
+  two-phase closes; persistence formats.
+- `soprano-launch` (agent/shell command lines, hooks, env), `soprano-term` (libghostty-vt +
+  PTY + GPUI terminal view), `soprano-ipc` (CLI subcommands and the app's local socket),
+  `soprano-notify` (agent lifecycle → status, banners per OS).
+- `soprano-agents` (transcripts, timelines, dashboard grouping), `soprano-chat` (ACP client
+  for `omp acp`), `soprano-accounts`, `soprano-automations`, `soprano-git`, `soprano-files`,
+  `soprano-text` (highlighter, editor documents, diff and Markdown models).
+- UI crates over those: `soprano-ui` (design system: tokens derived from Soprano's themes
+  with Herdr's formulas, fonts, icons, widgets, dialogs, picker), `soprano-editor`,
+  `soprano-explorer`, `soprano-chat-ui`, `soprano-dashboard`, `soprano-settings`,
+  `soprano-browser`, `soprano-automations-ui`.
+- `soprano` (bin): `main.rs` runs `soprano_ipc::cli::run_cli` first (the binary doubles as
+  `$SOPRANO_BIN`), then the app shell that wires every crate together.
 
-`Support/Info.plist` and `Support/AgentHooks/*.json` are copied into the bundle
-by `scripts/package-app.sh`; changes to the launcher hooks belong there and in
-`AgentManager`. `scripts/create-release-dmg.sh` accepts only a universal app. It
-supports Developer ID notarization when credentials exist and an explicit
-`SOPRANO_UNNOTARIZED_RELEASE=1` fallback for free, ad-hoc-signed releases.
+`resources/` ships inside every package (agent hook templates, OpenCode/omp plugins, zsh
+integration, `bin/omp` launchers, fonts, icons). `docs/rust-rewrite/` holds the Herdr look
+spec (`HERDR-UI.md`), the screen map and per-crate API reports.
 
 ## Adding a user-facing setting
 
-`settings.json` is the source of truth; `UserDefaults` is not. To add a setting:
-
-1. Add the (optional) key to `SopranoConfig` and apply it in `resolved()`,
-   reporting bad values as a `ConfigIssue` rather than failing — a typo must
-   never stop the app from launching.
-2. Document it in `ConfigFile.template`, which is what a new user actually reads.
-3. Have the settings screen write it with `configStore.write(_:at:)`; never
-   persist UI state on the side.
-4. Re-apply it in `MainWindowController.applyConfigChange()` so an edit made in
-   the file lands live.
-
-Window geometry, sidebar width, and saved workspaces stay in `UserDefaults` —
-they are app state, not configuration.
+`settings.json` is the source of truth. Add the optional key to `SopranoConfig` and apply
+it in `resolved()`, reporting bad values as a `ConfigIssue` (a typo never stops the app);
+document it in the config template; have the Settings screen write it with
+`ConfigStore::write`; re-apply it where the shell handles config changes. Window geometry,
+sidebar widths and saved workspaces stay in `StateStore` — app state, not configuration.
 
 ## Conventions
 
-- The look is Soprano Agents'. New or restyled chrome subclasses `PaletteView`
-  (re-coloring in `applyPalette(_:)`), takes colors only from
-  `PaletteCenter.shared.palette`, fonts from `Typography` (system font 14 body,
-  13 rows, 12 meta and pills, 11 kbd; SF Mono 13 for code, paths and diffs),
-  radii from `Radius` (composer, bubbles and cards 16; buttons, menus and code
-  blocks 8; rows 6) and SF Symbols from `Icon`. Compare it with Soprano Agents'
-  own renders (`SopranoAgents snapshot`) before calling it done.
-- No uppercase eyebrows or status words: sections are "Title N ⌄" headers and
-  agent status is an Agents status pill (symbol + word: Working with its
-  duration, Approval, Input, Failed, Done, else a relative time).
-- Keycaps follow K1: one cap per chord (`⌘1`, `⇧⌘P`, `⌃A`), a prefix sequence
-  as separate caps (`⌃A` then `P`), letter legends uppercase (`J`, `⇧J`), `esc`
-  lowercase.
-- Motion is opacity-only fades of 150 ms or less, and none under Reduce Motion.
-- Tests use **swift-testing** (`import Testing`, `@Test`, `#expect`), not XCTest,
-  with long sentence-style test names. One `struct …Tests` per file in
-  `Tests/SopranoTests/`.
-- Types that persist state accept an injectable `UserDefaults` (`init(defaults:
-  UserDefaults = .standard)`) so tests never touch real preferences. Follow this
-  when adding persisted state.
+- The look is Herdr's (`docs/rust-rewrite/HERDR-UI.md`): colors only from
+  `cx.soprano_theme()` tokens, sizes through its zoom helper, fonts and icons from
+  `soprano-ui`. No uppercase eyebrows or status words: sections are "Title N ⌄"; agent
+  status is a status pill (Working with its duration, Approval, Input, Failed, Done, else a
+  relative time). Keycaps follow K1: one cap per chord, a prefix sequence as separate caps.
+  Motion is opacity-only fades ≤150 ms, none under Reduce Motion.
+- Shortcuts are written with macOS keys; on Linux/Windows `cmd` is Ctrl+Shift, `cmd+shift`
+  Ctrl+Shift+Alt, `ctrl+cmd` Ctrl+Alt, plain `ctrl` stays Ctrl (`soprano-keys` matches,
+  `soprano-config` displays).
+- OS differences live in one small module per concern (see `soprano-platform`), never as
+  `#[cfg]` spread through shared code.
+- Types that persist state take a `StateStore` (`StateStore::in_memory()` in tests), under
+  the `soprano-*` keys the Swift app used.
+- Tests: sentence-style names (`fn closing_the_last_pane_of_a_tab_closes_the_tab()`);
+  GPUI views test with `TestAppContext`; tests never spawn the user's real shell or touch
+  the real keychain, home or settings.
 - Shell scripts: `#!/bin/bash`, `set -euo pipefail`, absolute-path validation on
-  any env-var-provided directory, `trap cleanup EXIT` for temp dirs.
-- Commits: short imperative subject, `fix:` / `feat:` prefixes common but not
-  universal.
-- Keep `README.md` in sync when changing keybindings, CLI subcommands, or
-  packaging behavior — it is the user-facing reference. User-visible changes also
-  get a `CHANGELOG.md` entry; see **Changelog and versioning** above.
+  env-provided directories, `trap cleanup EXIT` for temp dirs.
+- Keep `README.md` in sync when changing keybindings, CLI subcommands or packaging.
 
 ## Gotchas
 
-- `lib/libghostty.a` is **gitignored** (141 MB, over GitHub's file limit). A fresh
-  clone must build it with `scripts/build-ghostty.sh`, which needs **full Xcode**
-  for the Metal toolchain — Command Line Tools alone cannot build it — plus Zig
-  exactly matching `minimum_zig_version` in `ghostty/build.zig.zon` (0.15.2 today).
-- **Never copy libghostty artifacts by hand.** `scripts/build-ghostty.sh` builds the
-  submodule and refreshes `lib/libghostty.a`, `Sources/GhosttyKit/include/ghostty.h`,
-  and `Support/ghostty-version.txt` together. Updating only some of them is how a
-  header ends up describing a different struct layout than the library actually has —
-  that compiles, links, and corrupts memory at runtime with no diagnostic. Pass a ref
-  to move ghostty: `scripts/build-ghostty.sh v1.3.1`, then `git add ghostty` so the
-  submodule pin records what you built.
-- `Support/ghostty-version.txt` is the recorded ghostty version for the checkout, and
-  `GhosttyVersionTests` fails when the linked library disagrees with it. That test is
-  the only thing standing in for the version tracking git cannot do on an untracked
-  141 MB binary — if it fails, rebuild rather than editing the file.
-- Packaging needs Ghostty **runtime resources** (themes, shell-integration,
-  terminfo). `package-app.sh` searches `SOPRANO_GHOSTTY_RESOURCES_DIR`,
-  `ghostty/zig-out/share/ghostty`, `GHOSTTY_RESOURCES_DIR`, then
-  `/Applications/Ghostty.app`. It hard-fails if none is complete. These are found
-  independently of the linked library, so it prints which source it used and warns
-  when the versions differ; `SOPRANO_STRICT_GHOSTTY_RESOURCES=1` turns that into a
-  failure. Soprano exports `GHOSTTY_RESOURCES_DIR` into every pane pointing at its
-  own bundle, so packaging from inside a Soprano pane would otherwise copy resources
-  from the installed app back into the new one forever — candidates inside a
-  `com.soprano.*` bundle are refused for that reason.
-- Native notifications require a real `.app` bundle. `swift run` and
-  `.build/debug/Soprano` work for debugging but silently disable them.
-- `swift test` links the CLT-bundled `Testing.framework` via `unsafeFlags` in
-  `Package.swift`; that path is hardcoded to
-  `/Library/Developer/CommandLineTools/…`.
-- Never `import Foundation` next to `import Testing` in a test file: that activates
-  the `_Testing_Foundation` cross-import overlay, which the CLT framework builds for
-  macOS 26 while this package targets macOS 14, and every test file then fails to
-  compile. Test files `import AppKit` instead and get Foundation types through it.
-- Dev and installed apps use distinct bundle IDs (`com.soprano.dev` vs
-  `com.soprano.app`), so preferences, sessions, and notification permissions do
-  not carry over between them.
-- `_archive/` (gitignored) holds dead Tauri/React/Rust code — reference only,
-  never a build input.
+- New crate: write `src/lib.rs` before `Cargo.toml`, and never point a path dependency or
+  `[[example]]` at something that doesn't exist yet — any of these breaks every cargo
+  command in the workspace.
+- Ghostty's `translate_c` dependency comes from Codeberg, whose archive endpoint hangs;
+  `scripts/prefetch-zig-deps.sh` fetches it through git into Zig's global cache.
+- Moving Ghostty: check out a commit in `ghostty/`, rerun the prefetch script, rebuild, and
+  commit the pin. Herdr's `crates/ghostty-sys` pin is the known-good libghostty-vt API.
+- Native notifications on macOS need a real `.app` bundle; `cargo run` silently disables
+  them. Windows toasts need the Start-menu shortcut `soprano-notify` creates at launch.
+- Release and dev builds use distinct ids (`com.soprano.app` / `com.soprano.dev`), so their
+  state, sockets and notification permissions never mix. `SOPRANO_APP_ID`,
+  `SOPRANO_DATA_DIR`, `SOPRANO_RESOURCES_DIR` and `SOPRANO_CONFIG` override for tests.

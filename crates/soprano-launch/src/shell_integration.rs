@@ -11,16 +11,122 @@ use crate::resources::Resources;
 /// `PATH`-style list separator of the host OS.
 pub(crate) const LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
 
-/// Ghostty's default `shell-integration-features` (cursor, path, title) with its default
-/// blinking cursor, as `GHOSTTY_SHELL_FEATURES` spells them.
-pub const DEFAULT_SHELL_FEATURES: &str = "cursor:blink,path,title";
+/// Ghostty's `shell-integration-features` (`Config.ShellIntegrationFeatures`); the defaults
+/// are Ghostty's: cursor, title and path on; sudo and the ssh helpers off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShellFeatures {
+    pub cursor: bool,
+    pub sudo: bool,
+    pub title: bool,
+    pub ssh_env: bool,
+    pub ssh_terminfo: bool,
+    pub path: bool,
+}
+
+impl Default for ShellFeatures {
+    fn default() -> Self {
+        Self { cursor: true, sudo: false, title: true, ssh_env: false, ssh_terminfo: false, path: true }
+    }
+}
+
+impl ShellFeatures {
+    /// Applies a `shell-integration-features` value the way Ghostty parses a packed-struct
+    /// option: `true`/`false` set every feature; otherwise a comma list where `name` turns a
+    /// feature on and `no-name` off. Unknown names are ignored.
+    pub fn apply(&mut self, value: &str) {
+        match value.trim() {
+            "true" => *self = Self::all(true),
+            "false" => *self = Self::all(false),
+            list => {
+                for item in list.split(',').map(str::trim) {
+                    let (name, on) = match item.strip_prefix("no-") {
+                        Some(name) => (name, false),
+                        None => (item, true),
+                    };
+                    match name {
+                        "cursor" => self.cursor = on,
+                        "sudo" => self.sudo = on,
+                        "title" => self.title = on,
+                        "ssh-env" => self.ssh_env = on,
+                        "ssh-terminfo" => self.ssh_terminfo = on,
+                        "path" => self.path = on,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    fn all(on: bool) -> Self {
+        Self { cursor: on, sudo: on, title: on, ssh_env: on, ssh_terminfo: on, path: on }
+    }
+
+    /// `GHOSTTY_SHELL_FEATURES` (Ghostty's `setupFeatures`): enabled names sorted, the cursor
+    /// with `:blink` or `:steady`; `None` when every feature is off.
+    pub fn environment_value(&self, cursor_blink: bool) -> Option<String> {
+        // Already in Ghostty's case-insensitive name order.
+        let names = [
+            (self.cursor, if cursor_blink { "cursor:blink" } else { "cursor:steady" }),
+            (self.path, "path"),
+            (self.ssh_env, "ssh-env"),
+            (self.ssh_terminfo, "ssh-terminfo"),
+            (self.sudo, "sudo"),
+            (self.title, "title"),
+        ];
+        let enabled: Vec<&str> = names.iter().filter(|(on, _)| *on).map(|(_, name)| *name).collect();
+        (!enabled.is_empty()).then(|| enabled.join(","))
+    }
+}
+
+/// Ghostty's `shell-integration` option.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ShellIntegrationMode {
+    /// `none`: no automatic injection (the features variable is still set, for manual
+    /// integrations).
+    None,
+    /// `detect` (default): by the command's executable name.
+    #[default]
+    Detect,
+    /// `bash`, `elvish`, `fish`, `nushell`, `zsh`: treat the command as that shell.
+    Force(Shell),
+}
+
+impl ShellIntegrationMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.trim() {
+            "none" => Self::None,
+            "detect" => Self::Detect,
+            "bash" => Self::Force(Shell::Bash),
+            "elvish" => Self::Force(Shell::Elvish),
+            "fish" => Self::Force(Shell::Fish),
+            "nushell" => Self::Force(Shell::Nushell),
+            "zsh" => Self::Force(Shell::Zsh),
+            _ => return None,
+        })
+    }
+}
+
+/// The terminal settings that shape a pane's shell integration (Ghostty's
+/// `shell-integration`, `shell-integration-features` and `cursor-style-blink`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShellIntegrationConfig {
+    pub mode: ShellIntegrationMode,
+    pub features: ShellFeatures,
+    /// `cursor-style-blink`; unset means blinking, as in Ghostty.
+    pub cursor_blink: Option<bool>,
+}
 
 /// Sets the variables Ghostty's `Exec` set for a child: `GHOSTTY_RESOURCES_DIR`, `TERM`
 /// (`xterm-ghostty` with `TERMINFO` only when the terminfo entry is bundled, else
 /// `xterm-256color`), `COLORTERM`, `TERM_PROGRAM` (Soprano, as the Swift app exported),
 /// `TERM_PROGRAM_VERSION` and `GHOSTTY_SHELL_FEATURES`; drops `VTE_VERSION` so children do
 /// not think they run under VTE.
-pub fn apply_terminal_environment(env: &mut BTreeMap<String, String>, resources: &Resources, version: &str) {
+pub fn apply_terminal_environment(
+    env: &mut BTreeMap<String, String>,
+    resources: &Resources,
+    version: &str,
+    integration: &ShellIntegrationConfig,
+) {
     if let Some(dir) = resources.ghostty_resources_dir() {
         env.insert("GHOSTTY_RESOURCES_DIR".into(), path_string(dir));
     }
@@ -37,7 +143,9 @@ pub fn apply_terminal_environment(env: &mut BTreeMap<String, String>, resources:
     env.insert("TERM_PROGRAM".into(), "Soprano".into());
     env.insert("TERM_PROGRAM_VERSION".into(), version.into());
     env.remove("VTE_VERSION");
-    env.insert("GHOSTTY_SHELL_FEATURES".into(), DEFAULT_SHELL_FEATURES.into());
+    if let Some(features) = integration.features.environment_value(integration.cursor_blink.unwrap_or(true)) {
+        env.insert("GHOSTTY_SHELL_FEATURES".into(), features);
+    }
 }
 
 /// Shells Ghostty integrates automatically.
@@ -68,15 +176,24 @@ pub fn detect_shell(argv: &[String], is_macos: bool) -> Option<Shell> {
 }
 
 /// Injects Ghostty's shell integration into `argv` and `env` the way Ghostty does, returning
-/// the command to run (`argv` unchanged when the shell or its options are not integrated).
+/// the command to run (`argv` unchanged when the shell or its options are not integrated, or
+/// the mode is `none`).
 pub fn apply_shell_integration(
     argv: Vec<String>,
     env: &mut BTreeMap<String, String>,
     ghostty_resources: Option<&Path>,
     home: &Path,
+    mode: ShellIntegrationMode,
 ) -> Vec<String> {
     let Some(resources) = ghostty_resources else { return argv };
-    let Some(shell) = detect_shell(&argv, cfg!(target_os = "macos")) else { return argv };
+    let shell = match mode {
+        ShellIntegrationMode::None => return argv,
+        ShellIntegrationMode::Force(shell) => shell,
+        ShellIntegrationMode::Detect => match detect_shell(&argv, cfg!(target_os = "macos")) {
+            Some(shell) => shell,
+            None => return argv,
+        },
+    };
     let integrated = match shell {
         Shell::Bash => setup_bash(&argv, resources, env, home),
         Shell::Nushell => setup_nushell(&argv, resources, env),
@@ -213,6 +330,78 @@ pub(crate) fn path_string(path: &Path) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    /// Detect mode, as Ghostty runs by default.
+    fn apply_shell_integration(
+        argv: Vec<String>,
+        env: &mut BTreeMap<String, String>,
+        resources: Option<&Path>,
+        home: &Path,
+    ) -> Vec<String> {
+        super::apply_shell_integration(argv, env, resources, home, ShellIntegrationMode::Detect)
+    }
+
+    fn apply_terminal_environment(env: &mut BTreeMap<String, String>, resources: &Resources, version: &str) {
+        super::apply_terminal_environment(env, resources, version, &ShellIntegrationConfig::default());
+    }
+
+    #[test]
+    fn shell_features_follow_the_terminal_settings_like_ghosttys_setup_features() {
+        assert_eq!(
+            ShellFeatures::default().environment_value(true).as_deref(),
+            Some("cursor:blink,path,title")
+        );
+        assert_eq!(
+            ShellFeatures::all(true).environment_value(true).as_deref(),
+            Some("cursor:blink,path,ssh-env,ssh-terminfo,sudo,title")
+        );
+        assert_eq!(ShellFeatures::all(false).environment_value(true), None);
+
+        let mut features = ShellFeatures::all(false);
+        features.apply("sudo,ssh-env");
+        assert_eq!(features.environment_value(true).as_deref(), Some("ssh-env,sudo"));
+
+        let mut features = ShellFeatures::default();
+        features.apply("no-title, no-path");
+        assert_eq!(features.environment_value(false).as_deref(), Some("cursor:steady"));
+
+        let mut env = BTreeMap::new();
+        let steady = ShellIntegrationConfig { cursor_blink: Some(false), ..Default::default() };
+        super::apply_terminal_environment(&mut env, &Resources::none(), "1", &steady);
+        assert_eq!(env["GHOSTTY_SHELL_FEATURES"], "cursor:steady,path,title");
+
+        let mut env = BTreeMap::new();
+        let none = ShellIntegrationConfig { features: ShellFeatures::all(false), ..Default::default() };
+        super::apply_terminal_environment(&mut env, &Resources::none(), "1", &none);
+        assert!(!env.contains_key("GHOSTTY_SHELL_FEATURES"));
+    }
+
+    #[test]
+    fn shell_integration_none_injects_nothing_and_a_forced_shell_skips_detection() {
+        let res = resources_for("zsh");
+        let mut env = BTreeMap::new();
+        let argv = super::apply_shell_integration(
+            args("zsh"),
+            &mut env,
+            Some(res.path()),
+            Path::new("/h"),
+            ShellIntegrationMode::None,
+        );
+        assert_eq!(argv, args("zsh"));
+        assert!(env.is_empty());
+
+        let forced = ShellIntegrationMode::parse("zsh").expect("mode");
+        super::apply_shell_integration(
+            args("/opt/myzsh"),
+            &mut env,
+            Some(res.path()),
+            Path::new("/h"),
+            forced,
+        );
+        assert!(env["ZDOTDIR"].ends_with("shell-integration/zsh"));
+        assert_eq!(ShellIntegrationMode::parse("none"), Some(ShellIntegrationMode::None));
+        assert_eq!(ShellIntegrationMode::parse("bogus"), None);
+    }
 
     fn resources_for(shell: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");

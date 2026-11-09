@@ -16,9 +16,10 @@ pub mod shell_integration;
 pub mod spec;
 
 pub use chat::ChatLaunch;
-pub use command_runner::{CancelToken, CommandError, CommandResult, CommandRunner, RunOptions};
+pub use command_runner::{CancelToken, CommandError, CommandResult, CommandRunner, LineHandler, RunOptions};
 pub use quote::{ShellFlavor, shell_quoted};
 pub use resources::Resources;
+pub use shell_integration::{ShellFeatures, ShellIntegrationConfig, ShellIntegrationMode};
 pub use spec::{
-    AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec, fallback_shell, launch_arguments,
+    AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec, Platform, fallback_shell, launch_arguments,
 };

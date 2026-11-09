@@ -47,13 +47,21 @@ impl ChatLaunch {
         if !Self::supports(&profile.id) {
             return None;
         }
+        // Like `SopranoConfig.expandPath`: `~` expands, a relative folder resolves against the
+        // app's working folder, and only an empty one falls back to home.
         let raw = cwd.or(profile.cwd.as_deref()).unwrap_or("").trim();
         let directory = if raw.is_empty() {
             None
         } else {
-            Some(soprano_platform::paths::normalize(&soprano_platform::paths::expand_tilde_in(raw, home)))
+            let expanded = soprano_platform::paths::expand_tilde_in(raw, home);
+            let absolute = if expanded.is_absolute() {
+                Some(expanded)
+            } else {
+                std::env::current_dir().ok().map(|dir| dir.join(expanded))
+            };
+            absolute.map(|p| soprano_platform::paths::normalize(&p))
         };
-        let working_directory = path_string(directory.as_deref().filter(|d| d.is_absolute()).unwrap_or(home));
+        let working_directory = path_string(directory.as_deref().unwrap_or(home));
 
         // A Soprano started from one of its own panes must not pass that pane's identity on:
         // hooks would report this chat as that pane.
@@ -90,6 +98,7 @@ impl ChatLaunch {
                     .map(|(k, v)| format!("$env:{k} = {}", powershell_quoted(v)))
                     .collect();
                 let quoted: Vec<String> = command.iter().map(|c| powershell_quoted(c)).collect();
+                script.push(crate::command_runner::powershell_missing_command_check(&profile.command));
                 script.push(format!("& {}", quoted.join(" ")));
                 script.push("exit $LASTEXITCODE".into());
                 vec!["-NoLogo".into(), "-Command".into(), script.join("; ")]
@@ -174,6 +183,29 @@ mod tests {
             Path::new("/home/me"),
         )
         .expect("omp");
-        assert_eq!(launch.arguments, vec!["-NoLogo", "-Command", "& 'omp' 'acp'; exit $LASTEXITCODE"]);
+        assert_eq!(
+            launch.arguments,
+            vec![
+                "-NoLogo",
+                "-Command",
+                "if (-not (Get-Command -ErrorAction SilentlyContinue 'omp')) { [Console]::Error.WriteLine('omp: \
+                 command not found'); exit 127 }; & 'omp' 'acp'; exit $LASTEXITCODE"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_relative_chat_folder_resolves_against_the_apps_working_folder() {
+        let launch = ChatLaunch::for_profile(
+            &DefaultAgents::omp(),
+            Some("sub/../repo"),
+            "/bin/zsh",
+            &AccountAdjustments::default(),
+            &BTreeMap::new(),
+            Path::new("/home/me"),
+        )
+        .expect("omp");
+        let expected = std::env::current_dir().expect("cwd").join("repo");
+        assert_eq!(launch.working_directory, path_string(&expected));
     }
 }

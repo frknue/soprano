@@ -13,7 +13,7 @@ use crate::integrations::{
 use crate::quote::{ShellFlavor, powershell_quoted, shell_quoted};
 use crate::resources::Resources;
 use crate::shell_integration::{
-    LIST_SEPARATOR, apply_shell_integration, apply_terminal_environment, path_string,
+    ShellIntegrationConfig, apply_shell_integration, apply_terminal_environment, path_string,
 };
 
 /// Pane identity variables. Inherited values (a Soprano started from one of its own panes)
@@ -29,8 +29,45 @@ const PANE_IDENTITY_KEYS: [&str; 8] = [
     "SOPRANO_RESUME_SESSION_ID",
 ];
 
-/// PATH when neither the profile nor the app has one.
+/// PATH when neither the profile nor the app has one (Unix only; Windows gets no default).
 const DEFAULT_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/// How the target OS spells environments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Platform {
+    Unix,
+    /// Variable names are case-insensitive (`Path` is `PATH`) and lists use `;`.
+    Windows,
+}
+
+impl Platform {
+    pub fn current() -> Self {
+        if cfg!(windows) { Self::Windows } else { Self::Unix }
+    }
+
+    fn list_separator(self) -> char {
+        match self {
+            Self::Unix => ':',
+            Self::Windows => ';',
+        }
+    }
+
+    /// The key `env` already uses for `name` (any case on Windows).
+    fn existing_key(self, env: &BTreeMap<String, String>, name: &str) -> Option<String> {
+        match self {
+            Self::Unix => env.contains_key(name).then(|| name.to_owned()),
+            Self::Windows => env.keys().find(|k| k.eq_ignore_ascii_case(name)).cloned(),
+        }
+    }
+
+    /// Sets `key`, replacing a differently cased spelling of it on Windows.
+    fn insert(self, env: &mut BTreeMap<String, String>, key: String, value: String) {
+        if let Some(existing) = self.existing_key(env, &key).filter(|k| *k != key) {
+            env.remove(&existing);
+        }
+        env.insert(key, value);
+    }
+}
 
 /// The account choices an agent pane starts with (`AccountLaunchState.Adjustments`):
 /// `CODEX_HOME` for Codex, `--config <overlay>` for omp. The accounts layer computes them.
@@ -59,15 +96,21 @@ pub struct LaunchContext {
     /// The environment panes inherit (the app's own).
     pub base_env: BTreeMap<String, String>,
     pub home: PathBuf,
+    pub platform: Platform,
+    /// `shell-integration`, `shell-integration-features` and `cursor-style-blink` from the
+    /// terminal settings.
+    pub shell_integration: ShellIntegrationConfig,
 }
 
 impl LaunchContext {
-    pub fn current(socket: Option<String>) -> Self {
+    /// Reads the running app. Arguments and variables that are not valid UTF-8 are converted
+    /// lossily rather than refused.
+    pub fn current(socket: Option<String>, shell_integration: ShellIntegrationConfig) -> Self {
         let soprano_bin = std::env::current_exe()
             .ok()
             .and_then(|p| p.canonicalize().ok())
             .map(|p| path_string(&p))
-            .or_else(|| std::env::args().next())
+            .or_else(|| std::env::args_os().next().map(|a| a.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "soprano".into());
         Self {
             soprano_bin,
@@ -76,8 +119,10 @@ impl LaunchContext {
             app_version: soprano_platform::identity::app_version().into(),
             login_shell: soprano_platform::shell::user_shell(),
             resources: Resources::locate(),
-            base_env: std::env::vars().collect(),
+            base_env: lossy_environment(std::env::vars_os()),
             home: soprano_platform::paths::home_dir(),
+            platform: Platform::current(),
+            shell_integration,
         }
     }
 
@@ -373,9 +418,21 @@ fn expand(ctx: &LaunchContext, path: &str) -> PathBuf {
 fn inherited_env(ctx: &LaunchContext) -> BTreeMap<String, String> {
     let mut env = ctx.base_env.clone();
     for key in PANE_IDENTITY_KEYS {
-        env.remove(key);
+        if let Some(existing) = ctx.platform.existing_key(&env, key) {
+            env.remove(&existing);
+        }
     }
     env
+}
+
+/// An OS environment as text: names and values that are not valid UTF-8 are converted
+/// lossily (one stray Latin-1 variable must not stop a pane from starting).
+pub fn lossy_environment(
+    env: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> BTreeMap<String, String> {
+    env.into_iter()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect()
 }
 
 /// `TerminalConfig` before the surface scoped it to its pane.
@@ -400,26 +457,46 @@ impl RawConfig {
             self.env.insert("SOPRANO_SOCKET".into(), socket.clone());
         }
         if let Some(cli_dir) = cli_dir(ctx) {
-            let inherited = self
-                .env
-                .get("PATH")
-                .or_else(|| ctx.base_env.get("PATH"))
+            let separator = ctx.platform.list_separator();
+            let own = ctx.platform.existing_key(&self.env, "PATH");
+            let base = ctx.platform.existing_key(&ctx.base_env, "PATH");
+            let inherited = own
+                .as_ref()
+                .and_then(|k| self.env.get(k))
+                .or_else(|| base.as_ref().and_then(|k| ctx.base_env.get(k)))
                 .cloned()
-                .unwrap_or_else(|| DEFAULT_PATH.into());
-            let path = if inherited.split(LIST_SEPARATOR).any(|entry| entry == cli_dir) {
-                inherited
-            } else {
-                format!("{cli_dir}{LIST_SEPARATOR}{inherited}")
+                .or_else(|| (ctx.platform == Platform::Unix).then(|| DEFAULT_PATH.to_owned()))
+                .filter(|p| !p.is_empty());
+            let path = match inherited {
+                Some(path) if path.split(separator).any(|entry| entry == cli_dir) => path,
+                Some(path) => format!("{cli_dir}{separator}{path}"),
+                None => cli_dir,
             };
-            self.env.insert("PATH".into(), path);
+            // Keep the spelling the environment already uses (`Path` on Windows).
+            let key = own.or(base).unwrap_or_else(|| "PATH".into());
+            ctx.platform.insert(&mut self.env, key, path);
         }
 
+        // Ghostty's order: the inherited environment, its own variables and shell
+        // integration (which reads the inherited ZDOTDIR, ENV and HISTFILE), then the pane's
+        // variables, which override any of those, then PWD.
         let mut env = inherited_env(ctx);
-        env.extend(self.env);
-        apply_terminal_environment(&mut env, &ctx.resources, &ctx.app_version);
-
+        apply_terminal_environment(&mut env, &ctx.resources, &ctx.app_version, &ctx.shell_integration);
         let argv = self.argv.unwrap_or_else(|| login_shell_argv(&ctx.login_shell));
-        let argv = apply_shell_integration(argv, &mut env, ctx.resources.ghostty_resources_dir(), &ctx.home);
+        let argv = apply_shell_integration(
+            argv,
+            &mut env,
+            ctx.resources.ghostty_resources_dir(),
+            &ctx.home,
+            ctx.shell_integration.mode,
+        );
+        for (key, value) in self.env {
+            ctx.platform.insert(&mut env, key, value);
+        }
+        // The shell then shows the folder as reached, not its symlink-resolved path.
+        if let Some(cwd) = &self.cwd {
+            ctx.platform.insert(&mut env, "PWD".into(), path_string(cwd));
+        }
         LaunchSpec { argv, cwd: self.cwd, env, initial_input: self.initial_input, wait_after_command: true }
     }
 }

@@ -29,11 +29,15 @@ impl CommandResult {
         self.status == 0
     }
 
-    /// The last non-empty stderr line, else stdout's: what a CLI says when it fails.
+    /// The last non-empty stderr line, else stdout's: what a CLI says when it fails. Lines end
+    /// at any newline character, a bare `\r` included (Swift's `isNewline`), so a spinner's
+    /// progress does not stay in the message.
     pub fn failure_message(&self) -> String {
         for stream in [&self.stderr, &self.stdout] {
             let text = stripping_terminal_codes(stream);
-            if let Some(last) = text.lines().map(str::trim).rfind(|l| !l.is_empty()) {
+            if let Some(last) =
+                text.split(is_newline).map(|l| l.trim_matches([' ', '\t'])).rfind(|l| !l.is_empty())
+            {
                 return last.to_owned();
             }
         }
@@ -71,7 +75,8 @@ impl std::fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
-/// Cancels a running command from another thread (SIGTERM, then SIGKILL after 3 s).
+/// Cancels a running command from another thread (SIGTERM, then SIGKILL after 3 s; on
+/// Windows the whole process tree is ended).
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(Arc<AtomicBool>);
 
@@ -88,7 +93,7 @@ impl CancelToken {
 }
 
 /// Called with each complete output line (stdout and stderr), on a reader thread.
-pub type OutputLineHandler = Arc<dyn Fn(&str) + Send + Sync>;
+pub type LineHandler = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Options for one run.
 #[derive(Clone)]
@@ -101,7 +106,7 @@ pub struct RunOptions {
     /// Leaves stdin open until the command ends, for CLIs that treat end-of-input as
     /// "cancel".
     pub keep_stdin_open: bool,
-    pub on_output_line: Option<OutputLineHandler>,
+    pub on_output_line: Option<LineHandler>,
     pub cancel: Option<CancelToken>,
 }
 
@@ -158,6 +163,9 @@ impl CommandRunner {
             ShellFlavor::PowerShell => {
                 let mut script = vec!["[Console]::Error.Write([char]0x1E)".to_owned()];
                 script.extend(overrides.iter().map(|(k, v)| format!("$env:{k} = {}", powershell_quoted(v))));
+                if let Some(program) = arguments.first() {
+                    script.push(powershell_missing_command_check(program));
+                }
                 let words: Vec<String> = arguments.iter().map(|a| powershell_quoted(a)).collect();
                 script.push(format!("& {}", words.join(" ")));
                 script.push("exit $LASTEXITCODE".into());
@@ -166,16 +174,20 @@ impl CommandRunner {
         }
     }
 
-    /// Runs `arguments` through the login shell with [`background_environment`] and returns
-    /// stderr from the marker on.
+    /// Runs `arguments` through the login shell in Soprano's environment minus its pane
+    /// variables (see [`background_environment`]) and returns stderr from the marker on.
+    /// `options.environment` is ignored: the child inherits the app's environment byte for
+    /// byte, so a variable that is not valid UTF-8 passes through untouched.
     pub fn run_cli(
         &self,
         arguments: &[String],
         overrides: &BTreeMap<String, String>,
         mut options: RunOptions,
     ) -> Result<CommandResult, CommandError> {
-        options.environment = Some(background_environment(std::env::vars()));
-        let result = self.run(&self.shell, &self.cli_arguments(arguments, overrides), options)?;
+        options.environment = None;
+        let removed: Vec<std::ffi::OsString> =
+            std::env::vars_os().map(|(k, _)| k).filter(|k| is_pane_variable(&k.to_string_lossy())).collect();
+        let result = run_process(&self.shell, &self.cli_arguments(arguments, overrides), options, &removed)?;
         match result.stderr.rfind(COMMAND_START_MARKER) {
             Some(index) => Ok(CommandResult {
                 stderr: result.stderr[index + COMMAND_START_MARKER.len_utf8()..].to_owned(),
@@ -192,14 +204,35 @@ impl CommandRunner {
         arguments: &[String],
         options: RunOptions,
     ) -> Result<CommandResult, CommandError> {
-        run_process(executable, arguments, options)
+        run_process(executable, arguments, options, &[])
     }
+}
+
+/// PowerShell has no `env` to exit 127 when the CLI is missing (`& 'x'` leaves
+/// `$LASTEXITCODE` unset, so `exit $LASTEXITCODE` exits 0); check first, so
+/// [`CommandResult::failure_message_running`] can name the missing CLI.
+pub(crate) fn powershell_missing_command_check(program: &str) -> String {
+    let quoted = powershell_quoted(program);
+    format!(
+        "if (-not (Get-Command -ErrorAction SilentlyContinue {quoted})) {{ \
+         [Console]::Error.WriteLine({}); exit 127 }}",
+        powershell_quoted(&format!("{program}: command not found"))
+    )
+}
+
+fn is_pane_variable(key: &str) -> bool {
+    key.starts_with("SOPRANO_") || key == "TERM_PROGRAM"
+}
+
+/// Swift's `Character.isNewline`.
+fn is_newline(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 
 /// Soprano's own environment minus its pane variables: a background login must not report
 /// agent events or look like it runs inside a pane.
 pub fn background_environment(env: impl IntoIterator<Item = (String, String)>) -> BTreeMap<String, String> {
-    env.into_iter().filter(|(k, _)| !k.starts_with("SOPRANO_") && k != "TERM_PROGRAM").collect()
+    env.into_iter().filter(|(k, _)| !is_pane_variable(k)).collect()
 }
 
 static TERMINAL_CODES: LazyLock<Regex> = LazyLock::new(|| {
@@ -213,16 +246,48 @@ pub fn stripping_terminal_codes(text: &str) -> String {
     TERMINAL_CODES.replace_all(text, "").into_owned()
 }
 
-/// The first `https://` URL in a line of CLI output.
+/// The first `https://` URL in a line of CLI output, when it is a well-formed URL (what
+/// Swift's `URL(string:)` accepted: a host, an optional numeric port, and only RFC 3986
+/// characters or valid percent escapes).
 pub fn first_url(line: &str) -> Option<String> {
     let text = stripping_terminal_codes(line);
-    HTTPS_URL.find(&text).map(|m| m.as_str().to_owned())
+    let found = HTTPS_URL.find(&text)?.as_str();
+    is_well_formed_https_url(found).then(|| found.to_owned())
+}
+
+fn is_well_formed_https_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let bytes = rest.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        let allowed = b.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&'()*+,;=%".contains(&b);
+        if !allowed {
+            return false;
+        }
+        if b == b'%'
+            && !(bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                && bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit))
+        {
+            return false;
+        }
+    }
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let (host, port) = if let Some(after) = host_port.strip_prefix('[') {
+        match after.split_once(']') {
+            Some((ip, tail)) if !ip.is_empty() => (ip, tail.strip_prefix(':').unwrap_or(tail)),
+            _ => return false,
+        }
+    } else {
+        host_port.split_once(':').unwrap_or((host_port, ""))
+    };
+    !host.is_empty() && !host.contains(['[', ']']) && port.bytes().all(|b| b.is_ascii_digit())
 }
 
 fn run_process(
     executable: &str,
     arguments: &[String],
     options: RunOptions,
+    removed_environment: &[std::ffi::OsString],
 ) -> Result<CommandResult, CommandError> {
     if options.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
         return Err(CommandError::Cancelled);
@@ -232,6 +297,10 @@ fn run_process(
     if let Some(environment) = &options.environment {
         command.env_clear().envs(environment);
     }
+    for key in removed_environment {
+        command.env_remove(key);
+    }
+    hide_console(&mut command);
     let wants_stdin = options.input.is_some() || options.keep_stdin_open;
     command.stdin(if wants_stdin { Stdio::piped() } else { Stdio::null() });
     let mut child = command.spawn().map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
@@ -323,7 +392,7 @@ fn run_process(
 fn spawn_reader(
     mut pipe: impl Read + Send + 'static,
     sink: Arc<Mutex<Vec<u8>>>,
-    on_line: Option<OutputLineHandler>,
+    on_line: Option<LineHandler>,
     closed: mpsc::Sender<()>,
 ) {
     thread::spawn(move || {
@@ -388,9 +457,30 @@ fn terminate(child: &mut Child) {
 
 #[cfg(not(unix))]
 fn terminate(child: &mut Child) {
-    // Windows has no SIGTERM; TerminateProcess is the only stop there is.
+    // Windows has no SIGTERM. End the shell and everything it started (`taskkill /T`):
+    // killing only the shell leaves, say, `codex login` holding its callback port, and the
+    // next sign-in fails.
+    let mut taskkill = Command::new("taskkill");
+    taskkill
+        .args(["/T", "/F", "/PID", &child.id().to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console(&mut taskkill);
+    let _ = taskkill.status();
     let _ = child.kill();
 }
+
+/// Background commands get no console window on Windows.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
 
 fn exit_code(status: std::process::ExitStatus) -> i32 {
     if let Some(code) = status.code() {
@@ -428,12 +518,71 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_carriage_return_ends_a_line_of_the_failure_message() {
+        let result =
+            CommandResult { status: 1, stdout: String::new(), stderr: "50%\r100% failed: x\r\n".into() };
+        assert_eq!(result.failure_message(), "100% failed: x");
+        let separated =
+            CommandResult { status: 1, stdout: "a\u{2028}b  \u{0B}".into(), stderr: String::new() };
+        assert_eq!(separated.failure_message(), "b");
+    }
+
+    #[test]
     fn the_first_https_url_is_found_behind_terminal_codes() {
         assert_eq!(
             first_url("Open \x1b]8;;x\x07\x1b[1mhttps://auth.example.com/a?b=1\x1b[0m to log in").as_deref(),
             Some("https://auth.example.com/a?b=1")
         );
         assert_eq!(first_url("no link"), None);
+    }
+
+    #[test]
+    fn malformed_urls_are_not_offered() {
+        assert_eq!(first_url("go to https:// now"), None);
+        assert_eq!(first_url("https://host:port/x"), None);
+        assert_eq!(first_url("https://a.com/{x}"), None);
+        assert_eq!(first_url("https://a.com/%zz"), None);
+        assert_eq!(first_url("https://[::1]:8080/cb").as_deref(), Some("https://[::1]:8080/cb"));
+        assert_eq!(first_url("https://u@a.com:443/p%20q#f").as_deref(), Some("https://u@a.com:443/p%20q#f"));
+    }
+
+    #[test]
+    fn powershell_reports_a_missing_cli_as_status_127() {
+        let arguments =
+            CommandRunner::new("pwsh.exe").cli_arguments(&["codex".into(), "login".into()], &BTreeMap::new());
+        assert_eq!(
+            arguments,
+            vec![
+                "-NoLogo".to_owned(),
+                "-Command".into(),
+                "[Console]::Error.Write([char]0x1E); if (-not (Get-Command -ErrorAction SilentlyContinue 'codex')) \
+                 { [Console]::Error.WriteLine('codex: command not found'); exit 127 }; & 'codex' 'login'; \
+                 exit $LASTEXITCODE"
+                    .into(),
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_run_passes_non_utf8_variables_through_and_drops_pane_variables() {
+        use std::os::unix::ffi::OsStrExt;
+        // SAFETY: test-only variables no other test reads.
+        unsafe {
+            std::env::set_var("LAUNCH_TEST_LATIN1", std::ffi::OsStr::from_bytes(b"caf\xe9"));
+            std::env::set_var("SOPRANO_TEST_PANE_MARKER", "x");
+        }
+        let script =
+            "printf %s \"$LAUNCH_TEST_LATIN1\" | od -An -tx1; echo \"${SOPRANO_TEST_PANE_MARKER-unset}\"";
+        let result = CommandRunner::new("/bin/sh")
+            .run_cli(
+                &["sh".into(), "-c".into(), script.into()],
+                &BTreeMap::new(),
+                RunOptions::with_timeout(Duration::from_secs(10)),
+            )
+            .expect("ran");
+        let words: Vec<&str> = result.stdout.split_whitespace().collect();
+        assert_eq!(words, ["63", "61", "66", "e9", "unset"]);
     }
 
     #[test]
