@@ -11,9 +11,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, BorderStyle, Bounds, Corners, CursorStyle, DispatchPhase, Edges, Element, ElementId,
-    GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, SharedString,
-    StyledText, TextLayout, UnderlineStyle, Window, px, transparent_black,
+    GlobalElementId, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, InteractiveText,
+    IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    Point, SharedString, StyledText, TextLayout, UnderlineStyle, Window, px, transparent_black,
 };
 use gpui_base::{TextSelectionHandle, TextSelectionRegistration, TextSelectionRun};
 
@@ -32,11 +32,29 @@ pub struct RichText {
     highlights: Vec<(Range<usize>, HighlightStyle)>,
     font_overrides: Vec<(Range<usize>, SharedString)>,
     links: Rc<Vec<(Range<usize>, SharedString)>>,
+    /// A tooltip per link (its Markdown `title`), parallel to `links`.
+    link_titles: Rc<Vec<Option<SharedString>>>,
     on_link: Option<LinkHandler>,
     underline_hovered_link: bool,
     document_order: u64,
     selection_color: Option<Hsla>,
-    styled: Option<StyledText>,
+    inner: Option<Inner>,
+}
+
+/// The laid-out text: plain, or with tooltips over its titled links (GPUI's
+/// `InteractiveText` shows a tooltip per character range).
+enum Inner {
+    Plain(StyledText),
+    Titled(Box<InteractiveText>, TextLayout, Option<Hitbox>),
+}
+
+impl Inner {
+    fn layout(&self) -> TextLayout {
+        match self {
+            Self::Plain(styled) => styled.layout().clone(),
+            Self::Titled(_, layout, _) => layout.clone(),
+        }
+    }
 }
 
 impl RichText {
@@ -47,11 +65,12 @@ impl RichText {
             highlights: Vec::new(),
             font_overrides: Vec::new(),
             links: Rc::new(Vec::new()),
+            link_titles: Rc::new(Vec::new()),
             on_link: None,
             underline_hovered_link: false,
             document_order: 0,
             selection_color: None,
-            styled: None,
+            inner: None,
         }
     }
 
@@ -71,6 +90,13 @@ impl RichText {
     pub fn links(mut self, links: Vec<(Range<usize>, SharedString)>, handler: LinkHandler) -> Self {
         self.links = Rc::new(links);
         self.on_link = Some(handler);
+        self
+    }
+
+    /// A tooltip for each link (in `links` order; `None` for none), shown while the pointer
+    /// rests on it.
+    pub fn link_titles(mut self, titles: Vec<Option<SharedString>>) -> Self {
+        self.link_titles = Rc::new(titles);
         self
     }
 
@@ -216,22 +242,41 @@ impl Element for RichText {
         if !self.font_overrides.is_empty() {
             styled = styled.with_font_family_overrides(std::mem::take(&mut self.font_overrides));
         }
-        let (layout_id, ()) = styled.request_layout(None, inspector_id, window, cx);
-        self.styled = Some(styled);
+        let titled = self.link_titles.iter().any(Option::is_some);
+        let (layout_id, inner) = if titled {
+            let text_layout = styled.layout().clone();
+            let (links, titles) = (self.links.clone(), self.link_titles.clone());
+            let mut interactive =
+                InteractiveText::new(self.id.clone(), styled).tooltip(move |index, window, cx| {
+                    let link = links.iter().position(|(range, _)| range.contains(&index))?;
+                    let title = titles.get(link).cloned().flatten()?;
+                    Some(soprano_ui::tooltip(title)(window, cx))
+                });
+            let (layout_id, ()) = interactive.request_layout(Some(global_id), inspector_id, window, cx);
+            (layout_id, Inner::Titled(Box::new(interactive), text_layout, None))
+        } else {
+            let (layout_id, ()) = styled.request_layout(None, inspector_id, window, cx);
+            (layout_id, Inner::Plain(styled))
+        };
+        self.inner = Some(inner);
         (layout_id, layout)
     }
 
     fn prepaint(
         &mut self,
-        _global_id: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         state: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        if let Some(styled) = self.styled.as_mut() {
-            styled.prepaint(None, inspector_id, bounds, &mut (), window, cx);
+        match self.inner.as_mut() {
+            Some(Inner::Plain(styled)) => styled.prepaint(None, inspector_id, bounds, &mut (), window, cx),
+            Some(Inner::Titled(interactive, _, hitbox)) => {
+                *hitbox = Some(interactive.prepaint(global_id, inspector_id, bounds, &mut (), window, cx));
+            }
+            None => {}
         }
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
@@ -244,7 +289,7 @@ impl Element for RichText {
 
     fn paint(
         &mut self,
-        _global_id: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         state: &mut Self::RequestLayoutState,
@@ -252,8 +297,8 @@ impl Element for RichText {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let Some(mut styled) = self.styled.take() else { return };
-        let layout = styled.layout().clone();
+        let Some(inner) = self.inner.take() else { return };
+        let layout = inner.layout();
         let projection = state.handle.update_runs(
             &[TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)
                 .with_document_order(self.document_order)],
@@ -265,7 +310,15 @@ impl Element for RichText {
                 paint_selection(&layout, range, color, window);
             }
         }
-        styled.paint(None, inspector_id, bounds, &mut (), &mut (), window, cx);
+        match inner {
+            Inner::Plain(mut styled) => {
+                styled.paint(None, inspector_id, bounds, &mut (), &mut (), window, cx)
+            }
+            Inner::Titled(mut interactive, _, Some(mut text_hitbox)) => {
+                interactive.paint(global_id, inspector_id, bounds, &mut (), &mut text_hitbox, window, cx)
+            }
+            Inner::Titled(_, _, None) => {}
+        }
 
         let Some(handler) = self.on_link.clone() else { return };
         if self.links.is_empty() {

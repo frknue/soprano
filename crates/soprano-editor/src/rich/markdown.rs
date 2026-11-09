@@ -11,6 +11,7 @@
 //! Nothing in a document is executed: HTML is text, links only reach what the owner allows,
 //! code is highlighted text.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -18,10 +19,10 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use gpui::{
-    AnyElement, App, ElementId, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageFormat,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, Window, div, img,
-    prelude::FluentBuilder, px,
+    AnyElement, App, Bounds, ElementId, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image,
+    ImageFormat, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle,
+    SharedString, StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, Window, canvas, div,
+    img, prelude::FluentBuilder, px,
 };
 use soprano_text::markdown::{
     self as model, ImageSource, LinkTarget, MarkdownBlock, MarkdownInline, MarkdownListItem, MarkdownTable,
@@ -106,6 +107,64 @@ impl ReaderDocument {
     }
 }
 
+// MARK: - Anchors
+
+/// Where the headings of a rendered document are, and the heading to scroll to: a
+/// `#fragment` link brings the heading itself (not the block holding it) to the top, 20 px
+/// below the edge (the reader's `scroll-margin-top`).
+#[derive(Default)]
+pub struct AnchorTracker {
+    headings: RefCell<HashMap<String, Bounds<Pixels>>>,
+    pending: RefCell<Option<String>>,
+}
+
+/// The space kept above a heading scrolled to.
+pub const ANCHOR_MARGIN: f32 = 20.0;
+
+impl AnchorTracker {
+    pub fn new() -> Rc<Self> {
+        Rc::default()
+    }
+
+    /// Scrolls to the heading `anchor` when the document is next drawn.
+    pub fn scroll_to(&self, anchor: &str) {
+        *self.pending.borrow_mut() = Some(anchor.to_string());
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.pending.borrow().is_some()
+    }
+
+    /// Where heading `anchor` was last drawn, in window coordinates.
+    pub fn heading_bounds(&self, anchor: &str) -> Option<Bounds<Pixels>> {
+        self.headings.borrow().get(anchor).copied()
+    }
+
+    fn heading_painted(
+        &self,
+        anchor: &str,
+        bounds: Bounds<Pixels>,
+        scroll: &ScrollHandle,
+        zoom: f32,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.headings.borrow_mut().insert(anchor.to_string(), bounds);
+        if self.pending.borrow().as_deref() != Some(anchor) {
+            return;
+        }
+        *self.pending.borrow_mut() = None;
+        let viewport = scroll.bounds();
+        let offset = scroll.offset();
+        let distance = bounds.top() - (viewport.top() + px(ANCHOR_MARGIN * zoom));
+        let max = scroll.max_offset().y;
+        let y = (offset.y - distance).clamp(-max, px(0.0));
+        scroll.set_offset(gpui::point(offset.x, y));
+        // Draw again at the new offset once this frame is done.
+        window.defer(cx, |window, _| window.refresh());
+    }
+}
+
 // MARK: - Parse cache
 
 /// Parsed documents per text and style; a streaming message keeps only its latest parse
@@ -170,6 +229,7 @@ pub struct Markdown {
     shrink_to_fit: bool,
     document: Option<Rc<ReaderDocument>>,
     scroll: Option<ScrollHandle>,
+    anchors: Option<Rc<AnchorTracker>>,
     column: Option<(f32, [f32; 3])>,
 }
 
@@ -200,6 +260,7 @@ impl Markdown {
             shrink_to_fit: false,
             document: None,
             scroll: None,
+            anchors: None,
             column: None,
         }
     }
@@ -246,6 +307,13 @@ impl Markdown {
     }
 
     /// Centers the blocks in a column at most `width` wide, padded `[top, sides, bottom]`.
+    /// Records where each heading is drawn and scrolls to the one [`AnchorTracker::scroll_to`]
+    /// asks for (with [`Markdown::track_scroll`]).
+    pub fn anchors(mut self, tracker: Rc<AnchorTracker>) -> Self {
+        self.anchors = Some(tracker);
+        self
+    }
+
     pub fn column(mut self, width: f32, padding: [f32; 3]) -> Self {
         self.column = Some((width, padding));
         self
@@ -282,6 +350,7 @@ impl RenderOnce for Markdown {
             on_link,
             document: self.document.clone(),
             order: std::cell::Cell::new(0),
+            anchors: self.anchors.clone().zip(self.scroll.clone()),
         };
         let rendered = ctx.blocks(&blocks, Nest::default());
         let style = self.style;
@@ -331,6 +400,7 @@ struct Ctx {
     on_link: LinkHandler,
     document: Option<Rc<ReaderDocument>>,
     order: std::cell::Cell<u64>,
+    anchors: Option<(Rc<AnchorTracker>, ScrollHandle)>,
 }
 
 /// Where a block sits: inside a list item (tight spacing), how deep in lists and quotes.
@@ -418,7 +488,11 @@ impl Ctx {
             MarkdownBlock::Paragraph(inlines) => {
                 Rendered { element: self.paragraph(inlines, self.body_look(nest)), top, bottom }
             }
-            MarkdownBlock::Heading { level, inlines, .. } => self.heading(*level, inlines, nest),
+            MarkdownBlock::Heading { level, inlines, anchor } => {
+                let mut rendered = self.heading(*level, inlines, nest);
+                rendered.element = self.track_anchor(anchor, rendered.element);
+                rendered
+            }
             MarkdownBlock::List { ordered, start, items } => self.list(*ordered, *start, items, nest),
             MarkdownBlock::Blockquote(blocks) => self.quote(blocks, nest),
             MarkdownBlock::Code { language, code, tokens } => {
@@ -464,6 +538,31 @@ impl Ctx {
                 }
             }
         }
+    }
+
+    /// Reports where a heading is drawn to the [`AnchorTracker`], which scrolls a requested
+    /// heading to the top.
+    fn track_anchor(&self, anchor: &str, element: AnyElement) -> AnyElement {
+        let Some((tracker, scroll)) = self.anchors.clone() else { return element };
+        let anchor = anchor.to_string();
+        let zoom = self.zoom;
+        div()
+            .relative()
+            .w_full()
+            .child(element)
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds, _, window, cx| {
+                        tracker.heading_painted(&anchor, bounds, &scroll, zoom, window, cx)
+                    },
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .into_any_element()
     }
 
     fn heading(&self, level: u8, inlines: &[MarkdownInline], nest: Nest) -> Rendered {
@@ -572,6 +671,16 @@ impl Ctx {
             })
             .map(|link| (link.range.clone(), SharedString::from(link.destination.clone())))
             .collect();
+        let titles: Vec<Option<SharedString>> = text
+            .links
+            .iter()
+            .filter(|link| {
+                self.document
+                    .as_ref()
+                    .is_none_or(|document| document.resolve_link(&link.destination).is_some())
+            })
+            .map(|link| link.title.clone().filter(|title| !title.is_empty()).map(SharedString::from))
+            .collect();
         if self.reader() {
             for (range, _) in &links {
                 highlights = overlay_range(&highlights, range.clone(), |style| HighlightStyle {
@@ -588,7 +697,7 @@ impl Ctx {
             .selection_color(self.colors.selection)
             .underline_hovered_link(self.reader());
         if !links.is_empty() {
-            element = element.links(links, self.on_link.clone());
+            element = element.links(links, self.on_link.clone()).link_titles(titles);
         }
         element.into_any_element()
     }
@@ -954,5 +1063,30 @@ mod tests {
             let three = parsed(&streamed, false, true, cx);
             assert!(!Arc::ptr_eq(&one, &three));
         });
+    }
+
+    struct Page;
+
+    impl gpui::Render for Page {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            Markdown::new(
+                "page",
+                "A [titled](https://example.com \"Example\") link.",
+                MarkdownStyle::ASSISTANT,
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn titled_links_draw_and_take_hover(cx: &mut gpui::TestAppContext) {
+        cx.update(soprano_ui::init_for_tests);
+        let (_, cx) = cx.add_window_view(|_, _| Page);
+        cx.run_until_parked();
+        // Hovering the text runs the tooltip machinery without trouble.
+        for x in [20.0, 40.0, 60.0] {
+            cx.simulate_mouse_move(gpui::point(px(x), px(10.0)), None, Default::default());
+            cx.executor().advance_clock(std::time::Duration::from_millis(600));
+            cx.run_until_parked();
+        }
     }
 }

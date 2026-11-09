@@ -8,6 +8,7 @@
 //! editor, reveal.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +23,7 @@ use soprano_ui::IconName;
 
 use crate::colors::SurfaceColors;
 use crate::keys;
-use crate::rich::markdown::{MarkdownBlocks, MarkdownStyle, ReaderDocument, anchor_block};
+use crate::rich::markdown::{AnchorTracker, MarkdownBlocks, MarkdownStyle, ReaderDocument};
 use crate::surface::{SurfaceToolbar, breadcrumbs, display_path, toolbar_button};
 
 /// The key context of a focused reader.
@@ -170,6 +171,7 @@ pub struct MarkdownReaderView {
     /// The listening task drops before the watcher (tuple fields drop in order).
     watcher: Option<(Task<()>, FileWatcher)>,
     scroll: ScrollHandle,
+    anchors: Rc<AnchorTracker>,
     focus: FocusHandle,
 }
 
@@ -204,6 +206,7 @@ impl MarkdownReaderView {
             history: ReaderHistory::default(),
             watcher: None,
             scroll: ScrollHandle::new(),
+            anchors: AnchorTracker::new(),
             focus: cx.focus_handle(),
         };
         view.open_document(&path, None, true, cx);
@@ -241,6 +244,7 @@ impl MarkdownReaderView {
         if path == self.path && self.loaded {
             if let Some(fragment) = fragment {
                 self.scroll_to_anchor(&fragment);
+                cx.notify();
             }
             return;
         }
@@ -276,10 +280,9 @@ impl MarkdownReaderView {
         self.loaded = true;
     }
 
+    /// Brings the heading `anchor` to the top, on the next frame (when it has been drawn).
     fn scroll_to_anchor(&self, anchor: &str) {
-        if let Some(index) = anchor_block(&self.blocks, anchor) {
-            self.scroll.scroll_to_top_of_item(index);
-        }
+        self.anchors.scroll_to(anchor);
     }
 
     fn watch(&mut self, cx: &mut Context<Self>) {
@@ -316,7 +319,10 @@ impl MarkdownReaderView {
         cx.emit(ReaderEvent::FocusRequested);
         let Some(action) = link_action(&self.document, destination) else { return };
         match action {
-            ReaderLinkAction::ScrollTo(anchor) => self.scroll_to_anchor(&anchor),
+            ReaderLinkAction::ScrollTo(anchor) => {
+                self.scroll_to_anchor(&anchor);
+                cx.notify();
+            }
             ReaderLinkAction::OpenMarkdown { path, fragment } => {
                 self.open_document(&path, fragment, true, cx)
             }
@@ -414,6 +420,7 @@ impl Render for MarkdownReaderView {
         let body = MarkdownBlocks::new("markdown-reader", self.blocks.clone(), MarkdownStyle::READER)
             .document(self.document.clone())
             .track_scroll(&self.scroll)
+            .anchors(self.anchors.clone())
             .column(COLUMN_WIDTH, padding)
             .on_link(move |destination, _, cx| {
                 let _ = entity.update(cx, |this, cx| this.follow_link(destination, cx));
@@ -454,7 +461,7 @@ mod tests {
     use gpui::TestAppContext;
     use soprano_text::markdown::MarkdownInline;
 
-    use crate::rich::markdown::document_text;
+    use crate::rich::markdown::{anchor_block, document_text};
 
     fn setup(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -625,5 +632,28 @@ mod tests {
         );
         let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
         assert!(cocoa_error(Path::new("/x/a.md"), &denied).to_string().contains("permission to view it"));
+    }
+
+    #[gpui::test]
+    async fn an_anchor_link_scrolls_to_the_heading_itself(cx: &mut TestAppContext) {
+        setup(cx);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("long.md");
+        let filler: String = (1..=60).map(|n| format!("Paragraph {n}.\n\n")).collect();
+        // The heading sits inside a list item, below a long first item.
+        let source =
+            format!("# Top\n\n{filler}- first\n\n  {filler}\n- second\n\n  ## Nested\n\n  text\n\n{filler}");
+        std::fs::write(&path, source).unwrap();
+        let (view, cx) = cx.add_window_view(|window, cx| MarkdownReaderView::new(&path, window, cx));
+        cx.run_until_parked();
+        view.update(cx, |view, cx| view.follow_link("#nested", cx));
+        cx.run_until_parked();
+        let (heading, viewport, pending) = view.read_with(cx, |view, _| {
+            (view.anchors.heading_bounds("nested"), view.scroll.bounds(), view.anchors.is_pending())
+        });
+        let heading = heading.expect("the heading was drawn");
+        assert!(!pending);
+        let expected = viewport.top() + px(crate::rich::markdown::ANCHOR_MARGIN);
+        assert!((heading.top() - expected).abs() <= px(1.0), "{:?} vs {expected:?}", heading.top());
     }
 }

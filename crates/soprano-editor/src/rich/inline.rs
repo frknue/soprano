@@ -28,6 +28,8 @@ pub struct InlineSpan {
 pub struct InlineLink {
     pub range: Range<usize>,
     pub destination: String,
+    /// The Markdown link title, shown as the link's tooltip.
+    pub title: Option<String>,
 }
 
 /// Inline Markdown as one string: spans cover the whole text in order, adjacent equal marks
@@ -86,6 +88,12 @@ pub fn flatten_text(inlines: &[MarkdownInline]) -> InlineText {
     flattener.current
 }
 
+struct OpenLink {
+    destination: Option<String>,
+    title: Option<String>,
+    start: usize,
+}
+
 #[derive(Default)]
 struct Flattener {
     show_images: bool,
@@ -93,7 +101,7 @@ struct Flattener {
     pieces: Vec<InlinePiece>,
     /// The links being walked (innermost last): destination and where each starts in
     /// `current`.
-    open_links: Vec<(Option<String>, usize)>,
+    open_links: Vec<OpenLink>,
 }
 
 impl Flattener {
@@ -111,13 +119,17 @@ impl Flattener {
             return;
         }
         let end = self.current.text.len();
-        for (destination, start) in &mut self.open_links {
-            if let Some(destination) = destination
-                && end > *start
+        for link in &mut self.open_links {
+            if let Some(destination) = &link.destination
+                && end > link.start
             {
-                self.current.links.push(InlineLink { range: *start..end, destination: destination.clone() });
+                self.current.links.push(InlineLink {
+                    range: link.start..end,
+                    destination: destination.clone(),
+                    title: link.title.clone(),
+                });
             }
-            *start = 0;
+            link.start = 0;
         }
         self.pieces.push(InlinePiece::Text(std::mem::take(&mut self.current)));
     }
@@ -136,20 +148,29 @@ impl Flattener {
                     self.append(children, InlineMarks { strike: true, ..marks })
                 }
                 MarkdownInline::Code(code) => self.current.push(code, InlineMarks { code: true, ..marks }),
-                MarkdownInline::Link { destination, children, .. } => {
-                    self.open_links.push((destination.clone(), self.current.text.len()));
+                MarkdownInline::Link { destination, title, children } => {
+                    let start = self.current.text.len();
+                    self.open_links.push(OpenLink {
+                        destination: destination.clone(),
+                        title: title.clone(),
+                        start,
+                    });
                     self.append(children, InlineMarks { link: true, ..marks });
-                    let Some((destination, start)) = self.open_links.pop() else { continue };
+                    let Some(link) = self.open_links.pop() else { continue };
                     let end = self.current.text.len();
-                    if let Some(destination) = destination
-                        && end > start
+                    if let Some(destination) = link.destination
+                        && end > link.start
                     {
-                        self.current.links.push(InlineLink { range: start..end, destination });
+                        self.current.links.push(InlineLink {
+                            range: link.start..end,
+                            destination,
+                            title: link.title,
+                        });
                     }
                 }
                 MarkdownInline::Image { source: Some(source), alt, title } if self.show_images => {
                     self.flush();
-                    let link = self.open_links.iter().rev().find_map(|(destination, _)| destination.clone());
+                    let link = self.open_links.iter().rev().find_map(|link| link.destination.clone());
                     self.pieces.push(InlinePiece::Image {
                         source: source.clone(),
                         alt: alt.clone(),
@@ -196,7 +217,10 @@ mod tests {
         let inlines = paragraph("see [the docs](https://example.com) and ![a chart](chart.png)");
         let text = flatten_text(&inlines);
         assert_eq!(text.text, "see the docs and a chart");
-        assert_eq!(text.links, [InlineLink { range: 4..12, destination: "https://example.com".into() }]);
+        assert_eq!(
+            text.links,
+            [InlineLink { range: 4..12, destination: "https://example.com".into(), title: None }]
+        );
 
         let pieces = flatten(&inlines, true);
         assert_eq!(pieces.len(), 2);
@@ -217,9 +241,9 @@ mod tests {
         };
         assert_eq!(link.as_deref(), Some("d.md"));
         assert_eq!(before.text, "abcd x ");
-        assert_eq!(before.links, [InlineLink { range: 5..7, destination: "d.md".into() }]);
+        assert_eq!(before.links, [InlineLink { range: 5..7, destination: "d.md".into(), title: None }]);
         assert_eq!(after.text, " 日本 after");
-        assert_eq!(after.links, [InlineLink { range: 0..7, destination: "d.md".into() }]);
+        assert_eq!(after.links, [InlineLink { range: 0..7, destination: "d.md".into(), title: None }]);
         assert!(after.text.is_char_boundary(7));
 
         let badge = flatten(&paragraph("[![CI](ci.svg)](https://ci.example.com)"), true);
@@ -227,5 +251,11 @@ mod tests {
             badge.as_slice(),
             [InlinePiece::Image { link: Some(link), .. }] if link == "https://ci.example.com"
         ));
+    }
+
+    #[test]
+    fn a_links_title_comes_along_for_its_tooltip() {
+        let text = flatten_text(&paragraph("see [docs](https://example.com \"The docs\")"));
+        assert_eq!(text.links[0].title.as_deref(), Some("The docs"));
     }
 }
