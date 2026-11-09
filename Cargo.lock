@@ -7783,6 +7783,8 @@ dependencies = [
  "soprano-accounts",
  "soprano-agents",
  "soprano-browser",
+ "soprano-chat",
+ "soprano-chat-ui",
  "soprano-config",
  "soprano-explorer",
  "soprano-git",

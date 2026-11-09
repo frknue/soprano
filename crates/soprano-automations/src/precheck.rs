@@ -1,13 +1,10 @@
 //! A scheduled run's precheck (`AutomationPrecheck` in `Automations/AutomationWorkspace.swift`):
 //! a shell command in the automation's folder whose exit status decides whether the run starts.
 
-use std::io::Read;
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 
+use soprano_launch::command_runner::{CommandError, CommandResult, CommandRunner, RunOptions};
 use soprano_launch::quote::{ShellFlavor, powershell_quoted, shell_quoted};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,76 +38,19 @@ pub const OUTPUT_LIMIT: usize = 4_000;
 /// `jq`). Keeps the last `limit` characters of what it printed. A command that outlives
 /// `timeout` is stopped along with everything it started. Blocks; call it off the main thread.
 pub fn run(command: &str, folder: &str, timeout: Duration, shell: &str, limit: usize) -> PrecheckOutcome {
-    let (reader, writer) = match std::io::pipe() {
-        Ok(pipe) => pipe,
-        Err(error) => return PrecheckOutcome { exit_code: 127, timed_out: false, output: error.to_string() },
-    };
-    let error_writer = match writer.try_clone() {
-        Ok(writer) => writer,
-        Err(error) => return PrecheckOutcome { exit_code: 127, timed_out: false, output: error.to_string() },
-    };
-    let mut process = Command::new(shell);
-    process
-        .args(shell_arguments(shell, command))
-        .current_dir(folder)
-        .stdin(Stdio::null())
-        .stdout(writer)
-        .stderr(error_writer);
-    process_group::lead_own_group(&mut process);
-    let spawned = process.spawn();
-    // The command keeps its own copies of the pipe's write end; ours must close so the read
-    // ends with the command.
-    drop(process);
-    let mut child = match spawned {
-        Ok(child) => child,
-        Err(error) => return PrecheckOutcome { exit_code: 127, timed_out: false, output: error.to_string() },
-    };
-
-    let collected = Arc::new(Mutex::new(Vec::new()));
-    let (reached_end, ended) = mpsc::channel();
-    {
-        let collected = collected.clone();
-        let mut reader = reader;
-        thread::spawn(move || {
-            let mut chunk = [0u8; 8192];
-            loop {
-                match reader.read(&mut chunk) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        collected.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&chunk[..n])
-                    }
-                }
-            }
-            let _ = reached_end.send(());
-        });
-    }
-
-    let deadline = Instant::now() + timeout;
-    let mut timed_out = false;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if Instant::now() >= deadline => {
-                timed_out = true;
-                break process_group::stop(&mut child);
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
-            Err(_) => break None,
-        }
-    };
-    // The output ends with the command unless something it started in the background still
-    // holds the pipe; that is not waited for, or it would hold every automation's setup until
-    // it was done.
-    let _ = ended.recv_timeout(Duration::from_millis(500));
-    let data = collected.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let text = String::from_utf8_lossy(&data);
-    let text = text.trim();
+    let mut options = RunOptions::with_timeout(timeout);
+    options.working_directory = Some(PathBuf::from(folder));
+    options.merge_stderr = true;
+    let (exit_code, timed_out, output) =
+        match CommandRunner::new(shell).run(shell, &shell_arguments(shell, command), options) {
+            Ok(CommandResult { status, stdout, .. }) => (status, false, stdout),
+            Err(CommandError::TimedOut { stdout, stderr }) => (-1, true, stdout + &stderr),
+            Err(CommandError::LaunchFailed(reason)) => (127, false, reason),
+            Err(CommandError::Cancelled) => (-1, true, String::new()),
+        };
+    let text = output.trim();
     let skip = text.chars().count().saturating_sub(limit);
-    PrecheckOutcome {
-        exit_code: status.map(exit_code).unwrap_or(-1),
-        timed_out,
-        output: text.chars().skip(skip).collect(),
-    }
+    PrecheckOutcome { exit_code, timed_out, output: text.chars().skip(skip).collect() }
 }
 
 /// How `shell` runs a command string as a login shell.
@@ -136,91 +76,11 @@ pub(crate) fn exec_script(shell: &str, program: &str, arguments: &str, discard_e
     }
 }
 
-fn exit_code(status: std::process::ExitStatus) -> i32 {
-    if let Some(code) = status.code() {
-        return code;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::ExitStatusExt;
-        if let Some(signal) = status.signal() {
-            return signal;
-        }
-    }
-    -1
-}
-
-/// Stopping a timed-out precheck with everything it started.
-#[cfg(unix)]
-mod process_group {
-    use std::os::unix::process::CommandExt;
-    use std::process::{Child, Command, ExitStatus};
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    /// The shell leads its own process group, so what it starts is in it too.
-    pub fn lead_own_group(command: &mut Command) {
-        command.process_group(0);
-    }
-
-    /// SIGTERM to the whole group, then SIGKILL to whatever is left after two seconds, so
-    /// nothing piles up every tick.
-    pub fn stop(child: &mut Child) -> Option<ExitStatus> {
-        let Ok(pid) = i32::try_from(child.id()) else {
-            let _ = child.kill();
-            return child.wait().ok();
-        };
-        let group = -pid;
-        // SAFETY: kill(2) on the process group our own child leads.
-        unsafe { libc::kill(group, libc::SIGTERM) };
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let mut status = None;
-        while Instant::now() < deadline {
-            if status.is_none() {
-                status = child.try_wait().ok().flatten();
-            }
-            // SAFETY: signal 0 only checks whether the group still has members.
-            let group_alive = unsafe { libc::kill(group, 0) } == 0;
-            if status.is_some() && !group_alive {
-                break;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        // SAFETY: as above.
-        unsafe { libc::kill(group, libc::SIGKILL) };
-        match status {
-            Some(status) => Some(status),
-            None => child.wait().ok(),
-        }
-    }
-}
-
-#[cfg(windows)]
-mod process_group {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Child, Command, ExitStatus, Stdio};
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    pub fn lead_own_group(command: &mut Command) {
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    /// Ends the shell and every process it started (`taskkill /T`).
-    pub fn stop(child: &mut Child) -> Option<ExitStatus> {
-        let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &child.id().to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = child.kill();
-        child.wait().ok()
-    }
-}
-
 #[cfg(all(test, unix))]
 mod tests {
+    use std::thread;
+    use std::time::Instant;
+
     use super::*;
 
     fn precheck(command: &str, folder: &str, timeout: u64) -> PrecheckOutcome {
