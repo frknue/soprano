@@ -23,7 +23,7 @@ enum Launch {
     /// A program run with `arguments`, where [`FOLDER`] stands for the folder.
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     Program { program: PathBuf, arguments: Vec<&'static str> },
-    /// The OS default file manager.
+    /// The OS default file manager (Linux and Windows; macOS lists Finder as an application).
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     FileManager,
 }
@@ -259,10 +259,8 @@ mod platform {
         [("GitHub Desktop", r"GitHubDesktop\GitHubDesktop.exe", &[]), ("Fork", r"Fork\Fork.exe", &[FOLDER])];
 
     pub(super) fn detect() -> Vec<OpenInApplication> {
-        let mut applications = vec![OpenInApplication {
-            name: "File Explorer".to_owned(),
-            launch: Launch::Program { program: PathBuf::from("explorer.exe"), arguments: vec![FOLDER] },
-        }];
+        let mut applications =
+            vec![OpenInApplication { name: "File Explorer".to_owned(), launch: Launch::FileManager }];
         for (name, programs, arguments) in PROGRAMS {
             if let Some(program) = find_program(programs) {
                 applications.push(OpenInApplication {
