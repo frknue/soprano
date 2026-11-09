@@ -2004,10 +2004,15 @@ impl FilesPanel {
         let folder = drop_folder(Some((&row.id, row.is_directory)));
         let is_placeholder = row.placeholder.is_some();
         let tooltip: SharedString = row.id.clone().into();
+        // `w_full`: a uniform list sizes rows to their content otherwise, so the selection fill
+        // stopped at the name and long names ran past the panel instead of truncating.
         let mut element = div()
             .id(SharedString::from(format!("files-row-{}", row.id)))
             .flex()
             .items_center()
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
             .h(t.z(28.))
             .pl(t.z(8. + row.depth as f32 * 18.))
             .pr(t.z(8.))

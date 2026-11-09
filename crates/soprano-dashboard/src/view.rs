@@ -978,13 +978,16 @@ impl AgentDashboard {
 
     /// `window  /  omp · folder · ⎇ branch`.
     fn render_location(&self, entry: Option<&DashboardEntry>, theme: &SopranoTheme) -> impl IntoElement {
+        // Under an agent's title the line starts past its 16 px status mark and 10 px gap; the
+        // empty title has no mark, so the hint lines up with it instead.
+        let indent = if entry.is_some() { GUTTER + 26. } else { GUTTER };
         let line = div()
             .id("agent-dashboard-detail-location")
             .flex()
             .flex_row()
             .flex_none()
             .mt(theme.z(3.))
-            .pl(theme.z(GUTTER + 26.))
+            .pl(theme.z(indent))
             .pr(theme.z(GUTTER))
             .min_w_0()
             .text_size(theme.z(size::META))

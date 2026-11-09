@@ -214,15 +214,19 @@ impl HeaderModel {
         };
         let is_maximized = ws.maximized_pane_id() == Some(pane_id);
         let several_panes = ws.layout().map_or(0, SplitNode::leaf_count) > 1;
+        let title = tab.map_or_else(|| "Pane".to_owned(), |tab| tab_title(tab, home));
+        // The dim cwd follows the title unless the title already is that folder (`~ ~`).
+        let cwd = tab
+            .filter(|tab| is_terminal_tab(tab))
+            .and_then(PaneTab::effective_working_directory)
+            .map(|cwd| abbreviate_home(&cwd, home))
+            .filter(|cwd| *cwd != title);
         Self {
             pane_id: pane_id.to_owned(),
             icon: header_icon(tab),
-            title: tab.map_or_else(|| "Pane".to_owned(), |tab| tab_title(tab, home)),
+            title,
             slanted: tab.is_some_and(PaneTab::is_file_preview),
-            cwd: tab
-                .filter(|tab| is_terminal_tab(tab))
-                .and_then(PaneTab::effective_working_directory)
-                .map(|cwd| abbreviate_home(&cwd, home)),
+            cwd,
             status,
             tabs,
             active_tab_id: tab.map(|tab| tab.id.clone()),
@@ -953,6 +957,18 @@ mod tests {
         let tab = active_tab_id(&ws, &pane);
         ws.rename_tab(&pane, &tab, "user@host:~/git/shop");
         assert_eq!(model(&ws, &pane).title, "shop");
+    }
+
+    #[test]
+    fn a_title_that_already_is_the_folder_is_not_followed_by_the_same_folder() {
+        let mut ws = Workspace::new();
+        let pane = ws.active_pane_id().to_owned();
+        let tab = active_tab_id(&ws, &pane);
+        ws.update_working_directory(&pane, &tab, "/Users/tester");
+        ws.rename_tab(&pane, &tab, "tester@host:~");
+        let header = model(&ws, &pane);
+        assert_eq!(header.title, "~");
+        assert_eq!(header.cwd, None);
     }
 
     #[test]

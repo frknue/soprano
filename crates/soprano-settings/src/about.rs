@@ -61,10 +61,19 @@ pub struct LicenseNotice {
     pub file: Option<&'static str>,
 }
 
-pub const LICENSE_NOTICES: [LicenseNotice; 9] = [
+pub const LICENSE_NOTICES: [LicenseNotice; 10] = [
     LicenseNotice { component: "Soprano", license: "MIT License", file: Some("LICENSE") },
     LicenseNotice { component: "libghostty", license: "MIT License", file: Some("LICENSE-ghostty") },
-    LicenseNotice { component: "GPUI and gpui-component", license: "Apache License 2.0", file: None },
+    LicenseNotice {
+        component: "GPUI and gpui-component",
+        license: "Apache License 2.0",
+        file: Some("licenses/LICENSE-gpui"),
+    },
+    LicenseNotice {
+        component: "Herdr (interface design)",
+        license: "Apache License 2.0",
+        file: Some("licenses/LICENSE-herdr-app"),
+    },
     LicenseNotice {
         component: "Lucide icons",
         license: "ISC License",

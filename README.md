@@ -328,7 +328,7 @@ there; bind one in `settings.json`).
 
 | Shortcut | Action |
 |---|---|
-| `⌘P` | Command palette; `Esc` or a click on the dimmed window behind it closes it |
+| `⌘P` | Command palette; `Esc` or a click outside it closes it |
 | `⇧⌘D` | Open the Agent Dashboard |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |

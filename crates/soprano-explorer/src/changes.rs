@@ -600,10 +600,15 @@ impl ChangesPanel {
         let selected = self.selected.as_ref() == Some(&row.entry());
         let fill = selected.then(|| if focused { t.selected } else { t.hover });
         let hover = t.hover;
+        // `w_full`: a uniform list sizes rows to their content otherwise, so a long path pushed
+        // the line counts past the panel edge instead of truncating.
         let base = div()
             .id(("changes-row", index))
             .flex()
             .items_center()
+            .w_full()
+            .min_w_0()
+            .overflow_hidden()
             .h(t.z(28.))
             .px(t.z(8.))
             .gap(t.z(8.))
