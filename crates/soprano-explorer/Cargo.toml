@@ -1,0 +1,35 @@
+[package]
+name = "soprano-explorer"
+description = "Soprano's right sidebar in GPUI: the Files (explorer) and Changes (source control) cards."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-files = { path = "../soprano-files" }
+soprano-git = { path = "../soprano-git" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-ui = { path = "../soprano-ui" }
+gpui.workspace = true
+gpui-component.workspace = true
+anyhow.workspace = true
+futures = "0.3"
+smallvec = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true
+tempfile = "3"
+
+[[example]]
+name = "explorer_demo"
