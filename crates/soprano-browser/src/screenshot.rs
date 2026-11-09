@@ -1,6 +1,7 @@
 //! `soprano browser screenshot`: a PNG of the visible page.
 
 /// Errors that end a screenshot, worded as the Swift app's `BrowserAutomationError.screenshot`.
+#[cfg(target_os = "macos")]
 pub const ENCODE_FAILED_MESSAGE: &str = "WebKit could not encode the screenshot";
 
 /// The answer on platforms whose web view has no snapshot API wired up (WebView2, WebKitGTK).

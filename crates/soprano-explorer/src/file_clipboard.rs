@@ -39,8 +39,12 @@ mod platform {
     use std::path::PathBuf;
 
     pub(super) fn copy_files(paths: &[PathBuf]) -> bool {
+        use clipboard_win::Setter as _;
         let paths: Vec<String> = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect();
-        clipboard_win::set_clipboard(clipboard_win::formats::FileList, paths.as_slice()).is_ok()
+        // `FileList` writes a slice, which `set_clipboard` can't take by value: open the
+        // clipboard (emptied by the write) and write the list into it.
+        let Ok(_clipboard) = clipboard_win::Clipboard::new_attempts(10) else { return false };
+        clipboard_win::formats::FileList.write_clipboard(paths.as_slice()).is_ok()
     }
 }
 

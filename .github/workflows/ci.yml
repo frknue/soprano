@@ -83,10 +83,11 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        # --keep-going: one crate's error doesn't hide the other crates' errors.
+        run: cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Check shell scripts
         if: runner.os == 'Linux'
