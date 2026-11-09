@@ -88,8 +88,16 @@ pub fn strict_json(text: &str) -> Result<String, ParseError> {
     let mut parser = Parser::new(&stripped, &source);
     parser.parse_document()?;
     let commas = std::mem::take(&mut parser.trailing_commas);
+    let duplicates = std::mem::take(&mut parser.duplicate_spans);
     for index in commas {
         stripped[index] = ' ';
+    }
+    for (start, end) in duplicates {
+        for character in &mut stripped[start..end] {
+            if !is_newline(*character) {
+                *character = ' ';
+            }
+        }
     }
     Ok(stripped.into_iter().collect())
 }
@@ -99,8 +107,18 @@ pub fn decode<T: DeserializeOwned>(text: &str) -> Result<T, DecodeError> {
     let strict = strict_json(text).map_err(DecodeError::Syntax)?;
     let mut deserializer = serde_json::Deserializer::from_str(&strict);
     let value = serde_path_to_error::deserialize(&mut deserializer).map_err(|error| {
-        let path = error.path().to_string();
-        let path = if path == "." { String::new() } else { path };
+        // Swift's coding-path text: keys and `[index]` joined by dots (`agents.[0].id`).
+        let path = error
+            .path()
+            .iter()
+            .map(|segment| match segment {
+                serde_path_to_error::Segment::Seq { index } => format!("[{index}]"),
+                serde_path_to_error::Segment::Map { key } => key.clone(),
+                serde_path_to_error::Segment::Enum { variant } => variant.clone(),
+                serde_path_to_error::Segment::Unknown => "?".into(),
+            })
+            .collect::<Vec<_>>()
+            .join(".");
         DecodeError::Shape { path, message: strip_position(&error.into_inner().to_string()) }
     })?;
     deserializer.end().map_err(|error| DecodeError::Shape {
@@ -295,11 +313,15 @@ struct Parser<'a> {
     index: usize,
     /// Commas that sit directly before a `}` or `]`; blanked out when producing strict JSON.
     trailing_commas: Vec<usize>,
+    /// A repeated key in one object, from the comma before it to the end of its value; blanked
+    /// out when producing strict JSON, so the first occurrence wins — the same one the writer
+    /// edits — and a duplicate never rejects the file.
+    duplicate_spans: Vec<(usize, usize)>,
 }
 
 impl<'a> Parser<'a> {
     fn new(characters: &'a [char], source: &'a [char]) -> Self {
-        Self { characters, source, index: 0, trailing_commas: Vec::new() }
+        Self { characters, source, index: 0, trailing_commas: Vec::new(), duplicate_spans: Vec::new() }
     }
 
     fn parse_document(&mut self) -> Result<ParsedValue, ParseError> {
@@ -348,7 +370,8 @@ impl<'a> Parser<'a> {
     fn parse_object(&mut self) -> Result<ParsedValue, ParseError> {
         let start = self.index;
         self.index += 1;
-        let mut members = Vec::new();
+        let mut members: Vec<ParsedMember> = Vec::new();
+        let mut last_comma = None;
         let end_of_input = self.characters.len();
 
         loop {
@@ -371,6 +394,11 @@ impl<'a> Parser<'a> {
             self.index += 1;
             self.skip_whitespace();
             let value = self.parse_value()?;
+            if let Some(comma) = last_comma
+                && members.iter().any(|member| member.key == key)
+            {
+                self.duplicate_spans.push((comma, value.end));
+            }
             members.push(ParsedMember { key, key_start, value });
 
             self.skip_whitespace();
@@ -378,6 +406,7 @@ impl<'a> Parser<'a> {
                 None => return Err(self.error("Unexpected end of input, expected '}'", Some(end_of_input))),
                 Some(',') => {
                     let comma = self.index;
+                    last_comma = Some(comma);
                     self.index += 1;
                     self.skip_whitespace();
                     if self.peek() == Some('}') {
@@ -800,6 +829,14 @@ fn entry_text(key: &str, value: &Value, indent: &str, unit: &str) -> String {
     format!("{}: {}", quoted(key), format_value(value, indent, unit))
 }
 
+/// A number as a JSON value for [`setting`]. NaN and infinity have no JSON form; converting
+/// them with `Value::from` silently yields `null`, so they are refused here instead.
+pub fn number_value(number: f64) -> Result<Value, ParseError> {
+    serde_json::Number::from_f64(number)
+        .map(Value::Number)
+        .ok_or_else(|| ParseError::at_start("Cannot write a non-finite number"))
+}
+
 /// Renders a value, pretty-printed with sorted keys and every continuation line sitting at
 /// `indent`.
 fn format_value(value: &Value, indent: &str, unit: &str) -> String {
@@ -1002,6 +1039,29 @@ mod tests {
         assert_eq!(values["quote"], r#"she said "hi" // not a comment"#);
         assert_eq!(values["path"], r"C:\temp\");
         assert_eq!(values["kept"], true);
+    }
+
+    #[test]
+    fn a_repeated_key_keeps_its_first_value_instead_of_rejecting_the_document() {
+        let values = top_level_object("{\n  \"a\": 1,\n  \"b\": { \"x\": 1 },\n  \"a\": 2,\n}");
+        assert_eq!(values["a"], 1);
+        assert_eq!(values["b"]["x"], 1);
+        assert_eq!(top_level_object(r#"{"a": 1, "b": 2, "a": {"deep": [3]}}"#)["a"], 1);
+        assert_eq!(top_level_object(r#"{"m": {"k": "first", "k": "second"}}"#)["m"]["k"], "first");
+
+        #[derive(Deserialize)]
+        struct Theme {
+            theme: String,
+        }
+        let decoded: Theme = decode(r#"{ "theme": "nord", "theme": "dracula" }"#).expect("decodes");
+        assert_eq!(decoded.theme, "nord");
+    }
+
+    #[test]
+    fn the_writer_edits_the_same_occurrence_of_a_repeated_key_the_reader_uses() {
+        let text = "{\n  \"theme\": \"nord\",\n  \"theme\": \"dracula\"\n}";
+        let updated = set(json!("gruvbox-dark"), &["theme"], text);
+        assert_eq!(top_level_object(&updated)["theme"], "gruvbox-dark");
     }
 
     #[test]

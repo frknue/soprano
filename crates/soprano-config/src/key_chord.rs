@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use soprano_types::{KeyBinding, KeyBindingMode};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Which keyboard convention to render chords in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -261,11 +262,13 @@ impl KeyChord {
     fn worded_modifiers(&self, platform: KeyPlatform) -> Vec<String> {
         let modifiers = self.platform_modifiers(platform);
         // Shift implied by the symbol itself is dropped, but Shift that `cmd` adds on
-        // Linux/Windows is a real, separate key press and stays.
-        let shift = if self.meta && platform == KeyPlatform::Other && !self.ctrl {
-            true
-        } else {
-            modifiers.shift && self.shows_shift()
+        // Linux/Windows is a real, separate key press and stays — as does the Shift of a
+        // `ctrl+cmd` chord on a symbol, which is pressed alongside Ctrl+Alt
+        // (`Ctrl+Shift+Alt+|`).
+        let shift = match (platform, self.meta, self.ctrl) {
+            (KeyPlatform::Other, true, false) => true,
+            (KeyPlatform::Other, true, true) => modifiers.shift,
+            _ => modifiers.shift && self.shows_shift(),
         };
         let mut parts = Vec::new();
         if modifiers.ctrl {
@@ -455,7 +458,9 @@ fn resolve_key(token: &str) -> Option<String> {
     if let Some(named) = NAMED_KEYS.get(token) {
         return Some((*named).to_owned());
     }
-    (token.chars().count() == 1).then(|| token.to_owned())
+    // One user-perceived character, as Swift's `Character` count: a decomposed `é` or an emoji
+    // with a variation selector is one key.
+    (token.graphemes(true).count() == 1).then(|| token.to_owned())
 }
 
 /// Keys that cannot survive a literal round trip — they are invisible, or they collide with
@@ -578,6 +583,13 @@ mod tests {
             );
             assert_eq!(KeyChord::parse(canonical), Some(expected), "re-parsing {canonical}");
         }
+    }
+
+    #[test]
+    fn a_key_is_one_user_perceived_character_even_when_it_is_several_scalars() {
+        assert_eq!(KeyChord::parse("ctrl+e\u{301}").map(|c| c.key), Some("e\u{301}".into()));
+        assert_eq!(KeyChord::parse("cmd+❤️").map(|c| c.key), Some("❤️".into()));
+        assert_eq!(KeyChord::parse("cmd+ab"), None);
     }
 
     #[test]
@@ -791,6 +803,7 @@ mod tests {
             ("cmd+shift+p", "Ctrl+Shift+Alt+P"),
             ("ctrl+cmd+t", "Ctrl+Alt+T"),
             ("ctrl+cmd+shift+t", "Ctrl+Shift+Alt+T"),
+            ("ctrl+cmd+|", "Ctrl+Shift+Alt+|"),
             ("cmd+,", "Ctrl+Shift+,"),
             ("cmd+plus", "Ctrl+Shift++"),
             ("ctrl+h", "Ctrl+H"),

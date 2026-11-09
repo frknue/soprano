@@ -10,12 +10,14 @@
 //! retries every `rearm_interval` — only in that transient state, so this never becomes a
 //! steady-state poll.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::config_file::resolving_symlink;
 
@@ -46,8 +48,12 @@ impl ConfigFileWatcher {
     ) -> Self {
         let (sender, receiver) = mpsc::channel();
         let event_sender = sender.clone();
+        let relevant_names: Arc<Mutex<Vec<OsString>>> = Arc::default();
+        let names = relevant_names.clone();
         let notify_watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            if result.is_ok() {
+            let Ok(event) = result else { return };
+            let names = names.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if is_relevant(&event, &names) {
                 let _ = event_sender.send(Message::Event);
             }
         })
@@ -58,6 +64,7 @@ impl ConfigFileWatcher {
             watcher: notify_watcher,
             watched: Vec::new(),
             identity: None,
+            relevant_names,
         };
         state.rearm();
 
@@ -144,6 +151,8 @@ struct WatchState {
     watched: Vec<PathBuf>,
     /// `None` while blind: the config directory is missing (or no watch could be armed).
     identity: Option<Identity>,
+    /// File names whose events matter (see [`is_relevant`]); shared with the notify callback.
+    relevant_names: Arc<Mutex<Vec<OsString>>>,
 }
 
 impl WatchState {
@@ -187,8 +196,35 @@ impl WatchState {
         {
             self.watched.push(target_directory.to_path_buf());
         }
+        let mut names: Vec<OsString> = Vec::new();
+        for path in [&self.path, &identity.target].into_iter().chain(&self.watched) {
+            if let Some(name) = path.file_name()
+                && !names.iter().any(|known| known == name)
+            {
+                names.push(name.to_owned());
+            }
+        }
+        *self.relevant_names.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = names;
         self.identity = Some(identity);
     }
+}
+
+/// Whether a notify event can mean `settings.json` changed. Access events are dropped: on
+/// Linux inotify reports every open of the file, and the reload's own read would otherwise
+/// schedule the next reload forever (Swift listened only for write, extend, delete, rename,
+/// link and revoke). Of the rest, only events naming the settings file, its link target or a
+/// watched directory count — other files in a dotfiles folder are not ours. Events without
+/// paths (a rescan request) count.
+fn is_relevant(event: &notify::Event, names: &[OsString]) -> bool {
+    if matches!(event.kind, EventKind::Access(_)) {
+        return false;
+    }
+    event.paths.is_empty()
+        || event.need_rescan()
+        || event
+            .paths
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| names.iter().any(|known| known == name)))
 }
 
 /// A directory's identity: device and inode on Unix, so a deleted-and-recreated directory
@@ -220,6 +256,49 @@ mod tests {
     use crate::config_file;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn event(kind: EventKind, path: &str) -> notify::Event {
+        notify::Event::new(kind).add_path(PathBuf::from(path))
+    }
+
+    #[test]
+    fn opening_the_settings_file_is_not_a_change_and_other_files_are_not_ours() {
+        use notify::event::{AccessKind, AccessMode, CreateKind, ModifyKind};
+        let names = vec![OsString::from("settings.json"), OsString::from("soprano")];
+        let open = EventKind::Access(AccessKind::Open(AccessMode::Any));
+        let close_read = EventKind::Access(AccessKind::Close(AccessMode::Read));
+        let modify = EventKind::Modify(ModifyKind::Any);
+        assert!(!is_relevant(&event(open, "/c/soprano/settings.json"), &names));
+        assert!(!is_relevant(&event(close_read, "/c/soprano/settings.json"), &names));
+        assert!(is_relevant(&event(modify, "/c/soprano/settings.json"), &names));
+        assert!(is_relevant(&event(EventKind::Create(CreateKind::Any), "/c/soprano"), &names));
+        assert!(!is_relevant(&event(modify, "/c/soprano/other.json"), &names));
+        assert!(is_relevant(&notify::Event::new(modify), &names));
+    }
+
+    /// The reload reads the file; on Linux that read raised an open event that scheduled the
+    /// next reload, forever.
+    #[test]
+    fn reading_the_settings_file_does_not_report_a_change() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let path = root.path().join("soprano/settings.json");
+        config_file::write("{}", &path).expect("writes");
+        let changes = Arc::new(AtomicUsize::new(0));
+        let counter = changes.clone();
+        let watcher =
+            ConfigFileWatcher::start(&path, Duration::from_millis(20), DEFAULT_REARM_INTERVAL, move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            });
+        std::thread::sleep(Duration::from_millis(300));
+        let before = changes.load(Ordering::SeqCst);
+        for _ in 0..10 {
+            let _ = config_file::read(&path);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(changes.load(Ordering::SeqCst), before);
+        watcher.stop();
+    }
 
     fn wait_until(deadline: Duration, condition: impl Fn() -> bool) -> bool {
         let end = Instant::now() + deadline;

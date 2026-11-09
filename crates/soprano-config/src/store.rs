@@ -60,6 +60,19 @@ struct State {
     /// Text this store just wrote — used to ignore the watcher event our own save produces, so
     /// a UI edit does not round-trip into a redundant reload.
     self_written_text: Option<String>,
+    /// Counts changes published to observers.
+    generation: u64,
+}
+
+/// Observer delivery (see [`ConfigStore::publish`]).
+#[derive(Default)]
+struct Delivery {
+    /// The newest change not yet handed to observers.
+    pending: Option<(u64, ConfigSnapshot)>,
+    /// The newest change handed to observers.
+    delivered: u64,
+    /// A thread is running observers right now.
+    delivering: bool,
 }
 
 struct Shared {
@@ -68,6 +81,7 @@ struct Shared {
     catalog: Option<Arc<AgentCatalog>>,
     state: Mutex<State>,
     observers: Mutex<BTreeMap<String, Observer>>,
+    delivery: Mutex<Delivery>,
     watcher: Mutex<Option<ConfigFileWatcher>>,
 }
 
@@ -104,8 +118,10 @@ impl ConfigStore {
                     resolved: ResolvedConfig::defaults(),
                     file_issues: Vec::new(),
                     self_written_text: None,
+                    generation: 0,
                 }),
                 observers: Mutex::new(BTreeMap::new()),
+                delivery: Mutex::new(Delivery::default()),
                 watcher: Mutex::new(None),
             }),
         }
@@ -156,7 +172,10 @@ impl ConfigStore {
     }
 
     pub fn snapshot(&self) -> ConfigSnapshot {
-        let state = self.state();
+        Self::snapshot_of(&self.state())
+    }
+
+    fn snapshot_of(state: &State) -> ConfigSnapshot {
         ConfigSnapshot {
             text: state.text.clone(),
             config: state.config.clone(),
@@ -224,12 +243,12 @@ impl ConfigStore {
 
     /// Re-reads the file. Called by the watcher and by "Reload" in the UI.
     pub fn reload_from_disk(&self) {
-        let changed = {
+        let publication = {
             let mut state = self.state();
-            self.reload_locked(&mut state)
+            self.reload_locked(&mut state).then(|| Self::publication(&mut state))
         };
-        if changed {
-            self.notify_observers();
+        if let Some(publication) = publication {
+            self.publish(publication);
         }
     }
 
@@ -306,9 +325,21 @@ impl ConfigStore {
 
     /// Sets one key, preserving the rest of the document byte for byte. `Value::Null` writes a
     /// JSON `null`. Returns whether the file now holds the value.
+    ///
+    /// Floating-point values go through [`Self::write_number`]: converting NaN or infinity to
+    /// a `Value` already turns it into `null`.
     pub fn write(&self, value: impl Into<Value>, path: &[&str]) -> bool {
         let value = value.into();
         self.apply_edit(|text| jsonc::setting(&value, path, text))
+    }
+
+    /// Sets one numeric key. A non-finite number is refused (and reported as a file issue)
+    /// rather than written as `null`, as the Swift writer threw for it.
+    pub fn write_number(&self, value: f64, path: &[&str]) -> bool {
+        match jsonc::number_value(value) {
+            Ok(value) => self.write(value, path),
+            Err(error) => self.apply_edit(|_| Err(error)),
+        }
     }
 
     /// Removes one key so the built-in default takes over again.
@@ -317,21 +348,21 @@ impl ConfigStore {
     }
 
     fn apply_edit(&self, edit: impl FnOnce(&str) -> Result<String, jsonc::ParseError>) -> bool {
-        let (succeeded, notify) = {
+        let (succeeded, publication) = {
             let mut state = self.state();
             match self.edit_locked(&mut state, edit) {
-                Ok(changed) => (true, changed),
+                Ok(changed) => (true, changed.then(|| Self::publication(&mut state))),
                 Err(message) => {
                     state.file_issues = vec![ConfigIssue::error(format!(
                         "Could not update {}: {message}",
                         self.display_path()
                     ))];
-                    (false, true)
+                    (false, Some(Self::publication(&mut state)))
                 }
             }
         };
-        if notify {
-            self.notify_observers();
+        if let Some(publication) = publication {
+            self.publish(publication);
         }
         succeeded
     }
@@ -383,15 +414,43 @@ impl ConfigStore {
         self.shared.observers.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn notify_observers(&self) {
-        let handlers: Vec<Observer> = self.observers().values().cloned().collect();
-        if handlers.is_empty() {
+    /// Numbers each change and snapshots it while the state lock is still held, so the
+    /// snapshot is exactly the state that change produced.
+    fn publication(state: &mut State) -> (u64, ConfigSnapshot) {
+        state.generation += 1;
+        (state.generation, Self::snapshot_of(state))
+    }
+
+    /// Delivers changes to observers in order, never ending on an older snapshot: a change
+    /// older than one already delivered (or queued) is dropped, and while one thread delivers,
+    /// later changes — from other threads, or from an observer writing the store — are queued
+    /// for it to deliver next instead of racing it. Handlers run without any lock held.
+    fn publish(&self, (generation, snapshot): (u64, ConfigSnapshot)) {
+        let mut delivery = self.delivery();
+        if generation <= delivery.delivered
+            || delivery.pending.as_ref().is_some_and(|(g, _)| *g >= generation)
+        {
             return;
         }
-        let snapshot = self.snapshot();
-        for handler in handlers {
-            handler(&snapshot);
+        delivery.pending = Some((generation, snapshot));
+        if delivery.delivering {
+            return;
         }
+        delivery.delivering = true;
+        while let Some((generation, snapshot)) = delivery.pending.take() {
+            delivery.delivered = generation;
+            drop(delivery);
+            let handlers: Vec<Observer> = self.observers().values().cloned().collect();
+            for handler in handlers {
+                handler(&snapshot);
+            }
+            delivery = self.delivery();
+        }
+        delivery.delivering = false;
+    }
+
+    fn delivery(&self) -> MutexGuard<'_, Delivery> {
+        self.shared.delivery.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     // MARK: - Opening
@@ -435,12 +494,18 @@ fn describe_shape_error(path: &str, message: &str) -> String {
     format!("{location}: {message}")
 }
 
+/// serde's "expected" text → the words Swift's `readable(_:)` used. A keyed container is
+/// what `JSONDecoder` names `Dictionary<String, Any>`.
 fn readable(expected: &str) -> String {
     match expected {
         "a string" => "text".into(),
         "a boolean" => "true or false".into(),
-        "i64" | "u64" | "i32" | "u32" | "f64" | "f32" | "an integer" | "a number" => "a number".into(),
+        "i64" | "u64" | "i32" | "u32" | "f64" | "f32" | "an integer" | "a number" | "a JSON number" => {
+            "a number".into()
+        }
         "a sequence" => "a list".into(),
+        "a map" => "of type Dictionary<String, Any>".into(),
+        other if other.starts_with("struct ") => "of type Dictionary<String, Any>".into(),
         other => format!("of type {other}"),
     }
 }
@@ -834,7 +899,76 @@ mod tests {
         write_file(&store, r#"{ "agents": [ { "command": "x" } ] }"#);
         store.reload_from_disk();
         let error = store.issues().into_iter().find(|i| i.severity == Severity::Error).expect("error");
-        assert!(error.message.contains("is missing \"id\""), "{}", error.message);
+        assert!(error.message.contains("agents.[0] is missing \"id\""), "{}", error.message);
+    }
+
+    #[test]
+    fn writing_a_non_finite_number_is_refused_instead_of_writing_null() {
+        let (store, _directory) = make_store();
+        write_file(&store, "{}");
+        start(&store);
+
+        assert!(!store.write_number(f64::NAN, &["keybindings", "resizeTickPercent"]));
+        assert!(!file_text(&store).contains("null"));
+        let error = store.issues().into_iter().find(|i| i.severity == Severity::Error).expect("error");
+        assert!(error.message.contains("non-finite"), "{}", error.message);
+
+        assert!(store.write_number(7.0, &["keybindings", "resizeTickPercent"]));
+        assert_eq!(store.keybindings().resize_tick_percent, 7.0);
+        assert!(store.file_issues().is_empty());
+    }
+
+    /// Writes from several threads race; whatever order they land in, observers must end on
+    /// the store's final state, never on an older snapshot delivered late.
+    #[test]
+    fn observers_always_end_on_the_latest_state() {
+        let (store, _directory) = make_store();
+        write_file(&store, "{}");
+        start(&store);
+        let last_seen = Arc::new(Mutex::new(String::new()));
+        let sink = last_seen.clone();
+        store.add_observer("last", move |snapshot| {
+            *sink.lock().expect("lock") = snapshot.resolved.settings.theme_id.clone();
+        });
+
+        let themes = ["nord", "dracula", "gruvbox-dark", "tokyo-night"];
+        let threads: Vec<_> = themes
+            .iter()
+            .map(|theme| {
+                let store = store.clone();
+                let theme = theme.to_string();
+                std::thread::spawn(move || {
+                    for _ in 0..10 {
+                        store.write(theme.as_str(), &["theme"]);
+                        store.reload_from_disk();
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("joins");
+        }
+        assert_eq!(*last_seen.lock().expect("lock"), store.settings().theme_id);
+    }
+
+    /// An observer that writes the store gets that later change delivered after it returns.
+    #[test]
+    fn an_observer_that_writes_the_store_sees_its_own_change_next() {
+        let (store, _directory) = make_store();
+        write_file(&store, "{}");
+        start(&store);
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let writer = store.clone();
+        store.add_observer("chain", move |snapshot| {
+            let theme = snapshot.resolved.settings.theme_id.clone();
+            sink.lock().expect("lock").push(theme.clone());
+            if theme == "nord" {
+                writer.write("dracula", &["theme"]);
+            }
+        });
+        assert!(store.write("nord", &["theme"]));
+        assert_eq!(*seen.lock().expect("lock"), ["nord", "dracula"]);
     }
 
     // MARK: - SettingsConfigWritingTests (config side)

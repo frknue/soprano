@@ -179,11 +179,19 @@ pub struct AutomationEntry {
     pub base_branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::config::integral_number"
+    )]
     pub grace_minutes: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precheck: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::config::integral_number"
+    )]
     pub precheck_timeout_seconds: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -294,14 +302,26 @@ pub fn resolve_automations(
     automations
 }
 
-/// Finder-style ordering (`localizedStandardCompare`): case-insensitive, with digit runs
-/// compared by value so "Run 9" sorts before "Run 10".
+/// Finder-style ordering (`localizedStandardCompare`): case- and diacritic-insensitive, so
+/// "Änderungen" sorts with the A's, with digit runs compared by value so "Run 9" sorts before
+/// "Run 10". Names equal under that folding fall back to their exact text.
 pub fn localized_standard_compare(left: &str, right: &str) -> Ordering {
+    natural_compare(&fold(left), &fold(right)).then_with(|| left.cmp(right))
+}
+
+/// Lowercased with accents removed: decompose, then drop the combining marks.
+fn fold(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    use unicode_normalization::char::is_combining_mark;
+    text.nfd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).collect()
+}
+
+fn natural_compare(left: &str, right: &str) -> Ordering {
     let mut a = left.chars().peekable();
     let mut b = right.chars().peekable();
     loop {
         match (a.peek().copied(), b.peek().copied()) {
-            (None, None) => return left.cmp(right),
+            (None, None) => return Ordering::Equal,
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
@@ -321,7 +341,7 @@ pub fn localized_standard_compare(left: &str, right: &str) -> Ordering {
                 }
             }
             (Some(x), Some(y)) => {
-                let ordering = x.to_lowercase().cmp(y.to_lowercase());
+                let ordering = x.cmp(&y);
                 if ordering != Ordering::Equal {
                     return ordering;
                 }
@@ -357,5 +377,12 @@ mod tests {
         let mut names = vec!["Zebra", "apple", "Run 10", "Run 9"];
         names.sort_by(|a, b| localized_standard_compare(a, b));
         assert_eq!(names, ["apple", "Run 9", "Run 10", "Zebra"]);
+    }
+
+    #[test]
+    fn names_sort_without_regard_to_accents() {
+        let mut names = vec!["Zebra", "Änderungen", "apple", "Écrire", "Bericht"];
+        names.sort_by(|a, b| localized_standard_compare(a, b));
+        assert_eq!(names, ["Änderungen", "apple", "Bericht", "Écrire", "Zebra"]);
     }
 }

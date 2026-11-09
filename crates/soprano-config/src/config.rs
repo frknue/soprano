@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use soprano_types::{
     AgentCatalog, AgentProfile, DefaultAgents, KeyBinding, KeyBindingCategory, KeyBindingConfig,
@@ -68,7 +70,7 @@ pub struct StatusBarConfig {
 pub struct KeybindingsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "integral_number")]
     pub prefix_timeout_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resize_tick_percent: Option<f64>,
@@ -115,6 +117,24 @@ pub struct AgentConfig {
 pub enum BindingOverride {
     Chord(String),
     Disabled,
+}
+
+/// An optional integer that also accepts a whole-number float (`1500.0`), as Swift's
+/// `JSONDecoder` did for `Int` keys. A fractional or out-of-range number is still a type
+/// error.
+pub(crate) fn integral_number<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<i64>, D::Error> {
+    use serde::de::{Error, Unexpected};
+    let Some(number) = Option::<serde_json::Number>::deserialize(deserializer)? else { return Ok(None) };
+    if let Some(integer) = number.as_i64() {
+        return Ok(Some(integer));
+    }
+    match number.as_f64() {
+        Some(float) if float.fract() == 0.0 && float >= i64::MIN as f64 && float < i64::MAX as f64 => {
+            Ok(Some(float as i64))
+        }
+        Some(float) => Err(D::Error::invalid_type(Unexpected::Float(float), &"i64")),
+        None => Err(D::Error::invalid_type(Unexpected::Other("number"), &"i64")),
+    }
 }
 
 impl<'de> Deserialize<'de> for BindingOverride {
@@ -348,9 +368,9 @@ pub fn expand_path(raw_path: &str) -> String {
     if path.is_relative() {
         path = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")).join(path);
     }
-    let normalized = soprano_platform::paths::normalize(&path).display().to_string();
-    // `normalize` keeps a trailing separator only for the root itself.
-    if normalized.len() > 1 { normalized.trim_end_matches(['/', '\\']).to_owned() } else { normalized }
+    // `normalize` rebuilds the path from its components, so only a root (`/`, `C:\`) keeps a
+    // trailing separator — and a root must keep it: `C:` alone means the current folder on C.
+    soprano_platform::paths::normalize(&path).display().to_string()
 }
 
 // MARK: - Agents
@@ -490,7 +510,7 @@ fn resolve_keybindings(
 
     if let Some(prefix_key) = configured.and_then(|c| c.prefix_key.as_deref()) {
         let trimmed = prefix_key.trim();
-        if trimmed.chars().count() == 1 {
+        if trimmed.graphemes(true).count() == 1 {
             config.prefix_key = trimmed.to_lowercase();
         } else {
             issues.push(ConfigIssue::warning(format!(
@@ -1039,6 +1059,39 @@ mod tests {
         install_agents(&catalog, &resolved.agents);
         assert_eq!(catalog.profile("aider").map(|p| p.command), Some("aider".into()));
         assert_eq!(catalog.all().len(), DefaultAgents::all().len() + 1);
+    }
+
+    #[test]
+    fn whole_number_floats_are_accepted_for_integer_keys() {
+        let resolved = resolve(
+            r#"{ "keybindings": { "prefixTimeoutMs": 1500.0 },
+                 "automations": { "a": { "agent": "omp", "folder": "/tmp", "prompt": "x",
+                   "schedule": "0 9 * * *", "graceMinutes": 60.0, "precheckTimeoutSeconds": 30.0 } } }"#,
+        );
+        assert_eq!(resolved.keybindings.prefix_timeout_ms, 1500);
+        assert_eq!(resolved.automations[0].grace_minutes, 60);
+        assert_eq!(resolved.automations[0].precheck_timeout_seconds, 30);
+        assert!(resolved.issues.is_empty());
+
+        assert!(
+            jsonc::decode::<SopranoConfig>(r#"{ "keybindings": { "prefixTimeoutMs": 1500.5 } }"#).is_err()
+        );
+    }
+
+    #[test]
+    fn a_multi_scalar_single_character_is_a_valid_prefix_key() {
+        // A decomposed "é" is two scalars but one character.
+        let resolved = resolve("{ \"keybindings\": { \"prefixKey\": \"e\u{301}\" } }");
+        assert_eq!(resolved.keybindings.prefix_key, "e\u{301}");
+        assert!(!has_issue(&resolved, |m| m.contains("single character")));
+    }
+
+    #[test]
+    fn expanding_a_path_keeps_a_root_separator() {
+        assert_eq!(expand_path("/"), "/");
+        assert_eq!(expand_path("/tmp/./x/../y"), "/tmp/y");
+        #[cfg(windows)]
+        assert_eq!(expand_path("C:\\"), "C:\\");
     }
 
     #[test]

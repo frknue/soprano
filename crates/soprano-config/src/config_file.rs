@@ -23,14 +23,24 @@ pub fn config_path() -> PathBuf {
     config_path_from(|key| std::env::var(key).ok(), &paths::home_dir())
 }
 
-/// [`config_path`] with the environment and home directory injectable.
+/// [`config_path`] with the environment and home directory injectable; relative paths resolve
+/// against the current directory.
 pub fn config_path_from(env: impl Fn(&str) -> Option<String>, home: &Path) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| home.to_path_buf());
+    config_path_in(env, home, &cwd)
+}
+
+/// [`config_path_from`] with the current directory injectable too. A relative
+/// `SOPRANO_CONFIG` or `XDG_CONFIG_HOME` is made absolute against `cwd`, as Swift's
+/// `URL(fileURLWithPath:)` did — a relative path could not be watched.
+pub fn config_path_in(env: impl Fn(&str) -> Option<String>, home: &Path, cwd: &Path) -> PathBuf {
     let non_empty = |key: &str| env(key).filter(|value| !value.is_empty());
+    let absolute = |raw: &str| paths::normalize(&cwd.join(paths::expand_tilde_in(raw, home)));
     if let Some(path) = non_empty(PATH_ENVIRONMENT_KEY) {
-        return paths::normalize(&paths::expand_tilde_in(&path, home));
+        return absolute(&path);
     }
     if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
-        return paths::normalize(&paths::expand_tilde_in(&xdg, home)).join("soprano").join("settings.json");
+        return absolute(&xdg).join("soprano").join("settings.json");
     }
     home.join(".config").join("soprano").join("settings.json")
 }
@@ -57,12 +67,17 @@ pub fn exists(path: &Path) -> bool {
 }
 
 /// Returns the file's text, or `None` when it does not exist yet. A file that exists but
-/// cannot be read is an error, never an empty configuration.
+/// cannot be read is an error, never an empty configuration. A leading UTF-8 byte order mark
+/// is dropped, as Swift's string decoding did; otherwise the parser fails at 1:1.
 pub fn read(path: &Path) -> io::Result<Option<String>> {
     if !exists(path) {
         return Ok(None);
     }
-    std::fs::read_to_string(path).map(Some)
+    let text = std::fs::read_to_string(path)?;
+    Ok(Some(match text.strip_prefix('\u{FEFF}') {
+        Some(rest) => rest.to_owned(),
+        None => text,
+    }))
 }
 
 /// Writes atomically so a watcher never observes a half-written document.
@@ -385,6 +400,35 @@ mod tests {
             let decoded: crate::SopranoConfig = crate::jsonc::decode(&template).expect("template parses");
             assert_eq!(decoded.resolved().issues, vec![]);
         }
+    }
+
+    #[test]
+    fn a_relative_override_is_made_absolute_against_the_working_directory() {
+        let home = Path::new("/home/me");
+        let cwd = Path::new("/work/dir");
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |key: &str| pairs.iter().find(|(k, _)| *k == key).map(|(_, v)| (*v).to_owned())
+        };
+        assert_eq!(
+            config_path_in(env(&[("SOPRANO_CONFIG", "conf/../soprano.json")]), home, cwd),
+            PathBuf::from("/work/dir/soprano.json")
+        );
+        assert_eq!(
+            config_path_in(env(&[("XDG_CONFIG_HOME", "xdg")]), home, cwd),
+            PathBuf::from("/work/dir/xdg/soprano/settings.json")
+        );
+        assert!(config_path().is_absolute());
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_dropped_when_reading() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "\u{FEFF}{ \"theme\": \"nord\" }").expect("writes");
+        let text = read(&path).expect("readable").expect("exists");
+        assert_eq!(text, "{ \"theme\": \"nord\" }");
+        let decoded: crate::SopranoConfig = crate::jsonc::decode(&text).expect("decodes");
+        assert_eq!(decoded.theme.as_deref(), Some("nord"));
     }
 
     #[test]

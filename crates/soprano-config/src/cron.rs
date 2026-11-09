@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDate, TimeZone, Timelike};
+use chrono::{DateTime, Datelike, Duration, LocalResult, NaiveDate, TimeZone};
 
 /// Why an expression is not a schedule; `message` is shown to the user verbatim.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,7 +115,10 @@ impl CronSchedule {
     /// expression names a date that never comes, such as `0 0 31 2 *`.
     pub fn next_occurrence<Tz: TimeZone>(&self, date: &DateTime<Tz>) -> Option<DateTime<Tz>> {
         let zone = date.timezone();
-        let start_minute = date.with_second(0)?.with_nanosecond(0)?;
+        // Floor on the instant, not the wall clock: in the hour the clocks repeat, a local
+        // time is ambiguous and rebuilding it from fields would fail.
+        let seconds = date.timestamp();
+        let start_minute = zone.timestamp_opt(seconds - seconds.rem_euclid(60), 0).single()?;
         let first = start_minute + Duration::minutes(1);
         let mut day: NaiveDate = first.date_naive();
         for _ in 0..(366 * 8) {
@@ -182,10 +185,12 @@ fn values(part: &str, field: &Field) -> Result<BTreeSet<u32>, CronParseError> {
         if pieces.len() > 2 {
             return Err(error(format!("The {} field has more than one step in \"{item}\".", field.name)));
         }
-        let mut step = 1;
+        let mut step: usize = 1;
         if pieces.len() == 2 {
             step = match parse_int(pieces[1]) {
-                Some(value) if value > 0 => value as u32,
+                // A step past the field's range just leaves its first value, as Swift's
+                // `stride` does; it must never wrap to 0 or 1.
+                Some(value) if value > 0 => usize::try_from(value).unwrap_or(usize::MAX),
                 _ => {
                     return Err(error(format!(
                         "The {} step in \"{item}\" must be a positive number.",
@@ -214,7 +219,7 @@ fn values(part: &str, field: &Field) -> Result<BTreeSet<u32>, CronParseError> {
             }
             (low, high)
         };
-        result.extend((low..=high).step_by(step as usize));
+        result.extend((low..=high).step_by(step));
     }
     Ok(result)
 }
@@ -320,14 +325,16 @@ impl AutomationCadence {
         }
     }
 
-    /// A short clock time, `2:00 PM`.
+    /// A short clock time, `2:00 PM`. macOS puts a narrow no-break space (U+202F) before the
+    /// period, as its short time style does; other OSes a plain space.
     pub fn time(hour: u32, minute: u32) -> String {
         let period = if hour < 12 { "AM" } else { "PM" };
         let twelve = match hour % 12 {
             0 => 12,
             other => other,
         };
-        format!("{twelve}:{minute:02} {period}")
+        let space = if cfg!(target_os = "macos") { '\u{202F}' } else { ' ' };
+        format!("{twelve}:{minute:02}{space}{period}")
     }
 }
 
@@ -400,6 +407,28 @@ mod tests {
         assert_eq!(schedule("0 0 31 2 *").next_occurrence(&Local::now()), None);
     }
 
+    /// Clocks in Berlin go back from 03:00 CEST to 02:00 CET on 2026-10-25, so 02:30 happens
+    /// twice. Asking from inside that hour must still find the next run.
+    #[test]
+    fn the_next_occurrence_is_found_from_inside_the_hour_the_clocks_repeat() {
+        let repeated = date("2026-10-25 02:30"); // the first, CEST, 02:30
+        assert_eq!(repeated.format("%Z").to_string(), "CEST");
+
+        assert_eq!(schedule("45 * * * *").next_occurrence(&repeated), Some(date("2026-10-25 02:45")));
+        assert_eq!(schedule("30 2 * * *").next_occurrence(&repeated), Some(date("2026-10-26 02:30")));
+        assert_eq!(
+            schedule("15 * * * *").latest_occurrence(&date("2026-10-25 01:15"), &repeated),
+            Some(date("2026-10-25 02:15"))
+        );
+    }
+
+    #[test]
+    fn a_step_larger_than_any_field_leaves_only_the_first_value() {
+        assert_eq!(schedule("*/4294967296 * * * *").minutes, set(&[0]));
+        assert_eq!(schedule("*/4294967297 * * * *").minutes, set(&[0]));
+        assert_eq!(schedule("5/99999999999 * * * *").minutes, set(&[5]));
+    }
+
     #[test]
     fn a_time_the_clocks_skip_is_not_run_that_day() {
         // Clocks in Berlin jump from 02:00 to 03:00 on 2026-03-29.
@@ -443,6 +472,11 @@ mod tests {
                 .summary()
                 .starts_with("Thursdays at 2:00")
         );
-        assert_eq!(AutomationCadence::Daily { hour: 0, minute: 5 }.summary(), "Daily at 12:05 AM");
+        let space = if cfg!(target_os = "macos") { "\u{202F}" } else { " " };
+        assert_eq!(
+            AutomationCadence::Daily { hour: 0, minute: 5 }.summary(),
+            format!("Daily at 12:05{space}AM")
+        );
+        assert_eq!(AutomationCadence::time(14, 0), format!("2:00{space}PM"));
     }
 }
