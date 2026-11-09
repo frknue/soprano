@@ -1,0 +1,26 @@
+[package]
+name = "soprano-automations-ui"
+description = "The Automations page in GPUI: the list, an automation's settings and runs, a run's report, and the editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-automations = { path = "../soprano-automations" }
+soprano-config = { path = "../soprano-config" }
+soprano-editor = { path = "../soprano-editor" }
+soprano-model = { path = "../soprano-model" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-types = { path = "../soprano-types" }
+soprano-ui = { path = "../soprano-ui" }
+gpui.workspace = true
+gpui-component.workspace = true
+chrono = "0.4.45"
+chrono-tz = "0.10"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true
+soprano-text = { path = "../soprano-text" }
+tempfile = "3"
