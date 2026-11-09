@@ -192,9 +192,11 @@ impl FilesPanel {
                     }
                 }),
                 // Catches git changes nothing under the watched paths reflects, such as a
-                // commit made in another clone of a submodule.
+                // commit made in another clone of a submodule, and a repository created
+                // or removed above the shown folder.
                 cx.observe_window_activation(window, |this, window, cx| {
                     if window.is_window_active() && this.is_active {
+                        this.resolve_root_again(cx);
                         this.schedule_git_refresh(false, cx);
                     }
                 }),
@@ -348,6 +350,14 @@ impl FilesPanel {
             self.set_root(root, cx);
         }
         cx.notify();
+    }
+
+    /// Resolves the last working directory's root again: a repository may have been
+    /// created (`git init`) or removed since.
+    fn resolve_root_again(&mut self, cx: &mut Context<Self>) {
+        if let Some(cwd) = self.last_working_directory.take() {
+            self.set_working_directory(Some(&cwd), cx);
+        }
     }
 
     fn set_root(&mut self, root: ExplorerRoot, cx: &mut Context<Self>) {
@@ -623,6 +633,15 @@ impl FilesPanel {
         let Some(state) = self.state.as_ref() else { return };
         if needs_rescan {
             self.refresh_all(cx);
+            return;
+        }
+        // `.git` appearing at or vanishing from the root makes it a repository or stops it
+        // being one.
+        let touches_git_entry = paths.iter().any(|path| {
+            state.relative(path).is_some_and(|relative| relative == ".git" || relative.starts_with(".git/"))
+        });
+        if touches_git_entry && state.root.path.join(".git").exists() != state.root.is_git_repository {
+            self.resolve_root_again(cx);
             return;
         }
         let routing =

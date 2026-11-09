@@ -119,3 +119,33 @@ fn a_folder_outside_git_says_source_control_needs_a_repository(cx: &mut TestAppC
         Some("Source Control is only available for Git repositories")
     );
 }
+
+#[gpui::test]
+fn git_init_in_the_panes_folder_shows_its_changes(cx: &mut TestAppContext) {
+    if !has_git() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::write(root.join("a.txt"), "a\n").expect("write");
+    let (panel, cx) = panel(cx);
+    cx.update(|window, _| window.activate_window());
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    assert_eq!(
+        panel.read_with(cx, |panel, _| panel.status()),
+        Some("Source Control is only available for Git repositories")
+    );
+
+    git(&["init", "-q"], &root);
+    wait_until(cx, |cx| areas(&panel, cx) == [GitChangeArea::Untracked]);
+
+    fs::remove_dir_all(root.join(".git")).expect("remove .git");
+    wait_until(cx, |cx| {
+        panel.read_with(cx, |panel, _| panel.status())
+            == Some("Source Control is only available for Git repositories")
+    });
+}

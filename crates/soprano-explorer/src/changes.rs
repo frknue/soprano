@@ -62,6 +62,10 @@ pub struct ChangesPanel {
     is_active: bool,
     target: Option<Target>,
     last_working_directory: Option<String>,
+    /// The pane's folder (tilde expanded) and its resolved form, watched for `git init`
+    /// while it is not in a repository.
+    working_directory: Option<PathBuf>,
+    real_working_directory: Option<PathBuf>,
     shown_target: Option<Target>,
     root: Option<PathBuf>,
     /// The root fully resolved through symlinks, which file watchers report.
@@ -87,8 +91,10 @@ pub struct ChangesPanel {
 impl ChangesPanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![cx.observe_window_activation(window, |this, window, cx| {
-            // Catches changes nothing under the watched paths reflects.
+            // Catches changes nothing under the watched paths reflects, and a repository
+            // created or removed above the pane's folder.
             if window.is_window_active() && this.is_active {
+                this.resolve_again(cx);
                 this.schedule_refresh(false, cx);
             }
         })];
@@ -97,6 +103,8 @@ impl ChangesPanel {
             is_active: false,
             target: None,
             last_working_directory: None,
+            working_directory: None,
+            real_working_directory: None,
             shown_target: None,
             root: None,
             real_root: None,
@@ -155,7 +163,7 @@ impl ChangesPanel {
         if active {
             match self.target.clone() {
                 Some(target) if Some(&target) != self.shown_target.as_ref() => self.apply(target, cx),
-                _ if self.root.is_some() => {
+                _ if self.shown_target.is_some() => {
                     self.start_watching(cx);
                     self.schedule_refresh(true, cx);
                 }
@@ -178,13 +186,24 @@ impl ChangesPanel {
             return;
         }
         self.last_working_directory = Some(cwd.to_owned());
-        let expanded = soprano_platform::paths::expand_tilde(cwd).to_string_lossy().into_owned();
+        let expanded = soprano_platform::paths::expand_tilde(cwd);
+        self.real_working_directory = real_path(&expanded);
+        self.working_directory = Some(expanded.clone());
+        let expanded = expanded.to_string_lossy().into_owned();
         let target = repository_root(&expanded).map_or(Target::NotRepository, Target::Repository);
         self.target = Some(target.clone());
         if self.is_active && Some(&target) != self.shown_target.as_ref() {
             self.apply(target, cx);
         }
         cx.notify();
+    }
+
+    /// Looks for the last working directory's repository again: one may have been created
+    /// (`git init`) or removed since.
+    fn resolve_again(&mut self, cx: &mut Context<Self>) {
+        if let Some(cwd) = self.last_working_directory.take() {
+            self.set_working_directory(Some(&cwd), cx);
+        }
     }
 
     fn apply(&mut self, target: Target, cx: &mut Context<Self>) {
@@ -207,8 +226,9 @@ impl ChangesPanel {
         self.watcher = None;
         self._watch_task = None;
         self.show(GitChangeList::empty(), false);
+        // Outside a repository the folder is watched so `git init` there shows up.
+        self.start_watching(cx);
         if self.root.is_some() {
-            self.start_watching(cx);
             self.schedule_refresh(true, cx);
         }
     }
@@ -216,8 +236,11 @@ impl ChangesPanel {
     // MARK: - Watching
 
     fn start_watching(&mut self, cx: &mut Context<Self>) {
-        let Some(root) = self.root.clone() else { return };
-        let mut paths = vec![root];
+        let mut paths = match (&self.root, &self.working_directory) {
+            (Some(root), _) => vec![root.clone()],
+            (None, Some(directory)) => vec![directory.clone()],
+            (None, None) => return,
+        };
         paths.extend(self.external_git_directory.clone());
         let (sender, mut receiver) = mpsc::unbounded::<(Vec<PathBuf>, bool)>();
         self.watcher =
@@ -234,12 +257,34 @@ impl ChangesPanel {
     }
 
     fn handle_file_system_events(&mut self, paths: &[PathBuf], needs_rescan: bool, cx: &mut Context<Self>) {
-        if !self.is_active || self.root.is_none() {
+        if !self.is_active {
+            return;
+        }
+        if self.git_entry_changed(paths) {
+            self.resolve_again(cx);
+            return;
+        }
+        if self.root.is_none() {
             return;
         }
         if needs_rescan || self.affects_status(paths) {
             self.schedule_refresh(false, cx);
         }
+    }
+
+    /// Whether `.git` appeared in the watched folder outside a repository, or vanished
+    /// from the repository's root.
+    fn git_entry_changed(&self, paths: &[PathBuf]) -> bool {
+        let Some(folder) = self.root.as_ref().or(self.working_directory.as_ref()) else { return false };
+        let folders: Vec<&Path> = std::iter::once(folder.as_path())
+            .chain(self.real_root.as_deref())
+            .chain(self.real_working_directory.as_deref())
+            .collect();
+        let touches = paths.iter().any(|path| {
+            relative_path_in_roots(path, &folders)
+                .is_some_and(|relative| relative == ".git" || relative.starts_with(".git/"))
+        });
+        touches && folder.join(".git").exists() != self.root.is_some()
     }
 
     /// Whether any changed path can change `git status`: the git directory, or a working

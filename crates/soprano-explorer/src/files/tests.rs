@@ -408,3 +408,61 @@ fn refused_drops_are_not_offered_and_leaving_a_folder_cancels_its_spring_loading
     cx.executor().advance_clock(Duration::from_secs(1));
     wait_until(cx, |cx| shown(&panel, cx) == ["a", "a/inner", "file.txt"]);
 }
+
+#[gpui::test]
+fn git_init_in_the_shown_folder_turns_it_into_a_repository_and_removing_git_undoes_it(
+    cx: &mut TestAppContext,
+) {
+    if !has_git() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::write(root.join("a.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["a.txt"]);
+    assert!(!panel.read_with(cx, |panel, _| panel.is_git_repository()));
+
+    git(&["init", "-q"], &root);
+    wait_until(cx, |cx| panel.read_with(cx, |panel, _| panel.is_git_repository()));
+    // The new repository's files are decorated.
+    wait_until(cx, |cx| {
+        panel.read_with(cx, |panel, _| panel.git_status().status("a.txt", false))
+            == Some(soprano_git::GitFileStatus::Untracked)
+    });
+
+    fs::remove_dir_all(root.join(".git")).expect("remove .git");
+    wait_until(cx, |cx| !panel.read_with(cx, |panel, _| panel.is_git_repository()));
+}
+
+#[gpui::test]
+fn coming_back_to_the_app_finds_a_repository_created_above_the_shown_folder(cx: &mut TestAppContext) {
+    if !has_git() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("temp dir");
+    let parent = directory.path().to_path_buf();
+    fs::create_dir_all(parent.join("sub")).expect("mkdir");
+    fs::write(parent.join("sub/a.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = parent.join("sub").to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["a.txt"]);
+
+    // Outside the watched folder: noticed when the window becomes active again.
+    git(&["init", "-q"], &parent);
+    cx.deactivate_window();
+    cx.update(|window, _| window.activate_window());
+    wait_until(cx, |cx| shown(&panel, cx) == ["sub"]);
+    assert!(panel.read_with(cx, |panel, _| panel.is_git_repository()));
+}
