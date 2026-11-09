@@ -399,12 +399,20 @@ impl<'a> Scanner<'a> {
             return None;
         }
         if self.units[first] == b'\\' {
-            let mut index = first + 2;
-            while index < self.len() && index - start <= 12 && self.units[index] != b'\n' {
+            // The window is 12 UTF-16 units past the tick, as the Swift scanner counted.
+            let utf16_width = |lead: u8| if utf8_width(lead) == 4 { 2 } else { 1 };
+            let escaped = first + 1;
+            if escaped >= self.len() {
+                return None;
+            }
+            let mut index = escaped + utf8_width(self.units[escaped]);
+            let mut units = 2 + utf16_width(self.units[escaped]);
+            while index < self.len() && units <= 12 && self.units[index] != b'\n' {
                 if self.units[index] == b'\'' {
                     return Some(index + 1);
                 }
-                index += 1;
+                units += utf16_width(self.units[index]);
+                index += utf8_width(self.units[index]);
             }
             return None;
         }
@@ -1698,6 +1706,14 @@ mod tests {
         let python = highlighted("x = \"\"\"first\nsecond\"\"\"\ny = 1  # note", &PYTHON);
         assert!(python.contains(&("\"\"\"first\nsecond\"\"\"", String)));
         assert!(python.contains(&("# note", Comment)));
+    }
+
+    #[test]
+    fn an_escaped_character_literal_may_run_twelve_utf16_units_past_its_tick() {
+        let fits = format!("'\\{}'", "é".repeat(10));
+        assert_eq!(texts(&highlighted(&fits, &RUST), String), [fits.as_str()]);
+        let too_long = format!("'\\{}'", "é".repeat(11));
+        assert!(texts(&highlighted(&too_long, &RUST), String).is_empty());
     }
 
     #[test]

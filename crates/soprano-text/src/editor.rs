@@ -410,7 +410,7 @@ impl EditorDocument {
     /// Return: a line break that keeps the current line's indentation (its leading spaces
     /// and tabs up to the caret), replacing `selection`. Returns the caret after it.
     pub fn insert_newline(&mut self, selection: Range<usize>) -> usize {
-        let caret = self.clamp(selection.start);
+        let caret = self.clamp_offset(selection.start);
         let line_start = self.buffer.line_to_byte(self.buffer.byte_to_line(caret));
         let indentation: String = self
             .buffer
@@ -422,8 +422,8 @@ impl EditorDocument {
     }
 
     fn edit(&mut self, range: Range<usize>, text: &str, typing: bool) -> Range<usize> {
-        let start = self.clamp(range.start);
-        let end = self.clamp(range.end).max(start);
+        let start = self.clamp_offset(range.start);
+        let end = self.clamp_offset(range.end).max(start);
         let removed = self.buffer.byte_slice(start..end).to_string();
         if removed.is_empty() && text.is_empty() {
             return start..start;
@@ -431,14 +431,15 @@ impl EditorDocument {
         self.splice(start, end, text);
         let edit = Edit { start, removed, inserted: text.to_string() };
         self.history.redo.clear();
+        // Keystrokes join the typing step while they continue at its caret: typing on,
+        // backspacing from it, or deleting forward from it, as a text view groups typing.
         let joins = typing
             && self.history.typing_open
-            && self
-                .history
-                .undo
-                .last()
-                .and_then(|group| group.last())
-                .is_some_and(|last| last.start + last.inserted.len() == start && edit.removed.is_empty());
+            && self.history.undo.last().and_then(|group| group.last()).is_some_and(|last| {
+                let caret = last.start + last.inserted.len();
+                (start == caret && edit.removed.is_empty())
+                    || (edit.inserted.is_empty() && (end == caret || start == caret))
+            });
         if joins && let Some(group) = self.history.undo.last_mut() {
             group.push(edit);
         } else {
@@ -457,34 +458,56 @@ impl EditorDocument {
         !self.history.redo.is_empty()
     }
 
-    /// Undoes the last step; returns the range to select (the restored text).
+    /// Undoes the last step; returns the range to select (the text the step had replaced).
     pub fn undo(&mut self) -> Option<Range<usize>> {
         let group = self.history.undo.pop()?;
         self.history.typing_open = false;
-        let mut selection = 0..0;
+        let mut selection: Option<Range<usize>> = None;
         for edit in group.iter().rev() {
             self.splice(edit.start, edit.start + edit.inserted.len(), &edit.removed);
-            selection = edit.start..edit.start + edit.removed.len();
+            let restored = edit.start..edit.start + edit.removed.len();
+            selection = Some(match selection {
+                None => restored,
+                // The later edits' restored text, moved by this one, joined with its own.
+                Some(range) => {
+                    let end = if range.end > edit.start {
+                        range.end - edit.inserted.len() + edit.removed.len()
+                    } else {
+                        range.end
+                    };
+                    range.start.min(restored.start)..end.max(restored.end)
+                }
+            });
         }
         self.history.redo.push(group);
         self.did_edit();
-        Some(selection)
+        selection
     }
 
-    /// Redoes the last undone step; returns the range to select (the inserted text).
+    /// Redoes the last undone step; returns the range to select (the text it inserted).
     pub fn redo(&mut self) -> Option<Range<usize>> {
         let group = self.history.redo.pop()?;
         self.history.typing_open = false;
+        let mut selection: Option<Range<usize>> = None;
         for edit in &group {
             self.splice(edit.start, edit.start + edit.removed.len(), &edit.inserted);
+            let inserted = edit.start..edit.start + edit.inserted.len();
+            selection = Some(match selection {
+                None => inserted,
+                // The earlier edits' text, moved by this one, joined with its own.
+                Some(range) => {
+                    let end = if range.end > edit.start {
+                        range.end.saturating_sub(edit.removed.len()).max(edit.start) + edit.inserted.len()
+                    } else {
+                        range.end
+                    };
+                    range.start.min(inserted.start)..end.max(inserted.end)
+                }
+            });
         }
-        let selection = match (group.first(), group.last()) {
-            (Some(first), Some(last)) => first.start..last.start + last.inserted.len(),
-            _ => 0..0,
-        };
         self.history.undo.push(group);
         self.did_edit();
-        Some(selection)
+        selection
     }
 
     fn splice(&mut self, start: usize, end: usize, text: &str) {
@@ -494,10 +517,11 @@ impl EditorDocument {
         self.buffer.insert(char_start, text);
     }
 
-    /// `offset` within the text, moved back to a character boundary.
-    fn clamp(&self, offset: usize) -> usize {
-        let offset = offset.min(self.buffer.len_bytes());
-        self.buffer.char_to_byte(self.buffer.byte_to_char(offset))
+    /// `offset` within the text, moved back to a character boundary: what every offset a
+    /// view keeps across edits made elsewhere (another tab, a reload) must go through before
+    /// slicing the rope.
+    pub fn clamp_offset(&self, offset: usize) -> usize {
+        floor_char_boundary(&self.buffer, offset)
     }
 
     fn did_edit(&mut self) {
@@ -709,19 +733,25 @@ impl EditorDocument {
     }
 }
 
-/// A view's selection after its document reloaded: each range kept inside the new text,
-/// or a caret at the start when there was none.
-pub fn restore_selection(selection: &[Range<usize>], length: usize) -> Vec<Range<usize>> {
+/// A view's selection after its document reloaded: each range kept inside the new text and
+/// moved back to character boundaries (an old offset can fall inside a multi-byte
+/// character of the new text), or a caret at the start when there was none.
+pub fn restore_selection(selection: &[Range<usize>], text: &Rope) -> Vec<Range<usize>> {
     if selection.is_empty() {
         return vec![Range::default()];
     }
     selection
         .iter()
         .map(|range| {
-            let start = range.start.min(length);
-            start..start + (range.end - range.start).min(length - start)
+            let start = floor_char_boundary(text, range.start);
+            start..floor_char_boundary(text, range.end).max(start)
         })
         .collect()
+}
+
+fn floor_char_boundary(text: &Rope, offset: usize) -> usize {
+    let offset = offset.min(text.len_bytes());
+    text.char_to_byte(text.byte_to_char(offset))
 }
 
 /// `ByteCountFormatter` with the file count style (decimal units): "1 byte", "999 bytes",
@@ -1046,8 +1076,65 @@ mod tests {
     }
 
     #[test]
-    fn a_reloaded_selection_stays_inside_the_new_text() {
-        assert_eq!(restore_selection(&[], 10), vec![Range::default()]);
-        assert_eq!(restore_selection(&[4..9, 12..15], 6), [4..6, 6..6]);
+    fn a_reloaded_selection_stays_inside_the_new_text_on_character_boundaries() {
+        assert_eq!(restore_selection(&[], &Rope::from_str("0123456789")), vec![Range::default()]);
+        assert_eq!(restore_selection(&[4..9, 12..15], &Rope::from_str("abcdef")), [4..6, 6..6]);
+        // "日本語" is three 3-byte characters: offsets 4 and 7 fall inside the second and third.
+        let text = Rope::from_str("日本語");
+        assert_eq!(restore_selection(&[4..7, 1..2], &text), [3..6, 0..0]);
+    }
+
+    #[test]
+    fn offsets_kept_by_another_view_are_moved_to_a_character_boundary() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("cjk.txt");
+        write(&path, "日本".as_bytes());
+        let document = EditorDocument::open(&path);
+        assert_eq!(document.clamp_offset(4), 3);
+        assert_eq!(document.clamp_offset(99), 6);
+    }
+
+    #[test]
+    fn a_run_of_backspaces_and_forward_deletes_is_one_typing_undo_step() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.txt");
+        write(&path, b"hello world");
+        let mut document = EditorDocument::open(&path);
+        // Type "!" after "hello", backspace twice, then delete forward twice.
+        document.type_text(5..5, "!");
+        document.type_text(5..6, "");
+        document.type_text(4..5, "");
+        document.type_text(4..5, "");
+        document.type_text(4..5, "");
+        assert_eq!(document.text(), "hellorld");
+        // One step brings back "o w", the text the run removed, selected.
+        assert_eq!(document.undo(), Some(4..7));
+        assert_eq!(document.text(), "hello world");
+        assert!(!document.can_undo());
+        assert_eq!(document.redo(), Some(4..4));
+        assert_eq!(document.text(), "hellorld");
+        // A keystroke elsewhere starts a new step.
+        document.type_text(0..1, "");
+        document.type_text(3..4, "");
+        assert_eq!(document.undo(), Some(3..4));
+        assert_eq!(document.text(), "ellorld");
+    }
+
+    #[test]
+    fn saving_into_a_deleted_folder_fails_and_keeps_the_edits() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("gone");
+        fs::create_dir(&folder).unwrap();
+        let path = folder.join("note.txt");
+        write(&path, b"one");
+        let mut document = EditorDocument::open(&path);
+        document.replace(3..3, " two");
+        fs::remove_dir_all(&folder).unwrap();
+
+        assert!(document.save().is_err());
+        assert!(document.is_dirty());
+        assert_eq!(document.text(), "one two");
+        assert!(!folder.exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
     }
 }

@@ -161,13 +161,14 @@ pub struct HunkHighlights {
 }
 
 impl HunkHighlights {
-    /// Larger sides stay uncolored.
+    /// Larger sides (in UTF-16 code units, as Swift counted) stay uncolored.
     pub const MAXIMUM_LENGTH: usize = 1_500_000;
 
     /// Colors from the hunks of `path`: each side rebuilt from its lines and highlighted
     /// whole, so multi-line strings and comments color correctly.
     pub fn compute(hunks: &[DiffHunk], path: &str) -> Self {
-        let Some(language) = path.split('/').next_back().and_then(CodeLanguage::for_file) else {
+        let name = path.split('/').rfind(|part| !part.is_empty());
+        let Some(language) = name.and_then(CodeLanguage::for_file) else {
             return Self::default();
         };
         let lines: Vec<&HunkLine> = hunks.iter().flat_map(|hunk| &hunk.lines).collect();
@@ -187,17 +188,20 @@ fn side(
     let mut numbers = Vec::new();
     let mut starts = Vec::new();
     let mut text = String::new();
+    let mut utf16_length = 0;
     for line in
         lines.iter().filter(|line| line.kind != excluded && line.kind != DiffLineKind::NoNewlineMarker)
     {
         let Some(line_number) = number(line) else { continue };
         if !numbers.is_empty() {
             text.push('\n');
+            utf16_length += 1;
         }
         numbers.push(line_number);
         starts.push(text.len());
         text.push_str(&line.text);
-        if text.len() > HunkHighlights::MAXIMUM_LENGTH {
+        utf16_length += line.text.encode_utf16().count();
+        if utf16_length > HunkHighlights::MAXIMUM_LENGTH {
             return HashMap::new();
         }
     }
@@ -402,5 +406,18 @@ mod tests {
         unpositioned.highlight();
         assert!(unpositioned.highlights.new.is_empty());
         assert_eq!(unpositioned.max_number, 0);
+    }
+
+    #[test]
+    fn the_highlight_limit_counts_utf16_units_and_a_trailing_slash_keeps_the_language() {
+        // 600,000 "é" are 1.2 MB of UTF-8 but 600,000 UTF-16 units: still colored.
+        let wide = format!("@@ -1,1 +1,1 @@\n-let a = \"{}\"\n+let a = 1\n", "é".repeat(600_000));
+        let hunks = parse_hunks(&wide);
+        assert!(!HunkHighlights::compute(&hunks, "a.swift").old.is_empty());
+        let too_long = format!("@@ -1,1 +1,1 @@\n-let a = \"{}\"\n+let a = 1\n", "a".repeat(1_500_001));
+        assert!(HunkHighlights::compute(&parse_hunks(&too_long), "a.swift").old.is_empty());
+
+        let small = parse_hunks("@@ -1,1 +1,1 @@\n-let a = 1\n+let a = 2\n");
+        assert!(!HunkHighlights::compute(&small, "Sources/a.swift/").new.is_empty());
     }
 }

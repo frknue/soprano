@@ -59,12 +59,34 @@ pub enum TableAlignment {
     Right,
 }
 
+/// One table cell. GitHub-flavored table spans (as swift-markdown parses them): an empty
+/// cell written as adjacent pipes (`||`) widens the cell before it, and a body cell holding
+/// only `^` lengthens the cell above it. A covered cell keeps its place in the row with a
+/// zero `colspan` or `rowspan`; renderers skip it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TableCell {
+    pub inlines: Vec<MarkdownInline>,
+    pub colspan: usize,
+    pub rowspan: usize,
+}
+
+impl TableCell {
+    pub fn new(inlines: Vec<MarkdownInline>) -> Self {
+        Self { inlines, colspan: 1, rowspan: 1 }
+    }
+
+    /// Covered by a neighbor's span: not drawn.
+    pub fn is_covered(&self) -> bool {
+        self.colspan == 0 || self.rowspan == 0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MarkdownTable {
     /// One per column; `None` is the natural alignment.
     pub alignments: Vec<Option<TableAlignment>>,
-    pub header: Vec<Vec<MarkdownInline>>,
-    pub rows: Vec<Vec<Vec<MarkdownInline>>>,
+    pub header: Vec<TableCell>,
+    pub rows: Vec<Vec<TableCell>>,
 }
 
 impl MarkdownTable {
@@ -74,6 +96,27 @@ impl MarkdownTable {
 
     pub fn alignment(&self, column: usize) -> Option<TableAlignment> {
         self.alignments.get(column).copied().flatten()
+    }
+
+    /// A `||` cell widens the nearest drawn cell before it in its row.
+    fn span_columns(row: &mut [TableCell], column: usize) {
+        if let Some(owner) = row[..column].iter_mut().rev().find(|cell| cell.colspan > 0) {
+            owner.colspan += 1;
+            row[column].colspan = 0;
+        }
+    }
+
+    /// A `^` cell lengthens the nearest drawn cell above it in its column.
+    fn span_rows(&mut self, row: usize, column: usize) {
+        let Some(above) = (0..row).rev().find(|above| {
+            self.rows[*above].get(column).is_some_and(|cell| cell.rowspan > 0 && cell.colspan > 0)
+        }) else {
+            return;
+        };
+        self.rows[above][column].rowspan += 1;
+        let cell = &mut self.rows[row][column];
+        cell.rowspan = 0;
+        cell.inlines.clear();
     }
 }
 
@@ -108,9 +151,15 @@ pub enum MarkdownBlock {
 /// Parses Markdown into blocks. `line_breaks` turns soft line breaks into hard ones (user
 /// messages keep their lines).
 pub fn parse(text: &str, line_breaks: bool) -> Vec<MarkdownBlock> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH;
-    let events: Vec<Event> = Parser::new_ext(text, options).collect();
-    let mut builder = Builder { events: &events, position: 0, line_breaks, slugs: HashMap::new() };
+    // `Document(parsing:)` turns on smart punctuation: ’ “” – — ….
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_SMART_PUNCTUATION;
+    let (events, ranges): (Vec<Event>, Vec<std::ops::Range<usize>>) =
+        Parser::new_ext(text, options).into_offset_iter().unzip();
+    let mut builder =
+        Builder { events: &events, ranges: &ranges, position: 0, line_breaks, slugs: HashMap::new() };
     builder.blocks_until(None)
 }
 
@@ -194,11 +243,12 @@ fn roman(number: u64) -> String {
     result
 }
 
-/// A heading's anchor: case and diacritics folded, alphanumeric runs joined by `-`,
-/// "section" when nothing is left.
+/// A heading's anchor: case and diacritics folded (full case folding, so `Straße` reads as
+/// `strasse`; Hangul and other precomposed letters recomposed), alphanumeric runs joined by
+/// `-`, "section" when nothing is left.
 pub fn heading_slug(text: &str) -> String {
-    let folded: String =
-        text.nfd().filter(|character| !is_combining_mark(*character)).flat_map(char::to_lowercase).collect();
+    let without_marks: String = text.nfd().filter(|character| !is_combining_mark(*character)).collect();
+    let folded: String = caseless::default_case_fold_str(&without_marks).nfc().collect();
     let mut slug = String::new();
     let mut needs_dash = false;
     for character in folded.chars() {
@@ -217,6 +267,8 @@ pub fn heading_slug(text: &str) -> String {
 
 struct Builder<'a, 'e> {
     events: &'a [Event<'e>],
+    /// The source range of each event (an empty table cell's range tells `||` from `| |`).
+    ranges: &'a [std::ops::Range<usize>],
     position: usize,
     line_breaks: bool,
     /// How often each heading slug was used, for unique anchors (`a`, `a-1`, …).
@@ -378,11 +430,19 @@ impl<'a, 'e> Builder<'a, 'e> {
                 Event::End(TagEnd::TableHead) => in_head = false,
                 Event::Start(Tag::TableRow) => table.rows.push(Vec::new()),
                 Event::Start(Tag::TableCell) => {
-                    let cell = self.inlines_until(TagEnd::TableCell);
-                    if in_head {
-                        table.header.push(cell);
-                    } else if let Some(row) = table.rows.last_mut() {
-                        row.push(cell);
+                    let adjacent_pipes =
+                        self.ranges.get(self.position - 1).is_some_and(|range| range.is_empty());
+                    let cell = TableCell::new(self.inlines_until(TagEnd::TableCell));
+                    let row_index = table.rows.len().saturating_sub(1);
+                    let row = if in_head { Some(&mut table.header) } else { table.rows.last_mut() };
+                    let Some(row) = row else { continue };
+                    let column = row.len();
+                    let carets = cell.inlines == [MarkdownInline::Text("^".into())];
+                    row.push(cell);
+                    if adjacent_pipes {
+                        MarkdownTable::span_columns(row, column);
+                    } else if carets && !in_head {
+                        table.span_rows(row_index, column);
                     }
                 }
                 Event::End(TagEnd::Table) => break,
@@ -633,16 +693,22 @@ pub fn opens_linked_file(path: &Path) -> bool {
         "lua",
         "tcl",
     ];
+    // What conforms to image, PDF, audiovisual content or plain text (source code included)
+    // in the system's type tree.
     const VIEWABLE: &[&str] = &[
         // Documents and plain text.
-        "pdf", "txt", "text", "md", "markdown", "log", "csv", "tsv",
+        "pdf", "txt", "text", "md", "markdown", "log", "csv", "tsv", "patch", "diff", "strings",
         // Source code is plain text to the system.
-        "c", "h", "cc", "cpp", "cxx", "hpp", "m", "mm", "swift", "rs", "go", "java", "kt", "cs", "css",
-        "scss", // Images.
-        "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "avif", "ico", "icns",
-        "svg", // Audio and video.
-        "mp3", "m4a", "aac", "wav", "aif", "aiff", "flac", "ogg", "opus", "mp4", "m4v", "mov", "avi", "mkv",
-        "webm",
+        "c", "h", "cc", "cpp", "cxx", "c++", "hh", "hpp", "hxx", "m", "mm", "swift", "rs", "go", "java", "kt",
+        "cs", "css", "scss", "s", "asm", "f", "f77", "f90", "for", "pas", "ada", "adb", "ads", "y", "l",
+        // Images.
+        "png", "jpg", "jpeg", "jpe", "jfif", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "avif",
+        "ico", "icns", "svg", "psd", "tga", "exr", "hdr", "jp2", "j2k", "pict", "pct", "dng", "cr2", "cr3",
+        "crw", "nef", "nrw", "arw", "srf", "sr2", "orf", "raf", "rw2", "pef", "raw", "3fr", "erf", "mrw",
+        "x3f", // Audio and video.
+        "mp3", "m4a", "m4b", "aac", "wav", "wave", "aif", "aiff", "aifc", "caf", "flac", "ogg", "opus",
+        "mid", "midi", "kar", "au", "snd", "amr", "ac3", "mp4", "m4v", "mov", "qt", "avi", "mkv", "webm",
+        "mpg", "mpeg", "mpe", "m2v", "m2ts", "mts", "vob", "3gp", "3g2", "dv", "wmv", "wma", "flv",
     ];
     !SCRIPTS.contains(&extension.as_str()) && VIEWABLE.contains(&extension.as_str())
 }
@@ -701,12 +767,19 @@ pub struct ReaderHistory {
 }
 
 impl ReaderHistory {
-    /// A new document opened by a link or a command: later entries are dropped.
-    pub fn record(&mut self, path: PathBuf) {
+    /// A document opened by a link or a command: later entries are dropped. Returns false
+    /// (nothing recorded) when `path` is already the current document — the reader only
+    /// scrolls to the link's fragment then.
+    pub fn record(&mut self, path: PathBuf) -> bool {
+        let path = soprano_platform::paths::normalize(&path);
+        if self.current() == Some(path.as_path()) {
+            return false;
+        }
         let keep = self.index.map_or(0, |index| index + 1);
         self.entries.truncate(keep);
         self.entries.push(path);
         self.index = Some(self.entries.len() - 1);
+        true
     }
 
     pub fn current(&self) -> Option<&Path> {
@@ -801,8 +874,8 @@ mod tests {
             blocks[3],
             MarkdownBlock::Table(MarkdownTable {
                 alignments: vec![None, Some(TableAlignment::Right)],
-                header: vec![vec![text("Name")], vec![text("State")]],
-                rows: vec![vec![vec![text("Reader")], vec![text("ready")]]],
+                header: vec![TableCell::new(vec![text("Name")]), TableCell::new(vec![text("State")])],
+                rows: vec![vec![TableCell::new(vec![text("Reader")]), TableCell::new(vec![text("ready")])]],
             })
         );
         assert_eq!(blocks[4], MarkdownBlock::Html("<script>alert(\"no\")</script>".into()));
@@ -898,9 +971,34 @@ mod tests {
 
     #[test]
     fn heading_anchors_fold_case_and_diacritics() {
-        assert_eq!(heading_slug("Café Über Straße!"), "cafe-uber-straße");
+        assert_eq!(heading_slug("Café Über Straße!"), "cafe-uber-strasse");
         assert_eq!(heading_slug("  --  "), "section");
         assert_eq!(heading_slug("API v2.0"), "api-v2-0");
+        // Hangul syllables decompose into jamo; the anchor recomposes them.
+        assert_eq!(heading_slug("한국어 문서"), "한국어-문서");
+    }
+
+    #[test]
+    fn quotes_dashes_and_ellipses_are_set_typographically() {
+        let MarkdownBlock::Paragraph(inlines) = &parse("\"Hi\" -- it's 1---2...", false)[0] else { panic!() };
+        assert_eq!(plain_text(inlines), "“Hi” – it’s 1—2…");
+    }
+
+    #[test]
+    fn adjacent_pipes_widen_a_cell_and_a_caret_lengthens_the_cell_above() {
+        let blocks = parse("| a | b | c |\n|---|---|---|\n| x || y |\n| ^ | | z |\n| w |||\n", false);
+        let MarkdownBlock::Table(table) = &blocks[0] else { panic!("{blocks:?}") };
+        let spans =
+            |row: &[TableCell]| row.iter().map(|cell| (cell.colspan, cell.rowspan)).collect::<Vec<_>>();
+        assert_eq!(spans(&table.header), [(1, 1), (1, 1), (1, 1)]);
+        assert_eq!(spans(&table.rows[0]), [(2, 2), (0, 1), (1, 1)]);
+        // `| |` (with a space) is an ordinary empty cell; `^` is covered, without its text.
+        assert_eq!(spans(&table.rows[1]), [(1, 0), (1, 1), (1, 1)]);
+        assert!(table.rows[1][0].is_covered() && table.rows[1][0].inlines.is_empty());
+        assert_eq!(spans(&table.rows[2]), [(3, 1), (0, 1), (0, 1)]);
+        // A caret with nothing above stays text.
+        let MarkdownBlock::Table(lone) = &parse("| a |\n|---|\n| ^ |\n", false)[0] else { panic!() };
+        assert_eq!(lone.rows[0][0], TableCell::new(vec![text("^")]));
     }
 
     #[test]
@@ -1009,9 +1107,14 @@ mod tests {
         assert_eq!(history.back(), Some(Path::new("/a.md")));
         assert_eq!(history.back(), None);
         assert_eq!(history.forward(), Some(Path::new("/b.md")));
-        history.record("/d.md".into());
+        assert!(history.record("/d.md".into()));
         assert!(!history.can_go_forward());
         assert_eq!(history.back(), Some(Path::new("/b.md")));
         assert_eq!(history.current(), Some(Path::new("/b.md")));
+        // A link into the open document (`README.md#usage`) records nothing and keeps the
+        // forward history.
+        assert!(!history.record("/x/../b.md".into()));
+        assert!(history.can_go_forward());
+        assert_eq!(history.forward(), Some(Path::new("/d.md")));
     }
 }

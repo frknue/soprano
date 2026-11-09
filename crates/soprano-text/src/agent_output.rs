@@ -205,7 +205,10 @@ impl Output<'_> {
     }
 
     fn apply(&mut self, pattern: &Regex, line: &str, layer: Layer) {
-        for found in pattern.find_iter(line).flatten() {
+        // An error (the backtracking limit on a pathological line) is returned again by every
+        // later `next()` without moving on, so it ends the layer rather than being skipped.
+        for found in pattern.find_iter(line) {
+            let Ok(found) = found else { break };
             self.set(found.range(), layer);
         }
     }
@@ -413,6 +416,18 @@ static PATTERNS: LazyLock<Patterns> = LazyLock::new(|| Patterns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_regex_that_gives_up_on_a_line_ends_its_layer_instead_of_looping() {
+        // Lookaround runs in the backtracking engine; a limit of 1 makes it fail at once.
+        let pattern = RegexBuilder::new(r"(?<=a)(?:a|aa)+b").backtrack_limit(1).build().unwrap();
+        let line = "a".repeat(64);
+        assert!(pattern.find_iter(&line).next().is_some_and(|found| found.is_err()));
+        let mut styles = vec![OutputStyle::default(); line.len()];
+        let mut output = Output { styles: &mut styles, offset: 0 };
+        output.apply(&pattern, &line, Layer::color(OutputColor::Cyan));
+        assert!(styles.iter().all(|style| style.color == OutputColor::TextPrimary));
+    }
 
     fn style_of(text: &str, needle: &str, runs: &[OutputRun]) -> OutputStyle {
         let at = text.find(needle).unwrap_or_else(|| panic!("{needle} not in text"));

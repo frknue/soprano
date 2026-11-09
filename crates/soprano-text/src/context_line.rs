@@ -71,16 +71,20 @@ impl ContextLine {
 }
 
 /// `soprano` for `~/git/private/soprano`, `~` for the home folder itself
-/// (`TerminalTitle.folderName`).
+/// (`TerminalTitle.folderName`, as `soprano_model::terminal_title::folder_name_in`): one
+/// trailing separator dropped, then the last non-empty component, split on the platform's
+/// separators (`/`, and `\` on Windows).
 pub fn folder_name(path: &str, home: &str) -> String {
-    let trimmed = if path.len() > 1 { path.strip_suffix('/').unwrap_or(path) } else { path };
+    let trimmed = match path.chars().last() {
+        Some(last) if std::path::is_separator(last) && path.chars().count() > 1 => {
+            &path[..path.len() - last.len_utf8()]
+        }
+        _ => path,
+    };
     if trimmed == home || trimmed == "~" {
         return "~".to_string();
     }
-    match trimmed.rsplit('/').next() {
-        Some(name) if !name.is_empty() => name.to_string(),
-        _ => trimmed.to_string(),
-    }
+    trimmed.split(std::path::is_separator).rfind(|part| !part.is_empty()).unwrap_or(trimmed).to_string()
 }
 
 #[cfg(test)]
@@ -130,5 +134,9 @@ mod tests {
         assert_eq!(folder_name("/Users/me", "/Users/me"), "~");
         assert_eq!(folder_name("~", "/Users/me"), "~");
         assert_eq!(folder_name("/", "/Users/me"), "/");
+        assert_eq!(folder_name("/a/git//", "/Users/me"), "git");
+        assert_eq!(folder_name("/Users/me/", "/Users/me"), "~");
+        let windows = folder_name(r"C:\Users\me\shop", r"C:\Users\me");
+        assert_eq!(windows, if cfg!(windows) { "shop" } else { r"C:\Users\me\shop" });
     }
 }

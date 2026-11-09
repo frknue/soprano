@@ -1,6 +1,6 @@
 # soprano-text — API report from TextPort
 
-The new crate `crates/soprano-text` is finished. `CARGO_TARGET_DIR=target/agent-soprano-text cargo test -p soprano-text` passes (71 tests), clippy with `--all-targets` reports no warnings, and `cargo fmt` leaves no changes. Clippy is also clean for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`.
+The new crate `crates/soprano-text` is finished. `CARGO_TARGET_DIR=target/agent-soprano-text cargo test -p soprano-text` passes (83 tests after the parity-review fixes in `reviews/text-ui.md`), clippy with `--all-targets` reports no warnings, and `cargo fmt` leaves no changes. Clippy is also clean for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`.
 
 Every range in the crate is a UTF-8 byte range, so it can be used directly for GPUI text runs. There is no gpui and no TODOs.
 

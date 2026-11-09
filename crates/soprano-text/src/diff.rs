@@ -510,7 +510,7 @@ impl DiffList {
             }
             let Some(first) = line.text.chars().next() else { continue };
             if first.is_alphabetic() || first == '_' || first == '$' {
-                return line.text.trim_end().chars().take(80).collect();
+                return line.text.trim_end().graphemes(true).take(80).collect();
             }
         }
         String::new()
@@ -651,6 +651,17 @@ impl DiffLocation {
             || external_git_directory.is_some_and(|directory| path.starts_with(directory))
     }
 
+    /// Whether a batch of file-system events should reload the diff: the watcher asked for a
+    /// rescan (it dropped events), or one of `paths` is relevant.
+    pub fn needs_reload(
+        &self,
+        paths: &[PathBuf],
+        needs_rescan: bool,
+        external_git_directory: Option<&Path>,
+    ) -> bool {
+        needs_rescan || paths.iter().any(|path| self.is_relevant(path, external_git_directory))
+    }
+
     /// The paths to watch: the repository root, and an external git directory.
     pub fn watched_paths(&self, external_git_directory: Option<&Path>) -> Vec<PathBuf> {
         std::iter::once(self.root.clone()).chain(external_git_directory.map(Path::to_path_buf)).collect()
@@ -692,6 +703,8 @@ pub const NOT_IN_REPOSITORY_MESSAGE: &str = "This file is not in a Git repositor
 /// Reads and lays out the diff of `file_path` (staged or working tree). Blocks on git: run
 /// it off the UI thread.
 pub fn load_diff(file_path: &Path, staged: bool) -> DiffLoadResult {
+    // Like `standardizedFileURL`: `..` and `.` never reach git or the watcher's paths.
+    let file_path = &crate::editor::standardized(file_path);
     let file_exists = file_path.exists();
     let message = |text: &str, location: Option<DiffLocation>| DiffLoadResult {
         location,
@@ -738,7 +751,7 @@ pub fn relative_path(path: &Path, root: &Path) -> Option<String> {
 /// The symlink-free path, resolving the nearest existing ancestor for a deleted file.
 pub fn resolved_path(path: &Path) -> PathBuf {
     if let Ok(resolved) = std::fs::canonicalize(path) {
-        return resolved;
+        return without_verbatim_prefix(resolved);
     }
     match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) if !parent.as_os_str().is_empty() && parent != path => {
@@ -746,6 +759,19 @@ pub fn resolved_path(path: &Path) -> PathBuf {
         }
         _ => path.to_path_buf(),
     }
+}
+
+/// On Windows, `C:\x` for the verbatim `\\?\C:\x` that `canonicalize` returns: watchers
+/// report plain paths, and the two spellings share no components. UNC and other paths, and
+/// every path elsewhere, stay as they are.
+fn without_verbatim_prefix(path: PathBuf) -> PathBuf {
+    if cfg!(windows)
+        && let Some(plain) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\"))
+        && !plain.starts_with(r"UNC\")
+    {
+        return PathBuf::from(plain);
+    }
+    path
 }
 
 #[cfg(test)]
@@ -981,6 +1007,40 @@ mod tests {
         );
         assert_eq!(relative_path(Path::new("/repo"), Path::new("/repo")), None);
         assert_eq!(relative_path(Path::new("/repository/a"), Path::new("/repo")), None);
+
+        // A batch reloads when any path is relevant, or when the watcher dropped events.
+        let unrelated = [PathBuf::from("/real/repo/src/b.rs")];
+        assert!(!location.needs_reload(&unrelated, false, None));
+        assert!(location.needs_reload(&unrelated, true, None));
+        assert!(location.needs_reload(
+            &[unrelated[0].clone(), PathBuf::from("/real/repo/.git/HEAD")],
+            false,
+            None
+        ));
+    }
+
+    #[test]
+    fn verbatim_paths_lose_their_prefix_only_on_windows() {
+        let plain = without_verbatim_prefix(PathBuf::from(r"\\?\C:\repo\a.rs"));
+        let expected = if cfg!(windows) { r"C:\repo\a.rs" } else { r"\\?\C:\repo\a.rs" };
+        assert_eq!(plain, PathBuf::from(expected));
+        let unc = PathBuf::from(r"\\?\UNC\server\share\a.rs");
+        assert_eq!(without_verbatim_prefix(unc.clone()), unc);
+    }
+
+    #[test]
+    fn the_fold_strip_names_at_most_eighty_characters_of_the_declaration() {
+        // "é" written as e + combining accent: 80 characters, 160 code points.
+        let long = format!("struct {}", "e\u{301}".repeat(90));
+        let mut lines = vec![GitDiffLine::new(Context, Some(1), Some(1), &long)];
+        for number in 2..=10 {
+            lines.push(line(Context, Some(number), Some(number), "    x"));
+        }
+        lines.push(line(Added, None, Some(11), "    y"));
+        let document = DiffDocument::new("a.swift", lines, None);
+        let section = DiffList::section(&document, &document.unified.rows[7]);
+        assert_eq!(section.graphemes(true).count(), 80);
+        assert!(section.ends_with("e\u{301}"));
     }
 
     #[cfg(unix)]
@@ -1030,5 +1090,10 @@ mod tests {
         assert!(matches!(staged.content, DiffContent::Message(text) if text == "No staged changes"));
         let outside = load_diff(Path::new("/"), false);
         assert!(matches!(outside.content, DiffContent::Message(_)));
+        // `..` in the path is resolved before git sees it.
+        let dotted = load_diff(&root.join("missing/../app.txt"), false);
+        let DiffContent::Text(document) = dotted.content else { panic!("expected a text diff") };
+        assert_eq!(document.path, "app.txt");
+        assert_eq!(dotted.location.unwrap().real_file_path, file);
     }
 }
