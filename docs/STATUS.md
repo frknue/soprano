@@ -32,4 +32,4 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 
 ## Entscheidungen offen
 
-- Installation nach `/Applications` (ersetzt die Swift-App) und Merge nach `main`.
+- Merge nach `main` (Rust-Build ist seit 2026-11-09 in `/Applications/Soprano.app` installiert).
