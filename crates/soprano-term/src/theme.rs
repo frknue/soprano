@@ -29,32 +29,32 @@ impl TerminalTheme {
 }
 
 impl Default for TerminalTheme {
-    /// Folio Ink's terminal colors, so a terminal shown before the app applies its theme is
-    /// already dark and readable.
+    /// Folio Ink's terminal colors (`AppTheme.folioInk` in `Theme.swift`), so a terminal
+    /// shown before the app applies its theme is already dark and readable.
     fn default() -> Self {
         let c = Color::hex;
         Self {
             background: c(0x1d1b18),
-            foreground: c(0xe8e2d6),
+            foreground: c(0xe2dacb),
             cursor: c(0xe08a52),
             cursor_text: c(0x1d1b18),
-            selection_background: c(0x4a3a2c),
+            selection_background: c(0x483325),
             palette: [
-                c(0x1d1b18),
-                c(0xd9705f),
-                c(0x9db07a),
-                c(0xd8b36a),
-                c(0x7fa1c4),
-                c(0xbf8fb5),
-                c(0x7fb5ad),
-                c(0xb8b0a2),
-                c(0x6f665a),
-                c(0xe8836f),
-                c(0xb3c690),
-                c(0xe8c47e),
-                c(0x95b5d6),
-                c(0xd2a4c8),
-                c(0x95c9c1),
+                c(0x2a2622),
+                c(0xe0707a),
+                c(0x97ae76),
+                c(0xd6aa4f),
+                c(0x86a6cb),
+                c(0xc191b8),
+                c(0x74b3a9),
+                c(0xcfc6b5),
+                c(0x7d7469),
+                c(0xec8f97),
+                c(0xb0c592),
+                c(0xe8c272),
+                c(0xa3bfdf),
+                c(0xd5aacd),
+                c(0x93c9bf),
                 c(0xf4efe5),
             ],
         }
@@ -71,5 +71,18 @@ mod tests {
         assert_eq!(theme.unfocused_cursor(), theme.background.mix(theme.foreground, 0.55));
         assert_ne!(theme.unfocused_cursor(), theme.cursor);
         assert_eq!(theme.unfocused_cursor().a, 0xff);
+    }
+
+    #[test]
+    fn the_default_is_folio_inks_terminal_palette() {
+        let t = TerminalTheme::default();
+        let hex = |c: Color| c.to_hex();
+        assert_eq!(
+            [t.background, t.foreground, t.cursor, t.cursor_text, t.selection_background].map(hex),
+            ["#1d1b18", "#e2dacb", "#e08a52", "#1d1b18", "#483325"]
+        );
+        assert_eq!(hex(t.palette[0]), "#2a2622");
+        assert_eq!(hex(t.palette[7]), "#cfc6b5");
+        assert_eq!(hex(t.palette[15]), "#f4efe5");
     }
 }

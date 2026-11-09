@@ -194,6 +194,12 @@ pub struct GhosttyConfig {
     pub clipboard_paste_protection: Option<Option<bool>>,
     pub clipboard_paste_bracketed_safe: Option<Option<bool>>,
     pub macos_option_as_alt: Option<Option<OptionAsAlt>>,
+    /// `shell-integration`: the last value set; an empty value resets it.
+    pub shell_integration: Option<Option<String>>,
+    /// `shell-integration-features`: every value in order (Ghostty applies them one after
+    /// another, so `no-cursor` then `cursor` turns the cursor back on). An empty value is
+    /// kept as `""`, a reset.
+    pub shell_integration_features: Vec<String>,
 }
 
 impl GhosttyConfig {
@@ -259,6 +265,10 @@ impl GhosttyConfig {
             let empty = value.is_empty();
             match key {
                 "config-file" if !empty => includes.push(value.to_owned()),
+                "shell-integration" => {
+                    self.shell_integration = Some((!empty).then(|| value.to_owned()));
+                }
+                "shell-integration-features" => self.shell_integration_features.push(value.to_owned()),
                 "font-family" => {
                     // Repeated keys add fallbacks; the first one is the font.
                     if empty {
@@ -425,6 +435,19 @@ mod tests {
         assert!(s.clipboard_paste_protection && s.clipboard_paste_bracketed_safe);
         assert!(s.selection_clear_on_copy);
         assert_eq!(s.cursor_blink, None);
+    }
+
+    #[test]
+    fn shell_integration_keys_keep_the_last_mode_and_every_feature_list() {
+        let mut config = GhosttyConfig::default();
+        config.parse(
+            "shell-integration = zsh\nshell-integration-features = no-cursor\nshell-integration-features = cursor,no-title\n",
+        );
+        assert_eq!(config.shell_integration, Some(Some("zsh".into())));
+        assert_eq!(config.shell_integration_features, ["no-cursor", "cursor,no-title"]);
+        config.parse("shell-integration =\nshell-integration-features =\n");
+        assert_eq!(config.shell_integration, Some(None));
+        assert_eq!(config.shell_integration_features.last().map(String::as_str), Some(""));
     }
 
     #[test]
