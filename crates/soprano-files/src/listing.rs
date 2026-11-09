@@ -10,7 +10,11 @@ use soprano_git::natural::natural_compare;
 /// One directory entry as the explorer shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileExplorerEntry {
+    /// The display name (lossy for names that aren't valid UTF-8).
     pub name: String,
+    /// The exact on-disk name, for building paths: a name that isn't valid UTF-8 (possible
+    /// on Linux) must still be opened, renamed and trashed as itself.
+    pub file_name: std::ffi::OsString,
     /// Directories and symlinks that resolve to directories.
     pub is_directory: bool,
     pub is_symlink: bool,
@@ -28,7 +32,8 @@ pub fn entries(directory: &Path) -> std::io::Result<Vec<FileExplorerEntry>> {
     let mut entries = Vec::new();
     for entry in std::fs::read_dir(directory)? {
         let Ok(entry) = entry else { continue };
-        let name = entry.file_name().to_string_lossy().into_owned();
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy().into_owned();
         if is_always_hidden(&name) {
             continue;
         }
@@ -39,7 +44,7 @@ pub fn entries(directory: &Path) -> std::io::Result<Vec<FileExplorerEntry>> {
         } else {
             file_type.is_some_and(|t| t.is_dir())
         };
-        entries.push(FileExplorerEntry { name, is_directory, is_symlink });
+        entries.push(FileExplorerEntry { name, file_name, is_directory, is_symlink });
     }
     sort(&mut entries);
     Ok(entries)
@@ -53,6 +58,42 @@ pub fn compare(lhs: (&str, bool), rhs: (&str, bool)) -> Ordering {
 
 pub fn sort(entries: &mut [FileExplorerEntry]) {
     entries.sort_by(|lhs, rhs| compare((&lhs.name, lhs.is_directory), (&rhs.name, rhs.is_directory)));
+}
+
+/// Whether a folder is a macOS package (bundle) that Finder shows as one item, judged by
+/// the extensions of the common package types (Launch Services' full registry isn't
+/// queried). Always false elsewhere, where there are no packages.
+pub fn is_package(path: &Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    const PACKAGE_EXTENSIONS: [&str; 22] = [
+        "app",
+        "appex",
+        "bundle",
+        "framework",
+        "plugin",
+        "kext",
+        "xpc",
+        "prefpane",
+        "saver",
+        "qlgenerator",
+        "mdimporter",
+        "dsym",
+        "xcodeproj",
+        "xcworkspace",
+        "playground",
+        "xcarchive",
+        "rtfd",
+        "pages",
+        "numbers",
+        "key",
+        "scptd",
+        "photoslibrary",
+    ];
+    path.extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .is_some_and(|extension| PACKAGE_EXTENSIONS.contains(&extension.as_str()))
 }
 
 /// Whether any segment of the root-relative path is a dotfile.

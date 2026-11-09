@@ -1,14 +1,18 @@
 //! Finder's "natural" name order, the cross-platform stand-in for Foundation's
-//! `localizedStandardCompare`: case-insensitive, with runs of digits compared by value
-//! ("file2" before "file10").
+//! `localizedStandardCompare`: case- and diacritic-insensitive ("Ärger" sorts with the
+//! A's), with runs of digits compared by value ("file2" before "file10").
 
 use std::cmp::Ordering;
+use std::iter::Peekable;
 
-/// Compares `lhs` and `rhs` the way Finder orders names. Names that differ only in case
-/// (or in leading zeros) compare equal; callers break such ties themselves.
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
+
+/// Compares `lhs` and `rhs` the way Finder orders names. Names that differ only in case,
+/// accents (or leading zeros) compare equal; callers break such ties themselves.
 pub fn natural_compare(lhs: &str, rhs: &str) -> Ordering {
-    let mut left = lhs.chars().peekable();
-    let mut right = rhs.chars().peekable();
+    let mut left = folded(lhs);
+    let mut right = folded(rhs);
     loop {
         match (left.peek().copied(), right.peek().copied()) {
             (None, None) => return Ordering::Equal,
@@ -27,7 +31,7 @@ pub fn natural_compare(lhs: &str, rhs: &str) -> Ordering {
             (Some(l), Some(r)) => {
                 left.next();
                 right.next();
-                let order = l.to_lowercase().cmp(r.to_lowercase());
+                let order = l.cmp(&r);
                 if order != Ordering::Equal {
                     return order;
                 }
@@ -41,7 +45,12 @@ pub fn natural_compare_then_exact(lhs: &str, rhs: &str) -> Ordering {
     natural_compare(lhs, rhs).then_with(|| lhs.cmp(rhs))
 }
 
-fn take_digits(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+/// Decomposed, without combining marks, lowercased.
+fn folded(text: &str) -> Peekable<impl Iterator<Item = char> + '_> {
+    text.nfd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).peekable()
+}
+
+fn take_digits(chars: &mut Peekable<impl Iterator<Item = char>>) -> String {
     let mut digits = String::new();
     while let Some(c) = chars.peek().copied().filter(char::is_ascii_digit) {
         digits.push(c);
@@ -61,5 +70,13 @@ mod tests {
         assert_eq!(natural_compare("Docs", "docs"), Ordering::Equal);
         assert_eq!(natural_compare(".env", "a.md"), Ordering::Less);
         assert_eq!(natural_compare_then_exact("Docs", "docs"), Ordering::Less);
+    }
+
+    #[test]
+    fn accented_letters_sort_with_their_base_letter() {
+        assert_eq!(natural_compare("Ärger", "Zoo"), Ordering::Less);
+        assert_eq!(natural_compare("Ärger", "Apfel"), Ordering::Greater);
+        assert_eq!(natural_compare("école", "ecole"), Ordering::Equal);
+        assert_ne!(natural_compare_then_exact("école", "ecole"), Ordering::Equal);
     }
 }

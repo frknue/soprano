@@ -13,9 +13,16 @@ type ChangeHandler = Arc<dyn Fn() + Send + Sync>;
 /// Thread-safe. `on_change` fires on the file watcher's thread whenever a watched HEAD
 /// changes on disk; UI callers hop to their main thread themselves (the Swift class ran
 /// its watchers on the main queue).
+///
+/// Watchers live outside the state the watcher callbacks lock, and are only ever dropped
+/// with no lock held: notify's FSEvents backend joins its run-loop thread on drop, so
+/// dropping a watcher while its callback waits on a lock (or from inside its own
+/// callback) would hang forever.
 #[derive(Default)]
 pub struct GitBranchMonitor {
     inner: Arc<Mutex<Inner>>,
+    /// HEAD path -> active file watcher.
+    watchers: Mutex<HashMap<PathBuf, RecommendedWatcher>>,
 }
 
 #[derive(Default)]
@@ -27,8 +34,6 @@ struct Inner {
     branch_by_head_path: HashMap<PathBuf, String>,
     /// HEAD path -> the repository's default branch (`origin/HEAD`), `None` without one.
     default_branch_by_head_path: HashMap<PathBuf, Option<String>>,
-    /// HEAD path -> active file watcher.
-    watchers: HashMap<PathBuf, RecommendedWatcher>,
 }
 
 /// A repository without `origin/HEAD` counts these as its default branch.
@@ -75,44 +80,60 @@ impl GitBranchMonitor {
 
     /// Reconcile watchers with the current set of pane working directories.
     pub fn set_watched_paths(&self, paths: &[String]) {
-        let mut inner = lock(&self.inner);
-        let mut new_head_path_by_cwd = HashMap::new();
+        // Held for the whole reconciliation so concurrent calls don't interleave; watcher
+        // callbacks never take this lock.
+        let mut watchers = self.watchers.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut needed = HashSet::new();
-        for cwd in paths.iter().collect::<HashSet<_>>() {
-            let head_path = match inner.head_path_by_cwd.get(cwd.as_str()) {
-                Some(Some(cached)) => Some(cached.clone()),
-                _ => resolve_head_path(cwd),
-            };
-            if let Some(head_path) = &head_path {
-                needed.insert(head_path.clone());
+        let stale: Vec<RecommendedWatcher> = {
+            let mut inner = lock(&self.inner);
+            let mut new_head_path_by_cwd = HashMap::new();
+            for cwd in paths.iter().collect::<HashSet<_>>() {
+                let head_path = match inner.head_path_by_cwd.get(cwd.as_str()) {
+                    Some(Some(cached)) => Some(cached.clone()),
+                    _ => resolve_head_path(cwd),
+                };
+                if let Some(head_path) = &head_path {
+                    needed.insert(head_path.clone());
+                }
+                new_head_path_by_cwd.insert(cwd.clone(), head_path);
             }
-            new_head_path_by_cwd.insert(cwd.clone(), head_path);
-        }
-        inner.head_path_by_cwd = new_head_path_by_cwd;
+            inner.head_path_by_cwd = new_head_path_by_cwd;
 
-        let stale: Vec<PathBuf> =
-            inner.watchers.keys().filter(|path| !needed.contains(*path)).cloned().collect();
-        for head_path in stale {
-            inner.watchers.remove(&head_path);
-            inner.branch_by_head_path.remove(&head_path);
-            inner.default_branch_by_head_path.remove(&head_path);
-        }
+            let stale_paths: Vec<PathBuf> =
+                watchers.keys().filter(|path| !needed.contains(*path)).cloned().collect();
+            stale_paths
+                .into_iter()
+                .filter_map(|head_path| {
+                    inner.branch_by_head_path.remove(&head_path);
+                    inner.default_branch_by_head_path.remove(&head_path);
+                    watchers.remove(&head_path)
+                })
+                .collect()
+        };
+        let mut failed = Vec::new();
         for head_path in needed {
-            if inner.watchers.contains_key(&head_path) {
+            if watchers.contains_key(&head_path) {
                 continue;
             }
             match make_watcher(&head_path, Arc::downgrade(&self.inner)) {
                 Some(watcher) => {
-                    inner.watchers.insert(head_path, watcher);
+                    watchers.insert(head_path, watcher);
                 }
-                None => {
-                    // Watcher couldn't be established (unreadable HEAD, exhausted
-                    // fds): drop the cache so each rebuild re-reads instead of
-                    // serving a stale branch forever.
-                    inner.branch_by_head_path.remove(&head_path);
-                }
+                None => failed.push(head_path),
             }
         }
+        drop(watchers);
+        if !failed.is_empty() {
+            let mut inner = lock(&self.inner);
+            for head_path in failed {
+                // Watcher couldn't be established (unreadable HEAD, exhausted
+                // fds): drop the cache so each rebuild re-reads instead of
+                // serving a stale branch forever.
+                inner.branch_by_head_path.remove(&head_path);
+            }
+        }
+        // Dropped with no lock held (see the type's doc comment).
+        drop(stale);
     }
 }
 
@@ -257,7 +278,8 @@ pub fn parse_head(head_path: &Path) -> Option<String> {
         return (!name.is_empty()).then(|| name.to_owned());
     }
     if line.starts_with("ref: ") {
-        return line.rsplit('/').next().map(str::to_owned);
+        // Like Swift's `split(separator: "/").last`, which skips empty pieces.
+        return line.split('/').rfind(|piece| !piece.is_empty()).map(str::to_owned);
     }
     if line.chars().count() < 7 {
         return None;
@@ -365,5 +387,57 @@ mod tests {
         }
         assert!(fired.load(std::sync::atomic::Ordering::SeqCst));
         assert_eq!(monitor.branch(&path(&repository)).as_deref(), Some("feature"));
+    }
+
+    #[test]
+    fn a_symbolic_ref_ending_in_a_slash_names_its_last_nonempty_piece() {
+        let repository = make_repository("main", None);
+        let head = repository.path().join(".git/HEAD");
+        std::fs::write(&head, "ref: refs/remotes/origin/\n").expect("HEAD");
+
+        assert_eq!(parse_head(&head).as_deref(), Some("origin"));
+    }
+
+    /// HEAD changes racing watcher reconciliation must never hang: a watcher is never
+    /// dropped while its callback waits on the monitor's lock.
+    #[test]
+    fn reconciling_watchers_while_head_changes_never_hangs() {
+        let repository = make_repository("main", None);
+        let repo_path = path(&repository);
+        let git = repository.path().join(".git");
+        let (done_sender, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let monitor = GitBranchMonitor::new();
+            let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counter = changes.clone();
+            monitor.set_on_change(move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            });
+            let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let writer_stop = stop.clone();
+            let writer = std::thread::spawn(move || {
+                let mut flip = false;
+                while !writer_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    flip = !flip;
+                    let name = if flip { "feature" } else { "main" };
+                    let _ = std::fs::write(git.join("HEAD.lock"), format!("ref: refs/heads/{name}\n"));
+                    let _ = std::fs::rename(git.join("HEAD.lock"), git.join("HEAD"));
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+            });
+            for _ in 0..40 {
+                monitor.set_watched_paths(std::slice::from_ref(&repo_path));
+                std::thread::sleep(Duration::from_millis(10));
+                monitor.set_watched_paths(&[]);
+            }
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            let _ = writer.join();
+            monitor.set_watched_paths(std::slice::from_ref(&repo_path));
+            drop(monitor);
+            let _ = done_sender.send(());
+        });
+
+        assert!(done.recv_timeout(Duration::from_secs(60)).is_ok(), "the branch monitor hung");
+        let _ = worker.join();
     }
 }

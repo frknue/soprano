@@ -149,7 +149,7 @@ impl FileExplorerTree {
                         self.nodes.insert(
                             child.clone(),
                             FileExplorerNode::new(
-                                parent_path.join(&entry.name),
+                                parent_path.join(&entry.file_name),
                                 child.clone(),
                                 entry.is_directory,
                                 entry.is_symlink,
@@ -514,7 +514,6 @@ fn sort_filter_tree(node: &mut FilterNode) {
 /// Every file under `root` outside git, skipping the always-hidden folders, at most
 /// `limit`. Inside a repository the filter lists files with `soprano_git::reader::list_files`.
 pub fn enumerate_files(root: &Path, limit: usize) -> Vec<String> {
-    let root_text = root.to_string_lossy().into_owned();
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(directory) = stack.pop() {
@@ -532,13 +531,17 @@ pub fn enumerate_files(root: &Path, limit: usize) -> Vec<String> {
             let path = entry.path();
             // Symlinked folders are not followed, so a link loop cannot run forever.
             if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                stack.push(path);
+                // Like Foundation's `.skipsPackageDescendants`: an app or project bundle is
+                // one item to the user, not a folder of files.
+                if !listing::is_package(&path) {
+                    stack.push(path);
+                }
                 continue;
             }
             if std::fs::metadata(&path).is_ok_and(|m| m.is_dir()) {
                 continue;
             }
-            if let Some(relative) = relative_path(&path.to_string_lossy(), &root_text) {
+            if let Some(relative) = relative_path(&path, root) {
                 files.push(relative);
             }
         }
@@ -564,7 +567,7 @@ pub struct EventRouting {
 /// `external_git_directory` is a linked worktree's or submodule's git directory.
 pub fn route_events(
     paths: &[PathBuf],
-    roots: &[&str],
+    roots: &[&Path],
     external_git_directory: Option<&Path>,
     git_status: &GitStatusSnapshot,
 ) -> EventRouting {
@@ -576,7 +579,7 @@ pub fn route_events(
             routing.changed_git_directory = true;
             continue;
         }
-        let Some(relative) = relative_path_in_roots(&path.to_string_lossy(), roots) else { continue };
+        let Some(relative) = relative_path_in_roots(path, roots) else { continue };
         if relative == ".git" || relative.starts_with(".git/") {
             routing.changed_git_directory = true;
             continue;
@@ -814,7 +817,7 @@ mod tests {
     #[test]
     fn watcher_events_reload_parents_and_skip_git_refreshes_for_ignored_output() {
         let snapshot = GitStatusSnapshot::new(&[], ["target".to_owned()].into());
-        let roots = ["/repo", "/private/repo"];
+        let roots = [Path::new("/repo"), Path::new("/private/repo")];
         let external = Path::new("/main/.git/worktrees/x");
 
         let build = route_events(&[PathBuf::from("/private/repo/target/debug/app")], &roots, None, &snapshot);
@@ -840,5 +843,37 @@ mod tests {
         assert_eq!(git_refresh_delay(true, Duration::ZERO), Duration::ZERO);
         assert_eq!(git_refresh_delay(false, Duration::ZERO), Duration::from_secs(2));
         assert_eq!(git_refresh_delay(false, Duration::from_secs(5)), Duration::from_millis(400));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn enumerating_files_treats_bundles_as_single_items() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join("Tool.app/Contents/MacOS")).expect("mkdir");
+        std::fs::write(temp.path().join("Tool.app/Contents/MacOS/Tool"), "").expect("write");
+        std::fs::create_dir_all(temp.path().join("App.xcodeproj")).expect("mkdir");
+        std::fs::write(temp.path().join("App.xcodeproj/project.pbxproj"), "").expect("write");
+        std::fs::write(temp.path().join("main.swift"), "").expect("write");
+
+        assert_eq!(enumerate_files(temp.path(), ENUMERATED_FILE_LIMIT), ["main.swift"]);
+    }
+
+    /// Linux allows names that aren't UTF-8; the tree's node keeps the real name in its
+    /// path so the file can still be opened, renamed and trashed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_name_that_is_not_utf8_keeps_its_exact_path() {
+        use std::os::unix::ffi::OsStrExt;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let name = std::ffi::OsStr::from_bytes(b"bad\xffname.txt");
+        std::fs::write(temp.path().join(name), "x").expect("write");
+        let mut tree = FileExplorerTree::new(temp.path().to_path_buf());
+
+        tree.load("");
+
+        let relative = tree.node("").and_then(|root| root.children.clone()).expect("loaded").remove(0);
+        let node = tree.node(&relative).expect("node");
+        assert_eq!(node.path, temp.path().join(name));
+        assert!(node.path.exists());
     }
 }

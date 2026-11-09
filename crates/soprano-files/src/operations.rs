@@ -374,6 +374,9 @@ impl FileExplorerOperations {
                 }
                 crate::trash::restore_system(item).map_err(OperationError::Failed)
             }
+            TrashedItem::Unlocated(name) => Err(OperationError::Failed(format!(
+                "'{name}' is in the trash, but the trash didn't list it, so it can't be put back"
+            ))),
         }
     }
 
@@ -413,8 +416,23 @@ impl FileExplorerOperations {
     }
 }
 
+/// Whether `name` can name an item in place: never empty, `.`, `..`, or containing a
+/// path separator or NUL. On Windows, also none of `\\:*?"<>|` or control characters,
+/// and no trailing dot or space (`..\\x` would leave the folder, `a:b` creates an
+/// alternate data stream, and Windows silently strips trailing dots and spaces).
 pub fn is_valid_name(name: &str) -> bool {
-    !name.is_empty() && name != "." && name != ".." && !name.contains('/') && !name.contains('\0')
+    is_valid_name_on(name, cfg!(windows))
+}
+
+fn is_valid_name_on(name: &str, windows_rules: bool) -> bool {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+        return false;
+    }
+    if !windows_rules {
+        return true;
+    }
+    let forbidden = |c: char| matches!(c, '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control();
+    !name.chars().any(forbidden) && !name.ends_with('.') && !name.ends_with(' ')
 }
 
 /// `urls` without any item that sits inside another listed folder.
@@ -474,10 +492,25 @@ fn c_path(path: &Path) -> std::io::Result<std::ffi::CString> {
 /// rename(2) that fails with `AlreadyExists` instead of replacing the target.
 #[cfg(target_os = "macos")]
 fn rename_exclusive(source: &Path, target: &Path) -> std::io::Result<()> {
-    let (source, target) = (c_path(source)?, c_path(target)?);
+    let (c_source, c_target) = (c_path(source)?, c_path(target)?);
     // SAFETY: both arguments are valid NUL-terminated paths.
-    let result = unsafe { libc::renamex_np(source.as_ptr(), target.as_ptr(), libc::RENAME_EXCL) };
-    if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    let result = unsafe { libc::renamex_np(c_source.as_ptr(), c_target.as_ptr(), libc::RENAME_EXCL) };
+    if result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if needs_plain_rename(error.raw_os_error()) {
+        // File systems without RENAME_EXCL (renamex_np(2): ENOTSUP); FileManager.moveItem,
+        // which Swift used for these moves, checks and renames the same way.
+        return check_then_rename(source, target);
+    }
+    Err(error)
+}
+
+/// Whether an exclusive rename failed only because the file system lacks it.
+#[cfg(target_os = "macos")]
+fn needs_plain_rename(errno: Option<i32>) -> bool {
+    matches!(errno, Some(libc::ENOTSUP | libc::EINVAL))
 }
 
 #[cfg(target_os = "linux")]
@@ -511,7 +544,6 @@ fn rename_exclusive(source: &Path, target: &Path) -> std::io::Result<()> {
     check_then_rename(source, target)
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn check_then_rename(source: &Path, target: &Path) -> std::io::Result<()> {
     if exists(target) && !is_same_item(source, target) {
         return Err(ErrorKind::AlreadyExists.into());
@@ -519,13 +551,13 @@ fn check_then_rename(source: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::rename(source, target)
 }
 
-/// Copies a file, folder (recursively) or symlink (as a link); fails if `target` exists.
+/// Copies a file, folder (recursively, keeping its permissions), FIFO or symlink (as a
+/// link). Never replaces anything at `target`, even an item that appears meanwhile: every
+/// create is exclusive.
 fn copy_item(source: &Path, target: &Path) -> std::io::Result<()> {
-    if exists(target) {
-        return Err(ErrorKind::AlreadyExists.into());
-    }
     let metadata = std::fs::symlink_metadata(source)?;
-    if metadata.file_type().is_symlink() {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
         let link = std::fs::read_link(source)?;
         #[cfg(unix)]
         return std::os::unix::fs::symlink(link, target);
@@ -542,9 +574,65 @@ fn copy_item(source: &Path, target: &Path) -> std::io::Result<()> {
             let entry = entry?;
             copy_item(&entry.path(), &target.join(entry.file_name()))?;
         }
+        // Last, so a read-only folder still takes its contents.
+        return std::fs::set_permissions(target, metadata.permissions());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+        if file_type.is_fifo() {
+            // Reading a FIFO would block forever; make a new one, like FileManager.
+            let c_target = c_path(target)?;
+            let mode = (metadata.permissions().mode() & 0o7777) as libc::mode_t;
+            // SAFETY: a valid NUL-terminated path.
+            return if unsafe { libc::mkfifo(c_target.as_ptr(), mode) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            };
+        }
+        if file_type.is_socket() || file_type.is_char_device() || file_type.is_block_device() {
+            return Err(std::io::Error::new(
+                ErrorKind::Unsupported,
+                format!("'{}' is a special file and can't be copied", file_name(source).unwrap_or_default()),
+            ));
+        }
+    }
+    copy_file(source, target, &metadata)
+}
+
+/// A copy-on-write clone (with metadata) where the volume supports it; `clonefile(2)`
+/// fails rather than replacing an existing target.
+#[cfg(target_os = "macos")]
+fn copy_file(source: &Path, target: &Path, metadata: &std::fs::Metadata) -> std::io::Result<()> {
+    let (c_source, c_target) = (c_path(source)?, c_path(target)?);
+    // SAFETY: both arguments are valid NUL-terminated paths.
+    if unsafe { libc::clonefile(c_source.as_ptr(), c_target.as_ptr(), 0) } == 0 {
         return Ok(());
     }
-    std::fs::copy(source, target).map(|_| ())
+    let error = std::io::Error::last_os_error();
+    if error.kind() == ErrorKind::AlreadyExists {
+        return Err(error);
+    }
+    copy_file_contents(source, target, metadata)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn copy_file(source: &Path, target: &Path, metadata: &std::fs::Metadata) -> std::io::Result<()> {
+    copy_file_contents(source, target, metadata)
+}
+
+/// Creates `target` exclusively, then streams the contents and applies the permissions.
+fn copy_file_contents(source: &Path, target: &Path, metadata: &std::fs::Metadata) -> std::io::Result<()> {
+    let mut input = std::fs::File::open(source)?;
+    let mut output = std::fs::OpenOptions::new().write(true).create_new(true).open(target)?;
+    let copied =
+        std::io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(metadata.permissions()));
+    if copied.is_err() {
+        drop(output);
+        let _ = std::fs::remove_file(target);
+    }
+    copied
 }
 
 fn remove_item(path: &Path) -> std::io::Result<()> {
@@ -860,5 +948,141 @@ mod tests {
         operations.undo();
 
         assert_eq!(*moves.borrow(), [(file.clone(), renamed.clone()), (renamed, file)]);
+    }
+
+    #[test]
+    fn names_that_would_leave_the_folder_or_hide_a_stream_are_invalid_on_windows() {
+        for name in
+            [r"..\x", "a:b", "what?", "a*b", "pipe|", "quote\"", "<a>", "trailing.", "trailing ", "tab\t"]
+        {
+            assert!(!is_valid_name_on(name, true), "{name:?} should be invalid on Windows");
+        }
+        assert!(is_valid_name_on("notes.v2.txt", true));
+        assert!(is_valid_name_on(".env", true));
+        // Elsewhere only `/`, NUL, `.` and `..` are off limits.
+        assert!(is_valid_name_on("a:b", false));
+        assert!(!is_valid_name_on("a/b", false));
+        assert!(!is_valid_name_on("..", false));
+    }
+
+    #[test]
+    fn copying_never_replaces_an_item_already_at_the_target() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let source = root.path().join("new.txt");
+        let target = root.path().join("taken.txt");
+        std::fs::write(&source, "new").expect("write");
+        std::fs::write(&target, "keep").expect("write");
+
+        let error = copy_item(&source, &target).expect_err("refused");
+
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(read(&target), "keep");
+        assert_eq!(
+            copy_file_contents(&source, &target, &std::fs::metadata(&source).expect("meta"))
+                .map_err(|e| e.kind()),
+            Err(ErrorKind::AlreadyExists)
+        );
+        assert_eq!(read(&target), "keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copying_a_folder_keeps_its_permissions_and_copies_fifos_without_blocking() {
+        use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+        let root = tempfile::tempdir().expect("tempdir");
+        let folder = root.path().join("folder");
+        std::fs::create_dir(&folder).expect("mkdir");
+        std::fs::write(folder.join("file.txt"), "x").expect("write");
+        let fifo = c_path(&folder.join("pipe")).expect("path");
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o750)).expect("chmod");
+        let target = root.path().join("copy");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let (from, to) = (folder.clone(), target.clone());
+        std::thread::spawn(move || {
+            let _ = sender.send(copy_item(&from, &to).map_err(|e| e.to_string()));
+        });
+        let result =
+            receiver.recv_timeout(std::time::Duration::from_secs(10)).expect("the copy blocked on a FIFO");
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(std::fs::metadata(&target).expect("meta").permissions().mode() & 0o777, 0o750);
+        assert!(std::fs::symlink_metadata(target.join("pipe")).expect("meta").file_type().is_fifo());
+        assert_eq!(read(&target.join("file.txt")), "x");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_failed_exclusive_rename_falls_back_only_for_unsupported_file_systems() {
+        assert!(needs_plain_rename(Some(libc::ENOTSUP)));
+        assert!(needs_plain_rename(Some(libc::EINVAL)));
+        assert!(!needs_plain_rename(Some(libc::EEXIST)));
+        assert!(!needs_plain_rename(Some(libc::EACCES)));
+        assert!(!needs_plain_rename(None));
+    }
+
+    /// FAT has no RENAME_EXCL: rename and move must still work there, and still never
+    /// replace an existing item.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rename_and_move_work_on_a_volume_without_exclusive_rename() {
+        let scratch = tempfile::tempdir().expect("tempdir");
+        let hdiutil = |arguments: &[&str]| {
+            std::process::Command::new("/usr/bin/hdiutil")
+                .args(arguments)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        let image = scratch.path().join("fat").to_string_lossy().into_owned();
+        let mount = scratch.path().join("mnt");
+        let mount_text = mount.to_string_lossy().into_owned();
+        if !hdiutil(&[
+            "create",
+            "-size",
+            "8m",
+            "-fs",
+            "MS-DOS FAT16",
+            "-volname",
+            "SOPRANO",
+            "-quiet",
+            &image,
+        ]) || !hdiutil(&[
+            "attach",
+            "-nobrowse",
+            "-noverify",
+            "-quiet",
+            "-mountpoint",
+            &mount_text,
+            &format!("{image}.dmg"),
+        ]) {
+            eprintln!("skipped: hdiutil could not mount a FAT volume");
+            return;
+        }
+        let result = std::panic::catch_unwind(|| {
+            let mut operations = FileExplorerOperations::new();
+            let file = mount.join("a.txt");
+            let folder = mount.join("dir");
+            std::fs::write(&file, "a").expect("write");
+            std::fs::write(mount.join("taken.txt"), "keep").expect("write");
+            std::fs::create_dir(&folder).expect("mkdir");
+
+            let renamed = operations.rename(&file, "b.txt").expect("rename");
+            assert_eq!(read(&renamed), "a");
+            assert_eq!(
+                operations.rename(&renamed, "taken.txt"),
+                Err(OperationError::AlreadyExists("taken.txt".into()))
+            );
+            let moved = operations.move_items(std::slice::from_ref(&renamed), &folder).expect("move");
+            assert_eq!(moved[0].1, folder.join("b.txt"));
+            assert_eq!(read(&mount.join("taken.txt")), "keep");
+        });
+        hdiutil(&["detach", "-force", "-quiet", &mount_text]);
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 }

@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 soprano-platform = { path = "../soprano-platform" }
 notify = "8.2"
+unicode-normalization = "0.1"
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

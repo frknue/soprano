@@ -46,14 +46,31 @@ pub fn installed_application() -> Option<PathBuf> {
     let query = format!("kMDItemCFBundleIdentifier == '{BUNDLE_IDENTIFIER}'");
     if let Ok(output) = std::process::Command::new("/usr/bin/mdfind").arg(query).output()
         && output.status.success()
-        && let Some(found) = String::from_utf8_lossy(&output.stdout).lines().find(|line| !line.is_empty())
+        && let Some(found) = pick_application(&String::from_utf8_lossy(&output.stdout))
     {
-        return Some(PathBuf::from(found));
+        return Some(found);
     }
     let home = soprano_platform::paths::home_dir();
     [PathBuf::from("/Applications/Soprano Git.app"), home.join("Applications/Soprano Git.app")]
         .into_iter()
         .find(|path| path.is_dir())
+}
+
+/// The best of `mdfind`'s matches, one per line: never a copy in a Trash, and an
+/// installed copy (in an Applications folder) before a build lying elsewhere — the way
+/// Launch Services prefers installed apps.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn pick_application(candidates: &str) -> Option<PathBuf> {
+    let usable: Vec<&str> = candidates
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.contains("/.Trash/") && !line.contains("/.Trashes/"))
+        .collect();
+    usable
+        .iter()
+        .find(|line| line.starts_with("/Applications/") || line.contains("/Applications/"))
+        .or_else(|| usable.first())
+        .map(PathBuf::from)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -77,8 +94,11 @@ pub fn explanation(plan: &Plan) -> Option<String> {
     }
 }
 
-/// Opens the repository, or reports why it can't through `report`.
-pub fn open(working_directory: Option<&str>, report: impl FnOnce(String)) {
+/// Opens the repository, or reports why it can't through `report`. A plan that opens
+/// nothing is reported at once on the caller's thread; the launch itself runs on a
+/// background thread (like `NSWorkspace.open`'s completion handler), which reports a
+/// failure from there, so UI callers hop back to their main thread in `report`.
+pub fn open(working_directory: Option<&str>, report: impl FnOnce(String) + Send + 'static) {
     let plan = plan(working_directory, installed_application);
     let Plan::Open { repository, application } = plan else {
         if let Some(message) = explanation(&plan) {
@@ -86,8 +106,14 @@ pub fn open(working_directory: Option<&str>, report: impl FnOnce(String)) {
         }
         return;
     };
-    if let Err(error) = launch(&repository, &application) {
-        report(format!("Soprano Git could not open {}: {error}", repository.display()));
+    let spawned = std::thread::Builder::new().name("soprano-git-launcher".to_owned()).spawn(move || {
+        if let Err(error) = launch(&repository, &application) {
+            report(format!("Soprano Git could not open {}: {error}", repository.display()));
+        }
+    });
+    if let Err(error) = spawned {
+        // The closure holding `report` went with the thread that never started.
+        tracing::warn!("could not start the Soprano Git launcher: {error}");
     }
 }
 
@@ -174,5 +200,17 @@ mod tests {
     fn a_tab_without_a_folder_is_explained() {
         assert_eq!(plan(None, application), Plan::NoWorkingDirectory);
         assert_eq!(plan(Some(""), application), Plan::NoWorkingDirectory);
+    }
+
+    #[test]
+    fn the_installed_copy_wins_and_trashed_copies_are_never_opened() {
+        let found = "/Users/me/.Trash/Soprano Git.app\n/Users/me/dev/build/Soprano Git.app\n/Applications/Soprano Git.app\n";
+        assert_eq!(pick_application(found), Some(PathBuf::from("/Applications/Soprano Git.app")));
+        assert_eq!(
+            pick_application("/Users/me/.Trash/Soprano Git.app\n/Users/me/dev/Soprano Git.app\n"),
+            Some(PathBuf::from("/Users/me/dev/Soprano Git.app"))
+        );
+        assert_eq!(pick_application("/Volumes/X/.Trashes/501/Soprano Git.app\n"), None);
+        assert_eq!(pick_application(""), None);
     }
 }

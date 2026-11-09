@@ -101,7 +101,9 @@ pub fn changes(root: &Path) -> Option<GitChangeList> {
     let untracked = list.changes.iter_mut().filter(|change| change.area == GitChangeArea::Untracked);
     for change in untracked.take(MAXIMUM_COUNTED_UNTRACKED_FILES) {
         let path = root.join(&change.path);
-        let Ok(metadata) = std::fs::metadata(&path) else { continue };
+        // Like Foundation's resource values, a symlink is not a regular file: never
+        // follow it out of the repository.
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else { continue };
         if !metadata.is_file() || metadata.len() > MAXIMUM_COUNTED_FILE_BYTES {
             continue;
         }
@@ -197,6 +199,13 @@ fn execute(arguments: &[&str], directory: &Path, accepted_statuses: &[i32], byte
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window flashing up for every git call.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     let Ok(mut child) = command.spawn() else { return Output::Failed };
     let Some(mut stdout) = child.stdout.take() else {
         let _ = child.kill();
@@ -385,5 +394,25 @@ pub(crate) mod tests {
         let mut files = list_files(root).expect("files");
         files.sort();
         assert_eq!(files, [".gitignore", "fresh.txt", "tracked.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn untracked_symlinks_are_not_followed_when_counting_lines() {
+        if executable().is_none() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside");
+        let root = temp.path();
+        git(&["init", "-q"], root);
+        std::fs::write(outside.path().join("target.txt"), "a\nb\nc\n").expect("write");
+        std::os::unix::fs::symlink(outside.path().join("target.txt"), root.join("link.txt"))
+            .expect("symlink");
+
+        let list = changes(root).expect("changes");
+
+        let link = list.changes.iter().find(|c| c.path == "link.txt").expect("listed");
+        assert_eq!((link.lines_added, link.lines_deleted), (None, None));
     }
 }
