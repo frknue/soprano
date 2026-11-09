@@ -1,5 +1,6 @@
 [package]
 name = "soprano"
+description = "The Soprano app: window, sidebar, tab rows, split tree, pane chrome, status bar, overlays and every content crate wired together."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +11,26 @@ name = "soprano"
 path = "src/main.rs"
 
 [dependencies]
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-config = { path = "../soprano-config" }
+soprano-keys = { path = "../soprano-keys" }
+soprano-ipc = { path = "../soprano-ipc" }
+soprano-launch = { path = "../soprano-launch" }
+soprano-git = { path = "../soprano-git" }
+soprano-accounts = { path = "../soprano-accounts" }
+soprano-agents = { path = "../soprano-agents" }
+soprano-model = { path = "../soprano-model" }
+soprano-text = { path = "../soprano-text" }
+soprano-browser = { path = "../soprano-browser" }
+soprano-term = { path = "../soprano-term" }
+soprano-ui = { path = "../soprano-ui" }
+soprano-explorer = { path = "../soprano-explorer" }
+soprano-settings = { path = "../soprano-settings" }
+soprano-notify = { path = "../soprano-notify" }
+soprano-chat = { path = "../soprano-chat" }
+soprano-chat-ui = { path = "../soprano-chat-ui" }
+soprano-dashboard = { path = "../soprano-dashboard" }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true
@@ -18,6 +39,17 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+async-channel = "2"
+raw-window-handle = "0.6"
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow", "NSView", "NSResponder", "NSButton", "NSControl"] }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
