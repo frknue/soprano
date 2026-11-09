@@ -14,8 +14,8 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, DismissEvent, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent, MouseButton, ParentElement,
-    PathPromptOptions, Pixels, Point, Render, ScrollHandle, SharedString, Styled, Subscription, Task, Window,
-    div, point, prelude::*, px,
+    PathPromptOptions, Render, ScrollHandle, SharedString, Styled, Subscription, Task, Window, div, point,
+    prelude::*, px,
 };
 use gpui_component::input::{self as component_input, InputEvent, InputState};
 use soprano_accounts::AccountsSource;
@@ -90,6 +90,8 @@ pub struct SettingsView {
     pub(crate) new_agent_error: Option<&'static str>,
     dialog: Option<Entity<Dialog>>,
     menu: Option<Entity<ContextMenu>>,
+    /// Where the theme select was painted, so its menu opens under it rather than at the click.
+    pub(crate) theme_select_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     pub(crate) scroll: ScrollHandle,
     subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
@@ -253,6 +255,7 @@ impl SettingsView {
             new_agent_error: None,
             dialog: None,
             menu: None,
+            theme_select_bounds: Default::default(),
             scroll: ScrollHandle::new(),
             subscriptions,
             _tasks: vec![config_task, accounts_task],
@@ -615,12 +618,9 @@ impl SettingsView {
 
     // MARK: - Theme menu
 
-    pub(crate) fn open_theme_menu(
-        &mut self,
-        position: Point<Pixels>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub(crate) fn open_theme_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bounds = self.theme_select_bounds.get();
+        let position = gpui::point(bounds.left(), bounds.bottom() + cx.soprano_theme().z(4.));
         let selected = self.snapshot.resolved.settings.theme_id.clone();
         let view = cx.entity().downgrade();
         let items: Vec<soprano_ui::menu::MenuItem> = soprano_ui::theme::theme_options()

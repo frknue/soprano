@@ -107,9 +107,11 @@ impl SettingsView {
             .text_size(t.z(size::UI))
             .child(div().truncate().child(theme_name))
             .child(icon(IconName::ChevronDown).size(12.).color(t.muted))
-            .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                this.open_theme_menu(event.position(), window, cx)
-            }));
+            .child({
+                let bounds = self.theme_select_bounds.clone();
+                gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {}).absolute().size_full()
+            })
+            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.open_theme_menu(window, cx)));
         let appearance_index =
             AppearancePreference::ALL.iter().position(|p| *p == settings.appearance).unwrap_or_default();
         let appearance = SegmentedControl::new(

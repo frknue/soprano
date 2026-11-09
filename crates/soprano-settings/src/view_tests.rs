@@ -557,9 +557,7 @@ fn a_click_that_cancels_the_remove_dialog_keeps_settings_open(cx: &mut TestAppCo
 #[gpui::test]
 fn a_click_that_closes_the_theme_menu_keeps_settings_open(cx: &mut TestAppContext) {
     let (h, cx) = open(cx);
-    h.view.update_in(cx, |view, window, cx| {
-        view.open_theme_menu(gpui::point(gpui::px(400.), gpui::px(300.)), window, cx)
-    });
+    h.view.update_in(cx, |view, window, cx| view.open_theme_menu(window, cx));
     cx.run_until_parked();
     assert!(h.view.read_with(cx, |view, _| view.is_showing_menu()));
     cx.simulate_click(backdrop_corner(), gpui::Modifiers::none());
