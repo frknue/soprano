@@ -6,6 +6,7 @@
 //! [`no_target_message`] / [`unavailable_message`] / [`PANE_LIMIT_MESSAGE`] when it cannot.
 
 pub mod address;
+mod page_gate;
 mod registry;
 mod screenshot;
 pub mod scripts;
@@ -14,6 +15,7 @@ pub mod value;
 mod view;
 
 pub use address::resolve as resolve_address;
+pub use page_gate::{PAGE_NOT_STARTED_MESSAGE, PAGE_START_TIMEOUT};
 pub use registry::{BrowserRegistry, Registry};
 pub use screenshot::UNSUPPORTED_MESSAGE as SCREENSHOT_UNSUPPORTED_MESSAGE;
 pub use target::{
