@@ -1,8 +1,24 @@
 [package]
 name = "soprano-ui"
+description = "Soprano's design system in GPUI: Herdr's look over Soprano's themes, fonts, icons and shared widgets."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-base = "=0.9.1"
+gpui-kit-assets = "=0.9.1"
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true

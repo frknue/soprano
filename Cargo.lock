@@ -8084,6 +8084,7 @@ dependencies = [
  "soprano-types",
  "tempfile",
  "unicode-general-category",
+ "unicode-normalization",
  "url",
  "windows-sys 0.59.0",
 ]

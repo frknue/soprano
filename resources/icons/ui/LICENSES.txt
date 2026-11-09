@@ -1,0 +1,10 @@
+UI glyphs used by crates/soprano-ui.
+
+- Lucide icons (https://lucide.dev), ISC License; full notice in ../LICENSE-Lucide.txt.
+  Copied from the gpui-kit-assets 0.9.1 crate's Lucide catalog.
+- Herdr's custom glyphs (https://github.com/herdrdev/herdr-app), Apache License 2.0:
+  search.svg, sidebar.svg, spinner.svg, monitor.svg, server.svg, branch.svg (defaults/mods/workspace-chrome),
+  changes.svg (defaults/mods/changes), split-right.svg, split-down.svg, zoom.svg, unzoom.svg,
+  pane-close.svg (defaults/mods/pane/close.svg), win-min.svg, win-max.svg, win-restore.svg,
+  win-close.svg (defaults/mods/tabs), command.svg (defaults/frame/palette).
+  Copied unmodified except for the renamed pane-close.svg.
