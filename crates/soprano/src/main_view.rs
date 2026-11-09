@@ -316,8 +316,21 @@ impl MainView {
                 }
             }
         }));
-        // Automations: due runs every half minute (a wake from sleep lands on the next one),
-        // background results whenever the worker wakes us, and runs waiting for a display.
+        // Automations: due runs every half minute and right after the machine wakes
+        // (`didWakeNotification`), background results whenever the worker wakes us, and runs
+        // waiting for a display.
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            let mut detector = crate::power::WakeDetector::new();
+            loop {
+                cx.background_executor().timer(crate::power::WAKE_SAMPLE_INTERVAL).await;
+                if !detector.observe(std::time::SystemTime::now()) {
+                    continue;
+                }
+                if this.update_in(cx, |this, window, cx| this.tick_automations(window, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
         tasks.push(cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(AutomationController::CHECK_INTERVAL).await;

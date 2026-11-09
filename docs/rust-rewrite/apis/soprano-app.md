@@ -24,11 +24,11 @@
 `file_tabs_show_the_editor_the_diff_and_the_reader`, `closing_the_only_tab_of_an_unsaved_file_asks_first`, `a_file_another_tab_still_shows_closes_without_asking`; fixed `a_stopped_agent_tab_starts_no_process_until_restarted` (it used profile id `claude`; the id is `claude-code`).
 
 ## Deviations
-- Wake from sleep has no OS notification hook in GPUI; the 30 s tick runs right after a wake, which is when Swift's wake tick ran at the latest.
+- Wake from sleep: `power::WakeDetector`, sampled every second, treats a wall-clock gap of more than 5 s past the interval between two samples as a wake (a timer cannot fire during sleep on any OS) and ticks automations at once, like Swift's `didWakeNotification`; a busy UI thread may cause an extra, harmless tick.
 - Zoom, window frame and Commands-menu keymap: as in the previous report.
 
 ## Commands
-- `CARGO_TARGET_DIR=target/agent-soprano cargo test -p soprano` → 111 passed.
+- `CARGO_TARGET_DIR=target/agent-soprano cargo test -p soprano` → 112 passed.
 - `cargo clippy -p soprano --all-targets` → no warnings; `cargo fmt -p soprano` applied.
 - `cargo build -p soprano --release` → see the final report.
 - `cargo check --target x86_64-unknown-linux-gnu -p soprano` (zig cc/c++/ar wrappers, `RUST_FONTCONFIG_DLOPEN=1`) → blocked by `x11` (via soprano-browser → gpui-webview/lb-wry → gdkx11): its build script needs pkg-config for the Linux X11/GTK system libraries, and there is no Linux sysroot on this Mac.
