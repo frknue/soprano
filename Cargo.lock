@@ -7776,11 +7776,33 @@ name = "soprano"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "async-channel",
+ "chrono",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "raw-window-handle",
  "serde",
  "serde_json",
+ "soprano-accounts",
+ "soprano-agents",
+ "soprano-browser",
+ "soprano-config",
+ "soprano-explorer",
+ "soprano-git",
+ "soprano-ipc",
+ "soprano-keys",
+ "soprano-launch",
+ "soprano-model",
+ "soprano-platform",
+ "soprano-settings",
+ "soprano-term",
+ "soprano-text",
+ "soprano-types",
+ "soprano-ui",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "winresource",
@@ -7826,6 +7848,45 @@ dependencies = [
 [[package]]
 name = "soprano-automations"
 version = "0.6.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "iana-time-zone",
+ "libc",
+ "serde",
+ "serde_json",
+ "soprano-agents",
+ "soprano-config",
+ "soprano-git",
+ "soprano-ipc",
+ "soprano-launch",
+ "soprano-model",
+ "soprano-platform",
+ "soprano-types",
+ "tempfile",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "soprano-automations-ui"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "soprano-automations",
+ "soprano-config",
+ "soprano-editor",
+ "soprano-model",
+ "soprano-platform",
+ "soprano-text",
+ "soprano-types",
+ "soprano-ui",
+ "tempfile",
+]
 
 [[package]]
 name = "soprano-browser"
@@ -7859,6 +7920,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "soprano-chat-ui"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "fancy-regex 0.14.0",
+ "futures",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "serde_json",
+ "soprano-agents",
+ "soprano-chat",
+ "soprano-git",
+ "soprano-keys",
+ "soprano-text",
+ "soprano-types",
+ "soprano-ui",
+]
+
+[[package]]
 name = "soprano-config"
 version = "0.6.0"
 dependencies = [
@@ -7871,6 +7952,46 @@ dependencies = [
  "soprano-platform",
  "soprano-types",
  "tempfile",
+]
+
+[[package]]
+name = "soprano-dashboard"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "gpui-base",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "soprano-agents",
+ "soprano-model",
+ "soprano-platform",
+ "soprano-text",
+ "soprano-types",
+ "soprano-ui",
+ "tempfile",
+]
+
+[[package]]
+name = "soprano-editor"
+version = "0.6.0"
+dependencies = [
+ "async-channel",
+ "base64 0.22.1",
+ "gpui-base",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "soprano-files",
+ "soprano-git",
+ "soprano-keys",
+ "soprano-platform",
+ "soprano-text",
+ "soprano-ui",
+ "tempfile",
+ "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -7965,6 +8086,23 @@ dependencies = [
  "unicode-general-category",
  "url",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "soprano-notify"
+version = "0.6.0"
+dependencies = [
+ "block2 0.6.2",
+ "notify-rust",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications",
+ "soprano-ipc",
+ "soprano-model",
+ "soprano-platform",
+ "soprano-types",
+ "tracing",
+ "windows 0.62.2",
 ]
 
 [[package]]

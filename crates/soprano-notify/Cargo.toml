@@ -1,0 +1,46 @@
+[package]
+name = "soprano-notify"
+description = "Agent lifecycle events and terminal notifications into workspace state, attention marks, and native OS banners."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-ipc = { path = "../soprano-ipc" }
+soprano-model = { path = "../soprano-model" }
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSBundle",
+    "NSDictionary",
+    "NSError",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
+    "bitflags",
+    "block2",
+    "UNNotification",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationResponse",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+notify-rust = "4.19"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Data_Xml_Dom", "Foundation", "UI_Notifications"] }
