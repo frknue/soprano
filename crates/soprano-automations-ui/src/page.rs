@@ -4,6 +4,8 @@
 //! to know whether a run's tab is open), writes `settings.json` through it, and asks the app
 //! shell for everything that needs the workspace through [`AutomationsPageEvent`].
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Utc};
@@ -12,8 +14,9 @@ use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, MouseButton, ParentElement, Pixels,
     Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    Window, div, prelude::*,
+    Window, canvas, div, prelude::*,
 };
+use gpui_component::input::{Escape, MoveDown, MoveUp};
 use soprano_automations::{AutomationController, AutomationRun, RunStatus, RunTrigger, RunWorktree};
 use soprano_config::{Automation, AutomationCadence};
 use soprano_editor::rich::{Markdown, MarkdownStyle};
@@ -99,6 +102,8 @@ pub struct AutomationsPage {
     menu: Option<(Entity<ContextMenu>, Subscription)>,
     focus: FocusHandle,
     scroll: ScrollHandle,
+    /// The row to scroll into view once it is laid out.
+    reveal: Rc<RefCell<Option<String>>>,
     _subscriptions: Vec<Subscription>,
     _refresh: Task<()>,
 }
@@ -157,6 +162,7 @@ impl AutomationsPage {
             menu: None,
             focus,
             scroll: ScrollHandle::new(),
+            reveal: Rc::new(RefCell::new(None)),
             _subscriptions: subscriptions,
             _refresh: refresh,
         }
@@ -182,6 +188,11 @@ impl AutomationsPage {
     /// The selected run on an automation's page.
     pub fn selected_run(&self) -> Option<&str> {
         self.run_selection.selected()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn focus_search(&self, window: &mut Window, cx: &mut App) {
+        self.search.update(cx, |state, cx| state.focus(window, cx));
     }
 
     /// Hands the keyboard to the page so J/K, Return and Esc work at once.
@@ -240,6 +251,7 @@ impl AutomationsPage {
                 let ids = self.visible_ids(cx);
                 self.list_selection.select(&id, &ids);
                 self.display(Page::List, window, cx);
+                self.reveal(id);
             }
             Page::Run(run_id) => {
                 let automation_id =
@@ -249,11 +261,50 @@ impl AutomationsPage {
                         self.display(Page::Automation(automation_id.clone()), window, cx);
                         let ids = self.run_ids(&automation_id, cx);
                         self.run_selection.select(&run_id, &ids);
+                        self.reveal(run_id);
                     }
                     None => self.display(Page::List, window, cx),
                 }
             }
         }
+    }
+
+    /// Scrolls the row `id` into view once it is laid out (it may not be on screen yet).
+    fn reveal(&self, id: String) {
+        *self.reveal.borrow_mut() = Some(id);
+    }
+
+    /// How far the page is scrolled.
+    pub fn scroll_offset(&self) -> Point<Pixels> {
+        self.scroll.offset()
+    }
+
+    /// A marker laid over a row that scrolls the page to it when it is the row to reveal.
+    fn reveal_marker(&self, id: String) -> impl IntoElement {
+        let reveal = self.reveal.clone();
+        let scroll = self.scroll.clone();
+        canvas(
+            move |bounds, window, _| {
+                if reveal.borrow().as_deref() != Some(id.as_str()) {
+                    return;
+                }
+                reveal.borrow_mut().take();
+                let view = scroll.bounds();
+                let mut offset = scroll.offset();
+                if bounds.top() < view.top() {
+                    offset.y += view.top() - bounds.top();
+                } else if bounds.bottom() > view.bottom() {
+                    offset.y -= bounds.bottom() - view.bottom();
+                } else {
+                    return;
+                }
+                scroll.set_offset(offset);
+                window.refresh();
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .inset_0()
     }
 
     fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -278,12 +329,13 @@ impl AutomationsPage {
 
     fn visible_automations(&self, cx: &App) -> Vec<Automation> {
         let query = self.query(cx);
-        let automations = self.controller.read(cx).automations();
-        if query.is_empty() {
-            automations
-        } else {
-            automations.into_iter().filter(|automation| content::matches(automation, &query)).collect()
-        }
+        self.controller
+            .read(cx)
+            .automations()
+            .iter()
+            .filter(|automation| query.is_empty() || content::matches(automation, &query))
+            .cloned()
+            .collect()
     }
 
     fn visible_ids(&self, cx: &App) -> Vec<String> {
@@ -319,6 +371,30 @@ impl AutomationsPage {
     }
 
     // MARK: - Keyboard
+
+    /// Whether the search field has the keyboard and no editor, dialog or menu is up: its
+    /// arrows and Esc then drive the list, as in Orca.
+    fn search_has_keyboard(&self, window: &Window, cx: &App) -> bool {
+        self.editor.is_none()
+            && self.dialog.is_none()
+            && self.menu.is_none()
+            && self.search.read(cx).focus_handle(cx).is_focused(window)
+    }
+
+    fn search_move(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        // Capture-phase action listeners pass the action on unless they stop it.
+        if self.search_has_keyboard(window, cx) {
+            cx.stop_propagation();
+            self.move_selection(delta, cx);
+        }
+    }
+
+    fn search_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search_has_keyboard(window, cx) {
+            cx.stop_propagation();
+            self.handle_escape(window, cx);
+        }
+    }
 
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if self.editor.is_some() || self.dialog.is_some() || self.menu.is_some() {
@@ -373,16 +449,21 @@ impl AutomationsPage {
     }
 
     pub fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        match self.page.clone() {
+        let selected = match self.page.clone() {
             Page::List => {
                 let ids = self.visible_ids(cx);
                 self.list_selection.move_by(&ids, delta);
+                self.list_selection.selected().map(str::to_owned)
             }
             Page::Automation(id) => {
                 let ids = self.run_ids(&id, cx);
                 self.run_selection.move_by(&ids, delta);
+                self.run_selection.selected().map(str::to_owned)
             }
             Page::Run(_) => return,
+        };
+        if let Some(selected) = selected {
+            self.reveal(selected);
         }
         cx.notify();
     }
@@ -493,7 +574,7 @@ impl AutomationsPage {
         let setup = EditorSetup {
             automation,
             template,
-            automations: controller.automations(),
+            automations: controller.automations().to_vec(),
             taken_ids: controller.taken_ids(),
             project_directories: controller.config().settings().project_directories,
             settings_path: controller.config().display_path(),
@@ -525,6 +606,7 @@ impl AutomationsPage {
         if self.page == Page::List {
             let ids = self.visible_ids(cx);
             self.list_selection.select(automation_id, &ids);
+            self.reveal(automation_id.to_owned());
         }
         cx.notify();
     }
@@ -786,7 +868,7 @@ impl AutomationsPage {
             .visible_automations(cx)
             .into_iter()
             .map(|automation| ListItem {
-                next_run: controller.next_run_date(&automation.id),
+                next_run: controller.next_run_date_of(&automation),
                 last_run: controller.last_run(&automation.id).cloned(),
                 automation,
             })
@@ -909,6 +991,8 @@ impl AutomationsPage {
         let context_id = id.clone();
         div()
             .id(("automations-row", index))
+            .relative()
+            .child(self.reveal_marker(automation.id.clone()))
             .flex()
             .flex_row()
             .items_center()
@@ -957,7 +1041,17 @@ impl AutomationsPage {
                         column.tooltip(tooltip(format::date_time(next, zone)))
                     }),
             )
-            .child(div().flex_none().w(theme.z(LIST_COLUMNS[1])).min_w_0().child(last_run))
+            .child(
+                div()
+                    .id(("automations-row-last-run", index))
+                    .flex_none()
+                    .w(theme.z(LIST_COLUMNS[1]))
+                    .min_w_0()
+                    .when_some(item.last_run.as_ref().and_then(|run| run.message.clone()), |cell, message| {
+                        cell.tooltip(tooltip(message))
+                    })
+                    .child(last_run),
+            )
             .child(
                 div()
                     .id(("automations-row-agent", index))
@@ -1109,7 +1203,7 @@ impl AutomationsPage {
         let (now, zone) = self.now_and_zone(cx);
         let controller = self.controller.read(cx);
         let runs = controller.runs(&automation.id);
-        let next_run = controller.next_run_date(&automation.id);
+        let next_run = controller.next_run_date_of(&automation);
         let focused = self.focus.is_focused(window);
         let id = automation.id.clone();
 
@@ -1365,6 +1459,8 @@ impl AutomationsPage {
         };
         div()
             .id(("automations-run-row", index))
+            .relative()
+            .child(self.reveal_marker(run.id.clone()))
             .flex()
             .flex_row()
             .items_center()
@@ -1574,7 +1670,7 @@ impl Render for AutomationsPage {
         let controller = self.controller.read(cx);
         let automations = controller.automations();
         let next_runs: Vec<DateTime<Utc>> =
-            automations.iter().filter_map(|automation| controller.next_run_date(&automation.id)).collect();
+            automations.iter().filter_map(|automation| controller.next_run_date_of(automation)).collect();
         let subtitle = content::subtitle(automations.len(), &next_runs, now);
 
         let body = match self.page.clone() {
@@ -1595,6 +1691,9 @@ impl Render for AutomationsPage {
             .key_context("AutomationsPage")
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::on_key))
+            .capture_action(cx.listener(|this, _: &MoveDown, window, cx| this.search_move(1, window, cx)))
+            .capture_action(cx.listener(|this, _: &MoveUp, window, cx| this.search_move(-1, window, cx)))
+            .capture_action(cx.listener(Self::search_escape))
             .relative()
             .flex()
             .flex_col()

@@ -17,7 +17,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -111,6 +111,15 @@ pub struct AutomationController {
     waiting_for_display: BTreeSet<String>,
     /// The restore of a saved session last seen; one replaces every tab.
     workspace_restore_generation: u64,
+    /// The configured automations, replaced by the config store's observer on every change.
+    automations: Arc<Mutex<Arc<Vec<Automation>>>>,
+    observer_id: String,
+}
+
+impl Drop for AutomationController {
+    fn drop(&mut self) {
+        self.config.remove_observer(&self.observer_id);
+    }
 }
 
 impl AutomationController {
@@ -137,11 +146,22 @@ impl AutomationController {
         host: &mut dyn AutomationHost,
     ) -> Self {
         let worker = Worker::new(environment.wake.clone());
+        let automations = Arc::new(Mutex::new(Arc::new(config.resolved().automations)));
+        let observer_id = format!("AutomationController-{}", new_run_id());
+        config.add_observer(observer_id.clone(), {
+            let automations = automations.clone();
+            move |snapshot| {
+                *automations.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Arc::new(snapshot.resolved.automations.clone());
+            }
+        });
         let mut controller = Self {
             store,
             config,
             environment,
             worker,
+            automations,
+            observer_id,
             waiting_for_display: BTreeSet::new(),
             workspace_restore_generation: host.workspace_restore_generation(),
         };
@@ -206,8 +226,10 @@ impl AutomationController {
         self.store.revision()
     }
 
-    pub fn automations(&self) -> Vec<Automation> {
-        self.config.resolved().automations
+    /// The automations settings.json declares, as of its last change. Kept by the config
+    /// store's observer, so reading them copies nothing.
+    pub fn automations(&self) -> Arc<Vec<Automation>> {
+        self.automations.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Every id under `automations` in settings.json, including entries the file rejected, so
@@ -217,7 +239,7 @@ impl AutomationController {
     }
 
     pub fn automation(&self, id: &str) -> Option<Automation> {
-        self.automations().into_iter().find(|automation| automation.id == id)
+        self.automations().iter().find(|automation| automation.id == id).cloned()
     }
 
     /// Newest first.
@@ -235,14 +257,21 @@ impl AutomationController {
 
     /// When the automation runs next, or `None` while it is paused.
     pub fn next_run_date(&self, automation_id: &str) -> Option<DateTime<Utc>> {
-        let automation = self.automation(automation_id).filter(|a| a.enabled)?;
+        self.next_run_date_of(&self.automation(automation_id)?)
+    }
+
+    /// [`Self::next_run_date`] for an automation already at hand.
+    pub fn next_run_date_of(&self, automation: &Automation) -> Option<DateTime<Utc>> {
+        if !automation.enabled {
+            return None;
+        }
         let zone = self.environment.clock.time_zone();
-        if let Some(state) = self.store.schedules().get(automation_id)
-            && state.signature == scheduling::signature(&automation, zone)
+        if let Some(state) = self.store.schedules().get(&automation.id)
+            && state.signature == scheduling::signature(automation, zone)
         {
             return state.next_run_at;
         }
-        scheduling::next_occurrence(&automation, self.now(), zone)
+        scheduling::next_occurrence(automation, self.now(), zone)
     }
 
     /// Whether the run's tab is still open in this Soprano.
@@ -363,7 +392,7 @@ impl AutomationController {
             self.store.set_schedule(&id, None);
         }
         let zone = self.environment.clock.time_zone();
-        for automation in &automations {
+        for automation in automations.iter() {
             let (state, decision) =
                 scheduling::evaluate(automation, self.store.schedules().get(&automation.id), now, zone);
             self.store.set_schedule(&automation.id, Some(state));

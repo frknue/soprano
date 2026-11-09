@@ -658,10 +658,14 @@ EOF
 #[test]
 fn saving_pausing_and_deleting_go_through_settings_json() {
     let mut fixture = make_fixture(OMP, Utc::now(), false);
+    // Reading the automations copies nothing until settings.json changes.
+    assert!(Arc::ptr_eq(&fixture.controller.automations(), &fixture.controller.automations()));
+    let before = fixture.controller.automations();
     let mut automation = fixture.controller.automation("audit").expect("automation");
     automation.prompt = "Audit it all.".into();
     assert!(fixture.controller.save(&automation));
     assert_eq!(fixture.controller.automation("audit").map(|a| a.prompt), Some("Audit it all.".into()));
+    assert!(!Arc::ptr_eq(&before, &fixture.controller.automations()));
 
     assert!(fixture.controller.set_enabled("audit", false));
     assert_eq!(fixture.controller.automation("audit").map(|a| a.enabled), Some(false));

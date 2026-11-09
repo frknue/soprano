@@ -14,7 +14,7 @@ use gpui::{
     FontWeight, InteractiveElement, IntoElement, KeyDownEvent, ParentElement, PathPromptOptions, Render,
     SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::*, px,
 };
-use gpui_component::input::{Textarea, TextareaState};
+use gpui_component::input::{Enter, Escape, IndentInline, OutdentInline, Textarea, TextareaState};
 use soprano_automations::Clock;
 use soprano_config::Automation;
 use soprano_ui::button::{Button, ButtonVariant};
@@ -312,6 +312,16 @@ impl AutomationEditor {
         self.populate_folders(cx);
     }
 
+    #[cfg(test)]
+    pub(crate) fn focus_prompt(&self, window: &mut Window, cx: &mut App) {
+        self.prompt.update(cx, |state, cx| state.focus(window, cx));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prompt_is_focused(&self, window: &Window, cx: &App) -> bool {
+        self.prompt.read(cx).focus_handle(cx).is_focused(window)
+    }
+
     // MARK: - Folders
 
     fn populate_folders(&mut self, cx: &mut Context<Self>) {
@@ -404,7 +414,8 @@ impl AutomationEditor {
         cx.notify();
     }
 
-    /// Esc cancels and ⌘Return saves from any control, the prompt included.
+    /// Esc cancels and ⌘Return saves when the keyboard is on a control that has no binding for
+    /// them (the card itself, a select, the switch); fields arrive as actions (see `render`).
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
         let modifiers = &keystroke.modifiers;
@@ -667,6 +678,28 @@ impl Render for AutomationEditor {
             .key_context("AutomationEditor")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            // ⌘Return saves from any field, the prompt included; a plain Return in the prompt
+            // is a new line, in a one-line field it saves through PressEnter.
+            // (Capture-phase action listeners pass the action on unless they stop it.)
+            .capture_action(cx.listener(|this, action: &Enter, window, cx| {
+                if action.secondary {
+                    cx.stop_propagation();
+                    this.submit(window, cx);
+                }
+            }))
+            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+                cx.stop_propagation();
+                this.cancel(cx);
+            }))
+            // Tab moves on to the next control instead of typing a tab into the prompt.
+            .capture_action(cx.listener(|_, _: &IndentInline, window, cx| {
+                cx.stop_propagation();
+                window.focus_next(cx);
+            }))
+            .capture_action(cx.listener(|_, _: &OutdentInline, window, cx| {
+                cx.stop_propagation();
+                window.focus_prev(cx);
+            }))
             .absolute()
             .inset_0()
             .flex()

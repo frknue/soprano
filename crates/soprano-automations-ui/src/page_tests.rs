@@ -145,11 +145,11 @@ fn the_editor_stays_open_and_says_why_when_the_automation_cannot_be_saved(cx: &m
     let (harness, cx) = open(cx, ONE_AUTOMATION);
     let (automation, setup) = cx.update(|_, cx| {
         let controller = harness.controller.read(cx);
-        let automation = controller.automations().into_iter().next().expect("automation");
+        let automation = controller.automations().first().cloned().expect("automation");
         let setup = EditorSetup {
             automation: Some(automation.clone()),
             template: None,
-            automations: controller.automations(),
+            automations: controller.automations().to_vec(),
             taken_ids: controller.taken_ids(),
             project_directories: Vec::new(),
             settings_path: harness.config.display_path(),
@@ -320,4 +320,151 @@ fn deleting_asks_first_and_then_asks_the_shell(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert_eq!(*harness.events.borrow(), [AutomationsPageEvent::Delete { automation_id: "audit".into() }]);
     assert!(cx.update(|_, cx| harness.page.read(cx).dialog().is_none()));
+}
+
+fn command_return() -> &'static str {
+    if cfg!(target_os = "macos") { "cmd-enter" } else { "ctrl-enter" }
+}
+
+fn open_editor_for_audit(
+    harness: &Harness,
+    cx: &mut VisualTestContext,
+) -> (Entity<AutomationEditor>, Rc<RefCell<Vec<String>>>) {
+    cx.update(|window, cx| {
+        harness
+            .page
+            .update(cx, |page, cx| page.perform(crate::page::AutomationAction::Edit, "audit", window, cx))
+    });
+    let editor = cx.update(|_, cx| harness.page.read(cx).editor().cloned()).expect("editor open");
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    cx.update(|_, cx| {
+        let saved = saved.clone();
+        editor.update(cx, |editor, _| {
+            editor.set_on_save(move |automation, _, _| {
+                saved.borrow_mut().push(automation.prompt.clone());
+                true
+            })
+        })
+    });
+    (editor, saved)
+}
+
+#[gpui::test]
+fn command_return_in_the_prompt_saves_instead_of_adding_a_line(cx: &mut TestAppContext) {
+    let (harness, cx) = open(cx, ONE_AUTOMATION);
+    let (editor, saved) = open_editor_for_audit(&harness, cx);
+    cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus_prompt(window, cx)));
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes(command_return());
+    cx.run_until_parked();
+
+    assert_eq!(*saved.borrow(), ["Review the repository health and summarize what needs attention."]);
+    assert!(cx.update(|_, cx| harness.page.read(cx).editor().is_none()));
+}
+
+#[gpui::test]
+fn tab_in_the_prompt_moves_on_instead_of_typing_a_tab(cx: &mut TestAppContext) {
+    let (harness, cx) = open(cx, ONE_AUTOMATION);
+    let (editor, _) = open_editor_for_audit(&harness, cx);
+    cx.update(|window, cx| editor.update(cx, |editor, cx| editor.focus_prompt(window, cx)));
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("tab");
+    cx.run_until_parked();
+
+    let (prompt, focused) = cx.update(|window, cx| {
+        (editor.read(cx).values(cx).prompt, editor.read(cx).prompt_is_focused(window, cx))
+    });
+    assert_eq!(prompt, "Review the repository health and summarize what needs attention.");
+    assert!(!focused);
+}
+
+#[gpui::test]
+fn esc_in_a_field_of_the_editor_cancels_it(cx: &mut TestAppContext) {
+    let (harness, cx) = open(cx, ONE_AUTOMATION);
+    let (_, saved) = open_editor_for_audit(&harness, cx);
+    cx.run_until_parked();
+    // The editor opens with the keyboard in its name field.
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.update(|_, cx| harness.page.read(cx).editor().is_none()));
+    assert!(saved.borrow().is_empty());
+    assert!(harness.events.borrow().is_empty());
+}
+
+#[gpui::test]
+fn the_arrows_and_esc_drive_the_list_from_the_search_field(cx: &mut TestAppContext) {
+    let (harness, cx) = open(cx, TWO_AUTOMATIONS);
+    let selected = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| harness.page.read(cx).selected_automation().map(str::to_owned))
+    };
+    cx.update(|window, cx| harness.page.update(cx, |page, cx| page.focus_search(window, cx)));
+    cx.run_until_parked();
+
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected(cx), Some("review".into()));
+    cx.simulate_keystrokes("up");
+    assert_eq!(selected(cx), Some("audit".into()));
+
+    cx.simulate_input("rev");
+    cx.run_until_parked();
+    assert_eq!(selected(cx), Some("review".into()));
+    cx.simulate_keystrokes("enter");
+    assert_eq!(page_state(&harness, cx), Page::Automation("review".into()));
+
+    cx.simulate_keystrokes("escape");
+    assert_eq!(page_state(&harness, cx), Page::List);
+    cx.update(|window, cx| harness.page.update(cx, |page, cx| page.focus_search(window, cx)));
+    // Esc empties the search first, then closes the page.
+    cx.simulate_keystrokes("escape");
+    assert!(harness.events.borrow().is_empty());
+    assert_eq!(selected(cx), Some("review".into()));
+    cx.simulate_keystrokes("escape");
+    assert_eq!(*harness.events.borrow(), [AutomationsPageEvent::Dismiss]);
+}
+
+#[gpui::test]
+fn moving_through_a_long_run_history_scrolls_the_selected_run_into_view(cx: &mut TestAppContext) {
+    let (harness, cx) = open(cx, ONE_AUTOMATION);
+    cx.update(|_, cx| {
+        harness.controller.update(cx, |controller, cx| {
+            for number in 1..=60 {
+                let mut run = AutomationRun::new(
+                    format!("run-{number}"),
+                    "audit",
+                    number,
+                    RunTrigger::Scheduled,
+                    now(),
+                    RunStatus::Completed,
+                    "omp",
+                    "/tmp",
+                );
+                run.finished_at = Some(now());
+                controller.store_mut().insert(run);
+            }
+            cx.notify();
+        })
+    });
+    cx.update(|window, cx| harness.page.update(cx, |page, cx| page.show_automation("audit", window, cx)));
+    cx.run_until_parked();
+    let offset = |cx: &mut VisualTestContext| cx.update(|_, cx| harness.page.read(cx).scroll_offset().y);
+    assert_eq!(offset(cx), gpui::px(0.));
+
+    for _ in 0..59 {
+        cx.simulate_keystrokes("j");
+    }
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|_, cx| harness.page.read(cx).selected_run().map(str::to_owned)),
+        Some("run-1".into())
+    );
+    let scrolled = offset(cx);
+    assert!(scrolled < gpui::px(0.), "{scrolled:?}");
+
+    for _ in 0..59 {
+        cx.simulate_keystrokes("k");
+    }
+    cx.run_until_parked();
+    assert!(offset(cx) > scrolled);
 }
