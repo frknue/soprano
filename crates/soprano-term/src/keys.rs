@@ -80,17 +80,66 @@ pub fn key_bytes(vt: &mut Vt, keystroke: &Keystroke, action: KeyAction) -> Optio
         _ if alt_as_meta => unshifted.map(|c| shifted_text(c, m.shift || shifted)),
         _ => k.key_char.clone(),
     };
-    // macOS translates Option into text unless it is configured as Alt; that text can be
-    // ASCII too (Slovenian Shift-Option-2 -> "@"). Other platforms keep Alt shortcuts
-    // unless they produced non-ASCII text (AltGr).
+    if is_altgr_text(m, text.as_deref(), Platform::current()) {
+        // AltGr made the character: the program gets it plain, not Ctrl/Alt chorded.
+        mods &= !(GHOSTTY_MODS_CTRL as GhosttyMods | GHOSTTY_MODS_ALT as GhosttyMods);
+    }
+    let consumed = consumed_mods(mods, m, text.as_deref(), alt_as_meta, Platform::current());
+    Some(vt.encode_key(action.ghostty(), key, mods, consumed, text.as_deref(), unshifted))
+}
+
+/// Which OS's keyboard conventions apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Platform {
+    MacOs,
+    Windows,
+    Other,
+}
+
+impl Platform {
+    fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Platform::MacOs
+        } else if cfg!(windows) {
+            Platform::Windows
+        } else {
+            Platform::Other
+        }
+    }
+}
+
+/// Windows reports AltGr as Control+Alt with the typed character. Both made the character,
+/// so neither may turn it into a control code: AltGr+Q on a German layout types "@", not
+/// ESC NUL, and AltGr+E types "€", not ^E.
+fn is_altgr_text(m: Modifiers, text: Option<&str>, platform: Platform) -> bool {
+    platform == Platform::Windows
+        && m.control
+        && m.alt
+        && text.is_some_and(|t| !t.is_empty() && !t.chars().any(char::is_control))
+}
+
+/// The modifiers that went into making `text`, which the encoder must not report again.
+///
+/// - Shift always counts when it was held.
+/// - macOS translates Option into text unless it is configured as Alt; that text can be
+///   ASCII too (Slovenian Shift-Option-2 -> "@").
+/// - Other platforms keep Alt shortcuts unless they produced non-ASCII text (AltGr).
+fn consumed_mods(
+    mods: GhosttyMods,
+    m: Modifiers,
+    text: Option<&str>,
+    alt_as_meta: bool,
+    platform: Platform,
+) -> GhosttyMods {
     let mut consumed = mods & GHOSTTY_MODS_SHIFT as GhosttyMods;
-    if m.alt
+    if mods & GHOSTTY_MODS_ALT as GhosttyMods != 0
+        && m.alt
         && !alt_as_meta
-        && text.as_deref().is_some_and(|t| !t.is_empty() && (cfg!(target_os = "macos") || !t.is_ascii()))
+        && text.is_some_and(|t| !t.is_empty() && (platform == Platform::MacOs || !t.is_ascii()))
     {
         consumed |= GHOSTTY_MODS_ALT as GhosttyMods;
     }
-    Some(vt.encode_key(action.ghostty(), key, mods, consumed, text.as_deref(), unshifted))
+    consumed
 }
 
 fn shifted_text(c: char, shift: bool) -> String {
@@ -207,8 +256,9 @@ fn map_key(key: &str) -> Option<(GhosttyKey, bool, Option<char>)> {
         return Some((named, false, None));
     }
     if let Some(n) = key.strip_prefix('f').and_then(|n| n.parse::<u8>().ok())
-        && (1..=12).contains(&n)
+        && (1..=24).contains(&n)
     {
+        // F1..F25 are consecutive in libghostty's key enum.
         return Some((GHOSTTY_KEY_F1 + (n - 1) as GhosttyKey, false, None));
     }
     let mut chars = key.chars();
@@ -404,5 +454,42 @@ mod tests {
         assert!(
             !key_bytes(&mut vt, &press("a", Some("a")), KeyAction::Release).unwrap_or_default().is_empty()
         );
+    }
+
+    #[test]
+    fn altgr_characters_on_windows_are_typed_not_turned_into_control_codes() {
+        let ctrl_alt = Modifiers { control: true, alt: true, ..Modifiers::default() };
+        assert!(is_altgr_text(ctrl_alt, Some("@"), Platform::Windows));
+        assert!(is_altgr_text(ctrl_alt, Some("€"), Platform::Windows));
+        // A real Ctrl+Alt chord without a character stays a chord, and only Windows does this.
+        assert!(!is_altgr_text(ctrl_alt, None, Platform::Windows));
+        assert!(!is_altgr_text(ctrl_alt, Some("\u{11}"), Platform::Windows));
+        assert!(!is_altgr_text(ctrl_alt, Some("@"), Platform::Other));
+        assert!(!is_altgr_text(ctrl_alt, Some("@"), Platform::MacOs));
+        // With the AltGr modifiers dropped the encoder types the character.
+        let mut vt = vt();
+        assert_eq!(vt.encode_key(GHOSTTY_KEY_ACTION_PRESS, GHOSTTY_KEY_Q, 0, 0, Some("@"), Some('q')), b"@");
+        assert_eq!(
+            vt.encode_key(GHOSTTY_KEY_ACTION_PRESS, GHOSTTY_KEY_E, 0, 0, Some("€"), Some('e')),
+            "€".as_bytes()
+        );
+        // Kept, they would have been a control code: the bug this guards against.
+        let chorded = ghostty_mods(ctrl_alt);
+        assert_ne!(
+            vt.encode_key(GHOSTTY_KEY_ACTION_PRESS, GHOSTTY_KEY_Q, chorded, 0, Some("@"), Some('q')),
+            b"@"
+        );
+    }
+
+    #[test]
+    fn function_keys_up_to_f24_are_sent() {
+        let mut vt = vt();
+        for n in 1..=24 {
+            let bytes = send(&mut vt, &format!("f{n}"), None).unwrap_or_default();
+            assert!(!bytes.is_empty(), "f{n}");
+        }
+        assert_eq!(map_key("f13").map(|k| k.0), Some(GHOSTTY_KEY_F13));
+        assert_eq!(map_key("f24").map(|k| k.0), Some(GHOSTTY_KEY_F24));
+        assert_eq!(map_key("f25"), None);
     }
 }

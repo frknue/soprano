@@ -5,14 +5,14 @@
 //! interception, copy mode, clipboard confirmations, focus reporting and the dashboard's
 //! screen text.
 
-use crate::clipboard::ClipboardConfirmationKind;
+use crate::clipboard::{ClipboardConfirmationCoordinator, ClipboardConfirmationKind};
 use crate::copy_mode::{
     CopyModeCommand, CopyModeInput, CopyModePhase, CopyModeSelectionStyle, CopyModeSession,
 };
 use crate::drop_content::{self, DropPayload};
 use crate::engine::{PtyMessage, Terminal, TerminalLaunch, TerminalSize};
 use crate::events::{ClipboardRequest, TerminalEvent};
-use crate::input_metadata::{KeyEquivalentModifiers, KeyEquivalentRouter, KeyUpRoute};
+use crate::input_metadata::{DeliveredPresses, KeyEquivalentModifiers, KeyEquivalentRouter, KeyUpRoute};
 use crate::interaction::{MouseButtonState, SurfaceFocusTracker, TerminalInteractionState};
 use crate::keys::{self, KeyAction};
 use crate::links;
@@ -137,6 +137,10 @@ struct Grid {
 struct CopyMode {
     session: CopyModeSession,
     anchor: Option<(u16, u32)>,
+    /// The cursor as content, `(column, screen row)`: while selecting, the selection's end
+    /// stays on its text when the viewport scrolls (output, the wheel), as Ghostty's own
+    /// selection did. The session's row is viewport-relative and is resynced from this.
+    cursor: (u16, u32),
     /// The grid size copy mode began on; another one ends it.
     grid: (u16, u16),
 }
@@ -177,6 +181,11 @@ pub struct TerminalView {
     search_query: String,
     search_task: Option<Task<()>>,
     destroyed: bool,
+    clipboard_coordinator: Option<Rc<ClipboardConfirmationCoordinator>>,
+    /// Key presses the program got; only their releases reach it.
+    delivered_presses: DeliveredPresses,
+    /// The pending wake-up at a synchronized-output hold's deadline.
+    render_hold: Option<(Instant, Task<()>)>,
     _reader: Task<()>,
     _blink: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -301,6 +310,9 @@ impl TerminalView {
             search_query: String::new(),
             search_task: None,
             destroyed: false,
+            clipboard_coordinator: None,
+            delivered_presses: DeliveredPresses::default(),
+            render_hold: None,
             _reader: Self::read_output(rx, cx),
             _blink: Self::blink(cx),
             _subscriptions: subscriptions,
@@ -311,16 +323,24 @@ impl TerminalView {
     fn read_output(rx: async_channel::Receiver<PtyMessage>, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
             while let Ok(first) = rx.recv().await {
-                let deadline = Instant::now() + OUTPUT_TIME_PER_TURN;
-                let mut batch = vec![first];
-                while Instant::now() < deadline {
-                    match rx.try_recv() {
-                        Ok(message) => batch.push(message),
-                        Err(_) => break,
-                    }
-                }
-                if this.update(cx, |this, cx| this.ingest(batch, cx)).is_err() {
+                // The deadline bounds parsing, not just collecting: a flood of output (`cat`
+                // on a huge file, `yes`) leaves the rest queued, which stalls the reader.
+                let turn = output_turn(first, &rx, OUTPUT_TIME_PER_TURN);
+                if this.update(cx, |this, cx| this.ingest(turn, cx)).is_err() {
                     break;
+                }
+                if !rx.is_empty() {
+                    // A ready receiver does not yield to input and painting by itself.
+                    let mut yielded = false;
+                    std::future::poll_fn(|cx| {
+                        if std::mem::replace(&mut yielded, true) {
+                            std::task::Poll::Ready(())
+                        } else {
+                            cx.waker().wake_by_ref();
+                            std::task::Poll::Pending
+                        }
+                    })
+                    .await;
                 }
             }
         })
@@ -346,21 +366,49 @@ impl TerminalView {
         })
     }
 
-    fn ingest(&mut self, batch: Vec<PtyMessage>, cx: &mut Context<Self>) {
+    fn ingest(&mut self, turn: impl Iterator<Item = PtyMessage>, cx: &mut Context<Self>) {
         if self.destroyed {
+            // Drained, so the PTY threads never block on a terminal nobody shows.
+            turn.for_each(drop);
             return;
         }
-        let events = {
+        let (events, changed, deadline) = {
             let mut g = self.grid.borrow_mut();
-            for message in batch {
+            for message in turn {
                 g.terminal.handle(message);
             }
-            g.terminal.take_events()
+            let events = g.terminal.take_events();
+            // Output that changed nothing on screen (an agent spinning its title) needs no
+            // frame.
+            let changed = g.terminal.vt_mut().shows_change();
+            (events, changed, g.terminal.vt().render_hold_deadline())
         };
         for event in events {
             self.dispatch(event, cx);
         }
-        cx.notify();
+        self.schedule_render_hold_release(deadline, cx);
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// A program holding the screen (synchronized output) that never lets go must not
+    /// freeze it: libghostty leaves the timeout to the embedder, so the view redraws at the
+    /// deadline, when `frame()` drops the hold.
+    fn schedule_render_hold_release(&mut self, deadline: Option<Instant>, cx: &mut Context<Self>) {
+        if self.render_hold.as_ref().map(|(at, _)| *at) == deadline {
+            return;
+        }
+        self.render_hold = deadline.map(|deadline| {
+            let task = cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(deadline.saturating_duration_since(Instant::now())).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.render_hold = None;
+                    cx.notify();
+                });
+            });
+            (deadline, task)
+        });
     }
 
     fn dispatch(&mut self, event: TerminalEvent, cx: &mut Context<Self>) {
@@ -435,6 +483,13 @@ impl TerminalView {
             }
         }
         cx.notify();
+    }
+
+    /// The app's clipboard prompt queue. With it, `destroy` (and so `restart`) withdraws this
+    /// terminal's queued and showing prompts itself; without it, the host must call
+    /// `cancel_requests(view.entity_id().as_u64())` when it sees [`TerminalEvent::Destroyed`].
+    pub fn set_clipboard_coordinator(&mut self, coordinator: Option<Rc<ClipboardConfirmationCoordinator>>) {
+        self.clipboard_coordinator = coordinator;
     }
 
     /// Lets the host take keys before the terminal sees them.
@@ -555,10 +610,7 @@ impl TerminalView {
             return;
         }
         let bracketed = self.grid.borrow().terminal.vt().bracketed_paste();
-        let unsafe_paste = self.settings.clipboard_paste_protection
-            && !(self.settings.clipboard_paste_bracketed_safe && bracketed)
-            && !vt::paste_is_safe(text);
-        if unsafe_paste {
+        if paste_needs_confirmation(text, &self.settings, bracketed) {
             self.request_confirmation(
                 ClipboardConfirmationKind::Paste,
                 text.to_owned(),
@@ -607,8 +659,8 @@ impl TerminalView {
         if self.destroyed {
             return false;
         }
-        let text = raw.split(['\n', '\r']).collect::<Vec<_>>().join(" ");
-        let text = text.trim();
+        let text = submission_line(raw);
+        let text = text.as_str();
         if text.is_empty() {
             return false;
         }
@@ -811,14 +863,23 @@ impl TerminalView {
     /// is killed. Safe to call more than once.
     pub fn destroy(&mut self, cx: &mut Context<Self>) {
         self.finish_copy_mode(false, false, cx);
-        self.mouse_button.release_left_button();
+        self.release_tracked_left_button();
         self.key_router.reset();
+        self.delivered_presses.clear();
         self.suppressed_copy_mode_key_ups.clear();
         self.focus_tracker.reset();
+        self.render_hold = None;
         if self.destroyed {
             return;
         }
         self.destroyed = true;
+        // Prompts queued for this terminal go too (Swift cancelled them on destroy). Deferred:
+        // the coordinator answers them through the host, which updates this view.
+        if let Some(coordinator) = self.clipboard_coordinator.clone() {
+            let surface = cx.entity_id().as_u64();
+            cx.defer(move |_| coordinator.cancel_requests(surface));
+        }
+        cx.emit(TerminalEvent::Destroyed);
         // Pending prompts answer as denied: a read gets an empty clipboard.
         for (_, pending) in self.clipboard_requests.drain() {
             if let PendingClipboard::Read(read, _) = pending {
@@ -874,6 +935,7 @@ impl TerminalView {
             self.release_tracked_left_button();
             self.mouse_button.release_left_button();
             self.key_router.reset();
+            self.delivered_presses.clear();
             self.suppressed_copy_mode_key_ups.clear();
         }
     }
@@ -889,7 +951,7 @@ impl TerminalView {
         if self.copy_mode.is_some() || self.destroyed {
             return false;
         }
-        let (session, grid) = {
+        let (session, grid, top) = {
             let mut g = self.grid.borrow_mut();
             let vt = g.terminal.vt_mut();
             vt.scroll_to_bottom();
@@ -898,9 +960,11 @@ impl TerminalView {
             (
                 CopyModeSession::new(x as isize, y as isize, vt.cols as usize, vt.rows as usize),
                 (vt.cols, vt.rows),
+                vt.viewport_top(),
             )
         };
-        self.copy_mode = Some(CopyMode { session, anchor: None, grid });
+        let cursor = (session.column() as u16, top + session.row() as u32);
+        self.copy_mode = Some(CopyMode { session, anchor: None, cursor, grid });
         cx.emit(TerminalEvent::CopyModeStateChanged(KeybindingState::Copy));
         cx.notify();
         true
@@ -911,12 +975,22 @@ impl TerminalView {
     }
 
     fn finish_copy_mode(&mut self, copy: bool, scroll_to_bottom: bool, cx: &mut Context<Self>) {
+        if self.copy_mode.is_none() {
+            return;
+        }
+        // A drag still in progress ends with copy mode (no autoscroll, no copy-on-select).
+        self.release_tracked_left_button();
         let Some(mode) = self.copy_mode.take() else { return };
         if mode.session.phase() == CopyModePhase::Selecting {
-            if copy && let Some(text) = self.selection_text() {
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            let copied = copy
+                && self.selection_text().is_some_and(|text| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    true
+                });
+            // A yank leaves the highlight only when `selection-clear-on-copy` is off.
+            if !copied || self.settings.selection_clear_on_copy {
+                self.grid.borrow_mut().terminal.vt_mut().clear_selection();
             }
-            self.grid.borrow_mut().terminal.vt_mut().clear_selection();
         }
         if scroll_to_bottom {
             self.grid.borrow_mut().terminal.vt_mut().scroll_to_bottom();
@@ -943,7 +1017,7 @@ impl TerminalView {
     fn update_copy_selection(&mut self) {
         let Some(mode) = &self.copy_mode else { return };
         let (Some(anchor), Some(style)) = (mode.anchor, mode.session.selection_style()) else { return };
-        let cursor = self.copy_cursor(&mode.session);
+        let cursor = mode.cursor;
         let mut g = self.grid.borrow_mut();
         let vt = g.terminal.vt_mut();
         match style {
@@ -977,6 +1051,14 @@ impl TerminalView {
         };
         let selecting = mode.session.phase() == CopyModePhase::Selecting;
         let rows = mode.session.row_count() as isize;
+        if selecting {
+            // Bring the selection's end back where the session expects it, even if the
+            // viewport moved since the last key.
+            let top = self.grid.borrow().terminal.vt().viewport_top();
+            let (scroll, row) = viewport_row_for(mode.cursor.1, top, mode.session.row_count());
+            self.scroll_lines(scroll);
+            mode.session.move_to_viewport_row(row);
+        }
         use CopyModeCommand::*;
         match command {
             MoveLeft => {
@@ -1028,6 +1110,7 @@ impl TerminalView {
                         CopyModeSelectionStyle::Line
                     };
                     mode.anchor = Some(self.copy_cursor(&mode.session));
+                    mode.cursor = self.copy_cursor(&mode.session);
                     mode.session.begin_selection(style);
                     cx.emit(TerminalEvent::CopyModeStateChanged(KeybindingState::CopySelection));
                 }
@@ -1047,6 +1130,7 @@ impl TerminalView {
             }
             AwaitMore => {}
         }
+        mode.cursor = self.copy_cursor(&mode.session);
         self.copy_mode = Some(mode);
         self.update_copy_selection();
         cx.notify();
@@ -1067,8 +1151,9 @@ impl TerminalView {
         let Some(mode) = &mut self.copy_mode else { return };
         let previous = mode.session.phase();
         mode.session.update_mouse_selection(col, row, has_selection);
+        mode.cursor = (mode.session.column() as u16, top + mode.session.row() as u32);
         if pressed {
-            mode.anchor = Some((mode.session.column() as u16, top + mode.session.row() as u32));
+            mode.anchor = Some(mode.cursor);
         }
         let phase = mode.session.phase();
         if phase != previous {
@@ -1130,6 +1215,7 @@ impl TerminalView {
         self.blink_visible = true;
         self.write(&bytes);
         self.key_router.record_key_down_delivery(&k.key);
+        self.delivered_presses.press(k.key.clone());
         if k.key == "enter" && !k.modifiers.shift {
             cx.emit(TerminalEvent::AgentInputSubmitted);
         }
@@ -1139,6 +1225,11 @@ impl TerminalView {
     fn key_up(&mut self, event: &KeyUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let key = &event.keystroke.key;
         if self.suppressed_copy_mode_key_ups.remove(key) || self.destroyed {
+            return;
+        }
+        // Only a press the program got has a release: keys the host intercepted or handled
+        // as an action (Cmd+C, Cmd+V) never reached it.
+        if !self.delivered_presses.release(key) {
             return;
         }
         if self.key_router.route_key_up(key) == KeyUpRoute::Suppress {
@@ -1318,6 +1409,9 @@ impl TerminalView {
         if self.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(MouseButton::Left), ev.position, ev.modifiers) {
             // The program took the click: the old selection ends, so a copy can't repeat it.
             self.clear_selection(cx);
+            if self.copy_mode.is_some() {
+                self.update_copy_mode_mouse(ev.position, true, cx);
+            }
         } else {
             self.start_selection(ev.position, cx);
         }
@@ -1406,6 +1500,61 @@ fn read_clipboard(selection: bool, cx: &mut App) -> String {
         return SELECTION_CLIPBOARD.with(|s| s.borrow().clone());
     }
     cx.read_from_clipboard().and_then(|i| i.text()).unwrap_or_default()
+}
+
+/// Where a content row shows: the lines to scroll to bring it into a viewport of `rows`
+/// starting at screen row `top`, and its viewport row afterwards.
+fn viewport_row_for(screen_row: u32, top: u32, rows: usize) -> (isize, isize) {
+    let rows = rows.max(1) as isize;
+    let row = screen_row as isize - top as isize;
+    if row < 0 {
+        (row, 0)
+    } else if row >= rows {
+        (row - rows + 1, rows - 1)
+    } else {
+        (0, row)
+    }
+}
+
+/// Whether pasting `text` waits for the user (Ghostty's paste protection). A bracketed
+/// paste is trusted when `clipboard-paste-bracketed-safe` is on, unless the text carries
+/// the end marker that would let it out of the brackets.
+fn paste_needs_confirmation(text: &str, settings: &TerminalSettings, bracketed: bool) -> bool {
+    if !settings.clipboard_paste_protection {
+        return false;
+    }
+    if text.contains("\x1b[201~") {
+        return true;
+    }
+    !(settings.clipboard_paste_bracketed_safe && bracketed) && !vt::paste_is_safe(text)
+}
+
+/// Text submitted as one line: every line break (any of Unicode's) joins its neighbors with
+/// one space, empty lines vanish, and the ends are trimmed.
+fn submission_line(raw: &str) -> String {
+    let newline =
+        |c: char| matches!(c, '\n' | '\r' | '\u{0B}' | '\u{0C}' | '\u{85}' | '\u{2028}' | '\u{2029}');
+    raw.split(newline).filter(|line| !line.is_empty()).collect::<Vec<_>>().join(" ").trim().to_owned()
+}
+
+/// The messages of one output turn: the first, then whatever is queued until `budget` runs
+/// out. Lazy, so the budget limits parsing; a turn can overshoot by one message.
+fn output_turn(
+    first: PtyMessage,
+    rx: &async_channel::Receiver<PtyMessage>,
+    budget: Duration,
+) -> impl Iterator<Item = PtyMessage> + '_ {
+    let deadline = Instant::now() + budget;
+    let mut first = Some(first);
+    std::iter::from_fn(move || {
+        if let Some(first) = first.take() {
+            return Some(first);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        rx.try_recv().ok()
+    })
 }
 
 // Held-button events belong to the pane that received the press.
@@ -2149,6 +2298,9 @@ impl Render for TerminalView {
                                         ev.position,
                                         ev.modifiers,
                                     );
+                                    if this.copy_mode.is_some() && ev.button == MouseButton::Left {
+                                        this.update_copy_mode_mouse(ev.position, false, cx);
+                                    }
                                 }
                                 if this.selecting && ev.button == MouseButton::Left {
                                     this.finish_selection(ev.position, cx);
@@ -2173,8 +2325,8 @@ impl Render for TerminalView {
 #[cfg(test)]
 mod tests {
     use super::{
-        grid_size, link_mods, macos_wheel_steps, scroll_delta_steps, scroll_steps, selection_scroll_lines,
-        track_mouse_button,
+        grid_size, link_mods, macos_wheel_steps, output_turn, paste_needs_confirmation, scroll_delta_steps,
+        scroll_steps, selection_scroll_lines, submission_line, track_mouse_button, viewport_row_for,
     };
     use crate::settings::TerminalSettings;
     use ghostty_sys::*;
@@ -2248,5 +2400,47 @@ mod tests {
         let settings = TerminalSettings::default();
         let cols_rows = grid_size(&settings, size(px(828.0), px(504.0)), size(px(8.0), px(16.0)));
         assert_eq!(cols_rows, (100, 30));
+    }
+
+    #[test]
+    fn submitted_text_becomes_one_line_without_doubled_spaces() {
+        assert_eq!(submission_line("a\r\nb"), "a b");
+        assert_eq!(submission_line("  fix\n\n the tests \u{2028}now\n"), "fix  the tests  now");
+        assert_eq!(submission_line("\n\r\n"), "");
+    }
+
+    #[test]
+    fn an_embedded_bracketed_paste_end_always_asks_first() {
+        let settings = TerminalSettings::default();
+        assert!(paste_needs_confirmation("ls\x1b[201~rm -rf ~", &settings, true));
+        assert!(!paste_needs_confirmation("ls\nmake", &settings, true), "bracketed pastes are safe");
+        assert!(paste_needs_confirmation("ls\nmake", &settings, false));
+        assert!(!paste_needs_confirmation("ls -la", &settings, false));
+        let off = TerminalSettings { clipboard_paste_protection: false, ..TerminalSettings::default() };
+        assert!(!paste_needs_confirmation("ls\x1b[201~", &off, true));
+    }
+
+    #[test]
+    fn the_copy_cursor_follows_its_content_when_the_viewport_moves() {
+        // Content row 50 with the viewport at 40..64: row 10, no scrolling.
+        assert_eq!(viewport_row_for(50, 40, 24), (0, 10));
+        // Output scrolled the viewport down past it: scroll back up to show it on top.
+        assert_eq!(viewport_row_for(50, 60, 24), (-10, 0));
+        // Scrolled up past it: scroll down so it is the last row.
+        assert_eq!(viewport_row_for(80, 40, 24), (17, 23));
+    }
+
+    #[test]
+    fn an_output_turn_stops_parsing_at_its_deadline() {
+        let (tx, rx) = async_channel::bounded(8);
+        for _ in 0..4 {
+            tx.send_blocking(crate::PtyMessage::Data(vec![b'x'])).unwrap();
+        }
+        let first = crate::PtyMessage::Data(vec![b'a']);
+        assert_eq!(output_turn(first, &rx, std::time::Duration::from_secs(5)).count(), 5);
+        tx.send_blocking(crate::PtyMessage::Data(vec![b'x'])).unwrap();
+        let first = crate::PtyMessage::Data(vec![b'a']);
+        assert_eq!(output_turn(first, &rx, std::time::Duration::ZERO).count(), 1, "the rest waits");
+        assert_eq!(rx.len(), 1);
     }
 }

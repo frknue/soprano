@@ -2571,10 +2571,20 @@ impl Drop for Vt {
     }
 }
 
+/// Appends the cell's characters. A cell can hold more code points than the first buffer
+/// (combining marks, long emoji sequences): then libghostty reports the size it needs and
+/// fills nothing, so the read is repeated with a buffer that fits.
 fn push_graphemes(r: &GhosttyGridRef, text: &mut String) {
-    let mut cps = [0u32; 16];
+    let mut cps = vec![0u32; 16];
     let mut len = 0usize;
-    unsafe { ghostty_grid_ref_graphemes(r, cps.as_mut_ptr(), cps.len(), &mut len) };
+    let mut result = unsafe { ghostty_grid_ref_graphemes(r, cps.as_mut_ptr(), cps.len(), &mut len) };
+    if result == GHOSTTY_OUT_OF_SPACE {
+        cps.resize(len, 0);
+        result = unsafe { ghostty_grid_ref_graphemes(r, cps.as_mut_ptr(), cps.len(), &mut len) };
+    }
+    if result != GHOSTTY_SUCCESS {
+        return;
+    }
     text.extend(cps[..len.min(cps.len())].iter().filter_map(|c| char::from_u32(*c)));
 }
 
@@ -2884,5 +2894,42 @@ mod tests {
         assert!(vt.search_spans().iter().any(|span| span.selected));
         vt.clear_search();
         assert_eq!(vt.search_progress(), SearchProgress::default());
+    }
+
+    #[test]
+    fn a_cell_with_many_combining_marks_reads_whole_without_nuls() {
+        let mut vt = vt(10, 2);
+        let marks: String = std::iter::repeat_n('\u{301}', 20).collect();
+        vt.write(format!("a{marks}b").as_bytes());
+        let text = vt.screen_text(0).text;
+        assert!(!text.contains('\0'), "{text:?}");
+        assert!(text.starts_with('a') && text.contains('b'), "{text:?}");
+        assert_eq!(text.chars().filter(|c| *c == '\u{301}').count(), 20);
+    }
+
+    #[test]
+    fn output_that_only_changes_the_title_needs_no_redraw() {
+        let mut vt = vt(20, 3);
+        vt.write(b"hello");
+        assert!(vt.shows_change());
+        vt.frame();
+        vt.write(b"\x1b]2;spinner\x07");
+        assert!(!vt.shows_change());
+        vt.write(b"!");
+        assert!(vt.shows_change());
+    }
+
+    #[test]
+    fn a_synchronized_output_hold_has_a_deadline_and_releases_after_it() {
+        let mut vt = vt(20, 3);
+        vt.write(b"before");
+        vt.frame();
+        vt.write(b"\x1b[?2026h\r\x1b[Kafter");
+        let deadline = vt.render_hold_deadline().expect("held");
+        assert!(deadline > Instant::now());
+        vt.shared.held_since = Some(Instant::now() - MAX_HOLD - Duration::from_millis(1));
+        let frame = vt.frame();
+        assert!(row_text(&frame, 0).starts_with("after"));
+        assert_eq!(vt.render_hold_deadline(), None);
     }
 }

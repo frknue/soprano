@@ -11,6 +11,8 @@ use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// How to start a terminal's process (what `soprano-launch` builds).
@@ -53,6 +55,9 @@ pub enum PtyMessage {
     Exited(Option<i32>),
 }
 
+/// Output messages (up to 64 KiB each) waiting to be parsed before the reader stalls.
+const OUTPUT_QUEUE: usize = 16;
+
 /// The line Ghostty shows under a finished process it keeps open.
 const WAIT_AFTER_COMMAND_NOTICE: &[u8] = b"\r\n[Process exited. Press any key to close the terminal.]";
 
@@ -61,6 +66,8 @@ pub struct Terminal {
     master: Box<dyn MasterPty + Send>,
     writer: std::sync::mpsc::Sender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Set once the waiter thread reaped the process.
+    reaped: Arc<AtomicBool>,
     child_pid: Option<u32>,
     rx: async_channel::Receiver<PtyMessage>,
     osc52: Osc52ReadScanner,
@@ -68,6 +75,8 @@ pub struct Terminal {
     activity: CommandActivity,
     at_prompt: bool,
     running_command: bool,
+    /// A command started (OSC 133;C) and hasn't ended yet.
+    command_started: bool,
     exit_status: Option<Option<i32>>,
     wait_after_command: bool,
     size: TerminalSize,
@@ -97,9 +106,13 @@ impl Terminal {
         let killer = child.clone_killer();
         let master = pair.master;
         let mut reader = master.try_clone_reader().context("cannot read the pseudo-terminal")?;
-        let pty_writer = master.take_writer().context("cannot write the pseudo-terminal")?;
+        let pty_writer = pty_writer(master.as_ref())?;
 
-        let (tx, rx) = async_channel::unbounded();
+        // Bounded: when output outpaces parsing, the reader stalls and the PTY pushes back
+        // on the program instead of memory growing without limit.
+        let (tx, rx) = async_channel::bounded(OUTPUT_QUEUE);
+        let reaped = Arc::new(AtomicBool::new(false));
+        let reaped_by_waiter = reaped.clone();
         let (read_done_tx, read_done_rx) = std::sync::mpsc::channel::<()>();
         let data_tx = tx.clone();
         std::thread::Builder::new()
@@ -125,6 +138,8 @@ impl Terminal {
             .name("soprano-term-pty-wait".into())
             .spawn(move || {
                 let code = child.wait().ok().map(|status| status.exit_code() as i32);
+                // Its PID is free for reuse from now on: never signal it again.
+                reaped_by_waiter.store(true, Ordering::SeqCst);
                 // Let the reader hand over the last output first; a background job that
                 // keeps the PTY open must not hold back the exit for long.
                 let _ = read_done_rx.recv_timeout(Duration::from_millis(300));
@@ -153,6 +168,7 @@ impl Terminal {
             master,
             writer,
             killer,
+            reaped,
             child_pid,
             rx,
             osc52: Osc52ReadScanner::default(),
@@ -160,6 +176,7 @@ impl Terminal {
             activity: CommandActivity::default(),
             at_prompt: false,
             running_command: false,
+            command_started: false,
             exit_status: None,
             wait_after_command: launch.wait_after_command,
             size,
@@ -193,6 +210,12 @@ impl Terminal {
                 }
                 self.exit_status = Some(code);
                 self.events.push(TerminalEvent::ChildExited { exit_code: code });
+                // A finished process runs no command, whatever its last prompt mark said.
+                self.command_started = false;
+                if self.running_command {
+                    self.running_command = false;
+                    self.events.push(TerminalEvent::RunningCommandChanged(false));
+                }
                 if self.wait_after_command {
                     self.vt.write(WAIT_AFTER_COMMAND_NOTICE);
                 } else {
@@ -256,8 +279,14 @@ impl Terminal {
             }
             VtEvent::Prompt { step, exit_code } => {
                 self.at_prompt = !matches!(step, PromptStep::OutputStart);
-                if step == PromptStep::CommandEnd {
-                    self.events.push(TerminalEvent::CommandFinished { exit_code });
+                match step {
+                    PromptStep::OutputStart => self.command_started = true,
+                    // As Ghostty: an end without a start (shells mark one at the first
+                    // prompt, on an empty Enter, on Ctrl-C) finished nothing.
+                    PromptStep::CommandEnd if std::mem::take(&mut self.command_started) => {
+                        self.events.push(TerminalEvent::CommandFinished { exit_code });
+                    }
+                    _ => {}
                 }
                 let running = self.activity.is_running_command(self.at_prompt);
                 if running != self.running_command {
@@ -359,9 +388,15 @@ impl Terminal {
 
     /// Ends the process (the terminal closes).
     pub fn kill(&mut self) {
-        if self.exit_status.is_none() {
+        // Once reaped, the PID may belong to another process.
+        if self.exit_status.is_none() && !self.process_reaped() {
             let _ = self.killer.kill();
         }
+    }
+
+    /// Whether the process was reaped (it exited; its exit may not be handled yet).
+    pub fn process_reaped(&self) -> bool {
+        self.reaped.load(Ordering::SeqCst)
     }
 }
 
@@ -369,6 +404,26 @@ impl Drop for Terminal {
     fn drop(&mut self) {
         self.kill();
     }
+}
+
+/// Where input to the program goes. On unix a duplicate of the master: portable-pty's own
+/// writer types a newline and EOF into the PTY when dropped, and a foreground job (python,
+/// psql) that reads them before its SIGHUP would run a half-typed line.
+#[cfg(unix)]
+fn pty_writer(master: &(dyn MasterPty + Send)) -> Result<Box<dyn Write + Send>> {
+    use std::os::fd::FromRawFd;
+    let fd = master.as_raw_fd().context("the pseudo-terminal has no descriptor")?;
+    let dup = unsafe { libc::dup(fd) };
+    if dup < 0 {
+        return Err(std::io::Error::last_os_error()).context("cannot write the pseudo-terminal");
+    }
+    // SAFETY: `dup` is a fresh descriptor that only this File owns.
+    Ok(Box::new(unsafe { std::fs::File::from_raw_fd(dup) }))
+}
+
+#[cfg(not(unix))]
+fn pty_writer(master: &(dyn MasterPty + Send)) -> Result<Box<dyn Write + Send>> {
+    master.take_writer().context("cannot write the pseudo-terminal")
 }
 
 fn pty_size(size: TerminalSize) -> PtySize {

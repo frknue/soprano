@@ -196,6 +196,35 @@ impl<K: Eq + Hash + Clone> KeyEquivalentRouter<K> {
     }
 }
 
+/// The keys whose press reached the program. A release reaches it only for those, so a
+/// key the host took (an intercepted chord, a GPUI action such as Cmd+C) never shows up as
+/// a lone release for programs that asked for release events (kitty flag 2).
+#[derive(Clone, Debug)]
+pub struct DeliveredPresses<K: Eq + Hash = String> {
+    keys: std::collections::HashSet<K>,
+}
+
+impl<K: Eq + Hash> Default for DeliveredPresses<K> {
+    fn default() -> Self {
+        Self { keys: std::collections::HashSet::new() }
+    }
+}
+
+impl<K: Eq + Hash> DeliveredPresses<K> {
+    pub fn press(&mut self, key: K) {
+        self.keys.insert(key);
+    }
+
+    /// Whether the release may go to the program (its press did).
+    pub fn release(&mut self, key: &K) -> bool {
+        self.keys.remove(key)
+    }
+
+    pub fn clear(&mut self) {
+        self.keys.clear();
+    }
+}
+
 /// The platform's momentum phase of a scroll event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollMomentum {
@@ -509,5 +538,18 @@ mod tests {
             modifier_transition(0x39, ModifierFlags(0), ModifierDeviceFlags(0)),
             Some(ModifierAction::Release)
         );
+    }
+
+    #[test]
+    fn only_releases_of_delivered_presses_reach_the_program() {
+        let mut delivered = DeliveredPresses::<&str>::default();
+        // Cmd+C handled as an app action: the press never reached the program.
+        assert!(!delivered.release(&"c"));
+        delivered.press("a");
+        assert!(delivered.release(&"a"));
+        assert!(!delivered.release(&"a"));
+        delivered.press("b");
+        delivered.clear();
+        assert!(!delivered.release(&"b"));
     }
 }

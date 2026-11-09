@@ -6,7 +6,8 @@ use crate::vt::ClipboardLocation;
 use soprano_types::KeybindingState;
 
 /// A clipboard question waiting for the user (an unsafe paste, an OSC 52 read or write).
-/// The host shows it (see [`crate::ClipboardConfirmationCoordinator`]) and answers with
+/// The host shows it (see [`crate::ClipboardConfirmationCoordinator`], enqueued with the
+/// view's `entity_id().as_u64()` as the surface) and answers with
 /// `TerminalView::resolve_clipboard_request(id, allowed, cx)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClipboardRequest {
@@ -61,4 +62,9 @@ pub enum TerminalEvent {
     FocusRequested,
     /// The terminal gained keyboard focus in the active window.
     Focused,
+    /// `destroy` ended the terminal (also the old process on `restart`). Clipboard prompts
+    /// still queued for it must go: call
+    /// `ClipboardConfirmationCoordinator::cancel_requests(view.entity_id().as_u64())`, or
+    /// hand the view the coordinator (`TerminalView::set_clipboard_coordinator`) so it does.
+    Destroyed,
 }

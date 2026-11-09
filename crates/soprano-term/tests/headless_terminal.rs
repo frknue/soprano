@@ -101,3 +101,59 @@ fn an_osc52_read_waits_for_an_answer() {
     assert!(terminal.pump_until(Duration::from_secs(10), |t| t.has_exited()));
     assert!(terminal.vt().visible_text().contains("got[E]52;c;aGk=E"), "{:?}", terminal.vt().visible_text());
 }
+
+#[test]
+fn an_exited_shell_stops_counting_as_running_a_command() {
+    let script = "printf '\\033]133;A\\007$ \\033]133;B\\007\\033]133;C\\007'; sleep 0.2; exit 1";
+    let mut launch = launch(script);
+    launch.wait_after_command = true;
+    let mut terminal = spawn(launch);
+    assert!(terminal.pump_until(Duration::from_secs(10), |t| t.has_exited()));
+    assert!(!terminal.is_running_command());
+    let events = terminal.take_events();
+    assert!(events.contains(&TerminalEvent::RunningCommandChanged(true)), "{events:?}");
+    assert_eq!(events.last(), Some(&TerminalEvent::RunningCommandChanged(false)), "{events:?}");
+}
+
+#[test]
+fn a_command_end_without_a_start_finishes_nothing() {
+    let script = "printf '\\033]133;D;0\\007\\033]133;A\\007\\033]133;B\\007\\033]133;D\\007\\033]133;C\\007\\033]133;D;5\\007'";
+    let mut terminal = spawn(launch(script));
+    assert!(terminal.pump_until(Duration::from_secs(10), |t| t.has_exited()));
+    let finished: Vec<_> = terminal
+        .take_events()
+        .into_iter()
+        .filter(|e| matches!(e, TerminalEvent::CommandFinished { .. }))
+        .collect();
+    assert_eq!(finished, vec![TerminalEvent::CommandFinished { exit_code: Some(5) }]);
+}
+
+#[test]
+fn closing_a_terminal_types_nothing_into_its_program() {
+    // The program survives the hangup and would act on a line typed at close.
+    let marker = std::env::temp_dir().join(format!("soprano-term-close-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let script = format!(
+        "trap '' HUP; printf ready; read line && printf 'got[%s]' \"$line\" > '{}'",
+        marker.display()
+    );
+    let mut terminal = spawn(launch(&script));
+    assert!(terminal.pump_until(Duration::from_secs(10), |t| t.vt().visible_text().contains("ready")));
+    drop(terminal);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!marker.exists(), "the program read a line nobody typed");
+    let _ = std::fs::remove_file(&marker);
+}
+
+#[test]
+fn a_reaped_process_is_never_signalled_again() {
+    let mut terminal = spawn(launch("exit 0"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !terminal.process_reaped() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(terminal.process_reaped());
+    // Its exit is not handled yet (nothing was pumped), and kill must still stay away.
+    assert!(!terminal.has_exited());
+    terminal.kill();
+}
