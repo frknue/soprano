@@ -1,15 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-install_root="${SOPRANO_INSTALL_DIR:-/Applications}"
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}"
+# Where the installed app keeps its bundle: the macOS app's Resources, or the Linux prefix
+# install-linux.sh used.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    install_root="${SOPRANO_INSTALL_DIR:-/Applications}"
+    bundle_dir="$install_root/Soprano.app/Contents/Resources/Soprano_Soprano.bundle"
+else
+    install_root="${SOPRANO_INSTALL_PREFIX:-$HOME/.local}"
+    bundle_dir="$install_root/share/soprano/Soprano_Soprano.bundle"
+fi
 if [[ "$install_root" != /* || "$install_root" == "/" \
     || "$agent_dir" != /* || "$agent_dir" == "/" ]]; then
-    echo "SOPRANO_INSTALL_DIR and PI_CODING_AGENT_DIR must be absolute directories other than /." >&2
+    echo "The install location and PI_CODING_AGENT_DIR must be absolute directories other than /." >&2
     exit 2
 fi
 
-extension="$install_root/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoOmpAmbient.js"
+extension="$bundle_dir/SopranoOmpAmbient.js"
 if [[ ! -f "$extension" ]]; then
     echo "Install Soprano before enabling omp shell integration: $extension" >&2
     exit 1

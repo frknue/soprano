@@ -1,20 +1,5 @@
-# Xcode
-*.xcodeproj/
-*.xcworkspace/
-xcuserdata/
-DerivedData/
-/build/
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-*.xccheckout
-*.moved-aside
-
-# Swift Package Manager
-.build/
-.swiftpm/
-Package.resolved
+# Cargo
+/target
 
 # macOS
 .DS_Store
@@ -24,10 +9,11 @@ Package.resolved
 # Archive of old Tauri/React code
 _archive/
 
-# App bundle
+# App bundles and release artifacts
 *.app
 *.dmg
 *.pkg
+/dist/
 
 # Misc
 *.log
@@ -36,7 +22,3 @@ _archive/
 
 # Personal working notes.
 docs/notes/
-
-# Pre-built libghostty (rebuild from ghostty/ submodule)
-/lib/
-/target

@@ -1,22 +1,43 @@
-# Integration notes (lead)
+# Known differences from the Swift app
 
-Cleanups to do once the parallel crates land:
+Intentional or platform-forced differences that remain after the port. Per-crate details are in
+`apis/<crate>.md`; parity reviews and their fixes in `reviews/`.
 
-- `PaneNavigationClaimRegistry` is in both soprano-ipc (`navigation`) and soprano-keys (`claims`).
-  Keep keys' (it implements `PassthroughClaims`); delete ipc's and its tests.
-- Pane hints on Linux/Windows are Alt+Shift+letter (`Platform::is_pane_shortcut_chord`), because
-  Ctrl+Shift+letter is every ⌘-letter shortcut there. Document in README.
-- ⌘L (toggle right sidebar) has no default chord on Linux/Windows (collides with Ctrl+Shift+L,
-  next window). Document; maybe give it an explicit non-mac default.
-- Zig: ghostty's `translate_c` dependency (codeberg archive URL) hangs; prefetch through
-  `zig fetch git+https://codeberg.org/vancluever/translate-c.git#<commit>` inside `ghostty/`.
-- IPC: `send` fails fast when the app is not running (Swift waited 15 s); same message.
-- Windows: `crates/soprano` needs a Windows-only `winresource` build-dependency + `build.rs`
-  embedding an `.ico` made from `resources/icons/app-icon.png`; `resources/bin/omp` is bash, so
-  Windows needs an `omp.cmd` launcher.
-- Commit `Cargo.lock` (CI uses `--locked`).
-- Cutover: README/AGENTS still describe Info.plist versioning, `build-ghostty.sh`, Ghostty resource
-  search; delete `Support/Licenses/LICENSE-swift-cmark`, `Support/ghostty-version.txt`.
-- soprano-git ranges are byte offsets (Swift used UTF-16).
-- soprano-browser toolbar uses gpui-component theme colors directly (soprano-ui was not ready): switch it to soprano-ui tokens/widgets (ask BrowserUi once UiKit is done).
-- Cross-compiling C deps (bundled SQLite etc.) for Linux/Windows checks works with zig cc wrappers as CC_<target>/AR_<target> (AccountsPort did this).
+- **Look:** Herdr's layout and tokens (`HERDR-UI.md`, `SHELL-MAP.md`), derived from Soprano's
+  themes. Fonts are the bundled Geist and JetBrains Mono on every OS.
+- **Keyboard on Linux/Windows:** `cmd` is Ctrl+Shift, `cmd+shift` Ctrl+Shift+Alt, `ctrl+cmd`
+  Ctrl+Alt; pane hints are Alt+Shift+letter. ⌘L (toggle right sidebar) has no default there
+  because it lands on Ctrl+Shift+L (next window); the first binding wins, as in Swift.
+- **Terminal:** libghostty-vt rendered by GPUI instead of a full libghostty surface. Only the
+  Ghostty config keys a vt renderer can honor are read (font, cursor, scrollback, clipboard,
+  paste protection, padding, shell integration); ligatures are off.
+- **IPC:** a per-instance local socket (`SOPRANO_SOCKET`) replaces distributed notifications;
+  a CLI call to an app that isn't running fails at once with the same message instead of
+  waiting 15 s.
+- **Text offsets:** ranges are UTF-8 byte offsets; limits that Swift counted in UTF-16 units
+  still count UTF-16 units.
+- **Browser:** wry's web views; screenshots work on macOS only, and a failed page load is not
+  reported by wry.
+- **Reader:** an image inside a sentence sits on its own line (GPUI text can't flow images).
+- **Wake from sleep:** detected from wall-clock gaps between 1 s samples on every OS.
+- **Windows:** no terminfo; toasts register a Start-menu shortcut with the app id at launch;
+  `resources/bin/omp.cmd` is the omp launcher.
+- **Untested on real Linux/Windows hardware:** Linux-only tests (non-UTF-8 file names, the
+  freedesktop trash) and all Windows code were only compiled or clippy-checked from macOS; CI
+  runs them on ubuntu-latest and windows-latest.
+
+## Toolchain notes
+
+- Ghostty's `translate_c` dependency comes from Codeberg, whose archive endpoint hangs;
+  `scripts/prefetch-zig-deps.sh` fetches it through git into Zig's global cache.
+- Cross-checking crates with C dependencies (bundled SQLite, `ring`) from macOS works with
+  `zig cc` wrappers as `CC_<target>`/`AR_<target>`. GPUI's Windows build script and the
+  WebKitGTK/X11 build scripts can't be cross-built from macOS.
+
+## Sibling apps
+
+Soprano Agents, Cast, Files, Git, Desktop, Mix and Tab sync shared Swift files (`Chrome.swift`,
+`Theme.swift`, `JSONCText.swift`, `CommandPalettePanel.swift`, …) from
+`~/git/private/soprano/Sources/Soprano` with their `scripts/sync-soprano-chrome.sh`. Those
+files no longer exist on this branch; point those scripts at a checkout of tag `v0.6.0`
+(or port the sibling apps onto `soprano-ui`).

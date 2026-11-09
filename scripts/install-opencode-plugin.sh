@@ -1,15 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-install_root="${SOPRANO_INSTALL_DIR:-/Applications}"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+# Where the installed app keeps its bundle: the macOS app's Resources, or the Linux prefix
+# install-linux.sh used.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    install_root="${SOPRANO_INSTALL_DIR:-/Applications}"
+    bundle_dir="$install_root/Soprano.app/Contents/Resources/Soprano_Soprano.bundle"
+else
+    install_root="${SOPRANO_INSTALL_PREFIX:-$HOME/.local}"
+    bundle_dir="$install_root/share/soprano/Soprano_Soprano.bundle"
+fi
 if [[ "$install_root" != /* || "$install_root" == "/" \
     || "$config_home" != /* || "$config_home" == "/" ]]; then
-    echo "SOPRANO_INSTALL_DIR and XDG_CONFIG_HOME must be absolute directories other than /." >&2
+    echo "The install location and XDG_CONFIG_HOME must be absolute directories other than /." >&2
     exit 2
 fi
 
-plugin="$install_root/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoOpenCodeAmbient"
+plugin="$bundle_dir/SopranoOpenCodeAmbient"
 if [[ ! -f "$plugin/tui.js" ]]; then
     echo "Install Soprano before enabling OpenCode shell integration: $plugin" >&2
     exit 1

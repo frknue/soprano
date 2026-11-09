@@ -221,11 +221,11 @@ Soprano cannot re-prompt — the section links straight to
 To recognize agents started outside the built-in launchers, install their lifecycle
 integration separately:
 
-- **Codex:** merge [`Support/AgentHooks/codex-hooks.json`](Support/AgentHooks/codex-hooks.json)
+- **Codex:** merge [`resources/AgentHooks/codex-hooks.json`](resources/AgentHooks/codex-hooks.json)
   into `$CODEX_HOME/hooks.json` (normally `~/.codex/hooks.json`). Start Codex once, open
   `/hooks`, and trust the new command hooks.
 - **Claude Code:** merge the `hooks` entries from
-  [`Support/AgentHooks/claude-settings.json`](Support/AgentHooks/claude-settings.json)
+  [`resources/AgentHooks/claude-settings.json`](resources/AgentHooks/claude-settings.json)
   into `~/.claude/settings.json`.
 - **omp:** enable its ambient extension once after installing Soprano:
 
@@ -253,6 +253,10 @@ integration separately:
   without replacing an existing entry (it honors `XDG_CONFIG_HOME`). The plugin does
   nothing outside Soprano and does not duplicate events from the `⌘3` launcher. Quit
   and restart an `opencode` that was already running to load it.
+
+The paths above are the macOS app's. On Linux the same `Soprano_Soprano.bundle` folder is
+in `share/soprano/` of the prefix you installed into (`~/.local/share/soprano/` by default);
+on Windows it is in `resources\` beside `soprano.exe`.
 
 Preserve existing hook groups when merging Codex or Claude Code hooks. The commands
 no-op outside Soprano, and the first lifecycle event automatically associates the

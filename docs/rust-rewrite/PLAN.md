@@ -1,14 +1,14 @@
 # Soprano Rust rewrite — plan and contract
 
-Goal: replace the Swift/AppKit app (`Sources/`, `Tests/`, `Package.swift`) with a Rust
-workspace that runs on macOS, Linux and Windows, looks like Herdr
-(<https://github.com/herdrdev/herdr-app>), and otherwise behaves exactly like the Swift app:
-same features, keybindings, CLI subcommands, environment variables, `settings.json` format,
-agent integrations, persistence keys, notifications, and file locations.
+Goal: replace the Swift/AppKit app with a Rust workspace that runs on macOS, Linux and
+Windows, looks like Herdr (<https://github.com/herdrdev/herdr-app>), and otherwise behaves
+exactly like the Swift app: same features, keybindings, CLI subcommands, environment
+variables, `settings.json` format, agent integrations, persistence keys, notifications, and
+file locations.
 
-The Swift sources stay in the tree as the reference until the Rust app reaches parity; the
-cutover commit deletes them. **The Swift code is the spec**: when porting, read the Swift file
-and its tests and reproduce the behavior, including edge cases and comments that explain why.
+The Swift sources were the spec during the port and are deleted from the tree; they live in
+git history (last Swift release: tag `v0.6.0`). The per-crate API notes in `apis/` and the
+parity reviews in `reviews/` cite Swift files by path at that state.
 
 ## Stack
 
