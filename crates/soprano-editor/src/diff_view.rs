@@ -16,8 +16,8 @@ use std::time::Duration;
 use gpui::{
     AnyElement, App, ClipboardItem, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyBinding, ListAlignment, ListOffset, ListState, MouseButton,
-    MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollEvent, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, Window, actions, canvas, div, list,
+    MouseDownEvent, ParentElement, Pixels, Point, Render, ScrollDelta, ScrollEvent, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, TouchPhase, Window, actions, canvas, div, list,
     prelude::FluentBuilder, px,
 };
 use soprano_files::watcher::{DEFAULT_LATENCY, FileSystemWatcher};
@@ -120,6 +120,13 @@ pub struct DiffView {
     path_copied: Option<Task<()>>,
     menu: Option<(Entity<ContextMenu>, Subscription)>,
     dragging: bool,
+    /// Line wrapping of this view (new views start with the last choice).
+    wrap: bool,
+    /// The digit advance of the diff font and the zoom, from the last render.
+    column_width: f32,
+    zoom: f32,
+    /// A trackpad gesture keeps the axis it started on (true: sideways).
+    gesture_horizontal: Option<bool>,
     /// Where a drag selection's pointer is, and the loop scrolling while it is past an edge.
     drag_point: Option<Point<Pixels>>,
     drag_scrolling: bool,
@@ -186,6 +193,10 @@ impl DiffView {
             path_copied: None,
             menu: None,
             dragging: false,
+            wrap: WRAPS_LINES.load(Ordering::Relaxed),
+            column_width: DIFF_FONT_SIZE * 0.6,
+            zoom: 1.0,
+            gesture_horizontal: None,
             drag_point: None,
             drag_scrolling: false,
             drag_scroll: None,
@@ -446,7 +457,7 @@ impl DiffView {
     /// side), Copy File Path.
     fn context_menu(
         &mut self,
-        row: usize,
+        row: Option<usize>,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -459,7 +470,8 @@ impl DiffView {
                     .on_select(move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))),
             );
         }
-        let line = self.list.line(row, self.is_old_side(position.x), document).map(|line| line.text.clone());
+        let old_side = self.is_old_side(position.x);
+        let line = row.and_then(|row| self.list.line(row, old_side, document)).map(|line| line.text.clone());
         items.push(MenuItem::new("Copy Line").disabled(line.is_none()).on_select(move |_, cx| {
             if let Some(line) = &line {
                 cx.write_to_clipboard(ClipboardItem::new_string(line.clone()));
@@ -570,20 +582,43 @@ impl DiffView {
         cx.notify();
     }
 
-    /// Scrolls so `row` sits `above` below the top of the list.
-    fn scroll_to_row(&self, row: usize, above: Pixels) {
+    /// A row's height: as drawn when the list laid it out, else as the row computes it
+    /// (wrapped lines by their columns). The file header is drawn above the list.
+    fn row_height(&self, row: usize) -> Pixels {
+        if let Some(bounds) = self.list_state.bounds_for_item(row) {
+            return bounds.size.height;
+        }
+        let designed = match (self.list.rows.get(row), self.document.as_deref()) {
+            (Some(DiffListRow::Header) | None, _) => 0.0,
+            (Some(_), Some(document)) if self.wrap => {
+                let row_width = f32::from(self.list_state.viewport_bounds().size.width) / self.zoom;
+                let width = code_width(row_width, self.layout, self.number_width);
+                self.list.wrapped_height(row, document, width, self.column_width)
+            }
+            (Some(other), _) => other.height(),
+        };
+        px(designed * self.zoom)
+    }
+
+    /// The scroll that puts `row`'s top `above` below the top of the list.
+    fn offset_for_row(&self, row: usize, above: Pixels) -> ListOffset {
         let mut remaining = above;
         let mut ix = row;
         while ix > 0 && remaining > px(0.0) {
-            let height =
-                self.list_state.bounds_for_item(ix - 1).map_or(px(LINE_HEIGHT), |bounds| bounds.size.height);
-            if height > remaining {
-                break;
+            ix -= 1;
+            let height = self.row_height(ix);
+            if height >= remaining {
+                return ListOffset { item_ix: ix, offset_in_item: height - remaining };
             }
             remaining -= height;
-            ix -= 1;
         }
-        self.list_state.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.0) });
+        ListOffset { item_ix: ix, offset_in_item: px(0.0) }
+    }
+
+    /// Scrolls so `row` sits `above` below the top of the list (Swift: `rect(ofRow:).minY -
+    /// height / 3`).
+    fn scroll_to_row(&self, row: usize, above: Pixels) {
+        self.list_state.scroll_to(self.offset_for_row(row, above));
     }
 
     fn next_change(&mut self, _: &NextChange, _: &mut Window, cx: &mut Context<Self>) {
@@ -629,12 +664,15 @@ impl DiffView {
         self.set_layout(next, cx);
     }
 
-    pub fn wraps_lines() -> bool {
-        WRAPS_LINES.load(Ordering::Relaxed)
+    /// Whether this view wraps long lines.
+    pub fn wraps_lines(&self) -> bool {
+        self.wrap
     }
 
-    fn toggle_wrap(&mut self, cx: &mut Context<Self>) {
-        WRAPS_LINES.store(!Self::wraps_lines(), Ordering::Relaxed);
+    /// Wrapping on or off for this view; new views start with the last choice.
+    pub fn toggle_wrap(&mut self, cx: &mut Context<Self>) {
+        self.wrap = !self.wrap;
+        WRAPS_LINES.store(self.wrap, Ordering::Relaxed);
         self.text_offset = 0.0;
         self.preserving_top_line(|this| this.list_state.remeasure());
         cx.notify();
@@ -672,31 +710,47 @@ impl DiffView {
 
     // MARK: - Horizontal text scroll (no wrap)
 
-    fn scroll_text(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if Self::wraps_lines() {
+    /// A scroll over the list. A trackpad gesture keeps the axis it started on; a sideways
+    /// one scrolls the code text (when lines don't wrap) and never the list. True when the
+    /// event is taken here (the list must not scroll).
+    pub fn scroll_gesture(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) -> bool {
+        if event.touch_phase == TouchPhase::Started {
+            self.gesture_horizontal = None;
+        }
+        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
+        let precise = matches!(event.delta, ScrollDelta::Pixels(_));
+        let sideways = delta.x.abs() > delta.y.abs();
+        let horizontal = match self.gesture_horizontal {
+            Some(locked) if precise => locked,
+            _ if delta.x == px(0.0) && delta.y == px(0.0) => return false,
+            _ => {
+                if precise {
+                    self.gesture_horizontal = Some(sideways);
+                }
+                sideways
+            }
+        };
+        if horizontal {
+            self.scroll_text(delta.x, cx);
+        }
+        horizontal
+    }
+
+    fn scroll_text(&mut self, dx: Pixels, cx: &mut Context<Self>) {
+        if self.wrap {
             return;
         }
         let Some(document) = self.document.as_deref() else { return };
-        let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
-        if delta.x.abs() <= delta.y.abs() {
-            return;
-        }
-        let row_width: f32 = self.list_state.viewport_bounds().size.width.into();
-        let zoom = cx.soprano_theme().zoom();
-        let column = digit_width(DIFF_FONT_SIZE, window);
-        let limit = ((document.max_columns + 1) as f32 * column
-            - code_width(row_width / zoom, self.layout, self.number_width))
+        let row_width = f32::from(self.list_state.viewport_bounds().size.width) / self.zoom;
+        let limit = ((document.max_columns + 1) as f32 * self.column_width
+            - code_width(row_width, self.layout, self.number_width))
         .ceil()
         .max(0.0);
-        if limit <= 0.0 {
-            return;
-        }
-        let next = (self.text_offset - f32::from(delta.x) / zoom).clamp(0.0, limit);
+        let next = (self.text_offset - f32::from(dx) / self.zoom).clamp(0.0, limit);
         if next != self.text_offset {
             self.text_offset = next;
             cx.notify();
         }
-        cx.stop_propagation();
     }
 
     // MARK: - Rows
@@ -714,11 +768,8 @@ impl DiffView {
         let (Some(document), Some(row)) = (self.document.as_deref(), self.list.rows.get(index)) else {
             return div().into_any_element();
         };
-        let layout = DiffRowLayout {
-            number_width: self.number_width,
-            wrap: Self::wraps_lines(),
-            text_offset: self.text_offset,
-        };
+        let layout =
+            DiffRowLayout { number_width: self.number_width, wrap: self.wrap, text_offset: self.text_offset };
         let selected = self.selection.filter(|selection| selection.rows().contains(&index));
         let element = match row {
             DiffListRow::Header => return div().into_any_element(),
@@ -761,12 +812,6 @@ impl DiffView {
                     this.begin_selection(index, old_side, event.modifiers.shift, cx);
                 }),
             )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.context_menu(index, event.position, window, cx);
-                }),
-            )
             .child(element)
             .into_any_element()
     }
@@ -775,7 +820,7 @@ impl DiffView {
         let theme = cx.soprano_theme().clone();
         let z = |value: f32| theme.z(value);
         let has_changes = !self.list.change_rows.is_empty();
-        let wrap = Self::wraps_lines();
+        let wrap = self.wrap;
         let wrap_label = if wrap { "Disable line wrapping" } else { "Enable line wrapping" };
         let file = self.file.clone();
         div()
@@ -965,9 +1010,22 @@ impl DiffView {
                         }
                     }
                 });
-                window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, cx| {
-                    if phase == gpui::DispatchPhase::Bubble && event.button == MouseButton::Left {
-                        entity.update(cx, |this, _| this.drag_end());
+                window.on_mouse_event({
+                    let entity = entity.clone();
+                    move |event: &gpui::MouseUpEvent, phase, _, cx| {
+                        if phase == gpui::DispatchPhase::Bubble && event.button == MouseButton::Left {
+                            entity.update(cx, |this, _| this.drag_end());
+                        }
+                    }
+                });
+                // Before the list sees a scroll: a sideways gesture stays sideways.
+                window.on_mouse_event(move |event: &ScrollEvent, phase, _, cx| {
+                    if phase != gpui::DispatchPhase::Capture {
+                        return;
+                    }
+                    let over = entity.read(cx).list_state.viewport_bounds().contains(&event.position);
+                    if over && entity.update(cx, |this, cx| this.scroll_gesture(event, cx)) {
+                        cx.stop_propagation();
                     }
                 });
             },
@@ -994,6 +1052,8 @@ impl Render for DiffView {
         let theme = cx.soprano_theme().clone();
         if let Some(document) = self.document.as_deref() {
             self.number_width = crate::rich::diff::number_width(document.max_line, window);
+            self.column_width = digit_width(DIFF_FONT_SIZE, window);
+            self.zoom = theme.zoom();
         }
         let background = theme.background;
         let body: AnyElement = match self.document.as_deref() {
@@ -1013,7 +1073,14 @@ impl Render for DiffView {
                             .flex_1()
                             .min_h_0()
                             .w_full()
-                            .on_scroll(cx.listener(Self::scroll_text))
+                            // Anywhere in the list (lines, folds, the space below): the menu.
+                            .on_mouse_down(
+                                MouseButton::Right,
+                                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                                    let row = this.row_at(event.position.y);
+                                    this.context_menu(row, event.position, window, cx);
+                                }),
+                            )
                             .relative()
                             .child(rows)
                             .child(self.drag_tracker(cx)),
@@ -1054,6 +1121,7 @@ impl Render for DiffView {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use soprano_ui::menu::MenuItem;
 
     fn setup(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -1183,6 +1251,101 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(600));
         cx.run_until_parked();
         assert_eq!(view.read_with(cx, |view, _| view.list_state.logical_scroll_top()), after);
+    }
+
+    fn repository_with_changes(lines: usize) -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        git(root.path(), &["init", "-q"]);
+        let path = root.path().join("a.txt");
+        let original: String = (1..=lines).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(&path, &original).unwrap();
+        git(root.path(), &["add", "."]);
+        git(root.path(), &["commit", "-q", "-m", "one"]);
+        std::fs::write(&path, original.replace("line 5\n", "five\n").replace("line 90\n", "ninety\n"))
+            .unwrap();
+        (root, path)
+    }
+
+    #[gpui::test]
+    async fn wrapping_is_per_view_and_folds_and_blank_space_offer_the_menu(cx: &mut TestAppContext) {
+        setup(cx);
+        if soprano_git::reader::executable().is_none() {
+            return;
+        }
+        let (_root, path) = repository_with_changes(120);
+        let state = StateStore::in_memory();
+        let (first, cx) =
+            cx.add_window_view(|window, cx| DiffView::new(path.clone(), false, state.clone(), window, cx));
+        cx.run_until_parked();
+        let (second, cx) =
+            cx.add_window_view(|window, cx| DiffView::new(path.clone(), false, state.clone(), window, cx));
+        cx.run_until_parked();
+        let before = second.read_with(cx, |view, _| view.wraps_lines());
+        first.update(cx, |view, cx| view.toggle_wrap(cx));
+        assert_eq!(first.read_with(cx, |view, _| view.wraps_lines()), !before);
+        assert_eq!(second.read_with(cx, |view, _| view.wraps_lines()), before, "another tab keeps its own");
+        first.update(cx, |view, cx| view.toggle_wrap(cx));
+
+        // A right click on a fold or below the rows: Copy Line is off, Copy File Path is there.
+        second.update_in(cx, |view, window, cx| {
+            view.context_menu(None, gpui::point(px(10.0), px(10.0)), window, cx)
+        });
+        let labels = second.read_with(cx, |view, cx| {
+            let (menu, _) = view.menu.as_ref().expect("a menu");
+            menu.read(cx)
+                .items()
+                .iter()
+                .map(|item| match item {
+                    MenuItem::Action { label, disabled, .. } => (label.to_string(), *disabled),
+                    _ => (String::new(), true),
+                })
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(labels, [("Copy Line".to_string(), true), ("Copy File Path".to_string(), false)]);
+    }
+
+    #[gpui::test]
+    async fn a_sideways_swipe_never_scrolls_the_list_and_change_navigation_lands_on_the_change(
+        cx: &mut TestAppContext,
+    ) {
+        setup(cx);
+        if soprano_git::reader::executable().is_none() {
+            return;
+        }
+        let (_root, path) = repository_with_changes(200);
+        let state = StateStore::in_memory();
+        let (view, cx) =
+            cx.add_window_view(|window, cx| DiffView::new(path.clone(), false, state.clone(), window, cx));
+        cx.run_until_parked();
+        let swipe = |phase: TouchPhase, x: f32, y: f32| ScrollEvent {
+            position: gpui::point(px(100.0), px(100.0)),
+            delta: ScrollDelta::Pixels(gpui::point(px(x), px(y))),
+            modifiers: Default::default(),
+            touch_phase: phase,
+            source: Default::default(),
+        };
+        view.update(cx, |view, cx| {
+            assert!(view.scroll_gesture(&swipe(TouchPhase::Started, -12.0, 1.0), cx));
+            // The gesture drifts vertically: still sideways, still not the list's.
+            assert!(view.scroll_gesture(&swipe(TouchPhase::Moved, -2.0, 9.0), cx));
+            // A new vertical gesture goes to the list.
+            assert!(!view.scroll_gesture(&swipe(TouchPhase::Started, 0.0, 10.0), cx));
+        });
+
+        // F7 puts the second change a third of the way down (a short window, so it scrolls).
+        cx.simulate_resize(gpui::size(px(900.0), px(260.0)));
+        cx.run_until_parked();
+        view.update(cx, |view, cx| view.navigate(true, cx));
+        cx.run_until_parked();
+        view.update(cx, |view, cx| view.navigate(true, cx));
+        cx.run_until_parked();
+        view.update(cx, |view, _| {
+            let target = view.list.change_rows[1];
+            let viewport = view.list_state.viewport_bounds();
+            let bounds = view.list_state.bounds_for_item(target).expect("the change is on screen");
+            let third = viewport.top() + viewport.size.height / 3.0;
+            assert!((bounds.top() - third).abs() <= px(1.0), "{:?} vs {third:?}", bounds.top());
+        });
     }
 
     #[test]

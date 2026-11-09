@@ -323,3 +323,89 @@ async fn a_drag_selection_past_the_bottom_keeps_scrolling(cx: &mut TestAppContex
     cx.run_until_parked();
     assert_eq!(view.read_with(cx, |view, _| f32::from(view.scroll.y)), after);
 }
+
+#[gpui::test]
+async fn clicks_in_the_find_bar_stay_in_it(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = long_file(50);
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    view.update_in(cx, |view, window, cx| {
+        view.select(3..3, cx);
+        view.find(&Find, window, cx);
+    });
+    let bounds = laid_out(&view, cx);
+    // Inside the bar (top right of the text, 360 px wide): the caret stays where it was.
+    let in_bar = gpui::point(bounds.right() - gpui::px(250.0), bounds.top() + gpui::px(20.0));
+    cx.simulate_mouse_down(in_bar, MouseButton::Left, Default::default());
+    cx.simulate_mouse_up(in_bar, MouseButton::Left, Default::default());
+    assert_eq!(view.read_with(cx, |view, _| (view.selected_range(), view.selecting)), (3..3, false));
+}
+
+#[gpui::test]
+async fn an_input_method_word_is_one_undo_step(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = file("ime.txt", "a\n");
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    view.update_in(cx, |view, window, cx| {
+        view.select(1..1, cx);
+        for composing in ["に", "にほ", "にほn", "にほん"] {
+            view.replace_and_mark_text_in_range(None, composing, None, window, cx);
+        }
+        assert!(view.marked_text_range(window, cx).is_some());
+        view.replace_text_in_range(None, "日本", window, cx);
+    });
+    assert_eq!(view.read_with(cx, |view, cx| view.text(cx)), "a日本\n");
+    view.update_in(cx, |view, window, cx| view.undo(&Undo, window, cx));
+    assert_eq!(view.read_with(cx, |view, cx| view.text(cx)), "a\n");
+}
+
+#[gpui::test]
+async fn replace_and_replace_all_are_one_undo_step_each(cx: &mut TestAppContext) {
+    setup(cx);
+    let (_root, path) = file("r.txt", "one two one two\n");
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    view.update_in(cx, |view, window, cx| {
+        view.find(&Find, window, cx);
+        view.find.input.update(cx, |input, cx| input.set_value("one", window, cx));
+        view.find.replacement.update(cx, |input, cx| input.set_value("1", window, cx));
+        view.update_matches(true, cx);
+        view.replace_current(cx);
+    });
+    assert_eq!(view.read_with(cx, |view, cx| view.text(cx)), "1 two one two\n");
+    // The next match is selected for the next Replace.
+    assert_eq!(view.read_with(cx, |view, _| view.selected_range()), 6..9);
+    view.update_in(cx, |view, window, cx| {
+        view.find.input.update(cx, |input, cx| input.set_value("TWO", window, cx));
+        view.find.replacement.update(cx, |input, cx| input.set_value("2", window, cx));
+        view.update_matches(false, cx);
+        view.replace_all(cx);
+    });
+    assert_eq!(view.read_with(cx, |view, cx| view.text(cx)), "1 2 one 2\n");
+    view.update_in(cx, |view, window, cx| view.undo(&Undo, window, cx));
+    assert_eq!(view.read_with(cx, |view, cx| view.text(cx)), "1 two one two\n");
+}
+
+#[gpui::test]
+async fn a_click_on_a_note_focuses_the_pane(cx: &mut TestAppContext) {
+    setup(cx);
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("blob.bin");
+    std::fs::write(&path, [0_u8, 1, 2]).unwrap();
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, events, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+    cx.run_until_parked();
+    cx.simulate_mouse_down(
+        gpui::point(gpui::px(100.0), gpui::px(300.0)),
+        MouseButton::Left,
+        Default::default(),
+    );
+    assert!(events.borrow().contains(&EditorEvent::FocusRequested));
+    assert!(view.update_in(cx, |view, window, _| view.focus.is_focused(window)));
+}

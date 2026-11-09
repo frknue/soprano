@@ -41,8 +41,60 @@ actions!(
         GoForward,
         /// ⌘R: read the file again.
         Reload,
+        /// ⌘A: select the whole document.
+        SelectAll,
     ]
 );
+
+/// Keyboard scrolling, as the web view did: arrows by a line, Space and Page keys by a page,
+/// Home and End to the ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
+#[action(namespace = soprano_reader, no_json)]
+pub enum ScrollReader {
+    LineUp,
+    LineDown,
+    PageUp,
+    PageDown,
+    Top,
+    Bottom,
+}
+
+/// One arrow-key step (WebKit's).
+pub const LINE_STEP: f32 = 40.0;
+
+/// The scroll offset (distance from the top, positive) after `action`, for a viewport
+/// `page` tall over `max` of scrolling: pages keep one line of context.
+pub fn scrolled(action: ScrollReader, current: f32, page: f32, max: f32) -> f32 {
+    let page_step = (page - LINE_STEP).max(LINE_STEP);
+    let next = match action {
+        ScrollReader::LineUp => current - LINE_STEP,
+        ScrollReader::LineDown => current + LINE_STEP,
+        ScrollReader::PageUp => current - page_step,
+        ScrollReader::PageDown => current + page_step,
+        ScrollReader::Top => 0.0,
+        ScrollReader::Bottom => max,
+    };
+    next.clamp(0.0, max.max(0.0))
+}
+
+/// Cocoa's wording for a file that cannot be read (`NSFileReadNoSuchFileError`, …), as the
+/// Swift reader showed `localizedDescription`.
+pub fn cocoa_error(path: &Path, error: &std::io::Error) -> std::io::Error {
+    let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let message = match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            format!("The file “{name}” couldn’t be opened because there is no such file.")
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            format!("The file “{name}” couldn’t be opened because you don’t have permission to view it.")
+        }
+        std::io::ErrorKind::InvalidData => format!(
+            "The file “{name}” couldn’t be opened because the text encoding of its contents can’t be determined."
+        ),
+        _ => format!("The file “{name}” couldn’t be opened."),
+    };
+    std::io::Error::new(error.kind(), message)
+}
 
 /// The reader's key bindings; the app binds them once (`cx.bind_keys(key_bindings(cx))`).
 pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
@@ -51,7 +103,24 @@ pub fn key_bindings(cx: &App) -> Vec<KeyBinding> {
         (keys::command("]"), Box::new(GoForward)),
         (keys::command("r"), Box::new(Reload)),
     ];
-    table.into_iter().filter_map(|(keys, action)| keys::bind(&keys, action, READER_CONTEXT, cx)).collect()
+    let scrolling: [(&str, Box<dyn gpui::Action>); 10] = [
+        ("up", Box::new(ScrollReader::LineUp)),
+        ("down", Box::new(ScrollReader::LineDown)),
+        ("pageup", Box::new(ScrollReader::PageUp)),
+        ("pagedown", Box::new(ScrollReader::PageDown)),
+        ("space", Box::new(ScrollReader::PageDown)),
+        ("shift-space", Box::new(ScrollReader::PageUp)),
+        ("home", Box::new(ScrollReader::Top)),
+        ("end", Box::new(ScrollReader::Bottom)),
+        ("secondary-up", Box::new(ScrollReader::Top)),
+        ("secondary-down", Box::new(ScrollReader::Bottom)),
+    ];
+    table
+        .into_iter()
+        .chain(scrolling.into_iter().map(|(keys, action)| (keys.to_string(), action)))
+        .chain(std::iter::once(("secondary-a".to_string(), Box::new(SelectAll) as Box<dyn gpui::Action>)))
+        .filter_map(|(keys, action)| keys::bind(&keys, action, READER_CONTEXT, cx))
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,6 +193,8 @@ fn standardized(path: &Path) -> PathBuf {
 impl MarkdownReaderView {
     /// Shows `path`, the first entry of the reader's history.
     pub fn new(path: impl AsRef<Path>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // `https` images need an HTTP client; GPUI has none by default.
+        crate::http::install_http_client(cx);
         let path = standardized(path.as_ref());
         let mut view = Self {
             document: ReaderDocument::new(path.clone()),
@@ -166,16 +237,16 @@ impl MarkdownReaderView {
         cx: &mut Context<Self>,
     ) {
         let path = standardized(path);
-        let current = path == self.path && self.loaded;
-        // Recording the document already shown records nothing: it only scrolls.
-        if current || (record && self.loaded && !self.history.record(path.clone())) {
+        // The document on screen only scrolls (`MarkdownPaneView.openDocument`).
+        if path == self.path && self.loaded {
             if let Some(fragment) = fragment {
                 self.scroll_to_anchor(&fragment);
             }
             return;
         }
-        if record && !self.loaded {
-            self.history.record(path.clone());
+        if record {
+            // False only when the history's current entry is this path already.
+            let _ = self.history.record(path.clone());
         }
         self.path = path.clone();
         self.document = ReaderDocument::new(path.clone());
@@ -198,8 +269,9 @@ impl MarkdownReaderView {
 
     fn read(&mut self) {
         self.blocks = match std::fs::read_to_string(&self.path) {
-            Ok(source) => model::parse(&source, false).into(),
-            Err(error) => model::unreadable_document(&self.path, &error).into(),
+            // A byte order mark is not text (swift-cmark skips it too).
+            Ok(source) => model::parse(source.strip_prefix('\u{FEFF}').unwrap_or(&source), false).into(),
+            Err(error) => model::unreadable_document(&self.path, &cocoa_error(&self.path, &error)).into(),
         };
         self.loaded = true;
     }
@@ -262,6 +334,16 @@ impl MarkdownReaderView {
         }
     }
 
+    /// Scrolls the reading column by keyboard.
+    pub fn scroll_by(&mut self, action: ScrollReader, cx: &mut Context<Self>) {
+        let offset = self.scroll.offset();
+        let page = f32::from(self.scroll.bounds().size.height);
+        let max = f32::from(self.scroll.max_offset().y);
+        let next = scrolled(action, -f32::from(offset.y), page, max);
+        self.scroll.set_offset(point(offset.x, px(-next)));
+        cx.notify();
+    }
+
     fn open_in_editor(&self) {
         if let Err(error) = soprano_platform::system::open_default(&self.path.to_string_lossy()) {
             tracing::warn!("{error:#}");
@@ -280,7 +362,7 @@ impl Render for MarkdownReaderView {
         let colors = SurfaceColors::of(cx);
         let (can_back, can_forward) = (self.history.can_go_back(), self.history.can_go_forward());
         let toolbar = SurfaceToolbar::new()
-            .leading(breadcrumbs(&display_path(&self.path), cx))
+            .leading(breadcrumbs(&display_path(&self.path), &self.path, cx))
             .trailing(toolbar_button(
                 "reader-back",
                 IconName::ChevronLeft,
@@ -347,6 +429,10 @@ impl Render for MarkdownReaderView {
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.go_back(cx)))
             .on_action(cx.listener(|this, _: &GoForward, _, cx| this.go_forward(cx)))
             .on_action(cx.listener(|this, _: &Reload, _, cx| this.reload(cx)))
+            .on_action(cx.listener(|this, action: &ScrollReader, _, cx| this.scroll_by(*action, cx)))
+            .on_action(
+                cx.listener(|_, _: &SelectAll, window, cx| gpui_base::TextSelection::select_all(window, cx)),
+            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -507,5 +593,37 @@ mod tests {
             block,
             MarkdownBlock::Code { language: Some(language), .. } if language == "html"
         )));
+    }
+
+    #[gpui::test]
+    async fn a_byte_order_mark_does_not_hide_the_first_heading(cx: &mut TestAppContext) {
+        setup(cx);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("bom.md");
+        std::fs::write(&path, "\u{FEFF}# Title\n\nbody\n").unwrap();
+        let (view, cx) = cx.add_window_view(|window, cx| MarkdownReaderView::new(&path, window, cx));
+        let first = view.read_with(cx, |view, _| view.blocks().first().cloned());
+        assert!(matches!(first, Some(MarkdownBlock::Heading { anchor, .. }) if anchor == "title"));
+    }
+
+    #[test]
+    fn keyboard_scrolling_steps_by_lines_and_pages() {
+        assert_eq!(scrolled(ScrollReader::LineDown, 0.0, 500.0, 1000.0), 40.0);
+        assert_eq!(scrolled(ScrollReader::LineUp, 10.0, 500.0, 1000.0), 0.0);
+        assert_eq!(scrolled(ScrollReader::PageDown, 0.0, 500.0, 1000.0), 460.0);
+        assert_eq!(scrolled(ScrollReader::PageDown, 900.0, 500.0, 1000.0), 1000.0);
+        assert_eq!(scrolled(ScrollReader::Bottom, 0.0, 500.0, 1000.0), 1000.0);
+        assert_eq!(scrolled(ScrollReader::Top, 700.0, 500.0, 1000.0), 0.0);
+    }
+
+    #[test]
+    fn unreadable_files_are_described_in_cocoas_words() {
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(
+            cocoa_error(Path::new("/x/gone.md"), &missing).to_string(),
+            "The file “gone.md” couldn’t be opened because there is no such file."
+        );
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(cocoa_error(Path::new("/x/a.md"), &denied).to_string().contains("permission to view it"));
     }
 }

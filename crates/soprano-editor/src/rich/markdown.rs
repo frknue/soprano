@@ -20,7 +20,8 @@ use base64::Engine as _;
 use gpui::{
     AnyElement, App, ElementId, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageFormat,
     InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, Window, div, img, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, Window, div, img,
+    prelude::FluentBuilder, px,
 };
 use soprano_text::markdown::{
     self as model, ImageSource, LinkTarget, MarkdownBlock, MarkdownInline, MarkdownListItem, MarkdownTable,
@@ -595,7 +596,14 @@ impl Ctx {
     /// A reader image: workspace files, `https` and `data:image/` sources; anything else (and
     /// the chat) shows the alt text, as does an image that fails to load. An image inside a
     /// link opens it on a click; its title is its tooltip.
-    fn image(&self, source: &str, alt: &str, title: Option<&str>, link: Option<&str>, look: TextLook) -> AnyElement {
+    fn image(
+        &self,
+        source: &str,
+        alt: &str,
+        title: Option<&str>,
+        link: Option<&str>,
+        look: TextLook,
+    ) -> AnyElement {
         let alt_text = |ctx: &Self| {
             ctx.rich_text(InlineText { text: alt.to_string(), spans: Vec::new(), links: Vec::new() }, look)
         };
@@ -610,11 +618,9 @@ impl Ctx {
         // GPUI's fallback is built when loading fails; it shows the alt text in the body style.
         let fallback_text = SharedString::from(alt.to_string());
         let fallback_color = look.color;
-        let image = image
-            .max_w_full()
-            .rounded(self.z(8.0))
-            .overflow_hidden()
-            .with_fallback(move || div().text_color(fallback_color).child(fallback_text.clone()).into_any_element());
+        let image = image.max_w_full().rounded(self.z(8.0)).overflow_hidden().with_fallback(move || {
+            div().text_color(fallback_color).child(fallback_text.clone()).into_any_element()
+        });
         let (id, _) = self.next_id();
         let link = link
             .filter(|destination| {

@@ -214,6 +214,7 @@ pub enum EditorEvent {
 struct FindBar {
     visible: bool,
     input: Entity<InputState>,
+    replacement: Entity<InputState>,
     matches: Vec<Range<usize>>,
     current: Option<usize>,
 }
@@ -271,6 +272,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             id
         });
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Find"));
+        let replacement = cx.new(|cx| InputState::new(window, cx).placeholder("Replace"));
         let subscriptions =
             vec![
                 cx.subscribe(&documents, move |this: &mut Self, _, event: &DocumentsEvent, cx| match event {
@@ -299,6 +301,11 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
                         InputEvent::Focus | InputEvent::Blur => {}
                     }
                 }),
+                cx.subscribe(&replacement, |this: &mut Self, _, event: &InputEvent, cx| {
+                    if let InputEvent::PressEnter { .. } = event {
+                        this.replace_current(cx);
+                    }
+                }),
                 cx.on_release(move |this: &mut Self, cx| {
                     this.documents.update(cx, |documents, _| documents.detach(view));
                 }),
@@ -322,7 +329,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             drag_scrolling: false,
             drag_scroll: None,
             layout: None,
-            find: FindBar { visible: false, input, matches: Vec::new(), current: None },
+            find: FindBar { visible: false, input, replacement, matches: Vec::new(), current: None },
             pending_restore: None,
             dialog: None,
             image: None,
@@ -693,11 +700,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             return;
         }
         let selection = self.selected_range();
-        let range = if selection.is_empty() {
-            self.head.min(other)..self.head.max(other)
-        } else {
-            selection
-        };
+        let range = if selection.is_empty() { self.head.min(other)..self.head.max(other) } else { selection };
         if range.is_empty() {
             return;
         }
@@ -927,7 +930,6 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     // MARK: - Mouse
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        cx.emit(EditorEvent::FocusRequested);
         self.focus.focus(window, cx);
         if self.scrollbar_down(event.position, cx) {
             return;
@@ -1282,7 +1284,7 @@ impl<T: Clone + Eq + Hash + 'static> Render for EditorView<T> {
         let status = self.status(cx);
         let is_text = content == DocumentContent::Text;
 
-        let mut toolbar = SurfaceToolbar::new().leading(breadcrumbs(&display_path(&path), cx));
+        let mut toolbar = SurfaceToolbar::new().leading(breadcrumbs(&display_path(&path), &path, cx));
         if let Some((text, tone)) = status {
             let color = match tone {
                 StatusTone::Error => colors.error,
@@ -1377,6 +1379,17 @@ impl<T: Clone + Eq + Hash + 'static> Render for EditorView<T> {
             .id("soprano-editor")
             .key_context(if is_text { EDITOR_CONTEXT } else { "SopranoEditorSurface" })
             .track_focus(&self.focus)
+            // A press anywhere in the pane (the image, a note, the toolbar) focuses it, as the
+            // Swift pane's mouseDown did; a press in the find bar keeps the field's focus.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.emit(EditorEvent::FocusRequested);
+                    if !this.focus.contains_focused(window, cx) {
+                        this.focus.focus(window, cx);
+                    }
+                }),
+            )
             .size_full()
             .flex()
             .flex_col()
@@ -1457,28 +1470,14 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         let theme = cx.soprano_theme().clone();
         let z = |value: f32| theme.z(value);
         let label = self.match_label(cx);
-        div()
-            .absolute()
-            .top(z(6.5))
-            .right(z(6.5))
+        let editable = self.is_editable(cx);
+        let find_row = div()
             .h(z(38.0))
-            .max_w(z(460.0))
-            .w(z(360.0))
             .px(z(3.25))
             .gap(z(3.25))
             .flex()
             .flex_row()
             .items_center()
-            .rounded(z(4.9))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.popover)
-            .shadow_md()
-            .key_context(FIND_CONTEXT)
-            .on_action(cx.listener(Self::close_find))
-            .on_action(cx.listener(Self::find_next))
-            .on_action(cx.listener(Self::find_previous))
-            .on_action(cx.listener(Self::save))
             .child(div().flex_1().min_w_0().child(TextInput::new(&self.find.input).small()))
             .child(
                 div()
@@ -1509,7 +1508,115 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
                 "Done",
                 true,
                 cx.listener(|this, _, window, cx| this.close_find(&CloseFind, window, cx)),
-            ))
+            ));
+        // The text is editable: Replace and Replace All, as the find bar of an editable
+        // NSTextView offers.
+        let replace_row = editable.then(|| {
+            div()
+                .h(z(38.0))
+                .px(z(3.25))
+                .gap(z(3.25))
+                .flex()
+                .flex_row()
+                .items_center()
+                .border_t_1()
+                .border_color(theme.border)
+                .child(div().flex_1().min_w_0().child(TextInput::new(&self.find.replacement).small()))
+                .child(
+                    Button::new("find-replace", "Replace")
+                        .variant(ButtonVariant::Secondary)
+                        .size(ButtonSize::Xs)
+                        .on_click(cx.listener(|this, _, _, cx| this.replace_current(cx))),
+                )
+                .child(
+                    Button::new("find-replace-all", "All")
+                        .variant(ButtonVariant::Secondary)
+                        .size(ButtonSize::Xs)
+                        .tooltip("Replace All")
+                        .on_click(cx.listener(|this, _, _, cx| this.replace_all(cx))),
+                )
+        });
+        div()
+            .id("editor-find-bar")
+            .absolute()
+            .top(z(6.5))
+            .right(z(6.5))
+            .max_w(z(460.0))
+            .w(z(360.0))
+            .flex()
+            .flex_col()
+            .rounded(z(4.9))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .shadow_md()
+            // Clicks in the bar stay in it: they never reach the text behind.
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .key_context(FIND_CONTEXT)
+            .on_action(cx.listener(Self::close_find))
+            .on_action(cx.listener(Self::find_next))
+            .on_action(cx.listener(Self::find_previous))
+            .on_action(cx.listener(Self::save))
+            .child(find_row)
+            .children(replace_row)
+    }
+
+    /// Replace: the selected match becomes the replacement (one undo step), then the next
+    /// match is selected; without a selected match it only finds the next one.
+    pub fn replace_current(&mut self, cx: &mut Context<Self>) {
+        if !self.is_editable(cx) || self.query(cx).is_empty() {
+            return;
+        }
+        let selection = self.selected_range();
+        let replacement = self.find.replacement.read(cx).value().to_string();
+        if self.find.matches.contains(&selection) {
+            if let Some(inserted) =
+                self.edit_text(cx, |document| Some(document.replace(selection, &replacement)))
+            {
+                self.anchor = inserted.end;
+                self.head = inserted.end;
+            }
+            self.update_matches(false, cx);
+        }
+        let query = self.query(cx);
+        let from = self.selected_range().end;
+        if let Some(found) = self.with_document(cx, |document| document.find_next(&query, from)).flatten() {
+            self.select_match(found, cx);
+        }
+    }
+
+    /// Replace All: every match at once, as one undo step.
+    pub fn replace_all(&mut self, cx: &mut Context<Self>) {
+        let query = self.query(cx);
+        if !self.is_editable(cx) || query.is_empty() {
+            return;
+        }
+        let replacement = self.find.replacement.read(cx).value().to_string();
+        let Some((span, rebuilt)) = self
+            .with_document(cx, |document| {
+                let matches = document.find_all(&query);
+                let (first, last) = (matches.first()?.start, matches.last()?.end);
+                let source = document.rope().byte_slice(first..last).to_string();
+                let mut rebuilt = String::with_capacity(source.len());
+                let mut at = first;
+                for found in &matches {
+                    rebuilt.push_str(&source[at - first..found.start - first]);
+                    rebuilt.push_str(&replacement);
+                    at = found.end;
+                }
+                Some((first..last, rebuilt))
+            })
+            .flatten()
+        else {
+            return;
+        };
+        if let Some(inserted) = self.edit_text(cx, |document| Some(document.replace(span, &rebuilt))) {
+            self.anchor = inserted.start;
+            self.head = inserted.start;
+        }
+        self.update_matches(false, cx);
+        cx.notify();
     }
 }
 

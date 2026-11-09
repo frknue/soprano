@@ -663,11 +663,12 @@ pub fn is_markdown(path: &Path) -> bool {
 
 /// A linked document a viewer only displays (an image, a PDF, audio or video, plain text)
 /// opens; anything else — an app, a script, a `.command`, an executable — could run code
-/// from an untrusted checkout, so it is only revealed. Symlinks are judged by their target.
+/// from an untrusted checkout, so it is only revealed. Decided by the file's type (its
+/// extension) alone, as Swift's content type was: a 0755 PNG still opens in a viewer, while
+/// an extensionless executable has no viewable type. Symlinks are judged by their target.
 pub fn opens_linked_file(path: &Path) -> bool {
     let Ok(resolved) = std::fs::canonicalize(path) else { return false };
-    let Ok(metadata) = std::fs::metadata(&resolved) else { return false };
-    if !metadata.is_file() || is_executable(&metadata) {
+    if !std::fs::metadata(&resolved).is_ok_and(|metadata| metadata.is_file()) {
         return false;
     }
     let extension =
@@ -716,17 +717,6 @@ pub fn opens_linked_file(path: &Path) -> bool {
         "mpg", "mpeg", "mpe", "m2v", "m2ts", "mts", "vob", "3gp", "3g2", "dv", "wmv", "wma", "flv",
     ];
     !SCRIPTS.contains(&extension.as_str()) && VIEWABLE.contains(&extension.as_str())
-}
-
-#[cfg(unix)]
-fn is_executable(metadata: &std::fs::Metadata) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    metadata.permissions().mode() & 0o111 != 0
-}
-
-#[cfg(not(unix))]
-fn is_executable(_metadata: &std::fs::Metadata) -> bool {
-    false
 }
 
 /// The URL scheme of `value`, if it has one (`[A-Za-z][A-Za-z0-9+.-]*:`).
@@ -1115,6 +1105,9 @@ mod tests {
 
         assert!(opens_linked_file(&file("diagram.pdf", false)));
         assert!(opens_linked_file(&file("notes.txt", false)));
+        // The execute bit does not make a viewable file run: its type decides.
+        assert!(opens_linked_file(&file("photo.png", true)));
+        assert!(opens_linked_file(&file("manual.pdf", true)));
         assert!(!opens_linked_file(&root.join("setup.command")));
         assert!(!opens_linked_file(&file("install.sh", true)));
         assert!(!opens_linked_file(&file("run", true)));

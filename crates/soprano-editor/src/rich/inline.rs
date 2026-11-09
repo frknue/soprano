@@ -63,7 +63,12 @@ impl InlineText {
 pub enum InlinePiece {
     Text(InlineText),
     /// `link`: the destination of the link the image sits in (a badge, a linked screenshot).
-    Image { source: String, alt: String, title: Option<String>, link: Option<String> },
+    Image {
+        source: String,
+        alt: String,
+        title: Option<String>,
+        link: Option<String>,
+    },
 }
 
 /// Flattens `inlines`. With `show_images` false (the chat), images read as their alt text, as
@@ -121,8 +126,12 @@ impl Flattener {
         for inline in inlines {
             match inline {
                 MarkdownInline::Text(text) | MarkdownInline::Html(text) => self.current.push(text, marks),
-                MarkdownInline::Emphasis(children) => self.append(children, InlineMarks { emphasis: true, ..marks }),
-                MarkdownInline::Strong(children) => self.append(children, InlineMarks { strong: true, ..marks }),
+                MarkdownInline::Emphasis(children) => {
+                    self.append(children, InlineMarks { emphasis: true, ..marks })
+                }
+                MarkdownInline::Strong(children) => {
+                    self.append(children, InlineMarks { strong: true, ..marks })
+                }
                 MarkdownInline::Strikethrough(children) => {
                     self.append(children, InlineMarks { strike: true, ..marks })
                 }
@@ -201,7 +210,8 @@ mod tests {
     fn a_link_around_an_image_keeps_its_text_ranges_and_links_the_image() {
         let inlines = paragraph("abcd [x ![i](i.png) 日本](d.md) after");
         let pieces = flatten(&inlines, true);
-        let [InlinePiece::Text(before), InlinePiece::Image { link, .. }, InlinePiece::Text(after)] = pieces.as_slice()
+        let [InlinePiece::Text(before), InlinePiece::Image { link, .. }, InlinePiece::Text(after)] =
+            pieces.as_slice()
         else {
             panic!("text, image, text: {pieces:?}");
         };

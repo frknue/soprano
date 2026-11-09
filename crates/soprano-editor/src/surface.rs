@@ -6,8 +6,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, HighlightStyle, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, StyledText, Window, div, prelude::FluentBuilder,
+    AnyElement, App, ClickEvent, ElementId, HighlightStyle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, StyledText, Window, div,
+    prelude::FluentBuilder,
 };
 use soprano_ui::button::{Button, ButtonSize, ButtonVariant, IconButton};
 use soprano_ui::fonts::size;
@@ -36,8 +37,8 @@ pub fn display_path(path: &Path) -> String {
 }
 
 /// "Sources / Auth / LoginController.swift": folders and separators muted, the name in the
-/// foreground at medium weight, truncated from the head.
-pub fn breadcrumbs(path: &str, cx: &App) -> AnyElement {
+/// foreground at medium weight, truncated from the head; the full path is the tooltip.
+pub fn breadcrumbs(path: &str, full_path: &Path, cx: &App) -> AnyElement {
     let colors = SurfaceColors::of(cx);
     let parts: Vec<&str> = path.split(['/', '\\']).filter(|part| !part.is_empty()).collect();
     let mut text = String::new();
@@ -61,6 +62,8 @@ pub fn breadcrumbs(path: &str, cx: &App) -> AnyElement {
     )];
     let theme = cx.soprano_theme();
     div()
+        .id("surface-breadcrumbs")
+        .tooltip(soprano_ui::tooltip(full_path.to_string_lossy().into_owned()))
         .flex_1()
         .min_w_0()
         .overflow_hidden()
