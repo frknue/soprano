@@ -138,7 +138,8 @@ impl Workspace {
         pane_id: Option<&str>,
     ) -> Option<TerminalTarget> {
         let path = file_url::standardized_path(file);
-        let url = file_url::file_url_string(&path);
+        // Compared by path, not URL string: Swift wrote decomposed, differently escaped URLs.
+        let comparable = file_url::comparable_path(&path);
         let pane_id = match pane_id.map(str::to_owned).or_else(|| self.file_pane(&self.active_window_id)) {
             Some(id) if self.panes.contains_key(&id) => id,
             _ => return self.spawn_file_tab(&path, content_kind, preview),
@@ -151,7 +152,8 @@ impl Workspace {
         let existing = pane.tabs.iter().position(|tab| {
             tab.pane_type == PaneType::Browser
                 && tab.content_kind.as_deref() == Some(content_kind)
-                && tab.url.as_deref() == Some(url.as_str())
+                && tab.url.as_deref().and_then(file_url::comparable_path_from_url).as_ref()
+                    == Some(&comparable)
         });
         let tab_id = match existing {
             Some(index) => {
@@ -245,13 +247,14 @@ impl Workspace {
     /// Points every editor, diff, and Markdown reader tab showing `old`, or a file inside it
     /// when it is a folder, at its new location after a rename or move.
     pub fn relocate_file_tabs(&mut self, old: &Path, new: &Path) {
-        let old_path = file_url::standardized_path(old);
+        let old_path = file_url::comparable_path(old);
         let new_path = file_url::standardized_path(new);
         let mut moves = Vec::new();
         for pane in self.panes.values() {
             for tab in pane.tabs.iter().filter(|tab| tab.is_editor() || tab.is_diff() || tab.is_markdown()) {
-                let Some(path) = tab.url.as_deref().and_then(file_url::path_from_file_url) else { continue };
-                let path = file_url::standardized_path(&path);
+                let Some(path) = tab.url.as_deref().and_then(file_url::comparable_path_from_url) else {
+                    continue;
+                };
                 let Ok(rest) = path.strip_prefix(&old_path) else { continue };
                 let relocated =
                     if rest.as_os_str().is_empty() { new_path.clone() } else { new_path.join(rest) };
@@ -274,9 +277,11 @@ impl Workspace {
         let url = file_url::file_url_string(&path);
         let title = PaneContentKind::title(&path, &content_kind);
         let directory = file_url::parent_directory(&path);
-        if tab.url.as_deref() == Some(url.as_str())
-            && tab.title == title
-            && tab.cwd.as_deref() == Some(directory.as_str())
+        let same_path = tab.url.as_deref().and_then(file_url::comparable_path_from_url)
+            == Some(file_url::comparable_path(&path));
+        if same_path
+            && file_url::same_text(&tab.title, &title)
+            && tab.cwd.as_deref().is_some_and(|cwd| file_url::same_text(cwd, &directory))
         {
             return;
         }

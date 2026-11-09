@@ -167,6 +167,73 @@ fn renaming_a_folder_repoints_the_editor_and_reader_tabs_inside_it() {
     assert_eq!(documents, HashSet::from([editor.tab_id, reader]));
 }
 
+/// A workspace whose only pane holds the editor tab an older Swift build saved for `url`.
+#[cfg(unix)]
+fn workspace_with_swift_editor_tab(url: &str) -> Workspace {
+    let tab = SavedTab {
+        url: Some(url.into()),
+        title: Some("saved".into()),
+        content_kind: Some(crate::PaneContentKind::EDITOR.into()),
+        ..SavedTab::new("tab-2", PaneType::Browser)
+    };
+    let session = crate::WorkspaceSession::legacy(
+        "swift",
+        "Swift",
+        None,
+        vec![crate::SavedPane { id: "pane-1".into(), active_tab_index: 0, tabs: vec![tab] }],
+        "pane-1",
+    );
+    let mut workspace = Workspace::new();
+    workspace.restore_workspace(session);
+    workspace
+}
+
+#[cfg(unix)]
+#[test]
+fn a_swift_saved_decomposed_and_escaped_url_is_the_same_file_as_a_composed_path() {
+    let mut workspace =
+        workspace_with_swift_editor_tab("file:///tmp/project/Pra%CC%88sentation%20%5B1%5D.md");
+
+    let target = workspace
+        .open_editor(Path::new("/tmp/project/Pr\u{e4}sentation [1].md"), false, Some("pane-1"))
+        .expect("opened");
+
+    assert_eq!(target, TerminalTarget::new("pane-1", "tab-2"));
+    assert_eq!(workspace.pane("pane-1").map(|p| p.tabs.len()), Some(1));
+}
+
+#[test]
+fn bracketed_paths_reuse_their_tab_and_preview() {
+    let mut workspace = Workspace::new();
+    let page = tmp("app/[id]/page.tsx");
+    let first = workspace.open_editor(&page, true, None).expect("opened");
+    let again = workspace.open_editor(&page, false, None).expect("opened");
+    assert_eq!(again, first);
+    assert!(!workspace.tab(&first.pane_id, &first.tab_id).is_some_and(PaneTab::is_file_preview));
+
+    let layout = tmp("app/[id]/layout.tsx");
+    let preview = workspace.open_editor(&layout, true, None).expect("opened");
+    let replaced = workspace.open_editor(&tmp("app/[id]/loading.tsx"), true, None).expect("opened");
+    assert_ne!(preview.tab_id, replaced.tab_id);
+    assert_eq!(editor_tabs(&workspace, &first.pane_id).len(), 2);
+    workspace.take_changes();
+    workspace.update_file_document(&first.pane_id, &first.tab_id, &page);
+    assert!(workspace.take_changes().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn renaming_a_folder_with_an_accent_relocates_tabs_swift_saved_decomposed() {
+    let mut workspace = workspace_with_swift_editor_tab("file:///tmp/Pra%CC%88sentationen/%5Bid%5D.md");
+
+    workspace.relocate_file_tabs(Path::new("/tmp/Pr\u{e4}sentationen"), Path::new("/tmp/Folien"));
+
+    let tab = workspace.tab("pane-1", "tab-2").expect("tab");
+    assert_eq!(tab.url.as_deref(), Some("file:///tmp/Folien/%5Bid%5D.md"));
+    assert_eq!(tab.title, "[id].md");
+    assert_eq!(tab.cwd.as_deref(), Some("/tmp/Folien"));
+}
+
 // MARK: - Close confirmation
 
 #[test]

@@ -13,6 +13,7 @@ soprano-types = { path = "../soprano-types" }
 soprano-platform = { path = "../soprano-platform" }
 url = "2"
 unicode-general-category = "1"
+unicode-normalization = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
