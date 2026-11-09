@@ -19,6 +19,10 @@ mod system;
 #[path = "platform/windows.rs"]
 mod system;
 
+#[cfg(any(windows, test))]
+#[path = "platform/start_menu.rs"]
+mod start_menu;
+
 #[cfg(not(any(unix, windows)))]
 mod system {
     use std::sync::Arc;

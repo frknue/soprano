@@ -1,0 +1,26 @@
+[package]
+name = "soprano-settings"
+description = "The Settings card (General, Keyboard Shortcuts, Agent Profiles, Accounts, About) and the status bar's account usage popover, over settings.json."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-config = { path = "../soprano-config" }
+soprano-accounts = { path = "../soprano-accounts" }
+soprano-ui = { path = "../soprano-ui" }
+gpui.workspace = true
+gpui-component.workspace = true
+serde_json.workspace = true
+async-channel = "2"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true
+tempfile = "3"
+
+[[example]]
+name = "settings_demo"

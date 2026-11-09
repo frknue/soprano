@@ -7903,6 +7903,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-web-kit",
  "serde_json",
+ "soprano-ui",
  "url",
 ]
 
@@ -7932,6 +7933,7 @@ dependencies = [
  "serde_json",
  "soprano-agents",
  "soprano-chat",
+ "soprano-editor",
  "soprano-git",
  "soprano-keys",
  "soprano-text",
@@ -7960,11 +7962,11 @@ version = "0.6.0"
 dependencies = [
  "chrono",
  "futures",
- "gpui-base",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
  "soprano-agents",
+ "soprano-editor",
  "soprano-model",
  "soprano-platform",
  "soprano-text",
