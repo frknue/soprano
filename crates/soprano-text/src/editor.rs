@@ -140,6 +140,15 @@ struct UndoHistory {
     redo: Vec<Vec<Edit>>,
     /// The last group is typing that the next adjacent keystroke may join.
     typing_open: bool,
+    /// An input method's marked text, not yet recorded.
+    composition: Option<Composition>,
+}
+
+/// What an input method has changed so far: `region` of the current text replaced
+/// `original` of the text before composing began.
+struct Composition {
+    region: Range<usize>,
+    original: String,
 }
 
 /// A text to highlight off the main thread: hand `text` to [`syntax::tokens`] and the
@@ -392,14 +401,74 @@ impl EditorDocument {
     /// Replaces `range` (byte offsets, clamped to the text and to character boundaries) with
     /// `text` as one undo step. Returns the inserted text's range.
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
+        self.commit_marked_text();
         self.history.typing_open = false;
         self.edit(range, text, false)
     }
 
     /// Typing: like [`replace`](Self::replace), but keystrokes that continue where the last
-    /// one ended join its undo step, as a text view coalesces typing.
+    /// one ended join its undo step, as a text view coalesces typing. Typing inside an input
+    /// method's marked text commits the composition with it (one undo step).
     pub fn type_text(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
+        if let Some(composition) = &self.history.composition {
+            let region = composition.region.clone();
+            if range.start >= region.start && range.end <= region.end {
+                let inserted = self.mark_text(range, text);
+                self.commit_marked_text();
+                return inserted;
+            }
+            self.commit_marked_text();
+        }
         self.edit(range, text, true)
+    }
+
+    /// An input method's marked (composing) text replaces `range`: applied to the text, but
+    /// not recorded for undo until [`commit_marked_text`](Self::commit_marked_text), so a
+    /// committed word is one "Undo Typing" step, never its half-typed stages. Returns the
+    /// marked text's range.
+    pub fn mark_text(&mut self, range: Range<usize>, text: &str) -> Range<usize> {
+        let start = self.clamp_offset(range.start);
+        let end = self.clamp_offset(range.end).max(start);
+        let mut composition = self
+            .history
+            .composition
+            .take()
+            .unwrap_or(Composition { region: start..start, original: String::new() });
+        // The composition covers everything it has replaced, in the text before it began.
+        if start < composition.region.start {
+            let before = self.buffer.byte_slice(start..composition.region.start).to_string();
+            composition.original.insert_str(0, &before);
+            composition.region.start = start;
+        }
+        if end > composition.region.end {
+            composition.original.push_str(&self.buffer.byte_slice(composition.region.end..end).to_string());
+            composition.region.end = end;
+        }
+        composition.region.end = composition.region.end - (end - start) + text.len();
+        self.history.composition = Some(composition);
+        if start < end || !text.is_empty() {
+            self.splice(start, end, text);
+            self.history.redo.clear();
+            self.did_edit();
+        }
+        start..start + text.len()
+    }
+
+    /// Ends the composition (the input method unmarked its text): records what it changed
+    /// as one typing step, or nothing when it changed nothing (a cancelled composition).
+    pub fn commit_marked_text(&mut self) {
+        let Some(composition) = self.history.composition.take() else { return };
+        let inserted = self.buffer.byte_slice(composition.region.clone()).to_string();
+        if inserted == composition.original {
+            return;
+        }
+        let edit = Edit { start: composition.region.start, removed: composition.original, inserted };
+        self.record(edit, true);
+    }
+
+    /// The range of the uncommitted composition, if an input method is composing.
+    pub fn marked_range(&self) -> Option<Range<usize>> {
+        self.history.composition.as_ref().map(|composition| composition.region.clone())
     }
 
     /// Ends the current typing undo step (the caret moved, the view lost focus).
@@ -429,8 +498,15 @@ impl EditorDocument {
             return start..start;
         }
         self.splice(start, end, text);
-        let edit = Edit { start, removed, inserted: text.to_string() };
+        self.record(Edit { start, removed, inserted: text.to_string() }, typing);
+        self.did_edit();
+        start..start + text.len()
+    }
+
+    /// Adds an applied edit to the undo history.
+    fn record(&mut self, edit: Edit, typing: bool) {
         self.history.redo.clear();
+        let (start, end) = (edit.start, edit.start + edit.removed.len());
         // Keystrokes join the typing step while they continue at its caret: typing on,
         // backspacing from it, or deleting forward from it, as a text view groups typing.
         let joins = typing
@@ -446,8 +522,6 @@ impl EditorDocument {
             self.history.undo.push(vec![edit]);
         }
         self.history.typing_open = typing;
-        self.did_edit();
-        start..start + text.len()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -460,6 +534,7 @@ impl EditorDocument {
 
     /// Undoes the last step; returns the range to select (the text the step had replaced).
     pub fn undo(&mut self) -> Option<Range<usize>> {
+        self.commit_marked_text();
         let group = self.history.undo.pop()?;
         self.history.typing_open = false;
         let mut selection: Option<Range<usize>> = None;
@@ -486,6 +561,7 @@ impl EditorDocument {
 
     /// Redoes the last undone step; returns the range to select (the text it inserted).
     pub fn redo(&mut self) -> Option<Range<usize>> {
+        self.commit_marked_text();
         let group = self.history.redo.pop()?;
         self.history.typing_open = false;
         let mut selection: Option<Range<usize>> = None;
@@ -1118,6 +1194,62 @@ mod tests {
         document.type_text(3..4, "");
         assert_eq!(document.undo(), Some(3..4));
         assert_eq!(document.text(), "ellorld");
+    }
+
+    #[test]
+    fn a_committed_input_method_word_is_one_undo_step() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.txt");
+        write(&path, b"x ");
+        let mut document = EditorDocument::open(&path);
+        // に → にh → にほ → にほん, then the candidate 日本 replaces the marked text.
+        let mut marked = document.mark_text(2..2, "に");
+        for stage in ["にh", "にほ", "にほん"] {
+            marked = document.mark_text(marked, stage);
+        }
+        assert_eq!(document.marked_range(), Some(2..11));
+        assert!(!document.can_undo());
+        assert!(document.is_dirty());
+        let committed = document.type_text(marked, "日本");
+        assert_eq!(committed, 2..8);
+        assert_eq!(document.marked_range(), None);
+        assert_eq!(document.text(), "x 日本");
+
+        assert_eq!(document.undo(), Some(2..2));
+        assert_eq!(document.text(), "x ");
+        assert!(!document.can_undo());
+        assert_eq!(document.redo(), Some(2..8));
+        assert_eq!(document.text(), "x 日本");
+    }
+
+    #[test]
+    fn a_composition_replacing_a_selection_or_cancelled_records_what_changed() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("note.txt");
+        write(&path, b"abc");
+        let mut document = EditorDocument::open(&path);
+        // Composing over the selected "b", then unmarking as is.
+        let marked = document.mark_text(1..2, "ㅎ");
+        document.mark_text(marked, "한");
+        document.commit_marked_text();
+        assert_eq!(document.text(), "a한c");
+        assert_eq!(document.undo(), Some(1..2));
+        assert_eq!(document.text(), "abc");
+
+        // Escape: the input method deletes its marked text; nothing is recorded.
+        let marked = document.mark_text(3..3, "に");
+        document.mark_text(marked, "");
+        document.commit_marked_text();
+        assert_eq!(document.text(), "abc");
+        assert!(!document.can_undo());
+
+        // An edit elsewhere commits a pending composition first, as its own step.
+        document.mark_text(0..0, "に");
+        document.replace(4..5, "");
+        assert_eq!(document.text(), "にac");
+        assert_eq!(document.undo(), Some(4..5));
+        assert_eq!(document.undo(), Some(0..0));
+        assert_eq!(document.text(), "abc");
     }
 
     #[test]

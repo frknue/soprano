@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use percent_encoding::percent_decode_str;
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, LinkType, Options, Parser, Tag, TagEnd};
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
@@ -496,8 +496,13 @@ impl<'a, 'e> Builder<'a, 'e> {
             Event::Start(Tag::Strikethrough) => {
                 MarkdownInline::Strikethrough(self.inlines_until(TagEnd::Strikethrough))
             }
-            Event::Start(Tag::Link { dest_url, title, .. }) => MarkdownInline::Link {
-                destination: Some(dest_url.to_string()),
+            Event::Start(Tag::Link { link_type, dest_url, title, .. }) => MarkdownInline::Link {
+                // `<user@example.com>`: cmark makes the destination a `mailto:` URL.
+                destination: Some(if link_type == LinkType::Email {
+                    format!("mailto:{dest_url}")
+                } else {
+                    dest_url.to_string()
+                }),
                 title: Some(title.to_string()).filter(|title| !title.is_empty()),
                 children: self.inlines_until(TagEnd::Link),
             },
@@ -982,6 +987,27 @@ mod tests {
     fn quotes_dashes_and_ellipses_are_set_typographically() {
         let MarkdownBlock::Paragraph(inlines) = &parse("\"Hi\" -- it's 1---2...", false)[0] else { panic!() };
         assert_eq!(plain_text(inlines), "“Hi” – it’s 1—2…");
+    }
+
+    #[test]
+    fn email_autolinks_become_mailto_links() {
+        let MarkdownBlock::Paragraph(inlines) = &parse("<user@example.com> <https://x.dev>", false)[0] else {
+            panic!()
+        };
+        assert_eq!(
+            inlines[0],
+            MarkdownInline::Link {
+                destination: Some("mailto:user@example.com".into()),
+                title: None,
+                children: vec![text("user@example.com")],
+            }
+        );
+        let MarkdownInline::Link { destination: Some(web), .. } = &inlines[2] else { panic!("{inlines:?}") };
+        assert_eq!(web, "https://x.dev");
+        assert_eq!(
+            resolve_link("mailto:user@example.com", Path::new("/r/a.md"), Path::new("/r")),
+            Some(LinkTarget::External("mailto:user@example.com".into()))
+        );
     }
 
     #[test]
