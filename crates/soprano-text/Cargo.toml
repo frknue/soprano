@@ -1,0 +1,24 @@
+[package]
+name = "soprano-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-git = { path = "../soprano-git" }
+soprano-platform = { path = "../soprano-platform" }
+fancy-regex = "0.14"
+imagesize = "0.14"
+notify = "8.2"
+percent-encoding = "2"
+pulldown-cmark = { version = "0.13", default-features = false }
+ropey = { version = "1.6", default-features = false, features = ["simd"] }
+unicode-normalization = "0.1"
+unicode-segmentation = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
