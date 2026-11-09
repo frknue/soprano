@@ -671,11 +671,11 @@ impl ChangesPanel {
                             .gap(t.z(6.))
                             .items_baseline()
                             .child(
-                                // Shrinks (and truncates) when the name alone is wider than the
-                                // row, so the line counts after it stay visible.
+                                // Keeps its full width (the dim directory gives way first) and
+                                // only truncates when the name alone is wider than the row.
                                 div()
-                                    .min_w_0()
-                                    .max_w(t.z(260.))
+                                    .flex_none()
+                                    .max_w_full()
                                     .truncate()
                                     .text_color(if is_deleted { t.muted } else { t.foreground })
                                     .when(is_deleted, |name| name.line_through())
