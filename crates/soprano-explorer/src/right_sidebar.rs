@@ -173,7 +173,7 @@ impl RightSidebar {
 
     /// Double-clicking the edge restores the default width.
     pub fn reset_width(&mut self, cx: &mut Context<Self>) {
-        self.state.reset_width();
+        self.state.reset_width(self.available_width);
         cx.notify();
     }
 

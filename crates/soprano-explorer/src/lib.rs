@@ -16,6 +16,7 @@ mod file_clipboard;
 mod files;
 pub mod open_in;
 mod refresh;
+mod reveal;
 mod right_sidebar;
 mod selection;
 pub mod sidebar;

@@ -8,7 +8,11 @@ use crate::test_support::{git, has_git, init, record, wait_until};
 
 fn panel(cx: &mut TestAppContext) -> (Entity<FilesPanel>, &mut VisualTestContext) {
     init(cx);
-    cx.add_window_view(|window, cx| FilesPanel::new(StateStore::in_memory(), window, cx))
+    let (panel, cx) = cx.add_window_view(|window, cx| FilesPanel::new(StateStore::in_memory(), window, cx));
+    // A real window is active while the user works in it.
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    (panel, cx)
 }
 
 fn shown(panel: &Entity<FilesPanel>, cx: &mut VisualTestContext) -> Vec<String> {
@@ -278,4 +282,129 @@ fn nothing_is_read_while_the_panel_is_inactive(cx: &mut TestAppContext) {
 
     panel.update(cx, |panel, cx| panel.set_active(true, cx));
     wait_until(cx, |cx| shown(&panel, cx) == ["a.txt"]);
+}
+
+#[gpui::test]
+fn switching_to_another_app_mid_rename_keeps_editing(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::write(root.join("draft.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["draft.txt"]);
+    panel.update_in(cx, |panel, window, cx| panel.begin_rename("draft.txt", window, cx));
+    let input = panel
+        .read_with(cx, |panel, _| panel.editing.as_ref().map(|editing| editing.input.clone()))
+        .expect("input");
+    input.update_in(cx, |input, window, cx| input.set_value("dra", window, cx));
+
+    cx.deactivate_window();
+    cx.run_until_parked();
+    assert!(panel.read_with(cx, |panel, _| panel.editing.is_some()), "the half-typed name is not committed");
+    assert!(root.join("draft.txt").is_file());
+}
+
+#[gpui::test]
+fn committing_after_a_click_elsewhere_leaves_the_keyboard_where_it_went(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::write(root.join("draft.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["draft.txt"]);
+    panel.update_in(cx, |panel, window, cx| panel.begin_rename("draft.txt", window, cx));
+    cx.update(|window, _| assert!(window.is_window_active()));
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+
+    // The keyboard moves to the filter field: the edit commits and focus stays there.
+    let filter = panel.read_with(cx, |panel, _| panel.filter_input.clone());
+    filter.update_in(cx, |input, window, cx| input.focus(window, cx));
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(panel.read_with(cx, |panel, _| panel.editing.is_none()));
+    let filter_focused = cx.update(|window, cx| filter.read(cx).focus_handle(cx).is_focused(window));
+    assert!(filter_focused);
+
+    // Esc in the field hands the keyboard back to the tree.
+    panel.update_in(cx, |panel, window, cx| panel.begin_rename("draft.txt", window, cx));
+    cx.run_until_parked();
+    panel.update(cx, |panel, cx| panel.finish_editing(false, cx));
+    cx.run_until_parked();
+    let tree_focused = cx.update(|window, cx| panel.read(cx).focus_handle.is_focused(window));
+    assert!(tree_focused);
+}
+
+#[gpui::test]
+fn folders_collapsed_in_filter_results_stay_collapsed_after_an_inline_edit(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::create_dir_all(root.join("a")).expect("mkdir");
+    fs::create_dir_all(root.join("b")).expect("mkdir");
+    fs::write(root.join("a/note.txt"), "").expect("write");
+    fs::write(root.join("b/note.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["a", "b"]);
+    panel.update(cx, |panel, cx| panel.set_filter_query("note", cx));
+    wait_until(cx, |cx| shown(&panel, cx) == ["a", "a/note.txt", "b", "b/note.txt"]);
+    panel.update(cx, |panel, cx| panel.toggle_folder("a", cx));
+    assert_eq!(shown(&panel, cx), ["a", "b", "b/note.txt"]);
+
+    panel.update_in(cx, |panel, window, cx| panel.begin_rename("b/note.txt", window, cx));
+    panel.update(cx, |panel, cx| panel.finish_editing(false, cx));
+    assert_eq!(shown(&panel, cx), ["a", "b", "b/note.txt"]);
+}
+
+#[gpui::test]
+fn refused_drops_are_not_offered_and_leaving_a_folder_cancels_its_spring_loading(cx: &mut TestAppContext) {
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    fs::create_dir_all(root.join("a/inner")).expect("mkdir");
+    fs::write(root.join("file.txt"), "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx) == ["a", "file.txt"]);
+    let shown_root = panel.read_with(cx, |panel, _| panel.root().map(Path::to_path_buf)).expect("root");
+
+    panel.read_with(cx, |panel, _| {
+        // A folder into itself, or a file onto its own folder: nothing to do.
+        assert!(!panel.accepts_drop("a/inner", &[shown_root.join("a")], true, false));
+        assert!(!panel.accepts_drop("", &[shown_root.join("file.txt")], true, false));
+        assert!(panel.accepts_drop("a", &[shown_root.join("file.txt")], true, false));
+        // ⌥ copies next to the original.
+        assert!(panel.accepts_drop("", &[shown_root.join("file.txt")], true, true));
+    });
+
+    panel.update(cx, |panel, cx| panel.drag_hovered("a".to_owned(), cx));
+    panel.update(cx, |panel, _| panel.drag_left("a"));
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(shown(&panel, cx), ["a", "file.txt"], "the folder the pointer left stays closed");
+
+    panel.update(cx, |panel, cx| panel.drag_hovered("a".to_owned(), cx));
+    cx.executor().advance_clock(Duration::from_secs(1));
+    wait_until(cx, |cx| shown(&panel, cx) == ["a", "a/inner", "file.txt"]);
 }

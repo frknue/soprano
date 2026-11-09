@@ -199,10 +199,11 @@ impl RightSidebarState {
         SidebarWidthStore::RIGHT.save(self.width, &self.store);
     }
 
-    /// Double-clicking the resize edge: back to the default width, saved.
-    pub fn reset_width(&mut self) {
+    /// Double-clicking the resize edge: back to the default width (still leaving the panes
+    /// their reserved room in a narrow window), saved.
+    pub fn reset_width(&mut self, available_width: Option<f32>) {
         if self.is_open {
-            self.width = SidebarWidthStore::RIGHT.default_width;
+            self.drag_width(SidebarWidthStore::RIGHT.default_width, available_width);
         }
         self.save_width();
     }
@@ -321,9 +322,15 @@ mod tests {
         let mut state = RightSidebarState::load(store.clone());
         state.drag_width(500.0, None);
         state.save_width();
-        state.reset_width();
+        state.reset_width(None);
         assert_eq!(state.width(), SidebarWidthStore::RIGHT.default_width);
         assert_eq!(RightSidebarState::load(store).width(), SidebarWidthStore::RIGHT.default_width);
+
+        // A narrow window keeps the panes' reserved width even after a reset.
+        let mut state = RightSidebarState::load(StateStore::in_memory());
+        state.drag_width(230.0, None);
+        state.reset_width(Some(560.0));
+        assert_eq!(state.width(), 560.0 - SidebarWidthStore::RESERVED_CONTENT_WIDTH);
     }
 
     #[test]

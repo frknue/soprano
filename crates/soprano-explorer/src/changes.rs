@@ -61,6 +61,7 @@ pub struct ChangesPanel {
     focus_handle: FocusHandle,
     is_active: bool,
     target: Option<Target>,
+    last_working_directory: Option<String>,
     shown_target: Option<Target>,
     root: Option<PathBuf>,
     /// The root fully resolved through symlinks, which file watchers report.
@@ -95,6 +96,7 @@ impl ChangesPanel {
             focus_handle: cx.focus_handle(),
             is_active: false,
             target: None,
+            last_working_directory: None,
             shown_target: None,
             root: None,
             real_root: None,
@@ -171,6 +173,11 @@ impl ChangesPanel {
     /// The working directory of the focused pane's tab; `None` keeps the current one.
     pub fn set_working_directory(&mut self, cwd: Option<&str>, cx: &mut Context<Self>) {
         let Some(cwd) = cwd else { return };
+        // Finding the repository walks the disk; the same directory finds the same one.
+        if self.last_working_directory.as_deref() == Some(cwd) {
+            return;
+        }
+        self.last_working_directory = Some(cwd.to_owned());
         let expanded = soprano_platform::paths::expand_tilde(cwd).to_string_lossy().into_owned();
         let target = repository_root(&expanded).map_or(Target::NotRepository, Target::Repository);
         self.target = Some(target.clone());
@@ -178,13 +185,6 @@ impl ChangesPanel {
             self.apply(target, cx);
         }
         cx.notify();
-    }
-
-    /// The app became active again: re-read git (window activation does this too).
-    pub fn app_did_become_active(&mut self, cx: &mut Context<Self>) {
-        if self.is_active {
-            self.schedule_refresh(false, cx);
-        }
     }
 
     fn apply(&mut self, target: Target, cx: &mut Context<Self>) {
@@ -597,9 +597,8 @@ impl ChangesPanel {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            // The menu acts on this row without selecting it, as in Swift.
                             cx.stop_propagation();
-                            this.selected =
-                                Some(Entry::Change(context_change.area, context_change.path.clone()));
                             this.open_context_menu(context_change.clone(), event.position, window, cx);
                         }),
                     )

@@ -103,6 +103,9 @@ enum EditTarget {
 struct Editing {
     target: EditTarget,
     input: Entity<InputState>,
+    /// Whether the name field has the keyboard; only then does finishing hand it back to
+    /// the tree.
+    has_focus: bool,
     _subscription: Subscription,
 }
 
@@ -134,6 +137,7 @@ pub struct FilesPanel {
     operation_events: Rc<RefCell<Vec<OperationEvent>>>,
     is_active: bool,
     desired_root: Option<ExplorerRoot>,
+    last_working_directory: Option<String>,
     state: Option<RootState>,
     generation: u64,
     remembered_expansions: HashMap<PathBuf, BTreeSet<String>>,
@@ -204,6 +208,7 @@ impl FilesPanel {
             operation_events,
             is_active: false,
             desired_root: None,
+            last_working_directory: None,
             state: None,
             generation: 0,
             remembered_expansions: HashMap::new(),
@@ -331,6 +336,11 @@ impl FilesPanel {
     /// (browser, Markdown), which keep the current root.
     pub fn set_working_directory(&mut self, cwd: Option<&str>, cx: &mut Context<Self>) {
         let Some(cwd) = cwd else { return };
+        // Resolving the root walks the disk; the same directory resolves the same way.
+        if self.last_working_directory.as_deref() == Some(cwd) {
+            return;
+        }
+        self.last_working_directory = Some(cwd.to_owned());
         let root = explorer_root(cwd);
         self.desired_root = Some(root.clone());
         let unchanged = self.state.as_ref().is_some_and(|state| state.root == root);
@@ -872,13 +882,6 @@ impl FilesPanel {
         self.manual_refresh_spinner = false;
     }
 
-    /// The app became active again: re-read git (window activation does this too).
-    pub fn app_did_become_active(&mut self, cx: &mut Context<Self>) {
-        if self.is_active {
-            self.schedule_git_refresh(false, cx);
-        }
-    }
-
     // MARK: - Expansion
 
     fn set_expanded(&mut self, id: &str, expanded: bool, cx: &mut Context<Self>) {
@@ -1037,12 +1040,10 @@ impl FilesPanel {
     }
 
     fn reveal_selection(&mut self, cx: &mut Context<Self>) {
-        for (id, _) in self.selected_items() {
-            if let Some(path) = self.absolute(&id)
-                && let Err(error) = soprano_platform::system::reveal_in_file_manager(&path)
-            {
-                cx.emit(SidebarEvent::ShowError(error.to_string()));
-            }
+        let paths: Vec<PathBuf> =
+            self.selected_items().into_iter().filter_map(|(id, _)| self.absolute(&id)).collect();
+        if let Err(error) = crate::reveal::reveal(&paths) {
+            cx.emit(SidebarEvent::ShowError(error.to_string()));
         }
     }
 
@@ -1240,20 +1241,34 @@ impl FilesPanel {
             input
         });
         input.update(cx, |input, cx| input.focus(window, cx));
-        let subscription = cx.subscribe(&input, |this, _, event: &InputEvent, cx| match event {
-            InputEvent::PressEnter { .. } => this.finish_editing(true, cx),
-            // Clicking elsewhere commits the name.
-            InputEvent::Blur => this.finish_editing(true, cx),
-            _ => {}
-        });
-        self.editing = Some(Editing { target, input, _subscription: subscription });
+        let subscription =
+            cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.finish_editing(true, cx),
+                InputEvent::Focus => {
+                    if let Some(editing) = this.editing.as_mut() {
+                        editing.has_focus = true;
+                    }
+                }
+                // Clicking elsewhere commits the name; switching to another app does not.
+                InputEvent::Blur if window.is_window_active() => {
+                    if let Some(editing) = this.editing.as_mut() {
+                        editing.has_focus = false;
+                    }
+                    this.finish_editing(true, cx);
+                }
+                _ => {}
+            });
+        self.editing = Some(Editing { target, input, has_focus: true, _subscription: subscription });
         cx.notify();
     }
 
     fn finish_editing(&mut self, commit: bool, cx: &mut Context<Self>) {
         let Some(editing) = self.editing.take() else { return };
         let text = editing.input.read(cx).value().to_string();
-        self.focus_tree_on_render = true;
+        // The keyboard returns to the tree only from the field itself (Return, Esc).
+        if editing.has_focus {
+            self.focus_tree_on_render = true;
+        }
         match editing.target {
             EditTarget::Create { folder, kind } => {
                 if commit
@@ -1298,8 +1313,13 @@ impl FilesPanel {
                 }
             }
         }
-        self.display_refresh_deferred = false;
-        self.reload_visibility();
+        // Changes held back while typing apply now; otherwise the rows (and folders the
+        // user collapsed in filter results) stay as they are.
+        if std::mem::take(&mut self.display_refresh_deferred) {
+            self.reload_visibility();
+        } else {
+            self.rebuild_rows();
+        }
         self.drain_operation_events(cx);
         self.flush_pending_reloads(cx);
         self.apply_pending_selection();
@@ -1372,22 +1392,49 @@ impl FilesPanel {
         self.drag_hover = Some(DragHover { folder, _timer: timer });
     }
 
+    /// The pointer left `folder` during a drag: it no longer springs open.
+    fn drag_left(&mut self, folder: &str) {
+        if self.drag_hover.as_ref().is_some_and(|hover| hover.folder == folder) {
+            self.drag_hover = None;
+        }
+    }
+
     fn drag_ended(&mut self, cx: &mut Context<Self>) {
         self.dragging = false;
         self.drag_hover = None;
         self.flush_pending_reloads(cx);
     }
 
+    /// What a drag starting on a selected row carries: the selection's top-level items.
+    /// Computed once per frame, not per row.
+    fn selection_drag_items(&self) -> Vec<(PathBuf, bool)> {
+        let selected = self.selected_items();
+        let top: HashSet<String> = top_level_selection(&selected).into_iter().collect();
+        selected
+            .into_iter()
+            .filter(|(id, _)| top.contains(id))
+            .filter_map(|(id, is_dir)| self.absolute(&id).map(|path| (path, is_dir)))
+            .collect()
+    }
+
     /// The items a drag starting on `id` carries: the selection when `id` is in it.
-    fn drag_items(&self, id: &str) -> Vec<(PathBuf, bool)> {
-        let items = if self.selection.contains(id) {
-            let selected = self.selected_items();
-            let top = top_level_selection(&selected);
-            selected.into_iter().filter(|(path, _)| top.contains(path)).collect()
-        } else {
-            self.row(id).map(|row| vec![(row.id.clone(), row.is_directory)]).unwrap_or_default()
-        };
-        items.into_iter().filter_map(|(id, is_dir)| self.absolute(&id).map(|path| (path, is_dir))).collect()
+    fn drag_items(&self, id: &str, selection_items: &[(PathBuf, bool)]) -> Vec<(PathBuf, bool)> {
+        if self.selection.contains(id) {
+            return selection_items.to_vec();
+        }
+        self.row(id)
+            .and_then(|row| self.absolute(&row.id).map(|path| (path, row.is_directory)))
+            .into_iter()
+            .collect()
+    }
+
+    /// Whether dropping `sources` on `folder` would do anything (refused targets don't
+    /// highlight).
+    fn accepts_drop(&self, folder: &str, sources: &[PathBuf], from_explorer: bool, copy: bool) -> bool {
+        self.editing.is_none()
+            && self.absolute(folder).is_some_and(|target| {
+                drop_operation(&target, sources, from_explorer, copy) != DropOperation::None
+            })
     }
 
     // MARK: - Clicks
@@ -1795,6 +1842,28 @@ fn make_operations(events: &Rc<RefCell<Vec<OperationEvent>>>) -> FileExplorerOpe
     operations
 }
 
+/// `can_drop` for a row or the empty tree: explorer rows (moved, or copied with ⌥) and
+/// files from outside (copied), unless the drop would do nothing.
+fn accepts_drop(
+    panel: &gpui::WeakEntity<FilesPanel>,
+    folder: &str,
+    value: &dyn std::any::Any,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some(panel) = panel.upgrade() else { return false };
+    let id = panel.entity_id();
+    let panel = panel.read(cx);
+    if let Some(drag) = value.downcast_ref::<ExplorerDrag>() {
+        let copy = chords::is_copy_drag(&window.modifiers());
+        panel.accepts_drop(folder, &drag.paths(), drag.source == id, copy)
+    } else if let Some(paths) = value.downcast_ref::<ExternalPaths>() {
+        panel.accepts_drop(folder, paths.paths(), false, false)
+    } else {
+        false
+    }
+}
+
 fn is_markdown(path: &Path) -> bool {
     path.extension().is_some_and(|extension| {
         let extension = extension.to_string_lossy().to_lowercase();
@@ -1831,6 +1900,7 @@ impl FilesPanel {
         index: usize,
         t: &SopranoTheme,
         focused: bool,
+        selection_items: &[(PathBuf, bool)],
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let row = &self.rows[index];
@@ -1911,7 +1981,7 @@ impl FilesPanel {
             return element.into_any_element();
         }
         let source = cx.entity_id();
-        let items = self.drag_items(&row.id);
+        let items = self.drag_items(&row.id, selection_items);
         let label: SharedString = match items.as_slice() {
             [(path, _)] => {
                 path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default().into()
@@ -1959,6 +2029,11 @@ impl FilesPanel {
             .external_drag_payload(|drag: &ExplorerDrag, _, _| {
                 Some(ExternalDragPayload::Files(FileDragPaths::new(drag.items.clone())))
             })
+            .can_drop({
+                let weak = cx.entity().downgrade();
+                let folder = folder.clone();
+                move |value, window, cx| accepts_drop(&weak, &folder, value, window, cx)
+            })
             .drag_over::<ExplorerDrag>(move |style, _, _, _| {
                 style.bg(drop_fill).border_1().border_color(drop_edge)
             })
@@ -1970,6 +2045,8 @@ impl FilesPanel {
                 cx.listener(move |this, event: &DragMoveEvent<ExplorerDrag>, _, cx| {
                     if event.bounds.contains(&event.event.position) {
                         this.drag_hovered(folder.clone(), cx);
+                    } else {
+                        this.drag_left(&folder);
                     }
                 })
             })
@@ -1978,6 +2055,8 @@ impl FilesPanel {
                 cx.listener(move |this, event: &DragMoveEvent<ExternalPaths>, _, cx| {
                     if event.bounds.contains(&event.event.position) {
                         this.drag_hovered(folder.clone(), cx);
+                    } else {
+                        this.drag_left(&folder);
                     }
                 })
             })
@@ -2122,7 +2201,10 @@ impl Render for FilesPanel {
                     self.rows.len(),
                     cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                         let focused = this.focus_handle.is_focused(window);
-                        range.map(|index| this.render_row(index, &t2, focused, cx)).collect::<Vec<_>>()
+                        let selection_items = this.selection_drag_items();
+                        range
+                            .map(|index| this.render_row(index, &t2, focused, &selection_items, cx))
+                            .collect::<Vec<_>>()
                     }),
                 )
                 .track_scroll(&self.scroll)
@@ -2157,6 +2239,10 @@ impl Render for FilesPanel {
                         this.open_context_menu(None, event.position, window, cx);
                     }),
                 )
+                .can_drop({
+                    let weak = cx.entity().downgrade();
+                    move |value, window, cx| accepts_drop(&weak, "", value, window, cx)
+                })
                 .drag_over::<ExternalPaths>(|style, _, _, _| style)
                 .on_drop(cx.listener(|this, drag: &ExplorerDrag, window, cx| {
                     let internal = drag.source == cx.entity_id();
