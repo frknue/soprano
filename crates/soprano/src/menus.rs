@@ -9,7 +9,7 @@
 //! context nothing ever enters.
 
 use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, actions};
-use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+use gpui_component::input::{Copy, Cut, Delete, Paste, Redo, SelectAll, Undo};
 use soprano_types::{KeyBindingConfig, KeyBindingMode};
 
 use crate::shell::Command;
@@ -128,7 +128,7 @@ pub fn install(config: &KeyBindingConfig, cx: &mut App) {
             }
         }
     }
-    cx.bind_keys(display_bindings);
+    replace_menu_bindings(display_bindings, cx);
     cx.set_menus([
         Menu::new("Soprano").items([MenuItem::action("Quit Soprano", Quit)]),
         Menu::new("Edit").items([
@@ -138,11 +138,30 @@ pub fn install(config: &KeyBindingConfig, cx: &mut App) {
             MenuItem::os_action("Cut", Cut, OsAction::Cut),
             MenuItem::os_action("Copy", Copy, OsAction::Copy),
             MenuItem::os_action("Paste", Paste, OsAction::Paste),
+            MenuItem::action("Delete", Delete),
             MenuItem::separator(),
             MenuItem::os_action("Select All", SelectAll, OsAction::SelectAll),
         ]),
         Menu::new("Commands").items(items),
     ]);
+}
+
+/// Swaps the previous install's menu bindings for `bindings`. GPUI only appends key bindings and
+/// its menu shows an action's first binding, so appending again would freeze the menu (and
+/// its key equivalents) at the launch-time chords; every other binding is kept as it is.
+fn replace_menu_bindings(bindings: Vec<KeyBinding>, cx: &mut App) {
+    let keymap = cx.key_bindings();
+    let kept: Vec<KeyBinding> =
+        keymap.borrow().bindings().filter(|binding| !is_menu_binding(binding)).cloned().collect();
+    cx.clear_key_bindings();
+    cx.bind_keys(kept);
+    cx.bind_keys(bindings);
+}
+
+/// A binding [`install`] adds: Quit's, or one in the menu-display context.
+fn is_menu_binding(binding: &KeyBinding) -> bool {
+    binding.action().as_any().is::<Quit>()
+        || binding.predicate().is_some_and(|predicate| predicate.to_string() == MENU_DISPLAY_CONTEXT)
 }
 
 /// The Commands menu as a soprano-ui menu, for the ⋯ button off macOS.
@@ -174,6 +193,34 @@ mod tests {
         // Prefix chords cannot be menu key equivalents.
         assert_eq!(key_equivalent(&config, "command-palette"), None);
         assert_eq!(key_equivalent(&config, "no-such-binding"), None);
+    }
+
+    #[gpui::test]
+    fn reinstalling_the_menu_replaces_its_key_equivalents(cx: &mut gpui::TestAppContext) {
+        let mut config = DefaultKeybindings::config();
+        cx.update(|cx| {
+            cx.bind_keys([KeyBinding::new("cmd-c", Copy, None)]);
+            install(&config, cx);
+        });
+        if let Some(binding) = config.bindings.iter_mut().find(|b| b.id == "command-palette") {
+            binding.key = "j".to_owned();
+        }
+        cx.update(|cx| install(&config, cx));
+        cx.update(|cx| {
+            let keymap = cx.key_bindings();
+            let keymap = keymap.borrow();
+            let palette: Vec<String> = keymap
+                .bindings_for_action(&CommandPalette)
+                .map(|binding| {
+                    binding.keystrokes().iter().map(|k| k.key().to_owned()).collect::<Vec<_>>().join(" ")
+                })
+                .collect();
+            assert_eq!(palette.len(), 1);
+            assert_eq!(palette[0], "j");
+            assert_eq!(keymap.bindings_for_action(&Quit).count(), 1);
+            // Bindings the menu does not own stay.
+            assert_eq!(keymap.bindings_for_action(&Copy).count(), 1);
+        });
     }
 
     #[test]

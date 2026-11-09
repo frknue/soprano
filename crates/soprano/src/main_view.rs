@@ -63,6 +63,8 @@ type Proceed = Box<dyn FnOnce(&mut MainView, &mut Window, &mut Context<MainView>
 
 /// The sidebar's resize strip straddling its trailing edge.
 const SIDEBAR_HANDLE_WIDTH: f32 = 8.0;
+/// How long the window must stay put before its frame is saved.
+const FRAME_SAVE_DELAY: Duration = Duration::from_millis(500);
 /// How often the notification manager's upkeep runs.
 const NOTIFICATION_TICK: Duration = Duration::from_secs(1);
 
@@ -150,11 +152,11 @@ pub struct MainView {
     resolver_timer: Option<Task<()>>,
     clipboard: Rc<ClipboardConfirmationCoordinator>,
     clipboard_answers: async_channel::Sender<(WeakEntity<TerminalView>, u64, bool)>,
-    /// The terminal font size at zoom 1 (settings and Ghostty config); zoom scales it.
-    terminal_font_size: f32,
     focus: FocusHandle,
     /// The sidebar edge is being dragged: the pointer's start and the width it started at.
     sidebar_drag: Option<(Pixels, f32)>,
+    /// The pending frame save while the window moves or resizes.
+    frame_save: Option<Task<()>>,
     _ipc_server: Option<IpcServer>,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
@@ -194,11 +196,12 @@ impl MainView {
         let clipboard = ClipboardConfirmationCoordinator::new(ClipboardPrompts(prompt_sender));
         let (clipboard_answers, answer_receiver) =
             async_channel::unbounded::<(WeakEntity<TerminalView>, u64, bool)>();
-        let terminal_font_size = content.read(cx).terminal_settings().font_size;
         let keybindings = shell.read(cx).keybindings.clone();
         let resolver = KeybindingResolver::new(keybindings, Platform::current());
         content.update(cx, |content, cx| content.set_clipboard_coordinator(clipboard.clone(), cx));
 
+        let (quit_sender, quit_requests) = async_channel::unbounded::<()>();
+        crate::terminate::install(content.read(cx).unsaved(), quit_sender);
         let (wake_sender, wake_receiver) = async_channel::unbounded::<()>();
         let controller = automations::create_controller(
             &soprano_platform::AppIdentity::current(),
@@ -238,7 +241,7 @@ impl MainView {
                 this.window_activation_changed(window, cx)
             }),
             cx.observe_window_bounds(window, |this, window, cx| {
-                this.save_window_frame(window, cx);
+                this.schedule_frame_save(window, cx);
                 this.update_right_sidebar_width(window, cx);
             }),
             cx.observe_global_in::<SopranoTheme>(window, |this, _, cx| this.theme_changed(cx)),
@@ -313,6 +316,14 @@ impl MainView {
                     this.workspace.update(cx, |ws| notifications.borrow_mut().tick(Instant::now(), ws));
                 });
                 if alive.is_err() {
+                    break;
+                }
+            }
+        }));
+        // A system quit (Dock, logout) held back for unsaved files asks here.
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            while quit_requests.recv().await.is_ok() {
+                if this.update_in(cx, |this, window, cx| this.request_quit(window, cx)).is_err() {
                     break;
                 }
             }
@@ -396,9 +407,9 @@ impl MainView {
             resolver_timer: None,
             clipboard,
             clipboard_answers,
-            terminal_font_size,
             focus: cx.focus_handle(),
             sidebar_drag: None,
+            frame_save: None,
             _ipc_server: ipc_server,
             _subscriptions: subscriptions,
             _tasks: tasks,
@@ -514,9 +525,6 @@ impl MainView {
                 })
                 .detach();
             }
-            Command::ZoomIn => SopranoTheme::zoom_in(cx),
-            Command::ZoomOut => SopranoTheme::zoom_out(cx),
-            Command::ZoomReset => SopranoTheme::reset_zoom(cx),
             Command::StartCopyMode => {
                 if let Some(terminal) = self.content.read(cx).active_terminal(cx) {
                     terminal.update(cx, |terminal, cx| {
@@ -614,10 +622,13 @@ impl MainView {
             BindingCommand::ToggleSourceControl => self.run(Command::ToggleSourceControl, window, cx),
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
             BindingCommand::OpenAgentDashboard => self.run(Command::OpenDashboard, window, cx),
+            // `keybindingZoom`: the active terminal's font, not the whole UI.
             BindingCommand::Zoom(delta) => {
-                self.run(if delta > 0 { Command::ZoomIn } else { Command::ZoomOut }, window, cx)
+                self.content.update(cx, |content, cx| content.change_active_terminal_font_size(delta, cx))
             }
-            BindingCommand::ZoomReset => self.run(Command::ZoomReset, window, cx),
+            BindingCommand::ZoomReset => {
+                self.content.update(cx, |content, cx| content.reset_active_terminal_font_size(cx))
+            }
         }
     }
 
@@ -1475,15 +1486,8 @@ impl MainView {
 
     fn theme_changed(&mut self, cx: &mut Context<Self>) {
         let theme = cx.soprano_theme();
-        let zoom = theme.zoom();
         let palette = terminal_theme(theme.theme());
-        let font_size = self.terminal_font_size * zoom;
-        self.content.update(cx, |content, cx| {
-            let mut settings = content.terminal_settings().clone();
-            settings.theme = palette;
-            settings.font_size = font_size;
-            content.set_terminal_settings(settings, cx);
-        });
+        self.content.update(cx, |content, cx| content.set_terminal_theme(palette, cx));
         cx.notify();
     }
 
@@ -1498,7 +1502,17 @@ impl MainView {
         }
     }
 
+    /// Saves the frame once moving or resizing has paused for [`FRAME_SAVE_DELAY`]: writing
+    /// state.json on every bounds event would stutter a live resize. Close and quit save at once.
+    fn schedule_frame_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.frame_save = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(FRAME_SAVE_DELAY).await;
+            this.update_in(cx, |this, window, cx| this.save_window_frame(window, cx)).ok();
+        }));
+    }
+
     pub fn save_window_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.frame_save = None;
         if window.is_fullscreen() {
             return;
         }
@@ -1521,15 +1535,19 @@ impl MainView {
 
     /// What has the keyboard, for chords a content view keeps (`keybindingFocusedContent`).
     fn focused_content(&self, window: &Window, cx: &App) -> FocusedContent {
+        // The Automations page keeps its own chords (⌘N), as `AutomationsRootView` did.
+        if self
+            .automations_page
+            .as_ref()
+            .is_some_and(|page| page.focus_handle(cx).contains_focused(window, cx))
+        {
+            return FocusedContent::Automations;
+        }
         let content = self.content.read(cx);
         for (_, item) in content.contents() {
             let Some(handle) = item.focus_handle(cx) else { continue };
             if handle.contains_focused(window, cx) {
-                return match item {
-                    PaneContent::Terminal(_) => FocusedContent::Terminal,
-                    PaneContent::Browser(_) => FocusedContent::Browser,
-                    _ => FocusedContent::Other,
-                };
+                return item.focused_content();
             }
         }
         FocusedContent::Other
@@ -1891,7 +1909,14 @@ impl MainView {
         let show_window_tabs = !shell.settings.hide_window_tabs;
         let _ = window;
         let body: AnyElement = match page {
-            Some(page) => self.render_page(page, cx),
+            Some(page) => div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .child(crate::views::tab_rows::page_top_row(&self.shell, window, cx))
+                .child(self.render_page(page, cx))
+                .into_any_element(),
             None => div()
                 .flex()
                 .flex_col()

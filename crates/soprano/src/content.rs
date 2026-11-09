@@ -92,6 +92,17 @@ impl PaneContent {
         }
     }
 
+    /// What has the keyboard when this content does, for the chords content keeps
+    /// (`focusedContent(of:)`): an editor keeps ⌘F, ⌘G, ⇧⌘G and ⌘S.
+    pub fn focused_content(&self) -> soprano_keys::FocusedContent {
+        match self {
+            PaneContent::Terminal(_) => soprano_keys::FocusedContent::Terminal,
+            PaneContent::Browser(_) => soprano_keys::FocusedContent::Browser,
+            PaneContent::Editor(_) => soprano_keys::FocusedContent::Editor,
+            _ => soprano_keys::FocusedContent::Other,
+        }
+    }
+
     pub fn terminal(&self) -> Option<&Entity<TerminalView>> {
         match self {
             PaneContent::Terminal(view) => Some(view),
@@ -163,6 +174,11 @@ pub struct UnsavedEditors {
 impl UnsavedEditors {
     pub fn new(shown: Vec<(TerminalTarget, DocumentId)>, dirty: HashSet<DocumentId>) -> Self {
         Self { shown, dirty }
+    }
+
+    /// Whether any open document has unsaved changes (quitting asks first).
+    pub fn has_unsaved(&self) -> bool {
+        !self.dirty.is_empty()
     }
 
     /// Whether closing `targets` loses unsaved changes: a dirty document no tab outside
@@ -252,6 +268,11 @@ impl ContentHost {
         host
     }
 
+    /// The unsaved-documents mirror (Send + Sync, for the model and the system quit check).
+    pub fn unsaved(&self) -> SharedUnsaved {
+        self.unsaved.clone()
+    }
+
     pub fn documents(&self) -> &Entity<EditorDocuments<TerminalTarget>> {
         &self.documents
     }
@@ -331,21 +352,34 @@ impl ContentHost {
             .any(|handle| handle.contains_focused(window, cx))
     }
 
-    pub fn terminal_settings(&self) -> &TerminalSettings {
-        &self.terminal_settings
-    }
-
-    /// New colors, font or zoom for every terminal.
-    pub fn set_terminal_settings(&mut self, settings: TerminalSettings, cx: &mut Context<Self>) {
-        if settings == self.terminal_settings {
+    /// New colors for every terminal (the app's theme changed); each keeps its own font size.
+    pub fn set_terminal_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
+        if theme == self.terminal_settings.theme {
             return;
         }
-        self.terminal_settings = settings.clone();
+        self.terminal_settings.theme = theme.clone();
         for content in self.contents.values() {
             if let PaneContent::Terminal(view) = content {
-                let settings = settings.clone();
-                view.update(cx, |view, cx| view.set_settings(settings, cx));
+                let theme = theme.clone();
+                view.update(cx, |view, cx| view.set_theme(theme, cx));
             }
+        }
+    }
+
+    /// ⌘= / ⌘-: the active terminal's font grows or shrinks by `delta` points
+    /// (`changeActiveTerminalFontSize`); the rest of the UI keeps its size.
+    pub fn change_active_terminal_font_size(&mut self, delta: i32, cx: &mut Context<Self>) {
+        if let Some(view) = self.active_terminal(cx) {
+            view.update(cx, |view, cx| view.change_font_size(delta, cx));
+        }
+    }
+
+    /// ⌘0: the active terminal's font goes back to the configured size
+    /// (`resetActiveTerminalFontSize`).
+    pub fn reset_active_terminal_font_size(&mut self, cx: &mut Context<Self>) {
+        let configured = self.terminal_settings.font_size;
+        if let Some(view) = self.active_terminal(cx) {
+            view.update(cx, |view, cx| view.reset_font_size(configured, cx));
         }
     }
 
@@ -1358,6 +1392,13 @@ mod tests {
         cx.update(|_, cx| {
             let host = host.read(cx);
             assert!(matches!(host.content(&editor), Some(PaneContent::Editor(_))));
+            // An editor keeps its own chords (⌘F finds in the file, not a window).
+            let focused = host.content(&editor).map(PaneContent::focused_content);
+            assert_eq!(focused, Some(soprano_keys::FocusedContent::Editor));
+            assert_eq!(
+                host.content(&reader).map(PaneContent::focused_content),
+                Some(soprano_keys::FocusedContent::Other)
+            );
             assert!(matches!(host.content(&diff), Some(PaneContent::Diff(_))));
             assert!(matches!(host.content(&reader), Some(PaneContent::Reader(_))));
         });

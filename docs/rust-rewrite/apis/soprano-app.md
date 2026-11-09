@@ -9,6 +9,7 @@
 - **`main_view.rs`** — window root: layout, commands, closes (two-phase, see below), dialogs, pickers, Settings, the Dashboard and Automations pages, toasts, the keystroke interceptor, IPC, notification routing, clipboard prompts, the automation timers.
 - **`content.rs`** — `ContentHost`: per pane/tab content (`PaneContent::{Terminal, Browser, Chat, Editor, Diff, Reader, Stopped, Failed}`) cached across layout rebuilds. File tabs (`is_editor`/`is_diff`/`is_markdown`) get `EditorView`/`DiffView`/`MarkdownReaderView`; diffs are `set_shown(false)` while hidden; `WorkspaceChange::Document` re-points a reader and rebuilds an editor/diff whose file changed. It mirrors which tab shows which document and which are dirty (`UnsavedEditors`) and installs the model's close-confirmation predicate from it.
 - **`automations.rs`** — `AppHost` (the `AutomationHost` over the leased workspace + content host + notifications) and `drive(context, window, cx, |controller, host| ..)`, which runs a controller call, `cx.notify()`s the controller entity, then starts the terminals the call asked for (`ContentHost::start_background_terminal`, after the workspace lease ends). `create_controller` builds it with `AutomationEnvironment::for_app` and `<data dir>/automations.json`.
+- **`terminate.rs`** — macOS `applicationShouldTerminate:` added to GPUI's delegate class: a system quit (Dock, logout) with unsaved files is cancelled and routed to `MainView::request_quit`.
 - **`power.rs`** — the only new per-OS module: `display_is_awake()` (macOS `CGDisplayIsAsleep` over the online displays; Linux/Windows: true).
 - **`views/`**, `palette.rs`, `menus.rs`, `ipc.rs`, `keyboard.rs`, `sizing.rs`, `window_chrome.rs` — unchanged roles.
 
@@ -25,10 +26,12 @@
 
 ## Deviations
 - Wake from sleep: `power::WakeDetector`, sampled every second, treats a wall-clock gap of more than 5 s past the interval between two samples as a wake (a timer cannot fire during sleep on any OS) and ticks automations at once, like Swift's `didWakeNotification`; a busy UI thread may cause an extra, harmless tick.
-- Zoom, window frame and Commands-menu keymap: as in the previous report.
+- Zoom follows Swift: ⌘= / ⌘- / ⌘0 change the active terminal's font size; the UI zoom factor stays 1.
+- The window frame is saved 500 ms after moving/resizing stops and on close/quit; the Swift app's AppKit frame (`soprano-main-window-frame-v2-appkit`) is flipped to top-left once on first launch.
+- Pages (Dashboard, Automations) keep a slim top row with the drag region, the sidebar toggle/traffic-light inset and the Linux/Windows window buttons.
 
 ## Commands
-- `CARGO_TARGET_DIR=target/agent-soprano cargo test -p soprano` → 112 passed.
+- `CARGO_TARGET_DIR=target/agent-soprano cargo test -p soprano` → 116 passed.
 - `cargo clippy -p soprano --all-targets` → no warnings; `cargo fmt -p soprano` applied.
 - `cargo build -p soprano --release` → see the final report.
 - `cargo check --target x86_64-unknown-linux-gnu -p soprano` (zig cc/c++/ar wrappers, `RUST_FONTCONFIG_DLOPEN=1`) → blocked by `x11` (via soprano-browser → gpui-webview/lb-wry → gdkx11): its build script needs pkg-config for the Linux X11/GTK system libraries, and there is no Linux sysroot on this Mac.

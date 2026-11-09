@@ -138,12 +138,52 @@ pub fn load_frame(store: &StateStore, visible_frames: &[Frame]) -> Option<Frame>
     is_restorable(&frame, visible_frames).then(|| clamped(frame, visible_frames))
 }
 
+/// Where the Swift app's frame lands when state is imported from its UserDefaults
+/// (`soprano_platform::state::LEGACY_KEY_RENAMES`): AppKit coordinates, origin bottom-left.
+pub const APPKIT_FRAME_KEY: &str = "soprano-main-window-frame-v2-appkit";
+
+/// Converts the Swift app's frame to top-left coordinates once: when no frame of ours is
+/// saved yet, the AppKit one is flipped against the primary display's height
+/// (`y = primary_height - (y + height)`), saved under [`FRAME_KEY`] and removed.
+pub fn import_appkit_frame(store: &StateStore, primary_height: Option<f64>) {
+    let Some(legacy) = store.get::<String>(APPKIT_FRAME_KEY) else { return };
+    if store.get::<String>(FRAME_KEY).is_none()
+        && let Some(primary_height) = primary_height
+    {
+        let frame = Frame::from_rect_string(&legacy);
+        let flipped =
+            Frame::new(frame.x, primary_height - (frame.y + frame.height), frame.width, frame.height);
+        save_frame(store, flipped);
+    }
+    store.remove(APPKIT_FRAME_KEY);
+}
+
 pub fn save_frame(store: &StateStore, frame: Frame) {
     store.set(FRAME_KEY, &frame.to_rect_string());
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_swift_apps_frame_is_flipped_to_top_left_once() {
+        let store = StateStore::in_memory();
+        store.set(APPKIT_FRAME_KEY, "{{100, 200}, {1200, 800}}");
+        import_appkit_frame(&store, Some(1117.0));
+        assert_eq!(
+            store.get::<String>(FRAME_KEY).map(|s| Frame::from_rect_string(&s)),
+            Some(Frame::new(100.0, 117.0, 1200.0, 800.0))
+        );
+        assert_eq!(store.get::<String>(APPKIT_FRAME_KEY), None);
+        // A frame of our own wins; the legacy one is just dropped.
+        store.set(APPKIT_FRAME_KEY, "{{0, 0}, {500, 500}}");
+        import_appkit_frame(&store, Some(1117.0));
+        assert_eq!(
+            store.get::<String>(FRAME_KEY).map(|s| Frame::from_rect_string(&s)),
+            Some(Frame::new(100.0, 117.0, 1200.0, 800.0))
+        );
+        assert_eq!(store.get::<String>(APPKIT_FRAME_KEY), None);
+    }
+
     use super::*;
 
     #[test]

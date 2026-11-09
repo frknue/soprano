@@ -110,6 +110,7 @@ pub fn run() {
         };
         let shell = cx.new(|_| Shell::new(state.clone(), settings.clone(), keybindings.clone()));
 
+        sizing::import_appkit_frame(&state, window_chrome::primary_display_height(cx));
         let frame = sizing::load_frame(&state, &window_chrome::visible_frames(cx))
             .unwrap_or_else(|| sizing::initial_frame(window_chrome::main_visible_frame(cx)));
         let startup = Startup { ipc, banner_clicks, config_changes };

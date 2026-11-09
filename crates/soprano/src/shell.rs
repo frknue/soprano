@@ -84,9 +84,6 @@ pub enum Command {
         pane_id: Option<String>,
     },
     OpenInSopranoGit,
-    ZoomIn,
-    ZoomOut,
-    ZoomReset,
     StartCopyMode,
     /// A one-button notice over the window.
     ShowNotice {
@@ -151,11 +148,18 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         let handle = popup.read(cx).focus_handle(cx);
-        self.popup_subscription = Some(cx.subscribe(&popup, |shell, _, _: &DismissEvent, cx| {
-            shell.popup = None;
-            shell.popup_subscription = None;
-            cx.notify();
-        }));
+        // The keyboard goes back where it was when the popup closes (the usage card does not
+        // restore it itself, unlike `ContextMenu`), as closing Swift's child window did.
+        let previous = window.focused(cx);
+        self.popup_subscription =
+            Some(cx.subscribe_in(&popup, window, move |shell, _, _: &DismissEvent, window, cx| {
+                if let Some(previous) = &previous {
+                    window.focus(previous, cx);
+                }
+                shell.popup = None;
+                shell.popup_subscription = None;
+                cx.notify();
+            }));
         self.popup = Some(popup.into());
         window.focus(&handle, cx);
         cx.notify();
@@ -212,6 +216,44 @@ mod tests {
 
     fn shell() -> Shell {
         Shell::new(StateStore::in_memory(), AppSettings::default_settings(), DefaultKeybindings::config())
+    }
+
+    struct Card(gpui::FocusHandle);
+
+    impl EventEmitter<DismissEvent> for Card {}
+
+    impl gpui::Focusable for Card {
+        fn focus_handle(&self, _: &App) -> gpui::FocusHandle {
+            self.0.clone()
+        }
+    }
+
+    impl gpui::Render for Card {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+            gpui::Empty
+        }
+    }
+
+    #[gpui::test]
+    fn closing_a_popup_gives_the_keyboard_back(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let (shell, terminal) = cx.update(|window, cx| {
+            let terminal = cx.focus_handle();
+            window.focus(&terminal, cx);
+            (gpui::AppContext::new(cx, |_| shell()), terminal)
+        });
+        let card = cx.update(|window, cx| {
+            let card = gpui::AppContext::new(cx, |cx| Card(cx.focus_handle()));
+            shell.update(cx, |shell, cx| shell.show_popup(card.clone(), window, cx));
+            card
+        });
+        cx.update(|window, cx| assert!(card.read(cx).0.is_focused(window)));
+        cx.update(|_, cx| card.update(cx, |_, cx| cx.emit(DismissEvent)));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            assert!(terminal.is_focused(window));
+            assert!(shell.read(cx).popup.is_none());
+        });
     }
 
     #[test]

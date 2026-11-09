@@ -38,6 +38,7 @@ mod power;
 mod services;
 mod shell;
 mod sizing;
+mod terminate;
 mod views;
 mod window_chrome;
 mod workspace;

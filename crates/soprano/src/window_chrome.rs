@@ -85,6 +85,11 @@ pub fn visible_frames(cx: &App) -> Vec<sizing::Frame> {
     cx.displays().iter().map(|display| frame_of(display.visible_bounds())).collect()
 }
 
+/// The primary display's full height (AppKit's coordinate flip).
+pub fn primary_display_height(cx: &App) -> Option<f64> {
+    cx.primary_display().map(|display| f64::from(f32::from(display.bounds().size.height)))
+}
+
 /// The visible frame of the primary display.
 pub fn main_visible_frame(cx: &App) -> sizing::Frame {
     cx.primary_display()
@@ -134,7 +139,9 @@ impl RenderOnce for WindowButtons {
             .child(
                 button("window-close", IconName::WinClose)
                     .hover(|style| style.bg(rgb(0xc42b1c)).text_color(rgb(0xffffff)))
-                    .on_click(|_, window, _| window.remove_window()),
+                    // Closing the main window quits: through Quit, so unsaved files are asked about
+                    // and the workspace is saved (removing the window would skip both).
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::menus::Quit), cx)),
             )
     }
 }

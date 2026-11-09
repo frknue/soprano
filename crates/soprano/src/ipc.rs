@@ -69,7 +69,8 @@ pub fn open_markdown(
     }
     if !opens_new_pane {
         return match workspace.preview_markdown(path, &owner) {
-            Some(pane_id) => Response::success(pane_id),
+            // Like Swift, the reply names the pane that holds the reader.
+            Some(_) => Response::success(owner),
             None => Response::failure("Could not open a Markdown reader (tab limit reached)."),
         };
     }
@@ -147,7 +148,8 @@ mod tests {
         else {
             panic!("preview failed")
         };
-        assert!(!output.is_empty());
+        // The reply is the pane holding the reader (Swift's ownerPaneId), not the tab id.
+        assert_eq!(output, pane);
         assert!(workspace.panes().values().any(|p| p.tabs.iter().any(|t| t.is_markdown())));
         let panes_before = workspace.pane_count();
         let Response::Ok { output } = open_markdown(&mut workspace, &path, true, Some(&pane), Some(&tab))

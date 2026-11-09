@@ -221,7 +221,8 @@ pub struct PaneRow {
     pub pill: Option<StatusPillSpec>,
     /// An agent's status start: the time since shows when it has no pill.
     pub since: Option<SystemTime>,
-    /// An idle or stopped agent's title recedes unless its row is focused.
+    /// An agent that needs nothing from you (running, starting, idle, stopped) recedes unless
+    /// its row is focused; waiting and failed agents stand out.
     pub recedes: bool,
     pub hint_caps: Option<Vec<String>>,
     pub shows_hint: bool,
@@ -353,7 +354,7 @@ fn pane_row(
         meta,
         pill,
         since,
-        recedes: agent.is_some_and(|a| matches!(a.status, AgentStatus::Idle | AgentStatus::Stopped)),
+        recedes: agent.is_some_and(|a| agent_recedes(a.status)),
         shows_hint: input.hints.shows_pane_hints() && hint_caps.is_some(),
         hint_caps,
         focused: in_active_window && pane.id == ws.active_pane_id(),
@@ -364,6 +365,12 @@ fn pane_row(
 }
 
 /// The list index of each window's header, for revealing it.
+/// Whether an agent's row recedes (`SidebarView`: running, starting, idle and stopped agents
+/// need nothing from you; waiting and failed ones stand out).
+pub fn agent_recedes(status: AgentStatus) -> bool {
+    matches!(status, AgentStatus::Running | AgentStatus::Starting | AgentStatus::Idle | AgentStatus::Stopped)
+}
+
 pub fn window_row_index(rows: &[ListRow], window_id: &str) -> Option<usize> {
     rows.iter().position(|row| matches!(&row.row, RowModel::Window(w) if w.id == window_id))
 }
@@ -824,6 +831,15 @@ mod tests {
         let cwds = watched_cwds(&ws);
         assert!(cwds.contains(&"/tmp/a".to_owned()) && cwds.contains(&"/tmp/b".to_owned()));
         assert_eq!(cwds.iter().filter(|c| *c == "/tmp/a").count(), 1);
+    }
+
+    #[test]
+    fn only_agents_that_need_you_stand_out() {
+        for status in [AgentStatus::Running, AgentStatus::Starting, AgentStatus::Idle, AgentStatus::Stopped] {
+            assert!(agent_recedes(status), "{status:?}");
+        }
+        assert!(!agent_recedes(AgentStatus::Waiting));
+        assert!(!agent_recedes(AgentStatus::Error));
     }
 
     // Agents section

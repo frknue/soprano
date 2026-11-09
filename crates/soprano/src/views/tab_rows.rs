@@ -234,6 +234,18 @@ fn tab_slot(id: (&'static str, usize), pill: TabPill, cx: &App) -> gpui::Statefu
         .child(pill)
 }
 
+/// The top row a page (Agent Dashboard, Automations) shows instead of the tab rows: it keeps
+/// what those rows carried for the window — the drag region, room for the traffic lights or
+/// the sidebar toggle while the sidebar is hidden, and the window buttons off macOS.
+pub fn page_top_row(shell: &Entity<Shell>, window: &Window, cx: &App) -> gpui::AnyElement {
+    let chrome = TopRowChrome::of(true, shell.read(cx), window);
+    row_frame("page-top-row", chrome, true, cx)
+        .when(chrome.sidebar_toggle, |row| row.child(sidebar_toggle(shell)))
+        .child(div().flex_1())
+        .when(chrome.window_buttons, |row| row.child(WindowButtons))
+        .into_any_element()
+}
+
 /// The row frame: chrome fill, bottom border, Herdr's paddings, the drag region on top.
 fn row_frame(id: &'static str, chrome: TopRowChrome, is_top: bool, cx: &App) -> gpui::Stateful<gpui::Div> {
     let theme = cx.soprano_theme();
