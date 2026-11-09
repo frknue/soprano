@@ -566,3 +566,138 @@ fn a_transcript_reads_as_the_timeline_with_prompt_jumps_and_following(cx: &mut T
         TimelineRowContent::Empty(text) if text == "No conversation yet."
     ));
 }
+
+#[gpui::test]
+fn wheel_scrolling_the_timeline_stops_following_without_crashing(cx: &mut TestAppContext) {
+    cx.update(soprano_ui::init_for_tests);
+    let source = TranscriptSource::new();
+    source.set(transcript(6), "No conversation yet.");
+    let shared = source.clone();
+    let (timeline, cx) =
+        cx.add_window_view(move |window, cx| TimelineView::new(shared, "Claude Code", window, cx));
+    cx.run_until_parked();
+    assert!(timeline.read_with(cx, |t, _| t.is_following()));
+    let wheel = |y: f32| gpui::ScrollEvent {
+        position: gpui::point(gpui::px(200.0), gpui::px(200.0)),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.0), gpui::px(y))),
+        ..Default::default()
+    };
+    // Up: away from the end (the list's scroll callback must not read the list again).
+    let events: Rc<RefCell<Vec<crate::TimelineEvent>>> = Rc::default();
+    let recorded = events.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&timeline, move |_, event: &crate::TimelineEvent, _| {
+            recorded.borrow_mut().push(event.clone())
+        })
+        .detach();
+    });
+    for _ in 0..5 {
+        cx.simulate_event(wheel(2_000.0));
+        cx.run_until_parked();
+    }
+    assert!(events.borrow().contains(&crate::TimelineEvent::FollowingChanged(false)));
+    assert!(!timeline.read_with(cx, |t, _| t.is_following()));
+    // Down far past the end: following again.
+    cx.simulate_event(wheel(-100_000.0));
+    cx.run_until_parked();
+    assert!(timeline.read_with(cx, |t, _| t.is_following()));
+}
+
+#[gpui::test]
+fn stop_with_a_typed_answer_on_screen_stops_the_turn_instead_of_answering(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    chat.type_text("Pick a fix", cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    let id = chat.agent.ask(
+        "elicitation/create",
+        json!({
+            "sessionId": "new-session",
+            "message": "How should I fix it?",
+            "requestedSchema": {"type": "object", "properties": {
+                "q0": {"type": "string", "title": "Which approach?", "oneOf": [{"const": "Patch"}]},
+                "q0__other": {"type": "string"},
+            }},
+        }),
+    );
+    settle(cx);
+    chat.type_text("My own fix", cx);
+    let composer = cx.update(|_, cx| chat.view.read(cx).composer().clone());
+    cx.update(|window, cx| {
+        composer.update(cx, |composer, cx| {
+            composer.primary_clicked(ComposerPrimaryAction::Stop, false, window, cx)
+        })
+    });
+    settle(cx);
+    assert_eq!(
+        chat.agent.state().notifications.iter().map(|n| n.0.clone()).collect::<Vec<_>>(),
+        ["session/cancel"]
+    );
+    assert_ne!(
+        chat.agent.answer(&id),
+        Some(Ok(json!({"action": "accept", "content": {"q0__other": "My own fix"}})))
+    );
+}
+
+#[gpui::test]
+fn a_chip_closes_its_own_popover_and_the_editor_gets_the_keyboard_back(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    let composer = cx.update(|_, cx| chat.view.read(cx).composer().clone());
+    cx.update(|window, cx| {
+        composer.update(cx, |c, cx| c.toggle_popover(crate::PopoverKind::Model, window, cx))
+    });
+    cx.run_until_parked();
+    assert!(composer.read_with(cx, |c, _| c.popover.is_some()));
+    cx.update(|window, cx| {
+        composer.update(cx, |c, cx| c.toggle_popover(crate::PopoverKind::Model, window, cx))
+    });
+    cx.run_until_parked();
+    assert!(composer.read_with(cx, |c, _| c.popover.is_none()));
+    let focused =
+        cx.update(|window, cx| gpui::Focusable::focus_handle(composer.read(cx), cx).is_focused(window));
+    assert!(focused);
+}
+
+#[gpui::test]
+fn opening_a_step_during_a_running_turn_keeps_following(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    chat.type_text("Build it", cx);
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+    chat.agent.send(json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "name": "bash", "title": "$ make", "status": "completed",
+        "rawInput": {"command": "make"}, "rawOutput": {"content": [{"type": "text", "text": "ok"}], "details": {"exitCode": 0}}}));
+    settle(cx);
+    let timeline = cx.update(|_, cx| chat.view.read(cx).timeline().clone());
+    assert!(timeline.read_with(cx, |t, _| t.is_following()));
+    let entry = timeline.read_with(cx, |t, _| {
+        t.rows().iter().find_map(|r| match &r.content {
+            TimelineRowContent::WorkEntry(model) => Some(model.entry.id.clone()),
+            _ => None,
+        })
+    });
+    let entry = entry.expect("the command's entry");
+    timeline.update(cx, |t, cx| t.toggle(crate::rows::ExpansionSet::Entries, &entry, cx));
+    cx.run_until_parked();
+    assert!(timeline.read_with(cx, |t, _| t.is_following()));
+}
+
+#[gpui::test]
+fn the_slash_menu_highlights_commands_that_arrive_after_typing_slash(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    chat.type_text("/", cx);
+    let composer = cx.update(|_, cx| chat.view.read(cx).composer().clone());
+    assert_eq!(composer.read_with(cx, |c, _| c.slash.as_ref().and_then(|m| m.highlighted)), None);
+    chat.agent.send(json!({"sessionUpdate": "available_commands_update", "availableCommands": [
+        {"name": "compact", "description": "Compact the conversation"},
+    ]}));
+    settle(cx);
+    assert_eq!(composer.read_with(cx, |c, _| c.slash.as_ref().and_then(|m| m.highlighted)), Some(0));
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(chat.composer_text(cx), "/compact ");
+    assert!(chat.agent.sent_prompts().is_empty());
+}

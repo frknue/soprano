@@ -372,17 +372,29 @@ pub struct DiffStat {
     deletions: usize,
     font_size: f32,
     mute_zero: bool,
+    minus_sign: bool,
 }
 
 impl DiffStat {
     pub fn new(additions: usize, deletions: usize, font_size: f32) -> Self {
-        Self { additions, deletions, font_size, mute_zero: false }
+        Self { additions, deletions, font_size, mute_zero: false, minus_sign: false }
     }
 
     pub fn mute_zero(mut self, mute: bool) -> Self {
         self.mute_zero = mute;
         self
     }
+
+    /// Deletions as "−N" (U+2212 MINUS SIGN) rather than "-N" (the chat's changed-files card).
+    pub fn minus_sign(mut self, minus_sign: bool) -> Self {
+        self.minus_sign = minus_sign;
+        self
+    }
+}
+
+/// "+A -D" as the counts read (`minus_sign`: "−D").
+pub fn stat_text(additions: usize, deletions: usize, minus_sign: bool) -> (String, String) {
+    (format!("+{additions}"), format!("{}{deletions}", if minus_sign { '\u{2212}' } else { '-' }))
 }
 
 impl RenderOnce for DiffStat {
@@ -392,6 +404,7 @@ impl RenderOnce for DiffStat {
             if self.mute_zero && self.additions == 0 { colors.muted } else { colors.diff_add_foreground };
         let delete =
             if self.mute_zero && self.deletions == 0 { colors.muted } else { colors.diff_delete_foreground };
+        let (added, deleted) = stat_text(self.additions, self.deletions, self.minus_sign);
         div()
             .flex()
             .flex_row()
@@ -399,9 +412,9 @@ impl RenderOnce for DiffStat {
             .whitespace_nowrap()
             .font_family(TERMINAL_FONT_FAMILY)
             .text_size(px(self.font_size * zoom(cx)))
-            .child(div().text_color(add).child(format!("+{}", self.additions)))
+            .child(div().text_color(add).child(added))
             .child(" ")
-            .child(div().text_color(delete).child(format!("-{}", self.deletions)))
+            .child(div().text_color(delete).child(deleted))
     }
 }
 
@@ -419,10 +432,29 @@ impl HunkDiff {
         Self { id: id.into(), diff, wrap: true }
     }
 
+    /// Long lines wrap (the default), or stay whole: then the diff is as wide as its widest
+    /// line ([`hunk_document_width`]) so the owner can scroll it sideways in an
+    /// `overflow_x_scroll` box (`FileDiffRowView.documentWidth`).
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
         self
     }
+}
+
+/// The width of an unwrapped hunk diff, in designed pixels: the number column, the code
+/// inset, the longest line's columns (at most 2000) and the trailing space.
+pub fn hunk_document_width(diff: &InlineDiff, number_width: f32, column_width: f32) -> f32 {
+    let columns = diff
+        .lines
+        .iter()
+        .map(|line| match line {
+            InlineDiffLine::Line { line, .. } => line.columns(),
+            InlineDiffLine::Separator(text) => soprano_text::diff::columns(text),
+        })
+        .max()
+        .unwrap_or(0)
+        .min(soprano_text::diff::MAXIMUM_DRAWN_LENGTH);
+    number_width + CODE_INSET + (columns as f32 * column_width).ceil() + CODE_TRAILING
 }
 
 /// What a hunk line row shows.
@@ -457,8 +489,19 @@ impl RenderOnce for HunkDiff {
             wrap: self.wrap,
             text_offset: 0.0,
         };
-        let mut column =
-            div().id(self.id.clone()).w_full().flex().flex_col().font_family(TERMINAL_FONT_FAMILY);
+        let width = (!self.wrap).then(|| {
+            hunk_document_width(&self.diff, layout.number_width, digit_width(DIFF_FONT_SIZE, window)) * zoom
+        });
+        let mut column = div()
+            .id(self.id.clone())
+            .map(|column| match width {
+                // As wide as the widest line (or the owner's width): the owner scrolls it.
+                Some(width) => column.min_w_full().w(px(width)).flex_shrink_0(),
+                None => column.w_full(),
+            })
+            .flex()
+            .flex_col()
+            .font_family(TERMINAL_FONT_FAMILY);
         for (index, line) in self.diff.lines.iter().enumerate() {
             let id = ElementId::from(index);
             column = column.child(match line {
@@ -557,6 +600,22 @@ mod tests {
         assert_eq!(added[1].1.background_color, Some(colors.diff_add_word));
         let removed = styled_highlights(&line, DiffLineKind::Removed, &colors);
         assert_eq!(removed[1].1.background_color, Some(colors.diff_delete_word));
+    }
+
+    #[test]
+    fn counts_can_use_a_true_minus_sign() {
+        assert_eq!(stat_text(3, 2, false), ("+3".to_string(), "-2".to_string()));
+        assert_eq!(stat_text(3, 2, true), ("+3".to_string(), "\u{2212}2".to_string()));
+    }
+
+    #[test]
+    fn an_unwrapped_hunk_diff_is_as_wide_as_its_longest_line() {
+        let diff = InlineDiff::new("@@ -1,2 +1,2 @@\n a\n-bbbbbbbbbb\n+c\n", "x.txt", false);
+        // 30 px numbers + 12 inset + 10 columns × 7 + 12 trailing.
+        assert_eq!(hunk_document_width(&diff, 30.0, 7.0), 124.0);
+        let long = format!("@@ -1,1 +1,1 @@\n+{}\n", "x".repeat(5000));
+        let diff = InlineDiff::new(&long, "x.txt", false);
+        assert_eq!(hunk_document_width(&diff, 0.0, 1.0), 12.0 + 2000.0 + 12.0);
     }
 
     #[test]

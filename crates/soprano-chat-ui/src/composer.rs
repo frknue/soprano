@@ -62,6 +62,8 @@ pub enum ComposerEvent {
 pub(crate) struct SlashMenu {
     pub token: SlashToken,
     pub highlighted: Option<usize>,
+    /// The highlighted command's text, which keeps it highlighted when the list changes.
+    pub highlighted_insert: Option<String>,
 }
 
 pub struct ComposerView {
@@ -85,6 +87,8 @@ pub struct ComposerView {
     /// The approval panel's "More" menu.
     pub(crate) more_menu: Option<(Entity<soprano_ui::menu::ContextMenu>, Subscription)>,
     pub(crate) slash: Option<SlashMenu>,
+    /// The `/` menu's scroll position (the highlight stays in view).
+    pub(crate) slash_scroll: gpui::ScrollHandle,
     /// Escape (or text the composer set) hid the menu until the caret leaves the token.
     slash_dismissed: bool,
     /// The editor's text was set by the composer, not typed.
@@ -151,6 +155,7 @@ impl ComposerView {
             popover: None,
             more_menu: None,
             slash: None,
+            slash_scroll: gpui::ScrollHandle::new(),
             slash_dismissed: false,
             setting_text: false,
             anchors: Rc::new(Anchors::default()),
@@ -347,12 +352,28 @@ impl ComposerView {
             self.slash = None;
             return;
         }
-        if self.slash.as_ref().is_some_and(|menu| menu.token == token) {
-            return;
+        let matches = matching_commands(self.session.borrow().commands(), &token.query);
+        let kept = match &self.slash {
+            Some(menu) if menu.token == token => menu.highlighted_insert.clone(),
+            _ => None,
+        };
+        if self.slash.as_ref().is_none_or(|menu| menu.token != token) {
+            self.popover = None;
         }
-        self.popover = None;
-        let has_matches = !matching_commands(self.session.borrow().commands(), &token.query).is_empty();
-        self.slash = Some(SlashMenu { token, highlighted: has_matches.then_some(0) });
+        // Re-listing keeps the highlighted command where it still shows, else the first row.
+        let highlighted = kept
+            .and_then(|text| matches.iter().position(|c| c.insert_text() == text))
+            .or((!matches.is_empty()).then_some(0));
+        let changed =
+            self.slash.as_ref().is_none_or(|menu| menu.token != token || menu.highlighted != highlighted);
+        self.slash = Some(SlashMenu {
+            token,
+            highlighted,
+            highlighted_insert: highlighted.and_then(|h| matches.get(h)).map(|c| c.insert_text()),
+        });
+        if changed && let Some(index) = highlighted {
+            self.slash_scroll.scroll_to_item(index);
+        }
     }
 
     /// Replaces the typed token with the command's text, keeping what follows it.
@@ -412,8 +433,15 @@ impl ComposerView {
 
     // MARK: Sending
 
-    pub(crate) fn primary_clicked(&mut self, alternate: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.primary_action(cx) == ComposerPrimaryAction::Stop {
+    /// The round button was clicked while it showed `action` (Stop in question mode too).
+    pub(crate) fn primary_clicked(
+        &mut self,
+        action: ComposerPrimaryAction,
+        alternate: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if action == ComposerPrimaryAction::Stop {
             self.session.borrow_mut().cancel();
             cx.notify();
             return;
@@ -553,6 +581,7 @@ impl ComposerView {
     pub(crate) fn toggle_popover(&mut self, kind: PopoverKind, window: &mut Window, cx: &mut Context<Self>) {
         if self.popover.as_ref().is_some_and(|p| p.kind == kind) {
             self.close_popover(cx);
+            self.focus_editor(window, cx);
             return;
         }
         // Settings change only while the agent runs; the context card always opens.
@@ -680,12 +709,21 @@ impl ComposerView {
 
     pub(crate) fn move_slash_highlight(&mut self, delta: isize, cx: &mut Context<Self>) {
         let count = self.shown_commands().len();
-        if let Some(menu) = self.slash.as_mut()
-            && count > 0
-        {
-            let current =
-                menu.highlighted.map_or(if delta > 0 { -1 } else { count as isize }, |h| h as isize);
-            menu.highlighted = Some((current + delta).clamp(0, count as isize - 1) as usize);
+        if count == 0 {
+            return;
+        }
+        let current = self.slash.as_ref().and_then(|m| m.highlighted);
+        let current = current.map_or(if delta > 0 { -1 } else { count as isize }, |h| h as isize);
+        self.set_slash_highlight((current + delta).clamp(0, count as isize - 1) as usize, cx);
+    }
+
+    /// Highlights row `index` of the `/` menu and keeps it in view.
+    pub(crate) fn set_slash_highlight(&mut self, index: usize, cx: &mut Context<Self>) {
+        let insert = self.shown_commands().get(index).map(|c| c.insert_text());
+        if let Some(menu) = self.slash.as_mut() {
+            menu.highlighted = Some(index);
+            menu.highlighted_insert = insert;
+            self.slash_scroll.scroll_to_item(index);
             cx.notify();
         }
     }

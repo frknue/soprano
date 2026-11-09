@@ -62,68 +62,96 @@ impl InlineText {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InlinePiece {
     Text(InlineText),
-    Image { source: String, alt: String },
+    /// `link`: the destination of the link the image sits in (a badge, a linked screenshot).
+    Image { source: String, alt: String, title: Option<String>, link: Option<String> },
 }
 
 /// Flattens `inlines`. With `show_images` false (the chat), images read as their alt text, as
 /// nothing a reply points at is fetched; otherwise each image with a source is its own piece.
 pub fn flatten(inlines: &[MarkdownInline], show_images: bool) -> Vec<InlinePiece> {
-    let mut pieces = Vec::new();
-    let mut current = InlineText::default();
-    append(inlines, InlineMarks::default(), show_images, &mut current, &mut pieces);
-    if !current.is_empty() || pieces.is_empty() {
-        pieces.push(InlinePiece::Text(current));
-    }
-    pieces
+    let mut flattener = Flattener { show_images, ..Flattener::default() };
+    flattener.append(inlines, InlineMarks::default());
+    flattener.finish()
 }
 
 /// The text of `inlines` as one run, images as alt text.
 pub fn flatten_text(inlines: &[MarkdownInline]) -> InlineText {
-    let mut pieces = Vec::new();
-    let mut current = InlineText::default();
-    append(inlines, InlineMarks::default(), false, &mut current, &mut pieces);
-    current
+    let mut flattener = Flattener::default();
+    flattener.append(inlines, InlineMarks::default());
+    flattener.current
 }
 
-fn append(
-    inlines: &[MarkdownInline],
-    marks: InlineMarks,
+#[derive(Default)]
+struct Flattener {
     show_images: bool,
-    current: &mut InlineText,
-    pieces: &mut Vec<InlinePiece>,
-) {
-    for inline in inlines {
-        match inline {
-            MarkdownInline::Text(text) | MarkdownInline::Html(text) => current.push(text, marks),
-            MarkdownInline::Emphasis(children) => {
-                append(children, InlineMarks { emphasis: true, ..marks }, show_images, current, pieces)
+    current: InlineText,
+    pieces: Vec<InlinePiece>,
+    /// The links being walked (innermost last): destination and where each starts in
+    /// `current`.
+    open_links: Vec<(Option<String>, usize)>,
+}
+
+impl Flattener {
+    fn finish(mut self) -> Vec<InlinePiece> {
+        if !self.current.is_empty() || self.pieces.is_empty() {
+            self.pieces.push(InlinePiece::Text(self.current));
+        }
+        self.pieces
+    }
+
+    /// Ends the current run of text before an image: the links still open close their part
+    /// in it and reopen at the start of the next run.
+    fn flush(&mut self) {
+        if self.current.is_empty() {
+            return;
+        }
+        let end = self.current.text.len();
+        for (destination, start) in &mut self.open_links {
+            if let Some(destination) = destination
+                && end > *start
+            {
+                self.current.links.push(InlineLink { range: *start..end, destination: destination.clone() });
             }
-            MarkdownInline::Strong(children) => {
-                append(children, InlineMarks { strong: true, ..marks }, show_images, current, pieces)
-            }
-            MarkdownInline::Strikethrough(children) => {
-                append(children, InlineMarks { strike: true, ..marks }, show_images, current, pieces)
-            }
-            MarkdownInline::Code(code) => current.push(code, InlineMarks { code: true, ..marks }),
-            MarkdownInline::Link { destination, children, .. } => {
-                let start = current.text.len();
-                append(children, InlineMarks { link: true, ..marks }, show_images, current, pieces);
-                let end = current.text.len();
-                if let Some(destination) = destination
-                    && end > start
-                {
-                    current.links.push(InlineLink { range: start..end, destination: destination.clone() });
+            *start = 0;
+        }
+        self.pieces.push(InlinePiece::Text(std::mem::take(&mut self.current)));
+    }
+
+    fn append(&mut self, inlines: &[MarkdownInline], marks: InlineMarks) {
+        for inline in inlines {
+            match inline {
+                MarkdownInline::Text(text) | MarkdownInline::Html(text) => self.current.push(text, marks),
+                MarkdownInline::Emphasis(children) => self.append(children, InlineMarks { emphasis: true, ..marks }),
+                MarkdownInline::Strong(children) => self.append(children, InlineMarks { strong: true, ..marks }),
+                MarkdownInline::Strikethrough(children) => {
+                    self.append(children, InlineMarks { strike: true, ..marks })
                 }
-            }
-            MarkdownInline::Image { source: Some(source), alt, .. } if show_images => {
-                if !current.is_empty() {
-                    pieces.push(InlinePiece::Text(std::mem::take(current)));
+                MarkdownInline::Code(code) => self.current.push(code, InlineMarks { code: true, ..marks }),
+                MarkdownInline::Link { destination, children, .. } => {
+                    self.open_links.push((destination.clone(), self.current.text.len()));
+                    self.append(children, InlineMarks { link: true, ..marks });
+                    let Some((destination, start)) = self.open_links.pop() else { continue };
+                    let end = self.current.text.len();
+                    if let Some(destination) = destination
+                        && end > start
+                    {
+                        self.current.links.push(InlineLink { range: start..end, destination });
+                    }
                 }
-                pieces.push(InlinePiece::Image { source: source.clone(), alt: alt.clone() });
+                MarkdownInline::Image { source: Some(source), alt, title } if self.show_images => {
+                    self.flush();
+                    let link = self.open_links.iter().rev().find_map(|(destination, _)| destination.clone());
+                    self.pieces.push(InlinePiece::Image {
+                        source: source.clone(),
+                        alt: alt.clone(),
+                        title: title.clone(),
+                        link,
+                    });
+                }
+                MarkdownInline::Image { alt, .. } => self.current.push(alt, marks),
+                MarkdownInline::SoftBreak => self.current.push(" ", marks),
+                MarkdownInline::LineBreak => self.current.push("\n", marks),
             }
-            MarkdownInline::Image { alt, .. } => current.push(alt, marks),
-            MarkdownInline::SoftBreak => current.push(" ", marks),
-            MarkdownInline::LineBreak => current.push("\n", marks),
         }
     }
 }
@@ -163,6 +191,31 @@ mod tests {
 
         let pieces = flatten(&inlines, true);
         assert_eq!(pieces.len(), 2);
-        assert_eq!(pieces[1], InlinePiece::Image { source: "chart.png".into(), alt: "a chart".into() });
+        assert_eq!(
+            pieces[1],
+            InlinePiece::Image { source: "chart.png".into(), alt: "a chart".into(), title: None, link: None }
+        );
+    }
+
+    #[test]
+    fn a_link_around_an_image_keeps_its_text_ranges_and_links_the_image() {
+        let inlines = paragraph("abcd [x ![i](i.png) 日本](d.md) after");
+        let pieces = flatten(&inlines, true);
+        let [InlinePiece::Text(before), InlinePiece::Image { link, .. }, InlinePiece::Text(after)] = pieces.as_slice()
+        else {
+            panic!("text, image, text: {pieces:?}");
+        };
+        assert_eq!(link.as_deref(), Some("d.md"));
+        assert_eq!(before.text, "abcd x ");
+        assert_eq!(before.links, [InlineLink { range: 5..7, destination: "d.md".into() }]);
+        assert_eq!(after.text, " 日本 after");
+        assert_eq!(after.links, [InlineLink { range: 0..7, destination: "d.md".into() }]);
+        assert!(after.text.is_char_boundary(7));
+
+        let badge = flatten(&paragraph("[![CI](ci.svg)](https://ci.example.com)"), true);
+        assert!(matches!(
+            badge.as_slice(),
+            [InlinePiece::Image { link: Some(link), .. }] if link == "https://ci.example.com"
+        ));
     }
 }

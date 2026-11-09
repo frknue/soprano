@@ -46,6 +46,8 @@ pub struct Popover {
     pub(crate) highlighted: Option<usize>,
     pub(crate) search: Option<Entity<InputState>>,
     focus: FocusHandle,
+    /// The model list's scroll position (the highlight stays in view).
+    pub(crate) scroll: gpui::ScrollHandle,
     _subscription: Option<Subscription>,
 }
 
@@ -57,7 +59,14 @@ impl Popover {
         cx: &mut Context<ComposerView>,
     ) -> Self {
         let focus = cx.focus_handle();
-        let mut popover = Self { kind, highlighted: None, search: None, focus, _subscription: None };
+        let mut popover = Self {
+            kind,
+            highlighted: None,
+            search: None,
+            focus,
+            scroll: gpui::ScrollHandle::new(),
+            _subscription: None,
+        };
         match kind {
             PopoverKind::Model => {
                 let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search models..."));
@@ -77,6 +86,9 @@ impl Popover {
                             };
                             if let Some(popover) = this.popover.as_mut() {
                                 popover.highlighted = highlighted.filter(|_| !shown.is_empty());
+                                if let Some(index) = popover.highlighted {
+                                    popover.scroll.scroll_to_item(index);
+                                }
                             }
                         }
                         cx.notify();
@@ -97,6 +109,9 @@ impl Popover {
                 popover.focus.focus(window, cx);
             }
             PopoverKind::Context => popover.focus.focus(window, cx),
+        }
+        if let Some(index) = popover.highlighted {
+            popover.scroll.scroll_to_item(index);
         }
         popover
     }
@@ -204,8 +219,9 @@ impl ComposerView {
                     let current = popover
                         .highlighted
                         .map_or(if delta > 0 { -1 } else { options.len() as isize }, |h| h as isize);
-                    popover.highlighted =
-                        Some((current + delta).clamp(0, options.len() as isize - 1) as usize);
+                    let index = (current + delta).clamp(0, options.len() as isize - 1) as usize;
+                    popover.highlighted = Some(index);
+                    popover.scroll.scroll_to_item(index);
                     cx.notify();
                 }
                 true
@@ -271,7 +287,14 @@ impl ComposerView {
                     cx.stop_propagation();
                 }
             }))
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| this.close_popover(cx)))
+            // A press on the popover's own chip is the chip's: it toggles the popover closed.
+            .on_mouse_down_out(cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                if anchor_bounds.contains(&event.position) {
+                    return;
+                }
+                this.close_popover(cx);
+                this.focus_editor(window, cx);
+            }))
             .occlude()
             .rounded(t.z(8.0))
             .border_1()
@@ -298,6 +321,7 @@ impl ComposerView {
         let popover = self.popover.as_ref().expect("popover");
         let search = popover.search.clone().expect("model search");
         let highlighted = popover.highlighted;
+        let scroll = popover.scroll.clone();
         let query = search.read(cx).value().to_string();
         let (shown, hidden) = shown_models(&option, &query);
         let rows: Vec<AnyElement> =
@@ -406,6 +430,7 @@ impl ComposerView {
                                 .pt(t.z(2.0))
                                 .max_h(t.z(280.0))
                                 .overflow_y_scroll()
+                                .track_scroll(&scroll)
                                 .flex()
                                 .flex_col()
                                 .gap(t.z(2.0))

@@ -611,6 +611,7 @@ impl ComposerView {
                 .p(t.z(4.0))
                 .max_h(t.z(288.0))
                 .overflow_y_scroll()
+                .track_scroll(&self.slash_scroll)
                 .occlude()
                 .map(|list| {
                     if commands.is_empty() {
@@ -639,9 +640,8 @@ impl ComposerView {
                             .cursor_pointer()
                             .when(highlighted, |row| row.bg(t.foreground.opacity(0.09)))
                             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                                if *hovered && let Some(menu) = this.slash.as_mut() {
-                                    menu.highlighted = Some(index);
-                                    cx.notify();
+                                if *hovered {
+                                    this.set_slash_highlight(index, cx);
                                 }
                             }))
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -842,9 +842,9 @@ fn primary_button(
         .tooltip(soprano_ui::tooltip(tip))
         .when(enabled, |button| {
             button.cursor_pointer().hover(|s| s.bg(hover_fill)).on_click(cx.listener(
-                |this, event: &gpui::ClickEvent, window, cx| {
+                move |this, event: &gpui::ClickEvent, window, cx| {
                     let alternate = crate::keys::holds_command(&event.modifiers());
-                    this.primary_clicked(alternate, window, cx)
+                    this.primary_clicked(action, alternate, window, cx)
                 },
             ))
         })

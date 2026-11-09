@@ -142,6 +142,8 @@ pub(super) struct EditorPaint {
     numbers: Vec<(usize, ShapedLine)>,
     selection: Range<usize>,
     caret: Option<usize>,
+    /// Text an input method is composing: underlined.
+    marked: Option<Range<usize>>,
     matches: Vec<(Range<usize>, bool)>,
     focused: bool,
     colors: SurfaceColors,
@@ -271,6 +273,7 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
         };
         let documents = view.documents.read(cx);
         let document: &EditorDocument = documents.document(view.document)?;
+        let marked = document.marked_range();
 
         let line_height = px(LINE_HEIGHT * zoom);
         let font_size = px(FONT_SIZE * zoom);
@@ -371,6 +374,7 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
             numbers,
             selection,
             caret,
+            marked,
             matches,
             focused,
             colors,
@@ -395,6 +399,7 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
             numbers,
             selection,
             caret,
+            marked,
             matches,
             focused,
             colors,
@@ -435,6 +440,13 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
                             colors.accent.opacity(if *current { 0.55 } else { 0.28 }),
                         ));
                     }
+                }
+                if let Some(rect) = marked.as_ref().and_then(|marked| band(marked, false)) {
+                    let underline = Bounds::from_corners(
+                        point(rect.left(), rect.bottom() - px(3.0)),
+                        point(rect.right(), rect.bottom() - px(2.0)),
+                    );
+                    window.paint_quad(fill(underline, colors.foreground));
                 }
                 let _ = laid.shaped.paint(
                     point(layout.text_origin.x, top),

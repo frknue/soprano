@@ -20,7 +20,7 @@ use base64::Engine as _;
 use gpui::{
     AnyElement, App, ElementId, FontStyle, FontWeight, Global, HighlightStyle, Hsla, Image, ImageFormat,
     InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
-    StatefulInteractiveElement, StrikethroughStyle, Styled, Window, div, img, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, Window, div, img, prelude::FluentBuilder, px,
 };
 use soprano_text::markdown::{
     self as model, ImageSource, LinkTarget, MarkdownBlock, MarkdownInline, MarkdownListItem, MarkdownTable,
@@ -517,7 +517,9 @@ impl Ctx {
         for piece in pieces {
             column = column.child(match piece {
                 InlinePiece::Text(text) => self.rich_text(text, look),
-                InlinePiece::Image { source, alt } => self.image(&source, &alt, look),
+                InlinePiece::Image { source, alt, title, link } => {
+                    self.image(&source, &alt, title.as_deref(), link.as_deref(), look)
+                }
             });
         }
         column.into_any_element()
@@ -591,8 +593,12 @@ impl Ctx {
     }
 
     /// A reader image: workspace files, `https` and `data:image/` sources; anything else (and
-    /// the chat) shows the alt text.
-    fn image(&self, source: &str, alt: &str, look: TextLook) -> AnyElement {
+    /// the chat) shows the alt text, as does an image that fails to load. An image inside a
+    /// link opens it on a click; its title is its tooltip.
+    fn image(&self, source: &str, alt: &str, title: Option<&str>, link: Option<&str>, look: TextLook) -> AnyElement {
+        let alt_text = |ctx: &Self| {
+            ctx.rich_text(InlineText { text: alt.to_string(), spans: Vec::new(), links: Vec::new() }, look)
+        };
         let resolved = self.document.as_ref().and_then(|document| document.resolve_image(source));
         let image = match resolved {
             Some(ImageSource::File(path)) => Some(img(path)),
@@ -600,14 +606,33 @@ impl Ctx {
             Some(ImageSource::Data(uri)) => decode_data_image(&uri).map(|image| img(Arc::new(image))),
             None => None,
         };
-        match image {
-            Some(image) => div()
-                .w_full()
-                .child(image.max_w_full().rounded(self.z(8.0)).overflow_hidden())
-                .into_any_element(),
-            None => self
-                .rich_text(InlineText { text: alt.to_string(), spans: Vec::new(), links: Vec::new() }, look),
-        }
+        let Some(image) = image else { return alt_text(self) };
+        // GPUI's fallback is built when loading fails; it shows the alt text in the body style.
+        let fallback_text = SharedString::from(alt.to_string());
+        let fallback_color = look.color;
+        let image = image
+            .max_w_full()
+            .rounded(self.z(8.0))
+            .overflow_hidden()
+            .with_fallback(move || div().text_color(fallback_color).child(fallback_text.clone()).into_any_element());
+        let (id, _) = self.next_id();
+        let link = link
+            .filter(|destination| {
+                self.document.as_ref().is_none_or(|document| document.resolve_link(destination).is_some())
+            })
+            .map(str::to_string);
+        let on_link = self.on_link.clone();
+        div()
+            .id(id)
+            .w_full()
+            .child(image)
+            .when_some(title.filter(|title| !title.is_empty()).map(str::to_string), |image, title| {
+                image.tooltip(soprano_ui::tooltip(title))
+            })
+            .when_some(link, move |image, destination| {
+                image.cursor_pointer().on_click(move |_, window, cx| on_link(&destination, window, cx))
+            })
+            .into_any_element()
     }
 
     fn list(&self, ordered: bool, start: u64, items: &[MarkdownListItem], nest: Nest) -> Rendered {
@@ -799,7 +824,8 @@ fn decode_data_image(uri: &str) -> Option<Image> {
     let bytes = if header.to_ascii_lowercase().ends_with(";base64") {
         base64::engine::general_purpose::STANDARD.decode(payload.trim()).ok()?
     } else {
-        payload.as_bytes().to_vec()
+        // A plain data URI is percent-encoded (`data:image/svg+xml,%3Csvg…`).
+        percent_encoding::percent_decode_str(payload).collect()
     };
     Some(Image::from_bytes(format, bytes))
 }
@@ -893,6 +919,9 @@ mod tests {
         assert!(decode_data_image(png).is_some());
         assert!(decode_data_image("data:text/html;base64,PGI+").is_none());
         assert!(decode_data_image("data:image/png;base64").is_none());
+        let svg = decode_data_image("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'/%3E")
+            .expect("a percent-encoded SVG");
+        assert_eq!(svg.bytes(), b"<svg xmlns='http://www.w3.org/2000/svg'/>");
     }
 
     #[test]

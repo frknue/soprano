@@ -45,6 +45,10 @@ use layout::{DisplayLine, next_boundary, previous_boundary, word_end, word_range
 
 /// The key context of a focused editor.
 pub const EDITOR_CONTEXT: &str = "SopranoEditor";
+/// How far around the caret word and character motion look (a word longer than this stops
+/// at its edge).
+const MOTION_CONTEXT: usize = 4096;
+
 /// How often a drag selection past the edge scrolls.
 const DRAG_SCROLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -676,14 +680,20 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         self.replace_selection("\t", true, cx);
     }
 
+    /// Deletes the selection, or from the caret to where `target` (a motion over the text
+    /// around the caret) leads.
     fn delete_to(&mut self, target: impl FnOnce(&str, usize) -> usize, cx: &mut Context<Self>) {
+        let other = self.around(self.head, cx, target);
+        self.delete_toward(other, cx);
+    }
+
+    /// Deletes the selection, or the text between the caret and `other`.
+    fn delete_toward(&mut self, other: usize, cx: &mut Context<Self>) {
         if !self.is_editable(cx) {
             return;
         }
         let selection = self.selected_range();
         let range = if selection.is_empty() {
-            let text = self.text(cx);
-            let other = target(&text, self.head);
             self.head.min(other)..self.head.max(other)
         } else {
             selection
@@ -718,7 +728,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
 
     fn delete_to_line_start(&mut self, _: &DeleteToLineStart, _: &mut Window, cx: &mut Context<Self>) {
         let start = self.line_start_of(self.head, cx);
-        self.delete_to(|_, _| start, cx);
+        self.delete_toward(start, cx);
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -772,6 +782,23 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     // MARK: - Motion
+
+    /// The text within [`MOTION_CONTEXT`] bytes of `offset` (on character boundaries) and
+    /// where it starts: caret motion reads this rather than copying the whole document.
+    fn text_around(&self, offset: usize, cx: &App) -> (usize, String) {
+        self.with_document(cx, |document| {
+            let start = document.clamp_offset(offset.saturating_sub(MOTION_CONTEXT));
+            let end = document.clamp_offset(offset.saturating_add(MOTION_CONTEXT));
+            (start, document.rope().byte_slice(start..end).to_string())
+        })
+        .unwrap_or_default()
+    }
+
+    /// `motion` (on text and an offset in it) applied to the text around `offset`.
+    fn around(&self, offset: usize, cx: &App, motion: impl FnOnce(&str, usize) -> usize) -> usize {
+        let (start, text) = self.text_around(offset, cx);
+        start + motion(&text, offset - start)
+    }
 
     fn line_start_of(&self, offset: usize, cx: &App) -> usize {
         self.with_document(cx, |document| {
@@ -852,8 +879,12 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         self.motion(
             select,
             |this, cx| {
-                let text = this.text(cx);
-                if forward { next_boundary(&text, this.head) } else { previous_boundary(&text, this.head) }
+                let head = this.head;
+                if forward {
+                    this.around(head, cx, next_boundary)
+                } else {
+                    this.around(head, cx, previous_boundary)
+                }
             },
             cx,
         );
@@ -864,8 +895,8 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         self.motion(
             select,
             |this, cx| {
-                let text = this.text(cx);
-                if forward { word_end(&text, this.head) } else { word_start(&text, this.head) }
+                let head = this.head;
+                if forward { this.around(head, cx, word_end) } else { this.around(head, cx, word_start) }
             },
             cx,
         );
@@ -909,8 +940,9 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         self.break_coalescing(cx);
         match event.click_count {
             2 => {
-                let text = self.text(cx);
-                let range = word_range(&text, offset);
+                let (start, text) = self.text_around(offset, cx);
+                let local = word_range(&text, offset - start);
+                let range = start + local.start..start + local.end;
                 self.anchor = range.start;
                 self.head = range.end;
             }
@@ -1120,8 +1152,11 @@ impl<T: Clone + Eq + Hash + 'static> EntityInputHandler for EditorView<T> {
         self.with_document(cx, |document| bytes_to_utf16(document, marked))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    /// The input method accepted the marked text as it is: one undo step for the word.
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.marked = None;
+        self.edit(cx, EditorDocument::commit_marked_text);
+        cx.notify();
     }
 
     fn replace_text_in_range(
@@ -1156,10 +1191,11 @@ impl<T: Clone + Eq + Hash + 'static> EntityInputHandler for EditorView<T> {
             .and_then(|range| self.with_document(cx, |document| utf16_to_bytes(document, range)))
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.selected_range());
-        let Some(inserted) = self.edit_text(cx, |document| Some(document.type_text(range, text))) else {
+        // Marked text is not recorded for undo; committing it records one step.
+        let Some(inserted) = self.edit_text(cx, |document| Some(document.mark_text(range, text))) else {
             return;
         };
-        self.marked = (!text.is_empty()).then(|| inserted.clone());
+        self.marked = self.with_document(cx, EditorDocument::marked_range).flatten();
         let caret = match selected {
             Some(selected) => {
                 let start = inserted.start + utf16_prefix_bytes(text, selected.start);

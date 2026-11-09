@@ -5,8 +5,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, Context, FontFeatures, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled,
-    TextRun, Window, div, linear_color_stop, linear_gradient, prelude::*, px, relative,
+    AnyElement, Context, FontFeatures, FontWeight, Hsla, IntoElement, ParentElement, ScrollEvent,
+    ScrollHandle, SharedString, Styled, TextRun, Window, div, linear_color_stop, linear_gradient, prelude::*,
+    px, relative,
 };
 use soprano_agents::{ApprovalKind, ApprovalOptions, TurnItemStatus, UserMessage};
 use soprano_editor::rich::{DiffStat, HunkDiff, Markdown, MarkdownStyle};
@@ -433,6 +434,8 @@ impl TimelineView {
             .child(
                 WorkLogLine::new(row_id.to_owned(), group.clone(), model.icon, model.summary.clone())
                     .label_color(t.muted)
+                    .label_hover(t.foreground)
+                    .icon_color(if model.failed { t.failed.opacity(0.85) } else { t.muted })
                     .chevron(Chevron::AfterLabel(model.expanded))
                     .time(format::timestamp(model.date)),
             )
@@ -495,6 +498,7 @@ impl TimelineView {
                 )
             })
             .when(expanded && !entry.body_is_markdown, |column| {
+                let scroll = self.scroll_handle(row_id, "output");
                 column.child(
                     div()
                         .mt(t.z(2.0))
@@ -503,11 +507,13 @@ impl TimelineView {
                         .rounded(t.z(6.0))
                         .bg(panel_fill(&t))
                         .p(t.z(8.0))
+                        .on_scroll(contain_scroll(scroll.clone()))
                         .child(
                             div()
                                 .id(SharedString::from(format!("{row_id}-output")))
                                 .max_h(t.z(ENTRY_BODY_MAX_HEIGHT))
                                 .overflow_y_scroll()
+                                .track_scroll(&scroll)
                                 .font_family(MONO_FONT_FAMILY)
                                 .text_size(t.z(text_size::CODE))
                                 .line_height(t.z((text_size::CODE * 1.625).round()))
@@ -572,7 +578,7 @@ impl TimelineView {
         let open = model.expanded && diff.is_some();
         let indent = if lane < DIFF_NARROW_WIDTH { 0.0 } else { 30.0 };
         let body = diff.filter(|_| open).map(|diff| {
-            let scroll = self.diff_scrolls.entry(row_id.to_owned()).or_default().clone();
+            let scroll = self.scroll_handle(row_id, "diff");
             let wraps = wraps(&diff, lane - indent, window);
             if model.is_active() {
                 let max = scroll.max_offset().y;
@@ -591,6 +597,7 @@ impl TimelineView {
                 .bg(panel_fill(&t))
                 .py(t.z(4.0))
                 .overflow_hidden()
+                .on_scroll(contain_scroll(scroll.clone()))
                 .child(
                     div()
                         .id(SharedString::from(format!("{row_id}-diff")))
@@ -721,20 +728,21 @@ impl TimelineView {
                     .label_color(t.muted)
                     .chevron(Chevron::None),
             )
-            .child(
-                div()
-                    .id(SharedString::from(format!("{row_id}-detail")))
-                    .ml(t.z(32.0))
-                    .mr(t.z(4.0))
-                    .mb(t.z(4.0))
-                    .max_h(t.z(APPROVAL_DETAIL_MAX_HEIGHT))
-                    .overflow_y_scroll()
-                    .font_family(MONO_FONT_FAMILY)
-                    .text_size(t.z(text_size::SMALL))
-                    .line_height(t.z(20.0))
-                    .text_color(t.foreground)
-                    .child(detail),
-            )
+            .child({
+                let scroll = self.scroll_handle(row_id, "detail");
+                div().ml(t.z(32.0)).mr(t.z(4.0)).mb(t.z(4.0)).on_scroll(contain_scroll(scroll.clone())).child(
+                    div()
+                        .id(SharedString::from(format!("{row_id}-detail")))
+                        .max_h(t.z(APPROVAL_DETAIL_MAX_HEIGHT))
+                        .overflow_y_scroll()
+                        .track_scroll(&scroll)
+                        .font_family(MONO_FONT_FAMILY)
+                        .text_size(t.z(text_size::SMALL))
+                        .line_height(t.z(20.0))
+                        .text_color(t.foreground)
+                        .child(detail),
+                )
+            })
             .when_some(request.reason.clone().filter(|r| !r.is_empty()), |column, reason| {
                 column.child(
                     div()
@@ -827,7 +835,10 @@ impl TimelineView {
                             .child(format!("{count} changed file{}", if count == 1 { "" } else { "s" })),
                     )
                     .when(!narrow, |header| {
-                        header.child(DiffStat::new(model.additions(), model.deletions(), text_size::SMALL))
+                        header.child(
+                            DiffStat::new(model.additions(), model.deletions(), text_size::SMALL)
+                                .minus_sign(true),
+                        )
                     })
                     .child(div().flex_1())
                     .when(has_directories, |header| {
@@ -949,9 +960,35 @@ impl TimelineView {
                     .child(node.name().to_owned()),
             )
             .when(additions + deletions > 0 && !narrow, |row| {
-                row.child(div().flex_none().child(DiffStat::new(additions, deletions, 10.0)))
+                row.child(div().flex_none().child(DiffStat::new(additions, deletions, 10.0).minus_sign(true)))
             })
             .into_any_element()
+    }
+}
+
+/// The scroll position of a row's inner box (`part`: its diff, output or detail).
+impl TimelineView {
+    fn scroll_handle(&mut self, row_id: &str, part: &str) -> ScrollHandle {
+        self.diff_scrolls.entry(format!("{row_id}|{part}")).or_default().clone()
+    }
+}
+
+/// Keeps a wheel the box can still use away from the timeline; at the box's edge the timeline
+/// scrolls (Swift `PassThroughScrollView`). Registered on the box's parent, so it runs after
+/// the box scrolled.
+fn contain_scroll(handle: ScrollHandle) -> impl Fn(&ScrollEvent, &mut Window, &mut gpui::App) + 'static {
+    move |event, _, cx| {
+        let delta = event.delta.pixel_delta(px(20.0));
+        let offset = handle.offset();
+        let max = handle.max_offset();
+        let movable = if delta.y.abs() >= delta.x.abs() {
+            (delta.y > px(0.0) && offset.y < px(0.0)) || (delta.y < px(0.0) && -offset.y < max.y)
+        } else {
+            (delta.x > px(0.0) && offset.x < px(0.0)) || (delta.x < px(0.0) && -offset.x < max.x)
+        };
+        if movable {
+            cx.stop_propagation();
+        }
     }
 }
 

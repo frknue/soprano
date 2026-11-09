@@ -97,9 +97,11 @@ impl TimelineView {
         let list = ListState::new(0, ListAlignment::Top, px(320.0));
         list.set_follow_mode(FollowMode::Tail);
         let entity = cx.weak_entity();
-        list.set_scroll_handler(move |_, _, cx| {
+        // The list calls this while it holds its own state: take what it reports, never ask it.
+        list.set_scroll_handler(move |event, _, cx| {
+            let following = event.is_following_tail;
             if let Some(view) = entity.upgrade() {
-                view.update(cx, |view, cx| view.scrolled(cx));
+                view.update(cx, |view, cx| view.set_following(following, cx));
             }
         });
         let mut view = Self {
@@ -177,7 +179,7 @@ impl TimelineView {
             self.list.splice(old_range, new_count);
         }
         let live: std::collections::HashSet<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        self.diff_scrolls.retain(|id, _| live.contains(id.as_str()));
+        self.diff_scrolls.retain(|key, _| key.split('|').next().is_some_and(|id| live.contains(id)));
         self.rows = rows;
     }
 
@@ -254,11 +256,36 @@ impl TimelineView {
 
     fn scrolled(&mut self, cx: &mut Context<Self>) {
         let following = self.is_following();
+        self.set_following(following, cx);
+    }
+
+    /// Records whether the timeline follows its end and tells the host when that changed.
+    /// Never reads the list (the list's scroll callback lands here).
+    fn set_following(&mut self, following: bool, cx: &mut Context<Self>) {
         if following != self.was_following {
             self.was_following = following;
             cx.emit(TimelineEvent::FollowingChanged(following));
             cx.notify();
         }
+    }
+
+    /// Keeps row `index`'s header in view: nothing when it already shows (8 px inside the lane
+    /// above the composer), else the row goes to the top and the timeline stops following.
+    fn reveal_row(&mut self, index: usize, cx: &mut Context<Self>) {
+        let viewport = self.list.viewport_bounds();
+        let header = px(24.0);
+        let visible_top = viewport.top() + px(8.0);
+        let visible_bottom = viewport.bottom() - px(self.bottom_inset) - px(8.0);
+        let shown = self
+            .list
+            .bounds_for_item(index)
+            .is_some_and(|bounds| bounds.top() >= visible_top && bounds.top() + header <= visible_bottom);
+        if shown {
+            return;
+        }
+        self.list.scroll_to(ListOffset { item_ix: index, offset_in_item: px(0.0) });
+        self.list.pause_following_tail();
+        self.scrolled(cx);
     }
 
     fn update_clock(&mut self, running: bool, cx: &mut Context<Self>) {
@@ -293,9 +320,7 @@ impl TimelineView {
         self.reload(false, cx);
         // A following timeline keeps its end in view; keep an opened row's header in view instead.
         if let Some(index) = self.opened_row(set, id) {
-            self.list.scroll_to_reveal_item(index);
-            self.list.pause_following_tail();
-            self.scrolled(cx);
+            self.reveal_row(index, cx);
         }
     }
 
@@ -352,9 +377,7 @@ impl TimelineView {
                 let id = row.id.clone();
                 self.reload(false, cx);
                 if let Some(index) = self.rows.iter().position(|r| r.id == id) {
-                    self.list.scroll_to_reveal_item(index);
-                    self.list.pause_following_tail();
-                    self.scrolled(cx);
+                    self.reveal_row(index, cx);
                 }
                 return;
             }

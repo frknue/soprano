@@ -114,6 +114,8 @@ pub struct WorkLogLine {
     label: SharedString,
     label_color: Option<Hsla>,
     highlight: Option<Hsla>,
+    /// The label's color while the row is hovered (group summaries).
+    label_hover: Option<Hsla>,
     shimmering: bool,
     detail: Option<(SharedString, bool)>,
     note: Option<AnyElement>,
@@ -137,6 +139,7 @@ impl WorkLogLine {
             label: label.into(),
             label_color: None,
             highlight: None,
+            label_hover: None,
             shimmering: false,
             detail: None,
             note: None,
@@ -148,6 +151,12 @@ impl WorkLogLine {
 
     pub fn label_color(mut self, color: Hsla) -> Self {
         self.label_color = Some(color);
+        self
+    }
+
+    /// The label's color while the row (its hover group) is hovered.
+    pub fn label_hover(mut self, color: Hsla) -> Self {
+        self.label_hover = Some(color);
         self
     }
 
@@ -201,14 +210,24 @@ impl RenderOnce for WorkLogLine {
         let muted = t.muted;
         let label_color = self.label_color.unwrap_or(muted);
         let icon_color = self.icon_color.unwrap_or(if self.failed { t.failed.opacity(0.85) } else { muted });
-        let label = shimmer_label(
-            SharedString::from(format!("{}-label", self.id)),
-            self.label.clone(),
-            label_color,
-            self.highlight.unwrap_or(label_color),
-            self.shimmering,
-            cx,
-        );
+        let label = match self.label_hover.filter(|_| !self.shimmering) {
+            Some(hover) => div()
+                .font_family(UI_FONT_FAMILY)
+                .text_size(t.z(text_size::BODY))
+                .text_color(label_color)
+                .group_hover(self.group.clone(), move |s| s.text_color(hover))
+                .truncate()
+                .child(self.label.clone())
+                .into_any_element(),
+            None => shimmer_label(
+                SharedString::from(format!("{}-label", self.id)),
+                self.label.clone(),
+                label_color,
+                self.highlight.unwrap_or(label_color),
+                self.shimmering,
+                cx,
+            ),
+        };
         let chevron_color = muted.opacity(0.7);
         div()
             .h(t.z(24.0))

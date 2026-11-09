@@ -17,6 +17,11 @@ gpui.workspace = true
 gpui-base = "=0.9.1"
 async-channel = "2"
 base64 = "0.22"
+http_client = { package = "gpui-pre-http-client", version = "=0.3.12" }
+ureq = "3"
+futures = "0.3"
+anyhow.workspace = true
+percent-encoding = "2"
 tracing.workspace = true
 unicode-segmentation = "1"
 
