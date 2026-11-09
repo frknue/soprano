@@ -466,3 +466,34 @@ fn coming_back_to_the_app_finds_a_repository_created_above_the_shown_folder(cx: 
     wait_until(cx, |cx| shown(&panel, cx) == ["sub"]);
     assert!(panel.read_with(cx, |panel, _| panel.is_git_repository()));
 }
+
+/// Linux file systems allow names that aren't valid UTF-8 (APFS and NTFS don't).
+#[cfg(target_os = "linux")]
+#[gpui::test]
+fn a_name_that_is_not_valid_utf8_can_be_renamed(cx: &mut TestAppContext) {
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("temp dir");
+    let root = directory.path().to_path_buf();
+    let odd = root.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+    fs::write(&odd, "").expect("write");
+
+    let (panel, cx) = panel(cx);
+    let cwd = root.to_string_lossy().into_owned();
+    panel.update(cx, |panel, cx| {
+        panel.set_working_directory(Some(&cwd), cx);
+        panel.set_active(true, cx);
+    });
+    wait_until(cx, |cx| shown(&panel, cx).len() == 1);
+    let id = shown(&panel, cx).remove(0);
+    assert_eq!(panel.read_with(cx, |panel, _| panel.absolute(&id)), Some(odd.clone()));
+
+    panel.update_in(cx, |panel, window, cx| panel.begin_rename(&id, window, cx));
+    let input = panel
+        .read_with(cx, |panel, _| panel.editing.as_ref().map(|editing| editing.input.clone()))
+        .expect("input");
+    input.update_in(cx, |input, window, cx| input.set_value("cafe.txt", window, cx));
+    panel.update(cx, |panel, cx| panel.finish_editing(true, cx));
+    wait_until(cx, |cx| shown(&panel, cx) == ["cafe.txt"]);
+    assert!(!odd.exists());
+}

@@ -81,8 +81,14 @@ struct RootState {
 }
 
 impl RootState {
+    /// The exact on-disk path of the item at `relative`: the loaded node's own path (built
+    /// from the name as listed, so names that aren't valid UTF-8 survive), else the path
+    /// rebuilt from the tree string.
     fn absolute(&self, relative: &str) -> PathBuf {
-        absolute_path(&self.root.path, relative)
+        match self.tree.node(relative) {
+            Some(node) => node.path.clone(),
+            None => absolute_path(&self.root.path, relative),
+        }
     }
 
     /// Both forms of the root, for matching absolute paths.
@@ -159,7 +165,7 @@ pub struct FilesPanel {
     manual_refresh_spinner: bool,
     filter_input: Entity<InputState>,
     filter_tokens: Vec<String>,
-    filter_files: Option<Vec<String>>,
+    filter_files: Option<Vec<PathBuf>>,
     filter_generation: u64,
     filter_root: Option<FilterNode>,
     filter_collapsed: HashSet<String>,
@@ -602,8 +608,24 @@ impl FilesPanel {
             .collect()
     }
 
+    /// The exact on-disk path of the row at `relative`: from the real tree, or from the
+    /// filter results for a match whose folder was never loaded.
     fn absolute(&self, relative: &str) -> Option<PathBuf> {
-        self.state.as_ref().map(|state| state.absolute(relative))
+        let state = self.state.as_ref()?;
+        if state.tree.node(relative).is_none()
+            && let Some(node) = self.filter_node(relative)
+        {
+            return Some(node.path.clone());
+        }
+        Some(state.absolute(relative))
+    }
+
+    fn filter_node(&self, relative: &str) -> Option<&FilterNode> {
+        let mut node = self.filter_root.as_ref()?;
+        for segment in relative.split('/').filter(|segment| !segment.is_empty()) {
+            node = node.children.iter().find(|child| child.name == segment)?;
+        }
+        Some(node)
     }
 
     // MARK: - Watching
@@ -824,7 +846,8 @@ impl FilesPanel {
         }
         let Some(files) = self.filter_files.as_ref() else { return };
         let Some(rules) = self.rules() else { return };
-        let root = build_filter_tree(files, &self.filter_tokens, &rules);
+        let root = self.state.as_ref().map(|state| state.root.path.clone()).unwrap_or_default();
+        let root = build_filter_tree(&root, files, &self.filter_tokens, &rules);
         self.filter_root = Some(root);
         self.filter_collapsed.clear();
         self.rebuild_rows();
