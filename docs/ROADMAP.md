@@ -4,31 +4,22 @@ Geplante Arbeit, die noch nicht gebaut ist.
 
 ## Linux (Omarchy)
 
-Furkan wechselt später auf Omarchy (Arch Linux, Hyprland, Wayland). Jede App der Familie läuft
-heute nur auf macOS: programmatisches AppKit, `platforms: [.macOS(...)]` in `Package.swift`,
-macOS-Frameworks, `.app`-Paketierung und Signatur. Jedes Repo hat eine eigene Linux-Aufgabe
-(siehe Tabelle).
+Furkan wechselt später auf Omarchy (Arch Linux, Hyprland, Wayland). Soprano selbst läuft seit
+dem Rust-Rewrite (GPUI, libghostty-vt) auf macOS, Linux und Windows; die übrigen Apps der
+Familie laufen nur auf macOS (programmatisches AppKit). Jedes Repo hat eine eigene
+Linux-Aufgabe (siehe Tabelle).
 
 ### Zuerst eine Entscheidung für die ganze Familie
 
-- [ ] Das Linux-UI-Toolkit einmal für die ganze Familie wählen (GTK 4 über eine Swift-Bindung oder
-  etwas anderes). Jede App synct Chrome und Theme aus Soprano (`scripts/sync-soprano-chrome.sh`),
-  also beginnt die Linux-Chrome-Schicht hier, und das Sync-Skript muss sie mitnehmen.
-- [ ] Swift-Toolchain auf Arch über `swiftly`; ein Linux-CI-Job pro Repo, sobald sein Core baut.
-- [ ] Reihenfolge: zuerst die reinen Foundation-Cores (günstig, auf Linux testbar), dann die UIs.
+- [ ] Das Linux-UI-Toolkit für die restliche Familie wählen. Soprano nutzt GPUI und
+  `gpui-component`; `crates/soprano-ui` ist die gemeinsame Chrome- und Theme-Schicht, die die
+  anderen Apps statt `scripts/sync-soprano-chrome.sh` übernehmen könnten.
+- [ ] Reihenfolge: zuerst die reinen Cores (günstig, auf Linux testbar), dann die UIs.
 
 ### Soprano selbst
 
-Etwa 54.000 Zeilen, fast alles AppKit; kein eigenes Core-Target.
-
-- [ ] Terminal: GhosttyKit (`ghostty_surface_*`, `ghostty_app_*`) rendert mit Metal und
-  IOSurface. Ghostty läuft auf Linux als eigene GTK-App; zuerst prüfen, ob libghosttys
-  Embedding-API einen Nicht-macOS-Host (OpenGL) unterstützt oder ob der Linux-Port Ghostty
-  anders einbettet.
-- [ ] `WKWebView` (19 Stellen): WebKitGTK.
-- [ ] `UNUserNotificationCenter`: freedesktop-Notifications (mako auf Omarchy).
-- [ ] Carbon, CoreServices, UniformTypeIdentifiers, CryptoKit (→ swift-crypto), `Darwin`-Importe:
-  ersetzen oder hinter `#if canImport` legen.
+- [ ] Auf Omarchy selbst testen (Hyprland, Wayland, mako): Fensterdekoration, Zwischenablage,
+  Benachrichtigungen, Browser-Pane (WebKitGTK braucht X11 oder XWayland).
 - [ ] Globale Hotkeys: Bindings in `hyprland.conf`, die einen `soprano`-Befehl aufrufen (unter
   Wayland darf keine App Tasten abgreifen).
 
