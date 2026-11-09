@@ -35,14 +35,23 @@ if ! zig_env="$("$zig" env 2>/dev/null)"; then
     echo "Building libghostty-vt requires Zig 0.16 (brew install zig@0.16, or set ZIG)." >&2
     exit 1
 fi
-global_cache="$(
-    printf '%s\n' "$zig_env" \
-        | sed -n 's/^[[:space:]]*\.global_cache_dir = "\(.*\)",$/\1/p'
-)"
-# ZON escapes backslashes in Windows paths (C:\\Users\\…); Git Bash reads C:/Users/… too.
+# ZIG_GLOBAL_CACHE_DIR wins when set (CI's setup-zig sets it); else ask `zig env`, which prints
+# ZON (`.global_cache_dir = "…",`) in Zig 0.16 and JSON (`"global_cache_dir": "…",`) before.
+global_cache="${ZIG_GLOBAL_CACHE_DIR:-}"
+if [[ -z "$global_cache" ]]; then
+    global_cache="$(
+        printf '%s\n' "$zig_env" | tr -d '\r' \
+            | sed -n -E 's/^[[:space:]]*(\.global_cache_dir[[:space:]]*=|"global_cache_dir":)[[:space:]]*"(.*)",?$/\2/p' \
+            | head -n 1
+    )"
+fi
+# ZON and JSON escape backslashes in Windows paths (C:\\Users\\…); Git Bash reads C:/Users/…
+# too, and a plain C:\Users\… from the environment becomes C:/Users/… the same way.
 global_cache="${global_cache//\\\\//}"
+global_cache="${global_cache//\\//}"
 if [[ "$global_cache" != /* && ! "$global_cache" =~ ^[A-Za-z]:/ ]]; then
-    echo "Could not read the global cache directory from '$zig env'." >&2
+    echo "Could not read the global cache directory from '$zig env':" >&2
+    printf '%s\n' "$zig_env" >&2
     exit 1
 fi
 
