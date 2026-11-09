@@ -32,7 +32,7 @@ fi
 echo "Building Soprano Dev..."
 cd "$repo_root"
 "$script_dir/prefetch-zig-deps.sh"
-cargo build -p soprano
+cargo build -p soprano --features visual-snapshot
 
 dev_app="$target_dir/debug/Soprano Dev.app"
 "$script_dir/package-app.sh" \

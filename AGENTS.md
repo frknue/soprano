@@ -33,6 +33,9 @@ with C dependencies need `zig cc` wrappers as `CC_<target>`/`AR_<target>`.
 - `./scripts/dev.sh` (macOS) builds, packages and launches `Soprano Dev.app`
   (`com.soprano.dev`). Agents run it only when the user asks for a launch;
   `--build-only` when the bundle itself needs testing.
+- The Dev bundle is built with `--features visual-snapshot` (never release/install builds):
+  `SOPRANO_SOCKET=<socket> <Dev binary> debug-snapshot /abs/out.png` writes its main window as a PNG;
+  `debug-keys|debug-modifiers|debug-type|debug-click|debug-move|debug-scroll` inject input into it.
 - After completing and verifying a task that changes the app or its packaging, run
   `./scripts/install.sh` as the final step unless the user asks not to. The user has
   authorized it: it replaces `/Applications/Soprano.app` and never stops or launches a

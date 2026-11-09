@@ -1734,6 +1734,13 @@ impl MainView {
                 });
                 respond(response);
             }
+            #[cfg(feature = "visual-snapshot")]
+            Request::DebugSnapshot { path } => respond(match crate::snapshot::write_png(window, &path) {
+                Ok(()) => Response::success(path.to_string_lossy().into_owned()),
+                Err(error) => Response::failure(format!("{error:#}")),
+            }),
+            #[cfg(feature = "visual-snapshot")]
+            Request::DebugInput { input } => crate::debug_input::perform(input, window, cx, respond),
             Request::Browser { command, arguments, target_pane_id, .. } => {
                 if soprano_browser::is_open_command(&command) {
                     let response = self.workspace.update(cx, |ws| crate::ipc::open_browser(ws, &arguments));

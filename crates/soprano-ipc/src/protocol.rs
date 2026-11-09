@@ -133,11 +133,23 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caller_tab_id: Option<String>,
     },
+    /// Dev builds (`visual-snapshot`): render the main window into a PNG at `path` (absolute);
+    /// answered with the written path.
+    #[cfg(feature = "visual-snapshot")]
+    DebugSnapshot { path: PathBuf },
+    /// Dev builds (`visual-snapshot`): input dispatched through the main window; answered once
+    /// the window has redrawn.
+    #[cfg(feature = "visual-snapshot")]
+    DebugInput { input: crate::debug::DebugInput },
 }
 
 impl Request {
     /// Whether the CLI waits for a [`Response`] on the connection.
     pub fn expects_reply(&self) -> bool {
+        #[cfg(feature = "visual-snapshot")]
+        if matches!(self, Self::DebugSnapshot { .. } | Self::DebugInput { .. }) {
+            return true;
+        }
         matches!(self, Self::OpenMarkdown { .. } | Self::Browser { .. })
     }
 }

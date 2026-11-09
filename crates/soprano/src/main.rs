@@ -29,6 +29,8 @@
 mod app;
 mod automations;
 mod content;
+#[cfg(feature = "visual-snapshot")]
+mod debug_input;
 mod ipc;
 mod keyboard;
 mod main_view;
@@ -38,6 +40,8 @@ mod power;
 mod services;
 mod shell;
 mod sizing;
+#[cfg(feature = "visual-snapshot")]
+mod snapshot;
 mod terminate;
 mod views;
 mod window_chrome;

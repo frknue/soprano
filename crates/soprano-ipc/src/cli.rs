@@ -138,6 +138,10 @@ pub fn run_cli_with(args: &[String], env: &HashMap<String, String>, host: &mut d
     if let Some(code) = run_browser(args, env, host) {
         return CliOutcome::Exit(code);
     }
+    #[cfg(feature = "visual-snapshot")]
+    if let Some(code) = run_debug(args, env, host) {
+        return CliOutcome::Exit(code);
+    }
     if run_agent_event(args, env, host) || run_navigation(args, env, host) {
         return CliOutcome::Exit(0);
     }
@@ -232,6 +236,71 @@ fn run_markdown(args: &[String], env: &HashMap<String, String>, host: &mut dyn C
         caller_tab_id: env.get("SOPRANO_TAB_ID").cloned(),
     };
     Some(exchange(host, &endpoint, &message, "Timed out waiting for Soprano to open the Markdown file."))
+}
+
+/// The hidden visual-QA subcommands of Dev builds (`visual-snapshot`), not in the usage text:
+/// `debug-snapshot <absolute-png-path>` renders the main window into a PNG; `debug-keys`,
+/// `debug-modifiers`, `debug-type`, `debug-click`, `debug-move` and `debug-scroll`
+/// ([`crate::debug::USAGE`]) dispatch input through it. The app is found through
+/// `SOPRANO_SOCKET`, else `SOPRANO_APP_PID`. Prints the app's answer; exits 1 when the app
+/// cannot be reached or fails, 2 on bad arguments.
+#[cfg(feature = "visual-snapshot")]
+fn run_debug(args: &[String], env: &HashMap<String, String>, host: &mut dyn CliHost) -> Option<i32> {
+    use crate::debug::{DebugInput, USAGE as INPUT_USAGE};
+    let command = args.get(1)?.as_str();
+    let rest = &args[2..];
+    let request = if command == "debug-snapshot" {
+        match rest {
+            [path] if std::path::Path::new(path).is_absolute() => {
+                Request::DebugSnapshot { path: PathBuf::from(path) }
+            }
+            _ => {
+                write_line(host, Stream::Err, "Usage: soprano debug-snapshot <absolute-png-path>");
+                return Some(2);
+            }
+        }
+    } else {
+        match DebugInput::parse(command, rest)? {
+            Ok(input) => Request::DebugInput { input },
+            Err(message) => {
+                write_line(host, Stream::Err, &message);
+                write_line(host, Stream::Err, INPUT_USAGE);
+                return Some(2);
+            }
+        }
+    };
+    let endpoint = match env.get("SOPRANO_SOCKET").filter(|socket| !socket.is_empty()) {
+        Some(socket) => Endpoint::new(socket.clone()),
+        None => match env.get("SOPRANO_APP_PID").filter(|pid| !pid.is_empty()) {
+            Some(pid) => endpoint_for_pid(pid),
+            None => {
+                write_line(
+                    host,
+                    Stream::Err,
+                    "Set SOPRANO_SOCKET (or SOPRANO_APP_PID) to the running Soprano.",
+                );
+                return Some(2);
+            }
+        },
+    };
+    match host.send(&endpoint, &request) {
+        Ok(Some(Response::Ok { output })) => {
+            write_line(host, Stream::Out, &output);
+            Some(0)
+        }
+        Ok(Some(Response::Error { error })) => {
+            write_line(host, Stream::Err, &error);
+            Some(1)
+        }
+        Ok(None) => {
+            write_line(host, Stream::Err, "Timed out waiting for Soprano to answer.");
+            Some(1)
+        }
+        Err(error) => {
+            write_line(host, Stream::Err, &format!("Cannot reach Soprano at {}: {error}", endpoint.as_str()));
+            Some(1)
+        }
+    }
 }
 
 fn run_browser(args: &[String], env: &HashMap<String, String>, host: &mut dyn CliHost) -> Option<i32> {

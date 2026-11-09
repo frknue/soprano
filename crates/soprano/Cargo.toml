@@ -10,6 +10,11 @@ publish.workspace = true
 name = "soprano"
 path = "src/main.rs"
 
+[features]
+# Dev bundle only (scripts/dev.sh): `soprano debug-snapshot <png>` renders the main window into a
+# PNG for visual QA. Pulls in gpui's test support, so release builds must not enable it.
+visual-snapshot = ["gpui/test-support", "gpui_platform/test-support", "soprano-ipc/visual-snapshot", "dep:image"]
+
 [dependencies]
 soprano-types = { path = "../soprano-types" }
 soprano-platform = { path = "../soprano-platform" }
@@ -44,6 +49,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 async-channel = "2"
 raw-window-handle = "0.6"
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

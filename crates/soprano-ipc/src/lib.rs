@@ -12,6 +12,8 @@ pub mod alert;
 pub mod browser;
 pub mod caller_cwd;
 pub mod cli;
+#[cfg(feature = "visual-snapshot")]
+pub mod debug;
 pub mod launch;
 pub mod markdown;
 pub mod navigation;
