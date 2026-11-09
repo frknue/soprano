@@ -102,6 +102,7 @@ impl StateStore {
 
     /// Copies the Swift build's `soprano-*` preferences into this store. `UserDefaults`
     /// holds Codable values as JSON `Data`; those are decoded, plain values copied as-is.
+    /// Keys whose meaning changed are stored under a new name (see [`LEGACY_KEY_RENAMES`]).
     #[cfg(target_os = "macos")]
     fn import_user_defaults(&self, domain: &str) {
         let plist_path = paths::home_dir().join("Library/Preferences").join(format!("{domain}.plist"));
@@ -112,11 +113,22 @@ impl StateStore {
                 continue;
             }
             if let Some(json) = legacy_value(value) {
-                inner.values.insert(key, json);
+                inner.values.insert(imported_key(key), json);
             }
         }
         inner.flush();
     }
+}
+
+/// Swift keys whose stored value the Rust app reads differently, mapped to the key the import
+/// stores them under. The window frame was an AppKit rectangle (origin bottom-left, y up); the
+/// app converts it from this key once and saves it in its own coordinates.
+pub const LEGACY_KEY_RENAMES: &[(&str, &str)] =
+    &[("soprano-main-window-frame-v2", "soprano-main-window-frame-v2-appkit")];
+
+#[cfg(target_os = "macos")]
+fn imported_key(key: String) -> String {
+    LEGACY_KEY_RENAMES.iter().find(|(from, _)| *from == key).map(|(_, to)| (*to).to_owned()).unwrap_or(key)
 }
 
 #[cfg(target_os = "macos")]
@@ -196,5 +208,23 @@ mod tests {
         assert_eq!(clone.get::<i32>("k"), Some(1));
         clone.remove("k");
         assert!(StateStore::open(path).get_raw("k").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_swift_window_frame_is_imported_under_its_appkit_key_and_other_keys_keep_their_names() {
+        assert_eq!(
+            imported_key("soprano-main-window-frame-v2".into()),
+            "soprano-main-window-frame-v2-appkit"
+        );
+        assert_eq!(imported_key("soprano-sessions".into()), "soprano-sessions");
+    }
+
+    #[test]
+    fn a_failed_atomic_write_leaves_no_temp_file_and_needs_an_existing_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone").join("file.txt");
+        assert!(write_atomically(&missing, b"x").is_err());
+        assert!(!dir.path().join("gone").exists());
     }
 }
