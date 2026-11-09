@@ -7,7 +7,7 @@ variables, `settings.json` format, agent integrations, persistence keys, notific
 file locations.
 
 The Swift sources were the spec during the port and are deleted from the tree; they live in
-git history (last Swift release: tag `v0.6.0`). The per-crate API notes in `apis/` and the
+git history (last Swift state: commit `7eac737`, main before the rewrite; last Swift release: tag `v0.6.0`). The per-crate API notes in `apis/` and the
 parity reviews in `reviews/` cite Swift files by path at that state.
 
 ## Stack

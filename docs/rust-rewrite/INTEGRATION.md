@@ -39,5 +39,5 @@ Intentional or platform-forced differences that remain after the port. Per-crate
 Soprano Agents, Cast, Files, Git, Desktop, Mix and Tab sync shared Swift files (`Chrome.swift`,
 `Theme.swift`, `JSONCText.swift`, `CommandPalettePanel.swift`, …) from
 `~/git/private/soprano/Sources/Soprano` with their `scripts/sync-soprano-chrome.sh`. Those
-files no longer exist on this branch; point those scripts at a checkout of tag `v0.6.0`
+files no longer exist on this branch; point those scripts at a checkout of commit `7eac737`
 (or port the sibling apps onto `soprano-ui`).
