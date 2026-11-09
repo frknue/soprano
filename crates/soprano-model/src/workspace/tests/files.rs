@@ -6,8 +6,9 @@ use super::*;
 use crate::file_url;
 use crate::pane::{PaneState, PaneTab, PaneType};
 use crate::session::SavedTab;
-use crate::split_node::{SplitDirection, SplitNode};
+use crate::split_node::SplitNode;
 use crate::workspace::WorkspaceChange;
+use soprano_types::SplitDirection;
 
 /// An absolute path under the temporary directory (`/tmp/…` on Unix).
 fn tmp(relative: &str) -> PathBuf {

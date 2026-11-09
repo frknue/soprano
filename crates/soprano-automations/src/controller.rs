@@ -24,8 +24,8 @@ use chrono::{DateTime, Utc};
 use soprano_agents::{AgentTranscriptSource, TimelineItemKind};
 use soprano_config::{Automation, AutomationSession, AutomationWorkspace, ConfigStore};
 use soprano_ipc::agent_event::summarize;
-use soprano_model::TerminalTarget;
 use soprano_platform::AppIdentity;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentCatalog, AgentConversation, AgentLaunch, AgentStatus, AgentWaitingReason};
 
 use crate::claude_trust;

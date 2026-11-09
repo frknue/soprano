@@ -7,8 +7,9 @@
 //! user agreed, [`Workspace::force_close`] performs it. Closes nested inside an approved one
 //! (a pane's last tab taking the pane, a pane taking its window) are not asked again.
 
-use super::{TerminalTarget, Workspace};
+use super::Workspace;
 use crate::session::WorkspaceSession;
+use soprano_types::TerminalTarget;
 
 /// A close the host can replay with [`Workspace::force_close`].
 #[derive(Clone, Debug, PartialEq)]

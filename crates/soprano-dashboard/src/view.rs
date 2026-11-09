@@ -22,9 +22,10 @@ use soprano_agents::{
 };
 use soprano_chat_ui::{ActivityLine, TimelineSource, TimelineView, TranscriptSource};
 use soprano_editor::rich::RichText;
-use soprano_model::{TerminalTarget, Workspace};
+use soprano_model::Workspace;
 use soprano_text::context_line::{ContextLine, ContextPart};
 use soprano_types::AgentStatus;
+use soprano_types::TerminalTarget;
 use soprano_ui::button::{Button, ButtonSize};
 use soprano_ui::chrome::{ScrollList, SectionHeader, SidebarRow};
 use soprano_ui::controls::SegmentedControl;

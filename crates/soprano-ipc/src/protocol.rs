@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason};
+use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason, NavigationDirection};
 
 /// The lifecycle state an agent hook reports with `soprano agent-event <state>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -88,41 +88,6 @@ pub struct AgentEvent {
     pub reason: Option<AgentWaitingReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<AgentConversation>,
-}
-
-/// A pane navigation direction (`soprano navigate-pane left|right|up|down`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NavigationDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl NavigationDirection {
-    pub fn from_raw(raw: &str) -> Option<Self> {
-        match raw {
-            "left" => Some(Self::Left),
-            "right" => Some(Self::Right),
-            "up" => Some(Self::Up),
-            "down" => Some(Self::Down),
-            _ => None,
-        }
-    }
-
-    pub fn raw_value(self) -> &'static str {
-        match self {
-            Self::Left => "left",
-            Self::Right => "right",
-            Self::Up => "up",
-            Self::Down => "down",
-        }
-    }
-
-    pub fn is_horizontal(self) -> bool {
-        matches!(self, Self::Left | Self::Right)
-    }
 }
 
 /// `soprano navigation-passthrough enable|disable <source>`.

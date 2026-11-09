@@ -1,7 +1,8 @@
 //! Opens one browser tab: `cargo run -p soprano-browser --example browser_demo [url]`.
 
 use gpui::{App, AppContext as _, WindowOptions};
-use soprano_browser::{BrowserTarget, BrowserView};
+use soprano_browser::BrowserView;
+use soprano_types::TerminalTarget;
 use soprano_ui::{ActiveSopranoTheme as _, AppearancePreference, SopranoAssets};
 
 fn main() {
@@ -12,7 +13,7 @@ fn main() {
         cx.open_window(WindowOptions::default(), |window, cx| {
             cx.soprano_theme().apply_to_window(window);
             let browser =
-                cx.new(|cx| BrowserView::new(BrowserTarget::new("pane-1", "tab-1"), Some(&url), window, cx));
+                cx.new(|cx| BrowserView::new(TerminalTarget::new("pane-1", "tab-1"), Some(&url), window, cx));
             cx.new(|cx| gpui_component::Root::new(browser, window, cx))
         })
         .expect("the demo window opens");

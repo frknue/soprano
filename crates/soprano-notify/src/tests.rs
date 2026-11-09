@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 
 use soprano_ipc::agent_event::agent_event_request;
 use soprano_ipc::{AgentEvent, AgentEventState, Request};
-use soprano_model::{PaneType, TerminalTarget, Workspace, WorkspaceChange};
+use soprano_model::{PaneType, Workspace, WorkspaceChange};
 use soprano_platform::StateStore;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason};
 
 use crate::{

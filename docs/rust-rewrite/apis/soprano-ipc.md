@@ -14,13 +14,12 @@ I've built `crates/soprano-ipc` (only that crate changed). `cargo test -p sopran
   - `IpcServer::start(Endpoint) -> io::Result<(IpcServer, Receiver<Incoming>)>` and `server.endpoint()`. Dropping the server stops it and removes the socket.
   - `Incoming { request: Request, reply: Option<Replier> }` and `Replier::send(self, &Response) -> io::Result<()>`.
   - `send(&Endpoint, &Request) -> io::Result<Option<Response>>` and `send_with_timeout(.., Duration)`. `REPLY_TIMEOUT` is 15 s.
-- **`protocol`**: `Request`, `Response` (`success(..)` / `failure(..)`), `AgentEvent`, `AgentEventState` (`from_raw`, `raw_value`, `agent_status`, `default_body`), `NavigationDirection`, `PassthroughMode`, `Request::expects_reply()`.
+- **`protocol`**: `Request`, `Response` (`success(..)` / `failure(..)`), `AgentEvent`, `AgentEventState` (`from_raw`, `raw_value`, `agent_status`, `default_body`), `PassthroughMode` (directions are `soprano_types::NavigationDirection`), `Request::expects_reply()`.
 - **`agent_event`**: `agent_event_request(args, env, stdin_fn, hook_owner_fn) -> Option<Request>`, `agent_message`, `agent_message_text`, `waiting_reason`, `summarize`, `MESSAGE_LIMIT` (180), `FULL_MESSAGE_LIMIT` (8192), `hook_owner_process_id(start, app_pid, lookup)`, `current_hook_owner_process_id`, and `process::{parent_id, parent_and_name}`.
 - **`alert`**: `AgentAlert::{new(state, reason), title(name), body(agent, tab, window, session)}` and `stripping_status_glyphs`.
 - **`navigation`**
   - Request building and handling: `navigation_request`, `handle(args, env, tmux_navigator, post)`, `navigate_within_tmux`.
-  - `TerminalTarget { pane_id, tab_id }`.
-  - `PaneNavigationClaimRegistry` (`enable`, `disable`, `has_claims`, `synchronize(&HashSet<TerminalTarget>, generation: u64)`). This is app-side state in Swift; it lives here as a plain struct for the keys crate and the app.
+  - `PaneNavigationClaimRegistry` (`enable`, `disable`, `has_claims`, `synchronize(&HashSet<soprano_types::TerminalTarget>, generation: u64)`). This is app-side state in Swift; it lives here as a plain struct for the keys crate and the app.
 - **`markdown`**: `MarkdownCommandRequest::parse(args, env, cwd) -> Result<Option<_>, MarkdownCommandError>` (fields `path: PathBuf`, `opens_new_pane`), `validate_readable_file`, `HELP`.
 - **`browser`**: `BrowserCommandRequest::parse(args, env, cwd) -> Result<Option<_>, String>`, `HELP`.
 - **`launch`**: `LaunchDispatch::{StartApp, Help, UsageError}::decide(args, env, runs_owning_app)`, `runs_owning_app(exe, env)`, `USAGE`.
@@ -90,7 +89,6 @@ Not ported here, with reasons:
 - **`$PWD` check on Windows:** compares canonicalized paths, since there is no device/inode identity there.
 - **`AgentAlert` glyph stripping:** Swift checks `isEmojiPresentation`. Rust uses a static table of Emoji_Presentation ranges instead, so it may differ for rare characters.
 - **Message cap:** the 8192 limit counts Unicode code points, where Swift counted grapheme clusters.
-- **Types defined locally:** `NavigationDirection` and `TerminalTarget` live in this crate because the frozen crates don't have them.
 - **Overlap:** `AgentAlert` and the `AgentEventState` mapping are also on `soprano-agents`' list. Only one of the two copies should end up being used.
 
 ## 4. Verification

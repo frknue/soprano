@@ -6,8 +6,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use soprano_ipc::{AgentAlert, AgentEvent, AgentEventState};
-use soprano_model::{PaneType, TerminalTarget, Workspace, WorkspaceChange};
+use soprano_model::{PaneType, Workspace, WorkspaceChange};
 use soprano_platform::{AppIdentity, StateStore};
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentCatalog, AgentWaitingReason};
 
 use crate::authorization::{Authorization, AuthorizationState};

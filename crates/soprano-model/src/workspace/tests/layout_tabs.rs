@@ -3,7 +3,8 @@
 use super::*;
 use crate::pane::PaneType;
 use crate::session::WorkspaceSession;
-use crate::split_node::{SplitDirection, SplitNode};
+use crate::split_node::SplitNode;
+use soprano_types::SplitDirection;
 
 #[test]
 fn a_new_tab_opens_a_fresh_terminal_in_the_active_directory_and_switching_back_restores_the_layout() {

@@ -1,18 +1,7 @@
 //! App-side routing of `soprano browser` requests (`BrowserAutomationController`): which browser
 //! tab a request drives, and the messages the app answers with when it cannot.
 
-/// One browser tab: the pane holding it and the tab's id.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct BrowserTarget {
-    pub pane_id: String,
-    pub tab_id: String,
-}
-
-impl BrowserTarget {
-    pub fn new(pane_id: impl Into<String>, tab_id: impl Into<String>) -> Self {
-        Self { pane_id: pane_id.into(), tab_id: tab_id.into() }
-    }
-}
+use soprano_types::TerminalTarget;
 
 /// What target resolution needs to know about one pane's tabs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -46,20 +35,20 @@ pub fn resolve_target(
     active_pane_id: &str,
     ordered_leaf_ids: &[String],
     pane: impl Fn(&str) -> Option<PaneTabs>,
-) -> Option<BrowserTarget> {
+) -> Option<TerminalTarget> {
     if let Some(requested) = requested_pane_id {
         let tabs = pane(requested)?;
         let tab = tabs.active_browser().or_else(|| tabs.first_browser())?;
-        return Some(BrowserTarget::new(requested, tab));
+        return Some(TerminalTarget::new(requested, tab));
     }
 
     if let Some(tab) = pane(active_pane_id).as_ref().and_then(PaneTabs::active_browser) {
-        return Some(BrowserTarget::new(active_pane_id, tab));
+        return Some(TerminalTarget::new(active_pane_id, tab));
     }
 
     ordered_leaf_ids.iter().find_map(|pane_id| {
         let tabs = pane(pane_id)?;
-        tabs.first_browser().map(|tab| BrowserTarget::new(pane_id.as_str(), tab))
+        tabs.first_browser().map(|tab| TerminalTarget::new(pane_id.as_str(), tab))
     })
 }
 
@@ -72,7 +61,7 @@ pub fn no_target_message(requested_pane_id: Option<&str>) -> String {
 }
 
 /// The answer when the target's view is not registered (not built yet, or already gone).
-pub fn unavailable_message(target: &BrowserTarget) -> String {
+pub fn unavailable_message(target: &TerminalTarget) -> String {
     format!("Browser {} is not currently available.", target.pane_id)
 }
 
@@ -107,7 +96,7 @@ mod tests {
         ])
     }
 
-    fn resolve(requested: Option<&str>, active: &str, order: &[&str]) -> Option<BrowserTarget> {
+    fn resolve(requested: Option<&str>, active: &str, order: &[&str]) -> Option<TerminalTarget> {
         let panes = panes();
         let order: Vec<String> = order.iter().map(|id| id.to_string()).collect();
         resolve_target(requested, active, &order, |id| panes.get(id).cloned())
@@ -115,12 +104,12 @@ mod tests {
 
     #[test]
     fn a_requested_pane_prefers_its_active_browser_tab() {
-        assert_eq!(resolve(Some("pane-3"), "pane-1", &[]), Some(BrowserTarget::new("pane-3", "b4")));
+        assert_eq!(resolve(Some("pane-3"), "pane-1", &[]), Some(TerminalTarget::new("pane-3", "b4")));
     }
 
     #[test]
     fn a_requested_pane_falls_back_to_its_first_browser_tab() {
-        assert_eq!(resolve(Some("pane-2"), "pane-1", &[]), Some(BrowserTarget::new("pane-2", "b2")));
+        assert_eq!(resolve(Some("pane-2"), "pane-1", &[]), Some(TerminalTarget::new("pane-2", "b2")));
     }
 
     #[test]
@@ -131,14 +120,14 @@ mod tests {
 
     #[test]
     fn without_a_request_the_active_panes_active_browser_wins() {
-        assert_eq!(resolve(None, "pane-3", &["pane-2", "pane-3"]), Some(BrowserTarget::new("pane-3", "b4")));
+        assert_eq!(resolve(None, "pane-3", &["pane-2", "pane-3"]), Some(TerminalTarget::new("pane-3", "b4")));
     }
 
     #[test]
     fn otherwise_the_first_browser_in_layout_order_is_used() {
         assert_eq!(
             resolve(None, "pane-1", &["pane-1", "pane-2", "pane-3"]),
-            Some(BrowserTarget::new("pane-2", "b2"))
+            Some(TerminalTarget::new("pane-2", "b2"))
         );
         assert_eq!(resolve(None, "pane-2", &["pane-1"]), None);
     }
@@ -151,7 +140,7 @@ mod tests {
             "No browser pane exists. Run `soprano browser open [url]` first."
         );
         assert_eq!(
-            unavailable_message(&BrowserTarget::new("pane-2", "t")),
+            unavailable_message(&TerminalTarget::new("pane-2", "t")),
             "Browser pane-2 is not currently available."
         );
         assert!(is_open_command("open-split") && is_open_command("new") && !is_open_command("goto"));

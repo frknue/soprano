@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use soprano_agents::{AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus, Date};
-use soprano_model::{AgentDashboardEntry, TerminalTarget};
+use soprano_model::AgentDashboardEntry;
 use soprano_text::context_line::ContextLine;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentStatus, AgentWaitingReason};
 use soprano_ui::status::StatusPillSpec;
 

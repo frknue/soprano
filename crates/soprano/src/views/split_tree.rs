@@ -11,7 +11,8 @@ use gpui::{
     div, prelude::FluentBuilder, px,
 };
 use soprano_explorer::ExplorerDrag;
-use soprano_model::{SplitBranchSide, SplitDirection, SplitNode, TerminalTarget};
+use soprano_model::{SplitBranchSide, SplitNode};
+use soprano_types::{SplitDirection, TerminalTarget};
 use soprano_ui::ActiveSopranoTheme;
 use soprano_ui::chrome::Card;
 

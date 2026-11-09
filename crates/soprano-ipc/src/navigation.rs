@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 
-use crate::protocol::{NavigationDirection, PassthroughMode, Request};
+use crate::protocol::{PassthroughMode, Request};
+use soprano_types::NavigationDirection;
 
 pub const NAVIGATE_COMMAND: &str = "navigate-pane";
 pub const PASSTHROUGH_COMMAND: &str = "navigation-passthrough";

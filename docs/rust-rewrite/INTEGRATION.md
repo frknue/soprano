@@ -2,8 +2,6 @@
 
 Cleanups to do once the parallel crates land:
 
-- Duplicate small types: `NavigationDirection`, `TerminalTarget` exist in soprano-ipc, soprano-keys and
-  soprano-model; `SplitDirection` in keys and model. Move one copy into `soprano-types`, delete the rest.
 - `PaneNavigationClaimRegistry` is in both soprano-ipc (`navigation`) and soprano-keys (`claims`).
   Keep keys' (it implements `PassthroughClaims`); delete ipc's and its tests.
 - Pane hints on Linux/Windows are Alt+Shift+letter (`Platform::is_pane_shortcut_chord`), because

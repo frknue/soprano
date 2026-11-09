@@ -17,7 +17,7 @@ use gpui::{
     Subscription, Task, Window,
 };
 use soprano_accounts::AccountLaunchState;
-use soprano_browser::{BrowserEvent, BrowserTarget, BrowserView};
+use soprano_browser::{BrowserEvent, BrowserView};
 use soprano_chat::session::AgentChatEvent;
 use soprano_chat_ui::{ChatView, ChatViewEvent};
 use soprano_editor::{
@@ -27,15 +27,14 @@ use soprano_editor::{
 use soprano_ipc::AgentEventState;
 use soprano_launch::{AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec};
 use soprano_model::file_url;
-use soprano_model::{
-    PaneTab, PaneType, TerminalLifecycleAction, TerminalTarget, WorkspaceChange, WorkspaceEvent,
-};
+use soprano_model::{PaneTab, PaneType, TerminalLifecycleAction, WorkspaceChange, WorkspaceEvent};
 use soprano_platform::StateStore;
 use soprano_term::ClipboardConfirmationCoordinator;
 use soprano_term::{
     ClipboardRequest, TerminalEvent, TerminalLaunch, TerminalSettings, TerminalTheme, TerminalView,
 };
 use soprano_text::DocumentId;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, KeybindingState};
 
 use crate::shell::{CloseTarget, Command, Shell, dispatch};
@@ -649,7 +648,7 @@ impl ContentHost {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> PaneContent {
-        let browser_target = BrowserTarget::new(&target.pane_id, &target.tab_id);
+        let browser_target = TerminalTarget::new(&target.pane_id, &target.tab_id);
         let url = tab.url.clone();
         let view = cx.new(|cx| BrowserView::new(browser_target, url.as_deref(), window, cx));
         let workspace = self.workspace.clone();
@@ -1128,8 +1127,9 @@ mod tests {
     use gpui::TestAppContext;
     use soprano_config::{AppSettings, DefaultKeybindings};
     use soprano_launch::Resources;
-    use soprano_model::{SplitDirection, Workspace};
+    use soprano_model::Workspace;
     use soprano_platform::StateStore;
+    use soprano_types::SplitDirection;
 
     use super::*;
 

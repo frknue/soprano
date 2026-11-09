@@ -2,8 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use soprano_model::TerminalTarget;
 use soprano_types::AgentConversation;
+use soprano_types::TerminalTarget;
 
 /// What started a run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

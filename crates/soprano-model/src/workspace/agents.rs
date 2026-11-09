@@ -5,9 +5,10 @@ use std::time::SystemTime;
 
 use soprano_types::{AgentCatalog, AgentConversation, AgentProfile, AgentStatus, AgentWaitingReason};
 
-use super::{AgentReadinessGeneration, TerminalLifecycleAction, TerminalTarget, Workspace, WorkspaceEvent};
+use super::{AgentReadinessGeneration, TerminalLifecycleAction, Workspace, WorkspaceEvent};
 use crate::agent_instance::AgentInstance;
 use crate::pane::{PaneTab, PaneType};
+use soprano_types::TerminalTarget;
 
 impl Workspace {
     // MARK: - Lookup

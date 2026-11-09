@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use soprano_keys::{
     BindingCommand, FocusedContent, KeyContext, KeyEvent, KeyOutcome, KeybindingResolver, Modifiers,
-    PaneHintAssignment, PaneNavigationClaimRegistry, Platform, ResolverChange, TerminalTarget,
-    should_forward_prefix_key,
+    PaneHintAssignment, PaneNavigationClaimRegistry, Platform, ResolverChange, should_forward_prefix_key,
 };
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentCatalog, DefaultAgents, KeyBindingMode, KeybindingState};
 use support::default_config;
 

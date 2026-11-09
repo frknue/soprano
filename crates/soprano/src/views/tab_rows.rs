@@ -527,9 +527,10 @@ mod tests {
 
     use gpui::{TestAppContext, VisualTestContext, point, px};
     use soprano_config::{AppSettings, DefaultKeybindings};
-    use soprano_model::{PaneType, TerminalTarget};
+    use soprano_model::PaneType;
     use soprano_platform::StateStore;
     use soprano_types::AgentStatus;
+    use soprano_types::TerminalTarget;
     use soprano_ui::status::StatusPillSpec;
 
     use super::*;

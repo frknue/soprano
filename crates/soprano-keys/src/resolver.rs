@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 
 use soprano_types::{KeyBinding, KeyBindingConfig, KeyBindingMode, KeybindingState};
 
-use crate::claims::{PassthroughClaims, TerminalTarget};
+use crate::claims::PassthroughClaims;
 use crate::command::{FocusedContent, dispatches_through_main_menu};
 use crate::event::{ESCAPE, KeyEvent, Modifiers, Platform};
 use crate::hints::{PaneHintAssignment, PaneHintStep, pane_hint_step};
+use soprano_types::TerminalTarget;
 
 /// Ctrl+H/J/K/L: the bindings a terminal program may claim through navigation passthrough.
 pub const PANE_NAVIGATION_BINDING_IDS: [&str; 4] = ["nav-left", "nav-down", "nav-up", "nav-right"];

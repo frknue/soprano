@@ -9,8 +9,9 @@ use gpui::{
 };
 use soprano_chat_ui::TimelineRowContent;
 use soprano_chat_ui::work_log::WorkLogKind;
-use soprano_model::{TerminalTarget, Workspace};
+use soprano_model::Workspace;
 use soprano_text::context_line::ContextPart;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentStatus};
 
 use super::{AgentDashboard, DashboardEvent, DashboardHost};

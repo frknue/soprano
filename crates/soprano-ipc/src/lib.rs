@@ -23,7 +23,7 @@ pub use cli::{
     CliHost, CliOutcome, SystemHost, endpoint_from_environment, run_cli, run_cli_from_process, run_cli_with,
 };
 pub use launch::LaunchDispatch;
-pub use protocol::{AgentEvent, AgentEventState, NavigationDirection, PassthroughMode, Request, Response};
+pub use protocol::{AgentEvent, AgentEventState, PassthroughMode, Request, Response};
 pub use transport::{
     Endpoint, Incoming, IpcServer, REPLY_TIMEOUT, Replier, endpoint_for_pid, send, send_with_timeout,
 };

@@ -4,10 +4,12 @@
 
 use std::path::Path;
 
-use soprano_browser::{BrowserTarget, PaneTabs};
+use soprano_browser::PaneTabs;
+use soprano_ipc::Response;
 use soprano_ipc::transport::{Endpoint, Incoming, IpcServer, endpoint_for_pid};
-use soprano_ipc::{NavigationDirection as IpcDirection, Response};
-use soprano_model::{NavigationDirection, Workspace};
+use soprano_model::Workspace;
+use soprano_types::NavigationDirection;
+use soprano_types::TerminalTarget;
 
 /// Starts listening for this process; requests arrive on the returned channel (UI side).
 pub fn start_server() -> Option<(IpcServer, async_channel::Receiver<Incoming>)> {
@@ -34,23 +36,14 @@ pub fn start_server() -> Option<(IpcServer, async_channel::Receiver<Incoming>)> 
     }
 }
 
-pub fn navigation_direction(direction: IpcDirection) -> NavigationDirection {
-    match direction {
-        IpcDirection::Left => NavigationDirection::Left,
-        IpcDirection::Right => NavigationDirection::Right,
-        IpcDirection::Up => NavigationDirection::Up,
-        IpcDirection::Down => NavigationDirection::Down,
-    }
-}
-
 /// `soprano pane-navigation <dir>` from a terminal: moves only when that terminal is the active
 /// tab, so a stale or background shell never steals focus.
-pub fn navigate_pane(workspace: &mut Workspace, pane_id: &str, tab_id: &str, direction: IpcDirection) {
+pub fn navigate_pane(workspace: &mut Workspace, pane_id: &str, tab_id: &str, direction: NavigationDirection) {
     let active_pane = workspace.active_pane_id().to_owned();
     let is_active = active_pane == pane_id
         && workspace.pane(pane_id).and_then(|pane| pane.active_tab()).is_some_and(|tab| tab.id == tab_id);
     if is_active {
-        workspace.navigate_to_pane(navigation_direction(direction));
+        workspace.navigate_to_pane(direction);
     }
 }
 
@@ -94,7 +87,7 @@ pub fn open_markdown(
 pub fn browser_target(
     workspace: &Workspace,
     requested_pane_id: Option<&str>,
-) -> Result<BrowserTarget, String> {
+) -> Result<TerminalTarget, String> {
     let leaves: Vec<String> = workspace.layout().map(|layout| layout.ordered_leaf_ids()).unwrap_or_default();
     soprano_browser::resolve_target(requested_pane_id, workspace.active_pane_id(), &leaves, |pane_id| {
         let pane = workspace.pane(pane_id)?;
@@ -199,11 +192,11 @@ mod tests {
             workspace.pane(&first).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
         let second = workspace.spawn_terminal(None).expect("second pane");
         assert_eq!(workspace.active_pane_id(), second);
-        navigate_pane(&mut workspace, &first, &first_tab, IpcDirection::Left);
+        navigate_pane(&mut workspace, &first, &first_tab, NavigationDirection::Left);
         assert_eq!(workspace.active_pane_id(), second);
         let second_tab =
             workspace.pane(&second).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
-        navigate_pane(&mut workspace, &second, &second_tab, IpcDirection::Left);
+        navigate_pane(&mut workspace, &second, &second_tab, NavigationDirection::Left);
         assert_eq!(workspace.active_pane_id(), first);
     }
 }

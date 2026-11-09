@@ -24,7 +24,7 @@ use soprano_keys::{
     BindingCommand, FocusedContent, KeyContext, KeyOutcome, KeybindingResolver, PaneHintAssignment,
     PaneNavigationClaimRegistry, Platform, ResolverChange,
 };
-use soprano_model::{CloseOutcome, CloseRequest, SplitDirection, TerminalTarget, WorkspaceChange};
+use soprano_model::{CloseOutcome, CloseRequest, WorkspaceChange};
 use soprano_notify::{Authorization, BannerClick, NotificationManager, TerminalNotification};
 use soprano_settings::{
     NotificationAuthorization, NotificationStatusProvider, SettingsEvent, SettingsTab, SettingsView,
@@ -34,6 +34,7 @@ use soprano_term::{
     ClipboardConfirmationPresenter, ClipboardConfirmationPrompt, TerminalView,
 };
 use soprano_types::AgentCatalog;
+use soprano_types::TerminalTarget;
 use soprano_ui::{
     ActiveSopranoTheme, Dialog, DialogButton, DialogContent, DialogResult, Picker, PickerEvent, SopranoTheme,
     Toast, ToastLevel, ToastStack,
@@ -544,10 +545,6 @@ impl MainView {
                 ws.update(cx, |ws| ws.spawn_agent(&id, None, false));
             }
             BindingCommand::Split(direction) => {
-                let direction = match direction {
-                    soprano_keys::SplitDirection::Horizontal => SplitDirection::Horizontal,
-                    soprano_keys::SplitDirection::Vertical => SplitDirection::Vertical,
-                };
                 ws.update(cx, |ws| {
                     let pane = ws.active_pane_id().to_owned();
                     ws.split_pane(direction, &pane)
@@ -558,15 +555,11 @@ impl MainView {
                     ws.update(cx, |ws| ws.spawn_agent(&profile.id, None, true));
                 }
             }
-            BindingCommand::Navigate(direction) => {
-                ws.update(cx, |ws| ws.navigate_to_pane(model_direction(direction)))
-            }
+            BindingCommand::Navigate(direction) => ws.update(cx, |ws| ws.navigate_to_pane(direction)),
             BindingCommand::PreviousWindow => ws.update(cx, |ws| ws.activate_previous_window()),
             BindingCommand::NextWindow => ws.update(cx, |ws| ws.activate_next_window()),
             BindingCommand::LastWindow => ws.update(cx, |ws| ws.activate_last_window()),
-            BindingCommand::Resize(direction) => {
-                ws.update(cx, |ws| ws.resize_pane(model_direction(direction), tick))
-            }
+            BindingCommand::Resize(direction) => ws.update(cx, |ws| ws.resize_pane(direction, tick)),
             BindingCommand::ClosePane => {
                 let pane = ws.read(cx).active_pane_id().to_owned();
                 self.close(CloseTarget::Pane(pane), window, cx);
@@ -1331,11 +1324,11 @@ impl MainView {
         // Passthrough claims of closed tabs go; a restored workspace drops them all.
         let (valid, generation) = {
             let ws = self.workspace.read(cx);
-            let valid: HashSet<soprano_keys::TerminalTarget> = ws
+            let valid: HashSet<soprano_types::TerminalTarget> = ws
                 .panes()
                 .values()
                 .flat_map(|pane| {
-                    pane.tabs.iter().map(|tab| soprano_keys::TerminalTarget::new(&pane.id, &tab.id))
+                    pane.tabs.iter().map(|tab| soprano_types::TerminalTarget::new(&pane.id, &tab.id))
                 })
                 .collect();
             (valid, ws.workspace_restore_generation())
@@ -1562,7 +1555,7 @@ impl MainView {
             let pane = ws.active_pane_id();
             ws.pane(pane)
                 .and_then(|p| p.active_tab())
-                .map(|tab| soprano_keys::TerminalTarget::new(pane, &tab.id))
+                .map(|tab| soprano_types::TerminalTarget::new(pane, &tab.id))
         };
         let hints: Vec<PaneHintAssignment> = self
             .workspace
@@ -1704,7 +1697,7 @@ impl MainView {
                 respond_none(respond);
             }
             Request::NavigationPassthrough { pane_id, tab_id, mode, source } => {
-                let target = soprano_keys::TerminalTarget::new(pane_id, tab_id);
+                let target = soprano_types::TerminalTarget::new(pane_id, tab_id);
                 match mode {
                     PassthroughMode::Enable => self.claims.enable(&source, &target),
                     PassthroughMode::Disable => self.claims.disable(&source, &target),
@@ -2025,15 +2018,6 @@ impl MainView {
 fn respond_none(respond: impl FnOnce(Response)) {
     // One-way requests have no replier; dropping the closure drops nothing to send.
     drop(respond);
-}
-
-fn model_direction(direction: soprano_keys::NavigationDirection) -> soprano_model::NavigationDirection {
-    match direction {
-        soprano_keys::NavigationDirection::Left => soprano_model::NavigationDirection::Left,
-        soprano_keys::NavigationDirection::Right => soprano_model::NavigationDirection::Right,
-        soprano_keys::NavigationDirection::Up => soprano_model::NavigationDirection::Up,
-        soprano_keys::NavigationDirection::Down => soprano_model::NavigationDirection::Down,
-    }
 }
 
 pub fn theme_appearance(

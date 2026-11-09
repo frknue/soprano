@@ -6,9 +6,10 @@ use std::thread;
 use std::time::Duration;
 
 use soprano_ipc::{
-    AgentEventState, CliHost, CliOutcome, Endpoint, IpcServer, NavigationDirection, Request, Response,
-    endpoint_for_pid, run_cli_with, send, send_with_timeout,
+    AgentEventState, CliHost, CliOutcome, Endpoint, IpcServer, Request, Response, endpoint_for_pid,
+    run_cli_with, send, send_with_timeout,
 };
+use soprano_types::NavigationDirection;
 
 /// A unique endpoint per test: a pid-like number that no live process uses in practice.
 fn unique_endpoint() -> Endpoint {

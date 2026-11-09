@@ -1,18 +1,9 @@
 //! What a binding id means: the Swift `KeybindingManager.executeBinding` table, as data the host
 //! executes.
 
-use soprano_types::AgentCatalog;
+use soprano_types::{AgentCatalog, NavigationDirection, SplitDirection};
 
-use crate::claims::NavigationDirection;
 use crate::event::Modifiers;
-
-/// The axis panes are arranged along (Swift `SplitDirection`): `Horizontal` puts them side by
-/// side, `Vertical` stacks them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum SplitDirection {
-    Horizontal,
-    Vertical,
-}
 
 /// The command a binding id runs.
 #[derive(Clone, Debug, PartialEq)]

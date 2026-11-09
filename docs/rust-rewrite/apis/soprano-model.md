@@ -9,7 +9,7 @@
 **Layout tree (`split_node`)**
 - `SplitNode::{Leaf(String), Split(Box<SplitBranch>)}`, built with `leaf(id)` and `split(dir, first, second, pct)`.
 - `SplitBranch { direction, first, second, split_percentage }`. The percentage is always kept within 10–90.
-- `SplitDirection::{Horizontal, Vertical}`, `SplitBranchSide::{First, Second}`, `NavigationDirection::{Left, Right, Up, Down}` (with `from_raw`).
+- `SplitBranchSide::{First, Second}`. `SplitDirection` and `NavigationDirection` come from `soprano_types`.
 - `PaneFrame { min_x, min_y, max_x, max_y }` with `UNIT` and `span_across`.
 - Queries: `leaf_ids`, `insert_leaf_ids`, `ordered_leaf_ids`, `leaf_count`, `contains_leaf`, `first_leaf() -> &str`, `path_to`, `node_at`, `split_percentage_at`, `leaf_frames(PaneFrame)`.
 - Changes: `inserting_split`, `removing`, `adjacent_pane`, `wrapping_pane`, `setting_split_percentage`, `adjusting_split`.
@@ -57,7 +57,7 @@
 **Change and event enums**
 - `WorkspaceChange::{Model, Layout, TabTitle(t), TabWorkingDirectory(t), BrowserUrl(t), Document(t)}`. `Layout` replaces Swift's `layoutChanged` flag and bumps `layout_generation`.
 - `WorkspaceEvent::Terminal(TerminalLifecycleAction::{Stop(t), Restart(t)})`.
-- `TerminalTarget { pane_id, tab_id }`, `AgentReadinessGeneration`.
+- `AgentReadinessGeneration`. Tabs are addressed by `soprano_types::TerminalTarget`.
 
 **Two-phase close**
 - The host sets a predicate: `set_close_confirmation(Some(Box<dyn Fn(&[TerminalTarget]) -> bool + Send + Sync>))`. Returning `true` means "ask the user first".
@@ -134,7 +134,6 @@
 - **Defined locally, may duplicate other crates:**
   - `chat_supports` (Swift `AgentChatLaunch.supports`).
   - `AgentDashboardEntry`: soprano-agents' snapshot sorts it. I told ConversationPort about this type.
-  - `NavigationDirection`, which soprano-ipc also has.
 
 ## 4. Verification
 - `CARGO_TARGET_DIR=target/agent-soprano-model cargo test -p soprano-model`: 148 passed, 0 failed.

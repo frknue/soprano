@@ -15,10 +15,10 @@ use gpui::{
     Task, Window, div, prelude::*,
 };
 use soprano_model::{
-    PaneContentKind, PaneState, PaneTab, PaneType, SplitDirection, SplitNode, Workspace, chat_supports,
-    terminal_title,
+    PaneContentKind, PaneState, PaneTab, PaneType, SplitNode, Workspace, chat_supports, terminal_title,
 };
 use soprano_types::AgentCatalog;
+use soprano_types::SplitDirection;
 use soprano_ui::fonts::size;
 use soprano_ui::tooltip::tooltip;
 use soprano_ui::{
@@ -380,22 +380,11 @@ pub fn add_tab(ws: &mut Workspace, pane_id: &str, action: &AddTabAction) -> Opti
 /// Split right puts the new pane beside this one, split down below it — the `split-vertical`
 /// and `split-horizontal` bindings (`soprano_keys::split_direction`).
 pub fn split_right_direction() -> SplitDirection {
-    model_direction(soprano_keys::split_direction("split-vertical"), SplitDirection::Horizontal)
+    soprano_keys::split_direction("split-vertical").unwrap_or(SplitDirection::Horizontal)
 }
 
 pub fn split_down_direction() -> SplitDirection {
-    model_direction(soprano_keys::split_direction("split-horizontal"), SplitDirection::Vertical)
-}
-
-fn model_direction(
-    direction: Option<soprano_keys::SplitDirection>,
-    fallback: SplitDirection,
-) -> SplitDirection {
-    match direction {
-        Some(soprano_keys::SplitDirection::Horizontal) => SplitDirection::Horizontal,
-        Some(soprano_keys::SplitDirection::Vertical) => SplitDirection::Vertical,
-        None => fallback,
-    }
+    soprano_keys::split_direction("split-horizontal").unwrap_or(SplitDirection::Vertical)
 }
 
 // MARK: - Element
@@ -746,7 +735,7 @@ fn show_add_tab_menu(
 mod tests {
     use std::collections::HashSet;
 
-    use soprano_model::TerminalTarget;
+    use soprano_types::TerminalTarget;
     use soprano_types::{AgentStatus, AgentWaitingReason};
 
     use super::*;

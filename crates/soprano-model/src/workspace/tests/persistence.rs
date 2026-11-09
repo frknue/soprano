@@ -222,7 +222,7 @@ fn generated_placeholder_window_titles_are_replaced_and_custom_ones_kept() {
 #[test]
 fn snapshots_encode_the_keys_and_shapes_the_swift_app_wrote() {
     let mut workspace = Workspace::new();
-    workspace.split_pane(crate::SplitDirection::Horizontal, "pane-1").expect("split");
+    workspace.split_pane(soprano_types::SplitDirection::Horizontal, "pane-1").expect("split");
     let json = serde_json::to_value(workspace.snapshot_workspace()).expect("encodes");
 
     assert_eq!(json["id"], "last");

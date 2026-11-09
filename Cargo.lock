@@ -7908,6 +7908,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-web-kit",
  "serde_json",
+ "soprano-types",
  "soprano-ui",
  "url",
 ]

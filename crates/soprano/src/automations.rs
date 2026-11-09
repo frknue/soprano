@@ -12,9 +12,10 @@ use std::rc::Rc;
 
 use gpui::{App, AppContext, Entity, Window};
 use soprano_automations::{AutomationController, AutomationHost};
-use soprano_model::{TerminalTarget, Workspace};
+use soprano_model::Workspace;
 use soprano_notify::NotificationManager;
 use soprano_types::AgentStatus;
+use soprano_types::TerminalTarget;
 
 use crate::content::{ContentHost, PaneContent};
 use crate::workspace::WorkspaceHandle;

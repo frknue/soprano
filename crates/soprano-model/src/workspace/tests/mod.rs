@@ -11,7 +11,8 @@ mod sessions;
 
 use std::collections::HashSet;
 
-use super::{CloseOutcome, TerminalTarget, Workspace};
+use super::{CloseOutcome, Workspace};
+use soprano_types::TerminalTarget;
 
 /// The id of `pane_id`'s active tab.
 fn active_tab_id(workspace: &Workspace, pane_id: &str) -> String {

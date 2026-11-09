@@ -3,7 +3,7 @@
 use super::*;
 use crate::pane::{PaneContentKind, PaneType};
 use crate::session::WorkspaceSession;
-use crate::split_node::SplitDirection;
+use soprano_types::SplitDirection;
 use soprano_types::{AgentConversation, AgentStatus};
 
 fn active_tab(workspace: &Workspace) -> crate::PaneTab {

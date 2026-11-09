@@ -1,6 +1,6 @@
 [package]
 name = "soprano-types"
-description = "Small value types every Soprano crate shares: agent profiles and status, keybindings, colors."
+description = "Small value types every Soprano crate shares: agent profiles and status, keybindings, colors, pane layout addresses and directions."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use soprano_types::{NavigationDirection, SplitDirection};
 
 /// Smallest and largest share the first child of a split may take, in percent.
 const MIN_PERCENTAGE: f64 = 10.0;
@@ -103,47 +104,11 @@ impl From<BranchRepr> for SplitBranch {
     }
 }
 
-/// How a split divides its space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SplitDirection {
-    /// Side by side (left | right).
-    Horizontal,
-    /// Stacked (top / bottom).
-    Vertical,
-}
-
 /// One step of a path from the root of a layout to one of its nodes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SplitBranchSide {
     First,
     Second,
-}
-
-/// A direction to move focus or resize in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum NavigationDirection {
-    Left,
-    Right,
-    Up,
-    Down,
-}
-
-impl NavigationDirection {
-    pub fn is_horizontal(self) -> bool {
-        matches!(self, Self::Left | Self::Right)
-    }
-
-    /// Parses `left`, `right`, `up`, `down`.
-    pub fn from_raw(raw: &str) -> Option<Self> {
-        match raw {
-            "left" => Some(Self::Left),
-            "right" => Some(Self::Right),
-            "up" => Some(Self::Up),
-            "down" => Some(Self::Down),
-            _ => None,
-        }
-    }
 }
 
 /// A pane's rectangle in unit layout space (0…1 on both axes, y growing downward).

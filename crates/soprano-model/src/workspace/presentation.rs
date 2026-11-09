@@ -6,10 +6,11 @@ use std::time::SystemTime;
 
 use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, AgentWaitingReason};
 
-use super::{TerminalTarget, Workspace};
+use super::Workspace;
 use crate::pane::{PaneState, PaneTab};
 use crate::terminal_title;
 use crate::window::WorkspaceWindowState;
+use soprano_types::TerminalTarget;
 
 /// A pane and the letters that jump to it (`⌃⇧` + key).
 #[derive(Clone, Debug, PartialEq, Eq)]

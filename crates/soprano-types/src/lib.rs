@@ -4,6 +4,7 @@
 pub mod agent;
 pub mod color;
 pub mod keybinding;
+pub mod layout;
 
 pub use agent::{
     AgentCatalog, AgentConversation, AgentLaunch, AgentProfile, AgentStatus, AgentWaitingReason,
@@ -11,3 +12,4 @@ pub use agent::{
 };
 pub use color::Color;
 pub use keybinding::{KeyBinding, KeyBindingCategory, KeyBindingConfig, KeyBindingMode, KeybindingState};
+pub use layout::{NavigationDirection, SplitDirection, TerminalTarget};

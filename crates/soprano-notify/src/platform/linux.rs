@@ -145,7 +145,7 @@ impl NotificationBackend for LinuxBackend {
 
 #[cfg(test)]
 mod tests {
-    use soprano_model::TerminalTarget;
+    use soprano_types::TerminalTarget;
 
     use super::*;
 

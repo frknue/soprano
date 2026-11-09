@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use soprano_model::TerminalTarget;
 use soprano_platform::AppIdentity;
+use soprano_types::TerminalTarget;
 
 #[cfg(target_os = "macos")]
 #[path = "platform/macos.rs"]

@@ -4,7 +4,8 @@
 use super::*;
 use crate::agent_instance::AgentInstance;
 use crate::pane::{PaneState, PaneTab, PaneType};
-use crate::split_node::{NavigationDirection, SplitBranchSide, SplitDirection, SplitNode};
+use crate::split_node::{SplitBranchSide, SplitNode};
+use soprano_types::{NavigationDirection, SplitDirection};
 
 #[test]
 fn focusing_the_already_active_tab_does_not_emit_another_model_change() {

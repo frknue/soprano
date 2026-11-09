@@ -11,8 +11,9 @@ use crate::browser::{self, BrowserCommandRequest};
 use crate::launch::{self, LaunchDispatch, USAGE};
 use crate::markdown::{self, MarkdownCommandError, MarkdownCommandRequest};
 use crate::navigation;
-use crate::protocol::{NavigationDirection, Request, Response};
+use crate::protocol::{Request, Response};
 use crate::transport::{self, Endpoint, endpoint_for_pid};
+use soprano_types::NavigationDirection;
 
 /// What `main` does after [`run_cli`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

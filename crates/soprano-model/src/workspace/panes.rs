@@ -4,10 +4,12 @@ use std::path::Path;
 
 use soprano_types::AgentCatalog;
 
-use super::{TabSpec, TerminalTarget, Workspace, WorkspaceChange};
+use super::{TabSpec, Workspace, WorkspaceChange};
 use crate::agent_instance::AgentInstance;
 use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType};
-use crate::split_node::{NavigationDirection, SplitBranchSide, SplitDirection, SplitNode};
+use crate::split_node::{SplitBranchSide, SplitNode};
+use soprano_types::TerminalTarget;
+use soprano_types::{NavigationDirection, SplitDirection};
 
 impl Workspace {
     // MARK: - Pane spawning

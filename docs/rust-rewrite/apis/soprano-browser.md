@@ -8,8 +8,8 @@ The `soprano-browser` crate is in place. `cargo build -p soprano-browser --examp
 // View
 pub struct BrowserView;  // EventEmitter<BrowserEvent>, Focusable, Render
 impl BrowserView {
-    pub fn new(target: BrowserTarget, initial_url: Option<&str>, window: &mut Window, cx: &mut Context<Self>) -> Self;
-    pub fn target(&self) -> &BrowserTarget;
+    pub fn new(target: TerminalTarget, initial_url: Option<&str>, window: &mut Window, cx: &mut Context<Self>) -> Self;
+    pub fn target(&self) -> &TerminalTarget;
     pub fn url(&self) -> &str;
     pub fn is_loading(&self) -> bool;
     pub fn focus_preferred_control(&mut self, window: &mut Window, cx: &mut Context<Self>); // page if something loaded, else address bar
@@ -27,16 +27,16 @@ pub fn bind_keys(cx: &mut App); // secondary-l / -shift-l / -[ / -] / -r / -shif
 
 // Registry: a gpui Global, the port of BrowserPaneRegistry
 pub type BrowserRegistry = Registry<BrowserView>;
-impl Registry<V> { fn register(&mut self, BrowserTarget, WeakEntity<V>); fn unregister(&mut self, &BrowserTarget, EntityId); fn view_for(&mut self, &BrowserTarget) -> Option<Entity<V>> }
-impl BrowserRegistry { pub fn view(target: &BrowserTarget, cx: &mut App) -> Option<Entity<BrowserView>> }
+impl Registry<V> { fn register(&mut self, TerminalTarget, WeakEntity<V>); fn unregister(&mut self, &TerminalTarget, EntityId); fn view_for(&mut self, &TerminalTarget) -> Option<Entity<V>> }
+impl BrowserRegistry { pub fn view(target: &TerminalTarget, cx: &mut App) -> Option<Entity<BrowserView>> }
 
 // App-side routing, the port of BrowserAutomationController
-pub struct BrowserTarget { pub pane_id: String, pub tab_id: String }  // ::new(pane, tab)
+// Tabs are addressed by soprano_types::TerminalTarget { pane_id, tab_id }
 pub struct PaneTabs { pub active_tab_id: Option<String>, pub tabs: Vec<(String, bool /*is_web_browser*/)> }
-pub fn resolve_target(requested_pane_id: Option<&str>, active_pane_id: &str, ordered_leaf_ids: &[String], pane: impl Fn(&str) -> Option<PaneTabs>) -> Option<BrowserTarget>;
+pub fn resolve_target(requested_pane_id: Option<&str>, active_pane_id: &str, ordered_leaf_ids: &[String], pane: impl Fn(&str) -> Option<PaneTabs>) -> Option<TerminalTarget>;
 pub fn is_open_command(command: &str) -> bool;   // open | open-split | new
 pub fn no_target_message(requested: Option<&str>) -> String;
-pub fn unavailable_message(target: &BrowserTarget) -> String;
+pub fn unavailable_message(target: &TerminalTarget) -> String;
 pub const PANE_LIMIT_MESSAGE: &str;
 pub fn resolve_address(input: &str) -> Option<String>;  // also address::resolve
 pub const SCREENSHOT_UNSUPPORTED_MESSAGE: &str;

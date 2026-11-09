@@ -928,8 +928,9 @@ mod tests {
     use soprano_accounts::AccountsController;
     use soprano_config::{AppSettings, ConfigStore, DefaultKeybindings};
     use soprano_git::branch::GitBranchMonitor;
-    use soprano_model::{SessionManager, SplitDirection, Workspace};
+    use soprano_model::{SessionManager, Workspace};
     use soprano_platform::StateStore;
+    use soprano_types::SplitDirection;
 
     use super::*;
 

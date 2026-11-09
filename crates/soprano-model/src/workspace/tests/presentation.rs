@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::pane::PaneType;
-use crate::split_node::SplitDirection;
 use crate::workspace::{AgentDashboardEntry, WorkspaceChange};
+use soprano_types::SplitDirection;
 use soprano_types::{AgentStatus, AgentWaitingReason};
 
 // MARK: - Status bar location

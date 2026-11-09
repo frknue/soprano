@@ -38,13 +38,11 @@ The crate depends only on `soprano-types`, with no gpui. Everything below is re-
 - `fn split_direction(id) -> Option<SplitDirection>`
 - `fn dispatches_through_main_menu(id) -> bool`
 - `enum FocusedContent { Terminal, Browser, Editor, Automations, Other }` with `owns_chord(key, Modifiers)`
-- `enum SplitDirection`
 
 **`claims`**
-- `struct TerminalTarget { pane_id, tab_id }`
 - `trait PassthroughClaims { fn has_claims(&self, &TerminalTarget) -> bool }`, implemented for `()` and the registry.
 - `PaneNavigationClaimRegistry`: `enable`, `disable`, `synchronize(&HashSet<TerminalTarget>, generation: i64)`, and `handle_request(target, passthrough, source, direction, active) -> Option<NavigationDirection>`.
-- `enum NavigationDirection` with `parse`, `as_str`, `is_horizontal`.
+- `TerminalTarget`, `NavigationDirection` and `SplitDirection` come from `soprano_types` (`layout`).
 
 **`hints`**
 - `PaneHintAssignment { key, pane_id }`
@@ -104,7 +102,6 @@ Any `id` in the config. These are the ones `BindingCommand` knows:
 - **Copy mode:** Swift's terminal fed copy mode straight to the status bar. Here that goes through `copy_mode_changed`, and `display_state()` is whichever mode was reported last, as before.
 - **Timers:** the host runs them via `next_deadline()` / `tick(now)` instead of `Timer`.
 - **Windows that capture all keys:** `keys_captured` replaces the AppKit window checks (`leavesKeysAlone`).
-- **Mirror enums:** `NavigationDirection` and `SplitDirection` are small local copies of the soprano-model types, so this crate doesn't depend on that one.
 
 ## 4. Verification
 Run in the worktree:

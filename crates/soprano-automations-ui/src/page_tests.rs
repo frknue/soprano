@@ -12,7 +12,8 @@ use soprano_automations::{
     RunStatus, RunTrigger,
 };
 use soprano_config::{AppSettings, ConfigStore, DefaultKeybindings};
-use soprano_model::{TerminalTarget, Workspace};
+use soprano_model::Workspace;
+use soprano_types::TerminalTarget;
 
 use crate::editor::{AutomationEditor, EditorClosed, EditorSetup};
 use crate::page::{AutomationsPage, AutomationsPageEvent, Page};

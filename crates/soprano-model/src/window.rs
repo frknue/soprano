@@ -5,7 +5,8 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::split_node::{SplitBranchSide, SplitDirection, SplitNode};
+use crate::split_node::{SplitBranchSide, SplitNode};
+use soprano_types::SplitDirection;
 
 /// One tab of a logical window: a complete split layout of its own. Hidden tabs keep their
 /// panes, and so their terminals, alive.

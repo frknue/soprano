@@ -14,7 +14,8 @@ use soprano_automations::{
     FixedClock, RunStatus, RunTrigger, ScheduleState, scheduling,
 };
 use soprano_config::{AppSettings, Automation, ConfigStore, DefaultKeybindings};
-use soprano_model::{TerminalTarget, Workspace};
+use soprano_model::Workspace;
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentLaunch, AgentStatus, AgentWaitingReason};
 
 #[derive(Default)]

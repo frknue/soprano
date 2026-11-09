@@ -6,7 +6,8 @@
 //! display and banner methods are required; the workspace methods have defaults built on the
 //! model's automation API, which a host may override.
 
-use soprano_model::{AgentInstance, CloseOutcome, TerminalTarget, Workspace};
+use soprano_model::{AgentInstance, CloseOutcome, Workspace};
+use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentLaunch};
 
 pub trait AutomationHost {

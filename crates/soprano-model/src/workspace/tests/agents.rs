@@ -3,8 +3,9 @@
 use super::*;
 use crate::pane::PaneType;
 use crate::session::{SavedPane, SavedTab, WorkspaceSession};
-use crate::split_node::{SplitDirection, SplitNode};
+use crate::split_node::SplitNode;
 use crate::workspace::{TerminalLifecycleAction, WorkspaceEvent};
+use soprano_types::SplitDirection;
 use soprano_types::{AgentConversation, AgentStatus};
 
 fn lifecycle(workspace: &mut Workspace) -> Vec<TerminalLifecycleAction> {

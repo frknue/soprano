@@ -13,6 +13,7 @@ soprano-ui = { path = "../soprano-ui" }
 gpui-webview = "=0.9.1"
 wry = { package = "lb-wry", version = "0.53.3" }
 serde_json.workspace = true
+soprano-types = { path = "../soprano-types" }
 async-channel = "2"
 url = "2"
 

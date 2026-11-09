@@ -11,10 +11,9 @@ pub mod event;
 pub mod hints;
 pub mod resolver;
 
-pub use claims::{NavigationDirection, PaneNavigationClaimRegistry, PassthroughClaims, TerminalTarget};
+pub use claims::{PaneNavigationClaimRegistry, PassthroughClaims};
 pub use command::{
-    BindingCommand, FocusedContent, SplitDirection, dispatches_through_main_menu, launched_agent_id,
-    split_direction,
+    BindingCommand, FocusedContent, dispatches_through_main_menu, launched_agent_id, split_direction,
 };
 pub use event::{ESCAPE, KeyEvent, Modifiers, Platform, SHIFTED_SYMBOLS, binding_key, is_shifted_symbol};
 pub use hints::{PaneHintAssignment, PaneHintStep, pane_hint_step};

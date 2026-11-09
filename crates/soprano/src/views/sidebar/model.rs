@@ -493,8 +493,9 @@ pub fn agent_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soprano_model::{SplitDirection, TerminalTarget, WorkspaceSession};
+    use soprano_model::WorkspaceSession;
     use soprano_platform::StateStore;
+    use soprano_types::{SplitDirection, TerminalTarget};
 
     const HOME: &str = "/Users/me";
 

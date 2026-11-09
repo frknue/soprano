@@ -3,9 +3,10 @@
 
 use std::path::Path;
 
-use super::{TabSpec, TerminalTarget, Workspace, WorkspaceChange};
+use super::{TabSpec, Workspace, WorkspaceChange};
 use crate::file_url;
 use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType};
+use soprano_types::TerminalTarget;
 
 impl Workspace {
     // MARK: - Markdown readers

@@ -20,7 +20,7 @@ mod sessions;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use soprano_types::AgentCatalog;
+use soprano_types::{AgentCatalog, TerminalTarget};
 
 use crate::agent_instance::AgentInstance;
 use crate::file_url;
@@ -30,19 +30,6 @@ use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
 pub use closing::{CloseOutcome, CloseRequest};
 pub use presentation::{ActiveLocation, ActivitySummary, AgentDashboardEntry, PaneShortcut};
-
-/// One tab of one pane: the exact address of a terminal surface, agent or document.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct TerminalTarget {
-    pub pane_id: String,
-    pub tab_id: String,
-}
-
-impl TerminalTarget {
-    pub fn new(pane_id: impl Into<String>, tab_id: impl Into<String>) -> Self {
-        Self { pane_id: pane_id.into(), tab_id: tab_id.into() }
-    }
-}
 
 /// A token for one Codex surface's readiness fallback. Monotonic values prevent an older
 /// surface's fallback from completing a restarted or same-id replacement agent.
@@ -618,10 +605,10 @@ impl Workspace {
         let updated = match window.layout() {
             None => SplitNode::leaf(&pane_id),
             Some(layout) => layout
-                .inserting_split(&active_pane_id, &pane_id, crate::SplitDirection::Horizontal)
+                .inserting_split(&active_pane_id, &pane_id, soprano_types::SplitDirection::Horizontal)
                 .unwrap_or_else(|| {
                     SplitNode::split(
-                        crate::SplitDirection::Horizontal,
+                        soprano_types::SplitDirection::Horizontal,
                         layout.clone(),
                         SplitNode::leaf(&pane_id),
                         50.0,
