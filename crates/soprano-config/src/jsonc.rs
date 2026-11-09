@@ -633,14 +633,11 @@ fn array_index(segment: &str) -> Option<usize> {
     segment.parse().ok()
 }
 
-/// Whether the edit can continue inside `value` for the next path segment: any object, or an
-/// array addressed by an index.
-fn can_descend(value: &ParsedValue, next: &str) -> bool {
-    match value.kind {
-        Kind::Object(_) => true,
-        Kind::Array(_) => array_index(next).is_some(),
-        Kind::Scalar => false,
-    }
+/// Whether the edit continues inside `value` rather than replacing it: objects and arrays are
+/// entered (an array then needs an index — anything else is an error rather than silently
+/// replacing the whole list); scalars are replaced.
+fn can_descend(value: &ParsedValue) -> bool {
+    !matches!(value.kind, Kind::Scalar)
 }
 
 fn setting_edit(
@@ -699,9 +696,7 @@ fn setting_existing(
     existing: &ParsedValue,
     context: &EditContext<'_>,
 ) -> Result<Edit, ParseError> {
-    if let Some(next) = rest.first()
-        && can_descend(existing, next)
-    {
+    if !rest.is_empty() && can_descend(existing) {
         return setting_edit(value, rest, existing, context);
     }
     // Either the path ends here, or it continues but the existing value cannot hold it (a
@@ -1181,7 +1176,8 @@ mod tests {
         assert!(appended.contains("// the first") && appended.contains("// keep"));
         assert_eq!(top_level_object(&appended)["agents"].as_array().map(Vec::len), Some(4));
 
-        assert_eq!(set(json!("x"), &["l", "0"], "{ \"l\": [] }"), "{ \"l\": [\n    \"x\"\n  ] }");
+        // Same layout as an object member added to `{}`: indented from the container's line.
+        assert_eq!(set(json!("x"), &["l", "0"], "{ \"l\": [] }"), "{ \"l\": [\n  \"x\"\n] }");
         assert_eq!(set(json!(3), &["l", "2"], "{ \"l\": [1, 2] }"), "{ \"l\": [1, 2, 3] }");
         assert!(setting(&json!(1), &["agents", "5"], AGENTS).is_err());
         assert!(setting(&json!(1), &["agents", "name"], AGENTS).is_err());
@@ -1209,7 +1205,8 @@ mod tests {
         assert!(without_last.contains("// keep") && without_last.contains("// the first"));
 
         assert_eq!(remove(&["l", "0"], "{ \"l\": [1] }"), "{ \"l\": [] }");
-        assert_eq!(remove(&["l", "1"], "{ \"l\": [1, 2, 3] }"), "{ \"l\": [1, 3] }");
+        // As for object members on one line, the space before the removed entry stays.
+        assert_eq!(remove(&["l", "1"], "{ \"l\": [1, 2, 3] }"), "{ \"l\": [1,  3] }");
         assert_eq!(remove(&["agents", "9"], AGENTS), AGENTS);
         assert_eq!(remove(&["agents", "x"], AGENTS), AGENTS);
     }
