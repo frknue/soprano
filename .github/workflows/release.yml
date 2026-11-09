@@ -12,52 +12,45 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # crates/ghostty-sys builds libghostty-vt with exactly this Zig.
+  ZIG_VERSION: 0.16.0
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
 jobs:
   preflight:
     name: Validate release
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
       - name: Check out Soprano
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Validate tag, version, and changelog
         id: version
         run: |
           set -euo pipefail
 
-          short_version="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleShortVersionString" \
-              Support/Info.plist
-          )"
-          build_version="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleVersion" \
-              Support/Info.plist
-          )"
+          version="$(./scripts/cargo-version.sh)"
 
-          if [[ "$GITHUB_REF_NAME" != "v$short_version" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match Info.plist version $short_version." >&2
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match Cargo.toml version $version." >&2
             exit 1
           fi
-          if [[ "$build_version" != "$short_version" ]]; then
-            echo "CFBundleVersion $build_version does not match $short_version." >&2
-            exit 1
-          fi
-          if ! grep -Fq "## [$short_version] -" CHANGELOG.md; then
-            echo "CHANGELOG.md has no release heading for $short_version." >&2
+          if ! grep -Fq "## [$version] -" CHANGELOG.md; then
+            echo "CHANGELOG.md has no release heading for $version." >&2
             exit 1
           fi
 
-          echo "value=$short_version" >> "$GITHUB_OUTPUT"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
 
   build:
-    name: Build ${{ matrix.architecture }}
+    name: Build macOS ${{ matrix.architecture }}
     needs: preflight
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
     strategy:
       fail-fast: false
       matrix:
@@ -71,34 +64,27 @@ jobs:
       - name: Check out Soprano and Ghostty
         uses: actions/checkout@v7
         with:
-          submodules: recursive
+          persist-credentials: false
+          submodules: true
 
-      - name: Install Homebrew Swift and compatible Zig
-        run: |
-          set -euo pipefail
-          brew install swift zig@0.15
-          echo "$(brew --prefix swift)/bin" >> "$GITHUB_PATH"
-          echo "$(brew --prefix zig@0.15)/bin" >> "$GITHUB_PATH"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Ensure the Metal toolchain is available
-        run: |
-          set -euo pipefail
-          xcodebuild -version
-          if ! xcrun --find metal >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
-      - name: Build libghostty
-        run: |
-          set -euo pipefail
-          ./scripts/build-ghostty.sh
+      # Codeberg's archive endpoint hangs; fetch ghostty's Codeberg packages through git.
+      - name: Prefetch Zig dependencies
+        run: ./scripts/prefetch-zig-deps.sh
 
       - name: Build Soprano
-        run: swift build -c release
+        run: cargo build -p soprano --release --locked
 
       - name: Run tests
         if: matrix.architecture == 'arm64'
-        run: swift test
+        run: cargo test --workspace --locked
 
       - name: Prepare build output
         env:
@@ -108,19 +94,12 @@ jobs:
 
           artifact_dir="$RUNNER_TEMP/soprano-$ARCHITECTURE"
           mkdir -p "$artifact_dir"
-          cp ".build/release/Soprano" "$artifact_dir/Soprano-$ARCHITECTURE"
+          cp "target/release/soprano" "$artifact_dir/Soprano-$ARCHITECTURE"
 
           actual_architecture="$(lipo -archs "$artifact_dir/Soprano-$ARCHITECTURE")"
           if [[ "$actual_architecture" != "$ARCHITECTURE" ]]; then
             echo "Expected $ARCHITECTURE, built $actual_architecture." >&2
             exit 1
-          fi
-
-          if [[ "$ARCHITECTURE" == "arm64" ]]; then
-            tar -czf "$artifact_dir/release-resources.tar.gz" \
-              .build/release/Soprano_Soprano.bundle \
-              ghostty/zig-out/share/ghostty \
-              ghostty/zig-out/share/terminfo
           fi
 
       - name: Upload build output
@@ -131,20 +110,40 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  release:
-    name: Package and publish
-    needs:
-      - preflight
-      - build
-    runs-on: macos-15
-    permissions:
-      contents: write
+  build-linux:
+    name: Build Linux ${{ matrix.architecture }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu: the binary links the system glibc, so this sets
+          # how old a distribution it runs on.
+          - architecture: x86_64
+            runner: ubuntu-22.04
+          - architecture: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Check out Soprano
+      - name: Check out Soprano and Ghostty
         uses: actions/checkout@v7
         with:
-          # npm ci runs install scripts; the token reaches only `gh` below.
+          # npm ci runs install scripts; no token reaches this job's later steps.
           persist-credentials: false
+          submodules: true
+
+      - name: Linux build dependencies
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $apt update
+          sudo apt-get $apt install -y --no-install-recommends \
+            pkg-config clang libclang-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev libfontconfig-dev libfreetype-dev \
+            libdbus-1-dev libssl-dev \
+            ncurses-bin imagemagick
 
       - name: Install Node.js for the editable web app
         uses: actions/setup-node@v6
@@ -152,6 +151,132 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Prefetch Zig dependencies
+        run: ./scripts/prefetch-zig-deps.sh
+
+      - name: Build Soprano
+        run: cargo build -p soprano --release --locked
+
+      - name: Package the tarball
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SOPRANO_BUILD_PROFILE: release
+          # The archive is relocatable: its desktop entry runs `soprano` from PATH.
+          SOPRANO_DESKTOP_EXEC: soprano
+        run: |
+          set -euo pipefail
+
+          name="soprano-$VERSION-linux-$ARCHITECTURE"
+          package_root="$RUNNER_TEMP/package"
+          mkdir -p "$package_root" dist
+          ./scripts/package-linux.sh "$package_root/$name"
+
+          test -x "$package_root/$name/bin/soprano"
+          test -f "$package_root/$name/share/soprano/Soprano_Soprano.bundle/SopranoCopyMode.conf"
+          test -f "$package_root/$name/share/soprano/terminfo/x/xterm-ghostty"
+          test -f "$package_root/$name/share/applications/soprano.desktop"
+
+          tar -czf "dist/$name.tar.gz" -C "$package_root" "$name"
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-${{ matrix.architecture }}
+          path: dist/soprano-${{ needs.preflight.outputs.version }}-linux-${{ matrix.architecture }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows x64
+    needs: preflight
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out Soprano and Ghostty
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+
+      # bindgen's libclang: the runner image's LLVM.
+      - name: Windows build dependencies
+        run: echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+
+      - name: Install Node.js for the editable web app
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Prefetch Zig dependencies
+        run: ./scripts/prefetch-zig-deps.sh
+
+      - name: Build Soprano
+        run: cargo build -p soprano --release --locked
+
+      - name: Package the zip
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Configuration release -OutputDir "$PWD\dist"
+
+      - name: Upload zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64
+          path: dist/soprano-${{ needs.preflight.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Package and publish
+    needs:
+      - preflight
+      - build
+      - build-linux
+      - build-windows
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out Soprano and Ghostty
+        uses: actions/checkout@v7
+        with:
+          # npm ci runs install scripts; the token reaches only `gh` below.
+          persist-credentials: false
+          submodules: true
+
+      - name: Install Node.js for the editable web app
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Packaging compiles Ghostty's terminfo source with Zig.
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Download arm64 build
         uses: actions/download-artifact@v8
@@ -165,19 +290,31 @@ jobs:
           name: build-x86_64
           path: artifacts/x86_64
 
+      - name: Download Linux packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download Windows package
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-x64
+          path: dist
+
       - name: Assemble universal release build
         run: |
           set -euo pipefail
 
-          mkdir -p .build/release
+          mkdir -p target/release
           lipo -create \
             artifacts/arm64/Soprano-arm64 \
             artifacts/x86_64/Soprano-x86_64 \
-            -output .build/release/Soprano
-          chmod 755 .build/release/Soprano
-          tar -xzf artifacts/arm64/release-resources.tar.gz
+            -output target/release/soprano
+          chmod 755 target/release/soprano
 
-          architectures="$(lipo -archs .build/release/Soprano)"
+          architectures="$(lipo -archs target/release/soprano)"
           if [[ " $architectures " != *" arm64 "* || " $architectures " != *" x86_64 "* ]]; then
             echo "Universal build is incomplete: $architectures" >&2
             exit 1
@@ -186,8 +323,6 @@ jobs:
       - name: Package the ad-hoc-signed app
         env:
           SOPRANO_CODESIGN_IDENTITY: "-"
-          SOPRANO_GHOSTTY_RESOURCES_DIR: ${{ github.workspace }}/ghostty/zig-out/share/ghostty
-          SOPRANO_STRICT_GHOSTTY_RESOURCES: "1"
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -197,6 +332,7 @@ jobs:
             "com.soprano.app" \
             "Soprano"
           test -f "$PWD/dist/Soprano.app/Contents/Resources/Soprano_Soprano.bundle/SopranoCopyMode.conf"
+          test -f "$PWD/dist/Soprano.app/Contents/Resources/terminfo/78/xterm-ghostty"
           test ! -e "$PWD/dist/Soprano.app/Soprano_Soprano.bundle"
 
       - name: Create release disk image and cask
@@ -227,6 +363,9 @@ jobs:
             "dist/Soprano-$VERSION.dmg" \
             "dist/Soprano-$VERSION.dmg.sha256" \
             "dist/soprano.rb" \
+            "dist/soprano-$VERSION-linux-x86_64.tar.gz" \
+            "dist/soprano-$VERSION-linux-aarch64.tar.gz" \
+            "dist/soprano-$VERSION-windows-x64.zip" \
             --verify-tag \
             --title "Soprano $VERSION" \
             --notes "⚠️ This free release is ad-hoc signed and cannot be notarized without a paid Apple Developer membership. On first launch, macOS may require approval under System Settings → Privacy & Security → Open Anyway." \

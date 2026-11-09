@@ -1,8 +1,10 @@
 [package]
 name = "soprano-keys"
+description = "UI-independent keybinding resolver: prefix mode, direct chords, pane hints, navigation passthrough."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+soprano-types = { path = "../soprano-types" }

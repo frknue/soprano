@@ -10,11 +10,15 @@ if [[ "$install_root" != /* || "$install_root" == "/" ]]; then
     exit 2
 fi
 
-export PATH="/opt/homebrew/opt/swift/bin:$PATH"
+# libghostty-vt builds with Zig 0.16; prefer Homebrew's keg-only zig@0.16 when present.
+if [[ -z "${ZIG:-}" && -x /opt/homebrew/opt/zig@0.16/bin/zig ]]; then
+    export ZIG=/opt/homebrew/opt/zig@0.16/bin/zig
+fi
 
 echo "Building Soprano for release..."
 cd "$repo_root"
-swift build -c release
+"$script_dir/prefetch-zig-deps.sh"
+cargo build -p soprano --release
 
 installed_app="$install_root/Soprano.app"
 "$script_dir/package-app.sh" \

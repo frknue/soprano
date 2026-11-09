@@ -1,8 +1,19 @@
 [package]
 name = "soprano-launch"
+description = "How a pane's process starts: argv, cwd and environment for shells, agents and chat ACP servers; login-shell command runner."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde_json.workspace = true
+regex = "1"
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

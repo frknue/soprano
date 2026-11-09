@@ -1,25 +1,25 @@
 //! The user's login shell.
 
+/// The user's shell on Windows: `pwsh.exe` when installed, else `powershell.exe`.
+#[cfg(windows)]
+pub fn user_shell() -> String {
+    windows_shell()
+}
+
 /// The user's shell: `$SHELL` when set, else the account's shell from the password database
 /// (a GUI launch on macOS may not carry `$SHELL`), else `/bin/zsh` on macOS and `/bin/sh`
-/// elsewhere. On Windows: `pwsh.exe` when installed, else `powershell.exe`.
+/// elsewhere.
+#[cfg(unix)]
 pub fn user_shell() -> String {
-    #[cfg(windows)]
+    if let Ok(shell) = std::env::var("SHELL")
+        && !shell.trim().is_empty()
     {
-        return windows_shell();
+        return shell;
     }
-    #[cfg(unix)]
-    {
-        if let Ok(shell) = std::env::var("SHELL") {
-            if !shell.trim().is_empty() {
-                return shell;
-            }
-        }
-        if let Some(shell) = passwd_shell() {
-            return shell;
-        }
-        if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/sh".into() }
+    if let Some(shell) = passwd_shell() {
+        return shell;
     }
+    if cfg!(target_os = "macos") { "/bin/zsh".into() } else { "/bin/sh".into() }
 }
 
 #[cfg(unix)]

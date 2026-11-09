@@ -14,15 +14,27 @@ if [[ $# -eq 1 ]]; then
     launch_app=false
 fi
 
+target_dir="${CARGO_TARGET_DIR:-}"
+if [[ -n "$target_dir" && ( "$target_dir" != /* || "$target_dir" == "/" ) ]]; then
+    echo "CARGO_TARGET_DIR must be an absolute directory other than /." >&2
+    exit 2
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-export PATH="/opt/homebrew/opt/swift/bin:$PATH"
+target_dir="${target_dir:-$repo_root/target}"
+
+# libghostty-vt builds with Zig 0.16; prefer Homebrew's keg-only zig@0.16 when present.
+if [[ -z "${ZIG:-}" && -x /opt/homebrew/opt/zig@0.16/bin/zig ]]; then
+    export ZIG=/opt/homebrew/opt/zig@0.16/bin/zig
+fi
 
 echo "Building Soprano Dev..."
 cd "$repo_root"
-swift build
+"$script_dir/prefetch-zig-deps.sh"
+cargo build -p soprano
 
-dev_app="$repo_root/.build/debug/Soprano Dev.app"
+dev_app="$target_dir/debug/Soprano Dev.app"
 "$script_dir/package-app.sh" \
     debug \
     "$dev_app" \

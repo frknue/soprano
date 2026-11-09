@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push supersedes an older run of the same PR or branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # crates/ghostty-sys builds libghostty-vt with exactly this Zig.
+  ZIG_VERSION: 0.16.0
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out Soprano
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check out Ghostty
+        run: git submodule update --init ghostty
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        # A stuck package mirror fails here in minutes, not at the job's limit.
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $apt update
+          sudo apt-get $apt install -y --no-install-recommends \
+            pkg-config clang libclang-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev mesa-vulkan-drivers libfontconfig-dev libfreetype-dev \
+            libdbus-1-dev libssl-dev
+
+      # bindgen's libclang: the runner image's LLVM.
+      - name: Windows build dependencies
+        if: runner.os == 'Windows'
+        run: echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+
+      # Codeberg's archive endpoint hangs; fetch ghostty's Codeberg packages through git.
+      - name: Prefetch Zig dependencies
+        run: ./scripts/prefetch-zig-deps.sh
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' }}
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Check shell scripts
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          for script in scripts/*.sh; do
+            bash -n "$script"
+          done

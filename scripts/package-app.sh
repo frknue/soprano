@@ -1,4 +1,6 @@
 #!/bin/bash
+# Packages the cargo-built `soprano` binary as a signed macOS app bundle.
+# Build first: cargo build -p soprano [--release]
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
@@ -21,136 +23,57 @@ if [[ "$output_app" != /* || "$output_app" != *.app ]]; then
     exit 2
 fi
 
+target_dir="${CARGO_TARGET_DIR:-}"
+if [[ -n "$target_dir" && ( "$target_dir" != /* || "$target_dir" == "/" ) ]]; then
+    echo "CARGO_TARGET_DIR must be an absolute directory other than /." >&2
+    exit 2
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-build_dir="$repo_root/.build/$configuration"
+target_dir="${target_dir:-$repo_root/target}"
 output_parent="$(dirname "$output_app")"
 
-binary_path="$build_dir/Soprano"
-resource_bundle="$build_dir/Soprano_Soprano.bundle"
+binary_path="$target_dir/$configuration/soprano"
 info_plist="$repo_root/Support/Info.plist"
-app_icon="$repo_root/Sources/Soprano/Resources/AppIcon.icns"
-soprano_license="$repo_root/LICENSE"
-ghostty_license="$repo_root/Support/Licenses/LICENSE-ghostty"
-swift_cmark_license="$repo_root/Support/Licenses/LICENSE-swift-cmark"
-web_source="$repo_root/web"
-web_launcher="$repo_root/Support/bin/omp"
+app_icon="$repo_root/resources/icons/AppIcon.icns"
 
-ghostty_resources_dir=""
-ghostty_resource_candidates=(
-    "${SOPRANO_GHOSTTY_RESOURCES_DIR:-}"
-    "$repo_root/ghostty/zig-out/share/ghostty"
-    "${GHOSTTY_RESOURCES_DIR:-}"
-    "/Applications/Ghostty.app/Contents/Resources/ghostty"
-)
+# A pane inherits its Soprano's environment, so CARGO_TARGET_DIR can point into an installed
+# Soprano.app. Packaging from there would copy the installed app's executable straight back
+# into the new bundle instead of the one cargo just built. Refuse inputs from a Soprano bundle.
+soprano_bundle_containing() {
+    local path="$1"
 
-# Soprano exports GHOSTTY_RESOURCES_DIR into every pane, pointing at its own bundle. Packaging
-# from inside a Soprano pane would therefore copy the runtime resources out of the previously
-# installed Soprano and straight back into the new one, forwarding them from build to build
-# without them ever coming from ghostty again. Refuse to read resources out of a Soprano bundle.
-is_soprano_bundle() {
-    local resources_dir="$1"
-
-    case "$resources_dir" in
-        */Contents/Resources/ghostty) ;;
-        *) return 1 ;;
-    esac
-
-    local bundle="${resources_dir%/Contents/Resources/ghostty}"
-    local identifier
-
-    identifier="$(
-        defaults read "$bundle/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true
-    )"
-
-    case "$identifier" in
-        com.soprano.*) return 0 ;;
-        *) return 1 ;;
-    esac
+    while [[ "$path" == */* && "$path" != "/" ]]; do
+        if [[ "$path" == *.app && -f "$path/Contents/Info.plist" ]]; then
+            local identifier
+            identifier="$(
+                defaults read "$path/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || true
+            )"
+            if [[ "$identifier" == com.soprano.* ]]; then
+                printf '%s\n' "$path"
+                return 0
+            fi
+        fi
+        path="$(dirname "$path")"
+    done
+    return 1
 }
 
-for candidate in "${ghostty_resource_candidates[@]}"; do
-    if [[ -n "$candidate" \
-        && -d "$candidate/themes" \
-        && -d "$candidate/shell-integration" \
-        && -f "$(dirname "$candidate")/terminfo/78/xterm-ghostty" ]]; then
-        if is_soprano_bundle "$candidate"; then
-            echo "Ignoring Ghostty resources inside a Soprano bundle: $candidate"
-            continue
-        fi
-
-        ghostty_resources_dir="$candidate"
-        break
-    fi
-done
-
-if [[ -z "$ghostty_resources_dir" ]]; then
-    echo "Unable to find complete Ghostty runtime resources." >&2
-    echo "Build Ghostty first, install Ghostty.app, or set SOPRANO_GHOSTTY_RESOURCES_DIR." >&2
+if bundle="$(soprano_bundle_containing "$binary_path")"; then
+    echo "Refusing to package an executable from inside the Soprano bundle $bundle." >&2
+    echo "Unset CARGO_TARGET_DIR or point it at a cargo target directory." >&2
     exit 1
 fi
 
-ghostty_terminfo_dir="$(dirname "$ghostty_resources_dir")/terminfo"
-
-# The runtime resources (themes, shell-integration, terminfo) are found separately from the
-# library Soprano links, so they can silently come from a different Ghostty version. That is
-# mostly harmless for themes, but a mismatched terminfo or shell-integration breaks key
-# handling and the prompt markers pane status depends on. Report what was picked, and say so
-# when it does not match the linked library.
-echo "Ghostty runtime resources: $ghostty_resources_dir"
-
-linked_ghostty_version=""
-if [[ -f "$repo_root/Support/ghostty-version.txt" ]]; then
-    linked_ghostty_version="$(tr -d '[:space:]' < "$repo_root/Support/ghostty-version.txt")"
-fi
-
-resources_ghostty_version=""
-if [[ "$ghostty_resources_dir" == "$repo_root/ghostty/zig-out/share/ghostty" ]]; then
-    resources_ghostty_version="$linked_ghostty_version"
-elif [[ "$ghostty_resources_dir" == *"/Ghostty.app/Contents/Resources/ghostty" ]]; then
-    resources_app="${ghostty_resources_dir%/Contents/Resources/ghostty}"
-    resources_ghostty_version="$(
-        defaults read "$resources_app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true
-    )"
-fi
-
-if [[ -n "$linked_ghostty_version" && -n "$resources_ghostty_version" ]]; then
-    # Compare only X.Y.Z: the linked version carries a channel and commit suffix that a
-    # released Ghostty.app never has.
-    linked_release="${linked_ghostty_version%%-*}"
-    resources_release="${resources_ghostty_version%%-*}"
-
-    if [[ "$linked_release" != "$resources_release" ]]; then
-        echo "Warning: resources are Ghostty $resources_ghostty_version but the linked" >&2
-        echo "         libghostty is $linked_ghostty_version." >&2
-        echo "         Build the submodule (scripts/build-ghostty.sh) so both come from one" >&2
-        echo "         source, or set SOPRANO_GHOSTTY_RESOURCES_DIR to a matching directory." >&2
-
-        if [[ "${SOPRANO_STRICT_GHOSTTY_RESOURCES:-0}" != "0" ]]; then
-            echo "SOPRANO_STRICT_GHOSTTY_RESOURCES is set; refusing to package a mismatch." >&2
-            exit 1
-        fi
-    fi
-elif [[ -z "$resources_ghostty_version" ]]; then
-    echo "Note: could not determine the version of those resources."
-fi
-
-for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" \
-    "$soprano_license" "$ghostty_license" "$swift_cmark_license" \
-    "$web_launcher" "$web_source/package-lock.json"; do
+for required_path in "$binary_path" "$info_plist" "$app_icon"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing build artifact: $required_path" >&2
         exit 1
     fi
 done
 
-# Build our editable web fork, never download an upstream app at command runtime.
-"$script_dir/build-web.sh"
-web_standalone="$web_source/.next/standalone"
-if [[ ! -f "$web_standalone/server.js" ]]; then
-    echo "Missing standalone omp web server: $web_standalone/server.js" >&2
-    exit 1
-fi
+version="$("$script_dir/cargo-version.sh")"
 
 mkdir -p "$output_parent"
 stage_dir="$(mktemp -d "$output_parent/.soprano-package.XXXXXX")"
@@ -162,36 +85,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources/bin"
-cp "$binary_path" "$staged_app/Contents/MacOS/Soprano"
-ln -s "../../MacOS/Soprano" "$staged_app/Contents/Resources/bin/soprano"
-cp "$web_launcher" "$staged_app/Contents/Resources/bin/omp"
-chmod +x "$staged_app/Contents/Resources/bin/omp"
-web_destination="$staged_app/Contents/Resources/web"
-mkdir -p "$web_destination"
-# Standalone tracing may already include these directories. Merge their contents,
-# and leave development tests and Windows executables out of the macOS bundle.
-tar -C "$web_standalone" --exclude '*.test.mjs' --exclude '*.exe' -cf - . \
-    | tar -C "$web_destination" -xf -
-ditto "$web_source/.next/static" "$web_destination/.next/static"
-tar -C "$web_source" --exclude '*.test.mjs' --exclude '*.exe' -cf - bin lib public \
-    | tar -C "$web_destination" -xf -
-mkdir -p "$staged_app/Contents/Resources/web/scripts"
-cp "$web_source/scripts/macos-launchd.mts" "$staged_app/Contents/Resources/web/scripts/"
-cp "$web_source/package.json" "$web_source/package-lock.json" "$web_source/LICENSE" \
-    "$staged_app/Contents/Resources/web/"
-cp "$info_plist" "$staged_app/Contents/Info.plist"
-cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
-cp "$soprano_license" "$staged_app/Contents/Resources/LICENSE"
-cp "$ghostty_license" "$staged_app/Contents/Resources/LICENSE-ghostty"
-cp "$swift_cmark_license" "$staged_app/Contents/Resources/LICENSE-swift-cmark"
-cp -R "$resource_bundle" "$staged_app/Contents/Resources/Soprano_Soprano.bundle"
-cp -R "$ghostty_resources_dir" "$staged_app/Contents/Resources/ghostty"
-cp -R "$ghostty_terminfo_dir" "$staged_app/Contents/Resources/terminfo"
+resources="$staged_app/Contents/Resources"
+mkdir -p "$staged_app/Contents/MacOS"
+"$script_dir/stage-resources.sh" macos "$resources"
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_identifier" "$staged_app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleName $bundle_name" "$staged_app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string $bundle_name" "$staged_app/Contents/Info.plist"
+cp "$binary_path" "$staged_app/Contents/MacOS/Soprano"
+ln -s "../../MacOS/Soprano" "$resources/bin/soprano"
+cp "$app_icon" "$resources/AppIcon.icns"
+
+plist="$staged_app/Contents/Info.plist"
+cp "$info_plist" "$plist"
+/usr/bin/plutil -replace CFBundleExecutable -string "Soprano" "$plist"
+/usr/bin/plutil -replace CFBundleIdentifier -string "$bundle_identifier" "$plist"
+/usr/bin/plutil -replace CFBundleName -string "$bundle_name" "$plist"
+/usr/bin/plutil -replace CFBundleDisplayName -string "$bundle_name" "$plist"
+/usr/bin/plutil -replace CFBundleIconFile -string "AppIcon" "$plist"
+/usr/bin/plutil -replace CFBundleShortVersionString -string "$version" "$plist"
+/usr/bin/plutil -replace CFBundleVersion -string "$version" "$plist"
+/usr/bin/plutil -lint "$plist" >/dev/null
 
 "$script_dir/sign-app.sh" "$staged_app"
 

@@ -6,3 +6,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+soprano-platform = { path = "../soprano-platform" }
+notify = "8.2"
+
+[dev-dependencies]
+tempfile = "3"
