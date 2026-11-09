@@ -8196,7 +8196,9 @@ dependencies = [
  "soprano-platform",
  "soprano-types",
  "tracing",
+ "unicode-general-category",
  "unicode-normalization",
+ "unicode-segmentation",
 ]
 
 [[package]]

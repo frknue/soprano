@@ -5,6 +5,7 @@ use gpui::{
     App, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::fonts::{self, size};
 use crate::theme::ActiveSopranoTheme;
@@ -14,29 +15,56 @@ fn normalized(name: &str) -> String {
     name.nfkc().collect::<String>().trim().to_owned()
 }
 
-/// Two glyphs for a project name: the first letter, then the first digit after it, else the
-/// first letter of the last word, else the word's last letter. "PR" without letters.
+/// Swift's `CharacterSet.letters ∪ .decimalDigits`: the L* and M* categories and Nd.
+fn is_word_scalar(c: char) -> bool {
+    use unicode_general_category::{GeneralCategory as G, get_general_category};
+    matches!(
+        get_general_category(c),
+        G::UppercaseLetter
+            | G::LowercaseLetter
+            | G::TitlecaseLetter
+            | G::ModifierLetter
+            | G::OtherLetter
+            | G::NonspacingMark
+            | G::SpacingMark
+            | G::EnclosingMark
+            | G::DecimalNumber
+    )
+}
+
+/// Han ideographs with a Unicode numeric type (Unihan kPrimaryNumeric, kAccountingNumeric and
+/// kOtherNumeric), which Swift's `Character.isNumber` counts though their category is Lo.
+const HAN_NUMERALS: &str =
+    "〇零一二三四五六七八九十百千万萬亿億兆壹贰貳弍叁參弎肆伍陆陸柒捌玖拾佰仟廿卅卌两兩弌";
+
+/// `Character.isNumber`: the cluster's first scalar has a numeric type (Nd, Nl, No, or a
+/// numeric Han ideograph).
+fn is_number(grapheme: &str) -> bool {
+    grapheme.chars().next().is_some_and(|c| c.is_numeric() || HAN_NUMERALS.contains(c))
+}
+
+/// Two glyphs for a project name (`ShellProjectIdentity.monogram`), by grapheme cluster: the
+/// first one, then the first number after it in the first word, else the first glyph of the
+/// last word, else the word's last glyph. "PR" without letters or digits.
 pub fn monogram(name: &str) -> String {
     let normalized = normalized(name);
-    let words: Vec<&str> = normalized
-        .split(|c: char| !(c.is_alphabetic() || c.is_numeric()))
-        .filter(|w| !w.is_empty())
-        .collect();
+    let words: Vec<&str> = normalized.split(|c: char| !is_word_scalar(c)).filter(|w| !w.is_empty()).collect();
     let Some(first_word) = words.first() else { return "PR".into() };
-    let mut chars = first_word.chars();
-    let Some(first) = chars.next() else { return "PR".into() };
-    let second = chars
-        .clone()
-        .find(|c| c.is_numeric())
+    let glyphs: Vec<&str> = first_word.graphemes(true).collect();
+    let Some(first) = glyphs.first().copied() else { return "PR".into() };
+    let second = glyphs[1..]
+        .iter()
+        .copied()
+        .find(|g| is_number(g))
         .or_else(|| {
             if words.len() > 1 {
-                words.last().and_then(|w| w.chars().next())
+                words.last().and_then(|w| w.graphemes(true).next())
             } else {
-                first_word.chars().last()
+                glyphs.last().copied()
             }
         })
         .unwrap_or(first);
-    [first, second].iter().collect::<String>().to_uppercase().chars().take(2).collect()
+    format!("{first}{second}").to_uppercase().graphemes(true).take(2).collect()
 }
 
 /// Index into the project colors: `(index * 31 + codePoint) % count` over the lowercased,
@@ -171,6 +199,17 @@ mod tests {
         assert_eq!(monogram("x"), "XX");
         assert_eq!(monogram("---"), "PR");
         assert_eq!(monogram(""), "PR");
+    }
+
+    #[test]
+    fn monograms_work_on_grapheme_clusters_and_count_han_numerals_as_numbers() {
+        assert_eq!(monogram("第三版"), "第三");
+        // Devanagari vowel signs are marks: the whole word is one word of clusters.
+        assert_eq!(
+            monogram("हिन्दी"),
+            format!("हि{}", "हिन्दी".graphemes(true).next_back().unwrap_or_default())
+        );
+        assert_eq!(monogram("e\u{301}clair"), "ÉR");
     }
 
     #[test]

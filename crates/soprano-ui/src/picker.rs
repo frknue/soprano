@@ -14,12 +14,28 @@ use gpui::{
 };
 use gpui_component::input::{self as component_input, InputEvent, InputState};
 
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::controls::{InputSize, TextInput};
 use crate::fonts::{self, size};
 use crate::icons::{Icon, IconName, icon};
 use crate::keycaps::{KeyPlatform, Keycaps};
 use crate::motion::fade_in;
 use crate::theme::ActiveSopranoTheme;
+
+gpui::actions!(soprano_picker, [SelectNext, SelectPrevious]);
+
+/// The picker's own key bindings: on macOS ⌃N / ⌃P move the selection like ↓ / ↑ (Cocoa's
+/// standard `moveDown:` / `moveUp:` bindings). Called by [`crate::init`].
+pub fn bind_keys(cx: &mut App) {
+    if cfg!(target_os = "macos") {
+        cx.bind_keys([
+            gpui::KeyBinding::new("ctrl-n", SelectNext, Some("SopranoPicker")),
+            gpui::KeyBinding::new("ctrl-p", SelectPrevious, Some("SopranoPicker")),
+        ]);
+    }
+}
 
 /// One row (`CommandItem`).
 #[derive(Clone)]
@@ -82,8 +98,14 @@ impl PickerItem {
     }
 }
 
+/// Swift's case-insensitive comparison: canonically composed (NFC) and lowercased one
+/// scalar at a time (no final-sigma context, as `String.lowercased()`).
+fn fold(text: &str) -> String {
+    text.nfc().flat_map(char::to_lowercase).collect()
+}
+
 fn normalized(query: &str) -> String {
-    query.trim().to_lowercase()
+    fold(query.trim())
 }
 
 /// The indices of the items matching `query`, best first (`CommandPaletteSearch.filter`):
@@ -102,9 +124,10 @@ pub fn filter(items: &[PickerItem], query: &str) -> Vec<usize> {
             let fields =
                 [item.label.as_ref(), item.description.as_ref(), item.search_text.as_deref().unwrap_or("")];
             fields.iter().enumerate().find_map(|(field_priority, text)| {
-                let haystack = text.to_lowercase();
+                let haystack = fold(text);
                 let byte = haystack.find(&needle)?;
-                let offset = haystack[..byte].chars().count();
+                // Swift counts the offset in Characters.
+                let offset = haystack[..byte].graphemes(true).count();
                 let match_priority = if haystack == needle {
                     0
                 } else if offset == 0 {
@@ -123,18 +146,23 @@ pub fn filter(items: &[PickerItem], query: &str) -> Vec<usize> {
 /// The byte range of the first case-insensitive occurrence of `query` (trimmed) in `text`:
 /// the characters a row draws in `accent` semibold. None for an empty query or no match.
 pub fn match_range(text: &str, query: &str) -> Option<Range<usize>> {
-    let needle: Vec<char> = query.trim().chars().flat_map(char::to_lowercase).collect();
+    let needle = normalized(query);
     if needle.is_empty() {
         return None;
     }
-    let lowered: Vec<(usize, char)> =
-        text.char_indices().flat_map(|(byte, c)| c.to_lowercase().map(move |l| (byte, l))).collect();
-    let start =
-        lowered.windows(needle.len()).position(|w| w.iter().map(|(_, c)| *c).eq(needle.iter().copied()))?;
-    let first = lowered[start].0;
-    let last = lowered[start + needle.len() - 1].0;
-    let end = last + text[last..].chars().next().map_or(0, char::len_utf8);
-    Some(first..end)
+    // Each grapheme's span in `text` and where its folded form starts in `folded`.
+    let mut folded = String::with_capacity(text.len());
+    let mut spans: Vec<(Range<usize>, usize)> = Vec::new();
+    for (byte, grapheme) in text.grapheme_indices(true) {
+        spans.push((byte..byte + grapheme.len(), folded.len()));
+        folded.push_str(&fold(grapheme));
+    }
+    let start = folded.find(&needle)?;
+    let end = start + needle.len();
+    let containing = |at: usize| spans.iter().rposition(|(_, folded_start)| *folded_start <= at);
+    let first = containing(start)?;
+    let last = containing(end - 1)?;
+    Some(spans[first].0.start..spans[last].0.end)
 }
 
 /// A row of the list: a group head or an item (its index into the filtered results).
@@ -518,6 +546,8 @@ impl Render for Picker {
                 cx.stop_propagation();
                 this.move_selection(1, cx);
             }))
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(1, cx)))
+            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(-1, cx)))
             .on_action(cx.listener(|this, _: &component_input::Escape, window, cx| this.dismiss(window, cx)))
             .on_mouse_down_out(cx.listener(|this, _, window, cx| this.dismiss(window, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -640,6 +670,18 @@ mod tests {
     }
 
     #[test]
+    fn matching_ignores_composition_and_final_sigma_like_swift() {
+        // A decomposed é in the label still matches a composed query, and vice versa.
+        let decomposed = "Cafe\u{301} menu";
+        let range = match_range(decomposed, "café").expect("match");
+        assert_eq!(&decomposed[range], "Cafe\u{301}");
+        assert_eq!(filter(&[item("a", decomposed, None)], "CAFÉ"), [0]);
+        // Swift lowercases a word-final Σ to σ, so "ΟΔΟΣ" matches "οδοσ".
+        assert_eq!(filter(&[item("greek", "ΟΔΟΣ", None)], "οδοσ"), [0]);
+        assert_eq!(match_range("ΟΔΟΣ", "οδοσ"), Some(0.."ΟΔΟΣ".len()));
+    }
+
+    #[test]
     fn a_title_without_the_query_has_no_matched_range() {
         assert_eq!(match_range("omp web", "open"), None);
         assert_eq!(match_range("omp web", " "), None);
@@ -749,6 +791,15 @@ mod tests {
         fn arrows_move_and_return_confirms_with_the_query(cx: &mut TestAppContext) {
             let (_, events, cx) = setup(cx);
             cx.simulate_keystrokes("down");
+            cx.simulate_keystrokes("enter");
+            assert_eq!(*events.borrow(), [PickerEvent::Confirmed { id: "two".into(), query: String::new() }]);
+        }
+
+        #[cfg(target_os = "macos")]
+        #[gpui::test]
+        fn control_n_and_control_p_move_the_selection_on_macos(cx: &mut TestAppContext) {
+            let (_, events, cx) = setup(cx);
+            cx.simulate_keystrokes("ctrl-n ctrl-n ctrl-p ctrl-n");
             cx.simulate_keystrokes("enter");
             assert_eq!(*events.borrow(), [PickerEvent::Confirmed { id: "two".into(), query: String::new() }]);
         }

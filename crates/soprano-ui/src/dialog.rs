@@ -173,8 +173,13 @@ impl DialogContent {
         Self::new(title, message, vec![DialogButton::new("OK").primary()])
     }
 
-    /// The unsaved-changes question: Don't Save (⌘D), Cancel, Save.
-    pub fn save_changes(title: impl Into<SharedString>, message: impl Into<SharedString>) -> Self {
+    /// The unsaved-changes question: Don't Save (⌘D), Cancel, then `save_title` ("Save" for
+    /// one document, "Save All" for several — `soprano_text::save_question` gives all three).
+    pub fn save_changes(
+        title: impl Into<SharedString>,
+        message: impl Into<SharedString>,
+        save_title: impl Into<SharedString>,
+    ) -> Self {
         Self::new(
             title,
             message,
@@ -183,7 +188,7 @@ impl DialogContent {
                     .style(DialogButtonStyle::DestructiveOutline)
                     .shortcut(DialogShortcut::command("d")),
                 DialogButton::new("Cancel"),
-                DialogButton::new("Save").primary(),
+                DialogButton::new(save_title).primary(),
             ],
         )
     }
@@ -320,7 +325,8 @@ impl Dialog {
             let subscription = input.as_ref().map(|input| {
                 cx.subscribe_in(input, window, |this: &mut Self, _, event: &InputEvent, window, cx| {
                     match event {
-                        InputEvent::PressEnter { .. } => this.confirm_default(window, cx),
+                        // Only a bare Return confirms; ⌘↩ (secondary) does nothing, as in Swift.
+                        InputEvent::PressEnter { secondary: false, .. } => this.confirm_default(window, cx),
                         InputEvent::Change if this.error.take().is_some() => cx.notify(),
                         _ => {}
                     }
@@ -525,7 +531,7 @@ mod tests {
 
     #[test]
     fn a_buttons_own_shortcut_picks_it() {
-        let save = DialogContent::save_changes("Save?", "");
+        let save = DialogContent::save_changes("Save?", "", "Save");
         assert_eq!(save.key_choice(&key("d"), KeyPlatform::Mac), None);
         assert_eq!(save.key_choice(&key("cmd-d"), KeyPlatform::Mac), Some(Some(0)));
         assert_eq!(save.key_choice(&key("ctrl-shift-d"), KeyPlatform::Other), Some(Some(0)));
@@ -536,6 +542,8 @@ mod tests {
             ["Don't Save", "Cancel", "Save"]
         );
         assert!(save.buttons[0].is_destructive());
+        let several = DialogContent::save_changes("Save 2 files?", "", "Save All");
+        assert_eq!(several.buttons[2].title.as_ref(), "Save All");
     }
 
     #[test]
@@ -652,6 +660,17 @@ mod tests {
         }
 
         #[gpui::test]
+        fn command_return_does_not_confirm_a_prompt(cx: &mut TestAppContext) {
+            let (dialog, cx) =
+                setup(cx, DialogContent::prompt("Rename Session", "", "Session name", "Main", "Rename"));
+            let results = record(&dialog, cx);
+            cx.simulate_keystrokes("cmd-enter");
+            cx.simulate_keystrokes("ctrl-enter");
+            assert!(results.borrow().is_empty());
+            assert!(cx.update(|_, cx| !dialog.read(cx).is_finished()));
+        }
+
+        #[gpui::test]
         fn escape_in_a_prompt_cancels_even_with_text(cx: &mut TestAppContext) {
             let (dialog, cx) =
                 setup(cx, DialogContent::prompt("Rename Session", "", "Session name", "Main", "Rename"));
@@ -664,7 +683,7 @@ mod tests {
 
         #[gpui::test]
         fn escape_and_return_reach_the_dialog_from_its_card(cx: &mut TestAppContext) {
-            let (dialog, cx) = setup(cx, DialogContent::save_changes("Save?", ""));
+            let (dialog, cx) = setup(cx, DialogContent::save_changes("Save?", "", "Save"));
             let results = Rc::new(std::cell::RefCell::new(Vec::new()));
             let sink = results.clone();
             cx.update(|_, cx| {

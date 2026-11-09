@@ -601,6 +601,7 @@ impl Render for Gallery {
                                     DialogContent::save_changes(
                                         "Save changes to main.rs?",
                                         "Your changes are lost if you don't save them.",
+                                        "Save",
                                     ),
                                     window,
                                     cx,

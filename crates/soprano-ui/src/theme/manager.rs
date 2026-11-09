@@ -77,6 +77,12 @@ impl ThemeManager {
             && self.appearance == AppearancePreference::System
     }
 
+    /// The appearance the app's windows, menus and alerts take: None (follow the OS) while
+    /// `folio` follows the system, else the resolved theme's (`applyApplicationAppearance`).
+    pub fn app_appearance(&self) -> Option<Appearance> {
+        (!self.follows_system()).then(|| self.current.appearance())
+    }
+
     fn resolve_and_report(&mut self) -> Option<&'static AppTheme> {
         let resolved = Self::resolve(&self.theme_id, self.appearance, self.system_appearance);
         if resolved.id == self.current.id {
@@ -123,5 +129,18 @@ mod tests {
         manager.set_theme("dracula");
         assert!(!manager.follows_system());
         assert_eq!(manager.set_system_appearance(Appearance::Light), None);
+    }
+
+    #[test]
+    fn the_app_follows_the_os_only_while_folio_follows_the_system() {
+        let mut manager = ThemeManager::new("folio", AppearancePreference::System, Appearance::Light);
+        assert_eq!(manager.app_appearance(), None);
+        manager.set_appearance(AppearancePreference::Dark);
+        assert_eq!(manager.app_appearance(), Some(Appearance::Dark));
+        // A dark theme on a light-mode system still gives dark menus and title bars.
+        manager.update("dracula", AppearancePreference::System);
+        assert_eq!(manager.app_appearance(), Some(Appearance::Dark));
+        manager.update("folio-paper", AppearancePreference::Dark);
+        assert_eq!(manager.app_appearance(), Some(Appearance::Light));
     }
 }

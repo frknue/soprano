@@ -76,11 +76,26 @@ impl SopranoTheme {
         let system = Appearance::from_window(cx.window_appearance());
         let (zoom, reduce_motion) =
             cx.try_global::<Self>().map(|theme| (theme.zoom, theme.reduce_motion)).unwrap_or((1.0, false));
-        let mut theme = Self::new(ThemeManager::new(theme_id, appearance, system));
+        let mut manager = ThemeManager::new(theme_id, appearance, system);
+        Self::drive_app_appearance(&mut manager, cx);
+        let mut theme = Self::new(manager);
         theme.zoom = zoom;
         theme.reduce_motion = reduce_motion;
         cx.set_global(theme);
         Self::did_change(cx);
+    }
+
+    /// `applyApplicationAppearance`: the app's windows, menus, alerts and panels follow the
+    /// OS while `folio` follows the system, else take the resolved theme's appearance. While
+    /// following, the system appearance is re-read (an override no longer masks it).
+    fn drive_app_appearance(manager: &mut ThemeManager, cx: &App) {
+        cx.set_window_appearance(manager.app_appearance().map(|appearance| match appearance {
+            Appearance::Light => gpui::WindowAppearance::Light,
+            Appearance::Dark => gpui::WindowAppearance::Dark,
+        }));
+        if manager.follows_system() {
+            manager.set_system_appearance(Appearance::from_window(cx.window_appearance()));
+        }
     }
 
     /// The concrete palette in force.
@@ -121,21 +136,29 @@ impl SopranoTheme {
     }
 
     pub fn set_theme(id: &str, cx: &mut App) {
-        Self::change(cx, |manager| manager.set_theme(id).is_some());
+        Self::change(cx, |manager| {
+            manager.set_theme(id);
+        });
     }
 
     pub fn set_appearance(appearance: AppearancePreference, cx: &mut App) {
-        Self::change(cx, |manager| manager.set_appearance(appearance).is_some());
+        Self::change(cx, |manager| {
+            manager.set_appearance(appearance);
+        });
     }
 
     /// Applies the `theme` and `appearance` settings together.
     pub fn update_settings(theme_id: &str, appearance: AppearancePreference, cx: &mut App) {
-        Self::change(cx, |manager| manager.update(theme_id, appearance).is_some());
+        Self::change(cx, |manager| {
+            manager.update(theme_id, appearance);
+        });
     }
 
     /// The OS switched between light and dark.
     pub fn set_system_appearance(system: Appearance, cx: &mut App) {
-        Self::change(cx, |manager| manager.set_system_appearance(system).is_some());
+        Self::change(cx, |manager| {
+            manager.set_system_appearance(system);
+        });
     }
 
     /// Keeps `folio` following the OS: re-resolves whenever `window`'s appearance changes.
@@ -180,10 +203,13 @@ impl SopranoTheme {
         }
     }
 
-    fn change(cx: &mut App, apply: impl FnOnce(&mut ThemeManager) -> bool) {
+    fn change(cx: &mut App, apply: impl FnOnce(&mut ThemeManager)) {
         let before = cx.soprano_theme().manager.clone();
         let mut manager = before.clone();
-        let changed = apply(&mut manager);
+        apply(&mut manager);
+        // Every update re-applies the app appearance, even when the palette stays.
+        Self::drive_app_appearance(&mut manager, cx);
+        let changed = manager.current().id != before.current().id;
         if !changed
             && manager.theme_id() == before.theme_id()
             && manager.appearance() == before.appearance()

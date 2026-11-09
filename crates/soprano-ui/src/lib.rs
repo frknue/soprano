@@ -52,6 +52,7 @@ use gpui::App;
 /// then falls back to system fonts).
 pub fn init(cx: &mut App, theme_id: &str, appearance: AppearancePreference) {
     gpui_component::init(cx);
+    picker::bind_keys(cx);
     SopranoTheme::install(theme_id, appearance, cx);
     if let Err(error) = fonts::register_fonts(cx) {
         tracing::warn!("Soprano fonts not registered: {error:#}");
@@ -61,5 +62,6 @@ pub fn init(cx: &mut App, theme_id: &str, appearance: AppearancePreference) {
 /// [`init`] for tests: no font loading, the `folio` theme under a dark appearance.
 pub fn init_for_tests(cx: &mut App) {
     gpui_component::init(cx);
+    picker::bind_keys(cx);
     SopranoTheme::install(theme::FOLIO_ID, AppearancePreference::Dark, cx);
 }
