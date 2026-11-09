@@ -7786,6 +7786,7 @@ dependencies = [
  "soprano-chat",
  "soprano-chat-ui",
  "soprano-config",
+ "soprano-dashboard",
  "soprano-explorer",
  "soprano-git",
  "soprano-ipc",
