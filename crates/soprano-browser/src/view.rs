@@ -31,15 +31,25 @@ pub const KEY_CONTEXT: &str = "BrowserView";
 /// `⌘L` focuses the address bar, `⌘[`/`⌘]` go back/forward, `⌘R` reloads (Control on Linux and
 /// Windows). `⌘⇧L` and `⌘⇧R` work too, as in the Swift app.
 pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys(key_bindings());
+}
+
+/// `KeyBinding::new` parses without a host OS (and wants `'static` text), so GPUI's
+/// `secondary-` prefix can't be used here; the platform modifier is spelled out instead.
+fn key_bindings() -> [KeyBinding; 6] {
+    #[cfg(target_os = "macos")]
+    const KEYS: [&str; 6] = ["cmd-l", "cmd-shift-l", "cmd-[", "cmd-]", "cmd-r", "cmd-shift-r"];
+    #[cfg(not(target_os = "macos"))]
+    const KEYS: [&str; 6] = ["ctrl-l", "ctrl-shift-l", "ctrl-[", "ctrl-]", "ctrl-r", "ctrl-shift-r"];
     let context = Some(KEY_CONTEXT);
-    cx.bind_keys([
-        KeyBinding::new("secondary-l", FocusAddressBar, context),
-        KeyBinding::new("secondary-shift-l", FocusAddressBar, context),
-        KeyBinding::new("secondary-[", GoBack, context),
-        KeyBinding::new("secondary-]", GoForward, context),
-        KeyBinding::new("secondary-r", Reload, context),
-        KeyBinding::new("secondary-shift-r", Reload, context),
-    ]);
+    [
+        KeyBinding::new(KEYS[0], FocusAddressBar, context),
+        KeyBinding::new(KEYS[1], FocusAddressBar, context),
+        KeyBinding::new(KEYS[2], GoBack, context),
+        KeyBinding::new(KEYS[3], GoForward, context),
+        KeyBinding::new(KEYS[4], Reload, context),
+        KeyBinding::new(KEYS[5], Reload, context),
+    ]
 }
 
 /// What the workspace hears from a browser view.
@@ -700,7 +710,15 @@ impl Render for BrowserView {
 
 #[cfg(test)]
 mod tests {
-    use super::{BLANK_PAGE, NativeEvent, reports_location};
+    use super::{BLANK_PAGE, NativeEvent, key_bindings, reports_location};
+
+    #[test]
+    fn the_browser_shortcuts_parse_and_use_the_platform_modifier() {
+        let bindings = key_bindings();
+        let modifiers = *bindings[0].keystrokes()[0].modifiers();
+        assert_eq!(modifiers.platform, cfg!(target_os = "macos"));
+        assert_eq!(modifiers.control, !cfg!(target_os = "macos"));
+    }
 
     #[test]
     fn the_starting_blank_page_is_not_reported_as_a_location() {
