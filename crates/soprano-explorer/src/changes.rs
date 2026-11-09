@@ -667,11 +667,14 @@ impl ChangesPanel {
                             .flex()
                             .flex_1()
                             .min_w_0()
+                            .overflow_hidden()
                             .gap(t.z(6.))
                             .items_baseline()
                             .child(
+                                // Shrinks (and truncates) when the name alone is wider than the
+                                // row, so the line counts after it stay visible.
                                 div()
-                                    .flex_none()
+                                    .min_w_0()
                                     .max_w(t.z(260.))
                                     .truncate()
                                     .text_color(if is_deleted { t.muted } else { t.foreground })
