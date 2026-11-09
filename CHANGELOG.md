@@ -127,6 +127,9 @@ which is the single source of truth for the version shown in **Settings ▸ Abou
 
 ### Changed
 
+- Sidebar panes sit indented under their window's name, with a thin guide line from the
+  name down to the window's last pane, so it is clear which window each terminal or agent
+  belongs to.
 - Soprano now looks like Soprano Agents: the left sidebar reaches into the title bar with
   the sidebar toggle and session switcher, a Search row, windows as "name N ⌄" sections,
   and agents as cards with a project monogram and a status pill (Working with its

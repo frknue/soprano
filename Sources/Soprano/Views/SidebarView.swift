@@ -21,6 +21,10 @@ final class SidebarView: NSView {
     static let rowGap: CGFloat = 1
     static let tabGap: CGFloat = 5
     static let windowGap: CGFloat = 10
+    /// Pane rows sit this far right of their window's title, fill included,
+    /// with a hairline guide in the gutter running from the title down to the
+    /// window's last pane, so each pane reads as part of the window above it.
+    static let paneIndent: CGFloat = 14
 
     let agentManager: AgentManager
     let sessionManager: SessionManager
@@ -634,6 +638,7 @@ final class SidebarView: NSView {
         var gaps: [CGFloat] = []
         var nextWindowRows: [String: SidebarWindowRowView] = [:]
         var nextPaneRows: [String: SidebarPaneRowView] = [:]
+        var guides: [SidebarListView.Guide] = []
         for (index, terminalWindow) in agentManager.activeSessionWindows.enumerated() {
             let isActiveWindow = terminalWindow.id == agentManager.activeWindowId
             let isExpanded = showsHints
@@ -726,12 +731,17 @@ final class SidebarView: NSView {
                     nextPaneRows[pane.id] = row
                 }
             }
+            // An expanded window with panes ends on its last pane row.
+            if let lastPane = rows.last as? SidebarPaneRowView {
+                guides.append(.init(window: windowRow, lastPane: lastPane))
+            }
         }
         windowRows = nextWindowRows
         paneRows = nextPaneRows
         rowsStack.setArrangedSubviews(rows) { row in
             row.widthAnchor.constraint(equalTo: rowsStack.widthAnchor).isActive = true
         }
+        listContentView.guides = guides
         // Reused rows keep the gap they had; every row's is set each time.
         for (row, gap) in zip(rows, gaps) {
             rowsStack.setCustomSpacing(gap, after: row)
@@ -1030,13 +1040,24 @@ private class SidebarRowView: NSView {
         }
     }
 
+    /// How far the fill (and, in rows that lay out with it, the content)
+    /// starts right of the list's edge.
+    var indent: CGFloat = 0 {
+        didSet {
+            backgroundLeading.constant = indent
+            needsLayout = true
+        }
+    }
+    private var backgroundLeading: NSLayoutConstraint!
+
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         background.identifier = NSUserInterfaceItemIdentifier("sidebar-row-background")
         addSubview(background)
+        backgroundLeading = background.leadingAnchor.constraint(equalTo: leadingAnchor)
         NSLayoutConstraint.activate([
-            background.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backgroundLeading,
             background.trailingAnchor.constraint(equalTo: trailingAnchor),
             background.topAnchor.constraint(equalTo: topAnchor),
             background.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -1361,6 +1382,7 @@ private final class SidebarPaneRowView: SidebarRowView {
         }
         heightConstraint = heightAnchor.constraint(equalToConstant: Self.cardHeight)
         heightConstraint.isActive = true
+        indent = SidebarView.paneIndent
     }
 
     var hasLiveTime: Bool { !pillView.isHidden && pillView.hasLiveTime }
@@ -1483,7 +1505,7 @@ private final class SidebarPaneRowView: SidebarRowView {
 
     override func layout() {
         super.layout()
-        let left = ShellSidebarMetrics.contentLeft
+        let left = ShellSidebarMetrics.contentLeft + indent
         let right = bounds.width - ShellSidebarMetrics.contentLeft
         switch kind {
         case .card:
@@ -1568,6 +1590,18 @@ private final class SidebarListView: NSView {
     private var hoverArea: NSTrackingArea?
     private weak var hoveredRow: SidebarRowView?
 
+    /// An expanded window's span, from its title row to its last pane row.
+    struct Guide {
+        let window: NSView
+        let lastPane: NSView
+    }
+
+    /// One hairline per expanded window in the panes' indent, under the
+    /// window title's first letter.
+    var guides: [Guide] = [] {
+        didSet { needsDisplay = true }
+    }
+
     override var isFlipped: Bool { true }
 
     override init(frame frameRect: NSRect) {
@@ -1579,6 +1613,20 @@ private final class SidebarListView: NSView {
             name: NSApplication.didResignActiveNotification,
             object: nil
         )
+        PaletteCenter.shared.addObserver(self) { [weak self] _ in self?.needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !guides.isEmpty else { return }
+        PaletteCenter.shared.palette.sidebarBorder.setFill()
+        let x = ShellSidebarMetrics.contentLeft
+        for guide in guides {
+            let top = guide.window.convert(guide.window.bounds, to: self).maxY - 6
+            let bottom = guide.lastPane.convert(guide.lastPane.bounds, to: self).maxY - 6
+            let line = NSRect(x: x, y: top, width: 1, height: bottom - top)
+            guard line.height > 0, line.intersects(dirtyRect) else { continue }
+            line.fill()
+        }
     }
 
     @available(*, unavailable)
@@ -1634,6 +1682,8 @@ private final class SidebarListView: NSView {
     override func layout() {
         super.layout()
         rowsStack?.layoutSubtreeIfNeeded()
+        // The guides follow the rows' new frames.
+        needsDisplay = true
         refreshHover()
     }
 
