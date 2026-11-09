@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -59,7 +60,11 @@ impl CommandResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandError {
     LaunchFailed(String),
-    TimedOut,
+    /// Stopped at its timeout; carries what it had printed until then.
+    TimedOut {
+        stdout: String,
+        stderr: String,
+    },
     Cancelled,
 }
 
@@ -67,7 +72,7 @@ impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::LaunchFailed(reason) => write!(f, "Could not start the command: {reason}"),
-            Self::TimedOut => f.write_str("The command took too long and was stopped."),
+            Self::TimedOut { .. } => f.write_str("The command took too long and was stopped."),
             Self::Cancelled => f.write_str("Cancelled."),
         }
     }
@@ -75,8 +80,8 @@ impl std::fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
-/// Cancels a running command from another thread (SIGTERM, then SIGKILL after 3 s; on
-/// Windows the whole process tree is ended).
+/// Cancels a running command from another thread. The command and everything it started
+/// get SIGTERM, then SIGKILL after 3 s (its process group on Unix; `taskkill /T` on Windows).
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken(Arc<AtomicBool>);
 
@@ -101,6 +106,11 @@ pub struct RunOptions {
     pub timeout: Duration,
     /// Replaces the whole environment when set; otherwise the app's is inherited.
     pub environment: Option<BTreeMap<String, String>>,
+    /// The command's working folder; the app's when unset.
+    pub working_directory: Option<PathBuf>,
+    /// Sends stderr into the same pipe as stdout, so `stdout` holds both in the order they
+    /// were written and `stderr` stays empty.
+    pub merge_stderr: bool,
     /// Written to stdin, which is then closed (unless `keep_stdin_open`).
     pub input: Option<Vec<u8>>,
     /// Leaves stdin open until the command ends, for CLIs that treat end-of-input as
@@ -115,6 +125,8 @@ impl RunOptions {
         Self {
             timeout,
             environment: None,
+            working_directory: None,
+            merge_stderr: false,
             input: None,
             keep_stdin_open: false,
             on_output_line: None,
@@ -293,26 +305,50 @@ fn run_process(
         return Err(CommandError::Cancelled);
     }
     let mut command = Command::new(executable);
-    command.args(arguments).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.args(arguments);
     if let Some(environment) = &options.environment {
         command.env_clear().envs(environment);
     }
     for key in removed_environment {
         command.env_remove(key);
     }
+    if let Some(directory) = &options.working_directory {
+        command.current_dir(directory);
+    }
     hide_console(&mut command);
+    lead_own_group(&mut command);
     let wants_stdin = options.input.is_some() || options.keep_stdin_open;
     command.stdin(if wants_stdin { Stdio::piped() } else { Stdio::null() });
-    let mut child = command.spawn().map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
+    let merged = if options.merge_stderr {
+        let (reader, writer) = std::io::pipe().map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
+        let error_writer = writer.try_clone().map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
+        command.stdout(writer).stderr(error_writer);
+        Some(reader)
+    } else {
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        None
+    };
+    let spawned = command.spawn();
+    // The command holds our copies of a merged pipe's write end; they must close for the
+    // read to end with the command.
+    drop(command);
+    let mut child = spawned.map_err(|e| CommandError::LaunchFailed(e.to_string()))?;
 
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stderr = Arc::new(Mutex::new(Vec::new()));
     let (closed_tx, closed_rx) = mpsc::channel::<()>();
+    let mut open = 0;
+    if let Some(reader) = merged {
+        spawn_reader(reader, stdout.clone(), options.on_output_line.clone(), closed_tx.clone());
+        open += 1;
+    }
     if let Some(pipe) = child.stdout.take() {
         spawn_reader(pipe, stdout.clone(), options.on_output_line.clone(), closed_tx.clone());
+        open += 1;
     }
     if let Some(pipe) = child.stderr.take() {
         spawn_reader(pipe, stderr.clone(), options.on_output_line.clone(), closed_tx.clone());
+        open += 1;
     }
     drop(closed_tx);
 
@@ -336,7 +372,8 @@ fn run_process(
     }
 
     let deadline = Instant::now() + options.timeout;
-    let mut stop_reason: Option<CommandError> = None;
+    let mut timed_out = false;
+    let mut cancelled = false;
     let mut kill_at: Option<Instant> = None;
     let status = loop {
         match child.try_wait() {
@@ -344,30 +381,33 @@ fn run_process(
             Ok(None) => {}
             Err(_) => break None,
         }
-        if stop_reason.is_none() {
+        if !(cancelled || timed_out) {
             if options.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
-                stop_reason = Some(CommandError::Cancelled);
+                cancelled = true;
             } else if Instant::now() >= deadline {
-                stop_reason = Some(CommandError::TimedOut);
+                timed_out = true;
             }
-            if stop_reason.is_some() {
+            if cancelled || timed_out {
                 terminate(&mut child);
                 kill_at = Some(Instant::now() + Duration::from_secs(3));
             }
         }
         // SIGTERM, then SIGKILL for a command that ignores it.
         if kill_at.is_some_and(|at| Instant::now() >= at) {
-            let _ = child.kill();
+            kill(&mut child);
             kill_at = None;
         }
         thread::sleep(Duration::from_millis(10));
     };
     drop(stdin);
+    if let Some(at) = kill_at {
+        // The command ended on SIGTERM; what it started may ignore it.
+        finish_stopping(&child, at);
+    }
 
     // A child the command spawned (a browser opener, say) can hold the pipes open after the
     // command itself exited; don't wait for it longer than half a second.
     let grace = Instant::now() + Duration::from_millis(500);
-    let mut open = 2;
     while open > 0 {
         let left = grace.saturating_duration_since(Instant::now());
         match closed_rx.recv_timeout(left) {
@@ -376,12 +416,15 @@ fn run_process(
         }
     }
 
-    if let Some(reason) = stop_reason {
-        return Err(reason);
-    }
     let text = |buffer: &Arc<Mutex<Vec<u8>>>| {
         String::from_utf8_lossy(&buffer.lock().map(|b| b.clone()).unwrap_or_default()).into_owned()
     };
+    if cancelled {
+        return Err(CommandError::Cancelled);
+    }
+    if timed_out {
+        return Err(CommandError::TimedOut { stdout: text(&stdout), stderr: text(&stderr) });
+    }
     Ok(CommandResult {
         status: status.map(exit_code).unwrap_or(-1),
         stdout: text(&stdout),
@@ -445,14 +488,47 @@ impl CloneHandle for std::process::ChildStdin {
     }
 }
 
+/// The command leads its own process group, so whatever it starts is in it too.
+#[cfg(unix)]
+fn lead_own_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn lead_own_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn signal_group(child: &Child, signal: i32) -> bool {
+    match i32::try_from(child.id()) {
+        // SAFETY: kill(2) on the process group our own child leads.
+        Ok(pid) => unsafe { libc::kill(-pid, signal) == 0 },
+        Err(_) => false,
+    }
+}
+
 #[cfg(unix)]
 fn terminate(child: &mut Child) {
-    if let Ok(pid) = i32::try_from(child.id()) {
-        // SAFETY: plain kill(2) on our own child's pid.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
+    signal_group(child, libc::SIGTERM);
+}
+
+#[cfg(unix)]
+fn kill(child: &mut Child) {
+    signal_group(child, libc::SIGKILL);
+}
+
+/// After the command exited: give the rest of its group until `kill_at` to end on SIGTERM,
+/// then SIGKILL whatever is left.
+#[cfg(unix)]
+fn finish_stopping(child: &Child, kill_at: Instant) {
+    while Instant::now() < kill_at {
+        // Signal 0 only checks whether the group still has members.
+        if !signal_group(child, 0) {
+            return;
         }
+        thread::sleep(Duration::from_millis(50));
     }
+    signal_group(child, libc::SIGKILL);
 }
 
 #[cfg(not(unix))]
@@ -470,6 +546,15 @@ fn terminate(child: &mut Child) {
     let _ = taskkill.status();
     let _ = child.kill();
 }
+
+#[cfg(not(unix))]
+fn kill(child: &mut Child) {
+    let _ = child.kill();
+}
+
+/// `taskkill /T` already ended the whole tree.
+#[cfg(not(unix))]
+fn finish_stopping(_child: &Child, _kill_at: Instant) {}
 
 /// Background commands get no console window on Windows.
 #[cfg(windows)]
@@ -630,8 +715,49 @@ mod tests {
         let error = CommandRunner::default()
             .run("/bin/sleep", &["5".into()], RunOptions::with_timeout(Duration::from_millis(200)))
             .expect_err("timed out");
-        assert_eq!(error, CommandError::TimedOut);
+        assert_eq!(error, CommandError::TimedOut { stdout: String::new(), stderr: String::new() });
         assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_timed_out_command_keeps_its_output_and_takes_everything_it_started_with_it() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        // A background child that ignores SIGTERM, so only the group's SIGKILL ends it.
+        let script = "(trap '' TERM; sleep 30) & echo $! > pid; echo partial; echo oops >&2; sleep 30";
+        let mut options = RunOptions::with_timeout(Duration::from_millis(300));
+        options.working_directory = Some(directory.path().to_path_buf());
+        let error = CommandRunner::default()
+            .run("/bin/sh", &["-c".into(), script.into()], options)
+            .expect_err("timed out");
+        assert_eq!(error, CommandError::TimedOut { stdout: "partial\n".into(), stderr: "oops\n".into() });
+
+        let pid: i32 = std::fs::read_to_string(directory.path().join("pid"))
+            .expect("pid written in the working directory")
+            .trim()
+            .parse()
+            .expect("pid");
+        let gone = (0..100).any(|_| {
+            // SAFETY: signal 0 only checks whether the process exists.
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if alive {
+                thread::sleep(Duration::from_millis(20));
+            }
+            !alive
+        });
+        assert!(gone, "the background child outlived the timeout");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merged_output_keeps_the_order_it_was_written_in() {
+        let mut options = RunOptions::with_timeout(Duration::from_secs(10));
+        options.merge_stderr = true;
+        let result = CommandRunner::default()
+            .run("/bin/sh", &["-c".into(), "echo one; echo two >&2; echo three".into()], options)
+            .expect("ran");
+        assert_eq!(result.stdout, "one\ntwo\nthree\n");
+        assert_eq!(result.stderr, "");
     }
 
     #[cfg(unix)]
