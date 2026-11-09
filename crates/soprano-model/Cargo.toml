@@ -1,8 +1,24 @@
 [package]
 name = "soprano-model"
+description = "The workspace model: sessions, windows, layout tabs, split panes, pane tabs, agents, and their persistence."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+serde.workspace = true
+serde_json.workspace = true
+soprano-types = { path = "../soprano-types" }
+soprano-platform = { path = "../soprano-platform" }
+url = "2"
+unicode-general-category = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = "3"
