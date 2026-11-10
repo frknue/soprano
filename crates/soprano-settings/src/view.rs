@@ -1,7 +1,7 @@
-//! The settings screen as one GPUI view: the card over the window (Herdr's dialog frame:
-//! popover fill, 1 px border, radius 8, shadow, 35 % black backdrop), sized like the Swift
-//! card (at most 1280×960, 32 px clear of every window edge), the 240 px navigation, the
-//! "Settings › Page" header with its close button, and the scrolling page column.
+//! The settings screen as one GPUI view: a card over the window (1 px border, radius 10,
+//! shadow, 35 % black backdrop; at most 1040×880, 32 px clear of every window edge) laid out
+//! like the window itself: the navigation on `chrome`, the page on `canvas` with its groups as
+//! `background` cards. Each page has its title and the close button above a scrolling column.
 //!
 //! The view keeps no settings state of its own: every control writes one key into
 //! `settings.json` through [`ConfigStore`], and the page re-renders when the store (or the
@@ -28,8 +28,8 @@ use soprano_types::Machine;
 use soprano_ui::button::{IconButton, IconButtonSize};
 use soprano_ui::dialog::{Dialog, DialogContent};
 use soprano_ui::fonts::{self, size};
-use soprano_ui::menu::ContextMenu;
-use soprano_ui::{ActiveSopranoTheme, IconName, SopranoTheme, icon};
+use soprano_ui::keycaps::Keycaps;
+use soprano_ui::{ActiveSopranoTheme, IconName, ScrollList, SopranoTheme, icon};
 
 use crate::agents::AgentField;
 use crate::general::{self, AddDirectoryOutcome};
@@ -38,19 +38,16 @@ use crate::shortcuts::{ChordRecorder, RecordStep, RecordedKey};
 use crate::tab::SettingsTab;
 
 /// Width of the navigation column.
-pub const NAV_WIDTH: f32 = 240.0;
+pub const NAV_WIDTH: f32 = 220.0;
 /// The page column never grows past this.
-pub const PAGE_MAX_WIDTH: f32 = 768.0;
+pub const PAGE_MAX_WIDTH: f32 = 720.0;
 /// The card's largest size and its distance from the window edges.
-pub const CARD_MAX_WIDTH: f32 = 1280.0;
-pub const CARD_MAX_HEIGHT: f32 = 960.0;
+pub const CARD_MAX_WIDTH: f32 = 1040.0;
+pub const CARD_MAX_HEIGHT: f32 = 880.0;
 pub const CARD_MARGIN: f32 = 32.0;
-const HEADER_HEIGHT: f32 = 48.0;
-
-/// Width of the page column for a card `width` wide (`SettingsViewController.pageWidth`).
-pub fn page_width(card_width: f32) -> f32 {
-    (card_width - NAV_WIDTH - 48.0).clamp(320.0, PAGE_MAX_WIDTH)
-}
+const HEADER_HEIGHT: f32 = 52.0;
+/// Clear space on both sides of the page column.
+const PAGE_GUTTER: f32 = 32.0;
 
 /// What the host reacts to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,9 +111,8 @@ pub struct SettingsView {
     pub(crate) new_agent_inputs: [Entity<InputState>; 3],
     pub(crate) new_agent_error: Option<&'static str>,
     dialog: Option<Entity<Dialog>>,
-    menu: Option<Entity<ContextMenu>>,
-    /// Where the theme select was painted, so its menu opens under it rather than at the click.
-    pub(crate) theme_select_bounds: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    /// The Agent Profiles row that is open for editing.
+    pub(crate) expanded_agent: Option<String>,
     pub(crate) scroll: ScrollHandle,
     subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
@@ -295,8 +291,7 @@ impl SettingsView {
             new_agent_inputs,
             new_agent_error: None,
             dialog: None,
-            menu: None,
-            theme_select_bounds: Default::default(),
+            expanded_agent: None,
             scroll: ScrollHandle::new(),
             subscriptions,
             _tasks: vec![config_task, accounts_task],
@@ -725,50 +720,22 @@ impl SettingsView {
         self.subscriptions.push(subscription);
     }
 
-    /// Whether the theme menu is open.
-    #[cfg(test)]
-    pub(crate) fn is_showing_menu(&self) -> bool {
-        self.menu.is_some()
-    }
-
     /// The account-removal confirmation on screen, if any.
     pub fn is_confirming(&self) -> bool {
         self.dialog.is_some()
     }
 
-    // MARK: - Theme menu
+    // MARK: - Theme and agent rows
 
-    pub(crate) fn open_theme_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let bounds = self.theme_select_bounds.get();
-        let position = gpui::point(bounds.left(), bounds.bottom() + cx.soprano_theme().z(4.));
-        let selected = self.snapshot.resolved.settings.theme_id.clone();
-        let view = cx.entity().downgrade();
-        let items: Vec<soprano_ui::menu::MenuItem> = soprano_ui::theme::theme_options()
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, option)| {
-                let view = view.clone();
-                let id = option.id;
-                let item = soprano_ui::menu::MenuItem::new(option.name).checked(id == selected).on_select(
-                    move |window, cx| {
-                        let _ = view.update(cx, |this, cx| {
-                            this.write(id, general::THEME_KEY, window, cx);
-                            this.apply_theme_fallback(cx);
-                        });
-                    },
-                );
-                // Folio follows the appearance; the separator sets it apart from the
-                // palettes that pin their own.
-                if index == 0 { vec![item, soprano_ui::menu::MenuItem::separator()] } else { vec![item] }
-            })
-            .collect();
-        let menu = ContextMenu::new(position, items, window, cx);
-        menu.update(cx, |menu, _| menu.set_width(224.));
-        self.subscriptions.push(cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
-            this.menu = None;
-            cx.notify();
-        }));
-        self.menu = Some(menu);
+    /// A theme tile was chosen.
+    pub(crate) fn select_theme(&mut self, id: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        self.write(id, general::THEME_KEY, window, cx);
+        self.apply_theme_fallback(cx);
+    }
+
+    /// Opens the profile `id` for editing, or closes it when it is the open one.
+    pub(crate) fn toggle_agent(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.expanded_agent = (self.expanded_agent.as_deref() != Some(id)).then(|| id.to_owned());
         cx.notify();
     }
 
@@ -799,17 +766,17 @@ impl SettingsView {
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(t.z(8.))
-                .h(t.z(32.))
-                .px(t.z(8.))
-                .rounded(t.z(8.))
+                .gap(t.z(9.))
+                .h(t.z(30.))
+                .px(t.z(9.))
+                .rounded(t.z(6.))
                 .cursor_pointer()
                 .text_size(t.z(size::UI))
-                .text_color(t.foreground)
-                .when(active, |d| d.bg(t.selected).font_weight(FontWeight::MEDIUM))
-                .when(!active, |d| d.hover(|s| s.bg(t.hover)))
-                .child(icon(glyph).size(14.).color(if active { t.foreground } else { t.muted }))
-                .child(title)
+                .text_color(if active { t.foreground } else { t.muted })
+                .when(active, |d| d.bg(t.selected))
+                .when(!active, |d| d.hover(|s| s.bg(t.hover).text_color(t.foreground)))
+                .child(icon(glyph).size(15.).color(if active { t.foreground } else { t.muted }))
+                .child(div().flex_1().min_w_0().truncate().child(title))
         };
         let tabs = SettingsTab::ALL.into_iter().map(|tab| {
             item(
@@ -826,60 +793,79 @@ impl SettingsView {
             .flex_none()
             .w(t.z(NAV_WIDTH))
             .h_full()
+            // The card's content is not clipped to its rounded corners.
+            .rounded_tl(t.z(9.))
+            .rounded_bl(t.z(9.))
             .bg(t.chrome)
             .border_r_1()
             .border_color(t.border)
             .child(
                 div()
-                    .h(t.z(HEADER_HEIGHT))
                     .flex()
+                    .flex_none()
                     .items_center()
-                    .px(t.z(20.))
-                    .text_size(t.z(size::UI))
+                    .h(t.z(HEADER_HEIGHT))
+                    .px(t.z(17.))
+                    .text_size(t.z(size::BRAND))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(t.foreground)
                     .child("Settings"),
             )
-            .child(div().flex().flex_col().gap(t.z(2.)).px(t.z(12.)).children(tabs))
+            .child(div().flex().flex_col().gap(t.z(2.)).px(t.z(8.)).children(tabs))
             .child(div().flex_1())
             .child(
-                div().px(t.z(12.)).pb(t.z(12.)).child(
+                div().p(t.z(8.)).border_t_1().border_color(t.border).child(
                     item("settings-nav-open-file".into(), "Open settings.json", IconName::FileText, false)
+                        .child(icon(IconName::ExternalLink).size(12.).color(t.dim))
                         .on_click(cx.listener(|this, _, _, cx| this.open_settings_file(cx))),
                 ),
             )
             .into_any_element()
     }
 
+    /// The page's title over its column, and Esc / close at the card's corner. A hairline
+    /// rules it off once the page has scrolled under it.
     fn render_header(&self, t: &SopranoTheme, cx: &mut Context<Self>) -> AnyElement {
+        let scrolled = self.scroll.offset().y < px(0.);
         div()
+            .relative()
             .flex()
             .flex_row()
             .flex_none()
-            .items_center()
-            .gap(t.z(6.))
+            .justify_center()
             .h(t.z(HEADER_HEIGHT))
-            .pl(t.z(24.))
-            .pr(t.z(12.))
+            .px(t.z(PAGE_GUTTER))
             .border_b_1()
-            .border_color(t.border)
-            .text_size(t.z(size::UI))
-            .child(div().text_color(t.muted).child("Settings"))
-            .child(icon(IconName::ChevronRight).size(11.).color(t.muted))
+            .border_color(if scrolled { t.border } else { gpui::transparent_black() })
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(t.foreground)
-                    .child(self.tab.title()),
+                div().flex().flex_row().items_center().w_full().max_w(t.z(PAGE_MAX_WIDTH)).h_full().child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(t.z(size::DIALOG_TITLE))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(t.foreground)
+                        .child(self.tab.title()),
+                ),
             )
             .child(
-                IconButton::new("settings-close", IconName::X)
-                    .size(IconButtonSize::Chrome)
-                    .tooltip("Close settings")
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close(cx))),
+                div()
+                    .absolute()
+                    .top_0()
+                    .right(t.z(12.))
+                    .h_full()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(6.))
+                    .child(Keycaps::new(["esc"]).small())
+                    .child(
+                        IconButton::new("settings-close", IconName::X)
+                            .size(IconButtonSize::Chrome)
+                            .tooltip("Close settings")
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close(cx))),
+                    ),
             )
             .into_any_element()
     }
@@ -911,6 +897,16 @@ impl Render for SettingsView {
         let page = self.render_page(&t, window, cx);
         let nav = self.render_nav(&t, cx);
         let header = self.render_header(&t, cx);
+        let column = div()
+            .flex()
+            .flex_col()
+            .gap(t.z(28.))
+            .w_full()
+            .max_w(t.z(PAGE_MAX_WIDTH))
+            .min_w(t.z(320.))
+            .children(page);
+        // A page fades in when it is switched to.
+        let column = soprano_ui::motion::fade_in(column, ("settings-page", self.tab as usize), cx);
         let card = div()
             .id("settings-card")
             .flex()
@@ -918,10 +914,10 @@ impl Render for SettingsView {
             .size_full()
             .max_w(t.z(CARD_MAX_WIDTH))
             .max_h(t.z(CARD_MAX_HEIGHT))
-            .rounded(t.z(8.))
+            .rounded(t.z(10.))
             .border_1()
             .border_color(t.border)
-            .bg(t.popover)
+            .bg(t.canvas)
             .shadow_lg()
             .overflow_hidden()
             .font_family(fonts::UI_FONT_FAMILY)
@@ -931,24 +927,16 @@ impl Render for SettingsView {
             .child(nav)
             .child(
                 div().flex().flex_col().flex_1().min_w_0().h_full().child(header).child(
-                    div()
-                        .id("settings-scroll")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
-                        .child(
-                            div().flex().justify_center().px(t.z(24.)).py(t.z(32.)).child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(t.z(32.))
-                                    .w_full()
-                                    .max_w(t.z(PAGE_MAX_WIDTH))
-                                    .min_w(t.z(320.))
-                                    .children(page),
-                            ),
-                        ),
+                    ScrollList::new("settings-scroll", &self.scroll).child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .justify_center()
+                            .px(t.z(PAGE_GUTTER))
+                            .pt(t.z(4.))
+                            .pb(t.z(40.))
+                            .child(column),
+                    ),
                 ),
             );
         div()
@@ -973,12 +961,12 @@ impl Render for SettingsView {
                     this.escape(window, cx);
                 }
             }))
-            // A click that cancels the dialog or closes the theme menu stops there; only a
-            // click on the bare backdrop closes Settings.
+            // A click that cancels the dialog stops there; only a click on the bare backdrop
+            // closes Settings.
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
-                    if this.dialog.is_none() && this.menu.is_none() {
+                    if this.dialog.is_none() {
                         this.close(cx);
                     }
                 }),
@@ -987,6 +975,5 @@ impl Render for SettingsView {
             .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(card)
             .children(self.dialog.clone())
-            .children(self.menu.clone())
     }
 }

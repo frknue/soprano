@@ -1,5 +1,5 @@
-//! soprano-settings: the Settings card (General, Keyboard Shortcuts, Agent Profiles, Accounts,
-//! About) shown over the window, and the status bar's account usage popover.
+//! soprano-settings: the Settings card (General, Machines, Keyboard Shortcuts, Agent Profiles,
+//! Accounts, About) shown over the window, and the status bar's account usage popover.
 //!
 //! - [`SettingsView`]: the card; construct it with a [`soprano_config::ConfigStore`], the
 //!   accounts source and a [`NotificationStatusProvider`]; it emits [`SettingsEvent`]s.
@@ -27,7 +27,6 @@ pub use tab::SettingsTab;
 pub use usage_popover::{AccountUsagePopover, UsagePopoverEvent, usage_bar_color, usage_percent_color};
 pub use view::{
     CARD_MARGIN, CARD_MAX_HEIGHT, CARD_MAX_WIDTH, NAV_WIDTH, PAGE_MAX_WIDTH, SettingsEvent, SettingsView,
-    page_width,
 };
 #[cfg(test)]
 mod view_tests;

@@ -25,7 +25,7 @@ use soprano_ui::status::StatusClock;
 use soprano_ui::tooltip::tooltip;
 use soprano_ui::{
     ActiveSopranoTheme, Avatar, ContextMenu, Icon, IconButton, IconName, Keycaps, MenuItem, ScrollList,
-    SectionHeader, SidebarRow, SopranoTheme, StatusPill, icon, program_icon_path, project_color,
+    SectionHeader, SidebarRow, SopranoTheme, StatusPill, agent_icon_stem, icon, project_color,
 };
 
 use self::model::{
@@ -885,23 +885,12 @@ fn saved_workspace_label(session: &WorkspaceSession) -> String {
     format!("{} — {date}", session.name)
 }
 
-/// The agent's program icon where one ships (`resources/icons`).
-fn program_stem(profile_id: &str) -> Option<&'static str> {
-    match profile_id {
-        "claude-code" => Some("claude"),
-        "codex" => Some("codex"),
-        "opencode" => Some("opencode"),
-        "omp" => Some("pi"),
-        _ => None,
-    }
-}
-
 /// A row's icon: the agent's program icon, else its kind's glyph.
 fn kind_icon(kind: &PaneKind, lit: bool, foreground: Hsla, muted: Hsla) -> Icon {
     let tint = if lit { foreground } else { muted };
     match kind {
-        PaneKind::Agent(profile) | PaneKind::Chat(profile) => match program_stem(profile) {
-            Some(stem) => Icon::from_path(program_icon_path(stem)).color(foreground),
+        PaneKind::Agent(profile) | PaneKind::Chat(profile) => match agent_icon_stem(profile) {
+            Some(stem) => Icon::program(stem).color(foreground),
             None => Icon::new(if matches!(kind, PaneKind::Chat(_)) {
                 IconName::MessageSquare
             } else {

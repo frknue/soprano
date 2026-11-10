@@ -518,14 +518,6 @@ fn a_usage_card_with_many_logins_stays_inside_a_short_window_with_its_buttons_in
     );
 }
 
-#[test]
-fn the_page_column_caps_at_768_and_narrows_with_the_card() {
-    use crate::view::{CARD_MARGIN, PAGE_MAX_WIDTH, page_width};
-    assert_eq!(page_width(1800.0 - CARD_MARGIN * 2.0), PAGE_MAX_WIDTH);
-    assert_eq!(page_width(900.0 - CARD_MARGIN * 2.0), 900.0 - 64.0 - 240.0 - 48.0);
-    assert_eq!(page_width(400.0), 320.0);
-}
-
 #[gpui::test]
 fn editing_the_resize_step_clamps_and_writes_a_number(cx: &mut TestAppContext) {
     let (h, cx) = open(cx);
@@ -597,15 +589,16 @@ fn a_click_that_cancels_the_remove_dialog_keeps_settings_open(cx: &mut TestAppCo
     assert!(h.accounts.calls().is_empty());
 }
 
+/// The page scrolls under an overlay that draws the scrollbar; a tile under it still takes
+/// its click.
 #[gpui::test]
-fn a_click_that_closes_the_theme_menu_keeps_settings_open(cx: &mut TestAppContext) {
+fn clicking_a_theme_tile_writes_the_theme(cx: &mut TestAppContext) {
     let (h, cx) = open(cx);
-    h.view.update_in(cx, |view, window, cx| view.open_theme_menu(window, cx));
+    let tile = cx.debug_bounds("settings-theme-nord").expect("the Nord tile is drawn");
+    cx.simulate_click(tile.center(), gpui::Modifiers::none());
     cx.run_until_parked();
-    assert!(h.view.read_with(cx, |view, _| view.is_showing_menu()));
-    cx.simulate_click(backdrop_corner(), gpui::Modifiers::none());
-    cx.run_until_parked();
-    assert!(!h.view.read_with(cx, |view, _| view.is_showing_menu()));
+    assert_eq!(h.store.settings().theme_id, "nord");
+    assert!(file_text(&h.store).contains("\"theme\": \"nord\""), "{}", file_text(&h.store));
     assert!(h.events.borrow().is_empty());
 }
 

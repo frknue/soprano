@@ -230,10 +230,14 @@ the single source of truth for the version shown in **Settings ▸ About**.
   in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
 - Agent Dashboard entries lead with the project or custom window name, with the
   agent, status, and directory on separate lines for easier scanning.
-- Redesigned the Settings screen: a narrower reading column, section titles above flat
-  cards, aligned label/control rows, keyboard shortcuts drawn as keycaps — one per chord,
-  with the prefix step highlighted in the accent color — and buttons that match the
-  active theme.
+- Redesigned the Settings screen (`⌘,`), laid out like the window itself: navigation on the
+  left, and each page as its title (with `esc` and close) above a scrolling column of
+  cards. **General** shows the themes as tiles in their own colors, reports
+  `settings.json` problems in a notice at the top, and sorts its switches under
+  **Window** and **Session**. **Keyboard Shortcuts** lists one shortcut per line in
+  counted groups, keys drawn as keycaps, with the action's id in the name's tooltip.
+  **Agent Profiles** lists each agent with its icon and command; click one to edit its
+  fields. **About** leads with the app, its version and its links.
 - `⌃A` → `T` / `W` now open and close tabs, so pane tabs moved to Shift: `⌃A` → `⇧T`
   opens a terminal tab inside the active pane and `⌃A` → `⇧W` closes the active pane
   tab (`new-pane-tab`, `close-pane-tab`); `⌃A` → `>` / `<` still cycle them. `⌃A` →

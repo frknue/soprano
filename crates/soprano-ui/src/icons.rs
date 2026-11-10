@@ -296,6 +296,18 @@ pub fn program_icon_path(stem: &str) -> SharedString {
     format!("icons/{stem}.svg").into()
 }
 
+/// The program icon of a built-in agent profile, where one ships in `resources/icons/`
+/// (pass it to [`Icon::program`]).
+pub fn agent_icon_stem(profile_id: &str) -> Option<&'static str> {
+    match profile_id {
+        "claude-code" => Some("claude"),
+        "codex" => Some("codex"),
+        "opencode" => Some("opencode"),
+        "omp" => Some("pi"),
+        _ => None,
+    }
+}
+
 /// The explorer icon for a folder row.
 pub fn folder_icon(open: bool) -> IconName {
     if open { IconName::FolderOpen } else { IconName::Folder }

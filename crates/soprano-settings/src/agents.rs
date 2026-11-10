@@ -7,7 +7,6 @@ use soprano_types::{AgentProfile, DefaultAgents};
 
 pub const AGENTS_KEY: &[&str] = &["agents"];
 
-pub const INTRO_TITLE: &str = "Agent profiles";
 pub const INTRO: &str = "The agents Soprano can launch. Edit a profile below, or add your own under \"agents\" in settings.json — for example { \"id\": \"aider\", \"name\": \"Aider\", \"command\": \"aider\", \"launchKey\": \"cmd+4\" }. Reusing a built-in id patches that profile instead of creating a new one.";
 pub const CONFIGURED_BADGE: &str = "settings.json";
 

@@ -38,11 +38,6 @@ pub struct ShortcutEntry {
 }
 
 impl ShortcutEntry {
-    /// `id · description`.
-    pub fn description(&self) -> String {
-        format!("{} · {}", self.binding.id, self.binding.description)
-    }
-
     /// Customized and disabled rows can go back to the built-in shortcut.
     pub fn is_resettable(&self) -> bool {
         self.is_customized || self.is_disabled

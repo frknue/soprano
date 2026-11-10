@@ -1,13 +1,14 @@
-//! The About page: version, runtime, the settings file, links, third-party notices and the
-//! quick reference.
+//! The About page: the app with its version and links, the settings file, the quick reference
+//! and third-party notices.
 
 use std::path::PathBuf;
 
 use soprano_types::{KeyBinding, KeyBindingConfig};
 
-pub const VERSION_DESCRIPTION: &str = "Current version of the application.";
-pub const RUNTIME_DESCRIPTION: &str = "AI agent orchestration platform.";
+pub const TAGLINE: &str = "AI agent orchestration platform.";
 pub const RUNTIME: &str = "Rust + GPUI + libghostty";
+/// The app icon, in the resources the asset source serves.
+pub const APP_ICON: &str = "icons/app-icon.png";
 
 /// The quick reference's actions, in order; missing ones (unbound) are skipped.
 pub const QUICK_REFERENCE_IDS: [&str; 9] = [

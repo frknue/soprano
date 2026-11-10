@@ -15,8 +15,9 @@
 - `notification_authorization_changed(cx)`: call it when the OS permission changes; it re-reads the provider.
 - `reload(window, cx)`: re-reads the store. It also runs on its own: store and account observers wake a task on the window, so updates land on the main thread. Observers are removed when the entity is released.
 - `is_confirming() -> bool`: the remove-account dialog is open.
-- Render the entity over the workspace: it draws the 35 % backdrop and a card at most 1280×960, 32 px from each window edge, with popover fill, border, radius 8 and shadow.
-- Constants and helper: `NAV_WIDTH` (240), `PAGE_MAX_WIDTH` (768), `CARD_MAX_WIDTH`, `CARD_MAX_HEIGHT`, `CARD_MARGIN`, `page_width(card_width) -> f32`.
+- Render the entity over the workspace: it draws the 35 % backdrop and a card at most 1040×880, 32 px from each window edge (border, radius 10, shadow), laid out like the window: navigation on `chrome`, the page on `canvas`, groups as `background` cards.
+- Constants: `NAV_WIDTH` (220), `PAGE_MAX_WIDTH` (720), `CARD_MAX_WIDTH`, `CARD_MAX_HEIGHT`, `CARD_MARGIN`.
+- Visual QA without a screen: `cargo run -p soprano-settings --example settings_demo -- --snapshot /abs/dir [--size WxH] [--appearance dark|light] [--click PAGE:X,Y]` writes every page, and each screenful below its fold, as PNGs.
 
 **Notification permission**
 - `trait NotificationStatusProvider: 'static { fn authorization(&self) -> Option<NotificationAuthorization>; }`. `Option<NotificationAuthorization>` implements it for a fixed answer.
@@ -34,16 +35,17 @@
 ## What each page does
 - **Every control writes exactly one key** through `ConfigStore::write`, using the Swift key names. A row whose value differs from the default shows a reset button that calls `ConfigStore::remove`.
 - **General:**
-  - `settings.json` problems are listed first, as "Line N: …".
-  - Theme, appearance, the four switches and Restore workspace.
+  - `settings.json` problems come first, in one notice: "Line N: …" per problem.
+  - Theme: one tile per theme, drawn in that theme's terminal colors (Folio shows both of its palettes); a click writes `theme`. Appearance is a System / Light / Dark control under the tiles.
+  - Window (hide window bar, hide window tabs, uptime) and Session (restore workspace) switches.
   - Notifications: Play a sound, plus the permission line with the OS settings button.
   - Project directories: the list shows what the file says, unreachable ones are marked "Not found", and a typed path or Browse… adds one via `cx.prompt_for_paths`.
   - Prefix key recorder: click it, or focus it and press Space; Esc keeps the current key and a Shift symbol is refused.
   - Prefix timeout and resize step: clamped, written on Enter or when you leave the field.
-- **Keyboard Shortcuts:** search field, groups, keycaps, a "Customized" tooltip, disabled bindings shown as "Off", and the conflict or chord problems shown on the bindings they name. Esc in the search field clears the query first.
-- **Agent Profiles:** the Swift rows (color dot, name, `settings.json` badge, description, command, ready/error patterns) plus edit fields and an Add Agent row.
+- **Keyboard Shortcuts:** search field, then counted groups with one binding per line: name (its tooltip is the id, plus "Customized in settings.json" beside an accent dot), description, reset button, keycaps. Disabled bindings show "Off"; conflict or chord problems sit under the bindings they name. Esc in the search field clears the query first.
+- **Agent Profiles:** one line per agent (program icon in the profile color, name, `settings.json` badge, description, command); a click opens its edit fields, the ready/error patterns and Reset to default / Remove agent. An Add Agent row follows.
 - **Accounts:** built entirely from soprano-accounts' `AccountsPage`. Remove asks first through soprano-ui's `Dialog`.
-- **About:** version from `app_version()`, runtime, the settings file with Open / Show in Finder / Reload, links, license notices with a View button for each bundled license file, and the quick reference.
+- **About:** the app icon, name, version from `app_version()` and runtime with the links as buttons; the settings file with Open / Show in Finder / Reload; the quick reference; license notices with a View button for each bundled license file.
 
 ## Swift ported
 - **Files:** `SettingsWindowController`, `SettingsHeaderView`, all five `Settings/*` files and `AccountUsagePopover`.
@@ -59,10 +61,11 @@
   - Off macOS a recorded Ctrl+Shift chord is saved as `cmd`, following the agreed key table. Ctrl+Shift+Alt is read as `cmd+shift`, although `ctrl+cmd+shift` also shows as Ctrl+Shift+Alt.
   - Text that names the OS changes per OS ("Windows is blocking…", Ctrl captions instead of ⌃).
 - **Look:**
-  - The theme picker opens soprano-ui's `ContextMenu` at the click, so Folio keeps its separator; soprano-ui's `Select` has none.
+  - The theme picker is a grid of tiles rather than a menu, so every palette is visible before it is chosen.
   - The usage card shows "Claude" rather than "CLAUDE", because Soprano uses no uppercase eyebrows.
   - The problem mark on an account is an outlined diamond (a rotated square icon), because GPUI divs can't rotate.
-  - Success text is the green `working` token and warnings the yellow `approval` token.
+  - Status dots are the green `done` token for success and the yellow `approval` token for warnings.
+  - Monospace text turns Geist Mono's ligatures off (`form::mono`): they close the gap before a `--flag`.
 
 ## Commands run
 - `CARGO_TARGET_DIR=target/agent-soprano-settings cargo test -p soprano-settings` → 61 passed (this build also compiles `settings_demo`).

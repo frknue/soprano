@@ -23,7 +23,7 @@ impl SettingsTab {
         SettingsTab::About,
     ];
 
-    /// The page's name in the navigation and the "Settings › Page" breadcrumb.
+    /// The page's name in the navigation and above the page.
     pub fn title(self) -> &'static str {
         match self {
             Self::General => "General",

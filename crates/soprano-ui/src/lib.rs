@@ -33,7 +33,7 @@ pub use chrome::{
 pub use controls::{InputSize, SegmentedControl, Switch, TextInput, text_input};
 pub use dialog::{Dialog, DialogButton, DialogContent, DialogResult};
 pub use gpui_component::input::{InputEvent, InputState};
-pub use icons::{Icon, IconName, file_type_icon, folder_icon, icon, program_icon_path};
+pub use icons::{Icon, IconName, agent_icon_stem, file_type_icon, folder_icon, icon, program_icon_path};
 pub use identity::{Avatar, Monogram, monogram, project_color, project_color_index};
 pub use keycaps::{Keycaps, keycaps};
 pub use menu::{ContextMenu, MenuItem};

@@ -1,8 +1,9 @@
-//! The pages, as titled sections of grouped rows (`SettingsForm`).
+//! The pages: a lead paragraph where a page needs one, then titled sections of grouped rows
+//! (`form`).
 
 use gpui::{
-    AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
-    Styled, Window, div, prelude::*,
+    AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla, IntoElement, MouseButton, ParentElement,
+    SharedString, Styled, Window, div, prelude::*,
 };
 use gpui_component::input::InputState;
 use soprano_accounts::presentation::{
@@ -10,32 +11,35 @@ use soprano_accounts::presentation::{
     SectionFooter,
 };
 use soprano_config::{
-    AppSettings, AppearancePreference, DefaultKeybindings, Limits, Severity, prefix_legend_for,
+    AppSettings, AppearancePreference, ConfigIssue, DefaultKeybindings, Limits, Severity, prefix_legend_for,
 };
 use soprano_launch::MachineCheck;
-use soprano_types::AgentProfile;
-use soprano_ui::button::{Button, ButtonSize, ButtonVariant};
-use soprano_ui::controls::{InputSize, SegmentedControl, Switch, TextInput};
-use soprano_ui::fonts::{self, size};
+use soprano_types::{AgentProfile, DefaultAgents};
+use soprano_ui::button::{Button, ButtonSize, ButtonVariant, IconButton, IconButtonSize};
+use soprano_ui::controls::{SegmentedControl, Switch, TextInput};
+use soprano_ui::fonts::size;
 use soprano_ui::keycaps::Keycaps;
-use soprano_ui::{IconName, SopranoTheme, icon};
+use soprano_ui::theme::{AppTheme, Appearance, FOLIO_ID, FOLIO_INK, FOLIO_PAPER, ThemeOption, theme_for};
+use soprano_ui::tooltip::tooltip;
+use soprano_ui::{Icon, IconName, SopranoTheme, agent_icon_stem, icon};
 
 use crate::about;
 use crate::agents::{self, AgentField};
-use crate::form::Form;
+use crate::form::{Form, INSET, mono};
 use crate::general::{self, Toggle};
 use crate::notifications::{NotificationStatusRow, StatusTone};
-use crate::shortcuts;
+use crate::shortcuts::{self, ShortcutEntry};
 use crate::view::{MachineStatus, Recording, SettingsView};
 
 fn id(prefix: &str, key: impl std::fmt::Display) -> ElementId {
     SharedString::from(format!("{prefix}-{key}")).into()
 }
 
+/// The dot before a status line.
 fn tone_color(t: &SopranoTheme, tone: StatusTone) -> Hsla {
     match tone {
-        StatusTone::Normal => t.foreground,
-        StatusTone::Success => t.working,
+        StatusTone::Normal => t.dim,
+        StatusTone::Success => t.done,
         StatusTone::Error => t.failed,
     }
 }
@@ -45,6 +49,45 @@ impl SettingsView {
         Button::new(id("open-settings-file", key), "Open settings.json")
             .size(ButtonSize::Sm)
             .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.open_settings_file(cx)))
+    }
+
+    /// A page's opening paragraph with `end` beside it.
+    fn lead(&self, form: &Form, text: impl Into<SharedString>, end: impl IntoElement) -> AnyElement {
+        div()
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap(form.t.z(24.))
+            .child(div().flex_1().min_w_0().child(form.lead(text)))
+            .child(div().flex_none().child(end))
+            .into_any_element()
+    }
+
+    /// What `settings.json` got wrong: without this, a typo in the file would fail silently.
+    fn issues_callout(&self, form: &Form, issues: &[ConfigIssue], cx: &mut Context<Self>) -> AnyElement {
+        let t = form.t;
+        let tone = |severity: Severity| match severity {
+            Severity::Error => t.failed,
+            Severity::Warning => t.approval,
+        };
+        let worst =
+            if issues.iter().any(|issue| issue.severity == Severity::Error) { t.failed } else { t.approval };
+        let title = match issues.len() {
+            1 => "settings.json has a problem".to_owned(),
+            count => format!("settings.json has {count} problems"),
+        };
+        let lines = issues
+            .iter()
+            .map(|issue| {
+                let text = match issue.line {
+                    Some(line) => format!("Line {line}: {}", issue.message),
+                    None => issue.message.clone(),
+                };
+                (SharedString::from(text), tone(issue.severity))
+            })
+            .collect();
+        form.callout(worst, title, lines, Some(self.open_file_button("issues", cx).into_any_element()))
+            .into_any_element()
     }
 
     // MARK: - General
@@ -60,59 +103,80 @@ impl SettingsView {
         let defaults = AppSettings::default();
         let mut sections = Vec::new();
 
-        // Without this, a typo in the file would fail silently.
         let issues = self.snapshot.issues();
         if !issues.is_empty() {
-            let rows = issues
-                .iter()
-                .enumerate()
-                .map(|(index, issue)| {
-                    let (title, color) = match issue.severity {
-                        Severity::Error => ("Error", t.failed),
-                        Severity::Warning => ("Warning", t.approval),
-                    };
-                    let description = match issue.line {
-                        Some(line) => format!("Line {line}: {}", issue.message),
-                        None => issue.message.clone(),
-                    };
-                    form.row(title)
-                        .description(description)
-                        .description_color(color)
-                        .control(self.open_file_button(&format!("issue-{index}"), cx))
-                        .render(t)
-                })
-                .collect();
-            sections.push(form.section(Some("settings.json"), None, rows).into_any_element());
+            sections.push(self.issues_callout(&form, &issues, cx));
         }
+        sections.push(self.appearance_section(&form, &settings, &defaults, cx));
+        sections.push(
+            form.section("Window").rows(
+                [Toggle::HideWindowBar, Toggle::HideWindowTabs, Toggle::StatusBarUptime]
+                    .map(|toggle| self.toggle_row(&form, toggle, &settings, &defaults, cx))
+                    .into(),
+            ),
+        );
+        sections.push(form.section("Session").rows(vec![self.toggle_row(
+            &form,
+            Toggle::RestoreLastSession,
+            &settings,
+            &defaults,
+            cx,
+        )]));
 
-        let theme_name = soprano_ui::theme::theme_options()
+        // Permission lives in the OS settings, and macOS only ever prompts once. The row says
+        // where it stands and offers the way there.
+        let status = NotificationStatusRow::new(self.authorization);
+        let status_row = form
+            .row(status.title)
+            .leading(form.dot(tone_color(t, status.tone)))
+            .description(status.message.clone())
+            .when_some_control(status.button.map(|label| {
+                Button::new("settings-notification-settings", label).size(ButtonSize::Sm).on_click(
+                    |_, _, _| {
+                        let _ = crate::os_notifications::open_notification_settings();
+                    },
+                )
+            }))
+            .render(t);
+        sections.push(
+            form.section("Notifications")
+                .note("Banners for panes that are not focused, named window ▸ pane.")
+                .rows(vec![
+                    self.toggle_row(&form, Toggle::NotificationSound, &settings, &defaults, cx),
+                    status_row,
+                ]),
+        );
+
+        sections.push(self.project_directories_section(&form, cx));
+        sections.push(self.keybinding_behavior_section(&form, window, cx));
+        sections
+    }
+
+    /// The theme tiles and, for Folio, which of its two palettes to use. The section's reset
+    /// button puts the default theme back.
+    fn appearance_section(
+        &self,
+        form: &Form,
+        settings: &AppSettings,
+        defaults: &AppSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = form.t;
+        let tiles: Vec<AnyElement> = soprano_ui::theme::theme_options()
             .into_iter()
-            .find(|option| option.id == settings.theme_id)
-            .map_or_else(|| settings.theme_id.clone(), |option| option.name.to_owned());
-        let theme_select = div()
-            .id("settings-theme")
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap(t.z(6.))
-            .w(t.z(224.))
-            .h(t.z(28.))
-            .px(t.z(10.))
-            .rounded(t.z(8.))
-            .border_1()
-            .border_color(t.input)
-            .bg(t.raised)
-            .cursor_pointer()
-            .hover(|s| s.bg(t.hover))
-            .text_size(t.z(size::UI))
-            .child(div().truncate().child(theme_name))
-            .child(icon(IconName::ChevronDown).size(12.).color(t.muted))
-            .child({
-                let bounds = self.theme_select_bounds.clone();
-                gpui::canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {}).absolute().size_full()
-            })
-            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.open_theme_menu(window, cx)));
+            .map(|option| self.theme_tile(option, option.id == settings.theme_id, t, cx))
+            .collect();
+        // The tiles' selection rings stand 2 px outside their previews.
+        let theme = div()
+            .grid()
+            .grid_cols(5)
+            .gap_x(t.z(6.))
+            .gap_y(t.z(10.))
+            .px(t.z(INSET - 2.))
+            .pt(t.z(12.))
+            .pb(t.z(10.))
+            .children(tiles);
+
         let appearance_index =
             AppearancePreference::ALL.iter().position(|p| *p == settings.appearance).unwrap_or_default();
         let appearance = SegmentedControl::new(
@@ -130,71 +194,101 @@ impl SettingsView {
                 });
             }
         });
-
-        let appearance_rows = vec![
-            form.row("Theme")
-                .description(general::THEME_DESCRIPTION)
-                .reset_when(
-                    settings.theme_id != defaults.theme_id,
-                    "reset-theme",
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.reset(general::THEME_KEY, window, cx)
-                    }),
-                )
-                .control(theme_select)
-                .render(t),
-            form.row("Appearance")
-                .description(general::appearance_description())
-                .reset_when(
-                    settings.appearance != defaults.appearance,
-                    "reset-appearance",
-                    cx.listener(|this, _: &ClickEvent, window, cx| {
-                        this.reset(general::APPEARANCE_KEY, window, cx)
-                    }),
-                )
-                .control(appearance)
-                .render(t),
-            self.toggle_row(&form, Toggle::HideWindowBar, &settings, &defaults, cx),
-            self.toggle_row(&form, Toggle::HideWindowTabs, &settings, &defaults, cx),
-            self.toggle_row(&form, Toggle::StatusBarUptime, &settings, &defaults, cx),
-        ];
-        sections.push(form.section(Some("Appearance"), None, appearance_rows).into_any_element());
-        sections.push(
-            form.section(
-                Some("Session"),
-                None,
-                vec![self.toggle_row(&form, Toggle::RestoreLastSession, &settings, &defaults, cx)],
+        let appearance_row = form
+            .row("Appearance")
+            .description(general::appearance_description())
+            .reset_when(
+                settings.appearance != defaults.appearance,
+                "reset-appearance",
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    this.reset(general::APPEARANCE_KEY, window, cx)
+                }),
             )
-            .into_any_element(),
-        );
-
-        // Permission lives in the OS settings, and macOS only ever prompts once. The row says
-        // where it stands and offers the way there.
-        let status = NotificationStatusRow::new(self.authorization);
-        let status_row = form
-            .row(status.title)
-            .title_color(tone_color(t, status.tone))
-            .description(status.message.clone())
-            .when_some_control(status.button.map(|label| {
-                Button::new("settings-notification-settings", label).size(ButtonSize::Sm).on_click(
-                    |_, _, _| {
-                        let _ = crate::os_notifications::open_notification_settings();
-                    },
-                )
-            }))
+            .control(form.track(appearance))
             .render(t);
-        sections.push(
-            form.section(
-                Some("Notifications"),
-                Some("Banners for panes that are not focused, named window ▸ pane."),
-                vec![self.toggle_row(&form, Toggle::NotificationSound, &settings, &defaults, cx), status_row],
+        form.section("Theme")
+            .note(general::THEME_DESCRIPTION)
+            .reset_when(
+                settings.theme_id != defaults.theme_id,
+                "reset-theme",
+                cx.listener(|this, _: &ClickEvent, window, cx| this.reset(general::THEME_KEY, window, cx)),
             )
-            .into_any_element(),
-        );
+            .rows(vec![theme.into_any_element(), appearance_row])
+    }
 
-        sections.push(self.project_directories_section(&form, t, cx));
-        sections.push(self.keybinding_behavior_section(&form, t, window, cx));
-        sections
+    /// One theme: a preview in its own colors over its name. Folio shows both of its palettes,
+    /// since it follows the appearance.
+    fn theme_tile(
+        &self,
+        option: ThemeOption,
+        selected: bool,
+        t: &SopranoTheme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme_id = option.id;
+        let group = SharedString::from(format!("settings-theme-{theme_id}"));
+        let palettes: Vec<&'static AppTheme> = if theme_id == FOLIO_ID {
+            vec![&FOLIO_PAPER, &FOLIO_INK]
+        } else {
+            vec![theme_for(theme_id, Appearance::Dark)]
+        };
+        let preview = div()
+            .flex()
+            .flex_row()
+            .h(t.z(54.))
+            .rounded(t.z(6.))
+            .border_1()
+            .border_color(t.border)
+            .overflow_hidden()
+            .children(palettes.into_iter().map(|palette| theme_swatch(palette, t)));
+        let (hover_ring, hover_text) = (t.input, t.foreground);
+        div()
+            .id(group.clone())
+            .debug_selector(|| group.to_string())
+            .group(group.clone())
+            .flex()
+            .flex_col()
+            .gap(t.z(4.))
+            .min_w_0()
+            .cursor_pointer()
+            .child(
+                div()
+                    .p(t.z(2.))
+                    .rounded(t.z(9.))
+                    .border_1()
+                    .border_color(if selected { t.accent } else { gpui::transparent_black() })
+                    .when(!selected, |ring| {
+                        ring.group_hover(group.clone(), move |s| s.border_color(hover_ring))
+                    })
+                    .child(preview),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(4.))
+                    .px(t.z(3.))
+                    .text_size(t.z(size::META))
+                    .line_height(t.z(17.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(if selected { t.foreground } else { t.muted })
+                            .when(selected, |name| name.font_weight(FontWeight::MEDIUM))
+                            .when(!selected, |name| {
+                                name.group_hover(group.clone(), move |s| s.text_color(hover_text))
+                            })
+                            .child(option.name),
+                    )
+                    .when(selected, |row| row.child(icon(IconName::Check).size(12.).color(t.accent))),
+            )
+            .on_click(
+                cx.listener(move |this, _: &ClickEvent, window, cx| this.select_theme(theme_id, window, cx)),
+            )
+            .into_any_element()
     }
 
     fn toggle_row(
@@ -222,41 +316,41 @@ impl SettingsView {
             .render(form.t)
     }
 
-    fn project_directories_section(
-        &self,
-        form: &Form,
-        t: &SopranoTheme,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn project_directories_section(&self, form: &Form, cx: &mut Context<Self>) -> AnyElement {
+        let t = form.t;
         let directories = general::configured_project_directories(&self.store);
         let mut rows = Vec::new();
         if directories.is_empty() {
             rows.push(
-                form.row(general::NO_PROJECT_DIRECTORIES)
-                    .description(general::NO_PROJECT_DIRECTORIES_HINT)
-                    .render(t),
+                form.placeholder(general::NO_PROJECT_DIRECTORIES, general::NO_PROJECT_DIRECTORIES_HINT),
             );
         }
         for (index, directory) in directories.iter().enumerate() {
-            let reachable = general::is_reachable_directory(directory);
+            let mut row = form
+                .row(directory.clone())
+                .mono_title()
+                .leading(icon(IconName::Folder).size(15.).color(t.muted));
+            if !general::is_reachable_directory(directory) {
+                row = row.badge(form.badge("Not found", t.approval));
+            }
             rows.push(
-                form.row(directory.clone())
-                    .mono_title()
-                    .description(if reachable { "" } else { "Not found" })
-                    .description_color(t.approval)
-                    .control(
-                        Button::new(id("remove-directory", index), "Remove").size(ButtonSize::Xs).on_click(
-                            cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.remove_project_directory(index, window, cx)
-                            }),
-                        ),
-                    )
-                    .render(t),
+                row.control(
+                    IconButton::new(id("remove-directory", index), IconName::X)
+                        .tooltip("Remove from the list")
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.remove_project_directory(index, window, cx)
+                        })),
+                )
+                .render(t),
             );
         }
         rows.push(
-            form.actions_row(vec![
-                div().flex_1().min_w_0().child(TextInput::new(&self.project_input)).into_any_element(),
+            form.bar(vec![
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(TextInput::new(&self.project_input).small())
+                    .into_any_element(),
                 Button::new("browse-directory", "Browse…")
                     .size(ButtonSize::Sm)
                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -274,95 +368,16 @@ impl SettingsView {
             ])
             .into_any_element(),
         );
-        form.section(Some("Project directories"), Some(general::PROJECT_DIRECTORIES_NOTE), rows)
-            .into_any_element()
-    }
-
-    // MARK: - Machines
-
-    pub(crate) fn machines_page(&mut self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let form = Form::new(t);
-        let machines = &self.snapshot.resolved.machines;
-        let mut rows = Vec::new();
-        if machines.is_empty() {
-            rows.push(form.row(general::NO_MACHINES).description(general::NO_MACHINES_HINT).render(t));
-        }
-        for machine in machines {
-            let mut description = format!("ssh {}", machine.destination());
-            for arg in &machine.ssh_args {
-                description.push(' ');
-                description.push_str(arg);
-            }
-            if let Some(directory) = &machine.directory {
-                description.push_str(&format!(" · {directory}"));
-            }
-            let (status, status_color) = match self.machine_status.get(&machine.name) {
-                None => (None, t.muted),
-                Some(MachineStatus::Checking) => (Some("Checking…".to_owned()), t.muted),
-                Some(MachineStatus::Checked(check)) => {
-                    let healthy = matches!(check, MachineCheck::Ready { tmux: Some(_), .. });
-                    (Some(check.summary()), if healthy { t.working } else { t.approval })
-                }
-            };
-            let check_name = machine.name.clone();
-            let remove_name = machine.name.clone();
-            let checking = matches!(self.machine_status.get(&machine.name), Some(MachineStatus::Checking));
-            let mut row = form.row(machine.name.clone()).mono_title().description(description);
-            if let Some(status) = status {
-                row = row.status(status, status_color);
-            }
-            rows.push(
-                row.control(form.controls(vec![
-                    Button::new(id("check-machine", &machine.name), "Check")
-                        .size(ButtonSize::Xs)
-                        .disabled(checking)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            this.check_machine(&check_name, cx)
-                        }))
-                        .into_any_element(),
-                    Button::new(id("remove-machine", &machine.name), "Remove")
-                        .size(ButtonSize::Xs)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            this.remove_machine(&remove_name, window, cx)
-                        }))
-                        .into_any_element(),
-                ]))
-                .render(t),
-            );
-        }
-        rows.push(
-            form.actions_row(vec![
-                div().flex_1().min_w_0().child(TextInput::new(&self.machine_input)).into_any_element(),
-                Button::new("add-machine", "Add")
-                    .primary()
-                    .size(ButtonSize::Sm)
-                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                        let text = this.machine_input.read(cx).value().to_string();
-                        this.add_machine(&text, window, cx);
-                    }))
-                    .into_any_element(),
-            ])
-            .into_any_element(),
-        );
-        if let Some(notice) = &self.machine_notice {
-            rows.push(
-                div()
-                    .px(t.z(16.))
-                    .pb(t.z(12.))
-                    .child(form.small(notice.text.clone(), if notice.is_error { t.failed } else { t.muted }))
-                    .into_any_element(),
-            );
-        }
-        vec![form.section(None, Some(general::MACHINES_NOTE), rows).into_any_element()]
+        form.section("Project directories").note(general::PROJECT_DIRECTORIES_NOTE).rows(rows)
     }
 
     fn keybinding_behavior_section(
         &self,
         form: &Form,
-        t: &SopranoTheme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let t = form.t;
         let keybindings = &self.snapshot.resolved.keybindings;
         let defaults = DefaultKeybindings::config_for(self.platform);
         let recording = self.recording == Some(Recording::Prefix);
@@ -379,28 +394,33 @@ impl SettingsView {
             .items_center()
             .justify_center()
             .min_w(t.z(56.))
-            .h(t.z(30.))
-            .px(t.z(8.))
-            .rounded(t.z(8.))
+            .h(t.z(28.))
+            .px(t.z(10.))
+            .rounded(t.z(7.))
             .border_1()
             .border_color(if recording || focused { t.accent } else { t.input })
-            .bg(t.background)
+            .bg(t.raised)
             .cursor_pointer()
-            .text_size(t.z(size::UI))
+            .text_size(t.z(size::ROW))
+            .font_weight(FontWeight::MEDIUM)
             .text_color(if recording { t.muted } else { t.foreground })
             .child(legend)
-            .tooltip(soprano_ui::tooltip::tooltip(match self.platform {
+            .tooltip(tooltip(match self.platform {
                 soprano_config::KeyPlatform::Mac => "Click, then press the key to use with Control",
                 soprano_config::KeyPlatform::Other => "Click, then press the key to use with Ctrl",
             }))
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.begin_prefix_recording(window, cx)))
             .on_key_down(cx.listener(Self::on_prefix_key));
 
         let timeout_limits = Limits::PREFIX_TIMEOUT_MS;
         let resize_limits = Limits::RESIZE_TICK_PERCENT;
-        let number = |input: &gpui::Entity<InputState>, width: f32| {
-            div().w(t.z(width)).child(TextInput::new(input).size(InputSize::Small))
+        let number = |input: &gpui::Entity<InputState>, unit: &'static str| {
+            div().w(t.z(104.)).child(
+                TextInput::new(input)
+                    .small()
+                    .suffix(div().text_size(t.z(size::META)).text_color(t.dim).child(unit)),
+            )
         };
         let rows = vec![
             form.row("Prefix key")
@@ -427,7 +447,7 @@ impl SettingsView {
                         this.reset(general::PREFIX_TIMEOUT_KEY, window, cx)
                     }),
                 )
-                .control(number(&self.timeout_input, 80.))
+                .control(number(&self.timeout_input, "ms"))
                 .render(t),
             form.row("Resize step")
                 .description(format!(
@@ -442,10 +462,95 @@ impl SettingsView {
                         this.reset(general::RESIZE_STEP_KEY, window, cx)
                     }),
                 )
-                .control(number(&self.resize_input, 64.))
+                .control(number(&self.resize_input, "%"))
                 .render(t),
         ];
-        form.section(Some("Keybindings"), None, rows).into_any_element()
+        form.section("Keybindings").rows(rows)
+    }
+
+    // MARK: - Machines
+
+    pub(crate) fn machines_page(&mut self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let form = Form::new(t);
+        let machines = &self.snapshot.resolved.machines;
+        let mut rows = Vec::new();
+        if machines.is_empty() {
+            rows.push(form.placeholder(general::NO_MACHINES, general::NO_MACHINES_HINT));
+        }
+        for machine in machines {
+            let mut command = format!("ssh {}", machine.destination());
+            for arg in &machine.ssh_args {
+                command.push(' ');
+                command.push_str(arg);
+            }
+            if let Some(directory) = &machine.directory {
+                command.push_str(&format!(" · {directory}"));
+            }
+            let status = self.machine_status.get(&machine.name);
+            let checking = matches!(status, Some(MachineStatus::Checking));
+            let mut row = form
+                .row(machine.name.clone())
+                .mono_title()
+                .leading(icon(IconName::Server).size(15.).color(t.muted))
+                .description(command)
+                .mono_description();
+            row = match status {
+                None => row,
+                Some(MachineStatus::Checking) => row.status("Checking…", t.dim),
+                Some(MachineStatus::Checked(check)) => {
+                    let healthy = matches!(check, MachineCheck::Ready { tmux: Some(_), .. });
+                    row.status(check.summary(), if healthy { t.done } else { t.approval })
+                }
+            };
+            let check_name = machine.name.clone();
+            let remove_name = machine.name.clone();
+            rows.push(
+                row.control(form.controls(vec![
+                    IconButton::new(id("check-machine", &machine.name), IconName::RefreshCw)
+                        .icon_size(14.)
+                        .tooltip("Check the connection")
+                        .disabled(checking)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.check_machine(&check_name, cx)
+                        }))
+                        .into_any_element(),
+                    IconButton::new(id("remove-machine", &machine.name), IconName::X)
+                        .tooltip("Remove from the list")
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.remove_machine(&remove_name, window, cx)
+                        }))
+                        .into_any_element(),
+                ]))
+                .render(t),
+            );
+        }
+        let add = form.bar(vec![
+            div().flex_1().min_w_0().child(TextInput::new(&self.machine_input).small()).into_any_element(),
+            Button::new("add-machine", "Add")
+                .primary()
+                .size(ButtonSize::Sm)
+                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                    let text = this.machine_input.read(cx).value().to_string();
+                    this.add_machine(&text, window, cx);
+                }))
+                .into_any_element(),
+        ]);
+        rows.push(
+            div()
+                .flex()
+                .flex_col()
+                .child(add)
+                .when_some(self.machine_notice.as_ref(), |col, notice| {
+                    col.child(
+                        div().px(t.z(INSET)).pb(t.z(10.)).child(
+                            form.small(notice.text.clone(), if notice.is_error { t.failed } else { t.muted })
+                                .whitespace_normal(),
+                        ),
+                    )
+                })
+                .into_any_element(),
+        );
+        vec![form.lead(general::MACHINES_NOTE).into_any_element(), form.group(rows).into_any_element()]
     }
 
     // MARK: - Keyboard Shortcuts
@@ -458,134 +563,178 @@ impl SettingsView {
     ) -> Vec<AnyElement> {
         let form = Form::new(t);
         let query = self.shortcut_query(cx);
+        let search =
+            TextInput::new(&self.shortcut_query).prefix(icon(IconName::Search).size(14.).color(t.muted));
         let mut sections = vec![
-            TextInput::new(&self.shortcut_query)
-                .size(InputSize::Regular)
-                .prefix(icon(IconName::Search).size(14.).color(t.muted))
+            div()
+                .flex()
+                .flex_col()
+                .gap(t.z(14.))
+                .child(search)
+                .when(query.is_empty(), |top| {
+                    top.child(self.lead(
+                        &form,
+                        shortcuts::instructions(&self.snapshot.resolved.keybindings),
+                        self.open_file_button("shortcuts", cx),
+                    ))
+                })
                 .into_any_element(),
         ];
-        if query.is_empty() {
-            sections.push(
-                form.section(
-                    None,
-                    None,
-                    vec![
-                        form.row("Keyboard shortcuts")
-                            .description(shortcuts::instructions(&self.snapshot.resolved.keybindings))
-                            .control(self.open_file_button("shortcuts", cx))
-                            .render(t),
-                    ],
-                )
-                .into_any_element(),
-            );
-        }
         let issues = self.snapshot.issues();
         let general_issues = shortcuts::keybinding_issues(&issues);
         if !general_issues.is_empty() && query.is_empty() {
-            let rows = general_issues
+            let lines = general_issues
                 .iter()
-                .map(|issue| {
-                    form.row("Warning")
-                        .description(issue.message.clone())
-                        .description_color(t.approval)
-                        .render(t)
-                })
+                .map(|issue| (SharedString::from(issue.message.clone()), t.approval))
                 .collect();
-            sections.push(form.section(Some("Problems"), None, rows).into_any_element());
+            sections.push(form.callout(t.approval, "Keybinding problems", lines, None).into_any_element());
         }
 
         let groups = shortcuts::shortcut_groups_for(&self.snapshot.resolved, &issues, &query, self.platform);
         if groups.is_empty() {
             sections.push(
-                form.section(
-                    None,
-                    None,
-                    vec![
-                        form.row(shortcuts::NO_MATCHES_TITLE)
-                            .description(shortcuts::NO_MATCHES_HINT)
-                            .render(t),
-                    ],
-                )
-                .into_any_element(),
+                form.group(vec![form.placeholder(shortcuts::NO_MATCHES_TITLE, shortcuts::NO_MATCHES_HINT)])
+                    .into_any_element(),
             );
         }
         let prefix_key = self.snapshot.resolved.keybindings.prefix_key.clone();
         for group in groups {
-            let rows = group
-                .entries
-                .into_iter()
-                .map(|entry| {
-                    let binding_id = entry.binding.id.clone();
-                    let recording = match &self.recording {
-                        Some(Recording::Binding { id, recorder }) if *id == binding_id => {
-                            Some(recorder.is_awaiting_prefix_key())
-                        }
-                        _ => None,
-                    };
-                    let control: AnyElement = match recording {
-                        Some(awaiting) => div()
-                            .id(id("recording", &binding_id))
-                            .track_focus(&self.binding_focus)
-                            .flex()
-                            .items_center()
-                            .h(t.z(26.))
-                            .px(t.z(8.))
-                            .rounded(t.z(6.))
-                            .border_1()
-                            .border_color(t.accent)
-                            .bg(t.background)
-                            .text_size(t.z(size::META))
-                            .text_color(t.muted)
-                            .whitespace_nowrap()
-                            .child(shortcuts::recording_hint(awaiting, &prefix_key, self.platform))
-                            .on_key_down(cx.listener(Self::on_binding_key))
-                            .into_any_element(),
-                        None => {
-                            let record_id = binding_id.clone();
-                            div()
-                                .id(id("keys", &binding_id))
-                                .cursor_pointer()
-                                .rounded(t.z(6.))
-                                .p(t.z(2.))
-                                .hover(|s| s.bg(t.hover))
-                                .tooltip(soprano_ui::tooltip::tooltip("Click and press new keys to rebind"))
-                                .child(if entry.is_disabled {
-                                    form.small("Off", t.muted.opacity(0.7)).into_any_element()
-                                } else {
-                                    Keycaps::alternatives(entry.caps.clone()).into_any_element()
-                                })
-                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                    this.begin_binding_recording(&record_id, window, cx)
-                                }))
-                                .into_any_element()
-                        }
-                    };
-                    let mut description = entry.description();
-                    for issue in &entry.issues {
-                        description.push('\n');
-                        description.push_str(&issue.message);
-                    }
-                    let reset_id = binding_id.clone();
-                    form.row(entry.binding.label.clone())
-                        .description(description)
-                        .when_some_description_color((!entry.issues.is_empty()).then_some(t.approval))
-                        .when_title_color(entry.is_disabled.then_some(t.muted))
-                        .reset_when(
-                            entry.is_resettable(),
-                            id("reset-binding", &binding_id),
-                            cx.listener(move |this, _: &ClickEvent, window, cx| {
-                                this.reset(&shortcuts::binding_key_path(&reset_id), window, cx)
-                            }),
-                        )
-                        .when_tooltip(entry.is_customized.then_some(shortcuts::CUSTOMIZED_TOOLTIP))
-                        .control(control)
-                        .render(t)
-                })
-                .collect();
-            sections.push(form.section(Some(group.title), None, rows).into_any_element());
+            let count = group.entries.len();
+            let rows =
+                group.entries.iter().map(|entry| self.shortcut_row(entry, &prefix_key, &form, cx)).collect();
+            sections.push(form.section(group.title).count(count).rows(rows));
         }
         sections
+    }
+
+    /// One shortcut on one line: its name (the id is its tooltip), what it does, and its keys,
+    /// which record a new chord when clicked.
+    fn shortcut_row(
+        &self,
+        entry: &ShortcutEntry,
+        prefix_key: &str,
+        form: &Form,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let t = form.t;
+        let binding_id = entry.binding.id.clone();
+        let recording = match &self.recording {
+            Some(Recording::Binding { id, recorder }) if *id == binding_id => {
+                Some(recorder.is_awaiting_prefix_key())
+            }
+            _ => None,
+        };
+        let keys: AnyElement = match recording {
+            Some(awaiting) => div()
+                .id(id("recording", &binding_id))
+                .track_focus(&self.binding_focus)
+                .flex()
+                .flex_none()
+                .items_center()
+                .h(t.z(24.))
+                .px(t.z(8.))
+                .rounded(t.z(6.))
+                .border_1()
+                .border_color(t.accent)
+                .bg(t.canvas)
+                .text_size(t.z(size::META))
+                .text_color(t.muted)
+                .whitespace_nowrap()
+                .child(shortcuts::recording_hint(awaiting, prefix_key, self.platform))
+                .on_key_down(cx.listener(Self::on_binding_key))
+                .into_any_element(),
+            None => {
+                let record_id = binding_id.clone();
+                div()
+                    .id(id("keys", &binding_id))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .h(t.z(24.))
+                    .px(t.z(3.))
+                    .rounded(t.z(6.))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(t.hover))
+                    .tooltip(tooltip("Click and press new keys to rebind"))
+                    .child(if entry.is_disabled {
+                        form.small("Off", t.dim).px(t.z(3.)).into_any_element()
+                    } else {
+                        Keycaps::alternatives(entry.caps.clone()).color(t.muted).into_any_element()
+                    })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                        this.begin_binding_recording(&record_id, window, cx)
+                    }))
+                    .into_any_element()
+            }
+        };
+        let label_tooltip = if entry.is_customized {
+            format!("{binding_id} · {}", shortcuts::CUSTOMIZED_TOOLTIP)
+        } else {
+            binding_id.clone()
+        };
+        let label = div()
+            .id(id("shortcut", &binding_id))
+            .flex()
+            .flex_row()
+            .flex_none()
+            .items_center()
+            .gap(t.z(6.))
+            .w(t.z(190.))
+            .tooltip(tooltip(label_tooltip))
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(t.z(size::UI))
+                    .text_color(if entry.is_disabled { t.muted } else { t.foreground })
+                    .child(entry.binding.label.clone()),
+            )
+            .when(entry.is_customized, |label| label.child(form.dot(t.accent).size(t.z(5.))));
+        let reset = entry.is_resettable().then(|| {
+            let reset_id = binding_id.clone();
+            IconButton::new(id("reset-binding", &binding_id), IconName::UNDO)
+                .size(IconButtonSize::Tab)
+                .tooltip("Reset to default")
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.reset(&shortcuts::binding_key_path(&reset_id), window, cx)
+                }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(t.z(3.))
+            .min_h(t.z(38.))
+            .px(t.z(INSET))
+            .py(t.z(6.))
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(12.))
+                    .child(label)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(t.z(size::META))
+                            .text_color(t.muted)
+                            .child(entry.binding.description.clone()),
+                    )
+                    .children(reset)
+                    .child(keys),
+            )
+            .children(entry.issues.iter().map(|issue| {
+                div()
+                    .text_size(t.z(size::META))
+                    .line_height(t.z(17.))
+                    .text_color(t.approval)
+                    .child(issue.message.clone())
+            }))
+            .into_any_element()
     }
 
     // MARK: - Agent Profiles
@@ -598,24 +747,11 @@ impl SettingsView {
     ) -> Vec<AnyElement> {
         self.ensure_agent_inputs(window, cx);
         let form = Form::new(t);
-        let intro = form.section(
-            None,
-            None,
-            vec![
-                form.row(agents::INTRO_TITLE)
-                    .description(agents::INTRO)
-                    .control(self.open_file_button("agents", cx))
-                    .render(t),
-            ],
-        );
         let configured = self.snapshot.resolved.configured_agent_ids.clone();
-        let profiles: Vec<AnyElement> = self
-            .snapshot
-            .resolved
-            .agents
-            .clone()
-            .into_iter()
-            .map(|profile| self.agent_profile_row(&profile, configured.contains(&profile.id), t, cx))
+        let agents = self.snapshot.resolved.agents.clone();
+        let profiles: Vec<AnyElement> = agents
+            .iter()
+            .map(|profile| self.agent_profile_row(profile, configured.contains(&profile.id), &form, cx))
             .collect();
 
         let [new_id, new_name, new_command] = self.new_agent_inputs.clone();
@@ -623,16 +759,17 @@ impl SettingsView {
             .flex()
             .flex_col()
             .gap(t.z(8.))
-            .px(t.z(16.))
-            .py(t.z(12.))
+            .px(t.z(INSET))
+            .py(t.z(10.))
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .items_center()
                     .gap(t.z(8.))
-                    .child(div().flex_1().child(TextInput::new(&new_id).small()))
-                    .child(div().flex_1().child(TextInput::new(&new_name).small()))
-                    .child(div().flex_1().child(TextInput::new(&new_command).small()))
+                    .child(div().flex_none().w(t.z(150.)).child(TextInput::new(&new_id).small()))
+                    .child(div().flex_none().w(t.z(150.)).child(TextInput::new(&new_name).small()))
+                    .child(div().flex_1().min_w_0().child(TextInput::new(&new_command).small()))
                     .child(
                         Button::new("add-agent", "Add Agent")
                             .primary()
@@ -645,97 +782,168 @@ impl SettingsView {
             )
             .when_some(self.new_agent_error, |col, error| col.child(form.small(error, t.failed)));
         vec![
-            intro.into_any_element(),
-            form.section(Some("Profiles"), None, profiles).into_any_element(),
-            form.section(
-                Some("Add an agent"),
-                Some("A new id defines a new agent; it needs a command to run."),
-                vec![add_row.into_any_element()],
-            )
-            .into_any_element(),
+            self.lead(&form, agents::INTRO, self.open_file_button("agents", cx)),
+            form.section("Profiles").count(agents.len()).rows(profiles),
+            form.section("Add an agent")
+                .note("A new id defines a new agent; it needs a command to run.")
+                .rows(vec![add_row.into_any_element()]),
         ]
     }
 
+    /// A profile as one line (icon, name, what it is, its command); a click opens its fields
+    /// under it.
     fn agent_profile_row(
         &self,
         profile: &AgentProfile,
         is_configured: bool,
-        t: &SopranoTheme,
+        form: &Form,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let t = form.t;
+        let expanded = self.expanded_agent.as_deref() == Some(profile.id.as_str());
         let color: Hsla = soprano_ui::color::hsla(profile.color());
-        let reset_id = profile.id.clone();
+        let glyph = match agent_icon_stem(&profile.id) {
+            Some(stem) => Icon::program(stem),
+            None if profile.id == DefaultAgents::TERMINAL => Icon::new(IconName::SHELL),
+            None => Icon::new(IconName::Bot),
+        };
+        let toggle_id = profile.id.clone();
         let header = div()
+            .id(id("agent", &profile.id))
             .flex()
             .flex_row()
             .items_center()
-            .gap(t.z(8.))
-            .child(div().size(t.z(8.)).rounded_full().bg(color))
-            .child(div().text_size(t.z(size::UI)).font_weight(FontWeight::MEDIUM).child(profile.name.clone()))
-            .when(is_configured, |row| {
-                row.child(
-                    div()
-                        .px(t.z(6.))
-                        .h(t.z(18.))
-                        .flex()
-                        .items_center()
-                        .rounded(t.z(4.))
-                        .bg(t.raised)
-                        .border_1()
-                        .border_color(t.border)
-                        .text_size(t.z(size::SMALL))
-                        .text_color(t.muted)
-                        .child(agents::CONFIGURED_BADGE),
-                )
-                .child(
-                    soprano_ui::button::IconButton::new(id("reset-agent", &profile.id), IconName::UNDO)
-                        .size(soprano_ui::button::IconButtonSize::Tab)
-                        .tooltip(if agents::is_built_in(&profile.id) {
-                            "Reset to default"
-                        } else {
-                            "Remove agent"
-                        })
-                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                            agents::remove_agent_entry(&this.store, &reset_id);
-                            this.reload(window, cx);
-                        })),
-                )
-            });
+            .gap(t.z(10.))
+            .min_h(t.z(52.))
+            .px(t.z(INSET))
+            .py(t.z(8.))
+            .cursor_pointer()
+            .hover(|s| s.bg(t.hover))
+            .child(
+                icon(if expanded { IconName::ChevronDown } else { IconName::ChevronRight })
+                    .size(12.)
+                    .color(t.dim),
+            )
+            .child(glyph.size(16.).color(color))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(t.z(1.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(t.z(8.))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(t.z(size::UI))
+                                    .line_height(t.z(19.))
+                                    .child(profile.name.clone()),
+                            )
+                            .when(is_configured, |row| {
+                                row.child(form.badge(agents::CONFIGURED_BADGE, t.muted))
+                            }),
+                    )
+                    .when(!profile.description.is_empty(), |col| {
+                        col.child(
+                            div()
+                                .truncate()
+                                .text_size(t.z(size::META))
+                                .line_height(t.z(17.))
+                                .text_color(t.muted)
+                                .child(profile.description.clone()),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .max_w(t.z(260.))
+                    .truncate()
+                    .text_size(t.z(size::META))
+                    .map(mono)
+                    .text_color(t.muted)
+                    .child(agents::command_line(profile)),
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.toggle_agent(&toggle_id, cx)));
+        if !expanded {
+            return header.into_any_element();
+        }
+
         let fields = AgentField::ALL.iter().map(|field| {
             let input = self.agent_inputs.get(&(profile.id.clone(), *field)).cloned();
             div()
                 .flex()
                 .flex_col()
-                .gap(t.z(4.))
-                .w(gpui::relative(0.48))
-                .child(div().text_size(t.z(size::SMALL)).text_color(t.muted).child(field.label()))
+                .gap(t.z(5.))
+                .min_w_0()
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(t.z(6.))
+                        .text_size(t.z(size::SECTION))
+                        .text_color(t.muted)
+                        .child(field.label())
+                        .when(*field == AgentField::Color, |label| label.child(form.dot(color))),
+                )
                 .children(input.map(|input| TextInput::new(&input).small()))
         });
-        div()
+        let built_in = agents::is_built_in(&profile.id);
+        let reset_id = profile.id.clone();
+        // Indented to the name, past the chevron and the icon.
+        let body = div()
             .flex()
             .flex_col()
-            .gap(t.z(4.))
-            .px(t.z(16.))
-            .py(t.z(12.))
-            .child(header)
-            .child(div().text_size(t.z(size::META)).text_color(t.muted).child(profile.description.clone()))
+            .gap(t.z(12.))
+            .pl(t.z(INSET + 48.))
+            .pr(t.z(INSET))
+            .pt(t.z(2.))
+            .pb(t.z(14.))
+            .child(div().grid().grid_cols(2).gap_x(t.z(12.)).gap_y(t.z(10.)).children(fields))
             .child(
                 div()
-                    .mt(t.z(2.))
-                    .text_size(t.z(size::META))
-                    .font_family(fonts::MONO_FONT_FAMILY)
-                    .truncate()
-                    .child(agents::command_line(profile)),
-            )
-            .child(
-                div()
-                    .text_size(t.z(size::SMALL))
-                    .font_family(fonts::MONO_FONT_FAMILY)
-                    .text_color(t.muted)
-                    .child(agents::patterns_line(profile)),
-            )
-            .child(div().mt(t.z(8.)).flex().flex_row().flex_wrap().gap(t.z(8.)).children(fields))
-            .into_any_element()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(12.))
+                    .min_h(t.z(24.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(t.z(size::SMALL))
+                            .map(mono)
+                            .text_color(t.dim)
+                            .child(agents::patterns_line(profile)),
+                    )
+                    .when(is_configured, |row| {
+                        let (label, glyph, variant) = if built_in {
+                            ("Reset to default", IconName::UNDO, ButtonVariant::Secondary)
+                        } else {
+                            ("Remove agent", IconName::Trash, ButtonVariant::DestructiveOutline)
+                        };
+                        row.child(
+                            Button::new(id("reset-agent", &profile.id), label)
+                                .variant(variant)
+                                .icon(glyph)
+                                .size(ButtonSize::Xs)
+                                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                                    agents::remove_agent_entry(&this.store, &reset_id);
+                                    this.reload(window, cx);
+                                })),
+                        )
+                    }),
+            );
+        div().flex().flex_col().child(header).child(body).into_any_element()
     }
 
     /// One input per profile field, created on first sight and kept in step with the file.
@@ -828,27 +1036,17 @@ impl SettingsView {
         let form = Form::new(t);
         let now = soprano_accounts::chrono::Utc::now();
         let page = AccountsPage::build(&self.accounts_snapshot, &now);
-        let mut sections = vec![
-            form.section(
-                None,
-                None,
-                vec![
-                    form.row("Accounts")
-                        .description(page.intro)
-                        .control(form.controls(vec![
-                            form.small(page.updated.clone(), t.muted).into_any_element(),
-                            self.account_button(&page.refresh, "refresh", cx).into_any_element(),
-                        ]))
-                        .render(t),
-                ],
-            )
-            .into_any_element(),
-        ];
+        let refresh = form.controls(vec![
+            form.small(page.updated.clone(), t.dim).into_any_element(),
+            self.account_button(&page.refresh, "refresh", cx).size(ButtonSize::Sm).into_any_element(),
+        ]);
+        let mut sections = vec![self.lead(&form, page.intro, refresh)];
         for (section_index, section) in page.sections.iter().enumerate() {
             let mut rows = Vec::new();
             if let Some(error) = &section.error {
                 rows.push(
                     form.row(error.title)
+                        .leading(icon(IconName::CircleAlert).size(15.).color(t.failed))
                         .description(error.message.clone())
                         .description_color(t.failed)
                         .control(self.account_button(&error.dismiss, &format!("dismiss-{section_index}"), cx))
@@ -857,15 +1055,15 @@ impl SettingsView {
             }
             match &section.body {
                 SectionBody::Unavailable(reason) => {
-                    rows.push(form.row("Unavailable").description(reason.clone()).render(t))
+                    rows.push(form.placeholder("Unavailable", reason.clone()))
                 }
-                SectionBody::Placeholder(text) => rows.push(form.row(*text).render(t)),
+                SectionBody::Placeholder(text) => rows.push(form.row(*text).title_color(t.muted).render(t)),
                 SectionBody::Rows(entries) => {
                     for (row_index, entry) in entries.iter().enumerate() {
                         rows.push(self.account_entry_row(
                             entry,
                             &format!("{section_index}-{row_index}"),
-                            t,
+                            &form,
                             cx,
                         ));
                     }
@@ -889,14 +1087,12 @@ impl SettingsView {
                     )
                     .render(t),
                 SectionFooter::Add(button) => form
-                    .actions_row(vec![
+                    .bar(vec![
                         self.account_button(button, &format!("add-{section_index}"), cx).into_any_element(),
                     ])
                     .into_any_element(),
             });
-            sections.push(
-                form.section(Some(section.title.as_str()), Some(section.note), rows).into_any_element(),
-            );
+            sections.push(form.section(section.title.clone()).note(section.note).rows(rows));
         }
         sections
     }
@@ -925,9 +1121,10 @@ impl SettingsView {
         &self,
         entry: &EntryRow,
         key: &str,
-        t: &SopranoTheme,
+        form: &Form,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let t = form.t;
         let has_problem = entry.problem.as_deref().is_some_and(|p| !p.is_empty());
         let buttons: Vec<AnyElement> = entry
             .buttons
@@ -939,12 +1136,12 @@ impl SettingsView {
             .flex()
             .flex_row()
             .items_center()
-            .gap(t.z(24.))
-            .min_h(t.z(60.))
-            .px(t.z(16.))
-            .py(t.z(12.))
+            .gap(t.z(16.))
+            .min_h(t.z(52.))
+            .px(t.z(INSET))
+            .py(t.z(9.))
             .when(entry.is_selected, |row| {
-                row.bg(t.foreground.opacity(if t.is_dark() { 0.06 } else { 0.035 }))
+                row.bg(t.foreground.opacity(if t.is_dark() { 0.05 } else { 0.03 }))
             })
             .child(
                 div()
@@ -953,13 +1150,13 @@ impl SettingsView {
                     .flex_1()
                     .min_w_0()
                     .gap(t.z(10.))
-                    .child(div().pt(t.z(5.)).child(account_mark(entry.is_selected, has_problem, t)))
+                    .child(div().pt(t.z(6.)).child(account_mark(entry.is_selected, has_problem, t)))
                     .child(
                         div()
                             .flex()
                             .flex_col()
                             .min_w_0()
-                            .gap(t.z(3.))
+                            .gap(t.z(1.))
                             .child(
                                 div()
                                     .flex()
@@ -970,20 +1167,30 @@ impl SettingsView {
                                         div()
                                             .truncate()
                                             .text_size(t.z(size::UI))
-                                            .font_weight(FontWeight::MEDIUM)
+                                            .line_height(t.z(19.))
+                                            .when(entry.is_selected, |title| {
+                                                title.font_weight(FontWeight::MEDIUM)
+                                            })
                                             .child(entry.title.clone()),
                                     )
-                                    .when_some(entry.badge, |row, badge| row.child(badge_chip(badge, t))),
+                                    .when_some(entry.badge, |row, badge| {
+                                        row.child(form.badge(badge, t.muted))
+                                    }),
                             )
                             .child(
                                 div()
                                     .text_size(t.z(size::META))
+                                    .line_height(t.z(17.))
                                     .text_color(t.muted)
                                     .child(entry.detail.clone()),
                             )
                             .when_some(entry.problem.clone().filter(|_| has_problem), |col, problem| {
                                 col.child(
-                                    div().text_size(t.z(size::META)).text_color(t.failed).child(problem),
+                                    div()
+                                        .text_size(t.z(size::META))
+                                        .line_height(t.z(17.))
+                                        .text_color(t.failed)
+                                        .child(problem),
                                 )
                             }),
                     ),
@@ -998,108 +1205,187 @@ impl SettingsView {
 
     pub(crate) fn about_page(&mut self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let form = Form::new(t);
-        let about = form.section(
-            Some("About"),
-            None,
-            vec![
-                form.row("Version")
-                    .description(about::VERSION_DESCRIPTION)
-                    .control(form.value(soprano_platform::identity::app_version(), false))
-                    .render(t),
-                form.row("Runtime")
-                    .description(about::RUNTIME_DESCRIPTION)
-                    .control(form.value(about::RUNTIME, false))
-                    .render(t),
-                form.row("Settings file")
-                    .description(self.store.display_path())
-                    .mono_description()
-                    .control(form.controls(vec![
-                        self.open_file_button("about", cx).into_any_element(),
-                        Button::new("reveal-settings-file", about::reveal_label())
-                            .ghost()
-                            .size(ButtonSize::Sm)
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, _| {
-                                let _ = this.store.reveal_in_file_manager();
-                            }))
-                            .into_any_element(),
-                        Button::new("reload-settings-file", "Reload")
-                            .ghost()
-                            .size(ButtonSize::Sm)
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.store.reload_from_disk();
-                                this.reload(window, cx);
-                            }))
-                            .into_any_element(),
-                    ]))
-                    .render(t),
-            ],
-        );
-        let links = form.section(
-            Some("Links"),
-            None,
-            about::LINKS
-                .iter()
-                .map(|link| {
-                    let url = link.url;
-                    form.row(link.title)
-                        .description(link.description)
-                        .control(
-                            Button::new(id("link", link.title), "Open")
-                                .icon(IconName::ExternalLink)
-                                .size(ButtonSize::Xs)
-                                .on_click(move |_, _, _| {
-                                    let _ = soprano_platform::system::open_default(url);
-                                }),
-                        )
-                        .render(t)
+        let links = about::LINKS.iter().map(|link| {
+            let url = link.url;
+            Button::new(id("link", link.title), link.title)
+                .icon(IconName::ExternalLink)
+                .size(ButtonSize::Sm)
+                .tooltip(link.description)
+                .on_click(move |_, _, _| {
+                    let _ = soprano_platform::system::open_default(url);
                 })
-                .collect(),
-        );
-        let notices = form.section(
-            Some("Licenses"),
-            Some("Soprano is built on these projects; their licenses ship with the app."),
-            about::LICENSE_NOTICES
-                .iter()
-                .map(|notice| {
-                    let path = notice.path();
-                    form.row(notice.component)
-                        .description(notice.license)
-                        .when_some_control(path.map(|path| {
+        });
+        let hero = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(t.z(18.))
+            .child(gpui::img(about::APP_ICON).flex_none().size(t.z(72.)))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_baseline()
+                            .gap(t.z(8.))
+                            .child(
+                                div()
+                                    .text_size(t.z(20.))
+                                    .line_height(t.z(26.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(soprano_platform::identity::AppIdentity::current().name),
+                            )
+                            .child(
+                                div()
+                                    .text_size(t.z(size::ROW))
+                                    .map(mono)
+                                    .text_color(t.muted)
+                                    .child(soprano_platform::identity::app_version()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(t.z(size::ROW))
+                            .line_height(t.z(19.))
+                            .text_color(t.muted)
+                            .child(about::TAGLINE),
+                    )
+                    .child(
+                        div()
+                            .text_size(t.z(size::META))
+                            .line_height(t.z(17.))
+                            .text_color(t.dim)
+                            .child(about::RUNTIME),
+                    )
+                    .child(div().flex().flex_row().flex_wrap().gap(t.z(6.)).pt(t.z(12.)).children(links)),
+            );
+
+        let settings_file = form.section("Settings file").rows(vec![
+            form.row(self.store.display_path())
+                .mono_title()
+                .leading(icon(IconName::FileText).size(15.).color(t.muted))
+                .control(form.controls(vec![
+                    self.open_file_button("about", cx).into_any_element(),
+                    Button::new("reveal-settings-file", about::reveal_label())
+                        .ghost()
+                        .size(ButtonSize::Sm)
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, _| {
+                            let _ = this.store.reveal_in_file_manager();
+                        }))
+                        .into_any_element(),
+                    Button::new("reload-settings-file", "Reload")
+                        .ghost()
+                        .size(ButtonSize::Sm)
+                        .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                            this.store.reload_from_disk();
+                            this.reload(window, cx);
+                        }))
+                        .into_any_element(),
+                ]))
+                .render(t),
+        ]);
+
+        let keybindings = &self.snapshot.resolved.keybindings;
+        let reference = about::quick_reference_bindings(keybindings)
+            .into_iter()
+            .map(|binding| {
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(12.))
+                    .h(t.z(30.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(t.z(size::UI))
+                            .child(binding.label.clone()),
+                    )
+                    .child(
+                        Keycaps::alternatives(soprano_config::settings_keycap_alternatives_for(
+                            binding,
+                            &keybindings.prefix_key,
+                            self.platform,
+                        ))
+                        .color(t.muted),
+                    )
+            })
+            .collect::<Vec<_>>();
+        let quick_reference = form.section("Quick reference").body(form.group(vec![
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap_x(t.z(32.))
+                    .px(t.z(INSET))
+                    .py(t.z(8.))
+                    .children(reference)
+                    .into_any_element(),
+            ]));
+
+        let notices = form
+            .section("Licenses")
+            .note("Soprano is built on these projects; their licenses ship with the app.")
+            .rows(
+                about::LICENSE_NOTICES
+                    .iter()
+                    .map(|notice| {
+                        let view = notice.path().map(|path| {
                             Button::new(id("license", notice.component), "View")
-                                .size(ButtonSize::Xs)
+                                .variant(ButtonVariant::Text)
                                 .on_click(move |_, _, _| {
                                     let _ =
                                         soprano_platform::system::open_default(&path.display().to_string());
                                 })
-                        }))
-                        .render(t)
-                })
-                .collect(),
-        );
-        let keybindings = &self.snapshot.resolved.keybindings;
-        let quick_reference = form.section(
-            Some("Quick reference"),
-            None,
-            about::quick_reference_bindings(keybindings)
-                .into_iter()
-                .map(|binding| {
-                    form.row(binding.label.clone())
-                        .control(Keycaps::alternatives(soprano_config::settings_keycap_alternatives_for(
-                            binding,
-                            &keybindings.prefix_key,
-                            self.platform,
-                        )))
-                        .render(t)
-                })
-                .collect(),
-        );
-        vec![
-            about.into_any_element(),
-            links.into_any_element(),
-            notices.into_any_element(),
-            quick_reference.into_any_element(),
-        ]
+                                .into_any_element()
+                        });
+                        // The View column keeps its width so the license names line up.
+                        form.row(notice.component)
+                            .compact()
+                            .control(form.controls(vec![
+                                form.small(notice.license, t.muted).into_any_element(),
+                                div().flex().justify_end().w(t.z(32.)).children(view).into_any_element(),
+                            ]))
+                            .render(t)
+                    })
+                    .collect(),
+            );
+        vec![hero.into_any_element(), settings_file, quick_reference, notices]
     }
+}
+
+/// A theme's terminal in miniature: its background with lines in its text and ANSI colors.
+fn theme_swatch(palette: &AppTheme, t: &SopranoTheme) -> gpui::Div {
+    let color = soprano_ui::color::hsla;
+    let foreground = color(palette.terminal.foreground);
+    let ansi = palette.terminal.ansi;
+    let bar = |width: f32, fill: Hsla| div().flex_none().w(t.z(width)).h(t.z(4.)).rounded(t.z(2.)).bg(fill);
+    let line = || div().flex().flex_row().gap(t.z(4.));
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .justify_center()
+        .gap(t.z(6.))
+        .px(t.z(9.))
+        .overflow_hidden()
+        .bg(color(palette.terminal.background))
+        .child(line().child(bar(7., color(ansi[2]))).child(bar(26., foreground.opacity(0.9))))
+        .child(
+            line()
+                .child(bar(16., color(ansi[4])))
+                .child(bar(11., color(ansi[3])))
+                .child(bar(9., color(ansi[5]))),
+        )
+        .child(line().child(bar(32., foreground.opacity(0.4))))
 }
 
 /// The 8 px mark before a login: a filled dot for the chosen one, a ring for the others, an
@@ -1120,55 +1406,15 @@ pub(crate) fn account_mark(is_selected: bool, has_problem: bool, t: &SopranoThem
     }
 }
 
-fn badge_chip(text: &'static str, t: &SopranoTheme) -> impl IntoElement {
-    div()
-        .flex_none()
-        .px(t.z(6.))
-        .h(t.z(18.))
-        .flex()
-        .items_center()
-        .rounded(t.z(4.))
-        .bg(t.raised)
-        .border_1()
-        .border_color(t.border)
-        .text_size(t.z(size::SMALL))
-        .text_color(t.muted)
-        .child(text)
-}
-
 /// Small builder conveniences for optional parts.
 trait WhenSome: Sized {
     fn when_some_control(self, control: Option<impl IntoElement>) -> Self;
-    fn when_some_description_color(self, color: Option<Hsla>) -> Self;
-    fn when_title_color(self, color: Option<Hsla>) -> Self;
-    fn when_tooltip(self, text: Option<&'static str>) -> Self;
 }
 
 impl WhenSome for crate::form::Row {
     fn when_some_control(self, control: Option<impl IntoElement>) -> Self {
         match control {
             Some(control) => self.control(control),
-            None => self,
-        }
-    }
-
-    fn when_some_description_color(self, color: Option<Hsla>) -> Self {
-        match color {
-            Some(color) => self.description_color(color),
-            None => self,
-        }
-    }
-
-    fn when_title_color(self, color: Option<Hsla>) -> Self {
-        match color {
-            Some(color) => self.title_color(color),
-            None => self,
-        }
-    }
-
-    fn when_tooltip(self, text: Option<&'static str>) -> Self {
-        match text {
-            Some(text) => self.tooltip(text),
             None => self,
         }
     }
