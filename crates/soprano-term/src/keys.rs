@@ -492,4 +492,22 @@ mod tests {
         assert_eq!(map_key("f24").map(|k| k.0), Some(GHOSTTY_KEY_F24));
         assert_eq!(map_key("f25"), None);
     }
+
+    #[test]
+    fn natural_text_editing_bindings_win_over_option_as_alt_and_kitty_encoding() {
+        let binds = crate::keybinds::TerminalKeybinds::platform_defaults(true);
+        let mut vt = vt();
+        vt.set_option_as_alt(crate::settings::OptionAsAlt::True);
+        vt.write(b"\x1b[>11u");
+        // Encoded, these keys would be CSI sequences in this mode ...
+        assert!(send(&mut vt, "alt-left", None).unwrap_or_default().starts_with(b"\x1b["));
+        assert!(send(&mut vt, "cmd-backspace", None).unwrap_or_default().starts_with(b"\x1b["));
+        // ... but the view sends the binding's bytes first, whatever the program's modes.
+        let bound = |spec: &str| binds.lookup(&press(spec, None)).map(|o| o.bytes.clone());
+        assert_eq!(bound("alt-left"), Some(b"\x1bb".to_vec()));
+        assert_eq!(bound("alt-right"), Some(b"\x1bf".to_vec()));
+        assert_eq!(bound("cmd-backspace"), Some(b"\x15".to_vec()));
+        assert_eq!(bound("cmd-left"), Some(b"\x01".to_vec()));
+        assert_eq!(bound("cmd-right"), Some(b"\x05".to_vec()));
+    }
 }

@@ -9,6 +9,7 @@
 //! Colors are ignored: Soprano's theme always overrode them. `config-file` includes are
 //! followed. Everything else is ignored.
 
+use crate::keybinds::TerminalKeybinds;
 use crate::theme::TerminalTheme;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -90,6 +91,8 @@ pub struct TerminalSettings {
     /// Copying a selection clears it (Soprano's `SopranoCopyMode.conf` turns this on).
     pub selection_clear_on_copy: bool,
     pub option_as_alt: OptionAsAlt,
+    /// Ghostty's macOS defaults plus the user's `keybind` lines that write to the program.
+    pub keybinds: TerminalKeybinds,
 }
 
 impl TerminalSettings {
@@ -151,6 +154,12 @@ impl TerminalSettings {
         if let Some(v) = config.macos_option_as_alt {
             self.option_as_alt = v.unwrap_or_default();
         }
+        if !config.keybinds.is_empty() {
+            self.keybinds = TerminalKeybinds::from_config_values(
+                config.keybinds.iter().map(String::as_str),
+                cfg!(target_os = "macos"),
+            );
+        }
     }
 }
 
@@ -172,6 +181,7 @@ impl Default for TerminalSettings {
             clipboard_paste_bracketed_safe: true,
             selection_clear_on_copy: true,
             option_as_alt: OptionAsAlt::False,
+            keybinds: TerminalKeybinds::default(),
         }
     }
 }
@@ -200,6 +210,8 @@ pub struct GhosttyConfig {
     /// another, so `no-cursor` then `cursor` turns the cursor back on). An empty value is
     /// kept as `""`, a reset.
     pub shell_integration_features: Vec<String>,
+    /// Every `keybind` value in order (`""` and `clear` included); see [`TerminalKeybinds`].
+    pub keybinds: Vec<String>,
 }
 
 impl GhosttyConfig {
@@ -269,6 +281,7 @@ impl GhosttyConfig {
                     self.shell_integration = Some((!empty).then(|| value.to_owned()));
                 }
                 "shell-integration-features" => self.shell_integration_features.push(value.to_owned()),
+                "keybind" => self.keybinds.push(value.to_owned()),
                 "font-family" => {
                     // Repeated keys add fallbacks; the first one is the font.
                     if empty {
@@ -448,6 +461,22 @@ mod tests {
         config.parse("shell-integration =\nshell-integration-features =\n");
         assert_eq!(config.shell_integration, Some(None));
         assert_eq!(config.shell_integration_features.last().map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn keybind_lines_reach_the_terminal_keybinds_in_order() {
+        let mut config = GhosttyConfig::default();
+        config.parse("keybind = shift+enter=text:\\x1b\\r\nkeybind = clear\nkeybind = ctrl+j=text:\\n\n");
+        assert_eq!(config.keybinds, ["shift+enter=text:\\x1b\\r", "clear", "ctrl+j=text:\\n"]);
+        let mut s = TerminalSettings::default();
+        s.apply_ghostty_config(&config);
+        assert_eq!(
+            s.keybinds,
+            TerminalKeybinds::from_config_values(
+                config.keybinds.iter().map(String::as_str),
+                cfg!(target_os = "macos")
+            )
+        );
     }
 
     #[test]

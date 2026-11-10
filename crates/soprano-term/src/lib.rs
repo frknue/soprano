@@ -9,6 +9,7 @@ mod engine;
 mod events;
 pub mod input_metadata;
 pub mod interaction;
+pub mod keybinds;
 pub mod keys;
 pub mod links;
 pub mod os;
@@ -27,6 +28,7 @@ pub use clipboard::{
 pub use engine::{PtyMessage, Terminal, TerminalLaunch, TerminalSize};
 pub use events::{ClipboardRequest, TerminalEvent};
 pub use interaction::TerminalInteractionState;
+pub use keybinds::TerminalKeybinds;
 pub use settings::{
     ClipboardAccess, CopyOnSelect, CursorStyle, GhosttyConfig, OptionAsAlt, Padding, TerminalSettings,
 };

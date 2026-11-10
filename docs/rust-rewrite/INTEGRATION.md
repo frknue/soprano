@@ -10,7 +10,11 @@ Intentional or platform-forced differences that remain after the port. Per-crate
   because it lands on Ctrl+Shift+L (next window); the first binding wins, as in Swift.
 - **Terminal:** libghostty-vt rendered by GPUI instead of a full libghostty surface. Only the
   Ghostty config keys a vt renderer can honor are read (font, cursor, scrollback, clipboard,
-  paste protection, padding, shell integration); ligatures are off.
+  paste protection, padding, shell integration, and `keybind` lines whose action writes to
+  the program: `text:`, `esc:`, `csi:`, `ignore`, `unbind`, `clear`); ligatures are off.
+  Ghostty's macOS "natural text editing" defaults apply (⌘⌫ → `^U`, ⌘←/⌘→ → `^A`/`^E`,
+  ⌥←/⌥→ → `ESC b`/`ESC f`) unless a keybind overrides or unbinds them. Skipped: other actions,
+  key sequences (`a>b`), `chain=`, key tables, and the `global:`/`all:` prefixes.
 - **IPC:** a per-instance local socket (`SOPRANO_SOCKET`) replaces distributed notifications;
   a CLI call to an app that isn't running fails at once with the same message instead of
   waiting 15 s.

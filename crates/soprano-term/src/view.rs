@@ -1200,6 +1200,20 @@ impl TerminalView {
             self.copy_selection(cx);
             return;
         }
+        // Ghostty keybinds that write to the program (⌘⌫ kills the line on macOS, a user's
+        // `shift+enter=text:\x1b\r`) come before encoding, and their bytes go as they are.
+        if let Some(output) = self.settings.keybinds.lookup(k).cloned() {
+            self.write(&output.bytes);
+            self.blink_visible = true;
+            if output.consumed {
+                // The program never sees this press, so it gets no release either.
+                if k.key == "enter" && !k.modifiers.shift {
+                    cx.emit(TerminalEvent::AgentInputSubmitted);
+                }
+                cx.notify();
+                return;
+            }
+        }
         self.key_router.prepare_for_key_down(self.key_clock, k.key.clone());
         // Typing clears a selection, as in Ghostty.
         if self.has_selection() {
