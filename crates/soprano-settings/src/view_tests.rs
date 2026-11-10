@@ -475,6 +475,49 @@ fn the_usage_popover_follows_the_accounts_and_hands_manage_accounts_to_the_host(
     assert_eq!(accounts.calls(), vec!["refresh force=true"]);
 }
 
+#[gpui::test]
+fn a_usage_card_with_many_logins_stays_inside_a_short_window_with_its_buttons_in_view(
+    cx: &mut TestAppContext,
+) {
+    cx.update(soprano_ui::init_for_tests);
+    let mut snapshot = demo_snapshot();
+    let list = snapshot.lists.get_mut(&AccountListId::OMP_CLAUDE).expect("omp list");
+    let template = list.accounts[0].clone();
+    list.accounts = (0..30).map(|n| AccountRow { id: format!("login-{n}"), ..template.clone() }).collect();
+    let accounts = FakeAccounts::new(snapshot);
+    /// The card as the status bar shows it: in an `anchored` overlay, which lays its child
+    /// out at its content size rather than the window's.
+    struct Host(Entity<AccountUsagePopover>);
+    impl gpui::Render for Host {
+        fn render(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> impl gpui::IntoElement {
+            use gpui::{ParentElement as _, Styled as _};
+            gpui::div().size_full().child(
+                gpui::anchored()
+                    .anchor(gpui::Anchor::BottomRight)
+                    .position(gpui::point(gpui::px(780.), gpui::px(390.)))
+                    .snap_to_window_with_margin(gpui::px(8.))
+                    .child(self.0.clone()),
+            )
+        }
+    }
+    let (_host, cx) = cx.add_window_view({
+        let accounts: Rc<dyn AccountsSource> = accounts.clone();
+        move |window, cx| {
+            let card = gpui::AppContext::new(cx, |cx| AccountUsagePopover::new(accounts, window, cx));
+            Host(card)
+        }
+    });
+    cx.simulate_resize(gpui::size(gpui::px(800.), gpui::px(400.)));
+    cx.run_until_parked();
+    let card = cx.debug_bounds("usage-card").expect("card drawn");
+    let footer = cx.debug_bounds("usage-card-footer").expect("footer drawn");
+    assert!(card.top() >= gpui::px(0.) && card.size.height <= gpui::px(400.), "card is {card:?}");
+    assert!(
+        footer.bottom() <= card.bottom() && footer.size.height > gpui::px(20.),
+        "footer {footer:?} card {card:?}"
+    );
+}
+
 #[test]
 fn the_page_column_caps_at_768_and_narrows_with_the_card() {
     use crate::view::{CARD_MARGIN, PAGE_MAX_WIDTH, page_width};

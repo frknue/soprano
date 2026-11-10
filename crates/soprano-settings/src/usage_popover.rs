@@ -304,6 +304,7 @@ impl Render for AccountUsagePopover {
             .flex_col()
             .w(t.z(USAGE_POPOVER_WIDTH))
             .max_h(max_height)
+            .debug_selector(|| "usage-card".to_owned())
             .rounded(t.z(8.))
             .border_1()
             .border_color(t.border)
@@ -333,7 +334,9 @@ impl Render for AccountUsagePopover {
             .child(div().h(t.z(1.)).w_full().bg(t.border))
             .child(
                 div()
+                    .debug_selector(|| "usage-card-footer".to_owned())
                     .flex()
+                    .flex_none()
                     .flex_row()
                     .gap(t.z(8.))
                     .px(t.z(INSET))
