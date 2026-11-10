@@ -29,10 +29,12 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Prompt-Reste beim Verschmälern, wenn die erste Prompt-Zeile (ohne OSC-133-Marke, rechter
   Prompt füllt die Zeile) umbricht; Ghostty löscht nur ab der markierten Zeile (nur im Code
   gelesen, nicht mit der Swift-App verglichen).
-- Klick auf die Files/Changes-Umschalter wurde nur per Debug-Klick geprüft und traf auf dem
-  Retina-Display nicht; mit echter Maus prüfen.
-- Linux und Windows real testen; bisher nur Kompilier-/Clippy-Checks von macOS aus, CI läuft auf
-  `ubuntu-latest` und `windows-latest`.
+- Files/Changes-Umschalter, `+` und Session-Menü reagierten per Debug-Klick teils nicht, teils
+  doch; Ursache unklar (die Buttons stoppen den Mouse-Down selbst). Mit echter Maus prüfen.
+- Tab/Shift-Tab im Terminal behoben (`16eae0f`, Regressionstest in `keyboard.rs`).
+- CI: macOS grün auf `124ca84`; Linux/Windows Clippy grün, Tests nicht abgewartet. Spätere
+  Pushes nicht beobachtet.
+- Linux und Windows real testen; bisher nur CI und Clippy-Checks von macOS aus.
 - Geschwister-Apps (Agents, Cast, Files, Git, Desktop, Mix, Tab) synchronisieren Swift-Dateien
   aus `Sources/Soprano`; ihre `sync-soprano-chrome.sh` auf Commit `7eac737` zeigen lassen oder
   auf `soprano-ui` umstellen.
