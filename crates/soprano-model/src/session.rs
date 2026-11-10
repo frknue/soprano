@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use soprano_platform::StateStore;
 use soprano_types::AgentConversation;
 
-use crate::pane::PaneType;
+use crate::pane::{PaneType, Remote};
 use crate::split_node::SplitNode;
 use crate::window::TerminalSessionState;
 
@@ -163,6 +163,9 @@ pub struct SavedTab {
     /// Missing in older workspaces, which continue to start fresh agents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation: Option<AgentConversation>,
+    /// The machine the tab's program runs on; restoring reattaches to it there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<Remote>,
 }
 
 impl SavedTab {
@@ -178,6 +181,7 @@ impl SavedTab {
             content_kind: None,
             preview_owner_pane_id: None,
             conversation: None,
+            remote: None,
         }
     }
 }

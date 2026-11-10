@@ -13,6 +13,7 @@ use soprano_ipc::{AgentEvent, AgentEventState, Request};
 use soprano_model::{PaneType, Workspace, WorkspaceChange};
 use soprano_platform::StateStore;
 use soprano_types::TerminalTarget;
+use soprano_types::program_status::{BlockedKind, ProgramState, ProgramStatus};
 use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason};
 
 use crate::{
@@ -990,6 +991,142 @@ fn an_agents_osc_notification_reads_its_words_for_what_it_waits_on() {
         fake.posted().iter().map(|banner| banner.title.as_str()).collect::<Vec<_>>(),
         ["Claude Code needs approval", "Claude Code needs input", "Claude Code finished"]
     );
+}
+
+// MARK: - Program status (OSC 7501)
+
+fn report(state: ProgramState, kind: Option<BlockedKind>, app: Option<&str>) -> ProgramStatus {
+    ProgramStatus {
+        state,
+        id: None,
+        kind,
+        progress: None,
+        app: app.map(str::to_owned),
+        title: None,
+        msg: None,
+    }
+}
+
+#[test]
+fn a_remote_agents_status_reports_drive_its_tab_like_hook_events() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "claude-code");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+    let mut send = |workspace: &mut Workspace, state, kind| {
+        notifications.handle_program_status(
+            workspace,
+            target.clone(),
+            report(state, kind, Some("claude-code")),
+        );
+        workspace.agent(&target.pane_id, &target.tab_id).map(|agent| (agent.status, agent.waiting_reason))
+    };
+
+    assert_eq!(send(&mut workspace, ProgramState::Working, None), Some((AgentStatus::Running, None)));
+    assert_eq!(
+        send(&mut workspace, ProgramState::Blocked, Some(BlockedKind::Permission)),
+        Some((AgentStatus::Waiting, Some(AgentWaitingReason::Approval)))
+    );
+    assert_eq!(
+        send(&mut workspace, ProgramState::Done, None),
+        Some((AgentStatus::Waiting, Some(AgentWaitingReason::TurnEnded)))
+    );
+    assert_eq!(
+        fake.posted().iter().map(|banner| banner.title.as_str()).collect::<Vec<_>>(),
+        ["Claude Code needs approval", "Claude Code finished"]
+    );
+    send(&mut workspace, ProgramState::Clear, None);
+    let tab = workspace.pane(&target.pane_id).and_then(|pane| pane.tab(&target.tab_id)).expect("tab");
+    assert_eq!(tab.pane_type, PaneType::Terminal);
+}
+
+#[test]
+fn a_terminal_moved_to_a_machine_takes_status_reports_though_its_hooks_once_reported() {
+    let mut workspace = Workspace::new();
+    let target = first_target(&workspace);
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+    // omp ran here first and reported through its hook, then exited.
+    notifications.handle_agent_event(&mut workspace, event(&["running", "--profile", "omp"], &target));
+    notifications.handle_agent_event(&mut workspace, event(&["stopped", "--profile", "omp"], &target));
+
+    assert!(workspace.move_tab_to_machine(&target.pane_id, &target.tab_id, "vps"));
+    notifications.handle_program_status(
+        &mut workspace,
+        target.clone(),
+        report(ProgramState::Working, None, Some("omp")),
+    );
+
+    let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("agent");
+    assert_eq!((agent.profile_id.as_str(), agent.status), ("omp", AgentStatus::Running));
+}
+
+#[test]
+fn an_osc_notification_does_not_silence_later_status_reports() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "codex");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+    notifications.handle_terminal_notification(
+        &mut workspace,
+        TerminalNotification { target: target.clone(), title: String::new(), body: String::new() },
+    );
+    let waiting = |workspace: &Workspace| workspace.agent(&target.pane_id, &target.tab_id).map(|a| a.status);
+    assert_eq!(waiting(&workspace), Some(AgentStatus::Waiting));
+
+    notifications.handle_program_status(
+        &mut workspace,
+        target.clone(),
+        report(ProgramState::Working, None, Some("codex")),
+    );
+
+    assert_eq!(waiting(&workspace), Some(AgentStatus::Running));
+}
+
+#[test]
+fn status_reports_from_a_tab_its_hooks_already_cover_are_ignored() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "omp");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+    notifications.handle_agent_event(&mut workspace, event(&["running", "--profile", "omp"], &target));
+
+    notifications.handle_program_status(
+        &mut workspace,
+        target.clone(),
+        report(ProgramState::Done, None, Some("omp")),
+    );
+
+    let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("agent");
+    assert_eq!(agent.status, AgentStatus::Running);
+    assert!(fake.posted().is_empty());
+}
+
+#[test]
+fn an_agent_typed_into_a_terminal_attaches_by_the_app_it_reports_and_child_records_are_ignored() {
+    let mut workspace = Workspace::new();
+    let target = first_target(&workspace);
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+
+    let mut child = report(ProgramState::Working, None, Some("claude"));
+    child.id = Some("build/test".into());
+    notifications.handle_program_status(&mut workspace, target.clone(), child);
+    assert!(workspace.agent(&target.pane_id, &target.tab_id).is_none());
+    notifications.handle_program_status(
+        &mut workspace,
+        target.clone(),
+        report(ProgramState::Working, None, Some("my-script")),
+    );
+    assert!(workspace.agent(&target.pane_id, &target.tab_id).is_none());
+
+    notifications.handle_program_status(
+        &mut workspace,
+        target.clone(),
+        report(ProgramState::Working, None, Some("claude")),
+    );
+    let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("agent");
+    assert_eq!((agent.profile_id.as_str(), agent.status), ("claude-code", AgentStatus::Running));
 }
 
 // MARK: - Location subtitle (ExternalEventRoutingTests, TerminalSessionTests)

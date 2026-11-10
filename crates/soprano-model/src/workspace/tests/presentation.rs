@@ -284,12 +284,28 @@ fn an_agent_is_named_by_its_task_over_its_name() {
         conversation: None,
         is_chat: false,
         branch: None,
+        machine: None,
     };
     let working = entry("π ⠋ \u{F04E1} MIGR: Plan the migration");
     assert_eq!(working.title(), "MIGR: Plan the migration");
     assert_eq!(working.location(), "Window ▸ MIGR: Plan the migration");
     assert_eq!(working.id(), "pane-omp:omp");
     assert_eq!(entry("Codex: ab_tool").title(), "Codex");
+}
+
+#[test]
+fn a_machines_agent_shows_its_machine_and_never_this_computers_folder() {
+    let mut workspace = Workspace::new();
+    workspace.spawn_terminal_on("vps").expect("remote pane");
+    let agent = workspace.spawn_agent("omp", None, false).expect("agent on vps");
+    let entry = workspace
+        .agent_dashboard_entries()
+        .into_iter()
+        .find(|entry| entry.pane_id == agent)
+        .expect("dashboard entry");
+    assert_eq!(entry.machine.as_deref(), Some("vps"));
+    // No folder was chosen there; this app's working directory is not one on vps.
+    assert_eq!(entry.cwd, None);
 }
 
 #[test]

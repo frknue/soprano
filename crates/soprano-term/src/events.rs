@@ -28,6 +28,8 @@ pub enum TerminalEvent {
         title: String,
         body: String,
     },
+    /// An OSC 7501 program status report (the Program Status Protocol).
+    ProgramStatus(crate::program_status::ProgramStatus),
     Bell,
     /// Shell integration: a command finished (OSC 133;D), with its exit code when reported.
     CommandFinished {

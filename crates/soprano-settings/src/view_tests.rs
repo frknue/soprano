@@ -608,3 +608,44 @@ fn a_click_that_closes_the_theme_menu_keeps_settings_open(cx: &mut TestAppContex
     assert!(!h.view.read_with(cx, |view, _| view.is_showing_menu()));
     assert!(h.events.borrow().is_empty());
 }
+
+#[gpui::test]
+fn adding_a_destination_on_the_machines_page_writes_it_and_an_invalid_one_says_why(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx);
+    let checked = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    h.view.update_in(cx, |view, window, cx| {
+        let checked = checked.clone();
+        view.set_machine_checker(Arc::new(move |machine| {
+            checked.lock().unwrap().push(machine.name.clone());
+            soprano_launch::MachineCheck::Ready { tmux: Some("tmux 3.4".into()), system: "Linux".into() }
+        }));
+        view.switch_tab(SettingsTab::Machines, window, cx);
+        view.machine_input.update(cx, |state, cx| state.set_value("me@vps", window, cx));
+    });
+    h.view.update_in(cx, |view, window, cx| {
+        let text = view.machine_input.read(cx).value().to_string();
+        view.add_machine(&text, window, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        h.store.snapshot().resolved.machines.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+        ["vps"]
+    );
+    assert_eq!(*checked.lock().unwrap(), ["vps"]);
+    h.view.read_with(cx, |view, cx| {
+        assert_eq!(view.machine_input.read(cx).value().to_string(), "");
+        assert!(matches!(
+            view.machine_status.get("vps"),
+            Some(crate::view::MachineStatus::Checked(check)) if check.summary() == "Connected · Linux · tmux 3.4"
+        ));
+    });
+
+    let before = file_text(&h.store);
+    h.view.update_in(cx, |view, window, cx| view.add_machine("-oProxyCommand=evil", window, cx));
+    cx.run_until_parked();
+    assert_eq!(file_text(&h.store), before);
+    h.view.read_with(cx, |view, _| {
+        let notice = view.machine_notice.clone().expect("a reason under the field");
+        assert!(notice.is_error, "{notice:?}");
+    });
+}

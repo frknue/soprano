@@ -1,4 +1,4 @@
-//! The five pages, as titled sections of grouped rows (`SettingsForm`).
+//! The pages, as titled sections of grouped rows (`SettingsForm`).
 
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla, IntoElement, ParentElement, SharedString,
@@ -12,6 +12,7 @@ use soprano_accounts::presentation::{
 use soprano_config::{
     AppSettings, AppearancePreference, DefaultKeybindings, Limits, Severity, prefix_legend_for,
 };
+use soprano_launch::MachineCheck;
 use soprano_types::AgentProfile;
 use soprano_ui::button::{Button, ButtonSize, ButtonVariant};
 use soprano_ui::controls::{InputSize, SegmentedControl, Switch, TextInput};
@@ -25,7 +26,7 @@ use crate::form::Form;
 use crate::general::{self, Toggle};
 use crate::notifications::{NotificationStatusRow, StatusTone};
 use crate::shortcuts;
-use crate::view::{Recording, SettingsView};
+use crate::view::{MachineStatus, Recording, SettingsView};
 
 fn id(prefix: &str, key: impl std::fmt::Display) -> ElementId {
     SharedString::from(format!("{prefix}-{key}")).into()
@@ -275,6 +276,84 @@ impl SettingsView {
         );
         form.section(Some("Project directories"), Some(general::PROJECT_DIRECTORIES_NOTE), rows)
             .into_any_element()
+    }
+
+    // MARK: - Machines
+
+    pub(crate) fn machines_page(&mut self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let form = Form::new(t);
+        let machines = &self.snapshot.resolved.machines;
+        let mut rows = Vec::new();
+        if machines.is_empty() {
+            rows.push(form.row(general::NO_MACHINES).description(general::NO_MACHINES_HINT).render(t));
+        }
+        for machine in machines {
+            let mut description = format!("ssh {}", machine.destination());
+            for arg in &machine.ssh_args {
+                description.push(' ');
+                description.push_str(arg);
+            }
+            if let Some(directory) = &machine.directory {
+                description.push_str(&format!(" · {directory}"));
+            }
+            let (status, status_color) = match self.machine_status.get(&machine.name) {
+                None => (None, t.muted),
+                Some(MachineStatus::Checking) => (Some("Checking…".to_owned()), t.muted),
+                Some(MachineStatus::Checked(check)) => {
+                    let healthy = matches!(check, MachineCheck::Ready { tmux: Some(_), .. });
+                    (Some(check.summary()), if healthy { t.working } else { t.approval })
+                }
+            };
+            let check_name = machine.name.clone();
+            let remove_name = machine.name.clone();
+            let checking = matches!(self.machine_status.get(&machine.name), Some(MachineStatus::Checking));
+            let mut row = form.row(machine.name.clone()).mono_title().description(description);
+            if let Some(status) = status {
+                row = row.status(status, status_color);
+            }
+            rows.push(
+                row.control(form.controls(vec![
+                    Button::new(id("check-machine", &machine.name), "Check")
+                        .size(ButtonSize::Xs)
+                        .disabled(checking)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.check_machine(&check_name, cx)
+                        }))
+                        .into_any_element(),
+                    Button::new(id("remove-machine", &machine.name), "Remove")
+                        .size(ButtonSize::Xs)
+                        .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                            this.remove_machine(&remove_name, window, cx)
+                        }))
+                        .into_any_element(),
+                ]))
+                .render(t),
+            );
+        }
+        rows.push(
+            form.actions_row(vec![
+                div().flex_1().min_w_0().child(TextInput::new(&self.machine_input)).into_any_element(),
+                Button::new("add-machine", "Add")
+                    .primary()
+                    .size(ButtonSize::Sm)
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        let text = this.machine_input.read(cx).value().to_string();
+                        this.add_machine(&text, window, cx);
+                    }))
+                    .into_any_element(),
+            ])
+            .into_any_element(),
+        );
+        if let Some(notice) = &self.machine_notice {
+            rows.push(
+                div()
+                    .px(t.z(16.))
+                    .pb(t.z(12.))
+                    .child(form.small(notice.text.clone(), if notice.is_error { t.failed } else { t.muted }))
+                    .into_any_element(),
+            );
+        }
+        vec![form.section(None, Some(general::MACHINES_NOTE), rows).into_any_element()]
     }
 
     fn keybinding_behavior_section(

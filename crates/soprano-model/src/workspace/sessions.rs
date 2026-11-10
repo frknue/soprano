@@ -1,6 +1,6 @@
 //! Live sessions and logical windows.
 
-use super::Workspace;
+use super::{Place, Workspace};
 use crate::split_node::SplitNode;
 use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
@@ -32,17 +32,18 @@ impl Workspace {
     }
 
     /// Opens a session named `name` (trimmed; blank names are refused) with one window in
-    /// `cwd`, else the active terminal's directory, and switches to it.
+    /// `cwd`, else the active terminal's directory when it is on this computer, and switches
+    /// to it.
     pub fn create_session(&mut self, name: &str, cwd: Option<&str>) -> Option<String> {
         let trimmed = name.trim();
         if trimmed.is_empty() {
             return None;
         }
-        let working_directory = cwd.map(str::to_owned).or_else(|| self.active_working_directory());
+        let place = self.local_place(cwd);
         let session_id = self.next_session_id();
         self.terminal_sessions
             .insert(session_id.clone(), TerminalSessionState::new(&session_id, trimmed, ""));
-        self.create_window_in(&session_id, working_directory, None, true);
+        self.create_window_in(&session_id, place, None, true);
         Some(session_id)
     }
 
@@ -68,17 +69,17 @@ impl Workspace {
     // MARK: - Windows
 
     /// Opens a window in the active session holding one terminal, or a chat with
-    /// `chat_profile_id`, in `cwd`, else the active terminal's directory.
+    /// `chat_profile_id`, in `cwd`, else where the active tab is.
     pub fn create_window(&mut self, cwd: Option<&str>, chat_profile_id: Option<&str>) -> Option<String> {
         let session_id = self.active_session_id().to_owned();
-        let cwd = cwd.map(str::to_owned).or_else(|| self.active_working_directory());
-        self.create_window_in(&session_id, cwd, chat_profile_id, true)
+        let place = self.place(cwd);
+        self.create_window_in(&session_id, place, chat_profile_id, true)
     }
 
     pub(super) fn create_window_in(
         &mut self,
         session_id: &str,
-        cwd: Option<String>,
+        place: Place,
         chat_profile_id: Option<&str>,
         activate: bool,
     ) -> Option<String> {
@@ -86,7 +87,7 @@ impl Workspace {
             return None;
         }
         let window_id = self.next_window_id();
-        let pane_id = self.make_pane(cwd, chat_profile_id);
+        let pane_id = self.make_pane(place, chat_profile_id);
         let suggested =
             Self::suggested_window_title(self.panes.get(&pane_id).and_then(|pane| pane.active_tab()));
         let title = self.unique_automatic_window_title(&suggested, None, Some(session_id));
@@ -293,8 +294,8 @@ impl Workspace {
         if !self.windows.contains_key(&self.active_window_id) {
             return None;
         }
-        let cwd = cwd.map(str::to_owned).or_else(|| self.active_working_directory());
-        let pane_id = self.make_pane(cwd, chat_profile_id);
+        let place = self.place(cwd);
+        let pane_id = self.make_pane(place, chat_profile_id);
         let layout_tab_id = self.next_layout_tab_id();
         let window = self.windows.get_mut(&self.active_window_id)?;
         window.append_tab(LayoutTab {

@@ -877,7 +877,7 @@ impl Vt {
             set(GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE_MAX_BYTES, &max_clipboard as *const _ as *const c_void);
             // No read callback: that would also turn on Kitty paste events, and a read must
             // wait for the user's answer, which the callback can't. Reads are found in the
-            // output instead (`osc::Osc52ReadScanner`) and answered later.
+            // output instead (`osc::OscScanner`) and answered later.
             let images: u64 = 128 << 20;
             set(GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &images as *const _ as *const c_void);
 

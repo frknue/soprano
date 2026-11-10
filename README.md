@@ -434,6 +434,52 @@ If a recorded conversation has been deleted, the agent reports its normal resume
 Custom `launchScript` profiles receive `SOPRANO_RESUME_SESSION_ID` when a conversation
 was recorded and must use it in their own resume command.
 
+### Terminals on other machines
+
+Any pane can run on another computer you reach over SSH: a server, a VM, a cloud
+sandbox. Its agents keep working there while this computer sleeps or Soprano is closed.
+
+Add a machine with `soprano machine add vps` (an ssh `Host` alias), `soprano machine add
+vps me@vps.example --dir ~/code -- -p 2222`, **Add Machine…** (command palette, the
+sidebar's **+** menu, or the Terminal on Machine picker), **Settings ▸ Machines**, or a
+`machines` entry in `settings.json`. Adding one checks that ssh can log in and whether
+tmux is installed; Settings ▸ Machines shows that check for every machine and removes
+them. `soprano machine list` and `soprano machine remove <name>` do the same from a
+terminal. Then open a terminal there:
+
+- type `soprano vps` (or `soprano ssh vps`) in a terminal: that terminal continues on vps;
+- press `Ctrl+A`, then `Shift+M` (**Terminal on Machine…**, `machine-terminal`) to open
+  one beside the focused pane, choosing the machine when there are several (with none
+  listed yet, it asks for one to add);
+- or pick **New Terminal on vps** in the command palette or the sidebar's **+** menu.
+
+Whatever you open from a pane on vps runs there too: splits, pane tabs, new windows and
+agents (`⌘1` in a vps pane starts Claude Code on vps). The sidebar names the machine in
+the pane's line. A folder you pick yourself, a new session, and browser tabs stay here.
+
+Nothing needs setting up on the machine beyond `sshd` and, for panes that outlive the
+connection, `tmux` (3.3 or newer for agent status; Settings ▸ Machines says when it is
+missing). Soprano copies a small helper to `~/.soprano/` there and runs each pane in its
+own session of a private tmux server (`tmux -L soprano`), without a prefix key or status
+line, so it never touches your own tmux. When the connection drops, the pane says so and
+reconnects every two seconds; reopening Soprano reattaches to every pane. Closing a tab,
+window or session ends its programs on the machine; quitting Soprano leaves them running.
+Without tmux a pane still works but ends with its connection. Connections to a machine
+are shared, so a machine that asks for a password asks once, in the first pane.
+
+Agents on a machine report working, waiting and done like local ones, with banners and in
+the Agent Dashboard, whether Soprano started them or you typed `claude`, `codex`, `omp` or
+`opencode` in a terminal there: the shell finds Soprano's stand-ins first, which start the
+real CLI with Soprano's hooks (your own agent settings on the machine stay untouched), and
+the helper writes their status into the pane as OSC 7501. Codex asks for approvals with
+the terminal bell there, which tmux passes on. Soprano also reads OSC 7501 from Claude
+Code, Codex, omp and OpenCode when they report it themselves in a local pane its hooks
+don't cover. Some things stay on this computer: Files and Changes say "Not available on
+vps", chat tabs run their agent in a terminal, the dashboard names the machine and shows
+no timeline (transcripts are files on the machine), accounts (`CODEX_HOME`, omp overlays)
+are not applied, OpenCode 2 does not report status, and a restored agent reattaches to its
+running process instead of resuming a recorded conversation.
+
 ## Knowing where you are
 
 The active logical window and pane are marked in three places: the sidebar puts a pencil

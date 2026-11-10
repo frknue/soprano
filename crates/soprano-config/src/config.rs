@@ -9,7 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use soprano_types::{
     AgentCatalog, AgentProfile, DefaultAgents, KeyBinding, KeyBindingCategory, KeyBindingConfig,
-    KeyBindingMode,
+    KeyBindingMode, Machine,
 };
 
 use crate::app_settings::{AppSettings, AppearancePreference, KNOWN_THEME_IDS, is_known_theme_id};
@@ -48,6 +48,9 @@ pub struct SopranoConfig {
     /// Scheduled prompts, keyed by a stable id. See [`AutomationEntry`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub automations: Option<BTreeMap<String, AutomationEntry>>,
+    /// Remote machines reached over SSH whose sessions share the sidebar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machines: Option<Vec<Machine>>,
 }
 
 /// Whether the OS may deliver a banner is the system's decision, not ours, so the only thing
@@ -210,6 +213,8 @@ pub struct ResolvedConfig {
     /// Built-in agents (patched where the file reuses their id) followed by new ones.
     pub agents: Vec<AgentProfile>,
     pub automations: Vec<Automation>,
+    /// The valid `machines` entries, in file order.
+    pub machines: Vec<Machine>,
     pub issues: Vec<ConfigIssue>,
     /// Binding ids the file overrides — the UI badges these as customized.
     pub customized_binding_ids: BTreeSet<String>,
@@ -226,6 +231,7 @@ impl ResolvedConfig {
             keybindings: DefaultKeybindings::config(),
             agents: DefaultAgents::all(),
             automations: Vec::new(),
+            machines: Vec::new(),
             issues: Vec::new(),
             customized_binding_ids: BTreeSet::new(),
             disabled_binding_ids: BTreeSet::new(),
@@ -343,18 +349,40 @@ impl SopranoConfig {
             &agent_ids,
             &mut issues,
         );
-
+        let machines = resolve_machines(self.machines.as_deref().unwrap_or_default(), &mut issues);
         ResolvedConfig {
             settings,
             keybindings: keybindings.config,
             agents: agents.profiles,
             automations,
+            machines,
             issues,
             customized_binding_ids: keybindings.customized,
             disabled_binding_ids: keybindings.disabled,
             configured_agent_ids: agents.configured_ids,
         }
     }
+}
+
+/// Machines with a usable, unique name; the rest become warnings.
+fn resolve_machines(configured: &[Machine], issues: &mut Vec<ConfigIssue>) -> Vec<Machine> {
+    let mut machines: Vec<Machine> = Vec::new();
+    for machine in configured {
+        let mut machine = machine.clone();
+        machine.name = machine.name.trim().to_owned();
+        machine.destination = machine.destination.trim().to_owned();
+        if !Machine::valid_name(&machine.name) {
+            issues.push(ConfigIssue::warning(format!(
+                "machines: \"{}\" is not a usable name (no spaces, not starting with \"-\").",
+                machine.name
+            )));
+        } else if machines.iter().any(|known| known.name == machine.name) {
+            issues.push(ConfigIssue::warning(format!("machines: \"{}\" is listed twice.", machine.name)));
+        } else {
+            machines.push(machine);
+        }
+    }
+    machines
 }
 
 /// Trims, expands a leading `~`, makes the path absolute (relative to the working directory)
@@ -1263,5 +1291,22 @@ mod tests {
         );
         let names: Vec<&str> = resolved.automations.iter().map(|a| a.name.as_str()).collect();
         assert_eq!(names, ["apple", "Zebra"]);
+    }
+
+    #[test]
+    fn machines_keep_valid_unique_names_and_warn_about_the_rest() {
+        let resolved = resolve(
+            r#"{ "machines": [
+                { "name": " vps ", "destination": "me@vps.example", "sshArgs": ["-p", "2222"] },
+                { "name": "my box" },
+                { "name": "-oProxyCommand=x" },
+                { "name": "vps" },
+                { "name": "pi", "directory": "~/code" } ] }"#,
+        );
+        let names: Vec<&str> = resolved.machines.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["vps", "pi"]);
+        assert_eq!(resolved.machines[0].destination(), "me@vps.example");
+        assert_eq!(resolved.machines[1].destination(), "pi");
+        assert_eq!(resolved.issues.len(), 3);
     }
 }

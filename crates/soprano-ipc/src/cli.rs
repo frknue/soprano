@@ -1,5 +1,6 @@
 //! The CLI entry point the app's `main` calls first, in Swift `main.swift`'s order: Markdown,
-//! browser, agent-event, pane navigation, then the launch decision.
+//! browser, agent-event, pane navigation, then the launch decision. `machine` and
+//! `remote-attach` run without the app.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -40,6 +41,9 @@ pub trait CliHost {
     fn send(&mut self, endpoint: &Endpoint, request: &Request) -> io::Result<Option<Response>>;
     fn write_stdout(&mut self, text: &str);
     fn write_stderr(&mut self, text: &str);
+    /// Runs `argv` on this process's terminal and waits; the exit code, `None` for a signal.
+    fn run_attached(&mut self, argv: &[String]) -> io::Result<Option<i32>>;
+    fn sleep(&mut self, duration: std::time::Duration);
 }
 
 /// The real process: stdio, the process table, `tmux`, and the local socket.
@@ -87,6 +91,16 @@ impl CliHost for SystemHost {
 
     fn write_stderr(&mut self, text: &str) {
         let _ = io::stderr().lock().write_all(text.as_bytes());
+    }
+
+    fn run_attached(&mut self, argv: &[String]) -> io::Result<Option<i32>> {
+        let (program, arguments) = argv.split_first().ok_or_else(|| io::Error::other("no command"))?;
+        let status = std::process::Command::new(program).args(arguments).status()?;
+        Ok(status.code())
+    }
+
+    fn sleep(&mut self, duration: std::time::Duration) {
+        std::thread::sleep(duration);
     }
 }
 
@@ -142,8 +156,17 @@ pub fn run_cli_with(args: &[String], env: &HashMap<String, String>, host: &mut d
     if let Some(code) = run_debug(args, env, host) {
         return CliOutcome::Exit(code);
     }
+    if let Some(code) = crate::machines::run_machine(args, env, host) {
+        return CliOutcome::Exit(code);
+    }
+    if let Some(code) = crate::machines::run_remote_attach(args, host) {
+        return CliOutcome::Exit(code);
+    }
     if run_agent_event(args, env, host) || run_navigation(args, env, host) {
         return CliOutcome::Exit(0);
+    }
+    if let Some(code) = crate::machines::run_ssh(args, env, host) {
+        return CliOutcome::Exit(code);
     }
     let runs_owning_app = launch::runs_owning_app(host.executable_path().as_deref(), env);
     match LaunchDispatch::decide(args, env, runs_owning_app) {
@@ -186,7 +209,12 @@ fn write_line(host: &mut dyn CliHost, stream: Stream, value: &str) {
 
 /// Sends a request that expects an answer and prints it: output to stdout (exit 0) or error to
 /// stderr (exit 1); `timeout_message` when no answer arrives (the app is gone or did not reply).
-fn exchange(host: &mut dyn CliHost, endpoint: &Endpoint, request: &Request, timeout_message: &str) -> i32 {
+pub(crate) fn exchange(
+    host: &mut dyn CliHost,
+    endpoint: &Endpoint,
+    request: &Request,
+    timeout_message: &str,
+) -> i32 {
     match host.send(endpoint, request) {
         Ok(Some(Response::Ok { output })) => {
             write_line(host, Stream::Out, &output);

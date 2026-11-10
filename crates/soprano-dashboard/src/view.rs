@@ -270,7 +270,11 @@ impl AgentDashboard {
             .map(|mut entry| {
                 let waiting_reason =
                     workspace.agent(&entry.pane_id, &entry.tab_id).and_then(|agent| agent.waiting_reason);
-                entry.branch = entry.cwd.as_deref().and_then(|cwd| (self.host.notable_branch)(cwd, cx));
+                entry.branch = entry
+                    .cwd
+                    .as_deref()
+                    .filter(|_| entry.machine.is_none())
+                    .and_then(|cwd| (self.host.notable_branch)(cwd, cx));
                 DashboardEntry { entry, waiting_reason }
             })
             .collect();

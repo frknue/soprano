@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use soprano_types::{AgentConversation, AgentLaunch, AgentProfile};
 
 use crate::integrations::{
-    claude_integration_settings, codex_integration_arguments, file_url, opencode_cli_config_content,
-    opencode_config_content,
+    CodexApprovalSignal, claude_integration_settings, codex_integration_arguments, file_url,
+    opencode_cli_config_content, opencode_config_content,
 };
 use crate::quote::{ShellFlavor, powershell_quoted, shell_quoted};
 use crate::resources::Resources;
@@ -53,7 +53,7 @@ impl Platform {
     }
 
     /// The key `env` already uses for `name` (any case on Windows).
-    fn existing_key(self, env: &BTreeMap<String, String>, name: &str) -> Option<String> {
+    pub(crate) fn existing_key(self, env: &BTreeMap<String, String>, name: &str) -> Option<String> {
         match self {
             Self::Unix => env.contains_key(name).then(|| name.to_owned()),
             Self::Windows => env.keys().find(|k| k.eq_ignore_ascii_case(name)).cloned(),
@@ -61,7 +61,7 @@ impl Platform {
     }
 
     /// Sets `key`, replacing a differently cased spelling of it on Windows.
-    fn insert(self, env: &mut BTreeMap<String, String>, key: String, value: String) {
+    pub(crate) fn insert(self, env: &mut BTreeMap<String, String>, key: String, value: String) {
         if let Some(existing) = self.existing_key(env, &key).filter(|k| *k != key) {
             env.remove(&existing);
         }
@@ -231,7 +231,9 @@ impl LaunchSpec {
             env.insert("SOPRANO_RESUME_SESSION_ID".into(), conversation.id.clone());
         }
         match profile.id.as_str() {
-            "codex" => arguments.extend(codex_integration_arguments(&ctx.soprano_bin)),
+            "codex" => {
+                arguments.extend(codex_integration_arguments(&[&ctx.soprano_bin], CodexApprovalSignal::Osc9))
+            }
             "claude-code" => arguments.extend(["--settings".to_owned(), claude_integration_settings()]),
             "opencode" => {
                 // What the pane starts with: a profile's env wins over Soprano's own.
@@ -437,17 +439,17 @@ pub fn lossy_environment(
 
 /// `TerminalConfig` before the surface scoped it to its pane.
 #[derive(Default)]
-struct RawConfig {
+pub(crate) struct RawConfig {
     /// `None`: the login shell (Ghostty's default command).
-    argv: Option<Vec<String>>,
-    cwd: Option<PathBuf>,
-    env: BTreeMap<String, String>,
-    initial_input: Option<String>,
+    pub(crate) argv: Option<Vec<String>>,
+    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) env: BTreeMap<String, String>,
+    pub(crate) initial_input: Option<String>,
 }
 
 impl RawConfig {
     /// `TerminalSurfaceView.scopedConfig` plus what Ghostty added when spawning.
-    fn finish(mut self, ctx: &LaunchContext, pane_id: &str, tab_id: &str) -> LaunchSpec {
+    pub(crate) fn finish(mut self, ctx: &LaunchContext, pane_id: &str, tab_id: &str) -> LaunchSpec {
         self.env.insert("SOPRANO_BIN".into(), ctx.soprano_bin.clone());
         self.env.insert("SOPRANO_APP_PID".into(), ctx.app_pid.to_string());
         self.env.insert("SOPRANO_PANE_ID".into(), pane_id.into());
@@ -482,6 +484,14 @@ impl RawConfig {
         // variables, which override any of those, then PWD.
         let mut env = inherited_env(ctx);
         apply_terminal_environment(&mut env, &ctx.resources, &ctx.app_version, &ctx.shell_integration);
+        // Like Ghostty at launch: a UTF-8 LANG when no locale is set (an app started from the
+        // Dock or Finder has none), so programs and ssh (which passes LANG along) use UTF-8.
+        if ctx.platform == Platform::Unix
+            && ["LC_ALL", "LC_CTYPE", "LANG"].iter().all(|key| env.get(*key).is_none_or(|v| v.is_empty()))
+        {
+            let utf8 = if cfg!(target_os = "macos") { "en_US.UTF-8" } else { "C.UTF-8" };
+            env.insert("LANG".into(), utf8.into());
+        }
         let argv = self.argv.unwrap_or_else(|| login_shell_argv(&ctx.login_shell));
         let argv = apply_shell_integration(
             argv,

@@ -41,6 +41,8 @@ pub struct AgentDashboardEntry {
     /// The branch the agent works on when it is not its repository's default; the dashboard
     /// fills it in from the shared branch monitor.
     pub branch: Option<String>,
+    /// The machine the agent runs on; `cwd` is then a folder there and has no branch here.
+    pub machine: Option<String>,
 }
 
 impl AgentDashboardEntry {
@@ -263,11 +265,16 @@ impl Workspace {
     ) -> Option<AgentDashboardEntry> {
         let agent = tab.agent.as_ref()?;
         let profile = AgentCatalog::shared().profile(&agent.profile_id);
-        let cwd = tab
-            .cwd
-            .clone()
-            .or_else(|| profile.as_ref().and_then(|profile| profile.cwd.clone()))
-            .or_else(|| std::env::current_dir().ok().map(|dir| dir.to_string_lossy().into_owned()));
+        // A machine's agent works in a folder there: neither the profile's nor this app's.
+        let machine = tab.remote.as_ref().map(|remote| remote.machine.clone());
+        let cwd = if machine.is_some() {
+            tab.cwd.clone()
+        } else {
+            tab.cwd
+                .clone()
+                .or_else(|| profile.as_ref().and_then(|profile| profile.cwd.clone()))
+                .or_else(|| std::env::current_dir().ok().map(|dir| dir.to_string_lossy().into_owned()))
+        };
         Some(AgentDashboardEntry {
             pane_id: pane.id.clone(),
             tab_id: tab.id.clone(),
@@ -283,6 +290,7 @@ impl Workspace {
             conversation: agent.conversation.clone(),
             is_chat: tab.is_chat(),
             branch: None,
+            machine,
         })
     }
 

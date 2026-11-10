@@ -11,6 +11,7 @@ pub mod chat;
 pub mod command_runner;
 pub mod integrations;
 pub mod quote;
+pub mod remote;
 pub mod resources;
 pub mod shell_integration;
 pub mod spec;
@@ -18,6 +19,10 @@ pub mod spec;
 pub use chat::ChatLaunch;
 pub use command_runner::{CancelToken, CommandError, CommandResult, CommandRunner, LineHandler, RunOptions};
 pub use quote::{ShellFlavor, shell_quoted};
+pub use remote::{
+    MachineCheck, RemoteProgram, RemoteTarget, check_machine, remote_kill_command, remote_session_name,
+    ssh_arguments,
+};
 pub use resources::Resources;
 pub use shell_integration::{ShellFeatures, ShellIntegrationConfig, ShellIntegrationMode};
 pub use spec::{

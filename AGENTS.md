@@ -85,9 +85,11 @@ an app:
 - `soprano-model`: `Workspace` (sessions → logical windows → layout tabs → split panes →
   pane tabs; every geometry question is `SplitNode`'s) with a drained change log and
   two-phase closes; persistence formats.
-- `soprano-launch` (agent/shell command lines, hooks, env), `soprano-term` (libghostty-vt +
-  PTY + GPUI terminal view), `soprano-ipc` (CLI subcommands and the app's local socket),
-  `soprano-notify` (agent lifecycle → status, banners per OS).
+- `soprano-launch` (agent/shell command lines, hooks, env; `remote.rs`: panes on a
+  `machines` entry over `ssh` + a private tmux, with the helper in `src/remote/`),
+  `soprano-term` (libghostty-vt + PTY + GPUI terminal view, OSC 7501 parsing), `soprano-ipc`
+  (CLI subcommands, `machine`/`remote-attach`, and the app's local socket), `soprano-notify`
+  (agent lifecycle → status, banners per OS).
 - `soprano-agents` (transcripts, timelines, dashboard grouping), `soprano-chat` (ACP client
   for `omp acp`), `soprano-accounts`, `soprano-automations`, `soprano-git`, `soprano-files`,
   `soprano-text` (highlighter, editor documents, diff and Markdown models).

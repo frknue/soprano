@@ -227,6 +227,10 @@ struct TestHost {
     stdin: Option<Vec<u8>>,
     stdout: String,
     stderr: String,
+    /// Exit statuses `run_attached` returns, in order.
+    exits: std::collections::VecDeque<Option<i32>>,
+    ran: Vec<Vec<String>>,
+    slept: Vec<Duration>,
 }
 
 impl CliHost for TestHost {
@@ -258,10 +262,25 @@ impl CliHost for TestHost {
     fn write_stderr(&mut self, text: &str) {
         self.stderr.push_str(text);
     }
+    fn run_attached(&mut self, argv: &[String]) -> io::Result<Option<i32>> {
+        self.ran.push(argv.to_vec());
+        Ok(self.exits.pop_front().unwrap_or(Some(0)))
+    }
+    fn sleep(&mut self, duration: Duration) {
+        self.slept.push(duration);
+    }
 }
 
 fn host() -> TestHost {
-    TestHost { cwd: std::env::temp_dir(), stdin: None, stdout: String::new(), stderr: String::new() }
+    TestHost {
+        cwd: std::env::temp_dir(),
+        stdin: None,
+        stdout: String::new(),
+        stderr: String::new(),
+        exits: Default::default(),
+        ran: Vec::new(),
+        slept: Vec::new(),
+    }
 }
 
 fn args(values: &[&str]) -> Vec<String> {
@@ -423,4 +442,88 @@ fn run_cli_accepts_both_the_string_and_os_string_forms_main_passes() {
     let _strings: fn(&Vec<String>, &HashMap<String, String>) -> CliOutcome =
         |args, env| soprano_ipc::run_cli(args, env);
     let _os: fn() -> CliOutcome = || soprano_ipc::run_cli(std::env::args_os(), std::env::vars_os());
+}
+
+#[test]
+fn remote_attach_reconnects_after_a_dropped_connection_and_ends_with_the_programs_exit() {
+    let mut host = host();
+    host.exits = [Some(255), Some(255), Some(0)].into();
+    let command = args(&["soprano", "remote-attach", "--machine", "vps", "--", "ssh", "-t", "vps", "x"]);
+    assert_eq!(run_cli_with(&command, &HashMap::new(), &mut host), CliOutcome::Exit(0));
+    assert_eq!(host.ran, vec![args(&["ssh", "-t", "vps", "x"]); 3]);
+    assert_eq!(host.slept.len(), 2);
+    assert!(host.stdout.contains("Lost the connection to vps"));
+
+    let mut failed = self::host();
+    failed.exits = [Some(1)].into();
+    assert_eq!(run_cli_with(&command, &HashMap::new(), &mut failed), CliOutcome::Exit(1));
+    assert!(failed.slept.is_empty());
+}
+
+#[test]
+fn machines_are_added_listed_and_removed_in_settings_json() {
+    let dir = tempfile::tempdir().expect("dir");
+    let settings = dir.path().join("settings.json");
+    let env = HashMap::from([("SOPRANO_CONFIG".to_owned(), settings.to_string_lossy().into_owned())]);
+    let run = |values: &[&str]| {
+        let mut host = host();
+        let outcome = run_cli_with(&args(values), &env, &mut host);
+        (outcome, host.stdout, host.stderr)
+    };
+
+    let added =
+        run(&["soprano", "machine", "add", "vps", "me@vps.example", "--dir", "~/code", "--", "-p", "2222"]);
+    assert_eq!(added.0, CliOutcome::Exit(0), "{}", added.2);
+    assert_eq!(run(&["soprano", "machine", "add", "pi"]).0, CliOutcome::Exit(0));
+    assert_eq!(run(&["soprano", "machine", "add", "pi"]).0, CliOutcome::Exit(1));
+    assert_eq!(run(&["soprano", "machine", "add", "-x"]).0, CliOutcome::Exit(2));
+    assert_eq!(
+        run(&["soprano", "machine", "list"]).1,
+        "vps\tssh me@vps.example -p 2222\t~/code\npi\tssh pi\n"
+    );
+    // The file keeps the template's comments around the new entries.
+    let text = std::fs::read_to_string(&settings).expect("settings");
+    assert!(text.contains("// Other computers reached over SSH"));
+
+    assert_eq!(run(&["soprano", "machine", "remove", "vps"]).0, CliOutcome::Exit(0));
+    assert_eq!(run(&["soprano", "machine", "remove", "vps"]).0, CliOutcome::Exit(1));
+    assert_eq!(run(&["soprano", "machine", "list"]).1, "pi\tssh pi\n");
+    assert_eq!(run(&["soprano", "machine", "remove", "pi"]).0, CliOutcome::Exit(0));
+    assert_eq!(run(&["soprano", "machine", "list"]).1, "");
+}
+
+#[test]
+fn soprano_ssh_asks_the_app_to_move_the_calling_tab_and_a_bare_name_only_for_known_machines() {
+    let dir = tempfile::tempdir().expect("dir");
+    let settings = dir.path().join("settings.json");
+    std::fs::write(&settings, r#"{ "machines": [ { "name": "vps" } ] }"#).expect("settings");
+    let (server, incoming) = IpcServer::start(unique_endpoint()).expect("server");
+    let mut env = pane_env(server.endpoint());
+    env.insert("SOPRANO_CONFIG".into(), settings.to_string_lossy().into_owned());
+    let app = thread::spawn(move || {
+        let mut seen = Vec::new();
+        for response in [Response::success("Connecting to vps…"), Response::failure("No machine named pi.")]
+        {
+            let message = incoming.recv_timeout(Duration::from_secs(5)).expect("request");
+            seen.push(message.request);
+            message.reply.expect("replier").send(&response).expect("reply");
+        }
+        seen
+    });
+
+    let mut bare = host();
+    assert_eq!(run_cli_with(&args(&["soprano", "vps"]), &env, &mut bare), CliOutcome::Exit(0));
+    let mut unknown = host();
+    assert_eq!(run_cli_with(&args(&["soprano", "ssh", "pi"]), &env, &mut unknown), CliOutcome::Exit(1));
+    assert_eq!(unknown.stderr, "No machine named pi.\n");
+    // An unknown bare word is not a machine: the usage error, without asking the app.
+    let mut typo = host();
+    assert_eq!(run_cli_with(&args(&["soprano", "vpx"]), &env, &mut typo), CliOutcome::Exit(2));
+
+    let to = |machine: &str| Request::OpenOnMachine {
+        pane_id: "pane-1".into(),
+        tab_id: "tab-2".into(),
+        machine: machine.into(),
+    };
+    assert_eq!(app.join().expect("app thread"), vec![to("vps"), to("pi")]);
 }

@@ -275,6 +275,13 @@ pub const NO_PROJECT_DIRECTORIES: &str = "No project directories";
 pub const NO_PROJECT_DIRECTORIES_HINT: &str =
     "Add a folder below, or list them under \"projectDirectories\" in settings.json.";
 
+pub const MACHINES_NOTE: &str = "Computers reached over SSH. A terminal on a machine runs in tmux there and keeps \
+     running while this computer sleeps. Open one with soprano <name> in a terminal, Ctrl+A then Shift+M, or the \
+     command palette.";
+pub const NO_MACHINES: &str = "No machines";
+pub const NO_MACHINES_HINT: &str = "Add an ssh destination below, run `soprano machine add`, or list them under \"machines\" in settings.json.";
+pub const MACHINE_PLACEHOLDER: &str = "user@host, or a Host from ~/.ssh/config";
+
 #[cfg(test)]
 mod tests {
     use super::*;

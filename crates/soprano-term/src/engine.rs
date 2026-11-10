@@ -3,7 +3,8 @@
 
 use crate::events::TerminalEvent;
 use crate::interaction::CommandActivity;
-use crate::osc::{Osc52Read, Osc52ReadScanner};
+use crate::osc::{Osc52Read, OscScanner, ScannedOsc};
+use crate::program_status::{CAPABILITY_REPLY, ProgramStatusMessage};
 use crate::settings::TerminalSettings;
 use crate::vt::{PromptStep, Vt, VtEvent, VtSettings};
 use anyhow::{Context as _, Result};
@@ -70,7 +71,7 @@ pub struct Terminal {
     reaped: Arc<AtomicBool>,
     child_pid: Option<u32>,
     rx: async_channel::Receiver<PtyMessage>,
-    osc52: Osc52ReadScanner,
+    osc: OscScanner,
     events: Vec<TerminalEvent>,
     activity: CommandActivity,
     at_prompt: bool,
@@ -171,7 +172,7 @@ impl Terminal {
             reaped,
             child_pid,
             rx,
-            osc52: Osc52ReadScanner::default(),
+            osc: OscScanner::default(),
             events: Vec::new(),
             activity: CommandActivity::default(),
             at_prompt: false,
@@ -252,8 +253,16 @@ impl Terminal {
 
     /// The program's output: into the screen, its replies back, its reports as events.
     pub fn process_output(&mut self, bytes: &[u8]) {
-        for read in self.osc52.scan(bytes) {
-            self.events.push(TerminalEvent::ClipboardReadRequested(read));
+        for found in self.osc.scan(bytes) {
+            match found {
+                ScannedOsc::ClipboardRead(read) => {
+                    self.events.push(TerminalEvent::ClipboardReadRequested(read))
+                }
+                ScannedOsc::ProgramStatus(ProgramStatusMessage::Report(status)) => {
+                    self.events.push(TerminalEvent::ProgramStatus(status))
+                }
+                ScannedOsc::ProgramStatus(ProgramStatusMessage::Query) => self.write(CAPABILITY_REPLY),
+            }
         }
         self.vt.write(bytes);
         let replies = self.vt.take_replies();

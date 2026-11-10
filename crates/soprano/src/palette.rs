@@ -9,7 +9,7 @@ use std::rc::Rc;
 use gpui::{App, Entity, Window};
 use soprano_launch::ChatLaunch;
 use soprano_model::{PaneContentKind, PaneType, Workspace};
-use soprano_types::AgentCatalog;
+use soprano_types::{AgentCatalog, Machine};
 use soprano_ui::{IconName, PickerItem};
 
 use crate::shell::{CloseTarget, Command, Shell, dispatch};
@@ -713,7 +713,60 @@ pub fn command_items(
             command(shell, Command::OpenSettingsFile),
         ),
     ]);
+    if !shell_state.machines.is_empty() {
+        entries.push(entry(
+            spec(
+                "machine-terminal",
+                IconName::Server,
+                "Terminal on Machine…",
+                "Choose a machine and open a terminal on it beside the focused pane",
+                short(&["machine-terminal"]),
+            ),
+            command(shell, Command::MachineTerminal),
+        ));
+    }
+    entries.extend(machine_items(shell, &shell_state.machines));
+    entries.push(add_machine_item(shell));
     entries
+}
+
+/// "Add Machine…": always listed, and last in the "Terminal on Machine…" picker.
+pub fn add_machine_item(shell: &Entity<Shell>) -> PaletteEntry {
+    entry(
+        searchable(
+            spec(
+                "add-machine",
+                IconName::Plus,
+                "Add Machine…",
+                "Add a computer reached over SSH, then open terminals on it",
+                Vec::new(),
+            ),
+            "ssh remote server host machine",
+        ),
+        command(shell, Command::AddMachine),
+    )
+}
+
+/// "New Terminal on <machine>" for every `machines` entry of settings.json; also the
+/// "Terminal on Machine…" picker.
+pub fn machine_items(shell: &Entity<Shell>, machines: &[Machine]) -> Vec<PaletteEntry> {
+    machines
+        .iter()
+        .map(|machine| {
+            let description =
+                format!("Open a terminal on {} over SSH beside the focused pane", machine.destination());
+            entry(
+                spec(
+                    &format!("new-terminal-on-{}", machine.name),
+                    IconName::Server,
+                    &format!("New Terminal on {}", machine.name),
+                    &description,
+                    Vec::new(),
+                ),
+                command(shell, Command::NewTerminalOn(machine.name.clone())),
+            )
+        })
+        .collect()
 }
 
 /// "Switch Session…": every session of the workspace.

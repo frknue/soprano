@@ -32,6 +32,7 @@ impl Workspace {
                         content_kind: tab.content_kind.clone(),
                         preview_owner_pane_id: tab.preview_owner_pane_id.clone(),
                         conversation: tab.agent.as_ref().and_then(|agent| agent.conversation.clone()),
+                        remote: tab.remote.clone(),
                     })
                     .collect(),
             })
@@ -127,6 +128,7 @@ impl Workspace {
                         title: saved_tab.title.clone(),
                         content_kind: saved_tab.content_kind.clone(),
                         preview_owner_pane_id: saved_tab.preview_owner_pane_id.clone(),
+                        remote: saved_tab.remote.clone(),
                     },
                 );
                 if let Some(agent) = tab.agent.as_mut() {

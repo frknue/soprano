@@ -6,6 +6,7 @@ use soprano_ui::IconName;
 pub enum SettingsTab {
     #[default]
     General,
+    Machines,
     KeyboardShortcuts,
     AgentProfiles,
     Accounts,
@@ -13,8 +14,9 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 5] = [
+    pub const ALL: [SettingsTab; 6] = [
         SettingsTab::General,
+        SettingsTab::Machines,
         SettingsTab::KeyboardShortcuts,
         SettingsTab::AgentProfiles,
         SettingsTab::Accounts,
@@ -25,6 +27,7 @@ impl SettingsTab {
     pub fn title(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::Machines => "Machines",
             Self::KeyboardShortcuts => "Keyboard Shortcuts",
             Self::AgentProfiles => "Agent Profiles",
             Self::Accounts => "Accounts",
@@ -36,6 +39,7 @@ impl SettingsTab {
     pub fn icon(self) -> IconName {
         match self {
             Self::General => IconName::Settings,
+            Self::Machines => IconName::Server,
             Self::KeyboardShortcuts => IconName::Keyboard,
             Self::AgentProfiles => IconName::Cpu,
             Self::Accounts => IconName::ACCOUNT,
@@ -49,9 +53,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pages_keep_the_swift_navigation_order_and_titles() {
+    fn pages_keep_the_navigation_order_and_titles() {
         let titles: Vec<&str> = SettingsTab::ALL.iter().map(|tab| tab.title()).collect();
-        assert_eq!(titles, ["General", "Keyboard Shortcuts", "Agent Profiles", "Accounts", "About"]);
+        assert_eq!(
+            titles,
+            ["General", "Machines", "Keyboard Shortcuts", "Agent Profiles", "Accounts", "About"]
+        );
         assert_eq!(SettingsTab::default(), SettingsTab::General);
     }
 }

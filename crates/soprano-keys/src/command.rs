@@ -32,6 +32,8 @@ pub enum BindingCommand {
     NewWindow,
     NewSession,
     FindSession,
+    /// `machine-terminal`: choose a machine and open a terminal on it beside the active pane.
+    MachineTerminal,
     NewTab,
     CloseTab,
     NextTab,
@@ -96,6 +98,7 @@ impl BindingCommand {
             "new-window-current-directory" | "new-window" => Self::NewWindow,
             "new-session" => Self::NewSession,
             "find-session" => Self::FindSession,
+            "machine-terminal" => Self::MachineTerminal,
             "new-tab" | "new-tab-direct" => Self::NewTab,
             "close-tab" => Self::CloseTab,
             "next-tab" => Self::NextTab,

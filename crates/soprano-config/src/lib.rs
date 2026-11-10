@@ -18,6 +18,7 @@ pub mod cron;
 pub mod default_keybindings;
 pub mod jsonc;
 pub mod key_chord;
+pub mod machines;
 pub mod store;
 pub mod watcher;
 
@@ -36,5 +37,6 @@ pub use key_chord::{
     KeyChord, KeyPlatform, PlatformModifiers, keycaps, keycaps_for, prefix_legend, prefix_legend_for,
     settings_keycap_alternatives, settings_keycap_alternatives_for,
 };
+pub use machines::{MachineEdit, add_machine, machine_for_destination, remove_machine};
 pub use store::{ConfigSnapshot, ConfigStore};
 pub use watcher::ConfigFileWatcher;

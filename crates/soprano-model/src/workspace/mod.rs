@@ -24,7 +24,7 @@ use soprano_types::{AgentCatalog, TerminalTarget};
 
 use crate::agent_instance::AgentInstance;
 use crate::file_url;
-use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType, chat_supports};
+use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType, Remote, chat_supports};
 use crate::split_node::SplitNode;
 use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
@@ -294,6 +294,35 @@ impl Workspace {
         self.panes.get(self.active_pane_id())?.active_tab()?.cwd.clone()
     }
 
+    /// The machine of `pane_id`/`tab_id`'s program; `None` on this computer.
+    pub fn remote_of_tab(&self, pane_id: &str, tab_id: &str) -> Option<&Remote> {
+        self.tab(pane_id, tab_id)?.remote.as_ref()
+    }
+
+    /// The machine `pane_id`'s visible tab runs on; `None` on this computer.
+    pub fn machine_of_pane(&self, pane_id: &str) -> Option<&str> {
+        Some(self.panes.get(pane_id)?.active_tab()?.remote.as_ref()?.machine.as_str())
+    }
+
+    /// Where a new terminal opens: `cwd` on this computer, else where the active tab is (its
+    /// folder, and its machine).
+    fn place(&self, cwd: Option<&str>) -> Place {
+        if let Some(cwd) = cwd {
+            return Place { cwd: Some(cwd.to_owned()), machine: None };
+        }
+        let tab = self.panes.get(self.active_pane_id()).and_then(PaneState::active_tab);
+        Place {
+            cwd: tab.and_then(|tab| tab.cwd.clone()),
+            machine: tab.and_then(|tab| tab.remote.as_ref()).map(|remote| remote.machine.clone()),
+        }
+    }
+
+    /// [`Self::place`] on this computer: a remote tab's folder is not one here.
+    fn local_place(&self, cwd: Option<&str>) -> Place {
+        let place = self.place(cwd);
+        if place.machine.is_some() { Place::default() } else { place }
+    }
+
     pub fn window_containing_pane(&self, pane_id: &str) -> Option<&WorkspaceWindowState> {
         self.windows.values().find(|window| window.contains_pane(pane_id))
     }
@@ -551,6 +580,7 @@ impl Workspace {
             tab.agent = Some(AgentInstance::new(id, profile.id));
             tab.cwd = spec.cwd;
             tab.content_kind = is_chat.then(|| PaneContentKind::CHAT.to_owned());
+            tab.remote = spec.remote;
             return tab;
         }
 
@@ -566,25 +596,28 @@ impl Workspace {
         let title = spec.title.or(dir_name).unwrap_or_else(|| "Terminal".into());
         let mut tab = PaneTab::new(id, PaneType::Terminal, title);
         tab.cwd = spec.cwd;
+        tab.remote = spec.remote;
         tab
     }
 
-    /// Registers a new pane holding one terminal that starts in `cwd`, or a chat with
+    /// Registers a new pane holding one terminal that starts at `place`, or a chat with
     /// `chat_profile_id`'s agent there.
-    fn make_pane(&mut self, cwd: Option<String>, chat_profile_id: Option<&str>) -> String {
+    fn make_pane(&mut self, place: Place, chat_profile_id: Option<&str>) -> String {
         let tab_id = self.next_tab_id();
+        let remote = place.machine.map(Remote::on);
         let tab = match chat_profile_id {
             Some(profile_id) => Self::create_pane_tab(
                 tab_id,
                 TabSpec {
                     pane_type: PaneType::Agent,
                     profile_id: Some(profile_id.to_owned()),
-                    cwd,
+                    cwd: place.cwd,
                     content_kind: Some(PaneContentKind::CHAT.to_owned()),
+                    remote,
                     ..TabSpec::default()
                 },
             ),
-            None => Self::create_pane_tab(tab_id, TabSpec { cwd, ..TabSpec::default() }),
+            None => Self::create_pane_tab(tab_id, TabSpec { cwd: place.cwd, remote, ..TabSpec::default() }),
         };
         let pane_id = self.next_pane_id();
         self.panes.insert(pane_id.clone(), PaneState::new(pane_id.clone(), vec![tab]));
@@ -630,6 +663,13 @@ impl Workspace {
     }
 }
 
+/// Where a new terminal starts: a folder (`None`: the home folder), here or on a machine.
+#[derive(Clone, Debug, Default)]
+struct Place {
+    cwd: Option<String>,
+    machine: Option<String>,
+}
+
 /// What a new pane tab holds (Swift `createPaneTab`'s parameters).
 struct TabSpec {
     pane_type: PaneType,
@@ -639,6 +679,8 @@ struct TabSpec {
     title: Option<String>,
     content_kind: Option<String>,
     preview_owner_pane_id: Option<String>,
+    /// Terminal and agent tabs only.
+    remote: Option<Remote>,
 }
 
 impl Default for TabSpec {
@@ -651,6 +693,7 @@ impl Default for TabSpec {
             title: None,
             content_kind: None,
             preview_owner_pane_id: None,
+            remote: None,
         }
     }
 }

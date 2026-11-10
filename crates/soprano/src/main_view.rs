@@ -439,6 +439,22 @@ impl MainView {
             Command::NewSession => {
                 self.prompt_for_session_name("New Session", String::new(), None, window, cx)
             }
+            Command::MachineTerminal => {
+                let machines = self.shell.read(cx).machines.clone();
+                match machines.as_slice() {
+                    [] => self.prompt_to_add_machine(window, cx),
+                    [machine] => self.run(Command::NewTerminalOn(machine.name.clone()), window, cx),
+                    _ => {
+                        let mut items = palette::machine_items(&self.shell, &machines);
+                        items.push(palette::add_machine_item(&self.shell));
+                        self.show_picker(items, Some("Open a terminal on…"), Vec::new(), window, cx);
+                    }
+                }
+            }
+            Command::AddMachine => self.prompt_to_add_machine(window, cx),
+            Command::NewTerminalOn(machine) => {
+                self.workspace.update(cx, |ws| ws.spawn_terminal_on(&machine));
+            }
             Command::RenameSession => {
                 let Some(session) = self.workspace.read(cx).active_session().cloned() else { return };
                 self.prompt_for_session_name(
@@ -504,7 +520,18 @@ impl MainView {
             Command::OpenAutomationRun(run_id) => self.open_automation_run(&run_id, window, cx),
             Command::OpenMarkdown { pane_id } => self.choose_markdown_file(pane_id, window, cx),
             Command::OpenInSopranoGit => {
-                let cwd = self.workspace.read(cx).active_working_directory();
+                let (machine, cwd) = {
+                    let ws = self.workspace.read(cx);
+                    (
+                        ws.machine_of_pane(ws.active_pane_id()).map(str::to_owned),
+                        ws.active_working_directory(),
+                    )
+                };
+                if let Some(machine) = machine {
+                    let message = format!("Soprano Git opens folders on this computer, not on {machine}.");
+                    self.toast(ToastLevel::Error, message, cx);
+                    return;
+                }
                 let shell = self.shell.downgrade();
                 let (sender, receiver) = async_channel::bounded::<String>(1);
                 soprano_git::launcher::open(cwd.as_deref(), move |message| {
@@ -580,6 +607,7 @@ impl MainView {
             }
             BindingCommand::NewSession => self.run(Command::NewSession, window, cx),
             BindingCommand::FindSession => self.run(Command::FindSession, window, cx),
+            BindingCommand::MachineTerminal => self.run(Command::MachineTerminal, window, cx),
             BindingCommand::NewTab => {
                 ws.update(cx, |ws| ws.create_layout_tab(None, None));
             }
@@ -862,6 +890,73 @@ impl MainView {
             window,
             cx,
         );
+    }
+
+    /// "Add Machine…": asks for an ssh destination, lists it in `machines` and checks the
+    /// login in the background; the result arrives as a toast.
+    fn prompt_to_add_machine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let content = DialogContent::prompt(
+            "Add Machine".to_owned(),
+            "Soprano lists it under machines in settings.json and checks that ssh can log in.",
+            "user@host, or a Host from ~/.ssh/config",
+            String::new(),
+            "Add",
+        );
+        let this = cx.entity().downgrade();
+        self.present_dialog(
+            content,
+            move |result, _, cx| {
+                let Some(raw) = result.prompt_value() else { return };
+                let _ = this.update(cx, |this, cx| this.add_machine(&raw, cx));
+            },
+            window,
+            cx,
+        );
+    }
+
+    fn add_machine(&mut self, raw: &str, cx: &mut Context<Self>) {
+        let Some(machine) = soprano_config::machine_for_destination(raw) else { return };
+        let failure = match soprano_config::add_machine(&self.services.config, &machine) {
+            soprano_config::MachineEdit::Done => None,
+            soprano_config::MachineEdit::Exists => Some(format!("{} is listed already.", machine.name)),
+            soprano_config::MachineEdit::InvalidName => Some(format!(
+                "\"{}\" cannot name a machine: it needs no spaces and no leading dash.",
+                machine.name
+            )),
+            soprano_config::MachineEdit::NotFound | soprano_config::MachineEdit::WriteFailed => {
+                Some("settings.json could not be written, so the machine was not added.".to_owned())
+            }
+        };
+        if let Some(message) = failure {
+            self.toast(ToastLevel::Error, message, cx);
+            return;
+        }
+        self.toast(ToastLevel::Info, format!("{} added · checking…", machine.name), cx);
+        let check = cx.background_spawn({
+            let machine = machine.clone();
+            async move { soprano_launch::check_machine(&machine) }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = check.await;
+            let _ = this.update(cx, |this, cx| match result {
+                soprano_launch::MachineCheck::Ready { tmux: Some(_), .. } => this.toast(
+                    ToastLevel::Success,
+                    format!("{} added · {}", machine.name, result.summary()),
+                    cx,
+                ),
+                soprano_launch::MachineCheck::Ready { tmux: None, .. } => this.toast(
+                    ToastLevel::Warning,
+                    format!("{} added · {}", machine.name, result.summary()),
+                    cx,
+                ),
+                soprano_launch::MachineCheck::Unreachable { .. } => this.toast(
+                    ToastLevel::Error,
+                    format!("{} added, but ssh cannot log in: {}", machine.name, result.summary()),
+                    cx,
+                ),
+            });
+        })
+        .detach();
     }
 
     fn confirm_close_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1300,12 +1395,18 @@ impl MainView {
     /// changed folder is passed on.
     fn sync_right_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.update_right_sidebar_width(window, cx);
-        let cwd = {
+        let (cwd, machine) = {
             let ws = self.workspace.read(cx);
-            ws.pane(ws.active_pane_id())
+            let machine = ws.machine_of_pane(ws.active_pane_id()).map(str::to_owned);
+            // A remote pane's folder is on its machine; the panels keep their roots.
+            let cwd = ws
+                .pane(ws.active_pane_id())
                 .and_then(|pane| pane.active_tab())
-                .and_then(|tab| tab.effective_working_directory())
+                .filter(|_| machine.is_none())
+                .and_then(|tab| tab.effective_working_directory());
+            (cwd, machine)
         };
+        self.right_sidebar.update(cx, |sidebar, cx| sidebar.set_remote_machine(machine, cx));
         if self.explorer_directory.as_ref() == Some(&cwd) {
             return;
         }
@@ -1393,6 +1494,12 @@ impl MainView {
                     notifications.borrow_mut().handle_terminal_notification(ws, notification)
                 });
             }
+            ContentEvent::ProgramStatus { target, status } => {
+                let notifications = self.notifications.clone();
+                let (target, status) = (target.clone(), status.clone());
+                self.workspace
+                    .update(cx, |ws| notifications.borrow_mut().handle_program_status(ws, target, status));
+            }
             ContentEvent::TerminalDestroyed(id) => self.clipboard.cancel_requests(*id),
             ContentEvent::ShowError(message) => self.toast(ToastLevel::Error, message.clone(), cx),
             ContentEvent::AgentEvent(event) => {
@@ -1468,6 +1575,7 @@ impl MainView {
         self.shell.update(cx, |shell, cx| {
             shell.settings = settings;
             shell.keybindings = keybindings;
+            shell.machines = snapshot.resolved.machines.clone();
             cx.notify();
         });
         if let Some(view) = &self.settings {
@@ -1741,6 +1849,27 @@ impl MainView {
             }),
             #[cfg(feature = "visual-snapshot")]
             Request::DebugInput { input } => crate::debug_input::perform(input, window, cx, respond),
+            Request::OpenOnMachine { pane_id, tab_id, machine } => {
+                let machines = &self.shell.read(cx).machines;
+                if !machines.iter().any(|known| known.name == machine) {
+                    let known: Vec<&str> = machines.iter().map(|m| m.name.as_str()).collect();
+                    let message = if known.is_empty() {
+                        format!(
+                            "No machine named {machine}. Add it with: soprano machine add {machine} <user@host>"
+                        )
+                    } else {
+                        format!("No machine named {machine}. Machines: {}.", known.join(", "))
+                    };
+                    return respond(Response::failure(message));
+                }
+                let moved =
+                    self.workspace.update(cx, |ws| ws.move_tab_to_machine(&pane_id, &tab_id, &machine));
+                respond(if moved {
+                    Response::success(format!("Connecting to {machine}…"))
+                } else {
+                    Response::failure("Only a terminal tab can continue on a machine.")
+                });
+            }
             Request::Browser { command, arguments, target_pane_id, .. } => {
                 if soprano_browser::is_open_command(&command) {
                     let response = self.workspace.update(cx, |ws| crate::ipc::open_browser(ws, &arguments));

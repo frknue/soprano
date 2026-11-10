@@ -129,6 +129,20 @@ the single source of truth for the version shown in **Settings ▸ About**.
 - `opencode` typed into a Soprano terminal reports in too once
   `./scripts/install-opencode-plugin.sh` links Soprano's plugin into
   `~/.config/opencode/plugins`.
+- **Terminals on other machines.** Add a computer you reach over SSH with
+  `soprano machine add <name> [user@host]` (also `machine list` / `machine remove`),
+  **Add Machine…** (command palette, sidebar **+** menu), **Settings ▸ Machines** (which
+  checks each login), or `"machines"` in `settings.json`. Then type
+  `soprano <name>` (or `soprano ssh <name>`) in a terminal to continue it there, press
+  `Ctrl+A` then `Shift+M` (**Terminal on Machine…**), or pick **New Terminal on <name>** in
+  the command palette or the sidebar's **+** menu. The terminal runs inside a private tmux
+  session on the machine, reconnects when the connection drops and keeps running while this
+  computer sleeps; splits, tabs and agents opened from it run there too. Nothing needs
+  setting up on the machine: Claude Code, Codex, omp and OpenCode report their status with
+  banners there whether Soprano started them or you typed them, Codex approvals included,
+  and a machine that asks for a password asks once.
+- Claude Code, Codex, omp and OpenCode report their status in the sidebar when they send
+  it themselves with OSC 7501 (the Program Status Protocol), also outside Soprano's hooks.
 
 ### Changed
 
@@ -235,6 +249,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- A sideways trackpad swipe over the sidebar no longer scrolls the windows and agents
+  lists; the gesture stays with macOS Spaces.
 - A long agent title in the Agent Dashboard stays on one line and truncates instead of
   wrapping over the line below it.
 - `⌘W` and `⌃A` → `X` close only the active pane tab, like the pane header's `×`; the pane

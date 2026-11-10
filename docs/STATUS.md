@@ -22,6 +22,9 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Sichtprüfung per `debug-snapshot` (Dev-Build): Palette, Settings, Dashboard, Automations,
   Splits, Browser, Files/Changes, Editor, Markdown, Chat, Dialoge, Menüs; Befunde behoben.
 - Am 2026-11-09 nach `main` gepusht und nach `/Applications/Soprano.app` installiert.
+- 2026-11-10: Maschinen (Terminals über SSH, README „Terminals on other machines“): pro Tab statt
+  pro Session, `soprano <maschine>`, `⌃A ⇧M`, Settings ▸ Machines mit Verbindungsprüfung, Agenten
+  melden ohne Einrichtung auf der Maschine (Stand-ins im PATH, OSC 7501 durch tmux).
 
 ## Offen
 
@@ -39,3 +42,6 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   aus `Sources/Soprano`; ihre `sync-soprano-chrome.sh` auf Commit `7eac737` zeigen lassen oder
   auf `soprano-ui` umstellen.
 - Bekannte Abweichungen: `docs/rust-rewrite/INTEGRATION.md`.
+- Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
+  echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
+  OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.

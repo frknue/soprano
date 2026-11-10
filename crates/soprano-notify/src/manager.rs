@@ -9,6 +9,7 @@ use soprano_ipc::{AgentAlert, AgentEvent, AgentEventState};
 use soprano_model::{PaneType, Workspace, WorkspaceChange};
 use soprano_platform::{AppIdentity, StateStore};
 use soprano_types::TerminalTarget;
+use soprano_types::program_status::{BlockedKind, ProgramState, ProgramStatus};
 use soprano_types::{AgentCatalog, AgentWaitingReason};
 
 use crate::authorization::{Authorization, AuthorizationState};
@@ -106,6 +107,9 @@ pub struct NotificationManager {
     shared: Arc<Shared>,
     sound: Box<dyn Fn() -> bool + Send>,
     recent_events: HashMap<TerminalTarget, (EventFingerprint, Instant)>,
+    /// Tabs whose agent reports through Soprano's hooks; OSC 7501 from them would say the
+    /// same thing twice.
+    hook_reported: HashSet<TerminalTarget>,
 }
 
 impl NotificationManager {
@@ -137,6 +141,7 @@ impl NotificationManager {
             }),
             sound: Box::new(sound),
             recent_events: HashMap::new(),
+            hook_reported: HashSet::new(),
         }
     }
 
@@ -249,6 +254,80 @@ impl NotificationManager {
 
     /// [`Self::handle_agent_event`] at a given time (duplicate suppression is time based).
     pub fn handle_agent_event_at(&mut self, workspace: &mut Workspace, event: AgentEvent, now: Instant) {
+        self.hook_reported.insert(TerminalTarget::new(&event.pane_id, &event.tab_id));
+        self.apply_agent_event(workspace, event, now);
+    }
+
+    /// An OSC 7501 report from a terminal (the Program Status Protocol). It is how agents on a
+    /// remote machine report (Soprano's helper there writes it), and how agents that speak the
+    /// protocol report from a local pane Soprano's hooks don't cover. Only the root record
+    /// stands for the tab's agent.
+    pub fn handle_program_status(
+        &mut self,
+        workspace: &mut Workspace,
+        target: TerminalTarget,
+        status: ProgramStatus,
+    ) {
+        self.handle_program_status_at(workspace, target, status, Instant::now());
+    }
+
+    pub fn handle_program_status_at(
+        &mut self,
+        workspace: &mut Workspace,
+        target: TerminalTarget,
+        status: ProgramStatus,
+        now: Instant,
+    ) {
+        // Hooks on a machine cannot reach this app's socket: a remote tab reports only this
+        // way, also after `soprano <machine>` moved a tab whose local hooks once reported.
+        let remote = workspace.remote_of_tab(&target.pane_id, &target.tab_id).is_some();
+        if status.id.is_some() || (!remote && self.hook_reported.contains(&target)) {
+            return;
+        }
+        let tab_profile =
+            workspace.agent(&target.pane_id, &target.tab_id).map(|agent| agent.profile_id.clone());
+        let profile_id = status.app.as_deref().and_then(profile_for_app).or(tab_profile);
+        let Some(profile_id) = profile_id else { return };
+        let (state, notify, reason) = match status.state {
+            ProgramState::Idle => (AgentEventState::Ready, false, None),
+            ProgramState::Working => (AgentEventState::Running, false, None),
+            ProgramState::Blocked => (
+                AgentEventState::NeedsInput,
+                true,
+                status.kind.map(|kind| match kind {
+                    BlockedKind::Permission => AgentWaitingReason::Approval,
+                    BlockedKind::Question | BlockedKind::Auth => AgentWaitingReason::Question,
+                }),
+            ),
+            ProgramState::Done => (AgentEventState::NeedsInput, true, Some(AgentWaitingReason::TurnEnded)),
+            ProgramState::Error => (AgentEventState::Error, true, None),
+            ProgramState::Clear => (AgentEventState::Stopped, false, None),
+        };
+        let body = status.msg.filter(|msg| !msg.trim().is_empty()).unwrap_or_else(|| match status.state {
+            ProgramState::Done => "Response ready".to_owned(),
+            _ => state.default_body().to_owned(),
+        });
+        let event = AgentEvent {
+            pane_id: target.pane_id,
+            tab_id: target.tab_id,
+            state,
+            notify,
+            title: status
+                .title
+                .filter(|title| !title.trim().is_empty())
+                .unwrap_or_else(|| agent_name(&profile_id)),
+            body,
+            profile_id: Some(profile_id),
+            // Possibly another machine's process: never checked here.
+            process_id: None,
+            message: None,
+            reason,
+            conversation: None,
+        };
+        self.apply_agent_event(workspace, event, now);
+    }
+
+    fn apply_agent_event(&mut self, workspace: &mut Workspace, event: AgentEvent, now: Instant) {
         let target = TerminalTarget::new(&event.pane_id, &event.tab_id);
         // A stop never attaches: agent tabs report one again from their shell fallback after
         // the agent's own shutdown hook has already detached it.
@@ -358,7 +437,8 @@ impl NotificationManager {
             (true, true) => "Input required".to_owned(),
             (true, false) => "Ready for a prompt".to_owned(),
         };
-        self.handle_agent_event(
+        // An OSC notification is in-band like OSC 7501, not a hook: later status reports count.
+        self.apply_agent_event(
             workspace,
             AgentEvent {
                 pane_id: target.pane_id,
@@ -373,6 +453,7 @@ impl NotificationManager {
                 reason: needs_input.then_some(reason),
                 conversation: None,
             },
+            Instant::now(),
         );
     }
 
@@ -525,6 +606,12 @@ fn agent_name(profile_id: &str) -> String {
         .profile(profile_id)
         .map(|profile| profile.name)
         .unwrap_or_else(|| "Agent".to_owned())
+}
+
+/// The agent profile an OSC 7501 `app` names: a profile id, or Claude Code's own spelling.
+fn profile_for_app(app: &str) -> Option<String> {
+    let id = if app == "claude" { "claude-code" } else { app };
+    AgentCatalog::shared().profile(id).map(|profile| profile.id)
 }
 
 /// The banner for an agent event: what the agent wants, over the conversation (tab) name.

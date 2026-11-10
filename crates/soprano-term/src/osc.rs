@@ -75,13 +75,23 @@ impl Osc52Read {
     }
 }
 
-/// Finds OSC 52 read requests in the program's output, also when one arrives split across
-/// reads. libghostty-vt answers reads only from inside its callback, which can't wait for
-/// the user, so reads are answered later by writing the reply to the program.
+/// What [`OscScanner`] finds in the program's output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScannedOsc {
+    ClipboardRead(Osc52Read),
+    ProgramStatus(crate::program_status::ProgramStatusMessage),
+}
+
+/// Finds the OSC sequences libghostty-vt leaves to the host in the program's output, also
+/// when one arrives split across reads: OSC 52 read requests (libghostty-vt answers reads only
+/// from inside its callback, which can't wait for the user, so reads are answered later by
+/// writing the reply to the program) and OSC 7501 program status, which it doesn't parse.
 #[derive(Debug, Default)]
-pub struct Osc52ReadScanner {
+pub struct OscScanner {
     state: ScanState,
     body: Vec<u8>,
+    /// The body is longer than any sequence looked for, or starts otherwise.
+    skipping: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -93,20 +103,19 @@ enum ScanState {
     OscEscape,
 }
 
-/// Longer OSC bodies can't be a read request (`52;` + a few selection letters + `;?`).
+/// Longer OSC 52 bodies can't be a read request (`52;` + a few selection letters + `;?`).
 const MAX_READ_BODY: usize = 32;
+const OSC52: &[u8] = b"52;";
+const OSC7501: &[u8] = b"7501;";
 
-impl Osc52ReadScanner {
-    pub fn scan(&mut self, bytes: &[u8]) -> Vec<Osc52Read> {
+impl OscScanner {
+    pub fn scan(&mut self, bytes: &[u8]) -> Vec<ScannedOsc> {
         let mut found = Vec::new();
         for &b in bytes {
             self.state = match (self.state, b) {
                 (ScanState::Ground, 0x1b) => ScanState::Escape,
                 (ScanState::Ground, _) => ScanState::Ground,
-                (ScanState::Escape, b']') => {
-                    self.body.clear();
-                    ScanState::Osc
-                }
+                (ScanState::Escape, b']') => self.start(),
                 (ScanState::Escape, 0x1b) => ScanState::Escape,
                 (ScanState::Escape, _) => ScanState::Ground,
                 (ScanState::Osc, 0x07) => {
@@ -115,9 +124,7 @@ impl Osc52ReadScanner {
                 }
                 (ScanState::Osc, 0x1b) => ScanState::OscEscape,
                 (ScanState::Osc, b) => {
-                    if self.body.len() <= MAX_READ_BODY {
-                        self.body.push(b);
-                    }
+                    self.push(b);
                     ScanState::Osc
                 }
                 (ScanState::OscEscape, b'\\') => {
@@ -125,10 +132,7 @@ impl Osc52ReadScanner {
                     ScanState::Ground
                 }
                 // ESC inside an OSC aborts it and starts a new sequence.
-                (ScanState::OscEscape, b']') => {
-                    self.body.clear();
-                    ScanState::Osc
-                }
+                (ScanState::OscEscape, b']') => self.start(),
                 (ScanState::OscEscape, 0x1b) => ScanState::Escape,
                 (ScanState::OscEscape, _) => ScanState::Ground,
             };
@@ -136,18 +140,51 @@ impl Osc52ReadScanner {
         found
     }
 
-    fn finish(&mut self) -> Option<Osc52Read> {
+    fn start(&mut self) -> ScanState {
+        self.body.clear();
+        self.skipping = false;
+        ScanState::Osc
+    }
+
+    fn push(&mut self, b: u8) {
+        if self.skipping {
+            return;
+        }
+        self.body.push(b);
+        let wanted = |prefix: &[u8]| {
+            let n = self.body.len().min(prefix.len());
+            self.body[..n] == prefix[..n]
+        };
+        let limit = if wanted(OSC52) {
+            MAX_READ_BODY
+        } else if wanted(OSC7501) {
+            crate::program_status::MAX_FRAME
+        } else {
+            0
+        };
+        if self.body.len() > limit {
+            self.skipping = true;
+            self.body.clear();
+        }
+    }
+
+    fn finish(&mut self) -> Option<ScannedOsc> {
         let body = std::mem::take(&mut self.body);
-        if body.len() > MAX_READ_BODY {
+        if std::mem::take(&mut self.skipping) {
             return None;
         }
         let body = std::str::from_utf8(&body).ok()?;
+        if let Some(rest) = body.strip_prefix("7501;") {
+            return crate::program_status::parse(rest).map(ScannedOsc::ProgramStatus);
+        }
         let rest = body.strip_prefix("52;")?;
         let (selection, data) = rest.split_once(';')?;
         if data != "?" || !selection.chars().all(|c| c.is_ascii_alphanumeric()) {
             return None;
         }
-        Some(Osc52Read { selection: if selection.is_empty() { "c".into() } else { selection.into() } })
+        Some(ScannedOsc::ClipboardRead(Osc52Read {
+            selection: if selection.is_empty() { "c".into() } else { selection.into() },
+        }))
     }
 }
 
@@ -177,16 +214,39 @@ mod tests {
         assert_eq!(decode_pwd("/home/me").as_deref(), Some("/home/me"));
     }
 
+    fn read(selection: &str) -> ScannedOsc {
+        ScannedOsc::ClipboardRead(Osc52Read { selection: selection.into() })
+    }
+
     #[test]
     fn osc52_reads_are_found_across_reads_and_writes_are_not() {
-        let mut scanner = Osc52ReadScanner::default();
+        let mut scanner = OscScanner::default();
         assert!(scanner.scan(b"hello \x1b]52;c;aGk=\x07").is_empty());
         assert!(scanner.scan(b"\x1b]52;c").is_empty());
-        assert_eq!(scanner.scan(b";?\x1b\\"), vec![Osc52Read { selection: "c".into() }]);
-        assert_eq!(scanner.scan(b"\x1b]52;;?\x07"), vec![Osc52Read { selection: "c".into() }]);
-        let read = scanner.scan(b"\x1b]52;p;?\x07").remove(0);
-        assert!(read.wants_selection_clipboard());
+        assert_eq!(scanner.scan(b";?\x1b\\"), vec![read("c")]);
+        assert_eq!(scanner.scan(b"\x1b]52;;?\x07"), vec![read("c")]);
+        let ScannedOsc::ClipboardRead(found) = scanner.scan(b"\x1b]52;p;?\x07").remove(0) else { panic!() };
+        assert!(found.wants_selection_clipboard());
         assert!(scanner.scan(b"\x1b]0;title ;?\x07").is_empty());
+    }
+
+    #[test]
+    fn program_status_reports_are_found_across_reads() {
+        use crate::program_status::{ProgramState, ProgramStatusMessage};
+        let mut scanner = OscScanner::default();
+        assert!(scanner.scan(b"out \x1b]7501;state=wor").is_empty());
+        let found = scanner.scan(b"king:app=omp\x1b\\ more");
+        let [ScannedOsc::ProgramStatus(ProgramStatusMessage::Report(status))] = found.as_slice() else {
+            panic!("{found:?}")
+        };
+        assert_eq!((status.state, status.app.as_deref()), (ProgramState::Working, Some("omp")));
+        assert_eq!(
+            scanner.scan(b"\x1b]7501;?\x07"),
+            vec![ScannedOsc::ProgramStatus(ProgramStatusMessage::Query)]
+        );
+        // A frame over the protocol's limit is dropped whole.
+        let long = format!("\x1b]7501;state=done:x={}\x07", "a".repeat(4100));
+        assert!(scanner.scan(long.as_bytes()).is_empty());
     }
 
     #[test]

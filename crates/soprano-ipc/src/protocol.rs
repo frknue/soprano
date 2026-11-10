@@ -133,6 +133,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         caller_tab_id: Option<String>,
     },
+    /// `soprano ssh <machine>` (or `soprano <machine>`): the calling terminal tab continues
+    /// as a shell on that `machines` entry; answered with a [`Response`].
+    #[serde(rename_all = "camelCase")]
+    OpenOnMachine { pane_id: String, tab_id: String, machine: String },
     /// Dev builds (`visual-snapshot`): render the main window into a PNG at `path` (absolute);
     /// answered with the written path.
     #[cfg(feature = "visual-snapshot")]
@@ -150,7 +154,7 @@ impl Request {
         if matches!(self, Self::DebugSnapshot { .. } | Self::DebugInput { .. }) {
             return true;
         }
-        matches!(self, Self::OpenMarkdown { .. } | Self::Browser { .. })
+        matches!(self, Self::OpenMarkdown { .. } | Self::Browser { .. } | Self::OpenOnMachine { .. })
     }
 }
 

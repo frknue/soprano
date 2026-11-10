@@ -143,8 +143,9 @@ pub fn sidebar_title(pane: &PaneState, home: &str) -> String {
     )
 }
 
-/// The line under a pane's title: the agent (when its title is its task) and folder, a
-/// non-default branch, "N tabs" (`PaneContextLine`).
+/// The line under a pane's title: the machine it runs on, the agent (when its title is its
+/// task) and folder, a non-default branch, "N tabs" (`PaneContextLine`). A tab on a machine
+/// shows the folder it started in and no branch: this computer's disk knows neither.
 pub fn context_line(
     pane: &PaneState,
     title: &str,
@@ -152,15 +153,20 @@ pub fn context_line(
     home: &str,
 ) -> ContextLine {
     let Some(tab) = pane.active_tab() else { return ContextLine::default() };
-    let cwd = tab.effective_working_directory();
-    ContextLine::for_title(
+    let machine = tab.remote.as_ref().map(|remote| remote.machine.clone());
+    let cwd = if machine.is_some() { tab.cwd.clone() } else { tab.effective_working_directory() };
+    let mut line = ContextLine::for_title(
         title,
         agent_name(tab).as_deref(),
         cwd.as_deref(),
-        cwd.as_deref().and_then(branch),
+        cwd.as_deref().filter(|_| machine.is_none()).and_then(branch),
         pane.tabs.len(),
         home,
-    )
+    );
+    if let Some(machine) = machine {
+        line.context.insert(0, machine);
+    }
+    line
 }
 
 /// An agent's pill, timed by the clock, and the moment it entered its status (rows show the
@@ -380,13 +386,14 @@ pub fn can_collapse_all(ws: &Workspace) -> bool {
     ws.active_session_windows().iter().any(|window| !window.is_sidebar_collapsed)
 }
 
-/// Every working directory a tab of any pane runs in: the branch monitor watches their HEADs
-/// (`watchedCwds`).
+/// Every working directory a tab on this computer runs in: the branch monitor watches their
+/// HEADs (`watchedCwds`).
 pub fn watched_cwds(ws: &Workspace) -> Vec<String> {
     let mut cwds: Vec<String> = ws
         .panes()
         .values()
-        .flat_map(|pane| pane.tabs.iter().filter_map(PaneTab::effective_working_directory))
+        .flat_map(|pane| pane.tabs.iter().filter(|tab| tab.remote.is_none()))
+        .filter_map(PaneTab::effective_working_directory)
         .collect();
     cwds.sort();
     cwds.dedup();

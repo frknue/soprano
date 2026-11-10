@@ -1,0 +1,15 @@
+# Soprano on a remote machine: bash starts with this file (--rcfile) and reads what a login
+# shell reads, then puts Soprano's agent stand-ins first on PATH, so `claude`, `codex`, `omp`
+# and `opencode` typed in this terminal report their status to Soprano.
+[ -r /etc/profile ] && . /etc/profile
+for soprano_file in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+    if [ -r "$soprano_file" ]; then
+        . "$soprano_file"
+        break
+    fi
+done
+unset soprano_file
+if [ -n "${SOPRANO_AGENT_BIN:-}" ]; then
+    PATH="$SOPRANO_AGENT_BIN:$PATH"
+    export PATH
+fi

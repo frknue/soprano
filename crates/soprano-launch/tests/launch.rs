@@ -78,11 +78,13 @@ fn env_of(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
-/// What every pane carries.
+/// What every pane carries: with no locale in the app's environment, a UTF-8 `LANG`.
 fn pane_env(extra: &[(&str, &str)]) -> BTreeMap<String, String> {
+    let lang = if cfg!(target_os = "macos") { "en_US.UTF-8" } else { "C.UTF-8" };
     let mut env = env_of(&[
         ("COLORTERM", "truecolor"),
         ("GHOSTTY_SHELL_FEATURES", "cursor:blink,path,title"),
+        ("LANG", lang),
         ("PATH", "/opt/soprano/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
         ("SOPRANO_APP_PID", "4242"),
         ("SOPRANO_BIN", BIN),

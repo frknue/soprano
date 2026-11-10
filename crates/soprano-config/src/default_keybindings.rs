@@ -62,6 +62,7 @@ const TABLE: &[Row] = &[
     // Layout (prefix)
     ("new-session", "New Session…", "Create a named session with its own windows", General, "Prefix → Shift+C", Prefix, "c", SHIFT),
     ("find-session", "Switch Session…", "Switch between running sessions", Navigation, "Prefix → S", Prefix, "s", NONE),
+    ("machine-terminal", "Terminal on Machine…", "Open a terminal on a machine from settings beside the active pane", Layout, "Prefix → Shift+M", Prefix, "m", SHIFT),
     ("split-horizontal", "Split Horizontal", "Split the active pane horizontally", Layout, "Prefix → -", Prefix, "-", NONE),
     ("split-vertical", "Split Vertical", "Split the active pane vertically", Layout, "Prefix → |", Prefix, "|", SHIFT),
     ("close-pane", "Close Pane", "Close the active pane", Layout, "Prefix → Q", Prefix, "q", NONE),

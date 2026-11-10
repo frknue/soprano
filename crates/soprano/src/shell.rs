@@ -15,7 +15,7 @@ use gpui::{AnyView, App, Context, DismissEvent, Entity, EventEmitter, ManagedVie
 use soprano_config::AppSettings;
 use soprano_explorer::SidebarWidthStore;
 use soprano_platform::StateStore;
-use soprano_types::{KeyBindingConfig, KeybindingState};
+use soprano_types::{KeyBindingConfig, KeybindingState, Machine};
 
 /// Persisted visibility of the left sidebar (`MainContentViewController.sidebarVisibleKey`).
 pub const SIDEBAR_VISIBLE_KEY: &str = "soprano-sidebar-visible";
@@ -56,6 +56,12 @@ pub enum Command {
     FindSession,
     OpenProjectSearch,
     NewSession,
+    /// Choose a machine (`machines` in settings.json) and open a terminal on it.
+    MachineTerminal,
+    /// Ask for an ssh destination and add it to `machines`, then check it.
+    AddMachine,
+    /// Open a terminal on this machine beside the active pane.
+    NewTerminalOn(String),
     RenameSession,
     /// Close the active session, after confirming.
     CloseSession,
@@ -96,6 +102,8 @@ pub enum Command {
 pub struct Shell {
     pub state: StateStore,
     pub settings: AppSettings,
+    /// The `machines` of `settings.json`.
+    pub machines: Vec<Machine>,
     pub keybindings: KeyBindingConfig,
     pub sidebar_visible: bool,
     /// The width the sidebar has (and reopens at).
@@ -125,6 +133,7 @@ impl Shell {
         Self {
             state,
             settings,
+            machines: Vec::new(),
             keybindings,
             sidebar_visible,
             sidebar_width,

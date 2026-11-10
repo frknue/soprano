@@ -16,7 +16,7 @@ pub mod window;
 pub mod workspace;
 
 pub use agent_instance::AgentInstance;
-pub use pane::{PaneContentKind, PaneState, PaneTab, PaneType, chat_supports};
+pub use pane::{PaneContentKind, PaneState, PaneTab, PaneType, Remote, chat_supports};
 pub use session::{ReferenceDate, SavedLayoutTab, SavedPane, SavedTab, SavedWindow, WorkspaceSession};
 pub use session_manager::SessionManager;
 pub use split_node::{PaneFrame, SplitBranch, SplitBranchSide, SplitNode};

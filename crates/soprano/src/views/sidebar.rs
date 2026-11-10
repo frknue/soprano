@@ -179,8 +179,8 @@ impl Sidebar {
     }
 
     /// The Windows header's "+": a window, a pane of each agent (and each chat agent), a
-    /// terminal, a browser, a Markdown file (`plusClicked`).
-    fn new_menu(&self) -> Vec<MenuItem> {
+    /// terminal (here and on each machine), a browser, a Markdown file (`plusClicked`).
+    fn new_menu(&self, cx: &App) -> Vec<MenuItem> {
         let mut items = vec![self.spawn_item("New Window".into(), |ws| _ = ws.create_window(None, None))];
         items.push(MenuItem::separator());
         for profile in AgentCatalog::shared().all().into_iter().filter(|p| p.id != "terminal") {
@@ -197,6 +197,13 @@ impl Sidebar {
         }
         items.push(MenuItem::separator());
         items.push(self.spawn_item("New Terminal Pane".into(), |ws| _ = ws.spawn_terminal(None)));
+        for machine in &self.shell.read(cx).machines {
+            let name = machine.name.clone();
+            items.push(
+                self.spawn_item(format!("New Terminal on {name}"), move |ws| _ = ws.spawn_terminal_on(&name)),
+            );
+        }
+        items.push(self.command_item("Add Machine…", Command::AddMachine));
         items.push(self.spawn_item("New Browser Pane".into(), |ws| _ = ws.spawn_browser(None)));
         items.push(self.command_item("Open Markdown…", Command::OpenMarkdown { pane_id: None }));
         items
@@ -314,7 +321,7 @@ impl Sidebar {
     fn windows_header(&self, count: usize, can_collapse: bool, cx: &App) -> impl IntoElement {
         let theme = cx.soprano_theme();
         let workspace = self.workspace.clone();
-        let show_new = self.menu_handler(|sidebar, _| sidebar.new_menu());
+        let show_new = self.menu_handler(|sidebar, cx| sidebar.new_menu(cx));
         SectionHeader::new("sidebar-windows-header", "Windows").count(count).end_slot(
             div()
                 .flex()

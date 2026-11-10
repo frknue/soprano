@@ -8,31 +8,37 @@ use serde_json::{Map, Value, json};
 
 use crate::quote::toml_quoted;
 
+/// How Codex signals an approval request from its terminal UI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodexApprovalSignal {
+    /// An OSC 9 desktop notification (a pane on this computer).
+    Osc9,
+    /// The terminal bell: tmux, which keeps panes on a machine, drops OSC 9 but passes it on.
+    Bell,
+}
+
 /// Codex appends its notification payload as a trailing JSON argument to the configured
 /// notify program, so `agent-event` picks the message out of the arguments without any extra
-/// flag here. Approval requests arrive as OSC 9 notifications from the TUI.
-pub fn codex_integration_arguments(soprano_bin: &str) -> Vec<String> {
-    let notify = [
-        soprano_bin,
-        "agent-event",
-        "needs-input",
-        "--notify",
-        "--title",
-        "Codex",
-        "--body",
-        "Response ready",
-    ]
-    .iter()
-    .map(|part| toml_quoted(part))
-    .collect::<Vec<_>>()
-    .join(",");
+/// flag here. Approval requests arrive from the TUI as `approvals`. `program` is how to run
+/// `soprano` (its path, or a trampoline on a remote machine).
+pub fn codex_integration_arguments(program: &[&str], approvals: CodexApprovalSignal) -> Vec<String> {
+    let notify = program
+        .iter()
+        .chain(&["agent-event", "needs-input", "--notify", "--title", "Codex", "--body", "Response ready"])
+        .map(|part| toml_quoted(part))
+        .collect::<Vec<_>>()
+        .join(",");
+    let method = match approvals {
+        CodexApprovalSignal::Osc9 => "osc9",
+        CodexApprovalSignal::Bell => "bel",
+    };
     vec![
         "-c".into(),
         format!("notify=[{notify}]"),
         "-c".into(),
         "tui.notifications=[\"approval-requested\"]".into(),
         "-c".into(),
-        "tui.notification_method=\"osc9\"".into(),
+        format!("tui.notification_method=\"{method}\""),
         "-c".into(),
         "tui.notification_condition=\"always\"".into(),
     ]

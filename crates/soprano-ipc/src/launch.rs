@@ -19,6 +19,8 @@ pub const USAGE: &str = "Usage:
   soprano navigate-pane left|right|up|down
   soprano navigation-passthrough enable|disable <source>
   soprano agent-event <state> [options]
+  soprano ssh <machine>                continue this terminal on a machine (or soprano <machine>)
+  soprano machine add|list|remove ...    (soprano machine --help)
 
 Subcommands drive the Soprano instance that owns the calling terminal.
 Start the app itself from Finder, Spotlight, or `open -a Soprano`.";

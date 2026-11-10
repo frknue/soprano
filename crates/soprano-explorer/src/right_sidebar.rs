@@ -27,6 +27,9 @@ pub struct RightSidebar {
     /// The sidebar's right edge in window coordinates while the edge is dragged.
     resizing: Option<Pixels>,
     resize_highlighted: bool,
+    /// The focused pane runs on this remote machine: the panels, which read this computer's
+    /// disk, give way to a note.
+    remote_machine: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -45,6 +48,7 @@ impl RightSidebar {
             available_width: None,
             resizing: None,
             resize_highlighted: false,
+            remote_machine: None,
             _subscriptions: subscriptions,
         };
         sidebar.update_activity(cx);
@@ -86,6 +90,14 @@ impl RightSidebar {
     pub fn set_working_directory(&mut self, cwd: Option<&str>, cx: &mut Context<Self>) {
         self.files.update(cx, |files, cx| files.set_working_directory(cwd, cx));
         self.changes.update(cx, |changes, cx| changes.set_working_directory(cwd, cx));
+    }
+
+    /// The remote machine the focused pane runs on (`None`: this computer).
+    pub fn set_remote_machine(&mut self, machine: Option<String>, cx: &mut Context<Self>) {
+        if self.remote_machine != machine {
+            self.remote_machine = machine;
+            cx.notify();
+        }
     }
 
     /// Whether the keyboard is in either panel.
@@ -200,9 +212,21 @@ impl Render for RightSidebar {
         if !self.state.is_open() {
             return div().into_any_element();
         }
-        let panel = match self.state.tab() {
-            RightSidebarTab::Explorer => self.files.clone().into_any_element(),
-            RightSidebarTab::SourceControl => self.changes.clone().into_any_element(),
+        let panel = match (&self.remote_machine, self.state.tab()) {
+            (Some(machine), tab) => {
+                let title = if tab == RightSidebarTab::Explorer { "Files" } else { "Changes" };
+                crate::ui::card(&t)
+                    .child(crate::ui::header(&t, title))
+                    .child(crate::ui::empty_state(
+                        &t,
+                        &format!(
+                            "Not available on {machine}\nFiles and Changes show this computer's folders."
+                        ),
+                    ))
+                    .into_any_element()
+            }
+            (None, RightSidebarTab::Explorer) => self.files.clone().into_any_element(),
+            (None, RightSidebarTab::SourceControl) => self.changes.clone().into_any_element(),
         };
         let highlight = if self.resize_highlighted { t.input } else { gpui::transparent_black() };
         let entity = cx.entity().downgrade();

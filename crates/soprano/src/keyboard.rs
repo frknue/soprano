@@ -137,6 +137,8 @@ mod tests {
         fn restart(&self, _: &Entity<TerminalView>, _: TerminalLaunch, _: &mut gpui::App) -> bool {
             false
         }
+
+        fn run_detached(&self, _: Vec<String>) {}
     }
 
     /// The file at `path` once it exists with at least `bytes` bytes (or after 10 s).

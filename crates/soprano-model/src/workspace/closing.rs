@@ -170,7 +170,7 @@ impl Workspace {
         let Some(first_remaining) = remaining.first().cloned() else {
             // Keep the session usable without jumping into another session.
             let activate = self.active_window_id == window_id;
-            self.create_window_in(&session_id, None, None, activate);
+            self.create_window_in(&session_id, super::Place::default(), None, activate);
             return CloseOutcome::Closed;
         };
 

@@ -1,0 +1,20 @@
+# Soprano on a remote machine: zsh starts here (ZDOTDIR), goes back to the user's own startup
+# files, and once they have all run puts Soprano's agent stand-ins first on PATH, so `claude`,
+# `codex`, `omp` and `opencode` typed in this terminal report their status to Soprano.
+if [[ -n ${SOPRANO_USER_ZDOTDIR+x} ]]; then
+    ZDOTDIR=$SOPRANO_USER_ZDOTDIR
+else
+    unset ZDOTDIR
+fi
+unset SOPRANO_USER_ZDOTDIR
+[[ -r ${ZDOTDIR:-$HOME}/.zshenv ]] && builtin source "${ZDOTDIR:-$HOME}/.zshenv"
+
+if [[ -o interactive && -n ${SOPRANO_AGENT_BIN:-} ]]; then
+    autoload -Uz add-zsh-hook
+    _soprano_agent_path() {
+        path=("$SOPRANO_AGENT_BIN" ${path:#$SOPRANO_AGENT_BIN})
+        add-zsh-hook -d precmd _soprano_agent_path
+        unfunction _soprano_agent_path
+    }
+    add-zsh-hook precmd _soprano_agent_path
+fi

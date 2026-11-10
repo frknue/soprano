@@ -1,6 +1,6 @@
 [package]
 name = "soprano-settings"
-description = "The Settings card (General, Keyboard Shortcuts, Agent Profiles, Accounts, About) and the status bar's account usage popover, over settings.json."
+description = "The Settings card (General, Machines, Keyboard Shortcuts, Agent Profiles, Accounts, About) and the status bar's account usage popover, over settings.json."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,6 +10,7 @@ publish.workspace = true
 soprano-types = { path = "../soprano-types" }
 soprano-platform = { path = "../soprano-platform" }
 soprano-config = { path = "../soprano-config" }
+soprano-launch = { path = "../soprano-launch" }
 soprano-accounts = { path = "../soprano-accounts" }
 soprano-ui = { path = "../soprano-ui" }
 gpui.workspace = true

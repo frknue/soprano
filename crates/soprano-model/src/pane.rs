@@ -53,6 +53,33 @@ pub enum PaneType {
     Terminal,
 }
 
+/// Where a terminal or agent tab runs when it is not on this computer: a `machines` entry of
+/// `settings.json`, reached over ssh.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Remote {
+    pub machine: String,
+    /// Names the tab's program on the machine, so no other tab (of another saved workspace or
+    /// another Soprano build) reattaches to it: the creation time in nanoseconds, base 36.
+    pub key: String,
+}
+
+impl Remote {
+    /// A new program on `machine`.
+    pub fn on(machine: impl Into<String>) -> Self {
+        let mut value = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or_default();
+        let mut key = Vec::new();
+        while value > 0 || key.is_empty() {
+            key.push(b"0123456789abcdefghijklmnopqrstuvwxyz"[(value % 36) as usize]);
+            value /= 36;
+        }
+        key.reverse();
+        Self { machine: machine.into(), key: String::from_utf8(key).unwrap_or_default() }
+    }
+}
+
 /// A single tab within a pane.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaneTab {
@@ -72,6 +99,8 @@ pub struct PaneTab {
     pub preview_owner_pane_id: Option<String>,
     /// Initial terminal command. Restored workspaces open an ordinary shell instead.
     pub startup_command: Option<Vec<String>>,
+    /// The machine the tab's program runs on; `None` for this computer.
+    pub remote: Option<Remote>,
 }
 
 impl PaneTab {
@@ -87,6 +116,7 @@ impl PaneTab {
             content_kind: None,
             preview_owner_pane_id: None,
             startup_command: None,
+            remote: None,
         }
     }
 

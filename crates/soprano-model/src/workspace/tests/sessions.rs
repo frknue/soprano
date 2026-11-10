@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::session::WorkspaceSession;
+use crate::{PaneType, TerminalLifecycleAction, WorkspaceEvent};
 use soprano_types::{AgentLaunch, AgentStatus, AgentWaitingReason};
 
 #[test]
@@ -109,6 +110,74 @@ fn new_windows_inherit_the_current_directory_and_belong_to_the_selected_session(
     assert_eq!(workspace.terminal_sessions().len(), 2);
     workspace.rename_session(&session_id, "  Renamed  ");
     assert_eq!(workspace.active_session().map(|s| s.name.as_str()), Some("Renamed"));
+}
+
+#[test]
+fn a_terminal_on_a_machine_passes_it_to_what_opens_from_it_but_not_to_new_sessions() {
+    let mut workspace = Workspace::new();
+    workspace.spawn_terminal(Some("/tmp/project")).expect("local pane");
+    let local = workspace.active_pane_id().to_owned();
+    let remote_pane = workspace.spawn_terminal_on("vps").expect("remote pane");
+    let remote_tab =
+        workspace.pane(&remote_pane).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
+    assert_eq!(workspace.machine_of_pane(&remote_pane), Some("vps"));
+    assert_eq!(workspace.active_working_directory(), None);
+
+    // Splits, pane tabs, new agents and windows from there run on the same machine, each
+    // under its own key; a browser tab stays here.
+    let split = workspace.split_pane(soprano_types::SplitDirection::Horizontal, &remote_pane).expect("split");
+    let agent = workspace.spawn_agent("claude-code", None, false).expect("agent");
+    for pane in [&split, &agent] {
+        assert_eq!(workspace.machine_of_pane(pane), Some("vps"));
+    }
+    let browser = workspace.add_tab_to_pane(&split, PaneType::Browser, None, None).expect("browser tab");
+    assert_eq!(workspace.remote_of_tab(&split, &browser), None);
+    workspace.focus_pane(&agent);
+    let split_tab = workspace.pane(&split).map(|p| p.tabs[0].id.clone()).expect("tab");
+    assert_ne!(
+        workspace.remote_of_tab(&split, &split_tab),
+        workspace.remote_of_tab(&remote_pane, &remote_tab)
+    );
+    workspace.create_window(None, None).expect("window");
+    assert_eq!(workspace.machine_of_pane(workspace.active_pane_id()), Some("vps"));
+    // A folder named explicitly is on this computer.
+    let explicit = workspace.spawn_terminal(Some("/srv")).expect("pane");
+    assert_eq!(workspace.machine_of_pane(&explicit), None);
+    assert_eq!(workspace.machine_of_pane(&local), None);
+
+    let encoded = serde_json::to_string(&workspace.snapshot_workspace()).expect("encodes");
+    let mut restored = Workspace::new();
+    restored.restore_workspace(serde_json::from_str(&encoded).expect("decodes"));
+    assert_eq!(
+        restored.remote_of_tab(&remote_pane, &remote_tab),
+        workspace.remote_of_tab(&remote_pane, &remote_tab)
+    );
+
+    // From a machine's pane, a new session starts here, in the home folder.
+    restored.focus_pane(&remote_pane);
+    restored.create_session("Again local", None).expect("session");
+    assert_eq!(restored.machine_of_pane(restored.active_pane_id()), None);
+    assert_eq!(restored.active_working_directory(), None);
+}
+
+#[test]
+fn typing_a_machine_into_a_terminal_moves_that_tab_there_and_restarts_it() {
+    let mut workspace = Workspace::new();
+    let pane = workspace.spawn_terminal(Some("/tmp")).expect("pane");
+    let tab = workspace.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
+    workspace.take_events();
+
+    assert!(workspace.move_tab_to_machine(&pane, &tab, "vps"));
+    assert_eq!(workspace.machine_of_pane(&pane), Some("vps"));
+    assert_eq!(workspace.active_working_directory(), None);
+    assert_eq!(
+        workspace.take_events(),
+        vec![WorkspaceEvent::Terminal(TerminalLifecycleAction::Restart(TerminalTarget::new(&pane, &tab)))]
+    );
+
+    let agent = workspace.spawn_agent("omp", None, false).expect("agent pane");
+    let agent_tab = workspace.pane(&agent).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
+    assert!(!workspace.move_tab_to_machine(&agent, &agent_tab, "pi"));
 }
 
 #[test]

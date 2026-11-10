@@ -25,7 +25,10 @@ use soprano_editor::{
     ReaderEvent,
 };
 use soprano_ipc::AgentEventState;
-use soprano_launch::{AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec};
+use soprano_launch::{
+    AccountAdjustments, AgentRequest, LaunchContext, LaunchSpec, RemoteProgram, RemoteTarget,
+    remote_kill_command, remote_session_name, ssh_arguments,
+};
 use soprano_model::file_url;
 use soprano_model::{PaneTab, PaneType, TerminalLifecycleAction, WorkspaceChange, WorkspaceEvent};
 use soprano_platform::StateStore;
@@ -35,7 +38,7 @@ use soprano_term::{
 };
 use soprano_text::DocumentId;
 use soprano_types::TerminalTarget;
-use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, KeybindingState};
+use soprano_types::{AgentCatalog, AgentConversation, AgentStatus, KeybindingState, Machine};
 
 use crate::shell::{CloseTarget, Command, Shell, dispatch};
 use crate::workspace::{WorkspaceHandle, WorkspaceUpdate};
@@ -123,6 +126,10 @@ pub trait TerminalFactory {
 
     /// Restarts `view` with `launch` (Swift `recreateSurface`); false when it could not start.
     fn restart(&self, view: &Entity<TerminalView>, launch: TerminalLaunch, cx: &mut App) -> bool;
+
+    /// Runs `argv` in the background, without a terminal (ending a tab's program on its
+    /// machine over ssh).
+    fn run_detached(&self, argv: Vec<String>);
 }
 
 /// The real factory: a PTY with the launch's process.
@@ -142,6 +149,21 @@ impl TerminalFactory for PtyTerminals {
     fn restart(&self, view: &Entity<TerminalView>, launch: TerminalLaunch, cx: &mut App) -> bool {
         view.update(cx, |view, cx| view.restart(launch, cx)).is_ok()
     }
+
+    fn run_detached(&self, argv: Vec<String>) {
+        let Some((program, arguments)) = argv.split_first() else { return };
+        let spawned = std::process::Command::new(program)
+            .args(arguments)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        match spawned {
+            // Reaped off the UI thread; ssh gives up on an unreachable machine by itself.
+            Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
+            Err(error) => tracing::warn!("cannot run {program}: {error}"),
+        }
+    }
 }
 
 /// What the main view handles for the content layer.
@@ -153,6 +175,9 @@ pub enum ContentEvent {
     ClipboardConfirmation { terminal: Entity<TerminalView>, request: ClipboardRequest },
     /// A program posted a desktop notification (OSC 9 / 777).
     DesktopNotification { target: TerminalTarget, title: String, body: String },
+    /// A program reported its status (OSC 7501): agents on a remote machine, through
+    /// Soprano's helper there, and programs that speak the protocol.
+    ProgramStatus { target: TerminalTarget, status: soprano_types::program_status::ProgramStatus },
     /// A chat tab's agent reported a status the way a hook does (`AgentEventPayload`).
     AgentEvent(soprano_ipc::AgentEvent),
     /// A terminal took the keyboard (clears its attention and delivered banners).
@@ -212,6 +237,11 @@ pub struct ContentHost {
     clipboard: Option<Rc<ClipboardConfirmationCoordinator>>,
     contents: HashMap<TerminalTarget, PaneContent>,
     subscriptions: HashMap<TerminalTarget, Subscription>,
+    /// Every tab's remote session (tmux session name → machine) as of the last update: one
+    /// that disappears had its tab closed, and ends on the machine too.
+    remote_sessions: HashMap<String, Machine>,
+    /// Tabs whose next launch is a restart.
+    restarting: HashSet<TerminalTarget>,
     last_restore_generation: u64,
     copy_mode_target: Option<TerminalTarget>,
     _bus: Subscription,
@@ -259,12 +289,15 @@ impl ContentHost {
             clipboard: None,
             contents: HashMap::new(),
             subscriptions: HashMap::new(),
+            remote_sessions: HashMap::new(),
+            restarting: HashSet::new(),
             last_restore_generation,
             copy_mode_target: None,
             _bus: bus,
             _documents: documents_subscription,
             _sampler: None,
         };
+        host.remote_sessions = host.current_remote_sessions(cx);
         host.sync_visible_contents(window, cx);
         host
     }
@@ -470,15 +503,22 @@ impl ContentHost {
         cx: &mut Context<Self>,
     ) {
         match action {
-            TerminalLifecycleAction::Stop(target) => match self.contents.get(target) {
-                Some(PaneContent::Terminal(view)) => view.update(cx, |view, cx| view.destroy(cx)),
-                Some(PaneContent::Chat(view)) => view.update(cx, |view, cx| view.stop(window, cx)),
-                _ => {}
-            },
+            TerminalLifecycleAction::Stop(target) => {
+                match self.contents.get(target) {
+                    Some(PaneContent::Terminal(view)) => view.update(cx, |view, cx| view.destroy(cx)),
+                    Some(PaneContent::Chat(view)) => view.update(cx, |view, cx| view.stop(window, cx)),
+                    _ => {}
+                }
+                // Closing ssh would leave the machine's program running.
+                if let Some((machine, session)) = self.remote_session_of(target, cx) {
+                    self.end_remote_session(&machine, &session, Some(&now_stamp()));
+                }
+            }
             TerminalLifecycleAction::Restart(target) => {
                 let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else {
                     return;
                 };
+                self.restarting.insert(target.clone());
                 match self.contents.get(target).cloned() {
                     Some(PaneContent::Chat(view)) => {
                         let conversation =
@@ -486,7 +526,7 @@ impl ContentHost {
                         view.update(cx, |view, cx| view.restart(conversation.as_deref(), window, cx));
                     }
                     Some(PaneContent::Terminal(view)) => {
-                        let launch = self.launch_for(&tab, &target.pane_id);
+                        let launch = self.launch_for(&tab, target, cx);
                         if self.terminals.restart(&view, launch, cx) {
                             self.schedule_readiness(target, cx);
                         }
@@ -500,6 +540,7 @@ impl ContentHost {
                         self.ensure_content(&tab, &target.pane_id, None, window, cx);
                     }
                 }
+                self.restarting.remove(target);
             }
         }
     }
@@ -538,6 +579,7 @@ impl ContentHost {
         for target in orphans {
             self.remove_content(&target, cx);
         }
+        self.end_orphaned_remote_sessions(cx);
     }
 
     fn invalidate_all(&mut self, cx: &mut Context<Self>) {
@@ -545,6 +587,51 @@ impl ContentHost {
         for target in targets {
             self.remove_content(&target, cx);
         }
+        self.end_orphaned_remote_sessions(cx);
+    }
+
+    /// The machine and tmux session of a tab whose program runs on a machine.
+    fn remote_session_of(&self, target: &TerminalTarget, cx: &App) -> Option<(Machine, String)> {
+        let remote = self.workspace.read(cx).remote_of_tab(&target.pane_id, &target.tab_id)?;
+        Some((self.machine_named(&remote.machine, cx), remote_session_name(&remote.key, &target.tab_id)))
+    }
+
+    /// A `machines` entry; one removed from `settings.json` still connects by its name.
+    fn machine_named(&self, name: &str, cx: &App) -> Machine {
+        let machines = &self.shell.read(cx).machines;
+        machines.iter().find(|machine| machine.name == name).cloned().unwrap_or_else(|| Machine::new(name))
+    }
+
+    fn current_remote_sessions(&self, cx: &App) -> HashMap<String, Machine> {
+        self.workspace
+            .read(cx)
+            .panes()
+            .values()
+            .flat_map(|pane| pane.tabs.iter())
+            .filter_map(|tab| {
+                let remote = tab.remote.as_ref()?;
+                Some((remote_session_name(&remote.key, &tab.id), self.machine_named(&remote.machine, cx)))
+            })
+            .collect()
+    }
+
+    /// Ends the remote programs whose tab is gone (closed, or replaced by a loaded workspace).
+    /// Quitting the app ends none: a restore reattaches to them.
+    fn end_orphaned_remote_sessions(&mut self, cx: &mut Context<Self>) {
+        let current = self.current_remote_sessions(cx);
+        let previous = std::mem::replace(&mut self.remote_sessions, current);
+        for (session, machine) in previous {
+            if !self.remote_sessions.contains_key(&session) {
+                self.end_remote_session(&machine, &session, None);
+            }
+        }
+    }
+
+    /// Ends a tab's program on its machine, in the background (see `remote_kill_command`).
+    fn end_remote_session(&self, machine: &Machine, session: &str, generation: Option<&str>) {
+        let mut argv = ssh_arguments(machine, false);
+        argv.push(remote_kill_command(session, generation));
+        self.terminals.run_detached(argv);
     }
 
     fn remove_content(&mut self, target: &TerminalTarget, cx: &mut Context<Self>) {
@@ -576,12 +663,15 @@ impl ContentHost {
         if let Some(existing) = self.contents.get(&target) {
             return existing.clone();
         }
+        // A chat speaks ACP to an agent on this computer; on a machine its agent runs in a
+        // terminal there instead.
+        let remote = tab.remote.is_some();
         let content = match tab.pane_type {
             PaneType::Browser if tab.is_editor() || tab.is_diff() || tab.is_markdown() => {
                 self.make_file_view(tab, &target, window, cx)
             }
             PaneType::Browser => self.make_browser(tab, &target, window, cx),
-            PaneType::Agent if tab.is_chat() => match self.make_chat(tab, &target, window, cx) {
+            PaneType::Agent if tab.is_chat() && !remote => match self.make_chat(tab, &target, window, cx) {
                 Some(chat) => chat,
                 None => self.make_terminal(tab, &target, window, cx),
             },
@@ -815,7 +905,7 @@ impl ContentHost {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> PaneContent {
-        let launch = self.launch_for(tab, &target.pane_id);
+        let launch = self.launch_for(tab, target, cx);
         match self.terminals.create(launch, self.terminal_settings.clone(), window, cx) {
             Ok(view) => {
                 if let Some(coordinator) = self.clipboard.clone() {
@@ -839,9 +929,21 @@ impl ContentHost {
         }
     }
 
-    /// How `tab`'s process starts (Swift `terminalConfig(for:paneId:)`).
-    pub fn launch_for(&self, tab: &PaneTab, pane_id: &str) -> TerminalLaunch {
-        terminal_launch(&launch_spec(&self.launch_context, tab, pane_id))
+    /// How `tab`'s process starts (Swift `terminalConfig(for:paneId:)`): here, or on its
+    /// session's machine.
+    pub fn launch_for(&mut self, tab: &PaneTab, target: &TerminalTarget, cx: &App) -> TerminalLaunch {
+        let restarting = self.restarting.remove(target);
+        let Some((machine, session)) = self.remote_session_of(target, cx) else {
+            return terminal_launch(&launch_spec(&self.launch_context, tab, &target.pane_id));
+        };
+        let generation = restarting.then(now_stamp);
+        let remote = RemoteTarget {
+            machine: &machine,
+            directory: tab.cwd.as_deref(),
+            session: &session,
+            generation: generation.as_deref(),
+        };
+        terminal_launch(&remote_launch_spec(&self.launch_context, tab, &target.pane_id, remote))
     }
 
     fn schedule_readiness(&mut self, target: &TerminalTarget, cx: &mut Context<Self>) {
@@ -881,7 +983,20 @@ impl ContentHost {
                     body: body.clone(),
                 })
             }
-            TerminalEvent::Bell => {}
+            TerminalEvent::Bell => {
+                // Codex on a machine rings the bell for approvals (tmux drops its OSC 9): the
+                // same request a local Codex posts as a notification.
+                let ws = self.workspace.read(cx);
+                let remote_codex = ws.remote_of_tab(pane, tab).is_some()
+                    && ws.agent(pane, tab).is_some_and(|agent| agent.profile_id == "codex");
+                if remote_codex {
+                    cx.emit(ContentEvent::DesktopNotification {
+                        target: target.clone(),
+                        title: String::new(),
+                        body: String::new(),
+                    })
+                }
+            }
             TerminalEvent::CommandFinished { exit_code } => {
                 let exit_code = *exit_code;
                 self.workspace.update(cx, |ws| {
@@ -930,6 +1045,9 @@ impl ContentHost {
             TerminalEvent::FocusRequested => self.workspace.update(cx, |ws| ws.focus_tab(pane, tab, false)),
             TerminalEvent::Focused => cx.emit(ContentEvent::SurfaceFocused(target.clone())),
             TerminalEvent::Destroyed => cx.emit(ContentEvent::TerminalDestroyed(view.entity_id().as_u64())),
+            TerminalEvent::ProgramStatus(status) => {
+                cx.emit(ContentEvent::ProgramStatus { target: target.clone(), status: status.clone() })
+            }
             TerminalEvent::ClipboardWrite { .. } | TerminalEvent::ClipboardReadRequested(_) => {}
         }
     }
@@ -987,7 +1105,7 @@ impl ContentHost {
         match self.contents.get(target).cloned() {
             Some(PaneContent::Terminal(view)) if !view.read(cx).has_exited() => true,
             Some(PaneContent::Terminal(view)) => {
-                let launch = self.launch_for(&tab, &target.pane_id);
+                let launch = self.launch_for(&tab, target, cx);
                 let started = self.terminals.restart(&view, launch, cx);
                 if started {
                     self.schedule_readiness(target, cx);
@@ -1102,6 +1220,38 @@ pub fn launch_spec(ctx: &LaunchContext, tab: &PaneTab, pane_id: &str) -> LaunchS
     LaunchSpec::default_shell(ctx, cwd, pane_id, &tab.id)
 }
 
+/// The launch spec for a tab whose program runs on a remote machine: its command, agent or shell
+/// there. The local accounts layer has no say on another machine.
+pub fn remote_launch_spec(
+    ctx: &LaunchContext,
+    tab: &PaneTab,
+    pane_id: &str,
+    target: RemoteTarget<'_>,
+) -> LaunchSpec {
+    if tab.pane_type == PaneType::Terminal
+        && let Some(command) = &tab.startup_command
+    {
+        return LaunchSpec::remote(ctx, target, RemoteProgram::Command(command), pane_id, &tab.id);
+    }
+    if tab.pane_type == PaneType::Agent
+        && let Some(agent) = &tab.agent
+        && let Some(profile) = AgentCatalog::shared().profile(&agent.profile_id)
+    {
+        let mut request = AgentRequest::new(&profile, pane_id, &tab.id);
+        request.conversation = agent.conversation.as_ref();
+        request.launch = agent.launch.as_ref();
+        return LaunchSpec::remote(ctx, target, RemoteProgram::Agent(&request), pane_id, &tab.id);
+    }
+    LaunchSpec::remote(ctx, target, RemoteProgram::Shell, pane_id, &tab.id)
+}
+
+/// Now in nanoseconds since 1970: a restart's generation, compared with a stop's moment on
+/// the machine (`remote_kill_command`).
+fn now_stamp() -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    now.as_nanos().to_string()
+}
+
 pub fn terminal_launch(spec: &LaunchSpec) -> TerminalLaunch {
     TerminalLaunch {
         argv: spec.argv.clone(),
@@ -1172,6 +1322,7 @@ pub(crate) mod tests {
     #[derive(Default)]
     struct RecordingTerminals {
         created: RefCell<Vec<TerminalLaunch>>,
+        detached: RefCell<Vec<Vec<String>>>,
     }
 
     impl TerminalFactory for RecordingTerminals {
@@ -1188,6 +1339,10 @@ pub(crate) mod tests {
 
         fn restart(&self, _: &Entity<TerminalView>, _: TerminalLaunch, _: &mut App) -> bool {
             false
+        }
+
+        fn run_detached(&self, argv: Vec<String>) {
+            self.detached.borrow_mut().push(argv);
         }
     }
 
@@ -1288,6 +1443,69 @@ pub(crate) mod tests {
         cx.update(|_, cx| workspace.update(cx, |ws| ws.activate_previous_layout_tab()));
         cx.run_until_parked();
         assert_eq!(terminals.created.borrow().len(), started + 1);
+    }
+
+    #[gpui::test]
+    fn a_machines_panes_run_there_restart_fresh_and_end_there_when_closed(cx: &mut TestAppContext) {
+        let mut workspace = Workspace::new();
+        let first = workspace.active_pane_id().to_owned();
+        workspace.spawn_terminal_on("vps").expect("remote terminal");
+        let pane = workspace.spawn_agent("claude-code", None, false).expect("agent");
+        let (workspace, _host, terminals, cx) = host(workspace, cx);
+        let agent = active_target(&workspace, cx);
+        assert_eq!(agent.pane_id, pane);
+        let key = cx.update(|_, cx| {
+            workspace.read(cx).remote_of_tab(&agent.pane_id, &agent.tab_id).map(|remote| remote.key.clone())
+        });
+        let session = remote_session_name(&key.expect("remote"), &agent.tab_id);
+
+        // The first pane stays on this computer; the other two run on the machine.
+        let started = terminals.created.borrow().clone();
+        let remote = |launch: &TerminalLaunch| {
+            launch.argv.get(1..5).is_some_and(|argv| argv == ["remote-attach", "--machine", "vps", "--"])
+        };
+        assert_eq!(started.iter().filter(|launch| remote(launch)).count(), 2);
+        assert_eq!(cx.update(|_, cx| workspace.read(cx).machine_of_pane(&first).map(str::to_owned)), None);
+        let scripts: Vec<String> = started.iter().filter_map(|launch| launch.argv.last().cloned()).collect();
+        let script = scripts.iter().find(|script| script.contains(&session)).expect("the agent's launch");
+        assert!(!script.contains("--generation"), "{script}");
+
+        // A restart replaces whatever an earlier start left running there.
+        cx.update(|_, cx| workspace.update(cx, |ws| ws.restart_agent(&agent)));
+        cx.run_until_parked();
+        let restarted =
+            terminals.created.borrow().last().and_then(|l| l.argv.last().cloned()).unwrap_or_default();
+        assert!(restarted.contains("--generation"), "{restarted}");
+
+        // Closing the tab ends its program on the machine; nothing else is ended.
+        assert!(terminals.detached.borrow().is_empty());
+        cx.update(|_, cx| workspace.update(cx, |ws| ws.remove_tab_from_pane(&agent.pane_id, &agent.tab_id)));
+        cx.run_until_parked();
+        let detached = terminals.detached.borrow().clone();
+        assert_eq!(detached.len(), 1);
+        assert_eq!(detached[0][0], "ssh");
+        assert!(detached[0].iter().any(|arg| arg == "vps"));
+        let kill = detached[0].last().cloned().unwrap_or_default();
+        assert!(kill.contains("kill-session") && kill.contains(&session), "{kill}");
+    }
+
+    #[gpui::test]
+    fn a_terminal_moved_to_a_machine_starts_again_there(cx: &mut TestAppContext) {
+        let (workspace, _host, terminals, cx) = host(Workspace::new(), cx);
+        let target = active_target(&workspace, cx);
+        let local = terminals.created.borrow().last().map(|launch| launch.argv.clone()).expect("local start");
+        assert_ne!(local.get(1).map(String::as_str), Some("remote-attach"));
+
+        let moved = cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.move_tab_to_machine(&target.pane_id, &target.tab_id, "vps"))
+        });
+        assert!(moved);
+        cx.run_until_parked();
+
+        let argv = terminals.created.borrow().last().map(|launch| launch.argv.clone()).expect("restart");
+        assert_eq!(argv[1..5], ["remote-attach", "--machine", "vps", "--"]);
+        // Nothing ran on the machine before, so nothing is ended there.
+        assert!(terminals.detached.borrow().is_empty());
     }
 
     #[gpui::test]

@@ -84,6 +84,7 @@ impl<'a> Form<'a> {
             mono_title: false,
             description: None,
             description_color: None,
+            status: None,
             mono_description: false,
             reset: None,
             control: None,
@@ -134,6 +135,7 @@ pub(crate) struct Row {
     mono_title: bool,
     description: Option<SharedString>,
     description_color: Option<Hsla>,
+    status: Option<(SharedString, Hsla)>,
     mono_description: bool,
     reset: Option<(ElementId, ResetHandler)>,
     control: Option<AnyElement>,
@@ -149,6 +151,12 @@ impl Row {
 
     pub fn description_color(mut self, color: Hsla) -> Self {
         self.description_color = Some(color);
+        self
+    }
+
+    /// A second small line under the description (a machine's connection check).
+    pub fn status(mut self, text: impl Into<SharedString>, color: Hsla) -> Self {
+        self.status = Some((text.into(), color));
         self
     }
 
@@ -217,9 +225,14 @@ impl Row {
                 )
             },
         );
-        let left = div().flex().flex_col().flex_1().min_w_0().gap(t.z(4.)).child(title_row).when_some(
-            self.description,
-            |col, description| {
+        let left = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .gap(t.z(4.))
+            .child(title_row)
+            .when_some(self.description, |col, description| {
                 col.child(
                     div()
                         .max_w(t.z(672.))
@@ -228,8 +241,10 @@ impl Row {
                         .when(self.mono_description, |d| d.font_family(fonts::MONO_FONT_FAMILY))
                         .child(description),
                 )
-            },
-        );
+            })
+            .when_some(self.status, |col, (status, color)| {
+                col.child(div().max_w(t.z(672.)).text_size(t.z(size::META)).text_color(color).child(status))
+            });
         let row = div()
             .flex()
             .flex_row()

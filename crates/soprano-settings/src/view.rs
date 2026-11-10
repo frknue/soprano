@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, DismissEvent, ElementId, Entity, EventEmitter,
@@ -21,7 +22,9 @@ use gpui_component::input::{self as component_input, InputEvent, InputState};
 use soprano_accounts::AccountsSource;
 use soprano_accounts::models::AccountsSnapshot;
 use soprano_accounts::presentation::{Confirmation, PageAction};
-use soprano_config::{ConfigSnapshot, ConfigStore, KeyPlatform, Limits};
+use soprano_config::{ConfigSnapshot, ConfigStore, KeyPlatform, Limits, MachineEdit};
+use soprano_launch::MachineCheck;
+use soprano_types::Machine;
 use soprano_ui::button::{IconButton, IconButtonSize};
 use soprano_ui::dialog::{Dialog, DialogContent};
 use soprano_ui::fonts::{self, size};
@@ -59,6 +62,24 @@ pub enum SettingsEvent {
     OpenSettingsFile { error: Option<String> },
 }
 
+/// Logs in to a machine and reports what it found; blocks (runs `ssh`), so it runs on the
+/// background executor. [`soprano_launch::check_machine`] unless a test swaps it.
+pub type MachineChecker = Arc<dyn Fn(&Machine) -> MachineCheck + Send + Sync>;
+
+/// A Machines row's connection line.
+#[derive(Clone, Debug)]
+pub(crate) enum MachineStatus {
+    Checking,
+    Checked(MachineCheck),
+}
+
+/// The line under the Machines add field after an add.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MachineNotice {
+    pub text: String,
+    pub is_error: bool,
+}
+
 /// What is recording keys right now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Recording {
@@ -83,6 +104,10 @@ pub struct SettingsView {
     pub(crate) recording: Option<Recording>,
     pub(crate) shortcut_query: Entity<InputState>,
     pub(crate) project_input: Entity<InputState>,
+    pub(crate) machine_input: Entity<InputState>,
+    machine_checker: MachineChecker,
+    pub(crate) machine_status: HashMap<String, MachineStatus>,
+    pub(crate) machine_notice: Option<MachineNotice>,
     pub(crate) timeout_input: Entity<InputState>,
     pub(crate) resize_input: Entity<InputState>,
     pub(crate) agent_inputs: HashMap<(String, AgentField), Entity<InputState>>,
@@ -126,6 +151,7 @@ impl SettingsView {
             };
         let shortcut_query = new_input(crate::shortcuts::SEARCH_PLACEHOLDER, String::new(), window, cx);
         let project_input = new_input("Folder path", String::new(), window, cx);
+        let machine_input = new_input(general::MACHINE_PLACEHOLDER, String::new(), window, cx);
         let timeout_input = new_input("", keybindings.prefix_timeout_ms.to_string(), window, cx);
         let resize_input = new_input("", (keybindings.resize_tick_percent as i64).to_string(), window, cx);
         let new_agent_inputs = [
@@ -134,31 +160,42 @@ impl SettingsView {
             new_input("Command", String::new(), window, cx),
         ];
 
-        let mut subscriptions = vec![
-            cx.subscribe_in(&shortcut_query, window, |_, _, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    cx.notify();
-                }
-            }),
-            // The folder field adds on Enter only; leaving it keeps what is typed.
-            cx.subscribe_in(&project_input, window, |this, input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. }) {
-                    let text = input.read(cx).value().to_string();
-                    this.add_project_directory(&text, window, cx);
-                }
-            }),
-            // The number fields commit when editing ends, by Enter or by leaving them.
-            cx.subscribe_in(&timeout_input, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                    this.commit_prefix_timeout(window, cx);
-                }
-            }),
-            cx.subscribe_in(&resize_input, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
-                    this.commit_resize_step(window, cx);
-                }
-            }),
-        ];
+        let mut subscriptions =
+            vec![
+                cx.subscribe_in(&shortcut_query, window, |_, _, event: &InputEvent, _, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        cx.notify();
+                    }
+                }),
+                // The folder field adds on Enter only; leaving it keeps what is typed.
+                cx.subscribe_in(&project_input, window, |this, input, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. }) {
+                        let text = input.read(cx).value().to_string();
+                        this.add_project_directory(&text, window, cx);
+                    }
+                }),
+                cx.subscribe_in(&machine_input, window, |this, input, event: &InputEvent, window, cx| {
+                    match event {
+                        InputEvent::PressEnter { .. } => {
+                            let text = input.read(cx).value().to_string();
+                            this.add_machine(&text, window, cx);
+                        }
+                        InputEvent::Change if this.machine_notice.take().is_some() => cx.notify(),
+                        _ => {}
+                    }
+                }),
+                // The number fields commit when editing ends, by Enter or by leaving them.
+                cx.subscribe_in(&timeout_input, window, |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        this.commit_prefix_timeout(window, cx);
+                    }
+                }),
+                cx.subscribe_in(&resize_input, window, |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        this.commit_resize_step(window, cx);
+                    }
+                }),
+            ];
         for input in new_agent_inputs.clone() {
             subscriptions.push(cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 match event {
@@ -248,6 +285,10 @@ impl SettingsView {
             recording: None,
             shortcut_query,
             project_input,
+            machine_input,
+            machine_checker: Arc::new(soprano_launch::check_machine),
+            machine_status: HashMap::new(),
+            machine_notice: None,
             timeout_input,
             resize_input,
             agent_inputs: HashMap::new(),
@@ -278,6 +319,9 @@ impl SettingsView {
         if changed {
             self.scroll.set_offset(point(px(0.), px(0.)));
             self.focus_handle.focus(window, cx);
+        }
+        if changed && tab == SettingsTab::Machines {
+            self.check_all_machines(cx);
         }
         if tab == SettingsTab::Accounts {
             soprano_accounts::presentation::AccountsPage::on_open(&*self.accounts);
@@ -425,6 +469,82 @@ impl SettingsView {
     ) {
         general::remove_project_directory(&self.store, index);
         self.reload(window, cx);
+    }
+
+    /// Replaces how machines are checked (tests pass one that never runs `ssh`).
+    pub fn set_machine_checker(&mut self, checker: MachineChecker) {
+        self.machine_checker = checker;
+    }
+
+    /// Adds the machine `raw` names (an ssh destination) and checks it; the field clears once
+    /// it is listed, and a refusal says why under the field.
+    pub(crate) fn add_machine(&mut self, raw: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(machine) = soprano_config::machine_for_destination(raw) else { return };
+        let error = |text: String| Some(MachineNotice { text, is_error: true });
+        self.machine_notice = match soprano_config::add_machine(&self.store, &machine) {
+            MachineEdit::Done => None,
+            MachineEdit::Exists => {
+                Some(MachineNotice { text: format!("{} is listed already.", machine.name), is_error: false })
+            }
+            MachineEdit::InvalidName => error(format!(
+                "\"{}\" cannot name a machine: it needs no spaces and no leading dash.",
+                machine.name
+            )),
+            MachineEdit::NotFound | MachineEdit::WriteFailed => {
+                error("settings.json could not be written, so the machine was not added.".into())
+            }
+        };
+        let listed = self.machine_notice.as_ref().is_none_or(|notice| !notice.is_error);
+        if listed {
+            self.machine_input.update(cx, |state, cx| state.set_value("", window, cx));
+        }
+        self.reload(window, cx);
+        if listed {
+            self.check_machine(&machine.name, cx);
+        }
+    }
+
+    pub(crate) fn remove_machine(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        soprano_config::remove_machine(&self.store, name);
+        self.machine_status.remove(name);
+        self.reload(window, cx);
+    }
+
+    fn check_all_machines(&mut self, cx: &mut Context<Self>) {
+        let names: Vec<String> = self.snapshot.resolved.machines.iter().map(|m| m.name.clone()).collect();
+        for name in names {
+            self.check_machine(&name, cx);
+        }
+    }
+
+    /// Logs in to the machine named `name` in the background; its row says "Checking…" until
+    /// the result is in. A check already running is left to finish.
+    pub(crate) fn check_machine(&mut self, name: &str, cx: &mut Context<Self>) {
+        if matches!(self.machine_status.get(name), Some(MachineStatus::Checking)) {
+            return;
+        }
+        let Some(machine) = self.snapshot.resolved.machines.iter().find(|m| m.name == name).cloned() else {
+            return;
+        };
+        self.machine_status.insert(machine.name.clone(), MachineStatus::Checking);
+        cx.notify();
+        let checker = self.machine_checker.clone();
+        let check = cx.background_spawn({
+            let machine = machine.clone();
+            async move { checker(&machine) }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = check.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.snapshot.resolved.machines.contains(&machine) {
+                    this.machine_status.insert(machine.name, MachineStatus::Checked(result));
+                    cx.notify();
+                } else {
+                    this.machine_status.remove(&machine.name);
+                }
+            });
+        })
+        .detach();
     }
 
     /// Reads a number field, clamps it into `range` and shows the result; returns the value to
@@ -772,6 +892,7 @@ impl SettingsView {
     ) -> Vec<AnyElement> {
         match self.tab {
             SettingsTab::General => self.general_page(t, window, cx),
+            SettingsTab::Machines => self.machines_page(t, cx),
             SettingsTab::KeyboardShortcuts => self.shortcuts_page(t, window, cx),
             SettingsTab::AgentProfiles => self.agents_page(t, window, cx),
             SettingsTab::Accounts => self.accounts_page(t, cx),

@@ -4,9 +4,9 @@ use std::path::Path;
 
 use soprano_types::AgentCatalog;
 
-use super::{TabSpec, Workspace, WorkspaceChange};
+use super::{Place, TabSpec, TerminalLifecycleAction, Workspace, WorkspaceChange, WorkspaceEvent};
 use crate::agent_instance::AgentInstance;
-use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType};
+use crate::pane::{PaneContentKind, PaneState, PaneTab, PaneType, Remote};
 use crate::split_node::{SplitBranchSide, SplitNode};
 use soprano_types::TerminalTarget;
 use soprano_types::{NavigationDirection, SplitDirection};
@@ -15,15 +15,21 @@ impl Workspace {
     // MARK: - Pane spawning
 
     /// Opens a pane beside the active one with `profile_id`'s agent, as a chat when `chat` is
-    /// set and the agent supports one. An unknown profile or `terminal` opens a shell. `None`
-    /// when the visible tab is full; no id is used up then.
+    /// set and the agent supports one. An unknown profile or `terminal` opens a shell. It
+    /// starts in `cwd` here, else where the active tab is (its folder, and its machine).
+    /// `None` when the visible tab is full; no id is used up then.
     pub fn spawn_agent(&mut self, profile_id: &str, cwd: Option<&str>, chat: bool) -> Option<String> {
+        let place = self.place(cwd);
+        self.spawn_agent_at(profile_id, place, chat)
+    }
+
+    fn spawn_agent_at(&mut self, profile_id: &str, place: Place, chat: bool) -> Option<String> {
         if !self.can_add_pane(&self.active_window_id) {
             return None;
         }
-        let cwd = cwd.map(str::to_owned).or_else(|| self.active_working_directory());
         let pane_id = self.next_pane_id();
         let tab_id = self.next_tab_id();
+        let remote = place.machine.map(Remote::on);
         let tab = match AgentCatalog::shared().profile(profile_id).filter(|profile| profile.id != "terminal")
         {
             Some(profile) => Self::create_pane_tab(
@@ -31,12 +37,13 @@ impl Workspace {
                 TabSpec {
                     pane_type: PaneType::Agent,
                     profile_id: Some(profile.id),
-                    cwd,
+                    cwd: place.cwd,
                     content_kind: chat.then(|| PaneContentKind::CHAT.to_owned()),
+                    remote,
                     ..TabSpec::default()
                 },
             ),
-            None => Self::create_pane_tab(tab_id, TabSpec { cwd, ..TabSpec::default() }),
+            None => Self::create_pane_tab(tab_id, TabSpec { cwd: place.cwd, remote, ..TabSpec::default() }),
         };
         self.insert_pane(PaneState::new(&pane_id, vec![tab])).then_some(pane_id)
     }
@@ -45,14 +52,40 @@ impl Workspace {
         self.spawn_agent("terminal", cwd, false)
     }
 
-    /// Opens a terminal running `<launcher> web` (omp's web UI) beside the active pane.
+    /// Opens a terminal on `machine` (a `machines` name) beside the active pane, in the
+    /// machine's own starting folder.
+    pub fn spawn_terminal_on(&mut self, machine: &str) -> Option<String> {
+        self.spawn_agent_at("terminal", Place { cwd: None, machine: Some(machine.to_owned()) }, false)
+    }
+
+    /// Turns a terminal tab into a fresh shell on `machine` (`soprano <machine>` typed in it):
+    /// its program ends, and the host starts the remote one. False for other tabs.
+    pub fn move_tab_to_machine(&mut self, pane_id: &str, tab_id: &str, machine: &str) -> bool {
+        let Some(tab) = self.tab_mut(pane_id, tab_id) else { return false };
+        if tab.pane_type != PaneType::Terminal {
+            return false;
+        }
+        tab.remote = Some(Remote::on(machine));
+        tab.cwd = None;
+        tab.agent = None;
+        tab.startup_command = None;
+        tab.title = "Terminal".into();
+        self.events.push(WorkspaceEvent::Terminal(TerminalLifecycleAction::Restart(TerminalTarget::new(
+            pane_id, tab_id,
+        ))));
+        self.notify_model(false);
+        true
+    }
+
+    /// Opens a terminal running `<launcher> web` (omp's web UI) beside the active pane, on
+    /// this computer.
     pub fn spawn_omp_web(&mut self, launcher: &Path) -> Option<String> {
         if !self.can_add_pane(&self.active_window_id) {
             return None;
         }
         let pane_id = self.next_pane_id();
         let mut tab = PaneTab::new(self.next_tab_id(), PaneType::Terminal, "omp web");
-        tab.cwd = self.active_working_directory();
+        tab.cwd = self.local_place(None).cwd;
         tab.startup_command = Some(vec![launcher.to_string_lossy().into_owned(), "web".into()]);
         self.insert_pane(PaneState::new(&pane_id, vec![tab])).then_some(pane_id)
     }
@@ -103,6 +136,9 @@ impl Workspace {
                 new_tab.content_kind = source.content_kind.clone();
             }
             _ => new_tab.pane_type = PaneType::Terminal,
+        }
+        if new_tab.pane_type != PaneType::Browser {
+            new_tab.remote = source.remote.as_ref().map(|remote| Remote::on(&remote.machine));
         }
         self.panes.insert(new_pane_id.clone(), PaneState::new(&new_pane_id, vec![new_tab]));
 
@@ -291,7 +327,12 @@ impl Workspace {
         if pane.tabs.len() >= PaneState::MAX_TABS_PER_PANE {
             return None;
         }
-        let cwd = pane.active_tab().and_then(|tab| tab.cwd.clone());
+        let source = pane.active_tab();
+        let cwd = source.and_then(|tab| tab.cwd.clone());
+        let remote = source
+            .and_then(|tab| tab.remote.as_ref())
+            .filter(|_| pane_type != PaneType::Browser)
+            .map(|remote| Remote::on(&remote.machine));
         let tab_id = self.next_tab_id();
         let tab = Self::create_pane_tab(
             tab_id.clone(),
@@ -300,6 +341,7 @@ impl Workspace {
                 profile_id: profile_id.map(str::to_owned),
                 cwd,
                 content_kind: content_kind.map(str::to_owned),
+                remote,
                 ..TabSpec::default()
             },
         );

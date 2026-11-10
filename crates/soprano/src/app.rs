@@ -110,7 +110,12 @@ pub fn run() {
             branches,
             sessions: cx.new(|_| SessionManager::new(state.clone())),
         };
-        let shell = cx.new(|_| Shell::new(state.clone(), settings.clone(), keybindings.clone()));
+        let machines = config.resolved().machines;
+        let shell = cx.new(|_| {
+            let mut shell = Shell::new(state.clone(), settings.clone(), keybindings.clone());
+            shell.machines = machines;
+            shell
+        });
 
         sizing::import_appkit_frame(&state, window_chrome::primary_display_height(cx));
         let frame = sizing::load_frame(&state, &window_chrome::visible_frames(cx))

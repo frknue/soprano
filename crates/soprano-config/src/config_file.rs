@@ -250,6 +250,21 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
   //   }}
   "agents": [],
 
+  // Other computers reached over SSH (a server, a VM, a cloud sandbox).
+  // A terminal on one (`soprano <name>` in a terminal, Ctrl+A then
+  // Shift+M, or the command palette) runs there inside a private tmux
+  // session, so its agents keep working while this computer sleeps; the
+  // machine needs sshd, and tmux for that. `soprano machine add` writes
+  // entries too.
+  //
+  //   {{
+  //     "name": "vps",                   // what the sidebar shows
+  //     "destination": "me@vps.example", // for ssh; the name when left out
+  //     "sshArgs": ["-p", "2222"],       // extra ssh options
+  //     "directory": "~/code"            // where new sessions start; home when left out
+  //   }}
+  "machines": [],
+
   // Prompts an agent runs on a schedule while Soprano is open; the
   // sidebar's Automations page creates and edits them too. Each run
   // opens its agent in the "Automations" session without switching to

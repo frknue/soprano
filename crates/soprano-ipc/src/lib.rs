@@ -15,6 +15,7 @@ pub mod cli;
 #[cfg(feature = "visual-snapshot")]
 pub mod debug;
 pub mod launch;
+pub mod machines;
 pub mod markdown;
 pub mod navigation;
 pub mod protocol;

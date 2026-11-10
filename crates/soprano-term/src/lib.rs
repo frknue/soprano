@@ -14,6 +14,7 @@ pub mod keys;
 pub mod links;
 pub mod os;
 pub mod osc;
+pub mod program_status;
 pub mod settings;
 mod sprites;
 pub mod theme;

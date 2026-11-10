@@ -48,16 +48,20 @@ impl DashboardEntry {
         self.entry.title()
     }
 
-    /// `omp · folder · ⎇ branch`, the line under the title.
+    /// `[machine ·] omp · folder · ⎇ branch`, the line under the title.
     pub fn context(&self, home: &Path) -> ContextLine {
-        ContextLine::for_title(
+        let mut line = ContextLine::for_title(
             &self.title(),
             Some(&self.entry.profile_name),
             self.entry.cwd.as_deref(),
             self.entry.branch.clone(),
             0,
             &home.to_string_lossy(),
-        )
+        );
+        if let Some(machine) = &self.entry.machine {
+            line.context.insert(0, machine.clone());
+        }
+        line
     }
 
     /// The status pill; an idle agent reads Ready.
@@ -65,9 +69,14 @@ impl DashboardEntry {
         StatusPillSpec::of(self.entry.status, self.waiting_reason, None).unwrap_or(StatusPillSpec::READY)
     }
 
-    /// The working directory with the home folder as `~`.
+    /// The working directory with the home folder as `~`; on a machine, `machine:folder` as
+    /// written there.
     pub fn abbreviated_path(&self, home: &Path) -> Option<String> {
-        self.entry.cwd.as_deref().map(|cwd| soprano_platform::paths::abbreviate_home_in(Path::new(cwd), home))
+        match (&self.entry.machine, self.entry.cwd.as_deref()) {
+            (Some(machine), Some(cwd)) => Some(format!("{machine}:{cwd}")),
+            (Some(machine), None) => Some(machine.clone()),
+            (None, cwd) => cwd.map(|cwd| soprano_platform::paths::abbreviate_home_in(Path::new(cwd), home)),
+        }
     }
 
     /// The row's tooltip: title, agent and session, location, path and the open hint.
@@ -375,6 +384,7 @@ mod tests {
                 conversation: None,
                 is_chat: false,
                 branch: None,
+                machine: None,
             },
             waiting_reason: None,
         }
@@ -403,6 +413,26 @@ mod tests {
                 ContextPart::Branch("feat/refunds".into())
             ]
         );
+    }
+
+    #[test]
+    fn an_agent_on_a_machine_names_it_ahead_of_its_folder_there() {
+        let home = Path::new("/Users/me");
+        let mut agent = entry("a", AgentStatus::Running);
+        agent.entry.tab_title = "⠙ Fix the checkout total".into();
+        agent.entry.machine = Some("vps".into());
+        agent.entry.cwd = Some("/home/me/shop".into());
+        assert_eq!(
+            agent.context(home).parts(),
+            [
+                ContextPart::Text("vps".into()),
+                ContextPart::Text("Codex".into()),
+                ContextPart::Text("shop".into())
+            ]
+        );
+        assert_eq!(agent.abbreviated_path(home).as_deref(), Some("vps:/home/me/shop"));
+        agent.entry.cwd = None;
+        assert_eq!(agent.abbreviated_path(home).as_deref(), Some("vps"));
     }
 
     #[test]
