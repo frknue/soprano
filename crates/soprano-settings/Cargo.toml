@@ -21,10 +21,13 @@ async-channel = "2"
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 gpui_platform.workspace = true
+# The demo's `--snapshot` mode.
+soprano-ui = { path = "../soprano-ui", features = ["snapshot"] }
+anyhow.workspace = true
 tempfile = "3"
 
-# The demo's `--snapshot` renders its window into PNGs; the renderer's support for that is
-# switched on where it is known to build.
+# `--snapshot` renders the demo's window into PNGs; the renderer's support for that is switched
+# on where it is known to build.
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui_platform = { workspace = true, features = ["test-support"] }
 

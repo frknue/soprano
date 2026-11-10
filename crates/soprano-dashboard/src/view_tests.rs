@@ -447,19 +447,16 @@ fn a_narrow_window_gives_the_list_its_share(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn an_empty_dashboard_says_so_and_disables_the_agent_actions(cx: &mut TestAppContext) {
+fn an_empty_dashboard_says_so_and_offers_no_agent_actions(cx: &mut TestAppContext) {
     let (harness, cx) = open(cx, Workspace::new(), DashboardHost::new(), 900., 600.);
     harness.dashboard.read_with(cx, |dashboard, _| {
         assert!(dashboard.list().is_empty());
         assert_eq!(dashboard.subtitle(), "Monitoring 0 agents across 1 window");
-        assert_eq!(
-            dashboard.terminal_text(),
-            TerminalText::Message("Select an agent to see its current terminal.")
-        );
-        assert_eq!(dashboard.reply_hint(), "");
     });
-    cx.simulate_keystrokes("j enter t o g ]");
-    click(cx, "agent-dashboard-stop");
+    cx.simulate_keystrokes("j enter t o g ] tab");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-dashboard-stop").is_none());
+    assert!(!reply_focused(cx, &harness));
     assert!(harness.events.borrow().is_empty());
 }
 

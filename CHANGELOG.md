@@ -228,8 +228,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the current one. It writes `keybindings.prefixKey`.
 - `soprano <file.md>` and `soprano markdown <file>` now open a reusable reader tab
   in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
-- Agent Dashboard entries lead with the project or custom window name, with the
-  agent, status, and directory on separate lines for easier scanning.
+- The Agent Dashboard is laid out like the window: the agents are listed on the canvas,
+  each with its agent's icon, what it works on, a status pill and how long it has run over
+  `agent · folder · branch — activity`, and the selected agent is a card like its pane,
+  with its title and where it runs over the **Timeline** / **Terminal** switch and
+  **Open**, **Stop** and **Restart**, then its conversation or live terminal and the reply
+  field. A narrow window wraps that toolbar instead of clipping it, and a dashboard without
+  agents says so in one place.
 - Redesigned the Settings screen (`⌘,`), laid out like the window itself: navigation on the
   left, and each page as its title (with `esc` and close) above a scrolling column of
   cards. **General** shows the themes as tiles in their own colors, reports

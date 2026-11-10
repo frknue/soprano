@@ -29,6 +29,11 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   `background`-Karten; Theme-Kacheln statt Menü, Shortcuts einzeilig mit Zähler pro Gruppe,
   Agent-Profile aufklappbar, About mit App-Kopf. Sichtprüfung über
   `settings_demo -- --snapshot <ordner>` (hell, dunkel, 820×560, Dracula), installiert.
+- 2026-11-10: Agent Dashboard im selben Stil: Liste auf `canvas` (Agent-Icon, Titel, Status-Pill,
+  Laufzeit), der gewählte Agent als Pane-Karte, Toolbar bricht bei schmalem Fenster um, leeres
+  Dashboard als eine Karte. Sichtprüfung über `dashboard_demo -- --snapshot <ordner>` (hell,
+  dunkel, 820×400, Dracula, ohne Agenten). Die Snapshot-Hilfen liegen jetzt in
+  `soprano_ui::snapshot` (Feature `snapshot`, nur Dev-Dependencies).
 
 ## Offen
 
@@ -49,6 +54,7 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
-- Settings-Redesign: in der laufenden App noch nicht angesehen (nur Snapshots der Demo). Textfelder
-  rücken app-weit etwa 20 px ein (`TextInput` plus Padding von gpui-component); nicht angefasst,
-  weil es Dialoge, Picker, Browser-Adresszeile und Editor-Suche mitverschiebt.
+- Settings-Redesign und Dashboard: in der laufenden App noch nicht angesehen (nur Snapshots der
+  Demos). Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von
+  gpui-component); nicht angefasst, weil es Dialoge, Picker, Browser-Adresszeile und Editor-Suche
+  mitverschiebt.

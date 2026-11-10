@@ -20,6 +20,8 @@ pub mod menu;
 pub mod motion;
 pub mod picker;
 pub mod select;
+#[cfg(feature = "snapshot")]
+pub mod snapshot;
 pub mod status;
 pub mod theme;
 pub mod toast;

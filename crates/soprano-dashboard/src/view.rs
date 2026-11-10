@@ -1,7 +1,8 @@
 //! The Agent Dashboard view (`AgentDashboardViewController.swift`), laid out like a mail
-//! client in Herdr's look: the page header, the agents under Needs you / Working / Ready /
-//! Stopped on the left, and the selected agent's detail — title and location over a toolbar,
-//! its conversation (or live terminal), and a reply composer — on the right.
+//! client on the window's own surfaces: on `canvas`, the page header over the agents under
+//! Needs you / Working / Ready / Stopped; beside them, as a pane-like `background` card, the
+//! selected agent — its title and where it runs over a toolbar, its conversation (or live
+//! terminal), and a reply composer.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -22,19 +23,20 @@ use soprano_agents::{
 };
 use soprano_chat_ui::{ActivityLine, TimelineSource, TimelineView, TranscriptSource};
 use soprano_editor::rich::RichText;
+use soprano_model::AgentDashboardEntry;
 use soprano_model::Workspace;
 use soprano_text::context_line::{ContextLine, ContextPart};
 use soprano_types::AgentStatus;
 use soprano_types::TerminalTarget;
-use soprano_ui::button::{Button, ButtonSize};
-use soprano_ui::chrome::{ScrollList, SectionHeader, SidebarRow};
+use soprano_ui::button::{Button, ButtonSize, IconButton};
+use soprano_ui::chrome::{Card, ScrollList, SectionHeader, SidebarRow};
 use soprano_ui::controls::SegmentedControl;
 use soprano_ui::fonts::{self, size};
-use soprano_ui::identity::Monogram;
 use soprano_ui::keycaps::Keycaps;
+use soprano_ui::status::StatusPill;
 use soprano_ui::theme::ActiveSopranoTheme;
 use soprano_ui::tooltip::tooltip;
-use soprano_ui::{IconName, SopranoTheme, icon};
+use soprano_ui::{Icon, IconName, SopranoTheme, agent_icon_stem, icon};
 
 use crate::keys::{KeyAction, ScrollAmount, key_action};
 use crate::state::{
@@ -46,16 +48,24 @@ use crate::text::{OutputPalette, output_highlights};
 const LIST_WIDTH: f32 = 380.0;
 const LIST_MAXIMUM_FRACTION: f32 = 0.4;
 /// The list footer with its key hints.
-const FOOTER_HEIGHT: f32 = 44.0;
-/// The page header (`Metrics.topbarHeight`).
-const HEADER_HEIGHT: f32 = 52.0;
+const FOOTER_HEIGHT: f32 = 40.0;
+/// The page header.
+const HEADER_HEIGHT: f32 = 48.0;
 /// One agent row.
 const ROW_HEIGHT: f32 = 52.0;
-/// The detail's side margins.
-const GUTTER: f32 = 24.0;
+/// A row's icon and the gap after it: what its second line is indented by.
+const ROW_ICON: f32 = 16.0;
+const ROW_ICON_GAP: f32 = 9.0;
+/// Between the detail card and the page's edges, as between panes in the window.
+const CARD_GAP: f32 = 8.0;
+/// The detail card's side margins.
+const GUTTER: f32 = 20.0;
+/// The detail title's icon and the gap after it: what the line under it is indented by.
+const TITLE_ICON: f32 = 18.0;
+const TITLE_ICON_GAP: f32 = 10.0;
 /// The composer keeps to the timeline's chat lane (`Metrics.chatMaxWidth`).
 const READABLE_WIDTH: f32 = 736.0;
-const REPLY_FIELD_HEIGHT: f32 = 48.0;
+const REPLY_FIELD_HEIGHT: f32 = 44.0;
 /// One J/K line of scrolling.
 const LINE_SCROLL: f32 = 48.0;
 /// Between the window and the agent on the detail's location line.
@@ -75,7 +85,7 @@ pub enum DashboardEvent {
     /// to the chat session for a chat tab. When it cannot be delivered, call
     /// [`AgentDashboard::reply_failed`].
     Reply { target: TerminalTarget, text: String },
-    /// Esc or Done: close the dashboard without changing the active agent.
+    /// Esc or the close button: close the dashboard without changing the active agent.
     Close,
 }
 
@@ -408,7 +418,7 @@ impl AgentDashboard {
             .selected_timeline()
             .map(|timeline| ChatThread::from_transcript(timeline, running))
             .unwrap_or_default();
-        self.transcript_source.set(thread, state::timeline_empty_text(self.selected().is_some()));
+        self.transcript_source.set(thread, state::TIMELINE_EMPTY);
         self.timeline.update(cx, |timeline, cx| timeline.reload(scroll_to_end, cx));
     }
 
@@ -615,9 +625,9 @@ impl AgentDashboard {
         &self.timeline
     }
 
-    /// The text the terminal card shows.
+    /// What the selected agent's terminal shows.
     pub fn terminal_text(&self) -> TerminalText {
-        TerminalText::new(self.selected().is_some(), self.terminal.as_deref())
+        TerminalText::new(self.terminal.as_deref())
     }
 
     /// The reply field's state (its draft).
@@ -655,6 +665,26 @@ impl Render for AgentDashboard {
             self.terminal_scroll.scroll_to_bottom();
         }
         let theme = cx.soprano_theme().clone();
+        // The selection falls to the first agent, so only an empty dashboard has none.
+        let body = match self.selected() {
+            Some(entry) => div()
+                .flex()
+                .flex_row()
+                .flex_1()
+                .min_h_0()
+                .child(self.render_list(&theme, window, cx))
+                .child(self.render_detail(entry, &theme, window, cx)),
+            None => {
+                div().flex().flex_col().flex_1().min_h_0().px(theme.z(CARD_GAP)).pb(theme.z(CARD_GAP)).child(
+                    Card::new().flex_1().min_h_0().child(empty_state(
+                        IconName::Bot,
+                        "No agents to monitor",
+                        Some("Launch an agent from the sidebar or command palette."),
+                        &theme,
+                    )),
+                )
+            }
+        };
         div()
             .id("agent-dashboard")
             .key_context("AgentDashboard")
@@ -662,24 +692,17 @@ impl Render for AgentDashboard {
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme.background)
+            .bg(theme.canvas)
             .text_color(theme.foreground)
             .font_family(fonts::UI_FONT_FAMILY)
             .text_size(theme.z(size::UI))
             .child(self.render_header(&theme, cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.render_list(&theme, window, cx))
-                    .child(self.render_detail(&theme, window, cx)),
-            )
+            .child(body)
     }
 }
 
 impl AgentDashboard {
+    /// The page's title and what it monitors, with Esc / close at the corner.
     fn render_header(&self, theme: &SopranoTheme, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
@@ -688,14 +711,12 @@ impl AgentDashboard {
             .items_center()
             .gap(theme.z(10.))
             .h(theme.z(HEADER_HEIGHT))
-            .pl(theme.z(20.))
+            .pl(theme.z(16.))
             .pr(theme.z(12.))
-            .border_b_1()
-            .border_color(theme.border)
             .child(
                 div()
                     .flex_none()
-                    .text_size(theme.z(size::UI))
+                    .text_size(theme.z(size::DIALOG_TITLE))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child("Agent Dashboard"),
             )
@@ -708,11 +729,9 @@ impl AgentDashboard {
                     .text_color(theme.muted)
                     .child(self.subtitle()),
             )
+            .child(Keycaps::new(["esc"]).small())
             .child(
-                Button::new("agent-dashboard-done", "Done")
-                    .ghost()
-                    .size(ButtonSize::Sm)
-                    .keycap("esc")
+                IconButton::new("agent-dashboard-done", IconName::X)
                     .tooltip("Return to the workspace (Esc)")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(DashboardEvent::Close))),
             )
@@ -731,6 +750,7 @@ impl AgentDashboard {
                 SectionHeader::new(("agent-dashboard-section", index), section.title())
                     .count(entries.len())
                     .medium()
+                    .pl(theme.z(8.))
                     .into_any_element(),
             );
             for entry in entries {
@@ -738,17 +758,11 @@ impl AgentDashboard {
                 children.push(self.render_row(entry, selected, list_focused, theme, cx).into_any_element());
             }
         }
-        let body = if children.is_empty() {
-            self.render_empty_list(theme).into_any_element()
-        } else {
-            ScrollList::new("agent-dashboard-list-rows", &self.list_scroll)
-                .px(theme.z(8.))
-                .pt(theme.z(4.))
-                .pb(theme.z(8.))
-                .gap(theme.z(2.))
-                .children(children)
-                .into_any_element()
-        };
+        let rows = ScrollList::new("agent-dashboard-list-rows", &self.list_scroll)
+            .px(theme.z(8.))
+            .pb(theme.z(8.))
+            .gap(theme.z(2.))
+            .children(children);
         div()
             .id("agent-dashboard-list")
             .debug_selector(|| "agent-dashboard-list".into())
@@ -758,37 +772,8 @@ impl AgentDashboard {
             .h_full()
             .w(theme.z(LIST_WIDTH))
             .max_w(relative(LIST_MAXIMUM_FRACTION))
-            .bg(theme.chrome)
-            .border_r_1()
-            .border_color(theme.border)
-            .child(div().flex().flex_col().flex_1().min_h_0().child(body))
+            .child(div().flex().flex_col().flex_1().min_h_0().child(rows))
             .child(self.render_key_hints(theme))
-    }
-
-    fn render_empty_list(&self, theme: &SopranoTheme) -> impl IntoElement {
-        div()
-            .id("agent-dashboard-empty")
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(theme.z(6.))
-            .h(theme.z(150.))
-            .px(theme.z(16.))
-            .text_center()
-            .child(
-                div()
-                    .text_size(theme.z(size::UI))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme.muted)
-                    .child("No agents to monitor"),
-            )
-            .child(
-                div()
-                    .text_size(theme.z(size::SMALL))
-                    .text_color(theme.muted.opacity(0.7))
-                    .child("Launch an agent from the sidebar or command palette."),
-            )
     }
 
     fn render_key_hints(&self, theme: &SopranoTheme) -> impl IntoElement {
@@ -800,7 +785,7 @@ impl AgentDashboard {
                 .items_center()
                 .gap(theme.z(5.))
                 .child(Keycaps::new(caps.iter().copied()).small())
-                .child(div().text_size(theme.z(size::SMALL)).text_color(theme.muted).child(label))
+                .child(div().text_size(theme.z(size::SMALL)).text_color(theme.dim).child(label))
         };
         div()
             .id("agent-dashboard-key-hints")
@@ -812,14 +797,14 @@ impl AgentDashboard {
             .h(theme.z(FOOTER_HEIGHT))
             .px(theme.z(16.))
             .overflow_hidden()
-            .border_t_1()
-            .border_color(theme.border)
             .child(hint(&["J", "K"], "Select"))
             .child(hint(&["↵"], "Open"))
             .child(hint(&["Tab"], "Reply"))
             .child(hint(&["T"], "Terminal"))
     }
 
+    /// An agent on two lines: its program icon, what it works on and its status pill; under
+    /// the title, who and where it is with what it does now, and how long it has run.
     fn render_row(
         &self,
         entry: &DashboardEntry,
@@ -829,15 +814,10 @@ impl AgentDashboard {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let id = entry.id();
-        let pill = entry.pill();
-        let tone = theme.tone(pill.tone);
         let home = &self.host.home;
-        let monogram = entry
-            .entry
-            .cwd
-            .as_deref()
-            .map(|cwd| soprano_text::context_line::folder_name(cwd, &home.to_string_lossy()))
-            .unwrap_or_else(|| entry.entry.profile_name.clone());
+        // An agent with nothing going on steps back, as in the sidebar.
+        let quiet = !selected && matches!(entry.status(), AgentStatus::Idle | AgentStatus::Stopped);
+        let ink = if quiet { theme.muted } else { theme.foreground };
 
         let activity = self.current_activity(Some(entry)).map(|activity| {
             let color = if activity.tone == ActivityTone::Failed { theme.failed } else { theme.muted };
@@ -847,10 +827,11 @@ impl AgentDashboard {
                 .color(color)
                 .into_any_element()
         });
-        let second_line = context_element(
+        let context = context_element(
             ElementId::Name(format!("agent-dashboard-activity-{id}").into()),
             &entry.context(home),
             activity,
+            size::SMALL,
             theme.muted,
             theme,
         );
@@ -878,7 +859,18 @@ impl AgentDashboard {
                     .flex_col()
                     .flex_1()
                     .min_w_0()
-                    .gap(theme.z(4.))
+                    .gap(theme.z(1.))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(theme.z(ROW_ICON_GAP))
+                            .min_w_0()
+                            .child(agent_glyph(&entry.entry).size(ROW_ICON).color(ink))
+                            .child(div().flex_1().min_w_0().truncate().text_color(ink).child(entry.title()))
+                            .child(StatusPill::new(Some(entry.pill())).now(self.now)),
+                    )
                     .child(
                         div()
                             .flex()
@@ -886,37 +878,35 @@ impl AgentDashboard {
                             .items_center()
                             .gap(theme.z(8.))
                             .min_w_0()
-                            .child(Monogram::new(monogram).size(16.))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(entry.title()),
-                            )
-                            .child(
+                            .pl(theme.z(ROW_ICON + ROW_ICON_GAP))
+                            .child(div().flex_1().min_w_0().child(context))
+                            .children(self.elapsed(entry).map(|elapsed| {
                                 div()
                                     .flex_none()
-                                    .font_family(fonts::MONO_FONT_FAMILY)
                                     .text_size(theme.z(size::SMALL))
-                                    .text_color(theme.muted)
-                                    .child(elapsed_text(entry.status(), entry.entry.started_at, self.now)),
-                            )
-                            .child(pill_label(pill.icon, pill.label, tone, theme)),
-                    )
-                    .child(second_line),
+                                    .text_color(theme.dim)
+                                    .child(elapsed)
+                            })),
+                    ),
             );
         div().debug_selector(move || selector).child(row)
     }
 
+    /// How long the agent has run; a stopped agent's pill already says all there is.
+    fn elapsed(&self, entry: &DashboardEntry) -> Option<String> {
+        (entry.status() != AgentStatus::Stopped)
+            .then(|| elapsed_text(entry.status(), entry.entry.started_at, self.now))
+    }
+
+    /// The selected agent as a card like its pane: who it is, the toolbar, what it wrote, and
+    /// the reply field.
     fn render_detail(
         &self,
+        entry: &DashboardEntry,
         theme: &SopranoTheme,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let entry = self.selected();
         let controls = self.controls();
         let shows_timeline = self.shows_timeline();
         let content = if shows_timeline {
@@ -924,6 +914,15 @@ impl AgentDashboard {
         } else {
             self.render_terminal(theme).into_any_element()
         };
+        let card = Card::new()
+            .flex_1()
+            .min_h_0()
+            .child(self.render_title(entry, theme))
+            .child(self.render_location(entry, theme))
+            .child(self.render_toolbar(controls, shows_timeline, theme, cx))
+            .child(div().flex_none().mt(theme.z(12.)).h(px(1.)).bg(theme.border))
+            .child(content)
+            .child(self.render_composer(entry, controls, theme, window, cx));
         div()
             .id("agent-dashboard-detail")
             .debug_selector(|| "agent-dashboard-detail".into())
@@ -932,82 +931,71 @@ impl AgentDashboard {
             .flex_1()
             .min_w_0()
             .h_full()
-            .child(self.render_title(entry, theme))
-            .child(self.render_location(entry, theme))
-            .child(self.render_toolbar(controls, shows_timeline, theme, cx))
-            .child(div().flex_none().mt(theme.z(12.)).h(px(1.)).bg(theme.border))
-            .child(content)
-            .child(self.render_composer(entry, controls, theme, window, cx))
+            .pr(theme.z(CARD_GAP))
+            .pb(theme.z(CARD_GAP))
+            .child(card)
     }
 
-    fn render_title(&self, entry: Option<&DashboardEntry>, theme: &SopranoTheme) -> impl IntoElement {
-        let row = div()
+    fn render_title(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
+        div()
             .id("agent-dashboard-detail-title")
             .flex()
             .flex_row()
             .flex_none()
             .items_center()
-            .gap(theme.z(10.))
-            .pt(theme.z(18.))
+            .gap(theme.z(TITLE_ICON_GAP))
+            .pt(theme.z(16.))
             .px(theme.z(GUTTER))
-            .text_size(theme.z(size::UI))
-            .font_weight(FontWeight::SEMIBOLD);
-        let Some(entry) = entry else {
-            return row.text_color(theme.muted).child("No agent selected");
-        };
-        let pill = entry.pill();
-        let tone = theme.tone(pill.tone);
-        row.tooltip(tooltip(entry.title()))
-            .child(div().flex_none().w(theme.z(16.)).child(icon(pill.icon).size(12.5).color(tone)))
-            .child(div().min_w_0().truncate().child(entry.title()))
+            .tooltip(tooltip(entry.title()))
+            .child(agent_glyph(&entry.entry).size(TITLE_ICON).color(theme.foreground))
             .child(
                 div()
-                    .flex_none()
-                    .text_size(theme.z(size::META))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(tone)
-                    .child(pill.label),
-            )
-            .child(
-                div()
-                    .id("agent-dashboard-detail-elapsed")
-                    .flex_none()
-                    .font_family(fonts::MONO_FONT_FAMILY)
-                    .text_size(theme.z(size::META))
-                    .font_weight(FontWeight::NORMAL)
-                    .text_color(theme.muted)
-                    .child(elapsed_text(entry.status(), entry.entry.started_at, self.now)),
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(theme.z(size::DIALOG_TITLE))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(entry.title()),
             )
     }
 
+    /// Under the title: the status pill, how long the agent has run, and
     /// `window  /  omp · folder · ⎇ branch`.
-    fn render_location(&self, entry: Option<&DashboardEntry>, theme: &SopranoTheme) -> impl IntoElement {
-        // Under an agent's title the line starts past its 16 px status mark and 10 px gap; the
-        // empty title has no mark, so the hint lines up with it instead.
-        let indent = if entry.is_some() { GUTTER + 26. } else { GUTTER };
-        let line = div()
-            .id("agent-dashboard-detail-location")
+    fn render_location(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
+        let home = &self.host.home;
+        let mut context = entry.context(home);
+        context.context.insert(0, format!("{}{LOCATION_SEPARATOR}", entry.entry.window_title));
+        let quiet = |text: SharedString| {
+            div().flex_none().text_size(theme.z(size::META)).text_color(theme.dim).child(text)
+        };
+        div()
             .flex()
             .flex_row()
             .flex_none()
-            .mt(theme.z(3.))
-            .pl(theme.z(indent))
+            .items_center()
+            .gap(theme.z(8.))
+            .mt(theme.z(2.))
+            .pl(theme.z(GUTTER + TITLE_ICON + TITLE_ICON_GAP))
             .pr(theme.z(GUTTER))
             .min_w_0()
-            .text_size(theme.z(size::META))
-            .text_color(theme.muted);
-        let Some(entry) = entry else {
-            return line.child("Choose an agent to follow its work.");
-        };
-        let mut context = entry.context(&self.host.home);
-        context.context.insert(0, format!("{}{LOCATION_SEPARATOR}", entry.entry.window_title));
-        line.tooltip(tooltip(entry.location_tooltip(&self.host.home))).child(context_element(
-            "agent-dashboard-detail-context",
-            &context,
-            None,
-            theme.muted,
-            theme,
-        ))
+            .child(StatusPill::new(Some(entry.pill())).now(self.now))
+            .children(self.elapsed(entry).map(|elapsed| quiet(elapsed.into())))
+            .child(quiet("·".into()))
+            .child(
+                div()
+                    .id("agent-dashboard-detail-location")
+                    .flex_1()
+                    .min_w_0()
+                    .tooltip(tooltip(entry.location_tooltip(home)))
+                    .child(context_element(
+                        "agent-dashboard-detail-context",
+                        &context,
+                        None,
+                        size::META,
+                        theme.muted,
+                        theme,
+                    )),
+            )
     }
 
     fn render_toolbar(
@@ -1023,24 +1011,24 @@ impl AgentDashboard {
                 .into_iter()
                 .flatten()
                 .collect();
+        // A card too narrow for both groups on one line gives each its own.
         div()
             .id("agent-dashboard-toolbar")
             .flex()
             .flex_row()
+            .flex_wrap()
             .flex_none()
             .items_center()
-            .justify_between()
-            .gap(theme.z(6.))
+            .gap(theme.z(8.))
             .mt(theme.z(14.))
             .px(theme.z(GUTTER))
             .child(
                 div()
                     .flex()
                     .flex_row()
+                    .flex_none()
                     .items_center()
                     .gap(theme.z(6.))
-                    .min_w_0()
-                    .overflow_hidden()
                     .child(
                         div()
                             .id("agent-dashboard-mode")
@@ -1052,6 +1040,7 @@ impl AgentDashboard {
                                 )
                                 .selected(if shows_timeline { 0 } else { 1 })
                                 .disabled_segments(disabled_segments)
+                                .well()
                                 .on_select({
                                     let this = cx.entity().downgrade();
                                     move |index, window, cx| {
@@ -1082,6 +1071,7 @@ impl AgentDashboard {
                     .flex_none()
                     .items_center()
                     .gap(theme.z(6.))
+                    .ml_auto()
                     .child(
                         div().debug_selector(|| "agent-dashboard-open".into()).child(
                             Button::new("agent-dashboard-open", "Open")
@@ -1117,13 +1107,26 @@ impl AgentDashboard {
             )
     }
 
-    /// The live terminal in a code card at the full width (its lines are as wide as the
-    /// agent's pane), highlighted in the theme's colors and selectable for copying.
+    /// The live terminal across the card (its lines are as wide as the agent's pane),
+    /// highlighted in the theme's colors and selectable for copying; a note in its place while
+    /// there is nothing to show.
     fn render_terminal(&self, theme: &SopranoTheme) -> impl IntoElement {
-        let text = match self.terminal_text() {
+        let focus = self.terminal_focus.clone();
+        let terminal = div()
+            .id("agent-dashboard-terminal")
+            .debug_selector(|| "agent-dashboard-terminal".into())
+            .track_focus(&self.terminal_focus)
+            .flex_1()
+            .min_h_0()
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| window.focus(&focus, cx));
+        match self.terminal_text() {
             TerminalText::Output(text) => {
                 let highlights = output_highlights(&text, &OutputPalette::new(theme));
-                div()
+                terminal
+                    .overflow_y_scroll()
+                    .track_scroll(&self.terminal_scroll)
+                    .px(theme.z(GUTTER))
+                    .py(theme.z(14.))
                     .font_family(fonts::TERMINAL_FONT_FAMILY)
                     .font_weight(fonts::TERMINAL_WEIGHT)
                     .text_size(theme.z(size::META))
@@ -1133,45 +1136,17 @@ impl AgentDashboard {
                             .highlights(highlights)
                             .selection_color(theme.selection),
                     )
-                    .into_any_element()
             }
             TerminalText::Message(message) => {
-                div().text_size(theme.z(size::ROW)).text_color(theme.muted).child(message).into_any_element()
+                terminal.flex().flex_col().child(empty_state(IconName::SHELL, message, None, theme))
             }
-        };
-        let focus = self.terminal_focus.clone();
-        div()
-            .id("agent-dashboard-terminal-card")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .mx(theme.z(GUTTER))
-            .mt(theme.z(16.))
-            .rounded(theme.z(8.))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.surface)
-            .overflow_hidden()
-            .child(
-                div()
-                    .id("agent-dashboard-terminal")
-                    .debug_selector(|| "agent-dashboard-terminal".into())
-                    .track_focus(&self.terminal_focus)
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.terminal_scroll)
-                    .px(theme.z(14.))
-                    .py(theme.z(12.))
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| window.focus(&focus, cx))
-                    .child(text),
-            )
+        }
     }
 
     /// What the agent does over the reply field, kept to the chat lane.
     fn render_composer(
         &self,
-        entry: Option<&DashboardEntry>,
+        entry: &DashboardEntry,
         controls: Controls,
         theme: &SopranoTheme,
         window: &mut Window,
@@ -1179,8 +1154,8 @@ impl AgentDashboard {
     ) -> impl IntoElement {
         let reply_focused = self.reply.read(cx).focus_handle(cx).contains_focused(window, cx);
         let can_send = controls.reply && state::reply_text(&self.reply.read(cx).value()).is_some();
-        let hint_color = if self.reply_failed.is_some() { theme.failed } else { theme.muted };
-        div().flex().flex_row().flex_none().justify_center().px(theme.z(GUTTER)).mt(theme.z(16.)).child(
+        let hint_color = if self.reply_failed.is_some() { theme.failed } else { theme.dim };
+        div().flex().flex_row().flex_none().justify_center().px(theme.z(GUTTER)).pt(theme.z(12.)).child(
             div()
                 .flex()
                 .flex_col()
@@ -1196,13 +1171,15 @@ impl AgentDashboard {
                         .gap(theme.z(10.))
                         .mt(theme.z(8.))
                         .h(theme.z(REPLY_FIELD_HEIGHT))
-                        .pl(theme.z(16.))
-                        .pr(theme.z(10.))
-                        .rounded(theme.z(12.))
+                        .pl(theme.z(6.))
+                        .pr(theme.z(8.))
+                        .rounded(theme.z(10.))
                         .border_1()
                         .border_color(if reply_focused { theme.accent } else { theme.input })
                         .bg(theme.raised)
                         .text_size(theme.z(size::UI))
+                        // A field that cannot take a reply steps back; the hint says why.
+                        .when(!controls.reply, |card| card.opacity(0.55))
                         .child(div().flex_1().min_w_0().child(Input::new(&self.reply).appearance(false)))
                         .child(send_button(can_send, theme, cx)),
                 )
@@ -1210,8 +1187,9 @@ impl AgentDashboard {
                     div()
                         .id("agent-dashboard-reply-hint")
                         .mt(theme.z(6.))
-                        .mb(theme.z(12.))
+                        .mb(theme.z(10.))
                         .pl(theme.z(2.))
+                        .h(theme.z(15.))
                         .truncate()
                         .text_size(theme.z(size::SMALL))
                         .text_color(hint_color)
@@ -1220,17 +1198,7 @@ impl AgentDashboard {
         )
     }
 
-    fn render_activity(&self, entry: Option<&DashboardEntry>, theme: &SopranoTheme) -> impl IntoElement {
-        let line = div()
-            .id("agent-dashboard-activity-line")
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(theme.z(8.))
-            .pl(theme.z(2.))
-            .h(theme.z(18.))
-            .min_w_0();
-        let Some(entry) = entry else { return line };
+    fn render_activity(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
         let pill = entry.pill();
         let text = match self.current_activity(Some(entry)) {
             Some(activity) => {
@@ -1248,37 +1216,58 @@ impl AgentDashboard {
                 .child(state::fallback_activity(Some(entry.status())))
                 .into_any_element(),
         };
-        line.child(div().flex_none().child(icon(pill.icon).size(12.).color(theme.tone(pill.tone))))
+        div()
+            .id("agent-dashboard-activity-line")
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(theme.z(8.))
+            .pl(theme.z(2.))
+            .h(theme.z(18.))
+            .min_w_0()
+            .child(div().flex_none().child(icon(pill.icon).size(12.).color(theme.tone(pill.tone))))
             .child(div().flex_1().min_w_0().child(text))
     }
 }
 
-/// The pill's symbol and word in its tone.
-fn pill_label(
-    glyph: IconName,
-    label: &'static str,
-    tone: gpui::Hsla,
-    theme: &SopranoTheme,
-) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_center()
-        .gap(theme.z(2.))
-        .text_size(theme.z(size::META))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(tone)
-        .child(icon(glyph).size(12.5).color(tone))
-        .child(label)
+/// The agent's program icon where one ships, else a chat or agent glyph.
+fn agent_glyph(entry: &AgentDashboardEntry) -> Icon {
+    match agent_icon_stem(&entry.profile_id) {
+        Some(stem) => Icon::program(stem),
+        None if entry.is_chat => Icon::new(IconName::MessageSquare),
+        None => Icon::new(IconName::Bot),
+    }
 }
 
-/// A muted context line (`omp · folder · ⎇ branch`), optionally followed by ` — ` and an
-/// activity, on one line truncated at the tail. The branch is led by the branch glyph.
+/// What a list or the card shows while it has nothing: a glyph over a line or two, centered.
+fn empty_state(
+    glyph: IconName,
+    title: &'static str,
+    hint: Option<&'static str>,
+    theme: &SopranoTheme,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .items_center()
+        .justify_center()
+        .gap(theme.z(6.))
+        .px(theme.z(24.))
+        .text_center()
+        .child(div().pb(theme.z(4.)).child(icon(glyph).size(22.).color(theme.dim)))
+        .child(div().text_size(theme.z(size::UI)).text_color(theme.muted).child(title))
+        .children(hint.map(|hint| div().text_size(theme.z(size::META)).text_color(theme.dim).child(hint)))
+}
+
+/// A context line (`omp · folder · ⎇ branch`) at `text_size`, optionally followed by ` — ` and
+/// an activity, on one line truncated at the tail. The branch is led by the branch glyph.
 fn context_element(
     id: impl Into<ElementId>,
     context: &ContextLine,
     activity: Option<AnyElement>,
+    text_size: f32,
     color: gpui::Hsla,
     theme: &SopranoTheme,
 ) -> AnyElement {
@@ -1318,7 +1307,7 @@ fn context_element(
             .flex_none()
             .items_center()
             .gap(theme.z(3.))
-            .child(icon(IconName::GitBranch).size(11.).color(color))
+            .child(icon(IconName::GitBranch).size(text_size).color(color))
             .child(SharedString::from(name))
     });
     let tail_text = (!tail.is_empty()).then(|| div().min_w_0().truncate().child(SharedString::from(tail)));
@@ -1330,7 +1319,7 @@ fn context_element(
         .min_w_0()
         .overflow_hidden()
         .whitespace_nowrap()
-        .text_size(theme.z(size::SMALL))
+        .text_size(theme.z(text_size))
         .text_color(color)
         .children(head_text)
         .children(glyph)

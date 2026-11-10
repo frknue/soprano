@@ -7971,11 +7971,13 @@ dependencies = [
 name = "soprano-dashboard"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "futures",
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
+ "serde_json",
  "soprano-agents",
  "soprano-chat-ui",
  "soprano-editor",
@@ -8147,6 +8149,7 @@ dependencies = [
 name = "soprano-settings"
 version = "0.6.0"
 dependencies = [
+ "anyhow",
  "async-channel",
  "gpui-component",
  "gpui-pre",

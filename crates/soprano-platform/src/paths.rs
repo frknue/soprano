@@ -31,7 +31,7 @@ pub fn data_dir(identity: &AppIdentity) -> PathBuf {
 ///
 /// - macOS bundle: `Soprano.app/Contents/Resources`
 /// - Linux/Windows install: `<exe dir>/resources`, then `<exe dir>/../share/soprano`
-/// - a source checkout (`cargo run`): `<repo>/resources`
+/// - a source checkout (`cargo run`, or `cargo run --example`): `<repo>/resources`
 pub fn resources_dir() -> Option<PathBuf> {
     if let Some(dir) = env_dir("SOPRANO_RESOURCES_DIR") {
         return Some(dir);
@@ -45,10 +45,11 @@ pub fn resources_dir_for_executable(exe: &Path, is_dir: impl Fn(&Path) -> bool) 
     let exe_dir = exe.parent()?;
     let mut candidates =
         vec![exe_dir.join("../Resources"), exe_dir.join("resources"), exe_dir.join("../share/soprano")];
-    // target/{debug,release}/soprano → <repo>/resources
-    if let Some(repo) = exe_dir.parent().and_then(Path::parent) {
-        candidates.push(repo.join("resources"));
-    }
+    // target/{debug,release}/soprano and target/{debug,release}/examples/<demo> →
+    // <repo>/resources
+    let repo = exe_dir.parent().and_then(Path::parent);
+    candidates.extend(repo.map(|repo| repo.join("resources")));
+    candidates.extend(repo.and_then(Path::parent).map(|repo| repo.join("resources")));
     candidates.into_iter().find(|c| is_dir(c)).map(|c| normalize(&c))
 }
 
@@ -136,6 +137,14 @@ mod tests {
     #[test]
     fn a_cargo_build_finds_the_repository_resources_folder() {
         let exe = Path::new("/src/soprano/target/debug/soprano");
+        let found =
+            resources_dir_for_executable(exe, |p| normalize(p) == Path::new("/src/soprano/resources"));
+        assert_eq!(found, Some(PathBuf::from("/src/soprano/resources")));
+    }
+
+    #[test]
+    fn a_cargo_example_finds_the_repository_resources_folder() {
+        let exe = Path::new("/src/soprano/target/debug/examples/settings_demo");
         let found =
             resources_dir_for_executable(exe, |p| normalize(p) == Path::new("/src/soprano/resources"));
         assert_eq!(found, Some(PathBuf::from("/src/soprano/resources")));

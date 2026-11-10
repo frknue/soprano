@@ -154,18 +154,6 @@ impl<'a> Form<'a> {
         div().flex_none().size(self.z(7.)).rounded_full().bg(color)
     }
 
-    /// The well a segmented control sits in.
-    pub fn track(&self, control: impl IntoElement) -> Div {
-        div()
-            .flex_none()
-            .p(self.z(2.))
-            .rounded(self.z(8.))
-            .border_1()
-            .border_color(self.t.border)
-            .bg(self.t.canvas)
-            .child(control)
-    }
-
     /// A tinted notice: a warning glyph in `color`, a title, its lines (each with a dot in its
     /// own color), and an action at the end.
     pub fn callout(

@@ -237,9 +237,7 @@ pub fn is_agent_working(status: Option<AgentStatus>) -> bool {
 }
 
 /// What the timeline says before the transcript has a turn.
-pub fn timeline_empty_text(has_entry: bool) -> &'static str {
-    if has_entry { "Waiting for the agent's first message…" } else { "Choose an agent to follow its work." }
-}
+pub const TIMELINE_EMPTY: &str = "Waiting for the agent's first message…";
 
 /// The activity line when the transcript says nothing: the status in words.
 pub fn fallback_activity(status: Option<AgentStatus>) -> &'static str {
@@ -287,7 +285,7 @@ pub fn reply_hint(entry: Option<&DashboardEntry>, terminal_available: bool) -> &
 /// The hint after a reply the terminal did not take.
 pub const SEND_FAILED: &str = "Could not send to this terminal.";
 
-/// What the terminal card shows.
+/// What the selected agent's terminal shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalText {
     /// The terminal's visible text, highlighted.
@@ -298,9 +296,8 @@ pub enum TerminalText {
 
 impl TerminalText {
     /// `terminal` is the visible text, `None` while the terminal is not available.
-    pub fn new(has_entry: bool, terminal: Option<&str>) -> Self {
+    pub fn new(terminal: Option<&str>) -> Self {
         match terminal {
-            _ if !has_entry => Self::Message("Select an agent to see its current terminal."),
             None => Self::Message("This terminal is not currently available."),
             Some("") => Self::Message("No terminal output yet."),
             Some(text) => Self::Output(text.to_owned()),
@@ -570,14 +567,10 @@ mod tests {
     }
 
     #[test]
-    fn the_terminal_card_shows_the_text_or_says_why_there_is_none() {
-        assert_eq!(
-            TerminalText::new(false, Some("x")).text(),
-            "Select an agent to see its current terminal."
-        );
-        assert_eq!(TerminalText::new(true, None).text(), "This terminal is not currently available.");
-        assert_eq!(TerminalText::new(true, Some("")).text(), "No terminal output yet.");
-        assert_eq!(TerminalText::new(true, Some("ready")), TerminalText::Output("ready".into()));
+    fn the_terminal_shows_the_text_or_says_why_there_is_none() {
+        assert_eq!(TerminalText::new(None).text(), "This terminal is not currently available.");
+        assert_eq!(TerminalText::new(Some("")).text(), "No terminal output yet.");
+        assert_eq!(TerminalText::new(Some("ready")), TerminalText::Output("ready".into()));
     }
 
     #[test]

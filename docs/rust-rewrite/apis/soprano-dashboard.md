@@ -19,7 +19,7 @@ I've built `crates/soprano-dashboard`: the Agent Dashboard page, the theme-aware
 - `Stop(TerminalTarget)`: call `Workspace::stop_agent`.
 - `Restart(TerminalTarget)`: call `Workspace::restart_agent`.
 - `Reply { target, text }`: the text is trimmed and single-line. Type it plus Return into that pane tab, or send it with `ChatView::submit_prompt` for a chat tab.
-- `Close`: Esc or the Done button; it doesn't change the active agent.
+- `Close`: Esc or the close button; it doesn't change the active agent.
 
 **Methods**
 - `reply_failed(&mut self, &TerminalTarget, &str, window, cx)`: call this when a reply can't be delivered. It puts the draft back and shows "Could not send to this terminal." in the error color.
@@ -31,11 +31,13 @@ I've built `crates/soprano-dashboard`: the Agent Dashboard page, the theme-aware
 - `text`: `OutputPalette::new(&SopranoTheme)`, `output_highlights(text, &palette)`.
 
 **What it shows and does**
-- **Agent list:** agents under Needs you / Working / Ready / Stopped with counts. Each row has the monogram, title, runtime and status pill. Under it: `agent · folder · ⎇ branch — activity`. The selection is focused or unfocused depending on whether the list has the keyboard, and agents that need you get the attention tint. There's an empty state and a key-hint footer. The list is 380 px wide, at most 40 % of the window.
-- **Detail view:** title, pill and timer; the location line; Timeline/Terminal switch; Show/Hide details; Open, Stop, Restart.
+- **Surfaces:** the page is `canvas` with its header (title, "Monitoring N agents across M windows", `esc` and close) and the agent list straight on it; the selected agent is soprano-ui's `Card` (`background`, radius 10) 8 px from the page's edges, like a pane in the window. A dashboard without agents is one card saying so.
+- **Agent list:** agents under Needs you / Working / Ready / Stopped with counts. A row is the agent's program icon (`agent_icon_stem`), its title and soprano-ui's `StatusPill`; under the title `agent · folder · ⎇ branch — activity` and how long it has run (nothing for a stopped agent). Idle and stopped agents are muted until selected. The selection is focused or unfocused depending on whether the list has the keyboard, and agents that need you get the attention tint. A key-hint footer closes the list. The list is 380 px wide, at most 40 % of the dashboard.
+- **Detail card:** icon and title; under it the status pill, the runtime and the location line; the Timeline/Terminal switch in a well, Show/Hide details, and Open, Stop, Restart. The two toolbar groups wrap onto two lines when the card is too narrow for one.
 - **Conversation:** Claude Code, Codex, OpenCode and omp agents show their transcript in soprano-chat-ui's `TimelineView`. Transcripts are followed with `AgentTranscriptStore`.
-- **Live terminal:** plain terminals and custom agents show their text in a card with theme colors. You can select and copy it.
-- **Composer:** the activity line, the reply field and the send button, with the hint under it.
+- **Live terminal:** plain terminals and custom agents show their text across the card in the theme's colors. You can select and copy it. While there is none, a centered note says why.
+- **Composer:** the activity line, the reply field and the send button, with the hint under it. A field that cannot take a reply is dimmed.
+- **Visual QA without a screen:** `cargo run -p soprano-dashboard --example dashboard_demo -- --snapshot /abs/dir [--size WxH] [--appearance dark|light] [--theme ID] [--agents N]` writes the dashboard's states (every agent, details, the terminal, the reply field) as PNGs, inside a mock of the app's frame.
 - **Keys:** J/K/↓/↑, Return/Space, Tab or R into the reply, ⇧Tab back out keeping the draft, Esc, ⇧J/⇧K/PgDn/PgUp, `[` `]`, O, G, T. They run through a keystroke interceptor whenever focus is anywhere inside the dashboard, so clicking into the conversation or terminal text never swallows them. While the reply field has the keyboard, only Esc and ⇧Tab belong to the dashboard.
 
 ## Swift ported
@@ -50,8 +52,8 @@ I've built `crates/soprano-dashboard`: the Agent Dashboard page, the theme-aware
 - **Event instead of a send callback.** Swift's send callback returned a bool; here `Reply` is an event and failure comes back through `reply_failed`, so the dashboard never changes the model.
 - **Terminal text is `Option<String>`.** I didn't depend on soprano-term (its native build) just for its two-field state struct. The host closure should return `TerminalView::visible_text()` or `None` when unavailable.
 - **Reused shared pieces instead of copying them.** The activity line uses soprano-chat-ui's `ActivityLine`, and the selectable highlighted terminal text uses soprano-editor's `rich::RichText`. Selection needs gpui-component's `Root` in the window.
-- **Looks follow Herdr where Swift differs.** The selected row uses Herdr's `selected` token, or `hover` while the list doesn't have focus. The page header is a 52 px Herdr-style strip with a Done button showing the `esc` keycap.
-- **Toolbar on narrow windows.** The left controls clip instead of dropping one by one by priority. Stop and Restart always stay; the test confirms this at 600×400.
+- **Looks follow Herdr where Swift differs.** The selected row uses Herdr's `selected` token, or `hover` while the list doesn't have focus. The page header is a 48 px strip with the `esc` keycap and a close button, as in Settings.
+- **Toolbar on narrow windows.** The view switch and the agent's actions wrap onto two lines instead of dropping controls one by one by priority. Stop and Restart always stay; the test confirms this at 600×400.
 - **Real thread in one test.** The transcript test calls `cx.executor().allow_parking()` because the transcript store reads on its own worker thread.
 
 ## Commands

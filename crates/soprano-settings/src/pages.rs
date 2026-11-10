@@ -184,6 +184,7 @@ impl SettingsView {
             AppearancePreference::ALL.map(general::appearance_title),
         )
         .selected(appearance_index)
+        .well()
         .on_select({
             let view = cx.entity().downgrade();
             move |index, window, cx| {
@@ -204,7 +205,7 @@ impl SettingsView {
                     this.reset(general::APPEARANCE_KEY, window, cx)
                 }),
             )
-            .control(form.track(appearance))
+            .control(appearance)
             .render(t);
         form.section("Theme")
             .note(general::THEME_DESCRIPTION)

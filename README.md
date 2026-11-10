@@ -522,7 +522,7 @@ through Soprano's hooks, and OpenCode its session in OpenCode's database; Codex 
 once its first reply arrives, or right away with the
 [Codex hooks](#agents-that-report-in) installed. [Chats](#agent-chat) show their
 conversation the same way, without a Terminal view, and replies go to the chat. Plain
-terminals and custom agents show their live terminal in a card instead, with
+terminals and custom agents show their live terminal instead, with
 theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code. Under
 either view, the composer says what the agent is doing right now (the entry in the list
 repeats that line) above the reply field. Replies are available while the agent is

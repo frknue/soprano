@@ -81,6 +81,7 @@ pub struct SegmentedControl {
     titles: Vec<SharedString>,
     selected: usize,
     disabled: Vec<usize>,
+    well: bool,
     on_select: Option<IndexHandler>,
 }
 
@@ -91,6 +92,7 @@ impl SegmentedControl {
             titles: titles.into_iter().map(Into::into).collect(),
             selected: 0,
             disabled: Vec::new(),
+            well: false,
             on_select: None,
         }
     }
@@ -102,6 +104,13 @@ impl SegmentedControl {
 
     pub fn disabled_segments(mut self, indices: impl IntoIterator<Item = usize>) -> Self {
         self.disabled = indices.into_iter().collect();
+        self
+    }
+
+    /// Sets the segments in a well (`canvas`, 1 px border, radius 8, 2 px inset): for a
+    /// control that stands on its own in a form or toolbar rather than in a row of tabs.
+    pub fn well(mut self) -> Self {
+        self.well = true;
         self
     }
 
@@ -148,6 +157,14 @@ impl RenderOnce for SegmentedControl {
             .items_center()
             .gap(theme.z(2.))
             .text_size(theme.z(size::META))
+            .when(self.well, |control| {
+                control
+                    .p(theme.z(2.))
+                    .rounded(theme.z(8.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.canvas)
+            })
             .children(segments)
     }
 }

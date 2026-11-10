@@ -40,7 +40,7 @@ Sizes are designed px; the widgets apply zoom themselves.
 **icons**
 - `IconName`: 139 glyphs, each with `path()`, `stem()` and `ALL`. Herdr's custom glyphs are included, plus Soprano aliases such as `STATUS_WORKING` and `ACCOUNT`.
 - It implements gpui-component's `IconNamed`, so it works with that library's own icons.
-- `icon(name).size(14.).color(h)`, `Icon::program("claude")`, `Icon::from_path(p)`, `.rotate()`.
+- `icon(name).size(14.).color(h)`, `Icon::program("claude")`, `Icon::from_path(p)`, `.rotate()`. `agent_icon_stem(profile_id)` names a built-in agent's program icon.
 - File icons: `file_type_icon(name)`, `folder_icon(open)`, `SYMLINK_ICON`.
 
 **Buttons**
@@ -65,7 +65,7 @@ Sizes are designed px; the widgets apply zoom themselves.
 
 **controls**
 - `Switch::new(id, on)`: `.disabled .on_change`.
-- `SegmentedControl::new(id, titles)`: `.selected .disabled_segments .on_select`.
+- `SegmentedControl::new(id, titles)`: `.selected .disabled_segments .well .on_select`. `.well()` sets the segments in a bordered `canvas` well, for a control that stands alone in a form or toolbar.
 - `text_input(&state)` / `TextInput::new(&state)`: `.small .large .accent .invalid .prefix .suffix`. Re-exports `InputState` and `InputEvent`.
 
 **select**
@@ -106,6 +106,7 @@ Sizes are designed px; the widgets apply zoom themselves.
 - **tooltip:** `tooltip(text)`, `tooltip_with_keycaps(text, caps)`, the `Tooltip` view.
 - **toast:** `ToastStack::new(cx)` with `.push(Toast::new(ToastLevel, title).body(..).on_click(..), cx)` and `.remove`.
 - **motion:** `FADE` (150 ms), `fade_in(el, id, cx)`, the spinner constants and `ease_out`.
+- **snapshot** (feature `snapshot`, dev-dependencies only): the examples' `--snapshot` mode. `Args::parse(width, height)` reads `--snapshot /abs/dir`, `--size`, `--appearance` and leaves the example's own flags in `rest`; `redraw(cx).await` draws a window that is not on screen; `click`, `scroll` and `press("j enter")` send real input; `pixels` and `write_png` read the frame; `finish` quits or exits 1. The renderer needs `gpui_platform/test-support`, which the examples enable on macOS only.
 
 I added `ShieldQuestionMark`-style names and the extra glyphs that ExplorerUi, EditorUi, ChatUi, SettingsUi and AppShell asked for, and sent each of them the signatures they need.
 
