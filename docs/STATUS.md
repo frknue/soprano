@@ -1,6 +1,6 @@
 # Status: Rust-Rewrite
 
-Branch `feat/rust-rewrite` (Worktree `~/git/private/soprano.worktrees/rust-rewrite`).
+Auf `main` in `~/git/private/soprano` (der Rewrite-Branch `feat/rust-rewrite` ist gemergt und gelöscht).
 
 ## Ziel
 
