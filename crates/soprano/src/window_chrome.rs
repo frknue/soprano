@@ -146,34 +146,16 @@ impl RenderOnce for WindowButtons {
     }
 }
 
-/// A drag region: dragging moves the window, a double-click zooms it (the title bar's
+/// A drag region: mouse-down moves the window, a double-click zooms it (the title bar's
 /// double-click), as Herdr's brand and tab rows do.
-///
-/// The move starts on the first drag after a press, not on the press itself: a native window
-/// move swallows the mouse-up, so starting it on mouse-down kept every button in the row
-/// (tabs, `+`, Files / Changes) from ever seeing its click. Zed's title bar does the same.
 pub fn window_drag_region<E: InteractiveElement>(element: E) -> E {
-    thread_local! {
-        /// A left press in a drag region that hasn't moved yet.
-        static PRESSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-    element
-        .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
-            if event.click_count >= 2 {
-                PRESSED.set(false);
-                window.zoom_window();
-            } else {
-                PRESSED.set(true);
-            }
-        })
-        .on_mouse_up(gpui::MouseButton::Left, |_, _, _| PRESSED.set(false))
-        .on_mouse_move(|event, window, _| {
-            if !event.dragging() {
-                PRESSED.set(false);
-            } else if PRESSED.replace(false) {
-                window.start_window_move();
-            }
-        })
+    element.on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+        if event.click_count >= 2 {
+            window.zoom_window();
+        } else {
+            window.start_window_move();
+        }
+    })
 }
 
 /// The point where the traffic lights start, for tests and layout.
