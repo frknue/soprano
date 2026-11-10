@@ -766,6 +766,10 @@ impl RenderOnce for ScrollList {
             .flex_col()
             .size_full()
             .overflow_y_scroll()
+            // A sideways trackpad swipe belongs to macOS Spaces, not this list: gpui would
+            // otherwise remap its horizontal delta onto the vertical axis and scroll the
+            // rows sideways-to-vertically under the gesture.
+            .restrict_scroll_to_axis()
             .track_scroll(&self.handle)
             .children(self.children);
         list.style().refine(&self.style);
