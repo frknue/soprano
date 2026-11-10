@@ -249,6 +249,7 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- Codex panes show the Codex logo as their icon instead of a filled square.
 - A sideways trackpad swipe over the sidebar no longer scrolls the windows and agents
   lists; the gesture stays with macOS Spaces.
 - A long agent title in the Agent Dashboard stays on one line and truncates instead of
