@@ -356,8 +356,12 @@ impl Render for StatusBar {
                 .cursor_pointer()
                 .child(styled(usage, &theme))
                 .child(
+                    // Pinned to the corner: the segment isn't a flex box, so an unpinned
+                    // absolute child sat below the text and the card opened over the status bar.
                     canvas(move |bounds, _, _| usage_bounds.set(bounds), |_, _, _, _| {})
                         .absolute()
+                        .top_0()
+                        .left_0()
                         .size_full(),
                 )
                 .tooltip(tooltip(STATUS_USAGE_TOOLTIP))

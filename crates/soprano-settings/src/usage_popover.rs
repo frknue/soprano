@@ -142,12 +142,10 @@ impl AccountUsagePopover {
         };
         let mark_column = t.z(8. + 8.);
         div()
-            .id(gpui::SharedString::from(format!("usage-row-{}-{}", row.name, row.is_system_default)))
             .flex()
             .flex_col()
             .w_full()
             .gap(t.z(4.))
-            .tooltip(soprano_ui::tooltip::tooltip(row.tooltip.clone()))
             .child(
                 div()
                     .flex()
@@ -157,12 +155,19 @@ impl AccountUsagePopover {
                     .min_w_0()
                     .child(account_mark(row.is_selected, row.has_problem, t))
                     .child(
+                        // The tooltip sits on the name only (Swift's `nameLabel.toolTip`): on the
+                        // whole row it covered the usage lines below while reading them.
                         div()
+                            .id(gpui::SharedString::from(format!(
+                                "usage-row-{}-{}",
+                                row.name, row.is_system_default
+                            )))
                             .flex()
                             .flex_row()
                             .min_w_0()
                             .truncate()
                             .text_size(t.z(size::ROW))
+                            .tooltip(soprano_ui::tooltip::tooltip(row.tooltip.clone()))
                             .when(row.is_system_default, |d| {
                                 d.child(div().text_color(t.muted).child(USAGE_CARD_SYSTEM_DEFAULT_PREFIX))
                             })
@@ -228,39 +233,59 @@ impl AccountUsagePopover {
 }
 
 impl Render for AccountUsagePopover {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.soprano_theme().clone();
         let now = soprano_accounts::chrono::Utc::now();
         let card = UsageCard::build(&self.snapshot, &now);
 
+        // Swift's spacing: provider title → caption 8, caption → login 6, login → login 8,
+        // list → list 12, and 12 on both sides of the rule between providers.
         let mut content: Vec<AnyElement> = Vec::new();
         for (index, provider) in card.providers.iter().enumerate() {
             if index > 0 {
-                content.push(div().h(t.z(1.)).w_full().my(t.z(4.)).bg(t.border).into_any_element());
+                content.push(div().h(t.z(1.)).w_full().my(t.z(12.)).bg(t.border).into_any_element());
             }
-            // Soprano shows no uppercase eyebrows: the provider reads "Claude", not "CLAUDE".
-            content.push(
-                div()
-                    .text_size(t.z(size::SECTION))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(t.dim)
-                    .child(provider.provider.display_name())
-                    .into_any_element(),
-            );
-            for list in &provider.lists {
-                let rows: Vec<AnyElement> = list.rows.iter().map(|row| Self::row(row, &t)).collect();
-                content.push(
+            let lists: Vec<AnyElement> = provider
+                .lists
+                .iter()
+                .map(|list| {
                     div()
                         .flex()
                         .flex_col()
-                        .gap(t.z(8.))
                         .child(
-                            div().text_size(t.z(size::META)).text_color(t.muted).child(list.caption.clone()),
+                            div()
+                                .mb(t.z(6.))
+                                .text_size(t.z(size::META))
+                                .text_color(t.muted)
+                                .child(list.caption.clone()),
                         )
-                        .children(rows)
-                        .into_any_element(),
-                );
-            }
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(t.z(8.))
+                                .children(list.rows.iter().map(|row| Self::row(row, &t))),
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            // Soprano shows no uppercase eyebrows: the provider is a title ("Claude"), above
+            // its lists' muted captions.
+            content.push(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(t.z(8.))
+                    .child(
+                        div()
+                            .text_size(t.z(size::UI))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(t.foreground)
+                            .child(provider.provider.display_name()),
+                    )
+                    .child(div().flex().flex_col().gap(t.z(12.)).children(lists))
+                    .into_any_element(),
+            );
         }
         if let Some(empty) = card.empty_text {
             content.push(div().text_size(t.z(size::ROW)).text_color(t.muted).child(empty).into_any_element());
@@ -268,6 +293,9 @@ impl Render for AccountUsagePopover {
 
         let refresh_action = card.refresh.action.clone();
         let manage_action = card.manage_accounts.action.clone();
+        // Never taller than the window: with many logins the body scrolls and Refresh /
+        // Manage Accounts… stay in view (the status bar and the 8 px margins stay clear).
+        let max_height = (window.viewport_size().height - t.z(64.)).max(t.z(160.));
         div()
             .id("account-usage-popover")
             .track_focus(&self.focus_handle)
@@ -275,6 +303,7 @@ impl Render for AccountUsagePopover {
             .flex()
             .flex_col()
             .w(t.z(USAGE_POPOVER_WIDTH))
+            .max_h(max_height)
             .rounded(t.z(8.))
             .border_1()
             .border_color(t.border)
@@ -290,7 +319,17 @@ impl Render for AccountUsagePopover {
                 }
             }))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(DismissEvent)))
-            .child(div().flex().flex_col().gap(t.z(12.)).p(t.z(INSET)).children(content))
+            .child(
+                div()
+                    .id("account-usage-popover-body")
+                    .flex()
+                    .flex_col()
+                    .flex_shrink(1.)
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p(t.z(INSET))
+                    .children(content),
+            )
             .child(div().h(t.z(1.)).w_full().bg(t.border))
             .child(
                 div()
