@@ -350,6 +350,23 @@ to the terminal. Every pane gets a hint: past 20 panes the last ones take two le
 like Vimium link hints. Type the first with Control+Shift (`⌃⇧Z`), then the second with or
 without the modifiers; the sidebar narrows to the panes still matching, and `esc` cancels.
 
+**In a terminal pane** (macOS, as in Ghostty)
+
+| Shortcut | Sends | Usually does |
+|---|---|---|
+| `⌘⌫` | `^U` | Delete the whole input line |
+| `⌘←` / `⌘→` | `^A` / `^E` | Jump to the start / end of the line |
+| `⌥←` / `⌥→` | `ESC b` / `ESC f` | Move one word left / right |
+
+Terminals read your Ghostty config (`~/.config/ghostty/config`, then
+`~/Library/Application Support/com.mitchellh.ghostty/config` on macOS): font, cursor,
+scrollback, clipboard, padding, `macos-option-as-alt`, shell integration, and `keybind`
+lines that send text to the program (`text:`, `esc:`, `csi:`, `ignore`, `unbind`,
+`keybind = clear`). For example `keybind = shift+enter=text:\x1b\r` makes `⇧⏎` a newline
+in Claude Code. A `keybind` line overrides or unbinds the defaults above; bindings to app
+actions (copy, splits, …), key sequences and the `global:`/`all:` prefixes are ignored —
+Soprano's own shortcuts live in `settings.json`. Ghostty.app itself is not needed.
+
 ## Sessions and windows
 
 A session is a named group of windows. Each window has its own tabs, and each tab its
