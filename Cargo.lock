@@ -7981,10 +7981,8 @@ dependencies = [
  "serde_json",
  "soprano-agents",
  "soprano-chat-ui",
- "soprano-editor",
  "soprano-model",
  "soprano-platform",
- "soprano-text",
  "soprano-types",
  "soprano-ui",
  "tempfile",
@@ -8205,7 +8203,6 @@ name = "soprano-text"
 version = "0.6.0"
 dependencies = [
  "caseless",
- "fancy-regex 0.14.0",
  "imagesize 0.14.0",
  "libc",
  "percent-encoding",

@@ -10,6 +10,15 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **New threads from the Agent Dashboard**: the pencil button, `N`, or `⌘N` starts an agent
+  with your first message — "What should we build in *project*?" picks the folder (the
+  projects open in your windows, the `projectDirectories`, or any folder) and the chip in
+  the composer the agent (Codex, Claude Code, OpenCode, or omp in its terminal, or omp as a
+  chat; custom agents and ones behind a `launchScript` are not offered; the last choice is
+  remembered). The thread opens as a tab of the window that already works on that project,
+  or in a new window named after it, without moving what the main window shows.
+- The Agent Dashboard's inbox has a **Search** (`/`) and folds: click **Needs you**,
+  **Working**, **Ready**, or **Stopped** to hide its threads; Stopped starts folded.
 - **Linux and Windows.** Soprano now runs on macOS, Linux (x86_64 and arm64) and Windows
   10+. Releases ship a macOS DMG, Linux tarballs with a desktop entry, and a Windows zip.
   On Linux and Windows `⌘` shortcuts are `Ctrl+Shift` (`⇧⌘` is `Ctrl+Shift+Alt`), `⌃`
@@ -107,8 +116,6 @@ the single source of truth for the version shown in **Settings ▸ About**.
   switch with `Ctrl+A` then `S` or the sidebar selector, and use `Ctrl+A` then `C`
   to create windows inside it. Window navigation stays within the current session,
   and switching sessions preserves their running terminals, tabs, and layouts.
-- The Agent Dashboard live terminal now highlights prompts, diagnostics, paths, command
-  flags, diffs, and common fenced-code syntax using the active theme.
 - A light appearance: **Settings ▸ General ▸ Appearance** has a System / Light / Dark
   control that follows macOS or keeps Soprano light or dark (`"appearance": "system"`,
   `"light"`, or `"dark"` in `settings.json`; `system` by default).
@@ -234,13 +241,15 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the current one. It writes `keybindings.prefixKey`.
 - `soprano <file.md>` and `soprano markdown <file>` now open a reusable reader tab
   in the calling terminal's pane, keeping the shell running; `--new` opens a separate pane.
-- The Agent Dashboard is laid out like the window: the agents are listed on the canvas,
-  each with its agent's icon, what it works on, a status pill and how long it has run over
-  `agent · folder · branch — activity`, and the selected agent is a card like its pane,
-  with its title and where it runs over the **Timeline** / **Terminal** switch and
-  **Open**, **Stop** and **Restart**, then its conversation or live terminal and the reply
-  field. A narrow window wraps that toolbar instead of clipping it, and a dashboard without
-  agents says so in one place.
+- The Agent Dashboard is a window of its own that looks and works like Soprano Agents:
+  `⇧⌘D` (`agent-dashboard`) opens it, brings it forward while it is behind, and closes it
+  while it is in front (`⌘W`, or `Esc` on the list, close it too), and it reopens where
+  you left it. Agents are threads in an inbox — the project's monogram and name with the
+  status pill, the task, and what the agent is doing right now — and the open thread is a
+  chat: `project / task` over the conversation and a floating composer (`Return` sends,
+  `⇧Return` adds a line), with **Open**, **Stop**, **Restart** and the detailed work log
+  in the header. **Open** (`Return`) shows the agent in the main window and leaves the
+  dashboard open; `Esc` in the composer returns to the list instead of closing.
 - Redesigned the Settings screen (`⌘,`), laid out like the window itself: navigation on the
   left, and each page as its title (with `esc` and close) above a scrolling column of
   cards. **General** shows the themes as tiles in their own colors, reports
@@ -259,6 +268,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   shape, rim, and shadow like those of its own icons.
 
 ### Removed
+- The Agent Dashboard's live terminal view and its **Timeline** / **Terminal** switch
+  (`T`): a thread is its conversation. An agent without a readable transcript says so;
+  **Open** shows its pane.
 - Window depth: `⌃A` → `I` / `O`, the `‹ DEPTH n ›` pane header controls, the
   **Go In** / **Go Out** palette commands, and the `pane-depth-in` / `pane-depth-out`
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.

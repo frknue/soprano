@@ -42,6 +42,17 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   sonst nach omps Ordnernamen. Sichtprüfung über `statistics_demo -- --snapshot <ordner>` (hell
   860×900, dunkel, Dracula ohne Nutzung); Abfrage einmal lesend gegen die echte `stats.db`
   geprüft (153k Zeilen, „All“ in 0,2 s).
+- 2026-11-11: Agent Dashboard wie Soprano Agents, als eigenes OS-Fenster (auf `main`,
+  installiert): `⇧⌘D` öffnet, holt nach vorn, schließt (auch `⌘W`,
+  `Esc` in der Liste); Rahmen in `soprano-agents-window-frame`. Thread-Inbox (Karten mit
+  Projekt-Monogramm, Status-Pill, Titel, Aktivität; Suche `/`; Abschnitte klappbar, Stopped als
+  Regal), 52-px-Kopf `projekt / titel`, Chat-Lane, schwebender Composer, kein Terminal mehr.
+  Neuer Thread (`N`, `⌘N`, Stift): Projekt- und Agent-Wahl, landet über
+  `Workspace::open_thread` als Tab im Fenster des Projekts, sonst in einem neuen Fenster, ohne
+  das Hauptfenster umzuschalten. Code: `crates/soprano-dashboard` (View neu),
+  `crates/soprano/src/agents_window.rs`, `main_view.rs` (Tasten des Agents-Fensters laufen nicht
+  durch den Resolver, nur der Dashboard-Akkord). Sichtprüfung über
+  `dashboard_demo -- --snapshot <ordner>` (dunkel 1100×780, hell 840×620, Dracula ohne Agenten).
 
 ## Offen
 
@@ -62,9 +73,15 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
-- Settings-Redesign und Dashboard: in der laufenden App noch nicht angesehen (nur Snapshots der
-  Demos). Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von
-  gpui-component); nicht angefasst, weil es Dialoge, Picker, Browser-Adresszeile und Editor-Suche
-  mitverschiebt.
+- Agents-Fenster: in der laufenden App noch nicht angesehen (nur Demo-Snapshots und Tests).
+  Ungeprüft sind genau die Teile, die es nur im echten Fenster gibt: Öffnen/Schließen/Nach-vorn
+  per `⇧⌘D` aus beiden Fenstern, Ampel-Position (20, 19), Verschieben am 52-px-Band, das
+  Menü „Agent Dashboard“ bei aktivem Agents-Fenster, Start eines neuen Threads (Terminal-Agent
+  mit Prompt auf der Kommandozeile, omp-Chat mit erstem Prompt) und „Choose Folder…“. Banner
+  richten sich weiter nur nach dem Hauptfenster (Agents-Fenster vorn zählt als „nicht aktiv“).
+  Linux/Windows: natives Titelband statt eigener Fensterknöpfe, nicht gebaut.
+- Settings-Redesign: in der laufenden App noch nicht angesehen (nur Snapshots der Demo).
+  Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von gpui-component); nicht
+  angefasst, weil es Dialoge, Picker, Browser-Adresszeile und Editor-Suche mitverschiebt.
 - Statistik-Board: in der laufenden App noch nicht angesehen (nur Demo-Snapshots und Tests);
   `omp stats --summary` über die Login-Shell nicht live ausgelöst.

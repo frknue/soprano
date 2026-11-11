@@ -234,7 +234,7 @@ fn tab_slot(id: (&'static str, usize), pill: TabPill, cx: &App) -> gpui::Statefu
         .child(pill)
 }
 
-/// The top row a page (Agent Dashboard, Automations) shows instead of the tab rows: it keeps
+/// The top row a page (Automations, Statistics) shows instead of the tab rows: it keeps
 /// what those rows carried for the window — the drag region, room for the traffic lights or
 /// the sidebar toggle while the sidebar is hidden, and the window buttons off macOS.
 pub fn page_top_row(shell: &Entity<Shell>, window: &Window, cx: &App) -> gpui::AnyElement {

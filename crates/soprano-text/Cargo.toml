@@ -10,7 +10,6 @@ soprano-config = { path = "../soprano-config" }
 soprano-git = { path = "../soprano-git" }
 soprano-platform = { path = "../soprano-platform" }
 caseless = "0.2"
-fancy-regex = "0.14"
 imagesize = "0.14"
 percent-encoding = "2"
 pulldown-cmark = { version = "0.13", default-features = false }

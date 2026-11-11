@@ -50,6 +50,14 @@ impl AgentProfile {
         crate::Color::from_hex(&self.color)
     }
 
+    /// Whether Soprano can hand this agent its first message as it starts: the built-in CLIs
+    /// take one on their command line (`soprano_launch::launch_arguments`). A launch script
+    /// is typed into a shell as written, and another program's flags are not known.
+    pub fn takes_launch_prompt(&self) -> bool {
+        self.launch_script.as_deref().is_none_or(str::is_empty)
+            && matches!(self.id.as_str(), "claude-code" | "codex" | "omp" | "opencode")
+    }
+
     fn builtin(id: &str, name: &str, icon: &str, color: &str, description: &str, command: &str) -> Self {
         Self {
             id: id.into(),

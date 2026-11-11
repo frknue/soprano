@@ -613,12 +613,12 @@ pub fn command_items(
                     "agent-dashboard",
                     IconName::ChartColumn,
                     "Agent Dashboard",
-                    "Monitor every agent across all windows",
+                    "Every agent as a thread, in its own window",
                     short(&["agent-dashboard"]),
                 ),
                 "agents monitor status attention working",
             ),
-            command(shell, Command::OpenDashboard),
+            command(shell, Command::ToggleDashboard),
         ),
         entry(
             searchable(

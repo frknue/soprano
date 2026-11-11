@@ -57,6 +57,40 @@ pub fn main_window_options(frame: sizing::Frame) -> WindowOptions {
     }
 }
 
+/// Where the Agents window's traffic lights sit: centered on its 52 px top band.
+const AGENTS_TRAFFIC_LIGHTS: (f32, f32) = (20.0, 19.0);
+/// The Agents window's smallest size (Soprano Agents').
+pub const AGENTS_MINIMUM_SIZE: (f32, f32) = (840.0, 620.0);
+
+/// What the Agents window's inbox keeps clear at its top-left: the traffic lights on macOS,
+/// nothing where the OS draws a title bar over the window.
+pub fn agents_leading_inset() -> f32 {
+    if IS_MACOS { 90.0 } else { 0.0 }
+}
+
+/// The Agents window's options for a frame: on macOS the content runs under a transparent
+/// title bar, as in the main window; Linux and Windows give it their own title bar, which
+/// closes it without Soprano's quit-on-close buttons.
+pub fn agents_window_options(frame: sizing::Frame) -> WindowOptions {
+    let bounds = Bounds {
+        origin: point(px(frame.x as f32), px(frame.y as f32)),
+        size: Size { width: px(frame.width as f32), height: px(frame.height as f32) },
+    };
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: Some(TitlebarOptions {
+            title: Some("Soprano Agents".into()),
+            appears_transparent: IS_MACOS,
+            traffic_light_position: Some(point(px(AGENTS_TRAFFIC_LIGHTS.0), px(AGENTS_TRAFFIC_LIGHTS.1))),
+        }),
+        app_owns_titlebar_drag: IS_MACOS,
+        window_min_size: Some(Size { width: px(AGENTS_MINIMUM_SIZE.0), height: px(AGENTS_MINIMUM_SIZE.1) }),
+        window_background: WindowBackgroundAppearance::Opaque,
+        app_id: Some(soprano_platform::AppIdentity::current().id),
+        ..WindowOptions::default()
+    }
+}
+
 /// Shows or hides the native window bar where the OS draws one (the macOS traffic lights).
 pub fn apply_window_bar(window: &Window, hide_window_bar: bool) {
     #[cfg(target_os = "macos")]

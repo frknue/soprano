@@ -47,7 +47,7 @@ pub fn command_for(action: &dyn gpui::Action) -> Option<Command> {
     } else if any.is::<OpenMarkdown>() {
         Some(Command::OpenMarkdown { pane_id: None })
     } else if any.is::<AgentDashboard>() {
-        Some(Command::OpenDashboard)
+        Some(Command::ToggleDashboard)
     } else if any.is::<Automations>() {
         Some(Command::OpenAutomations)
     } else if any.is::<Statistics>() {
@@ -176,7 +176,7 @@ pub fn commands_menu_items() -> Vec<(&'static str, Command)> {
         ("Open Project…", Command::OpenProjectSearch),
         ("Open in Soprano Git", Command::OpenInSopranoGit),
         ("Open Markdown…", Command::OpenMarkdown { pane_id: None }),
-        ("Agent Dashboard", Command::OpenDashboard),
+        ("Agent Dashboard", Command::ToggleDashboard),
         ("Automations", Command::OpenAutomations),
         ("Statistics", Command::ToggleStatistics),
         ("Open settings.json", Command::OpenSettingsFile),

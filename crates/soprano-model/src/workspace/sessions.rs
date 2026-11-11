@@ -1,6 +1,12 @@
 //! Live sessions and logical windows.
 
-use super::{Place, Workspace};
+use std::path::Path;
+
+use soprano_types::{AgentCatalog, AgentLaunch, AgentProfile, TerminalTarget};
+
+use super::{Place, TabSpec, Workspace};
+use crate::agent_instance::AgentInstance;
+use crate::pane::{PaneContentKind, PaneState, PaneType, chat_supports};
 use crate::split_node::SplitNode;
 use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
@@ -285,6 +291,92 @@ impl Workspace {
         Some(super::TerminalTarget::new(pane_id, tab_id))
     }
 
+    // MARK: - Threads
+
+    /// Opens an agent in `cwd` as a thread of its project (the Agents window's New Thread): a
+    /// tab of its own at the end of the row of the window that already works on the project,
+    /// else a new window named after it in the active session. `prompt` is the agent's first
+    /// message. Nothing on screen changes: the tab waits behind the visible one, and the
+    /// active window stays. `None`, with nothing opened, for an unknown profile, `terminal`,
+    /// or an agent that cannot be handed the message ([`thread_launch`]).
+    pub fn open_thread(
+        &mut self,
+        profile_id: &str,
+        chat: bool,
+        cwd: &str,
+        prompt: Option<&str>,
+    ) -> Option<TerminalTarget> {
+        let profile =
+            AgentCatalog::shared().profile(profile_id).filter(|profile| profile.id != "terminal")?;
+        let launch = thread_launch(&profile, chat && chat_supports(&profile.id), prompt).ok()?;
+        let pane_id = self.next_pane_id();
+        let tab_id = self.next_tab_id();
+        let mut tab = Self::create_pane_tab(
+            tab_id.clone(),
+            TabSpec {
+                pane_type: PaneType::Agent,
+                profile_id: Some(profile.id.clone()),
+                cwd: Some(cwd.to_owned()),
+                content_kind: chat.then(|| PaneContentKind::CHAT.to_owned()),
+                ..TabSpec::default()
+            },
+        );
+        if launch.is_some() {
+            tab.agent = Some(AgentInstance::with_launch(&tab_id, &profile.id, launch, None));
+        }
+        let suggested = Self::suggested_window_title(Some(&tab));
+        self.panes.insert(pane_id.clone(), PaneState::new(&pane_id, vec![tab]));
+        let layout_tab = LayoutTab {
+            id: self.next_layout_tab_id(),
+            layout: Some(SplitNode::leaf(&pane_id)),
+            active_pane_id: pane_id.clone(),
+        };
+        match self.window_working_on(&Self::project_root(cwd)) {
+            Some(window_id) => self.windows.get_mut(&window_id)?.add_tab(layout_tab),
+            None => {
+                let session_id = self.active_session_id().to_owned();
+                let window_id = self.next_window_id();
+                let title = self.unique_automatic_window_title(&suggested, None, Some(&session_id));
+                self.windows.insert(
+                    window_id.clone(),
+                    WorkspaceWindowState::new(&window_id, &session_id, title, vec![layout_tab], 0),
+                );
+            }
+        }
+        self.notify_model(true);
+        Some(TerminalTarget::new(pane_id, tab_id))
+    }
+
+    /// The window a thread in `cwd` would join ([`Self::open_thread`]); `None` when it would
+    /// open a window of its own. Walks the disk.
+    pub fn window_for_thread(&self, cwd: &str) -> Option<&WorkspaceWindowState> {
+        self.window_working_on(&Self::project_root(cwd)).and_then(|id| self.windows.get(&id))
+    }
+
+    /// The window a new thread of the project at `root` joins: one with a terminal or agent
+    /// on this computer in that project — the active window first, then the active session's
+    /// windows, then the others'. Automation runs keep their session to themselves.
+    fn window_working_on(&self, root: &Path) -> Option<String> {
+        let active_session = self.active_session_id();
+        let automations = self
+            .terminal_sessions
+            .values()
+            .find(|session| session.name == Self::AUTOMATION_SESSION_NAME)
+            .map(|session| session.id.as_str());
+        let works_there = |window: &WorkspaceWindowState| {
+            self.ordered_panes(&window.id).into_iter().flat_map(|pane| pane.tabs.iter()).any(|tab| {
+                tab.pane_type != PaneType::Browser
+                    && tab.remote.is_none()
+                    && tab.cwd.as_deref().is_some_and(|cwd| Self::project_root(cwd) == root)
+            })
+        };
+        let mut windows = self.sorted_windows();
+        windows.retain(|window| Some(window.session_id.as_str()) != automations);
+        windows
+            .sort_by_key(|window| (window.id != self.active_window_id, window.session_id != active_session));
+        windows.into_iter().find(|window| works_there(window)).map(|window| window.id.clone())
+    }
+
     // MARK: - Layout tabs
 
     /// Opens a tab at the end of the active window's row holding one fresh terminal, or a chat
@@ -358,4 +450,22 @@ impl Workspace {
             .and_then(|pane| pane.active_tab())
             .map_or_else(|| "Tab".to_owned(), |tab| tab.title.clone())
     }
+}
+
+/// How a thread's agent gets its first message. A chat takes it through its session and a
+/// thread without one starts bare (`Ok(None)`); a terminal agent takes it on its command line
+/// (`Ok(Some(_))`). `Err` when the agent cannot be handed one that way: it would start
+/// without the message and nobody would know.
+pub(super) fn thread_launch(
+    profile: &AgentProfile,
+    is_chat: bool,
+    prompt: Option<&str>,
+) -> Result<Option<AgentLaunch>, ()> {
+    let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty() && !is_chat) else {
+        return Ok(None);
+    };
+    if !profile.takes_launch_prompt() {
+        return Err(());
+    }
+    Ok(Some(AgentLaunch { prompt: prompt.to_owned(), ..AgentLaunch::default() }))
 }

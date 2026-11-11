@@ -1,10 +1,11 @@
-//! The Agent Dashboard inside a mock of the app's frame (sidebar, top row, status bar), over a
-//! demo workspace: agents in every section, one with a Claude Code transcript, the others with
-//! canned terminal text. `cargo run -p soprano-dashboard --example dashboard_demo`.
+//! The Agent Dashboard as its window shows it, over a demo workspace: threads in every
+//! section, one with a Claude Code transcript.
+//! `cargo run -p soprano-dashboard --example dashboard_demo`.
 //!
-//! `-- --snapshot /abs/dir [--size 1280x820] [--appearance dark|light] [--theme ID]
-//! [--agents N]` writes the dashboard's states (every agent, details, the terminal, the reply
-//! field) as PNGs into the folder and quits, for visual QA without looking at the screen.
+//! `-- --snapshot /abs/dir [--size 1100x780] [--appearance dark|light] [--theme ID]
+//! [--agents N]` writes the dashboard's states (every thread, the detailed work log, the
+//! composer, the stopped shelf, a search, a new thread) as PNGs into the folder and quits,
+//! for visual QA without looking at the screen.
 
 use std::path::{Path, PathBuf};
 
@@ -15,22 +16,12 @@ use gpui::{
 };
 use gpui_component::Root;
 use serde_json::json;
-use soprano_dashboard::{AgentDashboard, DashboardEvent, DashboardHost};
+use soprano_agents::AgentDashboardSection;
+use soprano_dashboard::{AgentDashboard, DashboardEvent, DashboardHost, ProjectChoice};
 use soprano_model::Workspace;
 use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason, TerminalTarget};
 use soprano_ui::snapshot::{self, Args};
 use soprano_ui::{ActiveSopranoTheme, SopranoAssets};
-
-const CODEX_TERMINAL: &str = "❯ Run swift test --filter CheckoutTotal\n\
-• Updated Sources/Storefront/Checkout/Totals.swift:842\n\
-warning: 'roundedTotal' is deprecated\n\
-error: build failed\n\
-```swift\n@MainActor let count: Int = 42\nprint(\"ready\")\n```\n\
-All 301 tests passed";
-
-const CLAUDE_TERMINAL: &str = "● Bash(bin/rails db:migrate)\n\n\
-  Do you want to proceed?\n\
-❯ 1. Yes\n  2. Yes, and don't ask again for bin/rails commands\n  3. No, tell Claude what to do differently";
 
 struct DemoAgent {
     profile: &'static str,
@@ -234,8 +225,7 @@ fn demo_workspace(directory: &Path, count: usize) -> Workspace {
     workspace
 }
 
-/// The dashboard where the app shows it: beside the sidebar, under the page's top row, over
-/// the status bar.
+/// The dashboard as its window's content.
 struct DemoFrame {
     dashboard: Entity<AgentDashboard>,
 }
@@ -243,33 +233,16 @@ struct DemoFrame {
 impl Render for DemoFrame {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         cx.soprano_theme().apply_to_window(window);
-        let theme = cx.soprano_theme().clone();
-        let bar = || div().flex_none().bg(theme.chrome).border_color(theme.border);
-        div()
-            .flex()
-            .flex_row()
-            .size_full()
-            .bg(theme.canvas)
-            .child(bar().w(theme.z(220.)).h_full().border_r_1())
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .h_full()
-                    .child(bar().h(theme.z(42.)).border_b_1())
-                    .child(div().flex_1().min_h_0().child(self.dashboard.clone()))
-                    .child(bar().h(theme.z(28.)).border_t_1()),
-            )
+        div().size_full().child(self.dashboard.clone())
     }
 }
 
-/// Writes the first agent's conversation, details and terminal, the reply field, then every
-/// other agent.
+/// Writes the first thread's conversation, its detailed work log and the composer, every
+/// other thread, the stopped shelf, a search, and a new thread.
 async fn write_snapshots(
     directory: PathBuf,
     agents: usize,
+    dashboard: Entity<AgentDashboard>,
     cx: &mut AsyncWindowContext,
 ) -> anyhow::Result<()> {
     std::fs::create_dir_all(&directory)?;
@@ -283,21 +256,58 @@ async fn write_snapshots(
     };
     // The transcript is read on the store's own thread.
     cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
-    shot("", "first-agent", cx).await?;
+    shot("", "first-thread", cx).await?;
     if agents > 0 {
         shot("o", "details", cx).await?;
-        shot("o t", "terminal", cx).await?;
-        shot("t tab", "reply", cx).await?;
-        cx.update(|window, cx| snapshot::press("shift-tab", window, cx))?;
+        cx.update(|window, cx| {
+            snapshot::press("o tab", window, cx);
+            dashboard.update(cx, |dashboard, cx| {
+                dashboard.set_composer_text(
+                    "Yes, run it.\nThen check the totals of last week's refunds.",
+                    window,
+                    cx,
+                )
+            });
+        })?;
+        shot("", "composer", cx).await?;
+        cx.update(|window, cx| {
+            dashboard.update(cx, |dashboard, cx| dashboard.set_composer_text("", window, cx));
+            snapshot::press("escape", window, cx);
+        })?;
     }
     for index in 1..agents {
-        shot("j", &format!("agent-{}", index + 1), cx).await?;
+        shot("j", &format!("thread-{}", index + 1), cx).await?;
     }
+    if agents > 0 {
+        cx.update(|_, cx| {
+            dashboard.update(cx, |dashboard, cx| dashboard.toggle_fold(AgentDashboardSection::Stopped, cx))
+        })?;
+        shot("j", "stopped-shelf", cx).await?;
+        cx.update(|window, cx| {
+            dashboard.update(cx, |dashboard, cx| dashboard.set_search("pay", window, cx))
+        })?;
+        shot("", "search", cx).await?;
+        cx.update(|window, cx| dashboard.update(cx, |dashboard, cx| dashboard.set_search("", window, cx)))?;
+    }
+    shot("n", "new-thread", cx).await?;
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| {
+            dashboard.set_composer_text("Add a CSV export to the refunds report", window, cx)
+        })
+    })?;
+    shot("", "new-thread-written", cx).await?;
+    cx.update(|window, cx| dashboard.update(cx, |dashboard, cx| dashboard.open_agent_menu(window, cx)))?;
+    shot("", "new-thread-agents", cx).await?;
+    cx.update(|window, cx| {
+        snapshot::press("escape", window, cx);
+        dashboard.update(cx, |dashboard, cx| dashboard.open_project_picker(window, cx));
+    })?;
+    shot("", "new-thread-projects", cx).await?;
     Ok(())
 }
 
 fn main() {
-    let args = Args::parse(1280., 820.);
+    let args = Args::parse(1100., 780.);
     let mut theme = "folio".to_owned();
     let mut agents = AGENTS.len();
     for (flag, value) in &args.rest {
@@ -319,25 +329,31 @@ fn main() {
             |window, cx| {
                 let workspace = cx.new(|_| demo_workspace(&directory, agents));
                 let model = workspace.clone();
+                let projects = directory.join("projects");
                 let host = DashboardHost::new()
                     .home(directory.clone())
-                    .terminal_text(move |target, cx| {
-                        let workspace = model.read(cx);
-                        let entry = workspace.agent_dashboard_entry(target)?;
-                        match (entry.is_chat, entry.profile_id.as_str(), entry.status) {
-                            (true, ..) => Some(String::new()),
-                            (_, _, AgentStatus::Stopped) => None,
-                            (_, "codex", _) => Some(CODEX_TERMINAL.to_owned()),
-                            (_, "claude-code", _) => Some(CLAUDE_TERMINAL.to_owned()),
-                            _ => Some(String::new()),
-                        }
+                    .accepts_replies(move |target, cx| {
+                        model
+                            .read(cx)
+                            .agent_dashboard_entry(target)
+                            .is_some_and(|entry| entry.status != AgentStatus::Stopped)
                     })
                     .notable_branch(|cwd, _| {
                         cwd.ends_with("payments").then(|| "fix/partial-refunds".to_owned())
+                    })
+                    .projects(move |_| {
+                        AGENTS
+                            .iter()
+                            .map(|agent| {
+                                ProjectChoice::at(projects.join(agent.folder).to_string_lossy().into_owned())
+                            })
+                            .collect()
                     });
                 let dashboard = cx.new(|cx| AgentDashboard::new(workspace.clone(), host, window, cx));
                 let model = workspace.clone();
-                cx.subscribe(&dashboard, move |_, event: &DashboardEvent, cx| {
+                let handle = window.window_handle();
+                let elsewhere = directory.join("projects").join("elsewhere");
+                cx.subscribe(&dashboard, move |dashboard, event: &DashboardEvent, cx| {
                     println!("{event:?}");
                     match event {
                         DashboardEvent::Close => cx.quit(),
@@ -357,15 +373,38 @@ fn main() {
                             cx.notify();
                         }),
                         DashboardEvent::Reply { .. } => {}
+                        DashboardEvent::NewThread { profile_id, chat, cwd, prompt } => {
+                            let opened = model.update(cx, |workspace, cx| {
+                                let target = workspace.open_thread(profile_id, *chat, cwd, Some(prompt));
+                                workspace.take_changes();
+                                cx.notify();
+                                target
+                            });
+                            let _ = handle.update(cx, |_, window, cx| {
+                                dashboard.update(cx, |dashboard, cx| match &opened {
+                                    Some(target) => dashboard.thread_opened(target, window, cx),
+                                    None => dashboard.thread_failed("This agent is not set up.", window, cx),
+                                })
+                            });
+                        }
+                        DashboardEvent::ChooseProject => {
+                            let path = elsewhere.to_string_lossy().into_owned();
+                            let _ = handle.update(cx, |_, window, cx| {
+                                dashboard.update(cx, |dashboard, cx| {
+                                    dashboard.set_draft_project(&path, window, cx)
+                                })
+                            });
+                        }
                     }
                 })
                 .detach();
                 let focus = dashboard.focus_handle(cx);
                 window.focus(&focus, cx);
                 if let Some(directory) = snapshot {
+                    let dashboard = dashboard.clone();
                     window
                         .spawn(cx, async move |cx| {
-                            let result = write_snapshots(directory, agents, cx).await;
+                            let result = write_snapshots(directory, agents, dashboard, cx).await;
                             snapshot::finish(result, cx);
                         })
                         .detach();

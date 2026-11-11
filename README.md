@@ -329,7 +329,7 @@ there; bind one in `settings.json`).
 | Shortcut | Action |
 |---|---|
 | `⌘P` | Command palette; `Esc` or a click outside it closes it |
-| `⇧⌘D` | Open the Agent Dashboard |
+| `⇧⌘D` | Open the Agent Dashboard in its own window, bring it forward, or close it while it is in front |
 | `⇧⌘U` | Open or close Statistics |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
@@ -502,41 +502,55 @@ directory, browser URL, or agent name. Window-title matches rank ahead of matche
 only inside a split pane; selecting a result restores that window's remembered active
 pane.
 
-Open the **Agent Dashboard** from the sidebar chart button, the **Commands** menu, or the
-`⇧⌘D` (`agent-dashboard`). It is laid out like a mail client: a sidebar lists every
-agent across all logical windows under **Needs you** (waiting for input, failed, or
-asking for attention), **Working**, **Ready**, and **Stopped**, each with its count, and
-the selected agent fills the rest. Entries update from the same lifecycle events as pane
-headers and notifications and show elapsed runtime. Each entry is named like a sidebar
-row: the agent's task (its name before it has one), with the agent, its folder, and a
-branch other than the repository's default underneath, followed by what the agent is
-doing right now.
+Open the **Agent Dashboard** from the sidebar's Agents header, the **Commands** menu, or
+`⇧⌘D` (`agent-dashboard`). It is a window of its own, laid out like Soprano Agents, that
+you can keep beside the main window or on another screen: `⇧⌘D` brings it forward while it
+is behind and closes it while it is in front (`⌘W` and `Esc` on the list close it too). It
+reopens where you left it.
 
-The selected agent shows its title and location over a toolbar: **Timeline** /
-**Terminal**, **Show details**, and **Open**, **Stop**, and **Restart**. For a Claude
-Code, Codex, OpenCode, or omp agent the **timeline** reads like the [chat](#agent-chat),
-from the transcript the agent writes while it runs in its pane: your prompts as bubbles,
-Markdown answers, each turn's work under **Worked for** with the diff of every edit, and
-a card of the files it changed. **Scroll to end** appears
-once you scroll away from the newest entry. Claude Code and omp report their transcript
-through Soprano's hooks, and OpenCode its session in OpenCode's database; Codex is found
-once its first reply arrives, or right away with the
+On the left, the inbox lists every agent across all logical windows as a thread under
+**Needs you** (waiting for input, failed, or asking for attention), **Working**,
+**Ready**, and **Stopped**, each with its count; click a header to fold its threads away
+(Stopped starts folded and takes one line per thread). A thread is a card: the project's
+monogram and name with the status pill — or how long ago it went idle —, the agent's
+task (its name before it has one), and under it what the agent is doing right now, else
+its machine or a branch other than the repository's default. Type in **Search** (`/`) to
+narrow the inbox by task, project, agent, or branch. Entries update from the same
+lifecycle events as pane headers and notifications.
+
+The open thread is a chat: a header with `project / task`, its status, where it runs
+(click to open it in its window), and buttons for the detailed work log, **Restart**,
+**Stop**, and **Open**. For a Claude Code, Codex, OpenCode, or omp agent the conversation
+reads like the [chat](#agent-chat), from the transcript the agent writes while it runs in
+its pane: your prompts as bubbles, Markdown answers, each turn's work under **Worked
+for** with the diff of every edit, and a card of the files it changed. **Scroll to end**
+appears once you scroll away from the newest entry. Claude Code and omp report their
+transcript through Soprano's hooks, and OpenCode its session in OpenCode's database;
+Codex is found once its first reply arrives, or right away with the
 [Codex hooks](#agents-that-report-in) installed. [Chats](#agent-chat) show their
-conversation the same way, without a Terminal view, and replies go to the chat. Plain
-terminals and custom agents show their live terminal instead, with
-theme-aware highlighting for prompts, diagnostics, paths, diffs, and fenced code. Under
-either view, the composer says what the agent is doing right now (the entry in the list
-repeats that line) above the reply field. Replies are available while the agent is
-working, ready, waiting for input, or in an error state and are typed into that exact
-pane tab.
+conversation the same way. There is no terminal view: an agent without a readable
+transcript says so, and **Open** shows its pane. The floating composer sends to that
+exact pane tab while the agent is working, ready, waiting for input, or in an error
+state: `Return` sends, `⇧Return` adds a line (a terminal agent gets the lines joined by
+spaces).
 
-Use `J` / `K` or the arrow keys to move through agents, `Tab` (or `R`) to focus the reply
-field and `⇧Tab` to leave it again, `Return` to open the selected agent, and `Esc` to
-close the dashboard without changing the active agent. In the timeline, `⇧J` / `⇧K` (or
-`Page Down` / `Page Up`) scroll, `[` / `]` jump to the previous or next prompt, `O`
-toggles details (every step and diff open, or the minimal work log), `G` jumps back to the newest
-entry and keeps following it, and `T` switches between the timeline and the live
-terminal. Clicking into the text to copy from it leaves these keys working.
+**New thread** (the pencil button, `N`, or `⌘N`) starts an agent from the dashboard:
+"What should we build in *project*?" opens on the open thread's project — click the name
+to pick another from the projects open in your windows and the `projectDirectories`, or
+any folder — and the chip in the composer picks the agent: Codex, Claude Code, OpenCode,
+or omp in its terminal, or omp as a chat (the last choice is remembered). A custom agent,
+or one started through a `launchScript`, cannot be handed a first message and is not
+offered; start it from the main window. Your first message starts it. The thread
+opens as a tab of the window that already works on that project, or in a new window
+named after it when none does; the line under the headline says which. Nothing in the
+main window moves: the tab waits behind the visible one until you **Open** it.
+
+Use `J` / `K` or the arrow keys to move through threads, `Tab` (or `R`) to focus the
+composer and `Esc` or `⇧Tab` to leave it again, and `Return` to open the selected thread
+in its window. In the conversation, `⇧J` / `⇧K` (or `Page Down` / `Page Up`) scroll,
+`[` / `]` jump to the previous or next prompt, `O` toggles details (every step and diff
+open, or the minimal work log), and `G` jumps back to the newest entry and keeps following
+it. Clicking into the text to copy from it leaves these keys working.
 
 Drag the sidebar's trailing edge to resize it between 160 and 520 points; the cursor
 changes to a resize arrow over the edge and the border accents while you drag. A narrow

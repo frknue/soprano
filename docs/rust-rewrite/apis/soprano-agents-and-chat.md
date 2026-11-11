@@ -46,7 +46,6 @@ Deps: soprano-types, soprano-platform, serde_json, chrono, notify 8, rusqlite 0.
   - `trait DashboardEntryStatus` (`status`, `needs_attention`), so another entry type can be used through a newtype.
   - `AgentDashboardSnapshot::<E>::new(Vec<E>)`: sorts by urgency and gives `total_count` / `working_count` / `needs_input_count` / `error_count`.
   - `AgentDashboardSection::{NeedsYou, Working, Ready, Stopped}` with `of`, `title`, `group(&[E]) -> Vec<(Section, Vec<E>)>`.
-  - `elapsed_text(status, started_at, now)`.
 - **`json`:** `JsonValue = serde_json::Value`, plus `JsonValueExt` (`non_empty_string`, `int`).
 
 ### soprano-chat (no gpui; depends on soprano-agents and re-exports `chat_turns::*`, `JsonValue`, `omp_edit_changes`)

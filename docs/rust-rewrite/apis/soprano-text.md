@@ -16,10 +16,6 @@ Every range in the crate is a UTF-8 byte range, so it can be used directly for G
 - One static per language (`SWIFT`, `JAVASCRIPT`, `TYPESCRIPT`, … `MARKUP`, `MARKDOWN`, `DIFF`).
 - Colors are not in this crate. The UI keeps the three Swift color maps: the editor/diff map (`DiffStyle.syntaxColor`), the chat map (`MarkdownRenderer.syntaxColor`) and the reader's `tok-*` CSS colors.
 
-**`agent_output`** (port of `AgentOutputHighlighter.swift`)
-- `highlight(text) -> Vec<OutputRun { range, style: OutputStyle { color: OutputColor, weight: OutputWeight, underline, code_background } }>`. The runs cover the whole text in order.
-- `OutputColor` is a set of palette roles (`TextPrimary`, `TextMuted`, `Cyan`, `Blue`, `Success`, `Danger`, `Yellow`, `Syntax*`). `OutputWeight` is `Regular`/`Semibold`/`Bold`.
-
 **`editor`** (port of `EditorDocument.swift` plus the document logic of `EditorPaneView.swift`)
 - `EditorDocument::open(path)`. Read state with:
   - `path()`, `name()`, `content() -> &DocumentContent { Text, Image{width,height}, Unavailable(String) }`

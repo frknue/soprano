@@ -18,6 +18,8 @@
 //!   Markdown reader) cached by exact pane/tab target across layout rebuilds; terminal reports
 //!   flow back into the workspace; it also mirrors unsaved editor documents for the model's
 //!   close-confirmation predicate (the main view asks Save / Don't Save / Cancel).
+//! - [`agents_window`]: the Agent Dashboard's own OS window, its frame, and the folders it
+//!   offers a new thread.
 //! - [`automations`]: the `AutomationHost` over the workspace and content host, and `drive`,
 //!   the one way the main view calls the automation controller.
 //! - [`statistics`]: the statistics board's host: omp's usage history and the workspace's
@@ -28,6 +30,7 @@
 //!   palette's items and pickers, the macOS menu bar, the CLI requests' model logic, key event
 //!   conversion, window geometry, and the per-OS window frame.
 
+mod agents_window;
 mod app;
 mod automations;
 mod content;

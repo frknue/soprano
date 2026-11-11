@@ -99,7 +99,9 @@ an app:
   `soprano-explorer`, `soprano-chat-ui`, `soprano-dashboard`, `soprano-settings`,
   `soprano-browser`, `soprano-automations-ui`, `soprano-statistics`.
 - `soprano` (bin): `main.rs` runs `soprano_ipc::cli::run_cli` first (the binary doubles as
-  `$SOPRANO_BIN`), then the app shell that wires every crate together.
+  `$SOPRANO_BIN`), then the app shell that wires every crate together. The main window is
+  the app; the Agent Dashboard lives in a second OS window (`agents_window.rs`) whose keys
+  never run through the keybinding resolver, and whose events the main view answers.
 
 `resources/` ships inside every package (agent hook templates, OpenCode/omp plugins, zsh
 integration, `bin/omp` launchers, fonts, icons). `docs/rust-rewrite/` holds the Herdr look
@@ -120,7 +122,9 @@ sidebar widths and saved workspaces stay in `StateStore` — app state, not conf
   `soprano-ui`. No uppercase eyebrows or status words: sections are "Title N ⌄"; agent
   status is a status pill (Working with its duration, Approval, Input, Failed, Done, else a
   relative time). Keycaps follow K1: one cap per chord, a prefix sequence as separate caps.
-  Motion is opacity-only fades ≤150 ms, none under Reduce Motion.
+  Motion is opacity-only fades ≤150 ms, none under Reduce Motion. The Agent Dashboard is
+  the one exception in layout: it follows Soprano Agents (inbox, 52 px header, chat lane,
+  floating composer), with the same tokens, fonts and icons.
 - Shortcuts are written with macOS keys; on Linux/Windows `cmd` is Ctrl+Shift, `cmd+shift`
   Ctrl+Shift+Alt, `ctrl+cmd` Ctrl+Alt, plain `ctrl` stays Ctrl (`soprano-keys` matches,
   `soprano-config` displays).

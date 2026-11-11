@@ -1,6 +1,6 @@
 [package]
 name = "soprano-dashboard"
-description = "The Agent Dashboard in GPUI: every agent across all windows, its conversation or live terminal, and a reply line."
+description = "The Agent Dashboard in GPUI, laid out like Soprano Agents: every agent across all windows as a thread, its conversation, a composer, and new threads."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,14 +10,11 @@ publish.workspace = true
 soprano-agents = { path = "../soprano-agents" }
 soprano-model = { path = "../soprano-model" }
 soprano-platform = { path = "../soprano-platform" }
-soprano-text = { path = "../soprano-text" }
 soprano-types = { path = "../soprano-types" }
 soprano-ui = { path = "../soprano-ui" }
 gpui.workspace = true
 gpui-component.workspace = true
 soprano-chat-ui = { path = "../soprano-chat-ui" }
-soprano-editor = { path = "../soprano-editor" }
-chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
 futures = "0.3"
 
 [dev-dependencies]
@@ -25,6 +22,7 @@ gpui = { workspace = true, features = ["test-support"] }
 gpui_platform.workspace = true
 # The demo's `--snapshot` mode.
 soprano-ui = { path = "../soprano-ui", features = ["snapshot"] }
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
 anyhow.workspace = true
 serde_json.workspace = true
 tempfile = "3"

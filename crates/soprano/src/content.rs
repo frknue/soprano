@@ -1134,12 +1134,34 @@ impl ContentHost {
         }
     }
 
-    /// What the Agent Dashboard shows for `target`: a live terminal's text, or an empty text
-    /// for a running chat tab (its transcript lives in the chat), so both count as available.
-    pub fn dashboard_text(&self, target: &TerminalTarget, cx: &App) -> Option<String> {
-        match self.contents.get(target)? {
-            PaneContent::Chat(view) if view.read(cx).session().borrow().is_running() => Some(String::new()),
-            _ => self.visible_terminal_text(target, cx),
+    /// Whether `target`'s agent takes a message now (the Agent Dashboard's composer): a live
+    /// terminal, or a chat whose session runs.
+    pub fn accepts_prompt(&self, target: &TerminalTarget, cx: &App) -> bool {
+        match self.contents.get(target) {
+            Some(PaneContent::Chat(view)) => view.read(cx).session().borrow().is_running(),
+            Some(PaneContent::Terminal(view)) => !view.read(cx).has_exited(),
+            _ => false,
+        }
+    }
+
+    /// Starts the agent of a thread's tab (`Workspace::open_thread`), which waits behind its
+    /// window's visible tab where nothing would start it. A chat takes `prompt` as its first
+    /// message once its session is up; a terminal agent got it on its command line. False
+    /// when the agent could not start.
+    pub fn start_thread(
+        &mut self,
+        target: &TerminalTarget,
+        prompt: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else {
+            return false;
+        };
+        match self.ensure_content(&tab, &target.pane_id, Some(true), window, cx) {
+            PaneContent::Terminal(_) => true,
+            PaneContent::Chat(view) => view.update(cx, |view, cx| view.submit_prompt(prompt, window, cx)),
+            _ => false,
         }
     }
 

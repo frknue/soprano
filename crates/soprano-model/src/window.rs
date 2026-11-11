@@ -175,6 +175,11 @@ impl WorkspaceWindowState {
         self.active_tab_index = self.tabs.len() - 1;
     }
 
+    /// Adds `tab` at the end of the row behind the visible one.
+    pub fn add_tab(&mut self, tab: LayoutTab) {
+        self.tabs.push(tab);
+    }
+
     /// Removes the tab at `index` and returns the panes it held. Removing the active tab shows
     /// its right neighbor, or the new last tab. The last tab is never removed; closing it
     /// closes the window.

@@ -1,8 +1,8 @@
 //! The window's root (`MainWindowController` + `MainContentViewController`): lays out the
 //! sidebar, the tab rows, the split tree, the right sidebar and the status bar per SHELL-MAP.md,
 //! carries out every [`Command`], routes every key through the keybinding resolver before any
-//! content sees it, answers the CLI, and hosts the overlays (palette, dialogs, Settings, toasts,
-//! popups).
+//! content sees it, answers the CLI, hosts the overlays (palette, dialogs, Settings, toasts,
+//! popups), and owns the Agents window beside it.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -40,6 +40,7 @@ use soprano_ui::{
     Toast, ToastLevel, ToastStack,
 };
 
+use crate::agents_window::{self, AgentsWindowHandle};
 use crate::automations::{self, AutomationContext};
 use crate::content::{ContentEvent, ContentHost, PaneContent, terminal_theme};
 use crate::palette::{self, PaletteAction, PaletteEntry};
@@ -142,7 +143,10 @@ pub struct MainView {
     dialog: Option<Entity<Dialog>>,
     queued_dialogs: Vec<(DialogContent, DialogCompletion)>,
     settings: Option<Entity<SettingsView>>,
-    dashboard: Option<Entity<AgentDashboard>>,
+    /// The Agents window while it is open, with the subscription to its dashboard.
+    agents: Option<(AgentsWindowHandle, Subscription)>,
+    /// This window: keys typed in the Agents window are not the workspace's.
+    window_id: gpui::WindowId,
     automations: AutomationContext,
     automations_page: Option<Entity<AutomationsPage>>,
     statistics: Option<Entity<StatisticsBoard>>,
@@ -399,7 +403,8 @@ impl MainView {
             dialog: None,
             queued_dialogs: Vec::new(),
             settings: None,
-            dashboard: None,
+            agents: None,
+            window_id: window.window_handle().window_id(),
             automations,
             automations_page: None,
             statistics: None,
@@ -506,7 +511,7 @@ impl MainView {
                     self.toast(ToastLevel::Error, message, cx);
                 }
             }
-            Command::OpenDashboard => self.show_page(Page::Dashboard, window, cx),
+            Command::ToggleDashboard => self.toggle_agents_window(window, cx),
             Command::ToggleAutomations => {
                 if self.shell.read(cx).page == Some(Page::Automations) {
                     self.close_page(true, window, cx);
@@ -659,7 +664,7 @@ impl MainView {
             BindingCommand::ToggleExplorer => self.run(Command::ToggleExplorer, window, cx),
             BindingCommand::ToggleSourceControl => self.run(Command::ToggleSourceControl, window, cx),
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
-            BindingCommand::OpenAgentDashboard => self.run(Command::OpenDashboard, window, cx),
+            BindingCommand::OpenAgentDashboard => self.run(Command::ToggleDashboard, window, cx),
             BindingCommand::ToggleStatistics => self.run(Command::ToggleStatistics, window, cx),
             // `keybindingZoom`: the active terminal's font, not the whole UI.
             BindingCommand::Zoom(delta) => {
@@ -1227,9 +1232,6 @@ impl MainView {
         if self.settings.is_some() {
             self.close_settings(window, cx);
         }
-        if page != Page::Dashboard {
-            self.dashboard = None;
-        }
         if page != Page::Automations {
             self.automations_page = None;
         }
@@ -1252,23 +1254,6 @@ impl MainView {
             window.focus(&handle, cx);
             self.automations_page = Some(automations);
         }
-        if page == Page::Dashboard && self.dashboard.is_none() {
-            let content = self.content.clone();
-            let branches = self.services.branches.clone();
-            let host = DashboardHost::new()
-                .terminal_text(move |target, cx| content.read(cx).dashboard_text(target, cx))
-                .notable_branch(move |cwd, _| branches.notable_branch(cwd));
-            let model = self.workspace.model.clone();
-            let dashboard = cx.new(|cx| AgentDashboard::new(model, host, window, cx));
-            let subscription =
-                cx.subscribe_in(&dashboard, window, |this, dashboard, event: &DashboardEvent, window, cx| {
-                    this.dashboard_event(dashboard.clone(), event, window, cx)
-                });
-            self._subscriptions.push(subscription);
-            let handle = dashboard.focus_handle(cx);
-            self.dashboard = Some(dashboard);
-            window.focus(&handle, cx);
-        }
         if page == Page::Statistics && self.statistics.is_none() {
             let host = crate::statistics::host(self.workspace.model.clone());
             let board = cx.new(|cx| StatisticsBoard::new(host, window, cx));
@@ -1288,7 +1273,6 @@ impl MainView {
     }
 
     fn close_page(&mut self, restore_focus: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.dashboard = None;
         self.automations_page = None;
         self.statistics = None;
         self.shell.update(cx, |shell, cx| {
@@ -1300,18 +1284,104 @@ impl MainView {
         }
     }
 
-    /// `AgentDashboardViewController`'s callbacks.
-    fn dashboard_event(
-        &mut self,
-        dashboard: Entity<AgentDashboard>,
-        event: &DashboardEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+    // MARK: - Agents window
+
+    /// `⇧⌘D`: opens the Agents window, brings it forward while it is behind, and closes it
+    /// while it is in front.
+    fn toggle_agents_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((agents, _)) = self.agents.as_ref().filter(|(agents, _)| agents.is_open()) else {
+            return self.open_agents_window(window, cx);
+        };
+        let handle = agents.window;
+        let state = self.services.state.clone();
+        let closed = handle.update(cx, |_, window, _| {
+            let in_front = window.is_window_active();
+            if in_front {
+                agents_window::close(window, &state);
+            } else {
+                window.activate_window();
+            }
+            in_front
+        });
+        match closed {
+            Ok(true) => self.agents = None,
+            Ok(false) => {}
+            // The window is in the middle of an update of its own: the request came from a key
+            // or the menu in it, so it is the one in front. It closes once that update is over.
+            Err(_) => {
+                self.agents = None;
+                cx.defer(move |cx| {
+                    handle.update(cx, |_, window, _| agents_window::close(window, &state)).ok();
+                });
+            }
+        }
+    }
+
+    fn open_agents_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let content = self.content.clone();
+        let branches = self.services.branches.clone();
+        let workspace = self.workspace.clone();
+        let shell = self.shell.clone();
+        let host = DashboardHost::new()
+            .accepts_replies(move |target, cx| content.read(cx).accepts_prompt(target, cx))
+            .notable_branch(move |cwd, _| branches.notable_branch(cwd))
+            .projects(move |cx| {
+                agents_window::project_choices(
+                    workspace.read(cx),
+                    &shell.read(cx).settings.project_directories,
+                )
+            })
+            .state(self.services.state.clone())
+            .leading_inset(window_chrome::agents_leading_inset());
+        let display = match window.display(cx) {
+            Some(display) => window_chrome::frame_of(display.visible_bounds()),
+            None => window_chrome::main_visible_frame(cx),
+        };
+        match agents_window::open(self.workspace.model.clone(), host, &self.services.state, display, cx) {
+            Ok(agents) => {
+                let Some(dashboard) = agents.dashboard.upgrade() else { return };
+                let subscription =
+                    cx.subscribe_in(&dashboard, window, |this, _, event: &DashboardEvent, window, cx| {
+                        this.dashboard_event(event, window, cx)
+                    });
+                self.agents = Some((agents, subscription));
+            }
+            Err(error) => {
+                self.toast(ToastLevel::Error, format!("The Agents window could not open: {error}"), cx)
+            }
+        }
+    }
+
+    fn close_agents_window(&mut self, cx: &mut Context<Self>) {
+        let Some((agents, _)) = self.agents.take() else { return };
+        let state = self.services.state.clone();
+        agents.window.update(cx, |_, window, _| agents_window::close(window, &state)).ok();
+    }
+
+    /// Runs `f` on the dashboard in its own window.
+    fn with_dashboard(
+        &self,
+        cx: &mut App,
+        f: impl FnOnce(&mut AgentDashboard, &mut Window, &mut Context<AgentDashboard>),
     ) {
+        let Some((agents, _)) = &self.agents else { return };
+        let Some(dashboard) = agents.dashboard.upgrade() else { return };
+        agents
+            .window
+            .update(cx, |_, window, cx| dashboard.update(cx, |dashboard, cx| f(dashboard, window, cx)))
+            .ok();
+    }
+
+    /// What the dashboard asks for. `window` is the main window: the dashboard's events arrive
+    /// here once its own window is done with the key or click that caused them.
+    fn dashboard_event(&mut self, event: &DashboardEvent, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             DashboardEvent::Open(target) => {
+                // The agent shows in the main window, which comes forward; the Agents window
+                // stays where it is.
                 self.close_page(false, window, cx);
                 self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, true));
+                window.activate_window();
                 self.sync_keyboard_focus(window, cx);
             }
             DashboardEvent::Stop(target) => self.workspace.update(cx, |ws| ws.stop_agent(target)),
@@ -1320,10 +1390,56 @@ impl MainView {
                 let sent =
                     self.content.update(cx, |content, cx| content.reply_to_agent(text, target, window, cx));
                 if !sent {
-                    dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(target, text, window, cx));
+                    self.with_dashboard(cx, |dashboard, window, cx| {
+                        dashboard.reply_failed(target, text, window, cx)
+                    });
                 }
             }
-            DashboardEvent::Close => self.close_page(true, window, cx),
+            DashboardEvent::NewThread { profile_id, chat, cwd, prompt } => {
+                let opened =
+                    self.workspace.update(cx, |ws| ws.open_thread(profile_id, *chat, cwd, Some(prompt)));
+                let Some(target) = opened else {
+                    return self.with_dashboard(cx, |dashboard, window, cx| {
+                        dashboard.thread_failed(
+                            "This agent can no longer be started with a message.",
+                            window,
+                            cx,
+                        )
+                    });
+                };
+                // Its tab waits behind the visible one, so nothing has started its agent yet.
+                let started =
+                    self.content.update(cx, |content, cx| content.start_thread(&target, prompt, window, cx));
+                if !started {
+                    self.toast(ToastLevel::Error, "The agent could not start. Open it in its window.", cx);
+                }
+                self.with_dashboard(cx, |dashboard, window, cx| dashboard.thread_opened(&target, window, cx));
+            }
+            DashboardEvent::ChooseProject => {
+                let paths = cx.prompt_for_paths(PathPromptOptions {
+                    files: false,
+                    directories: true,
+                    multiple: false,
+                    prompt: Some("Choose".into()),
+                });
+                cx.spawn(async move |this, cx| {
+                    let Ok(Ok(Some(paths))) = paths.await else { return };
+                    let Some(path) = paths.first().map(|path| path.to_string_lossy().into_owned()) else {
+                        return;
+                    };
+                    this.update(cx, |this, cx| {
+                        this.with_dashboard(cx, |dashboard, window, cx| {
+                            dashboard.set_draft_project(&path, window, cx)
+                        })
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            DashboardEvent::Close => {
+                self.close_agents_window(cx);
+                window.activate_window();
+            }
         }
     }
 
@@ -1697,7 +1813,29 @@ impl MainView {
                 .is_some_and(|view| view.read(cx).captures_keys() || view.read(cx).is_confirming())
     }
 
+    /// Whether `keystroke` is the chord bound to the Agent Dashboard, read against the bindings
+    /// alone: the resolver's own prefix and hint state belongs to the main window.
+    fn toggles_agents_window(&self, keystroke: &gpui::Keystroke) -> bool {
+        let modifiers = &keystroke.modifiers;
+        if !(modifiers.platform || modifiers.control || modifiers.alt) {
+            return false;
+        }
+        let mut resolver = KeybindingResolver::new(self.resolver.config().clone(), self.resolver.platform());
+        let outcome =
+            resolver.handle(&crate::keyboard::key_event(keystroke), &KeyContext::new(Instant::now()));
+        matches!(outcome, KeyOutcome::Action(id) | KeyOutcome::MenuAction(id) if id == "agent-dashboard")
+    }
+
     fn intercept_key(&mut self, event: &KeystrokeEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if window.window_handle().window_id() != self.window_id {
+            // Keys typed in the Agents window are its own; only the chord that toggles it is
+            // the app's.
+            if self.toggles_agents_window(&event.keystroke) {
+                cx.stop_propagation();
+                self.toggle_agents_window(window, cx);
+            }
+            return;
+        }
         if self.dialog.is_some() && !soprano_ui::dialog::dialog_passes_chord_to_app(&event.keystroke) {
             // The dialog takes every key except the app's own editing chords.
             return;
@@ -2114,7 +2252,6 @@ impl MainView {
 
     fn render_page(&mut self, page: Page, cx: &mut Context<Self>) -> AnyElement {
         let view: Option<gpui::AnyView> = match page {
-            Page::Dashboard => self.dashboard.clone().map(Into::into),
             Page::Automations => self.automations_page.clone().map(Into::into),
             Page::Statistics => self.statistics.clone().map(Into::into),
         };

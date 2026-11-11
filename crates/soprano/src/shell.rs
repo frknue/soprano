@@ -20,10 +20,9 @@ use soprano_types::{KeyBindingConfig, KeybindingState, Machine};
 /// Persisted visibility of the left sidebar (`MainContentViewController.sidebarVisibleKey`).
 pub const SIDEBAR_VISIBLE_KEY: &str = "soprano-sidebar-visible";
 
-/// A full-workspace page right of the sidebar (`showDashboard` / `showAutomations`).
+/// A full-workspace page right of the sidebar (`showAutomations`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
-    Dashboard,
     Automations,
     Statistics,
 }
@@ -79,7 +78,8 @@ pub enum Command {
     OpenSettings,
     OpenAccountsSettings,
     OpenSettingsFile,
-    OpenDashboard,
+    /// Open the Agents window, bring it forward, or close it while it is in front.
+    ToggleDashboard,
     ToggleAutomations,
     /// Show the Automations page (on its list).
     OpenAutomations,

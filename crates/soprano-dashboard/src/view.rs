@@ -1,9 +1,12 @@
-//! The Agent Dashboard view (`AgentDashboardViewController.swift`), laid out like a mail
-//! client on the window's own surfaces: on `canvas`, the page header over the agents under
-//! Needs you / Working / Ready / Stopped; beside them, as a pane-like `background` card, the
-//! selected agent — its title and where it runs over a toolbar, its conversation (or live
-//! terminal), and a reply composer.
+//! The Agent Dashboard view, in Soprano Agents' layout: the thread inbox on the left (search,
+//! New Thread, cards under Needs you / Working / Ready / Stopped), and beside it the open
+//! thread as a chat — a 52 px header naming project and thread, the conversation in the
+//! centered lane, and the floating composer. A new thread is drafted in the same column.
 
+mod chat;
+mod sidebar;
+
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -11,114 +14,100 @@ use std::time::{Duration, SystemTime};
 
 use futures::StreamExt as _;
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, ElementId, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window, div, point,
-    prelude::*, px, relative,
+    App, AppContext as _, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
+    Styled, Subscription, Task, Window, canvas, div, point, px,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Enter, InputEvent, InputState, TextareaState};
 use soprano_agents::{
-    ActivityTone, AgentTimeline, AgentTimelineActivity, AgentTranscriptSource, AgentTranscriptStore,
-    ChatThread,
+    AgentTimeline, AgentTimelineActivity, AgentTranscriptSource, AgentTranscriptStore, ChatThread,
 };
-use soprano_chat_ui::{ActivityLine, TimelineSource, TimelineView, TranscriptSource};
-use soprano_editor::rich::RichText;
-use soprano_model::AgentDashboardEntry;
+use soprano_chat_ui::timeline_view::{gutter, lane_width};
+use soprano_chat_ui::{TimelineSource, TimelineView, TranscriptSource};
 use soprano_model::Workspace;
-use soprano_text::context_line::{ContextLine, ContextPart};
-use soprano_types::AgentStatus;
-use soprano_types::TerminalTarget;
-use soprano_ui::button::{Button, ButtonSize, IconButton};
-use soprano_ui::chrome::{Card, ScrollList, SectionHeader, SidebarRow};
-use soprano_ui::controls::SegmentedControl;
-use soprano_ui::fonts::{self, size};
-use soprano_ui::keycaps::Keycaps;
-use soprano_ui::status::StatusPill;
+use soprano_platform::StateStore;
+use soprano_types::{AgentStatus, TerminalTarget};
+use soprano_ui::fonts;
+use soprano_ui::status::StatusClock;
 use soprano_ui::theme::ActiveSopranoTheme;
-use soprano_ui::tooltip::tooltip;
-use soprano_ui::{Icon, IconName, SopranoTheme, agent_icon_stem, icon};
+use soprano_ui::{ContextMenu, IconName, MenuItem, Picker, PickerEvent, PickerItem, SopranoTheme};
 
-use crate::keys::{KeyAction, ScrollAmount, key_action};
-use crate::state::{
-    self, AgentList, Controls, DashboardEntry, TerminalText, date, elapsed_text, monitoring_subtitle,
-};
-use crate::text::{OutputPalette, output_highlights};
+use crate::keys::{KeyAction, KeyFocus, ScrollAmount, key_action};
+use crate::state::{self, AgentChoice, AgentList, Controls, DashboardEntry, ProjectChoice};
 
-/// The agent list's width; a narrow window takes it down to 40 % of the dashboard.
-const LIST_WIDTH: f32 = 380.0;
-const LIST_MAXIMUM_FRACTION: f32 = 0.4;
-/// The list footer with its key hints.
-const FOOTER_HEIGHT: f32 = 40.0;
-/// The page header.
-const HEADER_HEIGHT: f32 = 48.0;
-/// One agent row.
-const ROW_HEIGHT: f32 = 52.0;
-/// A row's icon and the gap after it: what its second line is indented by.
-const ROW_ICON: f32 = 16.0;
-const ROW_ICON_GAP: f32 = 9.0;
-/// Between the detail card and the page's edges, as between panes in the window.
-const CARD_GAP: f32 = 8.0;
-/// The detail card's side margins.
-const GUTTER: f32 = 20.0;
-/// The detail title's icon and the gap after it: what the line under it is indented by.
-const TITLE_ICON: f32 = 18.0;
-const TITLE_ICON_GAP: f32 = 10.0;
-/// The composer keeps to the timeline's chat lane (`Metrics.chatMaxWidth`).
-const READABLE_WIDTH: f32 = 736.0;
-const REPLY_FIELD_HEIGHT: f32 = 44.0;
+/// The inbox's width (Soprano Agents' sidebar); a narrow window takes it down to 40 %.
+const SIDEBAR_WIDTH: f32 = 256.0;
+const SIDEBAR_MAXIMUM_FRACTION: f32 = 0.4;
+/// The band over the inbox and the chat: brand and header, and what the window is moved by.
+const TOPBAR_HEIGHT: f32 = 52.0;
 /// One J/K line of scrolling.
 const LINE_SCROLL: f32 = 48.0;
-/// Between the window and the agent on the detail's location line.
-const LOCATION_SEPARATOR: &str = "  /  ";
+/// What the composer covers before it has been measured.
+const COMPOSER_HEIGHT: f32 = 118.0;
+/// The picker row that asks for any folder.
+const CHOOSE_FOLDER_ID: &str = "choose-folder";
 
 /// What the dashboard asks the app shell to do. The dashboard never mutates the workspace.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DashboardEvent {
-    /// Return, a double-click or Open: focus that exact pane tab (revealing it in the
-    /// sidebar) and close the dashboard.
+    /// Return, a double-click or Open: show that exact pane tab in its window.
     Open(TerminalTarget),
     /// `Workspace::stop_agent`.
     Stop(TerminalTarget),
     /// `Workspace::restart_agent`.
     Restart(TerminalTarget),
-    /// Type `text` (trimmed, single line) and Return into that pane tab's terminal, or send it
-    /// to the chat session for a chat tab. When it cannot be delivered, call
+    /// Send `text` to that pane tab's agent: typed into its terminal (line breaks become
+    /// spaces there), or to the chat session of a chat tab. When it cannot be delivered, call
     /// [`AgentDashboard::reply_failed`].
     Reply { target: TerminalTarget, text: String },
-    /// Esc or the close button: close the dashboard without changing the active agent.
+    /// Start an agent in `cwd` with `prompt` as its first message, as a tab of the window
+    /// that works on that project (`Workspace::open_thread`). Answer with
+    /// [`AgentDashboard::thread_opened`] or [`AgentDashboard::thread_failed`].
+    NewThread { profile_id: String, chat: bool, cwd: String, prompt: String },
+    /// Ask for any folder for the thread being drafted; answer with
+    /// [`AgentDashboard::set_draft_project`].
+    ChooseProject,
+    /// Esc on the list or ⌘W: close the dashboard.
     Close,
 }
 
-/// The exact pane tab's visible terminal text; `None` while it has no live terminal.
-pub type TerminalTextProvider = Rc<dyn Fn(&TerminalTarget, &App) -> Option<String>>;
+/// Whether the exact pane tab's agent can take a message right now.
+pub type RepliesProvider = Rc<dyn Fn(&TerminalTarget, &App) -> bool>;
 /// A folder's branch when it is not its repository's default (the branch monitor).
 pub type BranchProvider = Rc<dyn Fn(&str, &App) -> Option<String>>;
+/// The folders a new thread is offered, in the order to list them.
+pub type ProjectsProvider = Rc<dyn Fn(&App) -> Vec<ProjectChoice>>;
 
 /// What the shell answers that the workspace model does not know.
 #[derive(Clone)]
 pub struct DashboardHost {
-    /// Read for the selected agent when it changes or the workspace notifies (whether a reply
-    /// can go out), and once a second while the terminal is shown.
-    pub terminal_text: TerminalTextProvider,
+    /// Read for the selected thread when it changes, the workspace notifies, and once a second.
+    pub accepts_replies: RepliesProvider,
     pub notable_branch: BranchProvider,
+    pub projects: ProjectsProvider,
     /// Where the agent CLIs keep their transcripts and where `~` points.
     pub home: PathBuf,
+    /// App state: the agent the last thread was started with.
+    pub state: StateStore,
+    /// What the window's own controls take at the inbox's top-left (the macOS traffic
+    /// lights); the brand starts after it.
+    pub leading_inset: f32,
 }
 
 impl DashboardHost {
     pub fn new() -> Self {
         Self {
-            terminal_text: Rc::new(|_, _| None),
+            accepts_replies: Rc::new(|_, _| false),
             notable_branch: Rc::new(|_, _| None),
+            projects: Rc::new(|_| Vec::new()),
             home: state::default_home(),
+            state: StateStore::in_memory(),
+            leading_inset: 0.0,
         }
     }
 
-    pub fn terminal_text(
-        mut self,
-        provider: impl Fn(&TerminalTarget, &App) -> Option<String> + 'static,
-    ) -> Self {
-        self.terminal_text = Rc::new(provider);
+    pub fn accepts_replies(mut self, provider: impl Fn(&TerminalTarget, &App) -> bool + 'static) -> Self {
+        self.accepts_replies = Rc::new(provider);
         self
     }
 
@@ -127,8 +116,23 @@ impl DashboardHost {
         self
     }
 
+    pub fn projects(mut self, provider: impl Fn(&App) -> Vec<ProjectChoice> + 'static) -> Self {
+        self.projects = Rc::new(provider);
+        self
+    }
+
     pub fn home(mut self, home: impl Into<PathBuf>) -> Self {
         self.home = home.into();
+        self
+    }
+
+    pub fn state(mut self, state: StateStore) -> Self {
+        self.state = state;
+        self
+    }
+
+    pub fn leading_inset(mut self, inset: f32) -> Self {
+        self.leading_inset = inset;
         self
     }
 }
@@ -139,38 +143,55 @@ impl Default for DashboardHost {
     }
 }
 
-/// The Agent Dashboard page. Create it with [`AgentDashboard::new`], render it over the
-/// workspace, focus it ([`Focusable`]) when it opens and drop it when it closes (that stops
+/// The thread being drafted.
+struct Draft {
+    project: ProjectChoice,
+    agent: AgentChoice,
+    /// The window its tab joins; `None`: it opens a window of its own.
+    window_title: Option<String>,
+    /// The workspace layout `window_title` was read from.
+    layout_generation: u64,
+    /// Sent to the shell, which has not answered yet.
+    launching: bool,
+    /// Why the last launch did not happen.
+    error: Option<String>,
+}
+
+/// The Agent Dashboard. Create it with [`AgentDashboard::new`], render it as a window's
+/// content, focus it ([`Focusable`]) when it opens and drop it when it closes (that stops
 /// following transcripts).
 pub struct AgentDashboard {
     workspace: Entity<Workspace>,
     host: DashboardHost,
     list: AgentList,
-    window_count: usize,
-    /// The list's keyboard focus (the dashboard root).
+    /// The inbox's keyboard focus (the dashboard root).
     focus: FocusHandle,
-    /// The live terminal text, focused by a click into it.
-    terminal_focus: FocusHandle,
-    reply: Entity<InputState>,
-    /// The last reply could not be delivered: the status and terminal availability it failed
-    /// under; either changing clears it.
-    reply_failed: Option<(Option<AgentStatus>, bool)>,
-    /// The agent the detail shows; its draft is cleared when another is selected.
+    search: Entity<InputState>,
+    editor: Entity<TextareaState>,
+    draft: Option<Draft>,
+    /// The last message could not be delivered: the status and availability it failed under;
+    /// either changing clears it.
+    send_failed: Option<(Option<AgentStatus>, bool)>,
+    /// The thread the chat shows; its unsent text is cleared when another is selected.
     detail_id: Option<String>,
-    /// The selected agent's terminal text (`None`: unavailable).
-    terminal: Option<String>,
-    /// Set with T; applies to every agent until switched back.
-    prefers_terminal: bool,
+    /// Whether the selected thread's agent takes a message.
+    accepts_replies: bool,
     transcripts: AgentTranscriptStore,
     sources: HashMap<String, AgentTranscriptSource>,
     timelines: HashMap<String, AgentTimeline>,
     transcript_source: Rc<TranscriptSource>,
     timeline: Entity<TimelineView>,
+    /// Project folder names by working directory: finding a project walks the disk.
+    project_names: HashMap<String, String>,
     list_scroll: ScrollHandle,
-    terminal_scroll: ScrollHandle,
-    /// Scroll the terminal to its end after the next layout (new text or a new agent).
-    terminal_scroll_to_end: bool,
+    picker: Option<Entity<Picker>>,
+    menu: Option<Entity<ContextMenu>>,
+    /// The chat column, the composer card and the draft's agent chip as last drawn.
+    column_bounds: Rc<Cell<Bounds<Pixels>>>,
+    composer_bounds: Rc<Cell<Bounds<Pixels>>>,
+    agent_chip_bounds: Rc<Cell<Bounds<Pixels>>>,
     now: SystemTime,
+    _overlay: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -190,12 +211,16 @@ impl AgentDashboard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let reply = cx.new(|cx| InputState::new(window, cx));
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search"));
+        let editor = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(2, soprano_chat_ui::composer::EDITOR_MAX_LINES)
+                .placeholder(state::PLACEHOLDER)
+        });
         let transcript_source = TranscriptSource::new();
         let timeline = cx.new(|cx| {
             let source: Rc<dyn TimelineSource> = transcript_source.clone();
             let mut timeline = TimelineView::new(source, "", window, cx);
-            timeline.set_bottom_inset(cx.soprano_theme().z(8.), cx);
             // The minimal work log until O.
             timeline.set_detailed(false, cx);
             timeline
@@ -209,9 +234,23 @@ impl AgentDashboard {
         let entity = cx.entity().downgrade();
         let subscriptions = vec![
             cx.observe_in(&workspace, window, |this, _, window, cx| this.refresh(window, cx)),
-            cx.subscribe_in(&reply, window, |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::PressEnter { .. } => this.send_reply(window, cx),
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => cx.notify(),
+            cx.subscribe_in(&search, window, |this, search, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let query = search.read(cx).value().to_string();
+                    this.list.set_query(&query);
+                    this.list_scroll.scroll_to_item(0);
+                }
+                cx.notify();
+            }),
+            cx.subscribe_in(&editor, window, |this, _, event: &InputEvent, _, cx| {
+                // Typing again puts the status hint back in place of "Could not send".
+                if matches!(event, InputEvent::Change) {
+                    this.send_failed = None;
+                    if let Some(draft) = &mut this.draft {
+                        draft.error = None;
+                    }
+                }
+                cx.notify();
             }),
             cx.intercept_keystrokes(move |event, window, cx| {
                 let Some(this) = entity.upgrade() else { return };
@@ -234,7 +273,7 @@ impl AgentDashboard {
             cx.spawn_in(window, async move |this, cx| {
                 loop {
                     cx.background_executor().timer(Duration::from_secs(1)).await;
-                    if this.update(cx, |this, cx| this.tick(cx)).is_err() {
+                    if this.update_in(cx, |this, window, cx| this.tick(window, cx)).is_err() {
                         return;
                     }
                 }
@@ -245,27 +284,36 @@ impl AgentDashboard {
             workspace,
             host,
             list: AgentList::default(),
-            window_count: 0,
             focus: cx.focus_handle(),
-            terminal_focus: cx.focus_handle(),
-            reply,
-            reply_failed: None,
+            search,
+            editor,
+            draft: None,
+            send_failed: None,
             detail_id: None,
-            terminal: None,
-            prefers_terminal: false,
+            accepts_replies: false,
             transcripts,
             sources: HashMap::new(),
             timelines: HashMap::new(),
             transcript_source,
             timeline,
+            project_names: HashMap::new(),
             list_scroll: ScrollHandle::new(),
-            terminal_scroll: ScrollHandle::new(),
-            terminal_scroll_to_end: true,
+            picker: None,
+            menu: None,
+            column_bounds: Rc::new(Cell::new(Bounds::default())),
+            composer_bounds: Rc::new(Cell::new(Bounds::default())),
+            agent_chip_bounds: Rc::new(Cell::new(Bounds::default())),
             now: SystemTime::now(),
+            _overlay: None,
             _subscriptions: subscriptions,
             _tasks: tasks,
         };
         dashboard.refresh(window, cx);
+        // With no thread to show, the dashboard opens on a new one.
+        if dashboard.list.is_empty() {
+            dashboard.start_draft(cx);
+            dashboard.sync_composer(window, cx);
+        }
         dashboard
     }
 
@@ -273,22 +321,38 @@ impl AgentDashboard {
 
     /// Brings the dashboard up to date with the workspace (every model notification).
     pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let now = SystemTime::now();
+        // `StatusClock` is a global; take it out so the entries can read the workspace alongside.
+        let mut clock = std::mem::take(cx.default_global::<StatusClock>());
         let workspace = self.workspace.read(cx);
+        let layout_generation = workspace.layout_generation();
         let entries: Vec<DashboardEntry> = workspace
             .agent_dashboard_entries()
             .into_iter()
             .map(|mut entry| {
-                let waiting_reason =
-                    workspace.agent(&entry.pane_id, &entry.tab_id).and_then(|agent| agent.waiting_reason);
+                let agent = workspace.agent(&entry.pane_id, &entry.tab_id);
+                let waiting_reason = agent.and_then(|agent| agent.waiting_reason);
+                let since =
+                    agent.map_or(now, |agent| clock.since(&agent.id, agent.status, agent.started_at, now));
                 entry.branch = entry
                     .cwd
                     .as_deref()
                     .filter(|_| entry.machine.is_none())
                     .and_then(|cwd| (self.host.notable_branch)(cwd, cx));
-                DashboardEntry { entry, waiting_reason }
+                let project = project_name(&mut self.project_names, &entry);
+                DashboardEntry { entry, waiting_reason, project, since }
             })
             .collect();
-        self.window_count = workspace.window_count();
+        let draft_window =
+            self.draft.as_ref().filter(|draft| draft.layout_generation != layout_generation).map(|draft| {
+                workspace.window_for_thread(&draft.project.path).map(|window| window.title.clone())
+            });
+        *cx.default_global::<StatusClock>() = clock;
+        if let (Some(draft), Some(window_title)) = (&mut self.draft, draft_window) {
+            draft.window_title = window_title;
+            draft.layout_generation = layout_generation;
+        }
+        self.now = now;
         let selection_moved = self.list.update(entries);
         self.track_transcripts();
         self.sync_detail(window, cx);
@@ -335,12 +399,14 @@ impl AgentDashboard {
         cx.notify();
     }
 
-    /// Once a second: elapsed times, transcripts, and the shown terminal.
-    fn tick(&mut self, cx: &mut Context<Self>) {
+    /// Once a second: live durations, transcripts, and whether the thread takes a message.
+    fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.now = SystemTime::now();
         self.transcripts.refresh();
-        if !self.shows_timeline() {
-            self.read_terminal(cx);
+        let accepted = self.accepts_replies;
+        self.read_availability(cx);
+        if accepted != self.accepts_replies {
+            self.sync_composer(window, cx);
         }
         cx.notify();
     }
@@ -349,7 +415,9 @@ impl AgentDashboard {
         self.list.selected()
     }
 
-    fn has_transcript(&self) -> bool {
+    /// Whether the selected thread's conversation can be read: its CLI writes a transcript the
+    /// dashboard follows.
+    fn has_conversation(&self) -> bool {
         self.list.selected_id().is_some_and(|id| self.sources.contains_key(id))
     }
 
@@ -357,75 +425,77 @@ impl AgentDashboard {
         self.list.selected_id().and_then(|id| self.timelines.get(id))
     }
 
-    fn shows_timeline(&self) -> bool {
-        state::shows_timeline(self.selected(), self.has_transcript(), self.prefers_terminal)
+    /// What a thread's agent does right now, or last said: the line under its title.
+    fn current_activity(&self, entry: &DashboardEntry) -> Option<AgentTimelineActivity> {
+        let now = soprano_agents::Date::from(self.now);
+        AgentTimelineActivity::current(self.timelines.get(&entry.id()), entry.status(), now)
     }
 
     fn controls(&self) -> Controls {
-        Controls::new(self.selected(), self.has_transcript(), self.prefers_terminal, self.terminal.is_some())
+        Controls::new(self.selected(), self.has_conversation(), self.accepts_replies)
     }
 
-    /// Reads the selected agent's terminal; reading terminal text is not free, so only while
-    /// it is shown or to decide whether a reply can go out.
-    fn read_terminal(&mut self, cx: &mut Context<Self>) {
-        let terminal = self.selected().and_then(|entry| (self.host.terminal_text)(&entry.target(), cx));
-        if terminal != self.terminal {
-            self.terminal = terminal;
-            self.terminal_scroll_to_end = true;
-        }
-        // Like Swift's `updateControls`, a new status or terminal availability puts the
-        // status hint back in place of "Could not send".
-        if self.reply_failed.is_some_and(|state| state != self.reply_state()) {
-            self.reply_failed = None;
+    fn read_availability(&mut self, cx: &mut Context<Self>) {
+        self.accepts_replies =
+            self.selected().is_some_and(|entry| (self.host.accepts_replies)(&entry.target(), cx));
+        // A new status or availability puts the status hint back in place of "Could not send".
+        if self.send_failed.is_some_and(|state| state != self.reply_state()) {
+            self.send_failed = None;
         }
     }
 
-    /// What the reply hint depends on: the selected agent's status and whether its terminal
-    /// is available.
+    /// What the composer hint depends on: the selected thread's status and whether its agent
+    /// takes a message.
     fn reply_state(&self) -> (Option<AgentStatus>, bool) {
-        (self.selected().map(DashboardEntry::status), self.terminal.is_some())
+        (self.selected().map(DashboardEntry::status), self.accepts_replies)
     }
 
-    /// Follows the selection into the detail view.
+    /// Follows the selection into the chat column.
     fn sync_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let selected = self.list.selected_id().map(str::to_owned);
         let selection_changed = selected != self.detail_id;
-        self.read_terminal(cx);
+        self.read_availability(cx);
         if selection_changed {
             self.detail_id = selected;
-            self.reply_failed = None;
-            self.terminal_scroll_to_end = true;
-            self.reply.update(cx, |reply, cx| reply.set_value("", window, cx));
+            self.send_failed = None;
+            if self.draft.is_none() {
+                self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+            }
         }
-        let placeholder = self.selected().map(DashboardEntry::reply_placeholder).unwrap_or_default();
-        let enabled = self.controls().reply;
         let agent_name = self.selected().map(|entry| entry.entry.profile_name.clone()).unwrap_or_default();
-        self.reply.update(cx, |reply, cx| {
-            reply.set_placeholder(placeholder, window, cx);
-            reply.set_disabled(!enabled, cx);
-        });
         self.timeline.update(cx, |timeline, cx| timeline.set_agent_name(agent_name, cx));
+        self.sync_composer(window, cx);
         self.render_timeline(selection_changed, window, cx);
+    }
+
+    /// The editor takes text while a draft is being written or the thread takes a message.
+    fn sync_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let enabled = match &self.draft {
+            Some(draft) => !draft.launching,
+            None => self.controls().reply,
+        };
+        let _ = window;
+        self.editor.update(cx, |editor, cx| editor.set_disabled(!enabled, cx));
     }
 
     /// Hands the transcript to the timeline as turns; the last one runs while the agent works.
     fn render_timeline(&mut self, scroll_to_end: bool, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.shows_timeline() {
-            return;
-        }
-        let running = state::is_agent_working(self.selected().map(DashboardEntry::status));
+        let Some(entry) = self.selected() else { return };
+        let running = state::is_agent_working(Some(entry.status()));
+        let empty = state::timeline_empty_text(entry, self.has_conversation());
         let thread = self
             .selected_timeline()
             .map(|timeline| ChatThread::from_transcript(timeline, running))
             .unwrap_or_default();
-        self.transcript_source.set(thread, state::TIMELINE_EMPTY);
+        self.transcript_source.set(thread, empty);
         self.timeline.update(cx, |timeline, cx| timeline.reload(scroll_to_end, cx));
     }
 
-    // MARK: - Actions
+    // MARK: - Threads
 
     fn select(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
+        self.leave_draft(window, cx);
         if self.list.select(id) {
             self.sync_detail(window, cx);
         }
@@ -433,29 +503,24 @@ impl AgentDashboard {
     }
 
     fn move_selection(&mut self, delta: i32, window: &mut Window, cx: &mut Context<Self>) {
-        // J/K drive the list even from the timeline or terminal; take the keyboard back so
-        // the moved row shows the focused selection.
-        window.focus(&self.focus, cx);
-        if self.list.move_selection(delta) {
-            self.sync_detail(window, cx);
-            self.scroll_selection_into_view();
+        // J/K drive the list even from the conversation; the search field keeps the keyboard
+        // while it is typed in.
+        if !self.search.focus_handle(cx).contains_focused(window, cx) {
+            window.focus(&self.focus, cx);
         }
+        // Out of a draft, the first key shows the thread that was open.
+        let was_drafting = self.draft.is_some();
+        self.leave_draft(window, cx);
+        if !was_drafting && self.list.move_selection(delta) {
+            self.sync_detail(window, cx);
+        }
+        self.scroll_selection_into_view();
         cx.notify();
     }
 
-    /// The list's children are section headers and rows; scrolls to the selected row's child.
     fn scroll_selection_into_view(&self) {
-        let Some(selected) = self.list.selected_index() else { return };
-        let mut child = 0;
-        let mut row = 0;
-        for (_, entries) in self.list.sections() {
-            child += 1;
-            if selected < row + entries.len() {
-                self.list_scroll.scroll_to_item(child + selected - row);
-                return;
-            }
-            row += entries.len();
-            child += entries.len();
+        if let Some(row) = self.list.selected_row() {
+            self.list_scroll.scroll_to_item(row);
         }
     }
 
@@ -464,28 +529,35 @@ impl AgentDashboard {
         event: impl FnOnce(TerminalTarget) -> DashboardEvent,
         cx: &mut Context<Self>,
     ) {
-        if let Some(entry) = self.selected() {
+        if self.draft.is_none()
+            && let Some(entry) = self.selected()
+        {
             cx.emit(event(entry.target()));
         }
     }
 
-    fn set_prefers_terminal(&mut self, prefers: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let is_chat = self.selected().is_some_and(|entry| entry.entry.is_chat);
-        if !self.has_transcript() || is_chat || prefers == self.prefers_terminal {
-            return;
-        }
-        self.prefers_terminal = prefers;
-        if prefers {
-            self.terminal_scroll_to_end = true;
-            self.read_terminal(cx);
-        } else {
-            self.render_timeline(true, window, cx);
-        }
+    /// Folds a section's threads away, or shows them again.
+    pub fn toggle_fold(&mut self, section: soprano_agents::AgentDashboardSection, cx: &mut Context<Self>) {
+        self.list.toggle_fold(section);
+        cx.notify();
+    }
+
+    /// Narrows the inbox to the threads matching `query`, as typing in the search field does.
+    pub fn set_search(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| search.set_value(query.to_owned(), window, cx));
+        self.list.set_query(query);
+        self.list_scroll.scroll_to_item(0);
+        cx.notify();
+    }
+
+    /// Replaces what the composer holds.
+    pub fn set_composer_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.set_value(text.to_owned(), window, cx));
         cx.notify();
     }
 
     fn toggle_details(&mut self, cx: &mut Context<Self>) {
-        if !self.shows_timeline() {
+        if !self.controls().details || self.draft.is_some() {
             return;
         }
         self.timeline.update(cx, |timeline, cx| {
@@ -496,57 +568,84 @@ impl AgentDashboard {
     }
 
     fn scroll_text(&mut self, amount: ScrollAmount, cx: &mut Context<Self>) {
-        if self.shows_timeline() {
-            self.timeline.update(cx, |timeline, cx| {
-                let delta = match amount {
-                    ScrollAmount::Lines(count) => px(count as f32 * LINE_SCROLL),
-                    ScrollAmount::Pages(count) => timeline.page_height() * count as f32,
-                };
-                timeline.scroll_by(delta, cx);
-            });
-            return;
-        }
-        let viewport = self.terminal_scroll.bounds().size.height;
-        let delta = match amount {
-            ScrollAmount::Lines(count) => px(count as f32 * LINE_SCROLL),
-            ScrollAmount::Pages(count) => (viewport - px(40.)).max(px(LINE_SCROLL)) * count as f32,
+        self.timeline.update(cx, |timeline, cx| {
+            let delta = match amount {
+                ScrollAmount::Lines(count) => px(count as f32 * LINE_SCROLL),
+                ScrollAmount::Pages(count) => timeline.page_height() * count as f32,
+            };
+            timeline.scroll_by(delta, cx);
+        });
+    }
+
+    fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let enabled = match &self.draft {
+            Some(draft) => !draft.launching,
+            None => self.controls().reply,
         };
-        let maximum = self.terminal_scroll.max_offset().y;
-        let current = -self.terminal_scroll.offset().y;
-        let next = (current + delta).clamp(px(0.), maximum.max(px(0.)));
-        self.terminal_scroll.set_offset(point(px(0.), -next));
+        if enabled {
+            self.editor.update(cx, |editor, cx| editor.focus(window, cx));
+            cx.notify();
+        }
+    }
+
+    fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| search.focus(window, cx));
         cx.notify();
     }
 
-    fn follow_latest(&mut self, cx: &mut Context<Self>) {
-        if self.shows_timeline() {
-            self.timeline.update(cx, |timeline, cx| timeline.jump_to_latest(cx));
-        } else {
-            self.terminal_scroll.scroll_to_bottom();
-            cx.notify();
-        }
+    fn clear_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search.update(cx, |search, cx| search.set_value("", window, cx));
+        self.list.set_query("");
+        window.focus(&self.focus, cx);
+        self.scroll_selection_into_view();
+        cx.notify();
     }
 
-    fn focus_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.controls().reply {
-            self.reply.update(cx, |reply, cx| reply.focus(window, cx));
-            cx.notify();
+    // MARK: - Composer
+
+    /// Return in the composer: ⇧Return adds a line, Return sends.
+    fn on_enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if action.shift {
+            return;
         }
+        cx.stop_propagation();
+        self.send(window, cx);
     }
 
-    fn send_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Sends what the composer holds: the first message of the drafted thread, or a message to
+    /// the open one.
+    fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = state::reply_text(&self.editor.read(cx).value()) else { return };
+        if let Some(draft) = &mut self.draft {
+            if draft.launching {
+                return;
+            }
+            draft.launching = true;
+            draft.error = None;
+            draft.agent.remember(&self.host.state);
+            let event = DashboardEvent::NewThread {
+                profile_id: draft.agent.profile_id.clone(),
+                chat: draft.agent.chat,
+                cwd: draft.project.path.clone(),
+                prompt: text,
+            };
+            self.sync_composer(window, cx);
+            cx.emit(event);
+            cx.notify();
+            return;
+        }
         let Some(target) = self.selected().map(DashboardEntry::target) else { return };
         if !self.controls().reply {
             return;
         }
-        let Some(text) = state::reply_text(&self.reply.read(cx).value()) else { return };
-        self.reply_failed = None;
-        self.reply.update(cx, |reply, cx| reply.set_value("", window, cx));
+        self.send_failed = None;
+        self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        self.timeline.update(cx, |timeline, cx| timeline.jump_to_latest(cx));
         cx.emit(DashboardEvent::Reply { target, text });
         cx.notify();
     }
 
-    /// The shell could not deliver a [`DashboardEvent::Reply`]: the draft comes back (unless
+    /// The shell could not deliver a [`DashboardEvent::Reply`]: the text comes back (unless
     /// something new was typed) and the hint says so in the error color.
     pub fn reply_failed(
         &mut self,
@@ -555,29 +654,224 @@ impl AgentDashboard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.selected().map(DashboardEntry::target).as_ref() != Some(target) {
+        if self.draft.is_some() || self.selected().map(DashboardEntry::target).as_ref() != Some(target) {
             return;
         }
-        self.reply_failed = Some(self.reply_state());
-        if self.reply.read(cx).value().is_empty() {
-            self.reply.update(cx, |reply, cx| reply.set_value(text.to_owned(), window, cx));
+        if self.editor.read(cx).value().is_empty() {
+            self.editor.update(cx, |editor, cx| editor.set_value(text.to_owned(), window, cx));
+        }
+        // After the text: putting it back counts as typing, which clears the hint.
+        self.send_failed = Some(self.reply_state());
+        cx.notify();
+    }
+
+    // MARK: - New thread
+
+    /// Opens the draft of a new thread (N, ⌘N, the pencil button) and gives its composer the
+    /// keyboard.
+    pub fn new_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.draft.is_none() {
+            self.start_draft(cx);
+            self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        }
+        self.sync_composer(window, cx);
+        self.focus_composer(window, cx);
+        cx.notify();
+    }
+
+    /// A draft in the open thread's project, else where the workspace's active tab works,
+    /// else the home folder; with the agent the last thread started with.
+    fn start_draft(&mut self, cx: &mut Context<Self>) {
+        let Some(agent) = AgentChoice::initial(&self.host.state) else { return };
+        let workspace = self.workspace.read(cx);
+        let folder = self
+            .selected()
+            .filter(|entry| entry.entry.machine.is_none())
+            .and_then(|entry| entry.entry.cwd.clone())
+            .or_else(|| {
+                workspace
+                    .active_working_directory()
+                    .filter(|_| workspace.machine_of_pane(workspace.active_pane_id()).is_none())
+            });
+        let path = match folder {
+            Some(folder) => Workspace::project_root(&folder),
+            None => self.host.home.clone(),
+        };
+        self.draft = Some(Draft {
+            project: ProjectChoice::at(path.to_string_lossy().into_owned()),
+            agent,
+            window_title: None,
+            layout_generation: 0,
+            launching: false,
+            error: None,
+        });
+        self.read_draft_window(cx);
+    }
+
+    /// Which window the drafted thread's tab would join.
+    fn read_draft_window(&mut self, cx: &mut Context<Self>) {
+        let Some(draft) = &mut self.draft else { return };
+        let workspace = self.workspace.read(cx);
+        draft.window_title =
+            workspace.window_for_thread(&draft.project.path).map(|window| window.title.clone());
+        draft.layout_generation = workspace.layout_generation();
+    }
+
+    /// Gives a draft up for the open thread; a draft the shell is starting stays, and so does
+    /// the only thing there is to show.
+    fn leave_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.list.is_empty() || self.draft.as_ref().is_none_or(|draft| draft.launching) {
+            return;
+        }
+        self.draft = None;
+        self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        self.sync_composer(window, cx);
+        self.render_timeline(true, window, cx);
+        cx.notify();
+    }
+
+    /// The folder the drafted thread works in (the project picker, or the shell's answer to
+    /// [`DashboardEvent::ChooseProject`]).
+    pub fn set_draft_project(&mut self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = &mut self.draft else { return };
+        if draft.launching {
+            return;
+        }
+        draft.project = ProjectChoice::at(path);
+        draft.error = None;
+        self.read_draft_window(cx);
+        self.focus_composer(window, cx);
+        cx.notify();
+    }
+
+    fn set_draft_agent(&mut self, agent: AgentChoice, cx: &mut Context<Self>) {
+        if let Some(draft) = &mut self.draft
+            && !draft.launching
+        {
+            draft.agent = agent;
+            cx.notify();
+        }
+    }
+
+    /// The shell opened the drafted thread as `target`: the draft gives way to it.
+    pub fn thread_opened(&mut self, target: &TerminalTarget, window: &mut Window, cx: &mut Context<Self>) {
+        self.draft = None;
+        self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        self.refresh(window, cx);
+        let id = format!("{}:{}", target.pane_id, target.tab_id);
+        if self.list.select(&id) {
+            self.sync_detail(window, cx);
+            self.scroll_selection_into_view();
         }
         cx.notify();
     }
 
+    /// The shell could not open the drafted thread: the draft stays as written and says why.
+    pub fn thread_failed(&mut self, message: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(draft) = &mut self.draft {
+            draft.launching = false;
+            draft.error = Some(message.to_owned());
+        }
+        self.sync_composer(window, cx);
+        cx.notify();
+    }
+
+    /// The project picker over the dashboard (a click on the draft's project): the host's
+    /// folders, then any folder.
+    pub fn open_project_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.draft.as_ref().is_none_or(|draft| draft.launching) {
+            return;
+        }
+        let mut items: Vec<PickerItem> = (self.host.projects)(cx)
+            .into_iter()
+            .map(|project| {
+                PickerItem::new(format!("project:{}", project.path), project.name)
+                    .icon(IconName::Folder)
+                    .description(soprano_platform::paths::abbreviate_home_in(
+                        std::path::Path::new(&project.path),
+                        &self.host.home,
+                    ))
+            })
+            .collect();
+        items.push(
+            PickerItem::new(CHOOSE_FOLDER_ID, "Choose Folder…")
+                .icon(IconName::FolderPlus)
+                .description("Start the thread in any folder"),
+        );
+        let picker = Picker::new(items, window, cx);
+        picker.update(cx, |picker, cx| picker.set_placeholder("Search projects…", window, cx));
+        self._overlay = Some(cx.subscribe_in(&picker, window, |this, _, event: &PickerEvent, window, cx| {
+            this.picker = None;
+            this._overlay = None;
+            if let PickerEvent::Confirmed { id, .. } = event {
+                match id.strip_prefix("project:") {
+                    Some(path) => this.set_draft_project(path, window, cx),
+                    None => cx.emit(DashboardEvent::ChooseProject),
+                }
+            }
+            cx.notify();
+        }));
+        self.picker = Some(picker);
+        cx.notify();
+    }
+
+    /// The agents a thread can start with, as a menu above the draft's agent chip (a click on
+    /// it).
+    pub fn open_agent_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(draft) = self.draft.as_ref().filter(|draft| !draft.launching) else { return };
+        let choices = AgentChoice::all();
+        let theme = cx.soprano_theme();
+        let chip = self.agent_chip_bounds.get();
+        // Rows of 31 in a padding of 5, with a gap of 6 to the chip.
+        let height = theme.z(choices.len() as f32 * 31.0 + 16.0);
+        let position = point(chip.origin.x, (chip.origin.y - height).max(px(8.)));
+        let entity = cx.entity().downgrade();
+        let items = choices
+            .into_iter()
+            .map(|choice| {
+                let entity = entity.clone();
+                let picked = choice.clone();
+                MenuItem::new(choice.label())
+                    .icon(if choice.chat { IconName::MessageSquare } else { IconName::SHELL })
+                    .checked(choice == draft.agent)
+                    .on_select(move |_, cx| {
+                        let picked = picked.clone();
+                        let _ = entity.update(cx, |this, cx| this.set_draft_agent(picked, cx));
+                    })
+            })
+            .collect();
+        let menu = ContextMenu::new(position, items, window, cx);
+        self._overlay = Some(cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+            this.menu = None;
+            this._overlay = None;
+            cx.notify();
+        }));
+        self.menu = Some(menu);
+        cx.notify();
+    }
+
+    // MARK: - Keyboard
+
     /// Runs the dashboard shortcut for `keystroke` while the keyboard is anywhere inside the
-    /// dashboard (list, conversation, terminal text or reply field). Returns whether it was one.
+    /// dashboard. Returns whether it was one.
     fn handle_keystroke(
         &mut self,
         keystroke: &Keystroke,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.focus.contains_focused(window, cx) {
+        // A menu or the picker over the dashboard takes every key.
+        if self.picker.is_some() || self.menu.is_some() || !self.focus.contains_focused(window, cx) {
             return false;
         }
-        let reply_focused = self.reply.read(cx).focus_handle(cx).contains_focused(window, cx);
-        let Some(action) = key_action(keystroke, reply_focused) else { return false };
+        let focus = if self.editor.focus_handle(cx).contains_focused(window, cx) {
+            KeyFocus::Composer
+        } else if self.search.focus_handle(cx).contains_focused(window, cx) {
+            KeyFocus::Search
+        } else {
+            KeyFocus::List
+        };
+        let Some(action) = key_action(keystroke, focus) else { return false };
         self.perform(action, window, cx);
         true
     }
@@ -585,766 +879,150 @@ impl AgentDashboard {
     /// Runs one keyboard action.
     pub fn perform(&mut self, action: KeyAction, window: &mut Window, cx: &mut Context<Self>) {
         match action {
-            KeyAction::Dismiss => cx.emit(DashboardEvent::Close),
+            KeyAction::Dismiss => {
+                // Esc first gives up a draft; with nothing else to show it closes the window.
+                let drafting = self.draft.as_ref().is_some_and(|draft| !draft.launching);
+                if drafting && !self.list.is_empty() {
+                    self.leave_draft(window, cx);
+                } else {
+                    cx.emit(DashboardEvent::Close);
+                }
+            }
             KeyAction::Move(delta) => self.move_selection(delta, window, cx),
             KeyAction::Activate => self.emit_for_selection(DashboardEvent::Open, cx),
-            KeyAction::FocusReply => self.focus_reply(window, cx),
-            KeyAction::LeaveReply => {
+            KeyAction::FocusComposer => self.focus_composer(window, cx),
+            KeyAction::FocusList => {
                 window.focus(&self.focus, cx);
                 cx.notify();
             }
+            KeyAction::FocusSearch => self.focus_search(window, cx),
+            KeyAction::ClearSearch => self.clear_search(window, cx),
+            KeyAction::NewThread => self.new_thread(window, cx),
             KeyAction::Scroll(amount) => self.scroll_text(amount, cx),
             KeyAction::JumpTurn(direction) => {
-                if self.shows_timeline() {
-                    self.timeline.update(cx, |timeline, cx| timeline.jump_to_message(direction, cx));
-                }
+                self.timeline.update(cx, |timeline, cx| timeline.jump_to_message(direction, cx));
             }
             KeyAction::ToggleDetails => self.toggle_details(cx),
-            KeyAction::FollowLatest => self.follow_latest(cx),
-            KeyAction::ToggleTerminal => self.set_prefers_terminal(!self.prefers_terminal, window, cx),
+            KeyAction::FollowLatest => self.timeline.update(cx, |timeline, cx| timeline.jump_to_latest(cx)),
         }
     }
 
     // MARK: - Reading (for the shell and tests)
 
-    /// The agents in list order.
+    /// The inbox.
     pub fn list(&self) -> &AgentList {
         &self.list
-    }
-
-    /// `Monitoring N agents across M windows`.
-    pub fn subtitle(&self) -> String {
-        monitoring_subtitle(self.list.len(), self.window_count)
-    }
-
-    pub fn is_showing_terminal(&self) -> bool {
-        !self.shows_timeline()
     }
 
     pub fn timeline_view(&self) -> &Entity<TimelineView> {
         &self.timeline
     }
 
-    /// What the selected agent's terminal shows.
-    pub fn terminal_text(&self) -> TerminalText {
-        TerminalText::new(self.terminal.as_deref())
+    /// The composer's text.
+    pub fn composer_text(&self, cx: &App) -> String {
+        self.editor.read(cx).value().to_string()
     }
 
-    /// The reply field's state (its draft).
-    pub fn reply_input(&self) -> &Entity<InputState> {
-        &self.reply
+    /// Whether a new thread is being drafted.
+    pub fn is_drafting(&self) -> bool {
+        self.draft.is_some()
     }
 
-    /// The line under the reply field.
-    pub fn reply_hint(&self) -> &'static str {
-        if self.reply_failed.is_some() {
-            return state::SEND_FAILED;
+    /// The folder and agent the drafted thread starts with.
+    pub fn draft_choice(&self) -> Option<(&ProjectChoice, &AgentChoice)> {
+        self.draft.as_ref().map(|draft| (&draft.project, &draft.agent))
+    }
+
+    /// The line beside the send button: why nothing can be sent, or what went wrong; empty
+    /// otherwise. The flag marks an error.
+    pub fn composer_hint(&self) -> (String, bool) {
+        if let Some(draft) = &self.draft {
+            return match (&draft.error, draft.launching) {
+                (Some(error), _) => (error.clone(), true),
+                (None, true) => (format!("Starting {}…", draft.agent.profile_name()), false),
+                (None, false) => (String::new(), false),
+            };
         }
-        state::reply_hint(self.selected(), self.terminal.is_some())
-    }
-
-    /// What the selected agent is doing, or its status in words.
-    pub fn activity_text(&self) -> String {
-        match self.current_activity(self.selected()) {
-            Some(activity) => activity.text(),
-            None => state::fallback_activity(self.selected().map(DashboardEntry::status)).to_owned(),
+        if self.send_failed.is_some() {
+            return (state::SEND_FAILED.to_owned(), true);
         }
+        (state::composer_hint(self.selected(), self.accepts_replies).to_owned(), false)
     }
+}
 
-    fn current_activity(&self, entry: Option<&DashboardEntry>) -> Option<AgentTimelineActivity> {
-        let entry = entry?;
-        AgentTimelineActivity::current(self.timelines.get(&entry.id()), entry.status(), date(self.now))
+/// The folder name of the project `entry` works in: its checkout's on this computer, the
+/// folder's own on a machine; empty without a folder.
+fn project_name(names: &mut HashMap<String, String>, entry: &soprano_model::AgentDashboardEntry) -> String {
+    let Some(cwd) = entry.cwd.as_deref() else { return String::new() };
+    if entry.machine.is_some() {
+        return ProjectChoice::at(cwd).name;
     }
+    names
+        .entry(cwd.to_owned())
+        .or_insert_with(|| {
+            ProjectChoice::at(Workspace::project_root(cwd).to_string_lossy().into_owned()).name
+        })
+        .clone()
 }
 
 // MARK: - Rendering
 
 impl Render for AgentDashboard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if std::mem::take(&mut self.terminal_scroll_to_end) {
-            self.terminal_scroll.scroll_to_bottom();
-        }
         let theme = cx.soprano_theme().clone();
-        // The selection falls to the first agent, so only an empty dashboard has none.
-        let body = match self.selected() {
-            Some(entry) => div()
-                .flex()
-                .flex_row()
-                .flex_1()
-                .min_h_0()
-                .child(self.render_list(&theme, window, cx))
-                .child(self.render_detail(entry, &theme, window, cx)),
-            None => {
-                div().flex().flex_col().flex_1().min_h_0().px(theme.z(CARD_GAP)).pb(theme.z(CARD_GAP)).child(
-                    Card::new().flex_1().min_h_0().child(empty_state(
-                        IconName::Bot,
-                        "No agents to monitor",
-                        Some("Launch an agent from the sidebar or command palette."),
-                        &theme,
-                    )),
-                )
-            }
-        };
         div()
             .id("agent-dashboard")
             .key_context("AgentDashboard")
             .track_focus(&self.focus)
+            .relative()
             .flex()
-            .flex_col()
+            .flex_row()
             .size_full()
-            .bg(theme.canvas)
+            .bg(theme.background)
             .text_color(theme.foreground)
             .font_family(fonts::UI_FONT_FAMILY)
-            .text_size(theme.z(size::UI))
-            .child(self.render_header(&theme, cx))
-            .child(body)
+            .text_size(theme.z(soprano_chat_ui::widgets::text_size::BODY))
+            .child(self.render_sidebar(&theme, window, cx))
+            .child(self.render_chat(&theme, window, cx))
+            .children(self.picker.clone())
+            .children(self.menu.clone())
     }
 }
 
 impl AgentDashboard {
-    /// The page's title and what it monitors, with Esc / close at the corner.
-    fn render_header(&self, theme: &SopranoTheme, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(10.))
-            .h(theme.z(HEADER_HEIGHT))
-            .pl(theme.z(16.))
-            .pr(theme.z(12.))
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(theme.z(size::DIALOG_TITLE))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Agent Dashboard"),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(theme.z(size::ROW))
-                    .text_color(theme.muted)
-                    .child(self.subtitle()),
-            )
-            .child(Keycaps::new(["esc"]).small())
-            .child(
-                IconButton::new("agent-dashboard-done", IconName::X)
-                    .tooltip("Return to the workspace (Esc)")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DashboardEvent::Close))),
-            )
-    }
-
-    fn render_list(
-        &self,
-        theme: &SopranoTheme,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let list_focused = self.focus.is_focused(window);
-        let mut children: Vec<AnyElement> = Vec::new();
-        for (index, (section, entries)) in self.list.sections().iter().enumerate() {
-            children.push(
-                SectionHeader::new(("agent-dashboard-section", index), section.title())
-                    .count(entries.len())
-                    .medium()
-                    .pl(theme.z(8.))
-                    .into_any_element(),
-            );
-            for entry in entries {
-                let selected = self.list.selected_id() == Some(entry.id().as_str());
-                children.push(self.render_row(entry, selected, list_focused, theme, cx).into_any_element());
-            }
+    /// The chat column's page gutter and lane width, from its last drawn width.
+    fn lane(&self, theme: &SopranoTheme) -> (f32, f32) {
+        let width = f32::from(self.column_bounds.get().size.width) / theme.zoom();
+        // Before the first layout the column has no width; the lane cap stands in.
+        if width <= 0.0 {
+            return (soprano_chat_ui::timeline_view::GUTTER, soprano_chat_ui::timeline_view::CHAT_MAX_WIDTH);
         }
-        let rows = ScrollList::new("agent-dashboard-list-rows", &self.list_scroll)
-            .px(theme.z(8.))
-            .pb(theme.z(8.))
-            .gap(theme.z(2.))
-            .children(children);
-        div()
-            .id("agent-dashboard-list")
-            .debug_selector(|| "agent-dashboard-list".into())
-            .flex()
-            .flex_col()
-            .flex_none()
-            .h_full()
-            .w(theme.z(LIST_WIDTH))
-            .max_w(relative(LIST_MAXIMUM_FRACTION))
-            .child(div().flex().flex_col().flex_1().min_h_0().child(rows))
-            .child(self.render_key_hints(theme))
+        (gutter(width), lane_width(width))
     }
 
-    fn render_key_hints(&self, theme: &SopranoTheme) -> impl IntoElement {
-        let hint = |caps: &[&'static str], label: &'static str| {
-            div()
-                .flex()
-                .flex_row()
-                .flex_none()
-                .items_center()
-                .gap(theme.z(5.))
-                .child(Keycaps::new(caps.iter().copied()).small())
-                .child(div().text_size(theme.z(size::SMALL)).text_color(theme.dim).child(label))
-        };
-        div()
-            .id("agent-dashboard-key-hints")
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(14.))
-            .h(theme.z(FOOTER_HEIGHT))
-            .px(theme.z(16.))
-            .overflow_hidden()
-            .child(hint(&["J", "K"], "Select"))
-            .child(hint(&["↵"], "Open"))
-            .child(hint(&["Tab"], "Reply"))
-            .child(hint(&["T"], "Terminal"))
+    /// What the composer covers at the timeline's end.
+    fn composer_inset(&self, theme: &SopranoTheme) -> f32 {
+        let height = f32::from(self.composer_bounds.get().size.height) / theme.zoom();
+        let (gutter, _) = self.lane(theme);
+        (if height > 0.0 { height } else { COMPOSER_HEIGHT }) + gutter * 2.0
     }
+}
 
-    /// An agent on two lines: its program icon, what it works on and its status pill; under
-    /// the title, who and where it is with what it does now, and how long it has run.
-    fn render_row(
-        &self,
-        entry: &DashboardEntry,
-        selected: bool,
-        list_focused: bool,
-        theme: &SopranoTheme,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let id = entry.id();
-        let home = &self.host.home;
-        // An agent with nothing going on steps back, as in the sidebar.
-        let quiet = !selected && matches!(entry.status(), AgentStatus::Idle | AgentStatus::Stopped);
-        let ink = if quiet { theme.muted } else { theme.foreground };
-
-        let activity = self.current_activity(Some(entry)).map(|activity| {
-            let color = if activity.tone == ActivityTone::Failed { theme.failed } else { theme.muted };
-            ActivityLine::new(activity)
-                .compact(true)
-                .fonts(size::SMALL, FontWeight::NORMAL)
-                .color(color)
-                .into_any_element()
-        });
-        let context = context_element(
-            ElementId::Name(format!("agent-dashboard-activity-{id}").into()),
-            &entry.context(home),
-            activity,
-            size::SMALL,
-            theme.muted,
-            theme,
-        );
-
-        let row_id = id.clone();
-        let selector = format!("agent-dashboard-row-{id}");
-        let row = SidebarRow::new(ElementId::Name(format!("agent-dashboard-row-{id}").into()))
-            .height(ROW_HEIGHT)
-            .selected(selected && list_focused)
-            .when(selected && !list_focused, |row| row.bg(theme.hover))
-            .when(!selected && entry.entry.needs_attention, |row| row.bg(theme.attention_row_wash))
-            .tooltip(entry.row_tooltip(home))
-            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-                if event.click_count() >= 2 {
-                    if let Some(entry) = this.list.entry(&row_id) {
-                        cx.emit(DashboardEvent::Open(entry.target()));
-                    }
-                } else {
-                    this.select(&row_id, window, cx);
-                }
-            }))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(theme.z(1.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(theme.z(ROW_ICON_GAP))
-                            .min_w_0()
-                            .child(agent_glyph(&entry.entry).size(ROW_ICON).color(ink))
-                            .child(div().flex_1().min_w_0().truncate().text_color(ink).child(entry.title()))
-                            .child(StatusPill::new(Some(entry.pill())).now(self.now)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(theme.z(8.))
-                            .min_w_0()
-                            .pl(theme.z(ROW_ICON + ROW_ICON_GAP))
-                            .child(div().flex_1().min_w_0().child(context))
-                            .children(self.elapsed(entry).map(|elapsed| {
-                                div()
-                                    .flex_none()
-                                    .text_size(theme.z(size::SMALL))
-                                    .text_color(theme.dim)
-                                    .child(elapsed)
-                            })),
-                    ),
-            );
-        div().debug_selector(move || selector).child(row)
-    }
-
-    /// How long the agent has run; a stopped agent's pill already says all there is.
-    fn elapsed(&self, entry: &DashboardEntry) -> Option<String> {
-        (entry.status() != AgentStatus::Stopped)
-            .then(|| elapsed_text(entry.status(), entry.entry.started_at, self.now))
-    }
-
-    /// The selected agent as a card like its pane: who it is, the toolbar, what it wrote, and
-    /// the reply field.
-    fn render_detail(
-        &self,
-        entry: &DashboardEntry,
-        theme: &SopranoTheme,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let controls = self.controls();
-        let shows_timeline = self.shows_timeline();
-        let content = if shows_timeline {
-            div().flex().flex_col().flex_1().min_h_0().child(self.timeline.clone()).into_any_element()
+/// A band the window is moved by: mouse-down drags it, a double-click zooms it.
+fn drag_region<E: InteractiveElement>(element: E) -> E {
+    element.on_mouse_down(MouseButton::Left, |event, window, _| {
+        if event.click_count >= 2 {
+            window.zoom_window();
         } else {
-            self.render_terminal(theme).into_any_element()
-        };
-        let card = Card::new()
-            .flex_1()
-            .min_h_0()
-            .child(self.render_title(entry, theme))
-            .child(self.render_location(entry, theme))
-            .child(self.render_toolbar(controls, shows_timeline, theme, cx))
-            .child(div().flex_none().mt(theme.z(12.)).h(px(1.)).bg(theme.border))
-            .child(content)
-            .child(self.render_composer(entry, controls, theme, window, cx));
-        div()
-            .id("agent-dashboard-detail")
-            .debug_selector(|| "agent-dashboard-detail".into())
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .pr(theme.z(CARD_GAP))
-            .pb(theme.z(CARD_GAP))
-            .child(card)
-    }
-
-    fn render_title(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
-        div()
-            .id("agent-dashboard-detail-title")
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(TITLE_ICON_GAP))
-            .pt(theme.z(16.))
-            .px(theme.z(GUTTER))
-            .tooltip(tooltip(entry.title()))
-            .child(agent_glyph(&entry.entry).size(TITLE_ICON).color(theme.foreground))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(theme.z(size::DIALOG_TITLE))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(entry.title()),
-            )
-    }
-
-    /// Under the title: the status pill, how long the agent has run, and
-    /// `window  /  omp · folder · ⎇ branch`.
-    fn render_location(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
-        let home = &self.host.home;
-        let mut context = entry.context(home);
-        context.context.insert(0, format!("{}{LOCATION_SEPARATOR}", entry.entry.window_title));
-        let quiet = |text: SharedString| {
-            div().flex_none().text_size(theme.z(size::META)).text_color(theme.dim).child(text)
-        };
-        div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(8.))
-            .mt(theme.z(2.))
-            .pl(theme.z(GUTTER + TITLE_ICON + TITLE_ICON_GAP))
-            .pr(theme.z(GUTTER))
-            .min_w_0()
-            .child(StatusPill::new(Some(entry.pill())).now(self.now))
-            .children(self.elapsed(entry).map(|elapsed| quiet(elapsed.into())))
-            .child(quiet("·".into()))
-            .child(
-                div()
-                    .id("agent-dashboard-detail-location")
-                    .flex_1()
-                    .min_w_0()
-                    .tooltip(tooltip(entry.location_tooltip(home)))
-                    .child(context_element(
-                        "agent-dashboard-detail-context",
-                        &context,
-                        None,
-                        size::META,
-                        theme.muted,
-                        theme,
-                    )),
-            )
-    }
-
-    fn render_toolbar(
-        &self,
-        controls: Controls,
-        shows_timeline: bool,
-        theme: &SopranoTheme,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let detailed = self.timeline.read(cx).is_detailed();
-        let disabled_segments: Vec<usize> =
-            [(!controls.timeline_segment).then_some(0), (!controls.terminal_segment).then_some(1)]
-                .into_iter()
-                .flatten()
-                .collect();
-        // A card too narrow for both groups on one line gives each its own.
-        div()
-            .id("agent-dashboard-toolbar")
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(8.))
-            .mt(theme.z(14.))
-            .px(theme.z(GUTTER))
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_none()
-                    .items_center()
-                    .gap(theme.z(6.))
-                    .child(
-                        div()
-                            .id("agent-dashboard-mode")
-                            .tooltip(tooltip("Show the conversation or the live terminal (T)"))
-                            .child(
-                                SegmentedControl::new(
-                                    "agent-dashboard-mode-segments",
-                                    ["Timeline", "Terminal"],
-                                )
-                                .selected(if shows_timeline { 0 } else { 1 })
-                                .disabled_segments(disabled_segments)
-                                .well()
-                                .on_select({
-                                    let this = cx.entity().downgrade();
-                                    move |index, window, cx| {
-                                        let _ = this.update(cx, |this, cx| {
-                                            this.set_prefers_terminal(index == 1, window, cx)
-                                        });
-                                    }
-                                }),
-                            ),
-                    )
-                    .child(
-                        Button::new(
-                            "agent-dashboard-details",
-                            if detailed { "Hide details" } else { "Show details" },
-                        )
-                        .ghost()
-                        .size(ButtonSize::Sm)
-                        .keycap("O")
-                        .disabled(!controls.details)
-                        .tooltip("Show thinking, full commands, and output (O)")
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_details(cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_none()
-                    .items_center()
-                    .gap(theme.z(6.))
-                    .ml_auto()
-                    .child(
-                        div().debug_selector(|| "agent-dashboard-open".into()).child(
-                            Button::new("agent-dashboard-open", "Open")
-                                .size(ButtonSize::Sm)
-                                .keycap("↵")
-                                .disabled(!controls.open)
-                                .tooltip("Open the agent in its window (Return)")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.emit_for_selection(DashboardEvent::Open, cx)
-                                })),
-                        ),
-                    )
-                    .child(
-                        div().debug_selector(|| "agent-dashboard-stop".into()).child(
-                            Button::new("agent-dashboard-stop", "Stop")
-                                .size(ButtonSize::Sm)
-                                .disabled(!controls.stop)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.emit_for_selection(DashboardEvent::Stop, cx)
-                                })),
-                        ),
-                    )
-                    .child(
-                        div().debug_selector(|| "agent-dashboard-restart".into()).child(
-                            Button::new("agent-dashboard-restart", "Restart")
-                                .size(ButtonSize::Sm)
-                                .disabled(!controls.restart)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.emit_for_selection(DashboardEvent::Restart, cx)
-                                })),
-                        ),
-                    ),
-            )
-    }
-
-    /// The live terminal across the card (its lines are as wide as the agent's pane),
-    /// highlighted in the theme's colors and selectable for copying; a note in its place while
-    /// there is nothing to show.
-    fn render_terminal(&self, theme: &SopranoTheme) -> impl IntoElement {
-        let focus = self.terminal_focus.clone();
-        let terminal = div()
-            .id("agent-dashboard-terminal")
-            .debug_selector(|| "agent-dashboard-terminal".into())
-            .track_focus(&self.terminal_focus)
-            .flex_1()
-            .min_h_0()
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| window.focus(&focus, cx));
-        match self.terminal_text() {
-            TerminalText::Output(text) => {
-                let highlights = output_highlights(&text, &OutputPalette::new(theme));
-                terminal
-                    .overflow_y_scroll()
-                    .track_scroll(&self.terminal_scroll)
-                    .px(theme.z(GUTTER))
-                    .py(theme.z(14.))
-                    .font_family(fonts::TERMINAL_FONT_FAMILY)
-                    .font_weight(fonts::TERMINAL_WEIGHT)
-                    .text_size(theme.z(size::META))
-                    .text_color(theme.terminal_foreground)
-                    .child(
-                        RichText::new("agent-dashboard-terminal-text", text)
-                            .highlights(highlights)
-                            .selection_color(theme.selection),
-                    )
-            }
-            TerminalText::Message(message) => {
-                terminal.flex().flex_col().child(empty_state(IconName::SHELL, message, None, theme))
-            }
+            window.start_window_move();
         }
-    }
-
-    /// What the agent does over the reply field, kept to the chat lane.
-    fn render_composer(
-        &self,
-        entry: &DashboardEntry,
-        controls: Controls,
-        theme: &SopranoTheme,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let reply_focused = self.reply.read(cx).focus_handle(cx).contains_focused(window, cx);
-        let can_send = controls.reply && state::reply_text(&self.reply.read(cx).value()).is_some();
-        let hint_color = if self.reply_failed.is_some() { theme.failed } else { theme.dim };
-        div().flex().flex_row().flex_none().justify_center().px(theme.z(GUTTER)).pt(theme.z(12.)).child(
-            div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .max_w(theme.z(READABLE_WIDTH))
-                .child(self.render_activity(entry, theme))
-                .child(
-                    div()
-                        .id("agent-dashboard-reply-card")
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(theme.z(10.))
-                        .mt(theme.z(8.))
-                        .h(theme.z(REPLY_FIELD_HEIGHT))
-                        .pl(theme.z(6.))
-                        .pr(theme.z(8.))
-                        .rounded(theme.z(10.))
-                        .border_1()
-                        .border_color(if reply_focused { theme.accent } else { theme.input })
-                        .bg(theme.raised)
-                        .text_size(theme.z(size::UI))
-                        // A field that cannot take a reply steps back; the hint says why.
-                        .when(!controls.reply, |card| card.opacity(0.55))
-                        .child(div().flex_1().min_w_0().child(Input::new(&self.reply).appearance(false)))
-                        .child(send_button(can_send, theme, cx)),
-                )
-                .child(
-                    div()
-                        .id("agent-dashboard-reply-hint")
-                        .mt(theme.z(6.))
-                        .mb(theme.z(10.))
-                        .pl(theme.z(2.))
-                        .h(theme.z(15.))
-                        .truncate()
-                        .text_size(theme.z(size::SMALL))
-                        .text_color(hint_color)
-                        .child(self.reply_hint()),
-                ),
-        )
-    }
-
-    fn render_activity(&self, entry: &DashboardEntry, theme: &SopranoTheme) -> impl IntoElement {
-        let pill = entry.pill();
-        let text = match self.current_activity(Some(entry)) {
-            Some(activity) => {
-                let failed = activity.tone == ActivityTone::Failed;
-                ActivityLine::new(activity)
-                    .fonts(size::ROW, FontWeight::MEDIUM)
-                    .color(if failed { theme.failed } else { theme.muted })
-                    .code_color(if failed { theme.failed } else { theme.foreground })
-                    .into_any_element()
-            }
-            None => div()
-                .truncate()
-                .text_size(theme.z(size::ROW))
-                .text_color(theme.muted)
-                .child(state::fallback_activity(Some(entry.status())))
-                .into_any_element(),
-        };
-        div()
-            .id("agent-dashboard-activity-line")
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(theme.z(8.))
-            .pl(theme.z(2.))
-            .h(theme.z(18.))
-            .min_w_0()
-            .child(div().flex_none().child(icon(pill.icon).size(12.).color(theme.tone(pill.tone))))
-            .child(div().flex_1().min_w_0().child(text))
-    }
+    })
 }
 
-/// The agent's program icon where one ships, else a chat or agent glyph.
-fn agent_glyph(entry: &AgentDashboardEntry) -> Icon {
-    match agent_icon_stem(&entry.profile_id) {
-        Some(stem) => Icon::program(stem),
-        None if entry.is_chat => Icon::new(IconName::MessageSquare),
-        None => Icon::new(IconName::Bot),
-    }
-}
-
-/// What a list or the card shows while it has nothing: a glyph over a line or two, centered.
-fn empty_state(
-    glyph: IconName,
-    title: &'static str,
-    hint: Option<&'static str>,
-    theme: &SopranoTheme,
-) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h_0()
-        .items_center()
-        .justify_center()
-        .gap(theme.z(6.))
-        .px(theme.z(24.))
-        .text_center()
-        .child(div().pb(theme.z(4.)).child(icon(glyph).size(22.).color(theme.dim)))
-        .child(div().text_size(theme.z(size::UI)).text_color(theme.muted).child(title))
-        .children(hint.map(|hint| div().text_size(theme.z(size::META)).text_color(theme.dim).child(hint)))
-}
-
-/// A context line (`omp · folder · ⎇ branch`) at `text_size`, optionally followed by ` — ` and
-/// an activity, on one line truncated at the tail. The branch is led by the branch glyph.
-fn context_element(
-    id: impl Into<ElementId>,
-    context: &ContextLine,
-    activity: Option<AnyElement>,
-    text_size: f32,
-    color: gpui::Hsla,
-    theme: &SopranoTheme,
-) -> AnyElement {
-    let mut head = String::new();
-    let mut branch: Option<String> = None;
-    let mut tail = String::new();
-    for part in context.parts() {
-        let target = if branch.is_some() { &mut tail } else { &mut head };
-        match part {
-            ContextPart::Text(text) => {
-                if !target.is_empty() && !target.ends_with(LOCATION_SEPARATOR) {
-                    target.push_str(ContextLine::SEPARATOR);
-                }
-                target.push_str(&text);
-            }
-            ContextPart::Branch(name) => {
-                if !head.is_empty() && !head.ends_with(LOCATION_SEPARATOR) {
-                    head.push_str(ContextLine::SEPARATOR);
-                }
-                branch = Some(name);
-            }
-        }
-    }
-    if branch.is_none() {
-        // Without a glyph the whole line is one text.
-        tail = std::mem::take(&mut head);
-    }
-    let has_context = !tail.is_empty() || branch.is_some() || !head.is_empty();
-    if activity.is_some() && has_context {
-        tail.push_str(" — ");
-    }
-    let head_text = (!head.is_empty()).then(|| div().flex_none().child(SharedString::from(head)));
-    let glyph = branch.map(|name| {
-        div()
-            .flex()
-            .flex_row()
-            .flex_none()
-            .items_center()
-            .gap(theme.z(3.))
-            .child(icon(IconName::GitBranch).size(text_size).color(color))
-            .child(SharedString::from(name))
-    });
-    let tail_text = (!tail.is_empty()).then(|| div().min_w_0().truncate().child(SharedString::from(tail)));
-    div()
-        .id(id)
-        .flex()
-        .flex_row()
-        .items_center()
-        .min_w_0()
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_size(theme.z(text_size))
-        .text_color(color)
-        .children(head_text)
-        .children(glyph)
-        .children(tail_text)
-        .children(activity.map(|activity| div().flex_1().min_w_0().child(activity)))
-        .into_any_element()
-}
-
-/// The composer's round send button: the ink disc while there is something to send, faint
-/// otherwise.
-fn send_button(can_send: bool, theme: &SopranoTheme, cx: &mut Context<AgentDashboard>) -> impl IntoElement {
-    div()
-        .id("agent-dashboard-send")
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(theme.z(28.))
-        .rounded_full()
-        .bg(if can_send { theme.solid } else { theme.solid.opacity(0.25) })
-        .tooltip(tooltip("Send"))
-        .when(can_send, |button| {
-            button.cursor_pointer().on_click(cx.listener(|this, _, window, cx| this.send_reply(window, cx)))
-        })
-        .child(icon(IconName::ArrowUp).size(14.).color(theme.solid_foreground))
+/// Records where `bounds` is drawn, as an invisible layer over its parent.
+fn measure(bounds: &Rc<Cell<Bounds<Pixels>>>) -> impl IntoElement {
+    let bounds = bounds.clone();
+    canvas(move |drawn, _, _| bounds.set(drawn), |_, _, _, _| {}).absolute().size_full()
 }
 
 #[cfg(test)]

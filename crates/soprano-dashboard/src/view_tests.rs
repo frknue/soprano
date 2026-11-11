@@ -1,4 +1,4 @@
-//! View parts of `AgentDashboardTests.swift` (`AgentDashboardViewTests`), driven headlessly.
+//! The dashboard driven headlessly: the inbox, the chat column, and drafting a new thread.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -7,21 +7,27 @@ use gpui::{
     AppContext as _, Bounds, Entity, Focusable as _, Modifiers, Pixels, TestAppContext, VisualTestContext,
     point, px, size,
 };
+use soprano_agents::AgentDashboardSection;
 use soprano_chat_ui::TimelineRowContent;
 use soprano_chat_ui::work_log::WorkLogKind;
 use soprano_model::Workspace;
-use soprano_text::context_line::ContextPart;
+use soprano_platform::StateStore;
 use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentStatus};
 
 use super::{AgentDashboard, DashboardEvent, DashboardHost};
-use crate::state::TerminalText;
+use crate::state::{AgentChoice, ListRow};
 
 struct Harness {
     dashboard: Entity<AgentDashboard>,
     workspace: Entity<Workspace>,
     events: Rc<RefCell<Vec<DashboardEvent>>>,
     _home: tempfile::TempDir,
+}
+
+/// A host whose agents all take messages.
+fn replying() -> DashboardHost {
+    DashboardHost::new().accepts_replies(|_, _| true)
 }
 
 /// Opens the dashboard over `workspace` in a `width`×`height` window. The harness plays the
@@ -79,22 +85,31 @@ fn set_status(workspace: &mut Workspace, target: &TerminalTarget, status: AgentS
     workspace.update_agent_status(&target.pane_id, &target.tab_id, status, None, None);
 }
 
-fn change(cx: &mut VisualTestContext, harness: &Harness, mutate: impl FnOnce(&mut Workspace)) {
-    harness.workspace.update(cx, |workspace, cx| {
-        mutate(workspace);
+fn change<R>(cx: &mut VisualTestContext, harness: &Harness, mutate: impl FnOnce(&mut Workspace) -> R) -> R {
+    let result = harness.workspace.update(cx, |workspace, cx| {
+        let result = mutate(workspace);
         workspace.take_changes();
         cx.notify();
+        result
     });
     cx.run_until_parked();
+    result
 }
 
-fn headings(cx: &mut VisualTestContext, harness: &Harness) -> Vec<String> {
+/// The inbox as it reads top to bottom.
+fn shown(cx: &mut VisualTestContext, harness: &Harness) -> Vec<String> {
     harness.dashboard.read_with(cx, |dashboard, _| {
         dashboard
             .list()
-            .sections()
-            .iter()
-            .map(|(section, entries)| format!("{} {}", section.title(), entries.len()))
+            .rows()
+            .into_iter()
+            .map(|row| match row {
+                ListRow::Header { section, count, folded } => {
+                    format!("{} {count}{}", section.title(), if folded { " ›" } else { "" })
+                }
+                ListRow::Card(entry) => format!("card {}", entry.project),
+                ListRow::Slim(entry) => format!("slim {}", entry.project),
+            })
             .collect()
     })
 }
@@ -108,6 +123,15 @@ fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> 
     cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn"))
 }
 
+/// Where a thread's row is drawn. `debug_bounds` only takes a `'static` selector, and a row's
+/// is made of its ids: the test process keeps the few it asks for.
+fn row_bounds(cx: &mut VisualTestContext, target: &TerminalTarget) -> Bounds<Pixels> {
+    bounds(
+        cx,
+        Box::leak(format!("agent-dashboard-row-{}:{}", target.pane_id, target.tab_id).into_boxed_str()),
+    )
+}
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let center = bounds(cx, selector).center();
     cx.simulate_click(center, Modifiers::none());
@@ -119,43 +143,40 @@ fn list_focused(cx: &mut VisualTestContext, harness: &Harness) -> bool {
     cx.update(|window, cx| dashboard.read(cx).focus.is_focused(window))
 }
 
-fn reply_focused(cx: &mut VisualTestContext, harness: &Harness) -> bool {
+fn composer_focused(cx: &mut VisualTestContext, harness: &Harness) -> bool {
     let dashboard = harness.dashboard.clone();
     cx.update(|window, cx| {
-        let reply = dashboard.read(cx).reply.clone();
-        reply.focus_handle(cx).contains_focused(window, cx)
+        let editor = dashboard.read(cx).editor.clone();
+        editor.focus_handle(cx).contains_focused(window, cx)
     })
 }
 
-fn reply_draft(cx: &mut VisualTestContext, harness: &Harness) -> String {
-    harness.dashboard.read_with(cx, |dashboard, cx| dashboard.reply.read(cx).value().to_string())
+fn composer_text(cx: &mut VisualTestContext, harness: &Harness) -> String {
+    harness.dashboard.read_with(cx, |dashboard, cx| dashboard.composer_text(cx))
+}
+
+fn hint(cx: &mut VisualTestContext, harness: &Harness) -> (String, bool) {
+    harness.dashboard.read_with(cx, |dashboard, _| dashboard.composer_hint())
 }
 
 #[gpui::test]
-fn rows_show_the_task_over_the_agent_and_folder_and_follow_renames_and_directory_changes(
-    cx: &mut TestAppContext,
-) {
+fn cards_show_the_project_over_the_task_and_follow_renames_and_directory_changes(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
     set_status(&mut workspace, &target, AgentStatus::Waiting);
     let host = DashboardHost::new()
         .notable_branch(|cwd, _| (cwd == "/tmp/projects/payments").then(|| "feat/refunds".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 800., 700.);
+    let (harness, cx) = open(cx, workspace, host, 1000., 700.);
 
-    let home = harness.dashboard.read_with(cx, |dashboard, _| dashboard.host.home.clone());
-    let (title, context) = harness.dashboard.read_with(cx, |dashboard, _| {
-        let entry = dashboard.list().selected().expect("agent");
-        (entry.title(), entry.context(&home).parts())
+    // Before Codex titles itself, it goes by its name under its project; without a branch
+    // the card has two lines.
+    harness.dashboard.read_with(cx, |dashboard, _| {
+        let entry = dashboard.list().selected().expect("thread");
+        assert_eq!((entry.title().as_str(), entry.project.as_str()), ("Codex", "storefront"));
+        // A wait without a stated reason reads as a finished turn.
+        assert_eq!(entry.pill().map(|pill| pill.label), Some("Done"));
     });
-    // Before Codex titles itself, it goes by its name over its folder.
-    assert_eq!(title, "Codex");
-    assert_eq!(context, [ContextPart::Text("storefront".into())]);
-    let row = cx
-        .debug_bounds(Box::leak(
-            format!("agent-dashboard-row-{}:{}", target.pane_id, target.tab_id).into_boxed_str(),
-        ))
-        .expect("row");
-    assert_eq!(row.size.height, px(52.));
+    assert_eq!(row_bounds(cx, &target).size.height, px(63.));
 
     let window_id = harness.workspace.read_with(cx, |workspace, _| workspace.active_window_id().to_owned());
     change(cx, &harness, |workspace| {
@@ -164,48 +185,32 @@ fn rows_show_the_task_over_the_agent_and_folder_and_follow_renames_and_directory
         workspace.rename_window(&window_id, "Payments App");
     });
     harness.dashboard.read_with(cx, |dashboard, _| {
-        let entry = dashboard.list().selected().expect("agent");
-        assert_eq!(entry.title(), "Fix the checkout total");
-        assert_eq!(
-            entry.context(&home).parts(),
-            [
-                ContextPart::Text("Codex".into()),
-                ContextPart::Text("payments".into()),
-                ContextPart::Branch("feat/refunds".into())
-            ]
-        );
+        let entry = dashboard.list().selected().expect("thread");
+        assert_eq!((entry.title().as_str(), entry.project.as_str()), ("Fix the checkout total", "payments"));
+        assert_eq!(entry.entry.branch.as_deref(), Some("feat/refunds"));
         assert_eq!(entry.entry.window_title, "Payments App");
-        assert!(entry.row_tooltip(&home).contains("/tmp/projects/payments"));
-        assert!(entry.accessibility_label().starts_with("Fix the checkout total, Codex"));
+        assert!(entry.row_tooltip(&dashboard.host.home).contains("/tmp/projects/payments"));
     });
+    // The branch takes a third line.
+    assert_eq!(row_bounds(cx, &target).size.height, px(83.));
 }
 
 #[gpui::test]
-fn the_dashboard_shows_live_counts_and_the_terminal_and_sends_replies_stops_restarts_and_closes(
+fn the_chat_sends_messages_stops_and_restarts_the_agent_and_escape_closes_the_dashboard(
     cx: &mut TestAppContext,
 ) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
     set_status(&mut workspace, &target, AgentStatus::Running);
-    let host = DashboardHost::new().terminal_text(|_, _| Some("Codex is ready for your reply.".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1200., 760.);
+    let (harness, cx) = open(cx, workspace, replying(), 1200., 760.);
 
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.subtitle()),
-        "Monitoring 1 agent across 1 window"
-    );
-    assert_eq!(headings(cx, &harness), ["Working 1"]);
-    assert!(bounds(cx, "agent-dashboard-list").size.width > px(300.));
-    assert!(bounds(cx, "agent-dashboard-detail").size.width > px(500.));
-    harness.dashboard.read_with(cx, |dashboard, _| {
-        assert!(dashboard.is_showing_terminal());
-        assert_eq!(dashboard.terminal_text(), TerminalText::Output("Codex is ready for your reply.".into()));
-        assert_eq!(dashboard.reply_hint(), "Press Return to send this single-line reply.");
-    });
-    bounds(cx, "agent-dashboard-terminal");
+    assert_eq!(shown(cx, &harness), ["Working 1", "card storefront"]);
+    assert_eq!(bounds(cx, "agent-dashboard-list").size.width, px(256.));
+    assert!(bounds(cx, "agent-dashboard-detail").size.width > px(900.));
+    assert_eq!(hint(cx, &harness), (String::new(), false));
 
     cx.simulate_keystrokes("tab");
-    assert!(reply_focused(cx, &harness));
+    assert!(composer_focused(cx, &harness));
     cx.simulate_input("Run the focused tests");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
@@ -215,7 +220,7 @@ fn the_dashboard_shows_live_counts_and_the_terminal_and_sends_replies_stops_rest
             text: "Run the focused tests".into()
         })
     );
-    assert_eq!(reply_draft(cx, &harness), "");
+    assert_eq!(composer_text(cx, &harness), "");
 
     click(cx, "agent-dashboard-stop");
     let status = |cx: &mut VisualTestContext| {
@@ -224,18 +229,44 @@ fn the_dashboard_shows_live_counts_and_the_terminal_and_sends_replies_stops_rest
         })
     };
     assert_eq!(status(cx), Some(AgentStatus::Stopped));
-    assert_eq!(headings(cx, &harness), ["Stopped 1"]);
+    // The open thread stays listed in the folded Stopped shelf.
+    assert_eq!(shown(cx, &harness), ["Stopped 1 ›", "slim storefront"]);
+    assert_eq!(hint(cx, &harness), ("Restart the agent to message it.".to_owned(), false));
 
     click(cx, "agent-dashboard-restart");
     assert_eq!(status(cx), Some(AgentStatus::Starting));
-    assert_eq!(headings(cx, &harness), ["Working 1"]);
+    assert_eq!(shown(cx, &harness), ["Working 1", "card storefront"]);
 
+    // Out of the composer first, then out of the dashboard.
+    cx.simulate_keystrokes("escape");
+    assert!(list_focused(cx, &harness));
+    assert!(!harness.events.borrow().contains(&DashboardEvent::Close));
     cx.simulate_keystrokes("escape");
     assert_eq!(harness.events.borrow().last(), Some(&DashboardEvent::Close));
 }
 
 #[gpui::test]
-fn j_and_k_move_the_selection_and_return_opens_the_chosen_agent(cx: &mut TestAppContext) {
+fn a_message_keeps_the_lines_shift_return_adds(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
+    set_status(&mut workspace, &target, AgentStatus::Idle);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+
+    cx.simulate_keystrokes("r");
+    cx.simulate_input("Run the tests");
+    cx.simulate_keystrokes("shift-enter");
+    cx.simulate_input("Then commit");
+    assert!(harness.events.borrow().is_empty());
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(
+        harness.events.borrow().last(),
+        Some(&DashboardEvent::Reply { target, text: "Run the tests\nThen commit".into() })
+    );
+}
+
+#[gpui::test]
+fn j_and_k_move_the_selection_and_return_opens_the_chosen_thread(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let codex = spawn(&mut workspace, "codex", "/tmp/projects/a");
     let claude = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
@@ -246,54 +277,57 @@ fn j_and_k_move_the_selection_and_return_opens_the_chosen_agent(cx: &mut TestApp
     cx.simulate_keystrokes("j");
     assert_eq!(selected_target(cx, &harness), Some(claude.clone()));
     cx.simulate_keystrokes("k");
-    assert_eq!(selected_target(cx, &harness), Some(codex));
+    assert_eq!(selected_target(cx, &harness), Some(codex.clone()));
     cx.simulate_keystrokes("down enter");
-    assert_eq!(harness.events.borrow().last(), Some(&DashboardEvent::Open(claude)));
+    assert_eq!(harness.events.borrow().last(), Some(&DashboardEvent::Open(claude.clone())));
+
+    // A click opens a thread here, a double-click in its window.
+    let first = row_bounds(cx, &codex).center();
+    cx.simulate_click(first, Modifiers::none());
+    assert_eq!(selected_target(cx, &harness), Some(codex.clone()));
+    assert_eq!(harness.events.borrow().len(), 1);
+    cx.simulate_event(gpui::MouseDownEvent {
+        position: first,
+        modifiers: Modifiers::none(),
+        button: gpui::MouseButton::Left,
+        click_count: 2,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        position: first,
+        modifiers: Modifiers::none(),
+        button: gpui::MouseButton::Left,
+        click_count: 2,
+    });
+    cx.run_until_parked();
+    assert_eq!(harness.events.borrow().last(), Some(&DashboardEvent::Open(codex)));
 }
 
 #[gpui::test]
-fn j_from_the_terminal_text_moves_the_selection_and_gives_the_list_the_keyboard(cx: &mut TestAppContext) {
-    let mut workspace = Workspace::new();
-    spawn(&mut workspace, "codex", "/tmp/projects/a");
-    let claude = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
-    let host = DashboardHost::new().terminal_text(|_, _| Some("Working…".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
-
-    click(cx, "agent-dashboard-terminal");
-    assert!(!list_focused(cx, &harness));
-    cx.simulate_keystrokes("j");
-    assert_eq!(selected_target(cx, &harness), Some(claude));
-    assert!(list_focused(cx, &harness));
-}
-
-#[gpui::test]
-fn tab_moves_into_the_reply_field_and_shift_tab_returns_to_the_list_keeping_the_draft(
-    cx: &mut TestAppContext,
-) {
+fn tab_moves_into_the_composer_and_shift_tab_returns_to_the_list_keeping_the_text(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
     set_status(&mut workspace, &target, AgentStatus::Waiting);
-    let host = DashboardHost::new().terminal_text(|_, _| Some("Codex is waiting.".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
 
     cx.simulate_keystrokes("tab");
-    assert!(reply_focused(cx, &harness));
+    assert!(composer_focused(cx, &harness));
     cx.simulate_input("Run the tests");
-    // J, K and T are text while the reply field has the keyboard.
-    cx.simulate_input(" jkt");
+    // J, K, N and O are text while the composer has the keyboard.
+    cx.simulate_input(" jkno");
     cx.simulate_keystrokes("shift-tab");
     assert!(list_focused(cx, &harness));
-    assert_eq!(reply_draft(cx, &harness), "Run the tests jkt");
+    assert_eq!(composer_text(cx, &harness), "Run the tests jkno");
     assert!(harness.events.borrow().is_empty());
+    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
 }
 
 #[gpui::test]
-fn a_reply_the_shell_could_not_deliver_comes_back_with_an_error_hint(cx: &mut TestAppContext) {
+fn a_message_the_shell_could_not_deliver_comes_back_with_an_error_hint(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
     set_status(&mut workspace, &target, AgentStatus::Idle);
-    let host = DashboardHost::new().terminal_text(|_, _| Some("$".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
 
     cx.simulate_keystrokes("r");
     cx.simulate_input("  Retry  ");
@@ -307,30 +341,36 @@ fn a_reply_the_shell_could_not_deliver_comes_back_with_an_error_hint(cx: &mut Te
     cx.update(|window, cx| {
         dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(&target, "Retry", window, cx))
     });
-    assert_eq!(reply_draft(cx, &harness), "Retry");
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
-        "Could not send to this terminal."
-    );
+    cx.run_until_parked();
+    assert_eq!(composer_text(cx, &harness), "Retry");
+    assert_eq!(hint(cx, &harness), ("Could not send to this agent.".to_owned(), true));
+
+    // A new status puts the status hint back; the text stays.
+    change(cx, &harness, |workspace| set_status(workspace, &target, AgentStatus::Waiting));
+    assert_eq!(hint(cx, &harness), (String::new(), false));
+    assert_eq!(composer_text(cx, &harness), "Retry");
 }
 
 #[gpui::test]
-fn replies_wait_for_a_live_terminal(cx: &mut TestAppContext) {
+fn messages_wait_for_an_agent_that_takes_them(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
     set_status(&mut workspace, &target, AgentStatus::Running);
-    let (harness, cx) = open(cx, workspace, DashboardHost::new(), 1100., 720.);
+    let available = Rc::new(std::cell::Cell::new(false));
+    let live = available.clone();
+    let host = DashboardHost::new().accepts_replies(move |_, _| live.get());
+    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
 
-    harness.dashboard.read_with(cx, |dashboard, _| {
-        assert_eq!(
-            dashboard.terminal_text(),
-            TerminalText::Message("This terminal is not currently available.")
-        );
-        assert_eq!(dashboard.reply_hint(), "Open the agent to initialize its terminal.");
-    });
+    assert_eq!(hint(cx, &harness), ("Open the agent in its window to start it.".to_owned(), false));
     cx.simulate_keystrokes("tab");
-    assert!(!reply_focused(cx, &harness));
+    assert!(!composer_focused(cx, &harness));
     assert!(list_focused(cx, &harness));
+
+    available.set(true);
+    change(cx, &harness, |_| {});
+    assert_eq!(hint(cx, &harness), (String::new(), false));
+    cx.simulate_keystrokes("tab");
+    assert!(composer_focused(cx, &harness));
 }
 
 #[gpui::test]
@@ -369,13 +409,13 @@ fn busy_agent_titles_keep_the_list_scroll_position(cx: &mut TestAppContext) {
             .list()
             .entry(&format!("{}:{}", targets[5].pane_id, targets[5].tab_id))
             .expect("busy agent");
-        assert!(busy.row_tooltip(&dashboard.host.home).starts_with("Running the tests\n"));
+        assert_eq!(busy.title(), "Running the tests");
         assert_eq!(dashboard.list_scroll.offset().y, px(-150.));
     });
 }
 
 #[gpui::test]
-fn status_changes_move_the_rows_into_urgency_order_and_refresh_the_counts(cx: &mut TestAppContext) {
+fn status_changes_move_the_cards_into_urgency_order_and_refresh_the_counts(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let targets: Vec<TerminalTarget> = (0..3)
         .map(|index| {
@@ -385,41 +425,66 @@ fn status_changes_move_the_rows_into_urgency_order_and_refresh_the_counts(cx: &m
         })
         .collect();
     let (harness, cx) = open(cx, workspace, DashboardHost::new(), 900., 700.);
-    let folders = |cx: &mut VisualTestContext| {
-        harness.dashboard.read_with(cx, |dashboard, _| {
-            dashboard.list().entries().filter_map(|e| e.entry.cwd.clone()).collect::<Vec<_>>()
-        })
-    };
-    assert_eq!(
-        folders(cx),
-        ["/tmp/projects/project-0", "/tmp/projects/project-1", "/tmp/projects/project-2"]
-    );
+    assert_eq!(shown(cx, &harness), ["Working 3", "card project-0", "card project-1", "card project-2"]);
 
     change(cx, &harness, |workspace| {
         set_status(workspace, &targets[2], AgentStatus::Waiting);
         spawn(workspace, "claude-code", "/tmp/projects/project-3");
     });
     assert_eq!(
-        folders(cx),
-        [
-            "/tmp/projects/project-2",
-            "/tmp/projects/project-0",
-            "/tmp/projects/project-1",
-            "/tmp/projects/project-3"
-        ]
+        shown(cx, &harness),
+        ["Needs you 1", "card project-2", "Working 3", "card project-0", "card project-1", "card project-3"]
     );
-    assert_eq!(headings(cx, &harness), ["Needs you 1", "Working 3"]);
 }
 
 #[gpui::test]
-fn stop_and_restart_stay_in_the_toolbar_and_work_in_the_narrowest_window(cx: &mut TestAppContext) {
+fn the_stopped_shelf_unfolds_into_one_line_rows_and_a_search_narrows_the_inbox(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let running = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
+    set_status(&mut workspace, &running, AgentStatus::Running);
+    let stopped = spawn(&mut workspace, "claude-code", "/tmp/projects/payments");
+    workspace.stop_agent(&stopped);
+    let (harness, cx) = open(cx, workspace, DashboardHost::new(), 1000., 700.);
+
+    assert_eq!(shown(cx, &harness), ["Working 1", "card storefront", "Stopped 1 ›"]);
+    let dashboard = harness.dashboard.clone();
+    cx.update(|_, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.toggle_fold(AgentDashboardSection::Stopped, cx))
+    });
+    assert_eq!(shown(cx, &harness), ["Working 1", "card storefront", "Stopped 1", "slim payments"]);
+    assert_eq!(row_bounds(cx, &stopped).size.height, px(37.));
+    cx.simulate_keystrokes("j");
+    assert_eq!(selected_target(cx, &harness), Some(stopped.clone()));
+
+    // `/` searches; the arrows keep moving the selection, Escape drops the search.
+    cx.simulate_keystrokes("/");
+    cx.simulate_input("store");
+    assert_eq!(shown(cx, &harness), ["card storefront"]);
+    assert_eq!(selected_target(cx, &harness), Some(stopped));
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected_target(cx, &harness), Some(running));
+    cx.simulate_keystrokes("escape");
+    assert!(list_focused(cx, &harness));
+    assert_eq!(shown(cx, &harness), ["Working 1", "card storefront", "Stopped 1", "slim payments"]);
+    assert!(harness.events.borrow().is_empty());
+}
+
+#[gpui::test]
+fn stop_and_restart_stay_in_the_header_and_work_in_a_narrow_window(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let target = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
     set_status(&mut workspace, &target, AgentStatus::Running);
-    // `MainWindowSizing.minimumFrameSize`.
-    let (harness, cx) = open(cx, workspace, DashboardHost::new(), 600., 400.);
+    workspace.rename_tab(
+        &target.pane_id,
+        &target.tab_id,
+        "Upgrade the Terraform providers and fix what breaks",
+    );
+    let host = DashboardHost::new().notable_branch(|_, _| Some("chore/terraform-provider-upgrades".into()));
+    let (harness, cx) = open(cx, workspace, host, 600., 400.);
     let window = Bounds::new(point(px(0.), px(0.)), size(px(600.), px(400.)));
 
+    // The list takes its 40 % at most.
+    assert_eq!(bounds(cx, "agent-dashboard-list").size.width, px(240.));
     let stop = bounds(cx, "agent-dashboard-stop");
     assert!(window.contains(&stop.origin) && window.contains(&stop.bottom_right()), "{stop:?}");
     click(cx, "agent-dashboard-stop");
@@ -434,30 +499,131 @@ fn stop_and_restart_stay_in_the_toolbar_and_work_in_the_narrowest_window(cx: &mu
     assert!(window.contains(&restart.origin) && window.contains(&restart.bottom_right()), "{restart:?}");
     click(cx, "agent-dashboard-restart");
     assert_eq!(status(cx), Some(AgentStatus::Starting));
+    let composer = bounds(cx, "agent-dashboard-composer");
+    assert!(window.contains(&composer.origin) && window.contains(&composer.bottom_right()), "{composer:?}");
 }
 
 #[gpui::test]
-fn a_narrow_window_gives_the_list_its_share(cx: &mut TestAppContext) {
-    let mut workspace = Workspace::new();
-    spawn(&mut workspace, "codex", "/tmp/projects/storefront");
-    let (_harness, cx) = open(cx, workspace, DashboardHost::new(), 700., 600.);
-    assert_eq!(bounds(cx, "agent-dashboard-list").size.width, px(280.));
-    cx.simulate_resize(size(px(1000.), px(600.)));
-    assert_eq!(bounds(cx, "agent-dashboard-list").size.width, px(380.));
-}
-
-#[gpui::test]
-fn an_empty_dashboard_says_so_and_offers_no_agent_actions(cx: &mut TestAppContext) {
+fn a_dashboard_without_threads_opens_on_a_new_one_and_escape_closes_it(cx: &mut TestAppContext) {
     let (harness, cx) = open(cx, Workspace::new(), DashboardHost::new(), 900., 600.);
     harness.dashboard.read_with(cx, |dashboard, _| {
         assert!(dashboard.list().is_empty());
-        assert_eq!(dashboard.subtitle(), "Monitoring 0 agents across 1 window");
+        assert!(dashboard.is_drafting());
     });
-    cx.simulate_keystrokes("j enter t o g ] tab");
+    bounds(cx, "agent-dashboard-draft");
+    // The thread keys have nothing to act on, and an empty draft sends nothing.
+    cx.simulate_keystrokes("j enter o g ] tab enter");
     cx.run_until_parked();
     assert!(cx.debug_bounds("agent-dashboard-stop").is_none());
-    assert!(!reply_focused(cx, &harness));
     assert!(harness.events.borrow().is_empty());
+    assert!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
+
+    cx.simulate_keystrokes("escape escape");
+    assert_eq!(*harness.events.borrow(), [DashboardEvent::Close]);
+}
+
+#[gpui::test]
+fn a_new_thread_starts_in_the_open_threads_project_and_gives_way_to_the_thread_the_shell_opens(
+    cx: &mut TestAppContext,
+) {
+    let mut workspace = Workspace::new();
+    let first = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
+    set_status(&mut workspace, &first, AgentStatus::Idle);
+    let window_title = workspace.active_window().map(|window| window.title.clone());
+    let state = StateStore::in_memory();
+    let (harness, cx) = open(cx, workspace, replying().state(state.clone()), 1100., 720.);
+
+    cx.simulate_keystrokes("n");
+    assert!(composer_focused(cx, &harness));
+    let cwd = harness.dashboard.read_with(cx, |dashboard, _| {
+        let (project, agent) = dashboard.draft_choice().expect("draft");
+        assert_eq!(project.name, "storefront");
+        assert_eq!(agent, &AgentChoice { profile_id: "omp".into(), chat: false });
+        // Its tab joins the window that already works there.
+        assert_eq!(dashboard.draft.as_ref().and_then(|draft| draft.window_title.clone()), window_title);
+        project.path.clone()
+    });
+
+    // A chat instead, in another folder no window works in.
+    let dashboard = harness.dashboard.clone();
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| {
+            dashboard.set_draft_agent(AgentChoice { profile_id: "omp".into(), chat: true }, cx);
+            dashboard.set_draft_project("/tmp/projects/elsewhere", window, cx);
+            assert_eq!(dashboard.draft.as_ref().and_then(|draft| draft.window_title.clone()), None);
+            dashboard.set_draft_project(&cwd, window, cx);
+        })
+    });
+    cx.simulate_input("Fix the totals");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(
+        harness.events.borrow().last(),
+        Some(&DashboardEvent::NewThread {
+            profile_id: "omp".into(),
+            chat: true,
+            cwd: cwd.clone(),
+            prompt: "Fix the totals".into()
+        })
+    );
+    // Until the shell answers, the draft waits as written.
+    assert_eq!(hint(cx, &harness), ("Starting omp…".to_owned(), false));
+    assert_eq!(composer_text(cx, &harness), "Fix the totals");
+    cx.simulate_keystrokes("enter");
+    assert_eq!(harness.events.borrow().len(), 1);
+
+    // The shell could not: the draft says why and can be sent again.
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.thread_failed("omp is not installed.", window, cx))
+    });
+    assert_eq!(hint(cx, &harness), ("omp is not installed.".to_owned(), true));
+    assert_eq!(composer_text(cx, &harness), "Fix the totals");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(harness.events.borrow().len(), 2);
+
+    // The shell opened it: the thread takes the draft's place.
+    let opened =
+        change(cx, &harness, |workspace| workspace.open_thread("omp", true, &cwd, None)).expect("thread");
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.thread_opened(&opened, window, cx))
+    });
+    cx.run_until_parked();
+    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
+    assert_eq!(selected_target(cx, &harness), Some(opened));
+    assert_eq!(composer_text(cx, &harness), "");
+
+    // The next draft starts with the agent the last thread started with.
+    assert_eq!(AgentChoice::initial(&state), Some(AgentChoice { profile_id: "omp".into(), chat: true }));
+}
+
+#[gpui::test]
+fn escape_gives_a_draft_up_for_the_open_thread_and_so_does_choosing_a_thread(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let first = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    let second = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+    let drafting =
+        |cx: &mut VisualTestContext| harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting());
+
+    click(cx, "agent-dashboard-new-thread");
+    assert!(drafting(cx));
+    cx.simulate_input("Half an idea");
+    // Out of the composer, then out of the draft; the thread that was open shows again.
+    cx.simulate_keystrokes("escape escape");
+    assert!(!drafting(cx));
+    assert_eq!(selected_target(cx, &harness), Some(first.clone()));
+    assert_eq!(composer_text(cx, &harness), "");
+    assert!(harness.events.borrow().is_empty());
+
+    cx.simulate_keystrokes("n escape j");
+    assert!(!drafting(cx));
+    assert_eq!(selected_target(cx, &harness), Some(first));
+    cx.simulate_keystrokes("n");
+    let other = row_bounds(cx, &second).center();
+    cx.simulate_click(other, Modifiers::none());
+    assert!(!drafting(cx));
+    assert_eq!(selected_target(cx, &harness), Some(second));
 }
 
 /// A Claude Code transcript of three turns: a prompt, `swift test`, and a long answer.
@@ -491,7 +657,7 @@ fn write_transcript(directory: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[gpui::test]
-fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_o_and_the_terminal_on_t(
+fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_and_details_on_o(
     cx: &mut TestAppContext,
 ) {
     // The transcript store reads on its own worker thread and wakes the dashboard from there.
@@ -512,8 +678,7 @@ fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_
         &target.tab_id,
         None,
     );
-    let host = DashboardHost::new().terminal_text(|_, _| Some("claude ❯".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 900., 520.);
+    let (harness, cx) = open(cx, workspace, replying(), 900., 520.);
     let timeline = harness.dashboard.read_with(cx, |dashboard, _| dashboard.timeline_view().clone());
     let user_rows = |cx: &mut VisualTestContext| {
         timeline.read_with(cx, |timeline, _| {
@@ -531,7 +696,6 @@ fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_
 
     // The prompts as bubbles, each finished turn folded behind "Worked for …" in the minimal
     // work log, the answers as Markdown.
-    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_showing_terminal()));
     assert_eq!(user_rows(cx), 3);
     timeline.read_with(cx, |timeline, _| {
         let folds: Vec<&str> = timeline
@@ -547,9 +711,15 @@ fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_
         assert!(!timeline.is_detailed());
         assert!(timeline.is_following());
     });
-    assert_eq!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.activity_text()), {
-        "Replied · Paragraph 1 of the answer, long enough to take a line of its own."
+    // The thread's card says what the agent last said, which takes its third line.
+    harness.dashboard.read_with(cx, |dashboard, _| {
+        let entry = dashboard.list().selected().expect("thread");
+        assert_eq!(
+            dashboard.current_activity(entry).map(|activity| activity.text()).as_deref(),
+            Some("Replied · Paragraph 1 of the answer, long enough to take a line of its own.")
+        );
     });
+    assert_eq!(row_bounds(cx, &target).size.height, px(83.));
 
     // [ leaves the newest entry for an earlier prompt; G follows the newest again.
     cx.simulate_keystrokes("[ [");
@@ -565,35 +735,25 @@ fn an_agents_transcript_reads_as_the_chat_timeline_with_prompt_jumps_details_on_
             matches!(&row.content, TimelineRowContent::WorkEntry(model) if model.entry.kind == WorkLogKind::Command)
         }));
     });
-
-    // T shows the live terminal, and back.
-    cx.simulate_keystrokes("t");
-    harness.dashboard.read_with(cx, |dashboard, _| {
-        assert!(dashboard.is_showing_terminal());
-        assert_eq!(dashboard.terminal_text(), TerminalText::Output("claude ❯".into()));
-    });
-    cx.simulate_keystrokes("t");
-    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_showing_terminal()));
+    click(cx, "agent-dashboard-details");
+    assert!(!timeline.read_with(cx, |timeline, _| timeline.is_detailed()));
 }
 
 #[gpui::test]
-fn a_chat_tab_takes_replies_through_the_host_and_a_failure_gives_way_to_the_status_hint(
-    cx: &mut TestAppContext,
-) {
+fn a_chat_tab_takes_messages_through_the_host(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let pane = workspace.spawn_agent("omp", Some("/tmp/projects/a"), true).expect("chat pane");
     let tab =
         workspace.pane(&pane).and_then(|pane| pane.active_tab()).map(|tab| tab.id.clone()).expect("tab");
     let chat = TerminalTarget::new(pane, tab);
     set_status(&mut workspace, &chat, AgentStatus::Running);
-    // The shell reports a running chat as available with no terminal text.
-    let host = DashboardHost::new().terminal_text(|_, _| Some(String::new()));
+    let available = Rc::new(std::cell::Cell::new(true));
+    let live = available.clone();
+    let host = DashboardHost::new().accepts_replies(move |_, _| live.get());
     let (harness, cx) = open(cx, workspace, host, 1100., 720.);
 
-    // A chat always shows its conversation, never a terminal.
-    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_showing_terminal()));
     cx.simulate_keystrokes("r");
-    assert!(reply_focused(cx, &harness));
+    assert!(composer_focused(cx, &harness));
     cx.simulate_input("Summarize the diff");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
@@ -602,83 +762,30 @@ fn a_chat_tab_takes_replies_through_the_host_and_a_failure_gives_way_to_the_stat
         Some(&DashboardEvent::Reply { target: chat.clone(), text: "Summarize the diff".into() })
     );
 
-    let dashboard = harness.dashboard.clone();
-    cx.update(|window, cx| {
-        dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(&chat, "Summarize the diff", window, cx))
-    });
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
-        "Could not send to this terminal."
-    );
-    // A new status puts the status hint back, as Swift's `updateControls` does.
-    change(cx, &harness, |workspace| set_status(workspace, &chat, AgentStatus::Waiting));
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
-        "Press Return to send this single-line reply."
-    );
-    assert_eq!(reply_draft(cx, &harness), "Summarize the diff");
-}
-
-#[gpui::test]
-fn a_failed_send_gives_way_when_the_terminal_goes_away(cx: &mut TestAppContext) {
-    let mut workspace = Workspace::new();
-    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
-    set_status(&mut workspace, &target, AgentStatus::Idle);
-    let available = Rc::new(std::cell::Cell::new(true));
-    let live = available.clone();
-    let host = DashboardHost::new().terminal_text(move |_, _| live.get().then(|| "$".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
-
-    let dashboard = harness.dashboard.clone();
-    cx.update(|window, cx| {
-        dashboard.update(cx, |dashboard, cx| dashboard.reply_failed(&target, "x", window, cx))
-    });
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
-        "Could not send to this terminal."
-    );
+    // A chat whose session ended says to restart it, where a terminal agent says to open it.
     available.set(false);
     change(cx, &harness, |_| {});
-    assert_eq!(
-        harness.dashboard.read_with(cx, |dashboard, _| dashboard.reply_hint()),
-        "Open the agent to initialize its terminal."
-    );
+    assert_eq!(hint(cx, &harness), ("Restart the agent to message it.".to_owned(), false));
 }
 
 #[gpui::test]
-fn selecting_another_agent_clears_the_reply_draft(cx: &mut TestAppContext) {
+fn selecting_another_thread_clears_the_composer(cx: &mut TestAppContext) {
     let mut workspace = Workspace::new();
     let first = spawn(&mut workspace, "codex", "/tmp/projects/a");
     let second = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
     for target in [&first, &second] {
         set_status(&mut workspace, target, AgentStatus::Waiting);
     }
-    let host = DashboardHost::new().terminal_text(|_, _| Some("waiting".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
 
     cx.simulate_keystrokes("tab");
-    cx.simulate_input("Half-written reply");
+    cx.simulate_input("Half-written message");
     cx.simulate_keystrokes("shift-tab");
-    assert_eq!(reply_draft(cx, &harness), "Half-written reply");
+    assert_eq!(composer_text(cx, &harness), "Half-written message");
     cx.simulate_keystrokes("j");
     assert_eq!(selected_target(cx, &harness), Some(second));
-    assert_eq!(reply_draft(cx, &harness), "");
+    assert_eq!(composer_text(cx, &harness), "");
     cx.simulate_keystrokes("k");
     assert_eq!(selected_target(cx, &harness), Some(first));
-    assert_eq!(reply_draft(cx, &harness), "");
-}
-
-#[gpui::test]
-fn escape_in_the_reply_field_closes_the_dashboard_without_sending(cx: &mut TestAppContext) {
-    let mut workspace = Workspace::new();
-    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
-    set_status(&mut workspace, &target, AgentStatus::Waiting);
-    let host = DashboardHost::new().terminal_text(|_, _| Some("waiting".to_owned()));
-    let (harness, cx) = open(cx, workspace, host, 1100., 720.);
-
-    cx.simulate_keystrokes("tab");
-    cx.simulate_input("Never mind");
-    assert!(reply_focused(cx, &harness));
-    cx.simulate_keystrokes("escape");
-    assert_eq!(*harness.events.borrow(), [DashboardEvent::Close]);
+    assert_eq!(composer_text(cx, &harness), "");
 }

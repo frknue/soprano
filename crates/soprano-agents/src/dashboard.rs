@@ -1,5 +1,4 @@
-//! The Agent Dashboard's snapshot and grouping (`AgentDashboardSnapshot.swift`), plus the
-//! elapsed runtime text its rows show.
+//! The Agent Dashboard's snapshot and grouping (`AgentDashboardSnapshot.swift`).
 
 use soprano_types::{AgentConversation, AgentStatus};
 
@@ -164,21 +163,4 @@ fn urgency_rank(entry: &impl DashboardEntryStatus) -> u8 {
         AgentStatus::Idle => 5,
         AgentStatus::Stopped => 6,
     }
-}
-
-/// The runtime a dashboard row shows: empty without a start, `stopped` for a stopped agent,
-/// else `42s`, `3m 5s` or `1h 2m`.
-pub fn elapsed_text(status: AgentStatus, started_at: Option<Date>, now: Date) -> String {
-    let Some(started_at) = started_at else { return String::new() };
-    if status == AgentStatus::Stopped {
-        return "stopped".into();
-    }
-    let interval = (now - started_at).num_seconds().max(0);
-    if interval < 60 {
-        return format!("{interval}s");
-    }
-    if interval < 3_600 {
-        return format!("{}m {}s", interval / 60, interval % 60);
-    }
-    format!("{}h {}m", interval / 3_600, (interval % 3_600) / 60)
 }

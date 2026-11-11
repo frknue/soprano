@@ -542,6 +542,31 @@ fn a_prompt_that_starts_like_an_option_is_passed_after_the_end_of_options() {
 }
 
 #[test]
+fn a_first_message_reaches_exactly_the_agents_that_say_they_take_one() {
+    let launch = AgentLaunch { prompt: "Fix the totals".into(), ..Default::default() };
+    let none = AccountAdjustments::default();
+    let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
+    let scripted =
+        AgentProfile { launch_script: Some("./start-claude.sh".into()), ..DefaultAgents::claude_code() };
+    let mut profiles = DefaultAgents::all();
+    profiles.extend([custom, scripted]);
+    for profile in profiles.iter().filter(|profile| profile.id != "terminal") {
+        let mut request = AgentRequest::new(profile, "pane-1", "tab-2");
+        request.launch = Some(&launch);
+        request.accounts = &none;
+        let spec = LaunchSpec::for_agent(&context("/bin/zsh"), &request);
+        let started_with = [spec.argv.join(" "), spec.initial_input.clone().unwrap_or_default()].concat();
+        assert_eq!(
+            started_with.contains("Fix the totals"),
+            profile.takes_launch_prompt(),
+            "{} ({:?})",
+            profile.id,
+            profile.launch_script
+        );
+    }
+}
+
+#[test]
 fn a_resumed_run_keeps_its_autonomy_but_is_not_given_its_prompt_again() {
     let profile = DefaultAgents::codex();
     let launch =

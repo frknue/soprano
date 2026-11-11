@@ -667,7 +667,7 @@ impl Sidebar {
                     .icon_size(14.)
                     .color(theme.dim)
                     .tooltip("Agent Dashboard")
-                    .on_click(move |_, _, cx| shell::dispatch(&shell, Command::OpenDashboard, cx)),
+                    .on_click(move |_, _, cx| shell::dispatch(&shell, Command::ToggleDashboard, cx)),
             );
         let body = if groups.is_empty() {
             div()

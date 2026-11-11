@@ -497,3 +497,119 @@ fn workspace_sessions_without_a_window_list_restore_their_single_layout() {
     assert_eq!(workspace.pane("pane-8").map(|p| p.tabs[0].id.as_str()), Some("tab-9"));
     assert_eq!(workspace.spawn_terminal(None).as_deref(), Some("pane-11"));
 }
+
+/// A git checkout `name` with a `sub` folder, under a fresh temporary folder.
+fn checkout(name: &str) -> (tempfile::TempDir, String, String) {
+    let parent = tempfile::tempdir().expect("temp");
+    let root = parent.path().join(name);
+    std::fs::create_dir_all(root.join(".git")).expect("git");
+    std::fs::create_dir_all(root.join("sub")).expect("sub");
+    let sub = root.join("sub").to_string_lossy().into_owned();
+    (parent, root.to_string_lossy().into_owned(), sub)
+}
+
+#[test]
+fn a_thread_joins_the_window_working_on_its_project_as_a_tab_behind_the_visible_one() {
+    let (_keep, root, sub) = checkout("storefront");
+    let mut workspace = Workspace::new();
+    let project_window = workspace.create_window(Some(&sub), None).expect("window");
+    let other_window = workspace.create_window(Some("/tmp/elsewhere"), None).expect("window");
+    let visible_pane = workspace.active_pane_id().to_owned();
+
+    let thread = workspace.open_thread("omp", false, &root, None).expect("thread");
+
+    let window = workspace.window_containing_pane(&thread.pane_id).expect("window");
+    assert_eq!(window.id, project_window);
+    assert_eq!(window.tabs().len(), 2);
+    assert_eq!(window.active_tab_index(), 0);
+    assert_eq!(workspace.active_window_id(), other_window);
+    assert_eq!(workspace.active_pane_id(), visible_pane);
+    let tab = workspace.tab(&thread.pane_id, &thread.tab_id).expect("tab");
+    assert_eq!(tab.cwd.as_deref(), Some(root.as_str()));
+    assert_eq!(tab.agent.as_ref().map(|agent| agent.profile_id.as_str()), Some("omp"));
+}
+
+#[test]
+fn a_thread_of_a_project_no_window_works_on_opens_a_window_named_after_it() {
+    let (_keep, root, _) = checkout("payments");
+    let mut workspace = Workspace::new();
+    let session = workspace.active_session_id().to_owned();
+    let first_window = workspace.active_window_id().to_owned();
+
+    let thread = workspace.open_thread("claude-code", false, &root, None).expect("thread");
+
+    let window = workspace.window_containing_pane(&thread.pane_id).expect("window").clone();
+    assert_ne!(window.id, first_window);
+    assert_eq!(window.title, "payments");
+    assert_eq!(window.session_id, session);
+    assert_eq!(workspace.active_window_id(), first_window);
+    // The next thread of the project finds that window.
+    let second = workspace.open_thread("omp", false, &root, None).expect("thread");
+    assert_eq!(
+        workspace.window_containing_pane(&second.pane_id).map(|w| w.id.clone()),
+        Some(window.id.clone())
+    );
+    assert_eq!(workspace.window_count(), 2);
+}
+
+#[test]
+fn a_threads_first_message_starts_a_terminal_agent_and_is_left_to_a_chats_session() {
+    let mut workspace = Workspace::new();
+
+    let terminal =
+        workspace.open_thread("codex", false, "/tmp/repo", Some("  Fix the totals \n")).expect("thread");
+    let chat = workspace.open_thread("omp", true, "/tmp/repo", Some("Fix the totals")).expect("thread");
+    let silent = workspace.open_thread("codex", false, "/tmp/repo", Some("  ")).expect("thread");
+
+    let launch = |target: &TerminalTarget| {
+        workspace.agent(&target.pane_id, &target.tab_id).and_then(|agent| agent.launch.clone())
+    };
+    assert_eq!(launch(&terminal).map(|launch| launch.prompt).as_deref(), Some("Fix the totals"));
+    assert_eq!(launch(&terminal).map(|launch| launch.skips_approvals), Some(false));
+    assert!(workspace.tab(&chat.pane_id, &chat.tab_id).is_some_and(|tab| tab.is_chat()));
+    assert_eq!(launch(&chat), None);
+    assert_eq!(launch(&silent), None);
+}
+
+#[test]
+fn a_first_message_is_refused_for_an_agent_that_cannot_be_handed_one() {
+    use crate::workspace::sessions::thread_launch;
+    use soprano_types::{AgentProfile, DefaultAgents};
+
+    let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
+    let scripted =
+        AgentProfile { launch_script: Some("./start-claude.sh".into()), ..DefaultAgents::claude_code() };
+    for profile in [&custom, &scripted] {
+        // Its CLI would start and the message would be gone.
+        assert_eq!(thread_launch(profile, false, Some("Fix the totals")), Err(()), "{}", profile.id);
+        // Without a message there is nothing to lose.
+        assert_eq!(thread_launch(profile, false, None), Ok(None));
+        assert_eq!(thread_launch(profile, false, Some(" \n")), Ok(None));
+    }
+    // A chat takes the message through its session, whatever its profile's command line.
+    let scripted_omp = AgentProfile { launch_script: Some("./omp.sh".into()), ..DefaultAgents::omp() };
+    assert_eq!(thread_launch(&scripted_omp, true, Some("Fix the totals")), Ok(None));
+    assert_eq!(
+        thread_launch(&DefaultAgents::open_code(), false, Some("Fix the totals"))
+            .map(|l| l.map(|l| l.prompt)),
+        Ok(Some("Fix the totals".to_owned()))
+    );
+}
+
+#[test]
+fn threads_stay_out_of_the_automations_session_and_need_an_agent() {
+    let mut workspace = Workspace::new();
+    let run =
+        workspace.open_automation_window("Audit", "omp", "/tmp/repo", None, launch(), None).expect("run");
+    let panes = workspace.pane_count();
+
+    assert_eq!(workspace.open_thread("terminal", false, "/tmp/repo", None), None);
+    assert_eq!(workspace.open_thread("no-such-agent", false, "/tmp/repo", None), None);
+    assert_eq!(workspace.pane_count(), panes);
+
+    let thread = workspace.open_thread("omp", false, "/tmp/repo", None).expect("thread");
+    let run_window = workspace.window_containing_pane(&run.pane_id).expect("window");
+    let thread_window = workspace.window_containing_pane(&thread.pane_id).expect("window");
+    assert_ne!(thread_window.id, run_window.id);
+    assert_ne!(thread_window.session_id, run_window.session_id);
+}

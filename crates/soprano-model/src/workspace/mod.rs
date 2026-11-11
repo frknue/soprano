@@ -18,7 +18,7 @@ mod presentation;
 mod sessions;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use soprano_types::{AgentCatalog, TerminalTarget};
 
@@ -534,20 +534,27 @@ impl Workspace {
     }
 
     fn project_directory_name(path: &str) -> Option<String> {
+        Self::project_root(path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.is_empty())
+    }
+
+    /// The project a folder belongs to: the nearest enclosing git checkout, else the folder
+    /// itself. Walks the disk.
+    pub fn project_root(path: &str) -> PathBuf {
         let original = file_url::standardized_path(&soprano_platform::paths::expand_tilde(path));
         let mut directory: &Path = &original;
         loop {
-            if directory.join(".git").exists()
-                && let Some(name) = directory.file_name()
-            {
-                return Some(name.to_string_lossy().into_owned());
+            if directory.join(".git").exists() && directory.file_name().is_some() {
+                return directory.to_path_buf();
             }
             match directory.parent() {
                 Some(parent) if parent != directory => directory = parent,
                 _ => break,
             }
         }
-        original.file_name().map(|name| name.to_string_lossy().into_owned()).filter(|name| !name.is_empty())
+        original
     }
 
     /// `Window 3`: the placeholder titles of early builds.

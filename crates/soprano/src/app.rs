@@ -1,6 +1,7 @@
 //! `AppDelegate.applicationDidFinishLaunching`: settings first, accounts, theme, the workspace
 //! (restored when `restoreLastSession`), notifications, the CLI socket, then the main window.
-//! Closing the main window quits; quitting saves the window frame and the workspace.
+//! Closing the main window quits, whatever else is open; quitting saves the window frame and
+//! the workspace.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,7 +23,7 @@ use soprano_ui::SopranoAssets;
 use crate::content::{ContentHost, PtyTerminals, terminal_theme};
 use crate::main_view::{MainView, Startup, theme_appearance};
 use crate::services::Services;
-use crate::shell::Shell;
+use crate::shell::{Command, Shell};
 use crate::workspace::WorkspaceHandle;
 use crate::{ipc, menus, sizing, window_chrome};
 
@@ -71,6 +72,19 @@ pub fn run() {
             if asked.is_err() {
                 cx.quit();
             }
+        });
+        // The Agent Dashboard menu item while the Agents window is in front: the main view is
+        // not in that window, so the action reaches it from here.
+        let dashboard_window = main_window.clone();
+        cx.on_action(move |_: &menus::AgentDashboard, cx| {
+            let Some(window) = *dashboard_window.borrow() else { return };
+            window
+                .update(cx, |root, window, cx| {
+                    if let Ok(view) = root.view().clone().downcast::<MainView>() {
+                        view.update(cx, |view, cx| view.run(Command::ToggleDashboard, window, cx));
+                    }
+                })
+                .ok();
         });
         menus::install(&keybindings, cx);
 
@@ -172,9 +186,9 @@ pub fn run() {
             }
         };
         *main_window.borrow_mut() = Some(window);
-        // applicationShouldTerminateAfterLastWindowClosed.
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
+        // The main window is the app: when it closes, the Agents window goes with it.
+        cx.on_window_closed(move |cx, closed| {
+            if closed == window.window_id() {
                 cx.quit();
             }
         })

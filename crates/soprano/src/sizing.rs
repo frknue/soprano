@@ -133,9 +133,21 @@ pub fn clamped(frame: Frame, visible_frames: &[Frame]) -> Frame {
 pub const FRAME_KEY: &str = "soprano-main-window-frame-v2";
 
 pub fn load_frame(store: &StateStore, visible_frames: &[Frame]) -> Option<Frame> {
-    let stored: String = store.get(FRAME_KEY)?;
+    load_frame_at(store, FRAME_KEY, visible_frames)
+}
+
+/// The frame saved under `key`, when it still fits a display.
+pub fn load_frame_at(store: &StateStore, key: &str, visible_frames: &[Frame]) -> Option<Frame> {
+    let stored: String = store.get(key)?;
     let frame = Frame::from_rect_string(&stored);
     is_restorable(&frame, visible_frames).then(|| clamped(frame, visible_frames))
+}
+
+/// A `width`×`height` frame in the middle of `visible`, shrunk to fit it.
+pub fn centered_frame(visible: Frame, width: f64, height: f64) -> Frame {
+    let width = width.min(visible.width);
+    let height = height.min(visible.height);
+    Frame::new(visible.mid_x() - width / 2.0, visible.mid_y() - height / 2.0, width, height).integral()
 }
 
 /// Where the Swift app's frame lands when state is imported from its UserDefaults
@@ -159,7 +171,11 @@ pub fn import_appkit_frame(store: &StateStore, primary_height: Option<f64>) {
 }
 
 pub fn save_frame(store: &StateStore, frame: Frame) {
-    store.set(FRAME_KEY, &frame.to_rect_string());
+    save_frame_at(store, FRAME_KEY, frame);
+}
+
+pub fn save_frame_at(store: &StateStore, key: &str, frame: Frame) {
+    store.set(key, &frame.to_rect_string());
 }
 
 #[cfg(test)]

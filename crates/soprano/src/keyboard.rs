@@ -9,9 +9,9 @@ use gpui::{KeyBinding, Keystroke, NoAction};
 use soprano_keys::{KeyEvent, Modifiers};
 
 /// Content whose own key handling owns Tab and Shift-Tab: a terminal sends them to its program
-/// (`\t`, `ESC [ Z`); the Agent Dashboard moves between its list and reply box (in its
-/// keystroke interceptor) and, like Swift, does nothing on ⇧Tab in the list, where Root's
-/// traversal would otherwise move focus.
+/// (`\t`, `ESC [ Z`); the Agent Dashboard moves between its inbox and composer (in its
+/// keystroke interceptor) and does nothing on ⇧Tab in the inbox, where Root's traversal would
+/// otherwise move focus.
 pub const TAB_TAKING_CONTEXTS: [&str; 2] = [soprano_term::view::KEY_CONTEXT, "AgentDashboard"];
 
 /// gpui-component's `Root` binds Tab / Shift-Tab (context `Root`, an ancestor of every view)

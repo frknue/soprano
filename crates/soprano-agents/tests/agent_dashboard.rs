@@ -1,4 +1,3 @@
-use chrono::{Duration, TimeZone, Utc};
 use soprano_agents::*;
 use soprano_types::AgentStatus;
 
@@ -97,15 +96,4 @@ fn an_entry_is_identified_by_its_pane_and_tab_and_located_by_session_window_and_
     agent.title = "Plan the migration".into();
     assert_eq!(agent.id(), "pane-t1:t1");
     assert_eq!(agent.location(), "Work ▸ Window ▸ Plan the migration");
-}
-
-#[test]
-fn rows_show_the_runtime_in_seconds_minutes_and_hours_and_stopped_agents_say_so() {
-    let start = Utc.timestamp_opt(1_000, 0).single().expect("date");
-    assert_eq!(elapsed_text(AgentStatus::Running, None, start), "");
-    assert_eq!(elapsed_text(AgentStatus::Running, Some(start), start + Duration::seconds(42)), "42s");
-    assert_eq!(elapsed_text(AgentStatus::Running, Some(start), start + Duration::seconds(185)), "3m 5s");
-    assert_eq!(elapsed_text(AgentStatus::Idle, Some(start), start + Duration::seconds(3_720)), "1h 2m");
-    assert_eq!(elapsed_text(AgentStatus::Stopped, Some(start), start + Duration::seconds(10)), "stopped");
-    assert_eq!(elapsed_text(AgentStatus::Running, Some(start), start - Duration::seconds(10)), "0s");
 }

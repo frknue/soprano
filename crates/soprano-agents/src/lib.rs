@@ -28,7 +28,7 @@ pub use chat_turns::{
 pub use claude::ClaudeTranscriptDecoder;
 pub use codex::CodexRolloutDecoder;
 pub use dashboard::{
-    AgentDashboardEntry, AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus, elapsed_text,
+    AgentDashboardEntry, AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus,
 };
 pub use json::{JsonValue, JsonValueExt};
 pub use omp::OmpSessionDecoder;
