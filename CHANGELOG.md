@@ -258,6 +258,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- `⌃A` → `|` splits right again, and `⌃A` → `>` / `<` switch pane tabs again: shortcuts on
+  a symbol typed with Shift no longer fall through.
 - Codex panes show the Codex logo as their icon instead of a filled square.
 - A sideways trackpad swipe over the sidebar no longer scrolls the windows and agents
   lists; the gesture stays with macOS Spaces.

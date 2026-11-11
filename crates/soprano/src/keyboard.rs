@@ -28,10 +28,17 @@ pub fn tab_passthrough_bindings() -> Vec<KeyBinding> {
 }
 
 /// The resolver's view of a GPUI keystroke: `key` with Shift applied (AppKit's
-/// `charactersIgnoringModifiers`), `base_key` without it.
+/// `charactersIgnoringModifiers`), `base_key` without it, and Shift set whenever `key` is a
+/// symbol that needs it.
+///
+/// GPUI folds Shift into the symbol it produces and clears the flag on every platform: Shift+\
+/// arrives as `|` without Shift. Bindings carry Shift for such symbols (`KeyChord::new` infers
+/// it, and the built-in `split-vertical` is Prefix → Shift+|), so the flag and the unshifted base
+/// key are restored here; otherwise every shifted-symbol binding matches nothing.
 pub fn key_event(keystroke: &Keystroke) -> KeyEvent {
     let modifiers = &keystroke.modifiers;
-    let base = keystroke.key.as_str();
+    let reported = keystroke.key.as_str();
+    let base = unshifted(reported).unwrap_or(reported);
     let key = if base.chars().count() == 1 {
         let typed = keystroke
             .key_char
@@ -40,18 +47,18 @@ pub fn key_event(keystroke: &Keystroke) -> KeyEvent {
             .filter(|_| !modifiers.control && !modifiers.platform);
         match typed {
             Some(typed) => typed.to_owned(),
-            None if modifiers.shift => shifted(base),
+            None if modifiers.shift || base != reported => shifted(base),
             None => base.to_owned(),
         }
     } else {
         base.to_owned()
     };
     KeyEvent {
+        shift: modifiers.shift || soprano_keys::is_shifted_symbol(&key),
         key,
         base_key: Some(base.to_owned()),
         ctrl: modifiers.control,
         alt: modifiers.alt,
-        shift: modifiers.shift,
         cmd: modifiers.platform,
         is_repeat: false,
     }
@@ -61,33 +68,42 @@ pub fn modifiers(modifiers: &gpui::Modifiers) -> Modifiers {
     Modifiers { ctrl: modifiers.control, alt: modifiers.alt, shift: modifiers.shift, cmd: modifiers.platform }
 }
 
+/// Each key of a US layout and the symbol Shift makes of it.
+const SHIFT_PAIRS: [(&str, &str); 21] = [
+    ("1", "!"),
+    ("2", "@"),
+    ("3", "#"),
+    ("4", "$"),
+    ("5", "%"),
+    ("6", "^"),
+    ("7", "&"),
+    ("8", "*"),
+    ("9", "("),
+    ("0", ")"),
+    ("-", "_"),
+    ("=", "+"),
+    ("[", "{"),
+    ("]", "}"),
+    ("\\", "|"),
+    (";", ":"),
+    ("'", "\""),
+    (",", "<"),
+    (".", ">"),
+    ("/", "?"),
+    ("`", "~"),
+];
+
 /// The character Shift makes of `key` on a US layout.
 fn shifted(key: &str) -> String {
-    let shifted = match key {
-        "1" => "!",
-        "2" => "@",
-        "3" => "#",
-        "4" => "$",
-        "5" => "%",
-        "6" => "^",
-        "7" => "&",
-        "8" => "*",
-        "9" => "(",
-        "0" => ")",
-        "-" => "_",
-        "=" => "+",
-        "[" => "{",
-        "]" => "}",
-        "\\" => "|",
-        ";" => ":",
-        "'" => "\"",
-        "," => "<",
-        "." => ">",
-        "/" => "?",
-        "`" => "~",
-        other => return other.to_uppercase(),
-    };
-    shifted.to_owned()
+    SHIFT_PAIRS
+        .iter()
+        .find(|(base, _)| *base == key)
+        .map_or_else(|| key.to_uppercase(), |(_, symbol)| (*symbol).to_owned())
+}
+
+/// The US-layout key Shift turns into `symbol`, or `None` when `symbol` needs no Shift.
+fn unshifted(symbol: &str) -> Option<&'static str> {
+    SHIFT_PAIRS.iter().find(|(_, shifted)| *shifted == symbol).map(|(base, _)| *base)
 }
 
 /// When the resolver next needs a tick, as a delay from now.
@@ -247,5 +263,37 @@ mod tests {
         let event = key_event(&stroke("ctrl-a"));
         assert_eq!(event.key, "a");
         assert!(event.ctrl);
+    }
+
+    /// The keystroke GPUI delivers on every platform for Shift plus a symbol key: the symbol,
+    /// with the Shift flag cleared.
+    fn folded(symbol: &str, control: bool) -> Keystroke {
+        Keystroke {
+            modifiers: gpui::Modifiers { control, ..Default::default() },
+            key: symbol.into(),
+            key_char: (!control).then(|| symbol.into()),
+        }
+    }
+
+    /// Regression: GPUI reports Shift+\ as `|` without Shift, so Prefix → | (split right) and
+    /// every other shifted-symbol binding fell through while the palette and buttons worked.
+    #[test]
+    fn a_shifted_symbol_with_shift_folded_in_still_runs_its_prefix_binding() {
+        let event = key_event(&folded("|", false));
+        assert_eq!((event.key.as_str(), event.base_key.as_deref(), event.shift), ("|", Some("\\"), true));
+
+        let mut resolver = soprano_keys::KeybindingResolver::new(
+            DefaultKeybindings::config(),
+            soprano_keys::Platform::MacOs,
+        );
+        let context = soprano_keys::KeyContext::new(Instant::now());
+        let prefix = key_event(&folded("a", true));
+        for (symbol, binding) in [("|", "split-vertical"), (">", "next-pane-tab"), ("<", "prev-pane-tab")] {
+            assert_eq!(resolver.handle(&prefix, &context), soprano_keys::KeyOutcome::EnterPrefix);
+            assert_eq!(
+                resolver.handle(&key_event(&folded(symbol, false)), &context),
+                soprano_keys::KeyOutcome::Action(binding.into())
+            );
+        }
     }
 }
