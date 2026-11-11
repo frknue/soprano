@@ -97,6 +97,7 @@ const TABLE: &[Row] = &[
     ("launch-omp", "Launch omp", "Launch Oh My Pi agent", Agents, "⌘4", Direct, "4", CMD),
     ("new-chat", "New Chat", "Open a chat with an agent beside the focused pane", Agents, "⌘I", Direct, "i", CMD),
     ("agent-dashboard", "Agent Dashboard", "Monitor and control agents across all windows", Agents, "⇧⌘D", Direct, "d", CMD_SHIFT),
+    ("statistics", "Statistics", "Show omp's tokens and estimated cost over time", Agents, "⇧⌘U", Direct, "u", CMD_SHIFT),
 
     // General (direct)
     ("command-palette", "Commands", "Open the command palette", General, "⌘P", Direct, "p", CMD),

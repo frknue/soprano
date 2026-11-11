@@ -20,6 +20,8 @@
 //!   close-confirmation predicate (the main view asks Save / Don't Save / Cancel).
 //! - [`automations`]: the `AutomationHost` over the workspace and content host, and `drive`,
 //!   the one way the main view calls the automation controller.
+//! - [`statistics`]: the statistics board's host: omp's usage history and the workspace's
+//!   folders.
 //! - [`views`]: the sidebar, the window and layout tab rows, the split tree, pane headers and
 //!   the status bar.
 //! - [`palette`], [`menus`], [`ipc`], [`keyboard`], [`sizing`], [`window_chrome`]: the command
@@ -42,6 +44,7 @@ mod shell;
 mod sizing;
 #[cfg(feature = "visual-snapshot")]
 mod snapshot;
+mod statistics;
 mod terminate;
 mod views;
 mod window_chrome;

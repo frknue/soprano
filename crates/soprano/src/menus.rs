@@ -25,6 +25,7 @@ actions!(
         OpenMarkdown,
         AgentDashboard,
         Automations,
+        Statistics,
         OpenSettingsFile,
     ]
 );
@@ -49,6 +50,8 @@ pub fn command_for(action: &dyn gpui::Action) -> Option<Command> {
         Some(Command::OpenDashboard)
     } else if any.is::<Automations>() {
         Some(Command::OpenAutomations)
+    } else if any.is::<Statistics>() {
+        Some(Command::ToggleStatistics)
     } else if any.is::<OpenSettingsFile>() {
         Some(Command::OpenSettingsFile)
     } else {
@@ -69,6 +72,7 @@ fn commands() -> Vec<Option<MenuCommand>> {
         Some(("Open Markdown…", None, Box::new(OpenMarkdown))),
         Some(("Agent Dashboard", Some("agent-dashboard"), Box::new(AgentDashboard))),
         Some(("Automations", None, Box::new(Automations))),
+        Some(("Statistics", Some("statistics"), Box::new(Statistics))),
         None,
         Some(("Open settings.json", None, Box::new(OpenSettingsFile))),
     ]
@@ -174,6 +178,7 @@ pub fn commands_menu_items() -> Vec<(&'static str, Command)> {
         ("Open Markdown…", Command::OpenMarkdown { pane_id: None }),
         ("Agent Dashboard", Command::OpenDashboard),
         ("Automations", Command::OpenAutomations),
+        ("Statistics", Command::ToggleStatistics),
         ("Open settings.json", Command::OpenSettingsFile),
     ]
 }

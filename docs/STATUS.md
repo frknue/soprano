@@ -10,7 +10,7 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 
 ## Erledigt
 
-- 26 Crates unter `crates/` (Karte: `docs/rust-rewrite/PLAN.md`, Architektur: `AGENTS.md`).
+- 27 Crates unter `crates/` (Karte: `docs/rust-rewrite/PLAN.md`, Architektur: `AGENTS.md`).
   Terminal über libghostty-vt (Ghostty-Submodul auf Herdrs Pin, Zig 0.16), UI über `gpui-pre`
   + `gpui-component`, Look aus `docs/rust-rewrite/HERDR-UI.md` und `SHELL-MAP.md`.
 - Jede Swift-Datei portiert, Swift-Tests als Rust-Tests übernommen; Paritäts-Reviews pro Bereich
@@ -34,6 +34,14 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   Dashboard als eine Karte. Sichtprüfung über `dashboard_demo -- --snapshot <ordner>` (hell,
   dunkel, 820×400, Dracula, ohne Agenten). Die Snapshot-Hilfen liegen jetzt in
   `soprano_ui::snapshot` (Feature `snapshot`, nur Dev-Dependencies).
+- 2026-11-11: Statistik-Board aus Soprano Agents übernommen (`⇧⌘U`, Sidebar-Zeile „Statistics“,
+  Commands-Menü, Palette): omp-Nutzung aus `~/.omp/stats.db` (Modell in
+  `soprano_agents::usage`, Board im neuen Crate `soprano-statistics`, App-Seite in
+  `crates/soprano/src/statistics.rs`). Öffnen und Refresh starten `omp stats --summary` über die
+  Login-Shell, Periodenwechsel liest nur. Projekte heißen nach dem Ordner eines offenen Tabs,
+  sonst nach omps Ordnernamen. Sichtprüfung über `statistics_demo -- --snapshot <ordner>` (hell
+  860×900, dunkel, Dracula ohne Nutzung); Abfrage einmal lesend gegen die echte `stats.db`
+  geprüft (153k Zeilen, „All“ in 0,2 s).
 
 ## Offen
 
@@ -58,3 +66,5 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   Demos). Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von
   gpui-component); nicht angefasst, weil es Dialoge, Picker, Browser-Adresszeile und Editor-Suche
   mitverschiebt.
+- Statistik-Board: in der laufenden App noch nicht angesehen (nur Demo-Snapshots und Tests);
+  `omp stats --summary` über die Login-Shell nicht live ausgelöst.

@@ -90,13 +90,14 @@ an app:
   `soprano-term` (libghostty-vt + PTY + GPUI terminal view, OSC 7501 parsing), `soprano-ipc`
   (CLI subcommands, `machine`/`remote-attach`, and the app's local socket), `soprano-notify`
   (agent lifecycle → status, banners per OS).
-- `soprano-agents` (transcripts, timelines, dashboard grouping), `soprano-chat` (ACP client
-  for `omp acp`), `soprano-accounts`, `soprano-automations`, `soprano-git`, `soprano-files`,
-  `soprano-text` (highlighter, editor documents, diff and Markdown models).
+- `soprano-agents` (transcripts, timelines, dashboard grouping, omp's usage history in
+  `usage`), `soprano-chat` (ACP client for `omp acp`), `soprano-accounts`,
+  `soprano-automations`, `soprano-git`, `soprano-files`, `soprano-text` (highlighter, editor
+  documents, diff and Markdown models).
 - UI crates over those: `soprano-ui` (design system: tokens derived from Soprano's themes
   with Herdr's formulas, fonts, icons, widgets, dialogs, picker), `soprano-editor`,
   `soprano-explorer`, `soprano-chat-ui`, `soprano-dashboard`, `soprano-settings`,
-  `soprano-browser`, `soprano-automations-ui`.
+  `soprano-browser`, `soprano-automations-ui`, `soprano-statistics`.
 - `soprano` (bin): `main.rs` runs `soprano_ipc::cli::run_cli` first (the binary doubles as
   `$SOPRANO_BIN`), then the app shell that wires every crate together.
 

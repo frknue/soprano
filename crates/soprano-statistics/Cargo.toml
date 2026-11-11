@@ -1,0 +1,30 @@
+[package]
+name = "soprano-statistics"
+description = "The statistics board in GPUI: omp's tokens and estimated cost over time, by model, project and agent."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+soprano-agents = { path = "../soprano-agents" }
+soprano-platform = { path = "../soprano-platform" }
+soprano-ui = { path = "../soprano-ui" }
+gpui.workspace = true
+chrono = { version = "0.4.42", default-features = false, features = ["std", "clock"] }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui_platform.workspace = true
+gpui-component.workspace = true
+# The demo's `--snapshot` mode.
+soprano-ui = { path = "../soprano-ui", features = ["snapshot"] }
+anyhow.workspace = true
+
+# `--snapshot` renders the demo's window into PNGs; the renderer's support for that is switched
+# on where it is known to build.
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui_platform = { workspace = true, features = ["test-support"] }
+
+[[example]]
+name = "statistics_demo"

@@ -7802,6 +7802,7 @@ dependencies = [
  "soprano-notify",
  "soprano-platform",
  "soprano-settings",
+ "soprano-statistics",
  "soprano-term",
  "soprano-text",
  "soprano-types",
@@ -8162,6 +8163,20 @@ dependencies = [
  "soprano-types",
  "soprano-ui",
  "tempfile",
+]
+
+[[package]]
+name = "soprano-statistics"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "gpui-component",
+ "gpui-pre",
+ "gpui-pre-platform",
+ "soprano-agents",
+ "soprano-platform",
+ "soprano-ui",
 ]
 
 [[package]]

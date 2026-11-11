@@ -143,6 +143,12 @@ the single source of truth for the version shown in **Settings ▸ About**.
   and a machine that asks for a password asks once.
 - Claude Code, Codex, omp and OpenCode report their status in the sidebar when they send
   it themselves with OSC 7501 (the Program Status Protocol), also outside Soprano's hooks.
+- **Statistics** (`⇧⌘U` (`statistics`), the sidebar's **Statistics** row, the **Commands**
+  menu, or the command palette), as in Soprano Agents: omp's requests, tokens and estimated
+  API-equivalent cost over 24h, 7d, 30d, 90d or all time, as Cost or Tokens, with cache
+  savings, a stacked chart per hour, day, week or month (hover a bar for its numbers) and
+  breakdowns by model, project and agent; click a model to filter the board. `1`–`5` pick
+  the period, `C` / `T` switch Cost / Tokens, `Esc` closes.
 
 ### Changed
 

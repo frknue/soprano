@@ -57,6 +57,8 @@ pub enum BindingCommand {
     ToggleSourceControl,
     OpenSettings,
     OpenAgentDashboard,
+    /// `statistics`: show omp's usage statistics, or return from them to the workspace.
+    ToggleStatistics,
     /// Font zoom by this many steps (`zoom-in` +1, `zoom-out` -1).
     Zoom(i32),
     ZoomReset,
@@ -122,6 +124,7 @@ impl BindingCommand {
             "toggle-source-control" => Self::ToggleSourceControl,
             "open-settings" => Self::OpenSettings,
             "agent-dashboard" => Self::OpenAgentDashboard,
+            "statistics" => Self::ToggleStatistics,
             "zoom-in" => Self::Zoom(1),
             "zoom-out" => Self::Zoom(-1),
             "zoom-reset" => Self::ZoomReset,

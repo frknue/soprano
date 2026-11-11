@@ -25,6 +25,7 @@ pub const SIDEBAR_VISIBLE_KEY: &str = "soprano-sidebar-visible";
 pub enum Page {
     Dashboard,
     Automations,
+    Statistics,
 }
 
 /// Something to close; the main view asks about unsaved editors first when the model says so.
@@ -82,7 +83,10 @@ pub enum Command {
     ToggleAutomations,
     /// Show the Automations page (on its list).
     OpenAutomations,
-    CloseAutomations,
+    /// A sidebar row was chosen: the Automations or Statistics page gives way to the workspace.
+    LeavePage,
+    /// Show the statistics board, or return from it to the workspace.
+    ToggleStatistics,
     /// Show the Automations page on a run's report.
     OpenAutomationRun(String),
     /// Choose a Markdown file: into a new reader pane (`None`) or as a tab of a pane.

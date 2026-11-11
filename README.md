@@ -330,6 +330,7 @@ there; bind one in `settings.json`).
 |---|---|
 | `⌘P` | Command palette; `Esc` or a click outside it closes it |
 | `⇧⌘D` | Open the Agent Dashboard |
+| `⇧⌘U` | Open or close Statistics |
 | `⌘F` | Search and switch to a logical window |
 | `⇧⌘P` | Search configured projects or choose a directory |
 | `⌘,` | Settings |
@@ -981,6 +982,31 @@ and clicking it lists every account's 5-hour and weekly windows.
   session; `omp` typed into a plain terminal does not load the overlay. Those panes
   refuse `/logout` for the preferred account — choose **Automatic** first, or remove it
   here.
+
+## Statistics
+
+**Statistics** — `⇧⌘U` (`statistics`), the sidebar's **Statistics** row, the **Commands**
+menu, or `⌘P` → *Statistics* — shows what omp used, like Soprano Agents' board and T3
+Code's Usage page: requests, tokens, and the estimated API-equivalent cost over **24h**,
+**7d**, **30d**, **90d**, or **All** time. Switch between **Cost** and **Tokens**; four
+tiles give the headline numbers (estimated cost, cache savings, requests, and cost per
+request — or total, input, output, and cache-read tokens), and a stacked chart shows each
+hour, day, week, or month by output, input, cache write, and cache read; hover a bar for
+its numbers. Below it, **Models** lists every model with its share, requests, and cache
+hit rate — click one to limit the board to it, click it again or the chip at the top to
+show every model — over **Projects** (the eight largest, the rest summed) and **Agents**
+(main agent, subagents, advisor).
+
+While the board is open, `1`–`5` pick the period, `C` / `T` switch Cost / Tokens, and
+`Esc` (or `⇧⌘U` again) returns to the workspace.
+
+The numbers are omp's own records (`omp stats`, kept in `~/.omp/stats.db`), so every omp
+session on this computer counts, whether Soprano started it or not; Claude Code, Codex,
+and OpenCode are not included. Opening the board and **Refresh** let omp ingest its newest
+session files first; switching the period only reads. Cost is an estimate at the
+providers' API prices, not a subscription bill. A project is listed under its folder's
+name while one of your tabs works in it, otherwise under omp's name for the folder
+(`git-private-app` for `~/git/private/app`).
 
 ## Settings
 

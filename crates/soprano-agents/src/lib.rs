@@ -1,6 +1,7 @@
 //! soprano-agents: reading agent CLIs' own transcripts (Claude Code, Codex, omp, OpenCode) into
-//! one timeline, following them for the Agent Dashboard, the chat's turn model, and the
-//! dashboard's snapshot and grouping. No UI; see docs/rust-rewrite/PLAN.md.
+//! one timeline, following them for the Agent Dashboard, the chat's turn model, the dashboard's
+//! snapshot and grouping, and omp's usage history for the statistics board. No UI; see
+//! docs/rust-rewrite/PLAN.md.
 
 pub mod activity;
 pub mod chat_turns;
@@ -15,6 +16,7 @@ pub mod opencode_reader;
 pub mod store;
 pub mod timeline;
 pub mod transcript_thread;
+pub mod usage;
 
 pub use activity::{ActivityTone, AgentTimelineActivity, activity_duration};
 pub use chat_turns::{

@@ -53,6 +53,7 @@ use crate::workspace::{WorkspaceHandle, WorkspaceUpdate};
 use crate::{menus, sizing, window_chrome};
 use soprano_automations::AutomationController;
 use soprano_automations_ui::{AutomationsPage, AutomationsPageEvent};
+use soprano_statistics::{StatisticsBoard, StatisticsEvent};
 use soprano_text::DocumentId;
 use soprano_text::editor_store::{
     CloseResolution, OVERWRITE_MESSAGE, SaveChoice, SaveOutcome, overwrite_question, save_question,
@@ -144,6 +145,7 @@ pub struct MainView {
     dashboard: Option<Entity<AgentDashboard>>,
     automations: AutomationContext,
     automations_page: Option<Entity<AutomationsPage>>,
+    statistics: Option<Entity<StatisticsBoard>>,
     /// The focused tab's folder the right sidebar last followed.
     explorer_directory: Option<Option<String>>,
     notifications: Rc<RefCell<NotificationManager>>,
@@ -400,6 +402,7 @@ impl MainView {
             dashboard: None,
             automations,
             automations_page: None,
+            statistics: None,
             explorer_directory: None,
             notifications,
             resolver,
@@ -512,9 +515,16 @@ impl MainView {
                 }
             }
             Command::OpenAutomations => self.show_page(Page::Automations, window, cx),
-            Command::CloseAutomations => {
-                if self.shell.read(cx).page == Some(Page::Automations) {
+            Command::LeavePage => {
+                if matches!(self.shell.read(cx).page, Some(Page::Automations | Page::Statistics)) {
                     self.close_page(true, window, cx);
+                }
+            }
+            Command::ToggleStatistics => {
+                if self.shell.read(cx).page == Some(Page::Statistics) {
+                    self.close_page(true, window, cx);
+                } else {
+                    self.show_page(Page::Statistics, window, cx);
                 }
             }
             Command::OpenAutomationRun(run_id) => self.open_automation_run(&run_id, window, cx),
@@ -650,6 +660,7 @@ impl MainView {
             BindingCommand::ToggleSourceControl => self.run(Command::ToggleSourceControl, window, cx),
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
             BindingCommand::OpenAgentDashboard => self.run(Command::OpenDashboard, window, cx),
+            BindingCommand::ToggleStatistics => self.run(Command::ToggleStatistics, window, cx),
             // `keybindingZoom`: the active terminal's font, not the whole UI.
             BindingCommand::Zoom(delta) => {
                 self.content.update(cx, |content, cx| content.change_active_terminal_font_size(delta, cx))
@@ -1222,6 +1233,9 @@ impl MainView {
         if page != Page::Automations {
             self.automations_page = None;
         }
+        if page != Page::Statistics {
+            self.statistics = None;
+        }
         if page == Page::Automations && self.automations_page.is_none() {
             let controller = self.automations.controller.clone();
             let model = self.workspace.model.clone();
@@ -1255,6 +1269,18 @@ impl MainView {
             self.dashboard = Some(dashboard);
             window.focus(&handle, cx);
         }
+        if page == Page::Statistics && self.statistics.is_none() {
+            let host = crate::statistics::host(self.workspace.model.clone());
+            let board = cx.new(|cx| StatisticsBoard::new(host, window, cx));
+            let subscription =
+                cx.subscribe_in(&board, window, |this, _, event: &StatisticsEvent, window, cx| match event {
+                    StatisticsEvent::Close => this.close_page(true, window, cx),
+                });
+            self._subscriptions.push(subscription);
+            let handle = board.focus_handle(cx);
+            self.statistics = Some(board);
+            window.focus(&handle, cx);
+        }
         self.shell.update(cx, |shell, cx| {
             shell.page = Some(page);
             cx.notify();
@@ -1264,6 +1290,7 @@ impl MainView {
     fn close_page(&mut self, restore_focus: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.dashboard = None;
         self.automations_page = None;
+        self.statistics = None;
         self.shell.update(cx, |shell, cx| {
             shell.page = None;
             cx.notify();
@@ -2089,6 +2116,7 @@ impl MainView {
         let view: Option<gpui::AnyView> = match page {
             Page::Dashboard => self.dashboard.clone().map(Into::into),
             Page::Automations => self.automations_page.clone().map(Into::into),
+            Page::Statistics => self.statistics.clone().map(Into::into),
         };
         let theme = cx.soprano_theme();
         div().flex_1().min_h_0().bg(theme.canvas).children(view).into_any_element()
@@ -2136,6 +2164,9 @@ impl Render for MainView {
                 this.menu_action(action, window, cx)
             }))
             .on_action(cx.listener(|this, action: &menus::Automations, window, cx| {
+                this.menu_action(action, window, cx)
+            }))
+            .on_action(cx.listener(|this, action: &menus::Statistics, window, cx| {
                 this.menu_action(action, window, cx)
             }))
             .on_action(cx.listener(|this, action: &menus::OpenSettingsFile, window, cx| {

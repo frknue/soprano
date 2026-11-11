@@ -1,10 +1,12 @@
 //! The left sidebar (`Views/SidebarView.swift`) in Herdr's frame (HERDR-UI §5, SHELL-MAP): the
 //! brand row with the session switcher, Search and the sidebar toggle; the active session's
 //! windows with their panes tab by tab; every agent of the session grouped by what it needs;
-//! the Automations and Settings rows. App-level work goes out as [`Command`]s; plain model
+//! the Automations, Statistics and Settings rows. App-level work goes out as [`Command`]s; plain model
 //! changes (activate, focus, collapse, spawn) go through the [`WorkspaceHandle`].
 
 mod model;
+
+pub use model::watched_cwds;
 
 use std::time::{Duration, SystemTime};
 
@@ -424,7 +426,7 @@ impl Sidebar {
                 if click_count >= 2 {
                     toggle(cx);
                 } else {
-                    shell::dispatch(&shell, Command::CloseAutomations, cx);
+                    shell::dispatch(&shell, Command::LeavePage, cx);
                     workspace.update(cx, |ws| ws.activate_window(&id));
                 }
             }
@@ -568,7 +570,7 @@ impl Sidebar {
             let pane_id = row.pane_id.clone();
             let tab_id = row.tab_id.clone();
             move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
-                shell::dispatch(&shell, Command::CloseAutomations, cx);
+                shell::dispatch(&shell, Command::LeavePage, cx);
                 workspace.update(cx, |ws| match &tab_id {
                     Some(tab_id) => ws.focus_tab(&pane_id, tab_id, false),
                     None => ws.focus_pane(&pane_id),
@@ -743,7 +745,7 @@ impl Sidebar {
             )
             .child(StatusPill::new(row.pill).relative_to(row.since).now(now))
             .on_click(move |_, _, cx| {
-                shell::dispatch(&shell, Command::CloseAutomations, cx);
+                shell::dispatch(&shell, Command::LeavePage, cx);
                 workspace.update(cx, |ws| ws.focus_tab(&pane_id, &tab_id, true));
             })
             .into_any_element()
@@ -751,10 +753,11 @@ impl Sidebar {
 
     // MARK: - Footer
 
-    fn footer(&self, automations_open: bool, cx: &App) -> impl IntoElement {
+    fn footer(&self, page: Option<Page>, cx: &App) -> impl IntoElement {
         let theme = cx.soprano_theme();
         let z = |v: f32| theme.z(v);
         let automations_shell = self.shell.clone();
+        let statistics_shell = self.shell.clone();
         let settings_shell = self.shell.clone();
         let entry = |id: &'static str, glyph: IconName, label: &'static str, selected: bool| {
             let color = if selected { theme.foreground } else { theme.muted };
@@ -775,9 +778,24 @@ impl Sidebar {
             .pt(z(4.))
             .pb(z(8.))
             .child(
-                entry("sidebar-automations", IconName::AlarmClock, "Automations", automations_open).on_click(
-                    move |_, _, cx| shell::dispatch(&automations_shell, Command::ToggleAutomations, cx),
-                ),
+                entry(
+                    "sidebar-automations",
+                    IconName::AlarmClock,
+                    "Automations",
+                    page == Some(Page::Automations),
+                )
+                .on_click(move |_, _, cx| {
+                    shell::dispatch(&automations_shell, Command::ToggleAutomations, cx)
+                }),
+            )
+            .child(
+                entry(
+                    "sidebar-statistics",
+                    IconName::STATISTICS,
+                    "Statistics",
+                    page == Some(Page::Statistics),
+                )
+                .on_click(move |_, _, cx| shell::dispatch(&statistics_shell, Command::ToggleStatistics, cx)),
             )
             .child(
                 entry("sidebar-settings", IconName::Settings, "Settings", false)
@@ -790,7 +808,7 @@ impl Render for Sidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shell = self.shell.read(cx);
         let hints = Hints { control_held: shell.control_held, typed: shell.typed_pane_hint.clone() };
-        let automations_open = shell.page == Some(Page::Automations);
+        let page = shell.page;
         let resize_highlighted = shell.sidebar_resize_highlighted;
         let hide_window_bar = shell.settings.hide_window_bar;
         let platform = KeyPlatform::current();
@@ -866,7 +884,7 @@ impl Render for Sidebar {
                     ),
             )
             .child(self.agents_block(&groups, now, cx))
-            .child(self.footer(automations_open, cx))
+            .child(self.footer(page, cx))
     }
 }
 

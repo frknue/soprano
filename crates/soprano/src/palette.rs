@@ -634,6 +634,19 @@ pub fn command_items(
             command(shell, Command::OpenAutomations),
         ),
         entry(
+            searchable(
+                spec(
+                    "statistics",
+                    IconName::STATISTICS,
+                    "Statistics",
+                    "omp's tokens and estimated cost over time",
+                    short(&["statistics"]),
+                ),
+                "usage cost tokens spend models omp stats chart",
+            ),
+            command(shell, Command::ToggleStatistics),
+        ),
+        entry(
             spec(
                 "toggle-sidebar",
                 IconName::PanelLeft,
