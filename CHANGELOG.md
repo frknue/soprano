@@ -13,8 +13,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
 - **New threads from the Agent Dashboard**: the pencil button, `N`, or `⌘N` starts an agent
   with your first message — "What should we build in *project*?" picks the folder (the
   projects open in your windows, the `projectDirectories`, or any folder) and the chip in
-  the composer the agent (Codex, Claude Code, OpenCode, or omp in its terminal, or omp as a
-  chat; custom agents and ones behind a `launchScript` are not offered; the last choice is
+  the composer the agent (Codex, Claude Code, OpenCode, or omp; custom agents and ones
+  behind a `launchScript` are not offered; the last choice is
   remembered). The thread opens as a tab of the window that already works on that project,
   or in a new window named after it, without moving what the main window shows.
 - The Agent Dashboard's inbox has a **Search** (`/`) and folds: click **Needs you**,
@@ -276,6 +276,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- An omp agent no longer drops out of the sidebar's Agents list and the Agent Dashboard for
+  a few seconds after it starts working (its pane tab turned into a plain terminal until
+  omp's next status report); in the dashboard the thread vanished, the chat column went
+  blank, and the keyboard stopped responding.
+- The Agent Dashboard never shows an empty chat column: without a thread it opens on a new
+  one with the cursor in the composer, so the first key you type is the message's first
+  letter, and after a new thread starts `N` opens the next one right away.
 - `⌃A` → `|` splits right again, and `⌃A` → `>` / `<` switch pane tabs again: shortcuts on
   a symbol typed with Shift no longer fall through.
 - Codex panes show the Codex logo as their icon instead of a filled square.

@@ -504,22 +504,49 @@ fn stop_and_restart_stay_in_the_header_and_work_in_a_narrow_window(cx: &mut Test
 }
 
 #[gpui::test]
-fn a_dashboard_without_threads_opens_on_a_new_one_and_escape_closes_it(cx: &mut TestAppContext) {
+fn a_dashboard_without_threads_opens_on_a_new_one_ready_to_type(cx: &mut TestAppContext) {
     let (harness, cx) = open(cx, Workspace::new(), DashboardHost::new(), 900., 600.);
     harness.dashboard.read_with(cx, |dashboard, _| {
         assert!(dashboard.list().is_empty());
         assert!(dashboard.is_drafting());
     });
     bounds(cx, "agent-dashboard-draft");
-    // The thread keys have nothing to act on, and an empty draft sends nothing.
-    cx.simulate_keystrokes("j enter o g ] tab enter");
-    cx.run_until_parked();
     assert!(cx.debug_bounds("agent-dashboard-stop").is_none());
+    // The first key is the message's first letter, not a shortcut; an empty draft sends
+    // nothing.
+    assert!(composer_focused(cx, &harness));
+    cx.simulate_keystrokes("enter");
     assert!(harness.events.borrow().is_empty());
-    assert!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
+    cx.simulate_input("Reply ok");
+    assert_eq!(composer_text(cx, &harness), "Reply ok");
 
+    // Out of the composer, then out of the dashboard: there is no thread to go back to.
     cx.simulate_keystrokes("escape escape");
     assert_eq!(*harness.events.borrow(), [DashboardEvent::Close]);
+}
+
+#[gpui::test]
+fn when_the_last_thread_goes_away_the_dashboard_returns_to_a_new_one_with_the_keyboard(
+    cx: &mut TestAppContext,
+) {
+    let mut workspace = Workspace::new();
+    let only = spawn(&mut workspace, "omp", "/tmp/projects/storefront");
+    set_status(&mut workspace, &only, AgentStatus::Running);
+    let (harness, cx) = open(cx, workspace, replying(), 1000., 700.);
+    cx.simulate_keystrokes("tab");
+    assert!(composer_focused(cx, &harness));
+
+    // The agent quit and its tab is a plain terminal again.
+    change(cx, &harness, |workspace| workspace.agent_returned_to_shell(&only, Some(0)));
+
+    harness.dashboard.read_with(cx, |dashboard, _| {
+        assert!(dashboard.list().is_empty());
+        assert!(dashboard.is_drafting());
+    });
+    bounds(cx, "agent-dashboard-draft");
+    assert!(composer_focused(cx, &harness));
+    cx.simulate_input("Again");
+    assert_eq!(composer_text(cx, &harness), "Again");
 }
 
 #[gpui::test]
@@ -538,17 +565,17 @@ fn a_new_thread_starts_in_the_open_threads_project_and_gives_way_to_the_thread_t
     let cwd = harness.dashboard.read_with(cx, |dashboard, _| {
         let (project, agent) = dashboard.draft_choice().expect("draft");
         assert_eq!(project.name, "storefront");
-        assert_eq!(agent, &AgentChoice { profile_id: "omp".into(), chat: false });
+        assert_eq!(agent, &AgentChoice { profile_id: "omp".into() });
         // Its tab joins the window that already works there.
         assert_eq!(dashboard.draft.as_ref().and_then(|draft| draft.window_title.clone()), window_title);
         project.path.clone()
     });
 
-    // A chat instead, in another folder no window works in.
+    // Another agent, in another folder no window works in.
     let dashboard = harness.dashboard.clone();
     cx.update(|window, cx| {
         dashboard.update(cx, |dashboard, cx| {
-            dashboard.set_draft_agent(AgentChoice { profile_id: "omp".into(), chat: true }, cx);
+            dashboard.set_draft_agent(AgentChoice { profile_id: "codex".into() }, cx);
             dashboard.set_draft_project("/tmp/projects/elsewhere", window, cx);
             assert_eq!(dashboard.draft.as_ref().and_then(|draft| draft.window_title.clone()), None);
             dashboard.set_draft_project(&cwd, window, cx);
@@ -560,31 +587,31 @@ fn a_new_thread_starts_in_the_open_threads_project_and_gives_way_to_the_thread_t
     assert_eq!(
         harness.events.borrow().last(),
         Some(&DashboardEvent::NewThread {
-            profile_id: "omp".into(),
-            chat: true,
+            profile_id: "codex".into(),
             cwd: cwd.clone(),
             prompt: "Fix the totals".into()
         })
     );
     // Until the shell answers, the draft waits as written.
-    assert_eq!(hint(cx, &harness), ("Starting omp…".to_owned(), false));
+    assert_eq!(hint(cx, &harness), ("Starting Codex…".to_owned(), false));
     assert_eq!(composer_text(cx, &harness), "Fix the totals");
     cx.simulate_keystrokes("enter");
     assert_eq!(harness.events.borrow().len(), 1);
 
     // The shell could not: the draft says why and can be sent again.
     cx.update(|window, cx| {
-        dashboard.update(cx, |dashboard, cx| dashboard.thread_failed("omp is not installed.", window, cx))
+        dashboard.update(cx, |dashboard, cx| dashboard.thread_failed("Codex is not installed.", window, cx))
     });
-    assert_eq!(hint(cx, &harness), ("omp is not installed.".to_owned(), true));
+    assert_eq!(hint(cx, &harness), ("Codex is not installed.".to_owned(), true));
     assert_eq!(composer_text(cx, &harness), "Fix the totals");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     assert_eq!(harness.events.borrow().len(), 2);
 
-    // The shell opened it: the thread takes the draft's place.
+    // The shell opened it: the thread takes the draft's place, and the keyboard goes back to
+    // the inbox, where N starts the next one.
     let opened =
-        change(cx, &harness, |workspace| workspace.open_thread("omp", true, &cwd, None)).expect("thread");
+        change(cx, &harness, |workspace| workspace.open_thread("codex", &cwd, None)).expect("thread");
     cx.update(|window, cx| {
         dashboard.update(cx, |dashboard, cx| dashboard.thread_opened(&opened, window, cx))
     });
@@ -592,9 +619,19 @@ fn a_new_thread_starts_in_the_open_threads_project_and_gives_way_to_the_thread_t
     assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
     assert_eq!(selected_target(cx, &harness), Some(opened));
     assert_eq!(composer_text(cx, &harness), "");
+    assert!(list_focused(cx, &harness));
+    cx.simulate_keystrokes("n");
+    assert!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
+    assert!(composer_focused(cx, &harness));
 
     // The next draft starts with the agent the last thread started with.
-    assert_eq!(AgentChoice::initial(&state), Some(AgentChoice { profile_id: "omp".into(), chat: true }));
+    assert_eq!(AgentChoice::initial(&state), Some(AgentChoice { profile_id: "codex".into() }));
+    assert_eq!(
+        harness
+            .dashboard
+            .read_with(cx, |dashboard, _| dashboard.draft_choice().map(|(_, agent)| agent.name())),
+        Some("Codex".to_owned())
+    );
 }
 
 #[gpui::test]

@@ -60,10 +60,10 @@ pub enum DashboardEvent {
     /// spaces there), or to the chat session of a chat tab. When it cannot be delivered, call
     /// [`AgentDashboard::reply_failed`].
     Reply { target: TerminalTarget, text: String },
-    /// Start an agent in `cwd` with `prompt` as its first message, as a tab of the window
-    /// that works on that project (`Workspace::open_thread`). Answer with
+    /// Start an agent in its terminal in `cwd` with `prompt` as its first message, as a tab
+    /// of the window that works on that project (`Workspace::open_thread`). Answer with
     /// [`AgentDashboard::thread_opened`] or [`AgentDashboard::thread_failed`].
-    NewThread { profile_id: String, chat: bool, cwd: String, prompt: String },
+    NewThread { profile_id: String, cwd: String, prompt: String },
     /// Ask for any folder for the thread being drafted; answer with
     /// [`AgentDashboard::set_draft_project`].
     ChooseProject,
@@ -199,8 +199,10 @@ pub struct AgentDashboard {
 impl EventEmitter<DashboardEvent> for AgentDashboard {}
 
 impl Focusable for AgentDashboard {
-    fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus.clone()
+    /// What takes the keyboard when the dashboard opens: the inbox, or the composer when it
+    /// opens on a new thread, so the first key typed is the message's first letter.
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        if self.draft.is_some() { self.editor.focus_handle(cx) } else { self.focus.clone() }
     }
 }
 
@@ -310,10 +312,8 @@ impl AgentDashboard {
         };
         dashboard.refresh(window, cx);
         // With no thread to show, the dashboard opens on a new one.
-        if dashboard.list.is_empty() {
-            dashboard.start_draft(cx);
-            dashboard.sync_composer(window, cx);
-        }
+        dashboard.draft_when_empty(window, cx);
+        dashboard.sync_composer(window, cx);
         dashboard
     }
 
@@ -348,6 +348,17 @@ impl AgentDashboard {
                 workspace.window_for_thread(&draft.project.path).map(|window| window.title.clone())
             });
         *cx.default_global::<StatusClock>() = clock;
+        // A working agent retitles its tab several times a second (its spinner): most
+        // notifications change nothing the dashboard shows.
+        if draft_window.is_none() && self.list.holds(&entries) {
+            let accepted = self.accepts_replies;
+            self.read_availability(cx);
+            if accepted != self.accepts_replies {
+                self.sync_composer(window, cx);
+                cx.notify();
+            }
+            return;
+        }
         if let (Some(draft), Some(window_title)) = (&mut self.draft, draft_window) {
             draft.window_title = window_title;
             draft.layout_generation = layout_generation;
@@ -355,6 +366,7 @@ impl AgentDashboard {
         self.now = now;
         let selection_moved = self.list.update(entries);
         self.track_transcripts();
+        self.draft_when_empty(window, cx);
         self.sync_detail(window, cx);
         if selection_moved {
             self.scroll_selection_into_view();
@@ -463,7 +475,9 @@ impl AgentDashboard {
             }
         }
         let agent_name = self.selected().map(|entry| entry.entry.profile_name.clone()).unwrap_or_default();
-        self.timeline.update(cx, |timeline, cx| timeline.set_agent_name(agent_name, cx));
+        if self.timeline.read(cx).agent_name() != agent_name {
+            self.timeline.update(cx, |timeline, cx| timeline.set_agent_name(agent_name, cx));
+        }
         self.sync_composer(window, cx);
         self.render_timeline(selection_changed, window, cx);
     }
@@ -625,7 +639,6 @@ impl AgentDashboard {
             draft.agent.remember(&self.host.state);
             let event = DashboardEvent::NewThread {
                 profile_id: draft.agent.profile_id.clone(),
-                chat: draft.agent.chat,
                 cwd: draft.project.path.clone(),
                 prompt: text,
             };
@@ -753,16 +766,35 @@ impl AgentDashboard {
         }
     }
 
-    /// The shell opened the drafted thread as `target`: the draft gives way to it.
+    /// With no thread to show, the chat column holds a new one, ready to type: an empty
+    /// column would also leave the keyboard nowhere.
+    fn draft_when_empty(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.list.is_empty() || self.draft.is_some() {
+            return;
+        }
+        self.start_draft(cx);
+        if self.draft.is_some() {
+            self.editor.update(cx, |editor, cx| {
+                editor.set_value("", window, cx);
+                editor.set_disabled(false, cx);
+                editor.focus(window, cx);
+            });
+        }
+    }
+
+    /// The shell opened the drafted thread as `target`: the draft gives way to it, and the
+    /// keyboard goes back to the inbox (its agent is still starting and takes no message yet).
     pub fn thread_opened(&mut self, target: &TerminalTarget, window: &mut Window, cx: &mut Context<Self>) {
         self.draft = None;
         self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
         self.refresh(window, cx);
-        let id = format!("{}:{}", target.pane_id, target.tab_id);
-        if self.list.select(&id) {
-            self.sync_detail(window, cx);
-            self.scroll_selection_into_view();
+        self.list.select(&format!("{}:{}", target.pane_id, target.tab_id));
+        self.draft_when_empty(window, cx);
+        if self.draft.is_none() {
+            window.focus(&self.focus, cx);
         }
+        self.sync_detail(window, cx);
+        self.scroll_selection_into_view();
         cx.notify();
     }
 
@@ -831,13 +863,12 @@ impl AgentDashboard {
             .map(|choice| {
                 let entity = entity.clone();
                 let picked = choice.clone();
-                MenuItem::new(choice.label())
-                    .icon(if choice.chat { IconName::MessageSquare } else { IconName::SHELL })
-                    .checked(choice == draft.agent)
-                    .on_select(move |_, cx| {
+                MenuItem::new(choice.name()).icon(IconName::SHELL).checked(choice == draft.agent).on_select(
+                    move |_, cx| {
                         let picked = picked.clone();
                         let _ = entity.update(cx, |this, cx| this.set_draft_agent(picked, cx));
-                    })
+                    },
+                )
             })
             .collect();
         let menu = ContextMenu::new(position, items, window, cx);
@@ -939,7 +970,7 @@ impl AgentDashboard {
         if let Some(draft) = &self.draft {
             return match (&draft.error, draft.launching) {
                 (Some(error), _) => (error.clone(), true),
-                (None, true) => (format!("Starting {}…", draft.agent.profile_name()), false),
+                (None, true) => (format!("Starting {}…", draft.agent.name()), false),
                 (None, false) => (String::new(), false),
             };
         }

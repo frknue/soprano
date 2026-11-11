@@ -227,6 +227,23 @@ fn a_dedicated_agent_tab_becomes_a_terminal_when_its_shell_reports_the_command_f
     assert_eq!(workspace.tab(&pane, &tab).map(|t| t.pane_type), Some(PaneType::Terminal));
 }
 
+/// omp marks its own prompt zones (OSC 133 A/B/C/D;0) while it runs: the terminal reports a
+/// finished command with the agent still there.
+#[test]
+fn a_dedicated_agent_whose_process_still_runs_keeps_its_tab_when_it_marks_a_finished_command() {
+    let mut workspace = Workspace::new();
+    let pane = workspace.active_pane_id().to_owned();
+    let tab = workspace.add_tab_to_pane(&pane, PaneType::Agent, Some("omp"), None).expect("tab");
+    workspace.agent_mut(&pane, &tab).expect("agent").process_id = Some(std::process::id() as i32);
+    workspace.update_agent_status(&pane, &tab, AgentStatus::Running, None, None);
+
+    workspace.agent_command_did_finish(&TerminalTarget::new(&pane, &tab), Some(0));
+
+    assert_eq!(status(&workspace, &pane, &tab), Some(AgentStatus::Running));
+    assert_eq!(workspace.tab(&pane, &tab).map(|t| t.pane_type), Some(PaneType::Agent));
+    assert_eq!(workspace.agent_dashboard_entries().len(), 1);
+}
+
 #[test]
 fn duplicate_tab_ids_across_panes_keep_distinct_exact_targets() {
     let first = TerminalTarget::new("pane-10", "tab-shared");

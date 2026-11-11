@@ -93,20 +93,23 @@ impl Workspace {
         self.notify_model(false);
     }
 
-    /// The terminal also reports commands run by an ordinary shell. An agent whose process is
-    /// known detaches only once that process is gone, so a prior command's delayed completion
-    /// cannot hide one that still runs. An agent reported from the shell itself (a `codex`
-    /// wrapper's `agent-event ready`) names no process until its first turn ends; it ran as
-    /// the shell's foreground command, so the prompt returning means it quit.
+    /// The terminal reports a finished command (OSC 133;D). In a pane that runs an agent that
+    /// can mean three things, told apart by the agent's process:
+    /// - It still runs: the agent marked the command itself (omp marks its own prompt zones
+    ///   while it works) or ran one in its own shell tool. Nothing ended.
+    /// - It is gone: the agent quit and its shell is back. A dedicated agent tab becomes the
+    ///   terminal it fell back to; a terminal's attached agent detaches.
+    /// - It is unknown: an agent reported from the shell itself (a `codex` wrapper's
+    ///   `agent-event ready`) names no process until its first turn ends; it ran as the
+    ///   shell's foreground command, so the prompt returning means it quit.
     pub fn agent_command_did_finish(&mut self, target: &TerminalTarget, exit_code: Option<i32>) {
         let Some(tab) = self.tab(&target.pane_id, &target.tab_id) else { return };
         let Some(agent) = &tab.agent else { return };
+        if agent.process_id.is_some_and(crate::process::process_exists) {
+            return;
+        }
         if tab.pane_type == PaneType::Agent {
             self.agent_returned_to_shell(target, exit_code);
-        } else if let Some(process_id) = agent.process_id {
-            if !crate::process::process_exists(process_id) {
-                self.agent_process_did_exit(target, exit_code);
-            }
         } else {
             self.agent_process_did_exit(target, exit_code);
         }

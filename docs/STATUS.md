@@ -53,6 +53,17 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   `crates/soprano/src/agents_window.rs`, `main_view.rs` (Tasten des Agents-Fensters laufen nicht
   durch den Resolver, nur der Dashboard-Akkord). Sichtprüfung über
   `dashboard_demo -- --snapshot <ordner>` (dunkel 1100×780, hell 840×620, Dracula ohne Agenten).
+- 2026-11-12: Furkans Fehlerbericht „unusable, flackert, verschwindet“ behoben (uncommittet auf
+  `main`, installiert). Ursache: omp schreibt selbst OSC 133 (`A/B/C/D;0`) in sein Terminal;
+  `Workspace::agent_command_did_finish` hielt das `D` für „Agent beendet“ und machte den Tab zum
+  Terminal, bis der nächste Hook ihn wieder anhängte. Jetzt beendet eine Kommando-Ende-Marke
+  nichts, solange der gemeldete Agent-Prozess lebt (Regressionstest in
+  `workspace/tests/agents.rs`). Dashboard: nie leere Chat-Spalte (Entwurf mit fokussiertem
+  Composer), `refresh` überspringt unveränderte Einträge (omp setzt den Titel ~10×/s), leere
+  Timeline sagt „is starting…/is working…“, „omp · Chat“ aus Neuer Thread entfernt (Threads sind
+  Terminal-Agenten). In Soprano Dev nachgestellt und geprüft (zwei omp-Threads, Karte bleibt von
+  Starting bis Done, beide Tabs im Hauptfenster). Dev-Werkzeug: `debug-snapshot|debug-* --agents`
+  zielt auf das Agents-Fenster; Snapshots zeichnen vorher einen frischen Frame.
 
 ## Offen
 
@@ -73,12 +84,13 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
-- Agents-Fenster: in der laufenden App noch nicht angesehen (nur Demo-Snapshots und Tests).
-  Ungeprüft sind genau die Teile, die es nur im echten Fenster gibt: Öffnen/Schließen/Nach-vorn
-  per `⇧⌘D` aus beiden Fenstern, Ampel-Position (20, 19), Verschieben am 52-px-Band, das
-  Menü „Agent Dashboard“ bei aktivem Agents-Fenster, Start eines neuen Threads (Terminal-Agent
-  mit Prompt auf der Kommandozeile, omp-Chat mit erstem Prompt) und „Choose Folder…“. Banner
-  richten sich weiter nur nach dem Hauptfenster (Agents-Fenster vorn zählt als „nicht aktiv“).
+- Agents-Fenster: in Soprano Dev über `debug-* --agents` geprüft (Öffnen per `⇧⌘D`, neuer
+  Thread mit omp, `⌘W`). Noch ungeprüft: Nach-vorn/Schließen per `⇧⌘D` aus beiden Fenstern mit
+  echter Tastatur, Ampel-Position (20, 19), Verschieben am 52-px-Band, das Menü „Agent
+  Dashboard“ bei aktivem Agents-Fenster, „Choose Folder…“, Threads mit Codex/Claude Code/
+  OpenCode. Banner richten sich weiter nur nach dem Hauptfenster (Agents-Fenster vorn zählt als
+  „nicht aktiv“). Zwei Threads im selben Ordner können in verschiedenen Fenstern landen, wenn
+  das erste Terminal sein Verzeichnis erst nach dem ersten Thread meldet.
   Linux/Windows: natives Titelband statt eigener Fensterknöpfe, nicht gebaut.
 - Settings-Redesign: in der laufenden App noch nicht angesehen (nur Snapshots der Demo).
   Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von gpui-component); nicht

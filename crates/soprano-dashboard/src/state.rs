@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use soprano_agents::{AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus};
-use soprano_model::{AgentDashboardEntry, chat_supports};
+use soprano_model::AgentDashboardEntry;
 use soprano_platform::StateStore;
 use soprano_types::{AgentCatalog, AgentProfile, AgentStatus, AgentWaitingReason, TerminalTarget};
 use soprano_ui::status::StatusPillSpec;
@@ -174,6 +174,12 @@ impl Default for AgentList {
 }
 
 impl AgentList {
+    /// Whether `entries` (in workspace order) are exactly what the list already holds.
+    pub fn holds(&self, entries: &[DashboardEntry]) -> bool {
+        entries.len() == self.entries.len()
+            && AgentDashboardSnapshot::new(entries.to_vec()).entries == self.entries
+    }
+
     /// Takes a new set of entries (in workspace order; sorted by urgency here). Returns whether
     /// the selection moved to a different agent.
     pub fn update(&mut self, entries: Vec<DashboardEntry>) -> bool {
@@ -323,63 +329,52 @@ impl AgentList {
     }
 }
 
-/// What a new thread starts with: an agent, in its terminal or as a chat.
+/// The agent a new thread starts with. It runs in its terminal; the dashboard shows its
+/// conversation as a chat either way.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentChoice {
     pub profile_id: String,
-    pub chat: bool,
 }
 
 impl AgentChoice {
     /// Where the last choice is kept (app state).
     pub const STATE_KEY: &'static str = "soprano-agents-thread-agent";
 
-    /// Every way to start a thread with the agents of the catalog.
+    /// The agents of the catalog a thread can start with.
     pub fn all() -> Vec<Self> {
         Self::for_profiles(&AgentCatalog::shared().all())
     }
 
-    /// Every way to start a thread with `profiles`: an agent in its terminal when Soprano can
-    /// hand it the thread's first message as it starts, and as a chat where it serves one.
-    /// The shell is not an agent, and a custom agent or one behind a launch script would
-    /// start without the message.
+    /// The agents among `profiles` a thread can start with: those Soprano can hand the
+    /// thread's first message as they start. The shell is not an agent, and a custom agent or
+    /// one behind a launch script would start without the message.
     pub fn for_profiles(profiles: &[AgentProfile]) -> Vec<Self> {
         profiles
             .iter()
-            .filter(|profile| profile.id != "terminal")
-            .flat_map(|profile| {
-                let choice = |chat| Self { profile_id: profile.id.clone(), chat };
-                let terminal = profile.takes_launch_prompt().then(|| choice(false));
-                let chat = chat_supports(&profile.id).then(|| choice(true));
-                terminal.into_iter().chain(chat)
-            })
+            .filter(|profile| profile.id != "terminal" && profile.takes_launch_prompt())
+            .map(|profile| Self { profile_id: profile.id.clone() })
             .collect()
     }
 
-    /// The agent's name; `omp` when the catalog no longer lists it.
-    pub fn profile_name(&self) -> String {
+    /// The agent's name; its id when the catalog no longer lists it.
+    pub fn name(&self) -> String {
         AgentCatalog::shared().profile(&self.profile_id).map_or_else(|| self.profile_id.clone(), |p| p.name)
     }
 
-    /// `Claude Code`, `omp · Chat`.
-    pub fn label(&self) -> String {
-        if self.chat { format!("{} · Chat", self.profile_name()) } else { self.profile_name() }
-    }
-
-    /// The choice a draft opens with: the last one made while it can still be made, else omp
-    /// in its terminal, else the first agent there is.
+    /// The choice a draft opens with: the last one made while it can still be made, else omp,
+    /// else the first agent there is.
     pub fn initial(store: &StateStore) -> Option<Self> {
         let all = Self::all();
         let remembered = store
-            .get::<(String, bool)>(Self::STATE_KEY)
-            .map(|(profile_id, chat)| Self { profile_id, chat })
+            .get::<String>(Self::STATE_KEY)
+            .map(|profile_id| Self { profile_id })
             .filter(|choice| all.contains(choice));
-        let omp = Self { profile_id: "omp".into(), chat: false };
+        let omp = Self { profile_id: "omp".into() };
         remembered.or_else(|| all.contains(&omp).then_some(omp)).or_else(|| all.into_iter().next())
     }
 
     pub fn remember(&self, store: &StateStore) {
-        store.set(Self::STATE_KEY, &(self.profile_id.as_str(), self.chat));
+        store.set(Self::STATE_KEY, &self.profile_id);
     }
 }
 
@@ -418,15 +413,19 @@ pub fn is_agent_working(status: Option<AgentStatus>) -> bool {
     matches!(status, Some(AgentStatus::Running | AgentStatus::Starting))
 }
 
-/// What the timeline says while it has no turn to show: an invitation where the conversation
-/// can be followed, else where to follow it.
+/// What the timeline says while it has no turn to show: that the agent is at work on a
+/// message that has not reached its transcript yet, an invitation where the conversation can
+/// be followed, else where to follow it.
 pub fn timeline_empty_text(entry: &DashboardEntry, has_conversation: bool) -> String {
-    if has_conversation {
-        "Send a message to start the conversation.".to_owned()
-    } else if entry.entry.conversation.is_none() {
-        format!("{} has not started a conversation yet.", entry.entry.profile_name)
-    } else {
-        format!("{}'s conversation cannot be read here. Open it in its window.", entry.entry.profile_name)
+    let name = &entry.entry.profile_name;
+    match entry.status() {
+        AgentStatus::Starting if has_conversation || entry.entry.conversation.is_none() => {
+            format!("{name} is starting…")
+        }
+        AgentStatus::Running if has_conversation => format!("{name} is working…"),
+        _ if has_conversation => "Send a message to start the conversation.".to_owned(),
+        _ if entry.entry.conversation.is_none() => format!("{name} has not started a conversation yet."),
+        _ => format!("{name}'s conversation cannot be read here. Open it in its window."),
     }
 }
 
@@ -695,44 +694,37 @@ mod tests {
     }
 
     #[test]
-    fn a_thread_starts_with_any_built_in_agent_in_its_terminal_and_omp_also_as_a_chat() {
-        let all = AgentChoice::all();
-        assert!(all.iter().all(|choice| choice.profile_id != "terminal"));
-        let labels: Vec<String> = all.iter().map(AgentChoice::label).collect();
-        assert_eq!(labels, ["Codex", "Claude Code", "Open Code", "omp", "omp · Chat"]);
+    fn a_thread_starts_with_any_built_in_agent() {
+        let names: Vec<String> = AgentChoice::all().iter().map(AgentChoice::name).collect();
+        assert_eq!(names, ["Codex", "Claude Code", "Open Code", "omp"]);
     }
 
     #[test]
-    fn agents_that_cannot_be_handed_a_first_message_are_not_offered_in_their_terminal() {
-        use soprano_types::{AgentProfile, DefaultAgents};
+    fn agents_that_cannot_be_handed_a_first_message_are_not_offered() {
+        use soprano_types::DefaultAgents;
         let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
-        let scripted_claude =
+        let scripted =
             AgentProfile { launch_script: Some("./start-claude.sh".into()), ..DefaultAgents::claude_code() };
-        let scripted_omp = AgentProfile { launch_script: Some("./omp.sh".into()), ..DefaultAgents::omp() };
         let choices =
-            AgentChoice::for_profiles(&[custom, scripted_claude, scripted_omp, DefaultAgents::codex()]);
-        // omp behind a script still serves its chat, which takes the message itself.
-        assert_eq!(
-            choices,
-            [
-                AgentChoice { profile_id: "omp".into(), chat: true },
-                AgentChoice { profile_id: "codex".into(), chat: false }
-            ]
-        );
+            AgentChoice::for_profiles(&[custom, scripted, DefaultAgents::terminal(), DefaultAgents::codex()]);
+        assert_eq!(choices, [AgentChoice { profile_id: "codex".into() }]);
     }
 
     #[test]
-    fn a_draft_opens_with_omp_in_its_terminal_until_another_choice_is_remembered() {
+    fn a_draft_opens_with_omp_until_another_agent_is_remembered() {
         let store = StateStore::in_memory();
-        assert_eq!(AgentChoice::initial(&store), Some(AgentChoice { profile_id: "omp".into(), chat: false }));
+        assert_eq!(AgentChoice::initial(&store), Some(AgentChoice { profile_id: "omp".into() }));
 
-        let chat = AgentChoice { profile_id: "omp".into(), chat: true };
-        chat.remember(&store);
-        assert_eq!(AgentChoice::initial(&store), Some(chat));
+        let codex = AgentChoice { profile_id: "codex".into() };
+        codex.remember(&store);
+        assert_eq!(AgentChoice::initial(&store), Some(codex));
 
-        // A remembered agent that is gone gives way to the default.
-        AgentChoice { profile_id: "retired".into(), chat: false }.remember(&store);
-        assert_eq!(AgentChoice::initial(&store).map(|choice| choice.label()).as_deref(), Some("omp"));
+        // A remembered agent that is gone gives way to the default, and so does what an
+        // earlier build stored under the key.
+        AgentChoice { profile_id: "retired".into() }.remember(&store);
+        assert_eq!(AgentChoice::initial(&store).map(|choice| choice.name()).as_deref(), Some("omp"));
+        store.set(AgentChoice::STATE_KEY, &("omp", true));
+        assert_eq!(AgentChoice::initial(&store).map(|choice| choice.name()).as_deref(), Some("omp"));
     }
 
     #[test]
@@ -789,6 +781,20 @@ mod tests {
         thread.entry.conversation = Some(soprano_types::AgentConversation::new("c1"));
         assert_eq!(
             timeline_empty_text(&thread, false),
+            "Codex's conversation cannot be read here. Open it in its window."
+        );
+    }
+
+    #[test]
+    fn an_empty_timeline_of_an_agent_at_work_says_so_instead_of_asking_for_a_message() {
+        // A new thread's first message is with the agent before its transcript shows it.
+        assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Starting), false), "Codex is starting…");
+        assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Starting), true), "Codex is starting…");
+        assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Running), true), "Codex is working…");
+        let mut unreadable = entry("a", AgentStatus::Running);
+        unreadable.entry.conversation = Some(soprano_types::AgentConversation::new("c1"));
+        assert_eq!(
+            timeline_empty_text(&unreadable, false),
             "Codex's conversation cannot be read here. Open it in its window."
         );
     }

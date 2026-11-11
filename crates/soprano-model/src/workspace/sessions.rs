@@ -6,7 +6,7 @@ use soprano_types::{AgentCatalog, AgentLaunch, AgentProfile, TerminalTarget};
 
 use super::{Place, TabSpec, Workspace};
 use crate::agent_instance::AgentInstance;
-use crate::pane::{PaneContentKind, PaneState, PaneType, chat_supports};
+use crate::pane::{PaneState, PaneType};
 use crate::split_node::SplitNode;
 use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
@@ -293,22 +293,21 @@ impl Workspace {
 
     // MARK: - Threads
 
-    /// Opens an agent in `cwd` as a thread of its project (the Agents window's New Thread): a
-    /// tab of its own at the end of the row of the window that already works on the project,
-    /// else a new window named after it in the active session. `prompt` is the agent's first
-    /// message. Nothing on screen changes: the tab waits behind the visible one, and the
-    /// active window stays. `None`, with nothing opened, for an unknown profile, `terminal`,
-    /// or an agent that cannot be handed the message ([`thread_launch`]).
+    /// Opens an agent, in its terminal, in `cwd` as a thread of its project (the Agents
+    /// window's New Thread): a tab of its own at the end of the row of the window that already
+    /// works on the project, else a new window named after it in the active session. `prompt`
+    /// is the agent's first message. Nothing on screen changes: the tab waits behind the
+    /// visible one, and the active window stays. `None`, with nothing opened, for an unknown
+    /// profile, `terminal`, or an agent that cannot be handed the message ([`thread_launch`]).
     pub fn open_thread(
         &mut self,
         profile_id: &str,
-        chat: bool,
         cwd: &str,
         prompt: Option<&str>,
     ) -> Option<TerminalTarget> {
         let profile =
             AgentCatalog::shared().profile(profile_id).filter(|profile| profile.id != "terminal")?;
-        let launch = thread_launch(&profile, chat && chat_supports(&profile.id), prompt).ok()?;
+        let launch = thread_launch(&profile, prompt).ok()?;
         let pane_id = self.next_pane_id();
         let tab_id = self.next_tab_id();
         let mut tab = Self::create_pane_tab(
@@ -317,7 +316,6 @@ impl Workspace {
                 pane_type: PaneType::Agent,
                 profile_id: Some(profile.id.clone()),
                 cwd: Some(cwd.to_owned()),
-                content_kind: chat.then(|| PaneContentKind::CHAT.to_owned()),
                 ..TabSpec::default()
             },
         );
@@ -452,16 +450,11 @@ impl Workspace {
     }
 }
 
-/// How a thread's agent gets its first message. A chat takes it through its session and a
-/// thread without one starts bare (`Ok(None)`); a terminal agent takes it on its command line
-/// (`Ok(Some(_))`). `Err` when the agent cannot be handed one that way: it would start
-/// without the message and nobody would know.
-pub(super) fn thread_launch(
-    profile: &AgentProfile,
-    is_chat: bool,
-    prompt: Option<&str>,
-) -> Result<Option<AgentLaunch>, ()> {
-    let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty() && !is_chat) else {
+/// How a thread's agent gets its first message: on its command line (`Ok(Some(_))`); a thread
+/// without one starts bare (`Ok(None)`). `Err` when the agent cannot be handed one that way:
+/// it would start without the message and nobody would know.
+pub(super) fn thread_launch(profile: &AgentProfile, prompt: Option<&str>) -> Result<Option<AgentLaunch>, ()> {
+    let Some(prompt) = prompt.map(str::trim).filter(|prompt| !prompt.is_empty()) else {
         return Ok(None);
     };
     if !profile.takes_launch_prompt() {

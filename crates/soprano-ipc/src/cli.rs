@@ -269,27 +269,30 @@ fn run_markdown(args: &[String], env: &HashMap<String, String>, host: &mut dyn C
 /// The hidden visual-QA subcommands of Dev builds (`visual-snapshot`), not in the usage text:
 /// `debug-snapshot <absolute-png-path>` renders the main window into a PNG; `debug-keys`,
 /// `debug-modifiers`, `debug-type`, `debug-click`, `debug-move` and `debug-scroll`
-/// ([`crate::debug::USAGE`]) dispatch input through it. The app is found through
-/// `SOPRANO_SOCKET`, else `SOPRANO_APP_PID`. Prints the app's answer; exits 1 when the app
-/// cannot be reached or fails, 2 on bad arguments.
+/// ([`crate::debug::USAGE`]) dispatch input through it. `--agents` right after the subcommand
+/// targets the Agents window instead. The app is found through `SOPRANO_SOCKET`, else
+/// `SOPRANO_APP_PID`. Prints the app's answer; exits 1 when the app cannot be reached or
+/// fails, 2 on bad arguments.
 #[cfg(feature = "visual-snapshot")]
 fn run_debug(args: &[String], env: &HashMap<String, String>, host: &mut dyn CliHost) -> Option<i32> {
     use crate::debug::{DebugInput, USAGE as INPUT_USAGE};
     let command = args.get(1)?.as_str();
     let rest = &args[2..];
+    let agents = rest.first().is_some_and(|arg| arg == "--agents");
+    let rest = if agents { &rest[1..] } else { rest };
     let request = if command == "debug-snapshot" {
         match rest {
             [path] if std::path::Path::new(path).is_absolute() => {
-                Request::DebugSnapshot { path: PathBuf::from(path) }
+                Request::DebugSnapshot { path: PathBuf::from(path), agents }
             }
             _ => {
-                write_line(host, Stream::Err, "Usage: soprano debug-snapshot <absolute-png-path>");
+                write_line(host, Stream::Err, "Usage: soprano debug-snapshot [--agents] <absolute-png-path>");
                 return Some(2);
             }
         }
     } else {
         match DebugInput::parse(command, rest)? {
-            Ok(input) => Request::DebugInput { input },
+            Ok(input) => Request::DebugInput { input, agents },
             Err(message) => {
                 write_line(host, Stream::Err, &message);
                 write_line(host, Stream::Err, INPUT_USAGE);

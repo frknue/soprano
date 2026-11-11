@@ -65,7 +65,15 @@ impl AgentDashboard {
                         .child(composer),
                 )
                 .into_any_element(),
-            (None, None) => div().flex_1().into_any_element(),
+            // Nothing to show and nothing to start a thread with.
+            (None, None) => div()
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_center()
+                .text_color(theme.muted)
+                .child("No agent is set up to start a thread with.")
+                .into_any_element(),
         };
         let _ = window;
         div()
@@ -393,7 +401,7 @@ impl AgentDashboard {
                             .on_click(cx.listener(|this, _, window, cx| this.open_agent_menu(window, cx)))
                     })
                     .child(glyph.size(16.).color(theme.muted))
-                    .child(SharedString::from(draft.agent.label()))
+                    .child(SharedString::from(draft.agent.name()))
                     .child(icon(IconName::ChevronDown).size(12.).color(theme.muted))
             }
             (None, Some(entry)) => chip.child(agent_glyph(&entry.entry).size(16.).color(theme.muted)).child(

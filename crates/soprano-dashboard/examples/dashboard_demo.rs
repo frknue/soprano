@@ -373,9 +373,9 @@ fn main() {
                             cx.notify();
                         }),
                         DashboardEvent::Reply { .. } => {}
-                        DashboardEvent::NewThread { profile_id, chat, cwd, prompt } => {
+                        DashboardEvent::NewThread { profile_id, cwd, prompt } => {
                             let opened = model.update(cx, |workspace, cx| {
-                                let target = workspace.open_thread(profile_id, *chat, cwd, Some(prompt));
+                                let target = workspace.open_thread(profile_id, cwd, Some(prompt));
                                 workspace.take_changes();
                                 cx.notify();
                                 target

@@ -137,14 +137,22 @@ pub enum Request {
     /// as a shell on that `machines` entry; answered with a [`Response`].
     #[serde(rename_all = "camelCase")]
     OpenOnMachine { pane_id: String, tab_id: String, machine: String },
-    /// Dev builds (`visual-snapshot`): render the main window into a PNG at `path` (absolute);
-    /// answered with the written path.
+    /// Dev builds (`visual-snapshot`): render the main window, or with `agents` the Agents
+    /// window, into a PNG at `path` (absolute); answered with the written path.
     #[cfg(feature = "visual-snapshot")]
-    DebugSnapshot { path: PathBuf },
-    /// Dev builds (`visual-snapshot`): input dispatched through the main window; answered once
-    /// the window has redrawn.
+    DebugSnapshot {
+        path: PathBuf,
+        #[serde(default)]
+        agents: bool,
+    },
+    /// Dev builds (`visual-snapshot`): input dispatched through the main window, or with
+    /// `agents` the Agents window; answered once the window has redrawn.
     #[cfg(feature = "visual-snapshot")]
-    DebugInput { input: crate::debug::DebugInput },
+    DebugInput {
+        input: crate::debug::DebugInput,
+        #[serde(default)]
+        agents: bool,
+    },
 }
 
 impl Request {

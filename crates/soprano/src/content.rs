@@ -1089,7 +1089,8 @@ impl ContentHost {
 
     // MARK: - Host queries (dashboard, automations)
 
-    /// Starts the agent of a tab in a window nobody is looking at (an automation's run).
+    /// Starts the agent of a tab in a window or tab nobody is looking at (an automation's run,
+    /// a thread opened from the Agent Dashboard), where laying out the pane would not.
     pub fn start_background_terminal(
         &mut self,
         target: &TerminalTarget,
@@ -1140,27 +1141,6 @@ impl ContentHost {
         match self.contents.get(target) {
             Some(PaneContent::Chat(view)) => view.read(cx).session().borrow().is_running(),
             Some(PaneContent::Terminal(view)) => !view.read(cx).has_exited(),
-            _ => false,
-        }
-    }
-
-    /// Starts the agent of a thread's tab (`Workspace::open_thread`), which waits behind its
-    /// window's visible tab where nothing would start it. A chat takes `prompt` as its first
-    /// message once its session is up; a terminal agent got it on its command line. False
-    /// when the agent could not start.
-    pub fn start_thread(
-        &mut self,
-        target: &TerminalTarget,
-        prompt: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else {
-            return false;
-        };
-        match self.ensure_content(&tab, &target.pane_id, Some(true), window, cx) {
-            PaneContent::Terminal(_) => true,
-            PaneContent::Chat(view) => view.update(cx, |view, cx| view.submit_prompt(prompt, window, cx)),
             _ => false,
         }
     }

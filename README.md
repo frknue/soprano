@@ -538,7 +538,9 @@ spaces).
 "What should we build in *project*?" opens on the open thread's project — click the name
 to pick another from the projects open in your windows and the `projectDirectories`, or
 any folder — and the chip in the composer picks the agent: Codex, Claude Code, OpenCode,
-or omp in its terminal, or omp as a chat (the last choice is remembered). A custom agent,
+or omp (the last choice is remembered). The agent runs in its terminal, in a tab of the
+main window; the dashboard shows its conversation. With no thread yet, the dashboard
+opens on a new one with the cursor in the composer. A custom agent,
 or one started through a `launchScript`, cannot be handed a first message and is not
 offered; start it from the main window. Your first message starts it. The thread
 opens as a tab of the window that already works on that project, or in a new window

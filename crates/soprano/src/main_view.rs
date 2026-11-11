@@ -1352,6 +1352,12 @@ impl MainView {
         }
     }
 
+    /// The Agents window while it is open (the Dev build's `--agents` debug target).
+    #[cfg(feature = "visual-snapshot")]
+    fn open_agents(&self) -> Option<gpui::WindowHandle<gpui_component::Root>> {
+        self.agents.as_ref().filter(|(agents, _)| agents.is_open()).map(|(agents, _)| agents.window)
+    }
+
     fn close_agents_window(&mut self, cx: &mut Context<Self>) {
         let Some((agents, _)) = self.agents.take() else { return };
         let state = self.services.state.clone();
@@ -1395,9 +1401,8 @@ impl MainView {
                     });
                 }
             }
-            DashboardEvent::NewThread { profile_id, chat, cwd, prompt } => {
-                let opened =
-                    self.workspace.update(cx, |ws| ws.open_thread(profile_id, *chat, cwd, Some(prompt)));
+            DashboardEvent::NewThread { profile_id, cwd, prompt } => {
+                let opened = self.workspace.update(cx, |ws| ws.open_thread(profile_id, cwd, Some(prompt)));
                 let Some(target) = opened else {
                     return self.with_dashboard(cx, |dashboard, window, cx| {
                         dashboard.thread_failed(
@@ -1408,8 +1413,9 @@ impl MainView {
                     });
                 };
                 // Its tab waits behind the visible one, so nothing has started its agent yet.
-                let started =
-                    self.content.update(cx, |content, cx| content.start_thread(&target, prompt, window, cx));
+                let started = self
+                    .content
+                    .update(cx, |content, cx| content.start_background_terminal(&target, window, cx));
                 if !started {
                     self.toast(ToastLevel::Error, "The agent could not start. Open it in its window.", cx);
                 }
@@ -2008,12 +2014,34 @@ impl MainView {
                 respond(response);
             }
             #[cfg(feature = "visual-snapshot")]
-            Request::DebugSnapshot { path } => respond(match crate::snapshot::write_png(window, &path) {
-                Ok(()) => Response::success(path.to_string_lossy().into_owned()),
-                Err(error) => Response::failure(format!("{error:#}")),
-            }),
+            Request::DebugSnapshot { path, agents } => {
+                let target: Option<gpui::AnyWindowHandle> =
+                    if agents { self.open_agents().map(Into::into) } else { Some(window.window_handle()) };
+                let Some(target) = target else {
+                    return respond(Response::failure("The Agents window is not open."));
+                };
+                // Drawing renders this view, so it waits until this update is over.
+                cx.defer(move |cx| {
+                    let written =
+                        target.update(cx, |_, window, cx| crate::snapshot::write_png(window, &path, cx));
+                    respond(match written {
+                        Ok(Ok(())) => Response::success(path.to_string_lossy().into_owned()),
+                        Ok(Err(error)) | Err(error) => Response::failure(format!("{error:#}")),
+                    });
+                });
+            }
             #[cfg(feature = "visual-snapshot")]
-            Request::DebugInput { input } => crate::debug_input::perform(input, window, cx, respond),
+            Request::DebugInput { input, agents: false } => {
+                crate::debug_input::perform(input, window, cx, respond)
+            }
+            #[cfg(feature = "visual-snapshot")]
+            Request::DebugInput { input, agents: true } => match self.open_agents() {
+                Some(agents) => {
+                    let _ = agents
+                        .update(cx, |_, window, cx| crate::debug_input::perform(input, window, cx, respond));
+                }
+                None => respond(Response::failure("The Agents window is not open.")),
+            },
             Request::OpenOnMachine { pane_id, tab_id, machine } => {
                 let machines = &self.shell.read(cx).machines;
                 if !machines.iter().any(|known| known.name == machine) {
