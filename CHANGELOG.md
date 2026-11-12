@@ -17,6 +17,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
   behind a `launchScript` are not offered; the last choice is
   remembered). The thread opens as a tab of the window that already works on that project,
   or in a new window named after it, without moving what the main window shows.
+- **Model and thinking level in the Agent Dashboard**, as in Soprano Agents: an omp thread
+  runs as a chat, and its composer shows the model and the thinking level. Click the model
+  or press `⇧⌘M` to search omp's models, the level or `⇧⌘E` to change how hard it thinks —
+  before the first message of a new thread or at any time while it runs. A new omp thread
+  starts with what the last one started with.
 - The Agent Dashboard's inbox has a **Search** (`/`) and folds: click **Needs you**,
   **Working**, **Ready**, or **Stopped** to hide its threads; Stopped starts folded.
 - **Linux and Windows.** Soprano now runs on macOS, Linux (x86_64 and arm64) and Windows
@@ -276,6 +281,15 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- An omp chat, and so an omp thread started from the Agent Dashboard, no longer asks for
+  approval before every command while omp in a terminal runs the same command unasked. A
+  chat now starts with omp's own approval mode (`tools.approvalMode`, `yolo` by default).
+- Soprano no longer closes when the pointer is over a work log line of an agent chat
+  ("Read 3 files", a command, an edit). It happened in every chat tab, and most easily in a
+  thread started from the Agent Dashboard once you opened its tab.
+- When Soprano closes on its own, it now says why: `panic.log` in the app's data folder
+  (`~/Library/Application Support/com.soprano.app/` on macOS) keeps the message, place and
+  backtrace.
 - An omp agent no longer drops out of the sidebar's Agents list and the Agent Dashboard for
   a few seconds after it starts working (its pane tab turned into a plain terminal until
   omp's next status report); in the dashboard the thread vanished, the chat column went

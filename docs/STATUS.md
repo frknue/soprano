@@ -53,17 +53,56 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   `crates/soprano/src/agents_window.rs`, `main_view.rs` (Tasten des Agents-Fensters laufen nicht
   durch den Resolver, nur der Dashboard-Akkord). Sichtprüfung über
   `dashboard_demo -- --snapshot <ordner>` (dunkel 1100×780, hell 840×620, Dracula ohne Agenten).
-- 2026-11-12: Furkans Fehlerbericht „unusable, flackert, verschwindet“ behoben (uncommittet auf
+- 2026-11-12: Furkans Fehlerbericht „unusable, flackert, verschwindet“ behoben (`880a651` auf
   `main`, installiert). Ursache: omp schreibt selbst OSC 133 (`A/B/C/D;0`) in sein Terminal;
   `Workspace::agent_command_did_finish` hielt das `D` für „Agent beendet“ und machte den Tab zum
   Terminal, bis der nächste Hook ihn wieder anhängte. Jetzt beendet eine Kommando-Ende-Marke
   nichts, solange der gemeldete Agent-Prozess lebt (Regressionstest in
   `workspace/tests/agents.rs`). Dashboard: nie leere Chat-Spalte (Entwurf mit fokussiertem
   Composer), `refresh` überspringt unveränderte Einträge (omp setzt den Titel ~10×/s), leere
-  Timeline sagt „is starting…/is working…“, „omp · Chat“ aus Neuer Thread entfernt (Threads sind
-  Terminal-Agenten). In Soprano Dev nachgestellt und geprüft (zwei omp-Threads, Karte bleibt von
-  Starting bis Done, beide Tabs im Hauptfenster). Dev-Werkzeug: `debug-snapshot|debug-* --agents`
-  zielt auf das Agents-Fenster; Snapshots zeichnen vorher einen frischen Frame.
+  Timeline sagt „is starting…/is working…“. In Soprano Dev nachgestellt und geprüft (zwei
+  omp-Threads, Karte bleibt von Starting bis Done, beide Tabs im Hauptfenster). Dev-Werkzeug:
+  `debug-snapshot|debug-* --agents` zielt auf das Agents-Fenster; Snapshots zeichnen vorher
+  einen frischen Frame.
+- 2026-11-12: Modell- und Thinking-Auswahl im Agent Dashboard wie in Soprano Agents (Furkans
+  Entscheidung: omp-Threads laufen über ACP). `Workspace::open_thread` öffnet omp als Chat-Tab
+  (`omp acp`), die anderen Agenten weiter im Terminal mit Prompt auf der Kommandozeile; die
+  Wahl „omp · Chat“ im Agent-Menü gibt es nicht mehr. Composer-Chips Modell (`⇧⌘M`, `Picker`
+  nach Provider gruppiert) und Thinking (`⇧⌘E`, Menü): im Entwurf aus einer Wegwerf-Konversation
+  gelesen (`ContentHost::thread_options_probe`: `omp acp --session-dir <temp>`, damit nichts
+  in omps Sitzungsverlauf landet; nach Modellwechsel erneut, weil das Modell die Stufen
+  bestimmt), beim Start über `AgentChatSession::set_opening_options` vor dem ersten Prompt
+  gesetzt, im laufenden Thread per `DashboardEvent::SetOption`. Letzte Wahl pro Agent in
+  `soprano-agents-thread-options`. In Soprano Dev geprüft: Chips erscheinen ~1,5 s nach dem
+  Öffnen, Haiku 4.5 gewählt und gestartet, im laufenden Thread auf Sonnet 5.5 gewechselt (die
+  Antwort nennt `anthropic/claude-sonnet-5-5`), keine Reste in `~/.omp/agent/sessions`.
+- 2026-11-12: Absturz „Soprano schließt sich“ behoben (Furkan: Thread im Dashboard gestartet,
+  Dashboard zu, zum Tab gewechselt; launchd: `exited due to exit(101)`, kein Crash-Report, weil
+  ein Rust-Panic kein Signal ist). Ursache: `WorkLogLine` (soprano-chat-ui `widgets.rs`) blendete
+  die Uhrzeit per `.hidden()` + `group_hover(.flex())` ein. Den Hover einer Gruppe kennt GPUI
+  erst beim Malen; ein Element, das dort von `display: none` auf sichtbar wechselt, malt Kinder
+  ohne Prepaint → Panic „must call prepaint before paint“, sobald der Zeiger über einer
+  Work-Log-Zeile mit Uhrzeit steht. Betraf jeden Chat-Tab (`⌘I`) seit dem Rewrite; seit
+  omp-Threads Chats sind, trifft man es sofort. Jetzt `invisible()`/`visible()` (Platz bleibt
+  reserviert). Regressionstest in `soprano-chat-ui/src/view_tests.rs` (Zeiger fährt die
+  Konversation ab). Regel: mit `group_hover` nie `display` umschalten, nur Sichtbarkeit,
+  Deckkraft oder Farbe. Neu: `crates/soprano/src/crash_log.rs` schreibt jeden Panic mit
+  Backtrace nach `<Datenordner>/panic.log`.
+- 2026-11-12: omp-Chats (und damit Dashboard-Threads) fragten vor jedem Kommando nach Freigabe,
+  obwohl omp im Terminal nichts fragt. Ursache: `omp acp` fragt vor jedem `execute`-Tool, solange
+  der Freigabemodus nicht ausdrücklich gesetzt ist, auch wenn `tools.approvalMode` (Standard
+  `yolo`) nichts verlangt (mit `--approval-mode=yolo` oder dem Wert in `config.yml`: 0
+  Anfragen; ohne: 2 bei drei Tool-Aufrufen). Jetzt startet `ChatLaunch` (soprano-launch
+  `chat.rs`) den ACP-Server über `sh -c` mit `--approval-mode=$(omp config get
+  tools.approvalMode)`; ein Chat fragt damit genau dann, wenn omp im Terminal fragen würde.
+  `--approval-mode`/`--auto-approve` in den `args` des Agenten gehen vor, ebenso ein
+  `--config`-Overlay, das `tools: approvalMode:` setzt (mit `yaml-rust2` gelesen; ein gepunkteter
+  Schlüssel `tools.approvalMode` zählt nicht, omp liest ihn nicht: gemessen 1 Anfrage; `omp
+  config get` liest Overlays nicht, und das Flag würde das Overlay überstimmen: gemessen 1 → 0
+  Anfragen); mit `--profile` wird der Modus
+  dieses Profils gelesen. In Soprano Dev geprüft: Thread mit drei bash-Aufrufen läuft ohne
+  Rückfrage bis Done (`ps`: `omp acp --approval-mode=yolo`). PowerShell-Variante nur als Text
+  getestet.
 
 ## Offen
 
@@ -85,12 +124,15 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
 - Agents-Fenster: in Soprano Dev über `debug-* --agents` geprüft (Öffnen per `⇧⌘D`, neuer
-  Thread mit omp, `⌘W`). Noch ungeprüft: Nach-vorn/Schließen per `⇧⌘D` aus beiden Fenstern mit
-  echter Tastatur, Ampel-Position (20, 19), Verschieben am 52-px-Band, das Menü „Agent
-  Dashboard“ bei aktivem Agents-Fenster, „Choose Folder…“, Threads mit Codex/Claude Code/
-  OpenCode. Banner richten sich weiter nur nach dem Hauptfenster (Agents-Fenster vorn zählt als
-  „nicht aktiv“). Zwei Threads im selben Ordner können in verschiedenen Fenstern landen, wenn
-  das erste Terminal sein Verzeichnis erst nach dem ersten Thread meldet.
+  Thread mit omp, Modell/Thinking per Tastatur, `⌘W`). Noch ungeprüft: Klick auf die Chips mit
+  echter Maus, Nach-vorn/Schließen per `⇧⌘D` aus beiden Fenstern mit echter Tastatur,
+  Ampel-Position (20, 19), Verschieben am 52-px-Band, das Menü „Agent Dashboard“ bei aktivem
+  Agents-Fenster, „Choose Folder…“, Threads mit Codex/Claude Code/OpenCode, Freigaben
+  (Approvals) eines omp-Chat-Threads (beantwortbar nur im Chat-Tab des Hauptfensters, das
+  Dashboard zeigt den Status). Der Modell-Picker markiert das aktuelle Modell, wählt es aber
+  nicht vor. Banner richten sich weiter nur nach dem Hauptfenster (Agents-Fenster vorn zählt
+  als „nicht aktiv“). Zwei Threads im selben Ordner können in verschiedenen Fenstern landen,
+  wenn das erste Terminal sein Verzeichnis erst nach dem ersten Thread meldet.
   Linux/Windows: natives Titelband statt eigener Fensterknöpfe, nicht gebaut.
 - Settings-Redesign: in der laufenden App noch nicht angesehen (nur Snapshots der Demo).
   Textfelder rücken app-weit etwa 20 px ein (`TextInput` plus Padding von gpui-component); nicht

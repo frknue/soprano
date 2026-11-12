@@ -538,14 +538,21 @@ spaces).
 "What should we build in *project*?" opens on the open thread's project — click the name
 to pick another from the projects open in your windows and the `projectDirectories`, or
 any folder — and the chip in the composer picks the agent: Codex, Claude Code, OpenCode,
-or omp (the last choice is remembered). The agent runs in its terminal, in a tab of the
-main window; the dashboard shows its conversation. With no thread yet, the dashboard
-opens on a new one with the cursor in the composer. A custom agent,
-or one started through a `launchScript`, cannot be handed a first message and is not
-offered; start it from the main window. Your first message starts it. The thread
-opens as a tab of the window that already works on that project, or in a new window
-named after it when none does; the line under the headline says which. Nothing in the
-main window moves: the tab waits behind the visible one until you **Open** it.
+or omp (the last choice is remembered). With no thread yet, the dashboard opens on a new
+one with the cursor in the composer. Your first message starts the thread. It opens as a
+tab of the window that already works on that project, or in a new window named after it
+when none does; the line under the headline says which. Nothing in the main window
+moves: the tab waits behind the visible one until you **Open** it.
+
+An omp thread runs as a [chat](#agent-chat), so the composer also shows its **model** and
+**thinking level**, as in Soprano Agents. Click the model (or press `⇧⌘M`) to search every
+model omp knows, grouped by provider, and the level (or `⇧⌘E`) to choose how hard it
+thinks; a model changes which levels there are. Both can be set before the first message
+and changed at any time while the thread runs, and a new omp thread starts with what the
+last one started with. Codex, Claude Code, and OpenCode threads run in their terminal,
+where the dashboard cannot set a model: use the agent's own `/model` there. A custom
+agent, or one started through a `launchScript`, cannot be handed a first message in its
+terminal and is not offered; start it from the main window.
 
 Use `J` / `K` or the arrow keys to move through threads, `Tab` (or `R`) to focus the
 composer and `Esc` or `⇧Tab` to leave it again, and `Return` to open the selected thread
@@ -589,9 +596,13 @@ The composer floats at the bottom:
   away), `⌘Return` steers it into the running turn, and `Esc` (or the stop button) stops
   the turn. `↑` / `↓` in an empty composer recall earlier messages; `/` lists omp's
   commands and skills.
-- **Approvals:** when omp wants to run a command, the composer shows it with **Decline**,
-  **Approve**, and **⋯** for **Always allow**; sending a message instead declines and
-  redirects the agent.
+- **Approvals:** a chat asks before a tool call exactly when omp in a terminal would: it
+  starts with the approval mode omp resolves (`omp config get tools.approvalMode`; `yolo`,
+  omp's default, asks for nothing). Under a stricter mode the composer shows the command
+  with **Decline**, **Approve**, and **⋯** for **Always allow**; sending a message instead
+  declines and redirects the agent. An `--approval-mode=…` or `--auto-approve` in the omp
+  agent's `args`, or a `--config` overlay there that sets `approvalMode`, wins over the
+  setting; with a `--profile`, that profile's setting is the one read.
 - **Questions:** omp's questions show their choices with `1`–`9`; type your own answer
   instead, or close the question.
 - **Footer:** the model picker, thinking level, and mode omp offers, a ring showing how
@@ -1165,6 +1176,11 @@ The legacy `scripts/run.sh` forwards to `scripts/dev.sh`.
 macOS requires a real application bundle for native notifications. `cargo run` and the raw
 `target/debug/soprano` executable are useful for debugging, but notifications are silently
 disabled for those unbundled launches.
+
+If Soprano ever closes on its own, the reason is in `panic.log` in its data folder
+(`~/Library/Application Support/com.soprano.app/` on macOS, `~/.local/share/com.soprano.app/`
+on Linux, `%APPDATA%\com.soprano.app\` on Windows): the message, the place in the code and
+the backtrace of every panic. macOS writes no crash report for these.
 
 Release history lives in [`CHANGELOG.md`](CHANGELOG.md); user-visible changes land under
 `Unreleased` until a release is cut. [`AGENTS.md`](AGENTS.md) is the full contributor
