@@ -35,6 +35,13 @@ impl ChatLaunch {
         soprano_types::AgentCatalog::shared().all().into_iter().filter(|p| Self::supports(&p.id)).collect()
     }
 
+    /// What a throwaway conversation adds to the agent's command line (reading what a new
+    /// thread would offer): omp keeps it in `session_directory` instead of the folder's
+    /// session history.
+    pub fn throwaway_arguments(session_directory: &Path) -> Vec<String> {
+        vec!["--session-dir".into(), path_string(session_directory)]
+    }
+
     /// `None` for agents without an ACP server.
     pub fn for_profile(
         profile: &AgentProfile,

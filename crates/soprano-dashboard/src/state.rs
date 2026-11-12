@@ -2,12 +2,14 @@
 //! inbox's sections, search, folding and selection, what a new thread can start with, and what
 //! the chat column enables and says for the selected thread.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use soprano_agents::{AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus};
-use soprano_model::AgentDashboardEntry;
+use soprano_chat::AgentChatConfigOption;
+use soprano_chat_ui::composer_logic::{MODEL_CATEGORY, THINKING_CATEGORY, option_of, option_title};
+use soprano_model::{AgentDashboardEntry, chat_supports};
 use soprano_platform::StateStore;
 use soprano_types::{AgentCatalog, AgentProfile, AgentStatus, AgentWaitingReason, TerminalTarget};
 use soprano_ui::status::StatusPillSpec;
@@ -329,8 +331,9 @@ impl AgentList {
     }
 }
 
-/// The agent a new thread starts with. It runs in its terminal; the dashboard shows its
-/// conversation as a chat either way.
+/// The agent a new thread starts with. One that serves a chat (omp) runs as one, so its
+/// model and thinking level can be set from the composer; any other runs in its terminal.
+/// The dashboard shows the conversation as a chat either way.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentChoice {
     pub profile_id: String,
@@ -345,13 +348,15 @@ impl AgentChoice {
         Self::for_profiles(&AgentCatalog::shared().all())
     }
 
-    /// The agents among `profiles` a thread can start with: those Soprano can hand the
-    /// thread's first message as they start. The shell is not an agent, and a custom agent or
-    /// one behind a launch script would start without the message.
+    /// The agents among `profiles` a thread can start with: those that take the thread's
+    /// first message as they start, through their chat session or on their command line. The
+    /// shell is not an agent, and a custom terminal agent or one behind a launch script would
+    /// start without the message.
     pub fn for_profiles(profiles: &[AgentProfile]) -> Vec<Self> {
         profiles
             .iter()
-            .filter(|profile| profile.id != "terminal" && profile.takes_launch_prompt())
+            .filter(|profile| profile.id != "terminal")
+            .filter(|profile| chat_supports(&profile.id) || profile.takes_launch_prompt())
             .map(|profile| Self { profile_id: profile.id.clone() })
             .collect()
     }
@@ -375,6 +380,76 @@ impl AgentChoice {
 
     pub fn remember(&self, store: &StateStore) {
         store.set(Self::STATE_KEY, &self.profile_id);
+    }
+}
+
+/// A setting of its agent the composer offers beside the message: the model, and how hard it
+/// thinks. Agents that run as a chat have them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThreadOption {
+    Model,
+    Thinking,
+}
+
+impl ThreadOption {
+    /// In the order the composer shows them and a new thread applies them: the model decides
+    /// which thinking levels there are.
+    pub const ALL: [Self; 2] = [Self::Model, Self::Thinking];
+
+    /// Where the settings the last thread of each agent started with are kept (app state).
+    pub const STATE_KEY: &'static str = "soprano-agents-thread-options";
+
+    /// The agent's setting among `options`, when it offers a choice.
+    pub fn of(self, options: &[AgentChatConfigOption]) -> Option<&AgentChatConfigOption> {
+        let category = match self {
+            Self::Model => MODEL_CATEGORY,
+            Self::Thinking => THINKING_CATEGORY,
+        };
+        option_of(options, category)
+    }
+
+    /// What its chip shows: "Claude Opus 5.5", "High".
+    pub fn label(self, option: &AgentChatConfigOption) -> String {
+        match self {
+            Self::Model => option.current_name().to_owned(),
+            Self::Thinking => option_title(option.current_name()),
+        }
+    }
+
+    /// The settings among `options` a new thread starts with, as (option id, value).
+    pub fn opening(options: &[AgentChatConfigOption]) -> Vec<(String, String)> {
+        Self::ALL
+            .iter()
+            .filter_map(|kind| kind.of(options))
+            .map(|option| (option.id.clone(), option.current_value.clone()))
+            .collect()
+    }
+
+    /// Sets the option `id` to `value` where the agent offers that. Returns whether it did.
+    pub fn choose(options: &mut [AgentChatConfigOption], id: &str, value: &str) -> bool {
+        let Some(option) = options.iter_mut().find(|option| option.id == id) else { return false };
+        if !option.values.iter().any(|offered| offered.value == value) {
+            return false;
+        }
+        option.current_value = value.to_owned();
+        true
+    }
+
+    /// What the last thread of `profile_id` started with, as (option id, value).
+    pub fn remembered(store: &StateStore, profile_id: &str) -> Vec<(String, String)> {
+        store
+            .get::<BTreeMap<String, Vec<(String, String)>>>(Self::STATE_KEY)
+            .and_then(|mut all| all.remove(profile_id))
+            .unwrap_or_default()
+    }
+
+    pub fn remember(store: &StateStore, profile_id: &str, opening: &[(String, String)]) {
+        if opening.is_empty() {
+            return;
+        }
+        let mut all: BTreeMap<String, Vec<(String, String)>> = store.get(Self::STATE_KEY).unwrap_or_default();
+        all.insert(profile_id.to_owned(), opening.to_vec());
+        store.set(Self::STATE_KEY, &all);
     }
 }
 
@@ -705,9 +780,74 @@ mod tests {
         let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
         let scripted =
             AgentProfile { launch_script: Some("./start-claude.sh".into()), ..DefaultAgents::claude_code() };
-        let choices =
-            AgentChoice::for_profiles(&[custom, scripted, DefaultAgents::terminal(), DefaultAgents::codex()]);
-        assert_eq!(choices, [AgentChoice { profile_id: "codex".into() }]);
+        // omp behind a script still serves its chat, which takes the message itself.
+        let scripted_omp = AgentProfile { launch_script: Some("./omp.sh".into()), ..DefaultAgents::omp() };
+        let choices = AgentChoice::for_profiles(&[
+            custom,
+            scripted,
+            scripted_omp,
+            DefaultAgents::terminal(),
+            DefaultAgents::codex(),
+        ]);
+        assert_eq!(
+            choices,
+            [AgentChoice { profile_id: "omp".into() }, AgentChoice { profile_id: "codex".into() }]
+        );
+    }
+
+    fn option(id: &str, category: &str, current: &str, values: &[&str]) -> AgentChatConfigOption {
+        AgentChatConfigOption {
+            id: id.into(),
+            name: id.into(),
+            category: Some(category.into()),
+            current_value: current.into(),
+            values: values
+                .iter()
+                .map(|value| soprano_chat::ConfigOptionValue {
+                    value: (*value).into(),
+                    name: value.rsplit('/').next().unwrap_or(value).into(),
+                    detail: None,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_thread_offers_its_agents_model_and_thinking_level_and_starts_with_what_they_show() {
+        let mut options = vec![
+            option("mode", "mode", "default", &["default", "plan"]),
+            option("thinking", "thought_level", "high", &["off", "low", "high"]),
+            option("model", "model", "a/opus", &["a/opus", "a/haiku"]),
+        ];
+        let label = |kind: ThreadOption, options: &[AgentChatConfigOption]| {
+            kind.of(options).map(|option| kind.label(option))
+        };
+        assert_eq!(label(ThreadOption::Model, &options).as_deref(), Some("opus"));
+        assert_eq!(label(ThreadOption::Thinking, &options).as_deref(), Some("High"));
+
+        assert!(ThreadOption::choose(&mut options, "model", "a/haiku"));
+        // Not on offer: nothing changes.
+        assert!(!ThreadOption::choose(&mut options, "model", "a/gone"));
+        assert!(!ThreadOption::choose(&mut options, "speed", "fast"));
+        // The model goes first; the mode is not the thread's to start with.
+        assert_eq!(
+            ThreadOption::opening(&options),
+            [("model".to_owned(), "a/haiku".to_owned()), ("thinking".to_owned(), "high".to_owned())]
+        );
+        // A setting without a choice has no chip.
+        assert_eq!(ThreadOption::Model.of(&[option("model", "model", "a/opus", &["a/opus"])]), None);
+    }
+
+    #[test]
+    fn each_agent_remembers_what_its_last_thread_started_with() {
+        let store = StateStore::in_memory();
+        assert!(ThreadOption::remembered(&store, "omp").is_empty());
+        let opening = vec![("model".to_owned(), "a/haiku".to_owned())];
+        ThreadOption::remember(&store, "omp", &opening);
+        // An agent without settings leaves the others' alone.
+        ThreadOption::remember(&store, "codex", &[]);
+        assert_eq!(ThreadOption::remembered(&store, "omp"), opening);
+        assert!(ThreadOption::remembered(&store, "codex").is_empty());
     }
 
     #[test]

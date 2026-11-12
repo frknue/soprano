@@ -17,6 +17,10 @@ struct FakeState {
     notifications: Vec<(String, Value)>,
     replies: Vec<(Value, Result<Value, JsonRpcError>)>,
     load_error: Option<JsonRpcError>,
+    /// Leaves `session/set_config_option` unanswered, like an agent that dies first.
+    holds_settings: bool,
+    /// A reopened conversation reports its settings, as omp does.
+    load_reports_settings: bool,
     prompts: Vec<u64>,
     next_id: u64,
     next_request_id: u64,
@@ -118,11 +122,18 @@ impl JsonRpcPeer for FakeAgent {
             "initialize" => Some(Ok(json!({
                 "protocolVersion": 1, "agentCapabilities": {"loadSession": true}, "_meta": {"steering": {"supported": true}}
             }))),
-            "session/new" => Some(Ok(json!({"sessionId": "new-session", "configOptions": [
-                {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": "a/one",
-                 "options": [{"value": "a/one", "name": "One"}, {"value": "a/two", "name": "Two"}]},
-            ]}))),
-            "session/load" => Some(state.load_error.clone().map_or_else(|| Ok(json!({})), Err)),
+            "session/new" => Some(Ok(json!({"sessionId": "new-session", "configOptions": settings()}))),
+            "session/load" => Some(state.load_error.clone().map_or_else(
+                || {
+                    Ok(if state.load_reports_settings {
+                        json!({"configOptions": settings()})
+                    } else {
+                        json!({})
+                    })
+                },
+                Err,
+            )),
+            "session/set_config_option" if state.holds_settings => None,
             "session/prompt" => {
                 state.prompts.push(id);
                 None
@@ -151,6 +162,14 @@ impl JsonRpcPeer for FakeAgent {
     fn has_exited(&self) -> bool {
         self.state().exited
     }
+}
+
+/// What the stand-in agent offers a conversation.
+fn settings() -> Value {
+    json!([
+        {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": "a/one",
+         "options": [{"value": "a/one", "name": "One"}, {"value": "a/two", "name": "Two"}]},
+    ])
 }
 
 fn launch() -> AgentChatLaunch {
@@ -688,6 +707,108 @@ fn model_mode_plan_and_context_updates_change_what_the_chat_shows() {
     );
     assert_eq!(session.context_usage(), Some((1200, 200_000)));
     assert_eq!(session.config_options().iter().map(|o| o.current_name()).collect::<Vec<_>>(), vec!["Plan"]);
+}
+
+#[test]
+fn a_conversation_started_with_a_model_gets_it_before_its_first_prompt() {
+    let (mut session, agent, _) = make_session();
+    // The agent offers neither a thinking level nor a model a/nine: both are skipped.
+    session.set_opening_options(vec![
+        ("thinking".into(), "high".into()),
+        ("model".into(), "a/two".into()),
+        ("model".into(), "a/nine".into()),
+    ]);
+    session.start(None);
+    assert!(session.send("Fix the totals"));
+    settle(&mut session);
+
+    assert_eq!(
+        agent.methods(),
+        vec!["initialize", "session/new", "session/set_config_option", "session/prompt"]
+    );
+    assert_eq!(
+        agent.requests()[2].1,
+        json!({"sessionId": "new-session", "configId": "model", "value": "a/two"})
+    );
+    assert!(!session.has_opening_options());
+    assert_eq!(session.phase(), &ChatPhase::Working);
+}
+
+#[test]
+fn opening_settings_the_conversation_already_has_send_nothing() {
+    let (mut session, agent, _) = started();
+    session.set_opening_options(vec![("model".into(), "a/one".into())]);
+    assert!(session.send("Hello"));
+    settle(&mut session);
+    assert_eq!(agent.methods(), vec!["initialize", "session/new", "session/prompt"]);
+}
+
+#[test]
+fn probing_reads_what_a_new_conversation_offers_and_ends_the_agent() {
+    let (session, agent, _) = make_session();
+    let options = session
+        .probe_config_options(vec![("model".into(), "a/two".into())], std::time::Duration::from_secs(5));
+
+    assert_eq!(options.iter().map(|option| option.id.as_str()).collect::<Vec<_>>(), vec!["model"]);
+    assert_eq!(agent.methods(), vec!["initialize", "session/new", "session/set_config_option"]);
+    assert!(agent.is_terminated());
+}
+
+#[test]
+fn a_restart_before_an_opening_setting_is_answered_applies_it_again_then_sends_the_prompt() {
+    let first = FakeAgent::default();
+    first.state().holds_settings = true;
+    let second = FakeAgent::default();
+    second.state().load_reports_settings = true;
+    let peers = Rc::new(RefCell::new(vec![first.clone(), second.clone()]));
+    let mut session = AgentChatSession::with_peer_factory(
+        launch(),
+        Box::new(move |_| Box::new(peers.borrow_mut().remove(0))),
+    );
+    session.set_opening_options(vec![("model".into(), "a/two".into())]);
+    session.start(None);
+    assert!(session.send("Fix the totals"));
+    settle(&mut session);
+    // The setting is with the agent, and the prompt waits for its answer.
+    assert_eq!(first.methods().last().map(String::as_str), Some("session/set_config_option"));
+    assert!(session.has_opening_options());
+
+    // The agent goes away without answering: the conversation it reopens gets the setting
+    // again, and the prompt after it.
+    session.restart(None);
+    first.exit(0, "");
+    settle(&mut session);
+    assert_eq!(
+        second.methods(),
+        vec!["initialize", "session/load", "session/set_config_option", "session/prompt"]
+    );
+    assert_eq!(second.requests()[2].1["value"], json!("a/two"));
+    assert!(!session.has_opening_options());
+}
+
+#[test]
+fn an_agent_that_exits_before_answering_an_opening_setting_does_not_hold_later_prompts() {
+    let first = FakeAgent::default();
+    first.state().holds_settings = true;
+    let second = FakeAgent::default();
+    let peers = Rc::new(RefCell::new(vec![first.clone(), second.clone()]));
+    let mut session = AgentChatSession::with_peer_factory(
+        launch(),
+        Box::new(move |_| Box::new(peers.borrow_mut().remove(0))),
+    );
+    session.set_opening_options(vec![("model".into(), "a/two".into())]);
+    session.start(None);
+    settle(&mut session);
+    first.exit(1, "boom");
+    settle(&mut session);
+    assert!(!session.is_running());
+
+    // Started again, on a conversation that reports no settings: the prompt goes out.
+    session.restart(None);
+    settle(&mut session);
+    assert!(session.send("Hello"));
+    settle(&mut session);
+    assert_eq!(second.sent_prompts(), vec![json!("Hello")]);
 }
 
 // AgentChatTabTests: the part that is the session's — what the chat reports to its tab.

@@ -1,10 +1,10 @@
 //! One conversation with an agent over the Agent Client Protocol (`AgentChatSession.swift`).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use serde_json::{Map, Value, json};
@@ -494,6 +494,12 @@ pub struct AgentChatSession {
     plan: Vec<AgentChatPlanEntry>,
     /// Messages waiting for the running turn, oldest first.
     queue: Vec<UserMessage>,
+    /// Settings to apply once the conversation opens, before its first prompt goes out, as
+    /// (option id, value) in order.
+    opening_options: VecDeque<(String, String)>,
+    /// The opening option that is with the agent; prompts wait for its answer. An agent that
+    /// goes away first leaves it for the next conversation ([`Self::retire_opening_option`]).
+    opening_in_flight: Option<(String, String)>,
     /// The `/` commands the agent offers.
     commands: Vec<AgentChatCommand>,
     /// Context tokens in use and the window's size, after the last turn.
@@ -546,6 +552,8 @@ impl AgentChatSession {
             config_options: Vec::new(),
             plan: Vec::new(),
             queue: Vec::new(),
+            opening_options: VecDeque::new(),
+            opening_in_flight: None,
             commands: Vec::new(),
             context_usage: None,
             session_id: None,
@@ -724,6 +732,7 @@ impl AgentChatSession {
                 self.retiring.insert(peer_id, peer);
             }
         }
+        self.retire_opening_option();
         self.retiring.retain(|_, peer| !peer.has_exited());
         // A stop or another start while waiting wins.
         self.pending_start = Some(resuming.map(str::to_owned));
@@ -787,6 +796,7 @@ impl AgentChatSession {
     /// unanswered request dies with the process, which the next `start` waits for.
     fn shutdown(&mut self) {
         self.pending_start = None;
+        self.retire_opening_option();
         if let Some((peer_id, mut peer)) = self.peer.take() {
             peer.terminate();
             // Keeps the peer until its process is gone, across any number of stops and restarts.
@@ -872,20 +882,30 @@ impl AgentChatSession {
                     self.changed();
                 }
             }
-            Pending::SetConfig { id } => match result {
-                Ok(result) => {
-                    let options = AgentChatConfigOption::parse(result.get("configOptions"));
-                    if !options.is_empty() {
-                        self.config_options = options;
+            Pending::SetConfig { id } => {
+                match result {
+                    Ok(result) => {
+                        let options = AgentChatConfigOption::parse(result.get("configOptions"));
+                        if !options.is_empty() {
+                            self.config_options = options;
+                        }
+                        self.changed();
                     }
-                    self.changed();
+                    Err(error) if error.is_closed() => return,
+                    Err(error) => {
+                        self.builder.add_notice(
+                            &format!("Could not change {id}: {}", error.message),
+                            true,
+                            None,
+                        );
+                        self.changed();
+                    }
                 }
-                Err(error) if error.is_closed() => {}
-                Err(error) => {
-                    self.builder.add_notice(&format!("Could not change {id}: {}", error.message), true, None);
-                    self.changed();
+                if self.opening_in_flight.as_ref().is_some_and(|(option, _)| *option == id) {
+                    self.opening_in_flight = None;
+                    self.apply_opening_options();
                 }
-            },
+            }
         }
     }
 
@@ -902,7 +922,7 @@ impl AgentChatSession {
         self.phase = ChatPhase::Ready;
         self.report(AgentChatEvent::status(AgentStatus::Idle));
         self.changed();
-        self.send_next_queued_prompt();
+        self.apply_opening_options();
     }
 
     fn open_failed(&mut self, error: &JsonRpcError) {
@@ -959,7 +979,7 @@ impl AgentChatSession {
         if text.is_empty() || !self.is_running() {
             return false;
         }
-        if self.phase != ChatPhase::Ready || self.interaction.is_some() {
+        if self.phase != ChatPhase::Ready || self.interaction.is_some() || self.opening_in_flight.is_some() {
             let id = self.local_id("queued");
             self.queue.push(UserMessage::new(id, text, Some(now())));
             self.changed();
@@ -1095,7 +1115,11 @@ impl AgentChatSession {
     }
 
     fn send_next_queued_prompt(&mut self) {
-        if self.phase != ChatPhase::Ready || self.interaction.is_some() || self.queue.is_empty() {
+        if self.phase != ChatPhase::Ready
+            || self.interaction.is_some()
+            || self.opening_in_flight.is_some()
+            || self.queue.is_empty()
+        {
             return;
         }
         let message = self.queue.remove(0);
@@ -1141,6 +1165,79 @@ impl AgentChatSession {
         }
         let params = json!({"sessionId": session_id, "configId": id, "value": value});
         self.send_request("session/set_config_option", params, Pending::SetConfig { id: id.to_owned() });
+    }
+
+    /// Settings a new conversation starts with (a thread whose model and thinking level were
+    /// chosen before its first message), as (option id, value). They are applied in order once
+    /// the conversation is open, each after the agent answered the one before (a model
+    /// changes which thinking levels there are), and prompts wait until the last is through.
+    /// A value the agent does not offer is skipped.
+    pub fn set_opening_options(&mut self, options: Vec<(String, String)>) {
+        self.opening_options = options.into();
+        if self.phase == ChatPhase::Ready && self.opening_in_flight.is_none() {
+            self.apply_opening_options();
+        }
+    }
+
+    /// Whether opening options still wait to be applied or answered.
+    pub fn has_opening_options(&self) -> bool {
+        self.opening_in_flight.is_some() || !self.opening_options.is_empty()
+    }
+
+    /// Sends the next opening option that changes something; once none is left, the queue
+    /// goes out.
+    fn apply_opening_options(&mut self) {
+        while let Some((id, value)) = self.opening_options.pop_front() {
+            let changes = self.config_options.iter().any(|option| {
+                option.id == id
+                    && option.current_value != value
+                    && option.values.iter().any(|offered| offered.value == value)
+            });
+            if changes && self.peer.is_some() {
+                self.opening_in_flight = Some((id.clone(), value.clone()));
+                self.set_config_option(&id, &value);
+                return;
+            }
+        }
+        self.send_next_queued_prompt();
+    }
+
+    /// The agent is gone, or about to be replaced, before it answered an opening option: its
+    /// answer will never come, so the option goes back to the front for the conversation the
+    /// next start opens, and prompts no longer wait for it.
+    fn retire_opening_option(&mut self) {
+        if let Some(option) = self.opening_in_flight.take() {
+            self.opening_options.push_front(option);
+        }
+    }
+
+    /// What the agent offers a new conversation (its models, thinking levels and modes), read
+    /// from a throwaway one: starts the agent, applies `opening` (a model changes which
+    /// thinking levels there are), reads the settings and ends the agent. Blocks up to
+    /// `timeout`; empty when no conversation opened in time. For a session never started.
+    pub fn probe_config_options(
+        mut self,
+        opening: Vec<(String, String)>,
+        timeout: Duration,
+    ) -> Vec<AgentChatConfigOption> {
+        self.set_opening_options(opening);
+        self.start(None);
+        let deadline = Instant::now() + timeout;
+        let options = loop {
+            self.process_events();
+            match self.phase {
+                ChatPhase::Ready if !self.has_opening_options() => break self.config_options.clone(),
+                ChatPhase::Stopped(_) => break Vec::new(),
+                _ => {}
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break Vec::new();
+            }
+            self.wait_and_process_events(left.min(Duration::from_millis(100)));
+        };
+        self.shutdown();
+        options
     }
 
     // MARK: - Interactions

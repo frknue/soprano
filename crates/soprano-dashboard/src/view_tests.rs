@@ -4,10 +4,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Bounds, Entity, Focusable as _, Modifiers, Pixels, TestAppContext, VisualTestContext,
-    point, px, size,
+    AppContext as _, Bounds, Entity, Focusable as _, Modifiers, Pixels, Task, TestAppContext,
+    VisualTestContext, point, px, size,
 };
 use soprano_agents::AgentDashboardSection;
+use soprano_chat::{AgentChatConfigOption, ConfigOptionValue};
 use soprano_chat_ui::TimelineRowContent;
 use soprano_chat_ui::work_log::WorkLogKind;
 use soprano_model::Workspace;
@@ -16,7 +17,7 @@ use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentStatus};
 
 use super::{AgentDashboard, DashboardEvent, DashboardHost};
-use crate::state::{AgentChoice, ListRow};
+use crate::state::{AgentChoice, ListRow, ThreadOption};
 
 struct Harness {
     dashboard: Entity<AgentDashboard>,
@@ -134,6 +135,12 @@ fn row_bounds(cx: &mut VisualTestContext, target: &TerminalTarget) -> Bounds<Pix
 
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let center = bounds(cx, selector).center();
+    cx.simulate_click(center, Modifiers::none());
+    cx.run_until_parked();
+}
+
+fn click_row(cx: &mut VisualTestContext, target: &TerminalTarget) {
+    let center = row_bounds(cx, target).center();
     cx.simulate_click(center, Modifiers::none());
     cx.run_until_parked();
 }
@@ -589,7 +596,9 @@ fn a_new_thread_starts_in_the_open_threads_project_and_gives_way_to_the_thread_t
         Some(&DashboardEvent::NewThread {
             profile_id: "codex".into(),
             cwd: cwd.clone(),
-            prompt: "Fix the totals".into()
+            prompt: "Fix the totals".into(),
+            // Codex runs in its terminal: nothing to set.
+            options: Vec::new(),
         })
     );
     // Until the shell answers, the draft waits as written.
@@ -825,4 +834,219 @@ fn selecting_another_thread_clears_the_composer(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("k");
     assert_eq!(selected_target(cx, &harness), Some(first));
     assert_eq!(composer_text(cx, &harness), "");
+}
+
+fn option(id: &str, category: &str, current: &str, values: &[&str]) -> AgentChatConfigOption {
+    AgentChatConfigOption {
+        id: id.into(),
+        name: id.into(),
+        category: Some(category.into()),
+        current_value: current.into(),
+        values: values
+            .iter()
+            .map(|value| ConfigOptionValue {
+                value: (*value).into(),
+                name: value.rsplit('/').next().unwrap_or(value).into(),
+                detail: None,
+            })
+            .collect(),
+    }
+}
+
+/// What a stand-in omp offers a conversation once `opening` is applied: its small model
+/// thinks in fewer levels and starts on the lowest.
+fn offered(opening: &[(String, String)]) -> Vec<AgentChatConfigOption> {
+    let mut options = vec![
+        option("model", "model", "a/opus", &["a/opus", "a/haiku"]),
+        option("thinking", "thought_level", "high", &["low", "high", "max"]),
+    ];
+    for (id, value) in opening {
+        if id == "model" && value == "a/haiku" {
+            options[1] = option("thinking", "thought_level", "low", &["low", "medium"]);
+        }
+        ThreadOption::choose(&mut options, id, value);
+    }
+    options
+}
+
+type Asked = Rc<RefCell<Vec<(String, Vec<(String, String)>)>>>;
+
+/// A host whose omp answers with [`offered`]; `asked` records what it was asked for.
+fn offering(state: &StateStore) -> (DashboardHost, Asked) {
+    let asked = Asked::default();
+    let record = asked.clone();
+    let host = replying().state(state.clone()).draft_options(move |profile_id, opening, _| {
+        record.borrow_mut().push((profile_id.to_owned(), opening.clone()));
+        Task::ready(if profile_id == "omp" { offered(&opening) } else { Vec::new() })
+    });
+    (host, asked)
+}
+
+fn chips(cx: &mut VisualTestContext, harness: &Harness) -> Vec<String> {
+    harness.dashboard.read_with(cx, |dashboard, _| {
+        ThreadOption::ALL
+            .iter()
+            .filter_map(|kind| kind.of(dashboard.composer_options()).map(|option| kind.label(option)))
+            .collect()
+    })
+}
+
+#[gpui::test]
+fn a_drafted_omp_thread_picks_its_model_and_thinking_level_and_starts_with_them(cx: &mut TestAppContext) {
+    let state = StateStore::in_memory();
+    let (host, asked) = offering(&state);
+    let (harness, cx) = open(cx, Workspace::new(), host, 1000., 700.);
+
+    // The draft asks what omp offers and shows it beside the agent.
+    assert_eq!(*asked.borrow(), [("omp".to_owned(), Vec::new())]);
+    assert_eq!(chips(cx, &harness), ["opus", "High"]);
+    bounds(cx, "agent-dashboard-thinking");
+
+    // The model chip opens the models; the picked one thinks in other levels.
+    click(cx, "agent-dashboard-model");
+    cx.simulate_input("haiku");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let picked = vec![("model".to_owned(), "a/haiku".to_owned()), ("thinking".to_owned(), "high".to_owned())];
+    assert_eq!(asked.borrow().last(), Some(&("omp".to_owned(), picked)));
+    assert_eq!(chips(cx, &harness), ["haiku", "Low"]);
+    // Back in the composer, where the message goes.
+    assert!(composer_focused(cx, &harness));
+
+    harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "medium", cx));
+    cx.simulate_input("Fix the totals");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let opening =
+        vec![("model".to_owned(), "a/haiku".to_owned()), ("thinking".to_owned(), "medium".to_owned())];
+    assert!(matches!(
+        harness.events.borrow().last(),
+        Some(DashboardEvent::NewThread { profile_id, options, .. }) if profile_id == "omp" && *options == opening
+    ));
+    // While the shell starts it, the choice stands.
+    harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "low", cx));
+    assert_eq!(chips(cx, &harness), ["haiku", "Medium"]);
+
+    // The next omp thread starts where this one did.
+    let cwd = harness
+        .dashboard
+        .read_with(cx, |dashboard, _| dashboard.draft_choice().map(|(project, _)| project.path.clone()))
+        .expect("draft");
+    let opened = change(cx, &harness, |workspace| workspace.open_thread("omp", &cwd, None)).expect("thread");
+    let dashboard = harness.dashboard.clone();
+    cx.update(|window, cx| {
+        dashboard.update(cx, |dashboard, cx| dashboard.thread_opened(&opened, window, cx))
+    });
+    cx.simulate_keystrokes("n");
+    cx.run_until_parked();
+    assert_eq!(asked.borrow().last(), Some(&("omp".to_owned(), opening)));
+    assert_eq!(chips(cx, &harness), ["haiku", "Medium"]);
+}
+
+#[gpui::test]
+fn a_thinking_level_picked_while_the_new_models_levels_are_read_is_kept(cx: &mut TestAppContext) {
+    // A host that answers when the test says so, like an agent that takes a second to start.
+    type Answers = Rc<RefCell<Vec<futures::channel::oneshot::Sender<Vec<AgentChatConfigOption>>>>>;
+    let answers = Answers::default();
+    let waiting = answers.clone();
+    let host = replying().draft_options(move |_, _, cx| {
+        let (answer, answered) = futures::channel::oneshot::channel();
+        waiting.borrow_mut().push(answer);
+        cx.spawn(async move |_| answered.await.unwrap_or_default())
+    });
+    let (harness, cx) = open(cx, Workspace::new(), host, 1000., 700.);
+    let answer = |cx: &mut VisualTestContext, options: Vec<AgentChatConfigOption>| {
+        let _ = answers.borrow_mut().remove(0).send(options);
+        cx.run_until_parked();
+    };
+    answer(cx, offered(&[]));
+    assert_eq!(chips(cx, &harness), ["opus", "High"]);
+
+    // The model's levels are still being read when the level is picked.
+    harness.dashboard.update(cx, |dashboard, cx| {
+        dashboard.pick_option("model", "a/haiku", cx);
+        dashboard.pick_option("thinking", "low", cx);
+    });
+    assert_eq!(chips(cx, &harness), ["haiku", "Low"]);
+    // The answer was asked for with the old level, and the model would start on another.
+    answer(
+        cx,
+        vec![
+            option("model", "model", "a/haiku", &["a/opus", "a/haiku"]),
+            option("thinking", "thought_level", "medium", &["low", "medium"]),
+        ],
+    );
+    assert_eq!(chips(cx, &harness), ["haiku", "Low"]);
+
+    // A level the new model does not have gives way to the model's own.
+    harness.dashboard.update(cx, |dashboard, cx| {
+        dashboard.pick_option("model", "a/opus", cx);
+        dashboard.pick_option("thinking", "medium", cx);
+    });
+    answer(cx, offered(&[("model".to_owned(), "a/opus".to_owned())]));
+    assert_eq!(chips(cx, &harness), ["opus", "High"]);
+}
+
+#[gpui::test]
+fn an_agent_in_its_terminal_offers_no_model(cx: &mut TestAppContext) {
+    let state = StateStore::in_memory();
+    AgentChoice { profile_id: "codex".into() }.remember(&state);
+    let (host, asked) = offering(&state);
+    let (harness, cx) = open(cx, Workspace::new(), host, 1000., 700.);
+
+    assert_eq!(*asked.borrow(), [("codex".to_owned(), Vec::new())]);
+    assert!(chips(cx, &harness).is_empty());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("agent-dashboard-model").is_none());
+
+    // Switching the draft to omp brings its settings.
+    let dashboard = harness.dashboard.clone();
+    cx.update(|_, cx| {
+        dashboard.update(cx, |dashboard, cx| {
+            dashboard.set_draft_agent(AgentChoice { profile_id: "omp".into() }, cx)
+        })
+    });
+    cx.run_until_parked();
+    assert_eq!(chips(cx, &harness), ["opus", "High"]);
+}
+
+#[gpui::test]
+fn the_open_chat_threads_model_and_thinking_level_are_set_through_the_shell(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let terminal = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    let chat = workspace.open_thread("omp", "/tmp/projects/b", None).expect("thread");
+    set_status(&mut workspace, &terminal, AgentStatus::Idle);
+    set_status(&mut workspace, &chat, AgentStatus::Idle);
+    let running = Rc::new(std::cell::Cell::new(true));
+    let (live, chat_tab) = (running.clone(), chat.clone());
+    let host = DashboardHost::new()
+        .accepts_replies(move |_, _| live.get())
+        .thread_options(move |target, _| if *target == chat_tab { offered(&[]) } else { Vec::new() });
+    let (harness, cx) = open(cx, workspace, host, 1000., 700.);
+
+    click_row(cx, &terminal);
+    assert!(chips(cx, &harness).is_empty());
+    click_row(cx, &chat);
+    assert_eq!(chips(cx, &harness), ["opus", "High"]);
+
+    // The thinking chip lists the levels; the pick goes to the shell and shows at once.
+    click(cx, "agent-dashboard-thinking");
+    assert!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.menu.is_some()));
+    cx.simulate_keystrokes("escape");
+    harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "max", cx));
+    assert_eq!(
+        harness.events.borrow().last(),
+        Some(&DashboardEvent::SetOption { target: chat.clone(), id: "thinking".into(), value: "max".into() })
+    );
+    assert_eq!(chips(cx, &harness), ["opus", "Max"]);
+    // What the agent did not offer is not asked for.
+    let sent = harness.events.borrow().len();
+    harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "ultra", cx));
+    assert_eq!(harness.events.borrow().len(), sent);
+
+    // A stopped agent's settings cannot be changed.
+    running.set(false);
+    change(cx, &harness, |workspace| set_status(workspace, &chat, AgentStatus::Stopped));
+    harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "low", cx));
+    assert_eq!(harness.events.borrow().len(), sent);
 }

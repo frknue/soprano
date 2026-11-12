@@ -11,7 +11,8 @@ pub mod state;
 mod view;
 
 pub use keys::{KeyAction, KeyFocus, ScrollAmount};
-pub use state::{AgentChoice, AgentList, DashboardEntry, ListRow, ProjectChoice};
+pub use state::{AgentChoice, AgentList, DashboardEntry, ListRow, ProjectChoice, ThreadOption};
 pub use view::{
-    AgentDashboard, BranchProvider, DashboardEvent, DashboardHost, ProjectsProvider, RepliesProvider,
+    AgentDashboard, BranchProvider, DashboardEvent, DashboardHost, DraftOptionsProvider, ProjectsProvider,
+    RepliesProvider, ThreadOptionsProvider,
 };

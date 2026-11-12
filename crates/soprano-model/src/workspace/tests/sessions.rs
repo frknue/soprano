@@ -553,21 +553,30 @@ fn a_thread_of_a_project_no_window_works_on_opens_a_window_named_after_it() {
 }
 
 #[test]
-fn a_threads_first_message_starts_its_agent_which_runs_in_its_terminal() {
+fn a_threads_first_message_starts_a_terminal_agent_and_is_left_to_a_chats_session() {
     let mut workspace = Workspace::new();
 
-    let thread = workspace.open_thread("codex", "/tmp/repo", Some("  Fix the totals \n")).expect("thread");
-    let silent = workspace.open_thread("omp", "/tmp/repo", Some("  ")).expect("thread");
+    let terminal = workspace.open_thread("codex", "/tmp/repo", Some("  Fix the totals \n")).expect("thread");
+    let silent = workspace.open_thread("codex", "/tmp/repo", Some("  ")).expect("thread");
+    // omp serves a chat: its thread opens as one, where its model can be set.
+    let chat = workspace.open_thread("omp", "/tmp/repo", Some("Fix the totals")).expect("thread");
 
     let launch = |target: &TerminalTarget| {
         workspace.agent(&target.pane_id, &target.tab_id).and_then(|agent| agent.launch.clone())
     };
-    assert_eq!(launch(&thread).map(|launch| launch.prompt).as_deref(), Some("Fix the totals"));
-    assert_eq!(launch(&thread).map(|launch| launch.skips_approvals), Some(false));
+    let is_chat = |target: &TerminalTarget| {
+        workspace.tab(&target.pane_id, &target.tab_id).is_some_and(|tab| tab.is_chat())
+    };
+    assert_eq!(launch(&terminal).map(|launch| launch.prompt).as_deref(), Some("Fix the totals"));
+    assert_eq!(launch(&terminal).map(|launch| launch.skips_approvals), Some(false));
     assert_eq!(launch(&silent), None);
-    for target in [&thread, &silent] {
-        assert!(workspace.tab(&target.pane_id, &target.tab_id).is_some_and(|tab| !tab.is_chat()));
-    }
+    assert!(!is_chat(&terminal) && !is_chat(&silent));
+    assert!(is_chat(&chat));
+    assert_eq!(launch(&chat), None);
+    assert_eq!(
+        workspace.agent(&chat.pane_id, &chat.tab_id).map(|agent| agent.profile_id.as_str()),
+        Some("omp")
+    );
 }
 
 #[test]

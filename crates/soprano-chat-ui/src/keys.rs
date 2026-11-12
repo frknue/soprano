@@ -19,6 +19,15 @@ pub fn is_command(modifiers: &Modifiers) -> bool {
         && modifiers.platform == wanted.cmd
 }
 
+/// Whether `modifiers` are exactly ⇧⌘ (Ctrl+Shift+Alt off the Mac).
+pub fn is_command_shift(modifiers: &Modifiers) -> bool {
+    let wanted = command_modifiers(true);
+    modifiers.control == wanted.ctrl
+        && modifiers.alt == wanted.alt
+        && modifiers.shift == wanted.shift
+        && modifiers.platform == wanted.cmd
+}
+
 /// Whether ⌘ is held, whatever else is (the composer's alternate send while the button shows).
 pub fn holds_command(modifiers: &Modifiers) -> bool {
     let wanted = command_modifiers(false);

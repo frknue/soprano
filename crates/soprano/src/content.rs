@@ -18,7 +18,7 @@ use gpui::{
 };
 use soprano_accounts::AccountLaunchState;
 use soprano_browser::{BrowserEvent, BrowserView};
-use soprano_chat::session::AgentChatEvent;
+use soprano_chat::session::{AgentChatConfigOption, AgentChatEvent};
 use soprano_chat_ui::{ChatView, ChatViewEvent};
 use soprano_editor::{
     DiffEvent, DiffView, DocumentsEvent, EditorDocuments, EditorEvent, EditorView, MarkdownReaderView,
@@ -49,6 +49,8 @@ use crate::workspace::{WorkspaceHandle, WorkspaceUpdate};
 pub const RUNNING_COMMAND_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 /// How long a starting Codex agent may stay "starting" before it counts as ready.
 pub const CODEX_READINESS_DELAY: Duration = Duration::from_millis(2500);
+/// How long an agent gets to say what a new thread would offer: its login shell starts first.
+const THREAD_OPTIONS_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// One tab's content.
 #[derive(Clone)]
@@ -810,26 +812,7 @@ impl ContentHost {
         let agent = tab.agent.as_ref()?;
         let profile = AgentCatalog::shared().profile(&agent.profile_id)?;
         let cwd = agent.conversation.as_ref().and_then(|c| c.cwd.clone()).or_else(|| tab.cwd.clone());
-        let adjustments = AccountLaunchState::shared().adjustments(&profile.id);
-        let accounts =
-            AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
-        let ctx = &self.launch_context;
-        let launch = soprano_launch::ChatLaunch::for_profile(
-            &profile,
-            cwd.as_deref(),
-            &ctx.login_shell,
-            &accounts,
-            &ctx.base_env,
-            &ctx.home,
-        )?;
-        let mut argv = vec![launch.shell.clone()];
-        argv.extend(launch.arguments.iter().cloned());
-        let spec = soprano_chat::session::LaunchSpec {
-            argv,
-            cwd: PathBuf::from(&launch.working_directory),
-            env: launch.environment.clone().into_iter().collect(),
-        };
-        let chat_launch = soprano_chat::session::AgentChatLaunch::new(&profile, spec)?;
+        let chat_launch = self.chat_launch(&profile, cwd.as_deref())?;
         let session = soprano_chat::session::AgentChatSession::new(chat_launch);
         let agent_name = profile.name.clone();
         let view = cx.new(|cx| ChatView::new(session, agent_name.clone(), window, cx));
@@ -843,6 +826,66 @@ impl ContentHost {
             view.update(cx, |view, cx| view.start(resume.as_deref(), window, cx));
         }
         Some(PaneContent::Chat(view))
+    }
+
+    /// How `profile`'s chat server starts in `cwd`; `None` for an agent without one.
+    fn chat_launch(
+        &self,
+        profile: &soprano_types::AgentProfile,
+        cwd: Option<&str>,
+    ) -> Option<soprano_chat::session::AgentChatLaunch> {
+        let adjustments = AccountLaunchState::shared().adjustments(&profile.id);
+        let accounts =
+            AccountAdjustments { environment: adjustments.environment, arguments: adjustments.arguments };
+        let ctx = &self.launch_context;
+        let launch = soprano_launch::ChatLaunch::for_profile(
+            profile,
+            cwd,
+            &ctx.login_shell,
+            &accounts,
+            &ctx.base_env,
+            &ctx.home,
+        )?;
+        let mut argv = vec![launch.shell.clone()];
+        argv.extend(launch.arguments.iter().cloned());
+        let spec = soprano_chat::session::LaunchSpec {
+            argv,
+            cwd: PathBuf::from(&launch.working_directory),
+            env: launch.environment.clone().into_iter().collect(),
+        };
+        soprano_chat::session::AgentChatLaunch::new(profile, spec)
+    }
+
+    /// What a new thread of `profile_id` would offer (its models, its thinking levels) once
+    /// `opening` (option id, value) is applied: read off the UI thread from a throwaway
+    /// conversation the agent keeps in a temporary folder. Nothing for an agent without a
+    /// chat, or one that does not answer.
+    pub fn thread_options_probe(
+        &self,
+        profile_id: &str,
+        opening: Vec<(String, String)>,
+        cx: &App,
+    ) -> Task<Vec<AgentChatConfigOption>> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let folder = std::env::temp_dir().join(format!(
+            "soprano-thread-options-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let launch = AgentCatalog::shared().profile(profile_id).and_then(|mut profile| {
+            profile.args.extend(soprano_launch::ChatLaunch::throwaway_arguments(&folder));
+            self.chat_launch(&profile, Some(&folder.to_string_lossy()))
+        });
+        let Some(launch) = launch else { return Task::ready(Vec::new()) };
+        cx.background_executor().spawn(async move {
+            if std::fs::create_dir_all(&folder).is_err() {
+                return Vec::new();
+            }
+            let options = soprano_chat::session::AgentChatSession::new(launch)
+                .probe_config_options(opening, THREAD_OPTIONS_TIMEOUT);
+            let _ = std::fs::remove_dir_all(&folder);
+            options
+        })
     }
 
     /// What a chat session reports turns into the tab's status, conversation and title
@@ -1141,6 +1184,56 @@ impl ContentHost {
         match self.contents.get(target) {
             Some(PaneContent::Chat(view)) => view.read(cx).session().borrow().is_running(),
             Some(PaneContent::Terminal(view)) => !view.read(cx).has_exited(),
+            _ => false,
+        }
+    }
+
+    /// The settings `target`'s chat session offers (the Agent Dashboard's model and thinking
+    /// chips); none for a terminal.
+    pub fn chat_options(&self, target: &TerminalTarget, cx: &App) -> Vec<AgentChatConfigOption> {
+        match self.contents.get(target) {
+            Some(PaneContent::Chat(view)) => view.read(cx).session().borrow().config_options().to_vec(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Sets one of them.
+    pub fn set_chat_option(
+        &mut self,
+        target: &TerminalTarget,
+        id: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(PaneContent::Chat(view)) = self.contents.get(target).cloned() {
+            view.update(cx, |view, cx| view.set_option(id, value, window, cx));
+        }
+    }
+
+    /// Starts the agent of a thread's tab (`Workspace::open_thread`), which waits behind its
+    /// window's visible tab where nothing would start it. A chat opens with `options` set and
+    /// takes `prompt` as its first message once its session is up; a terminal agent got the
+    /// prompt on its command line. False when the agent could not start with it.
+    pub fn start_thread(
+        &mut self,
+        target: &TerminalTarget,
+        prompt: &str,
+        options: Vec<(String, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab) = self.workspace.read(cx).tab(&target.pane_id, &target.tab_id).cloned() else {
+            return false;
+        };
+        if !tab.is_chat() {
+            return self.start_background_terminal(target, window, cx);
+        }
+        match self.ensure_content(&tab, &target.pane_id, Some(true), window, cx) {
+            PaneContent::Chat(view) => {
+                view.update(cx, |view, cx| view.submit_opening(options, prompt, window, cx))
+            }
+            // The agent serves no chat after all: its terminal started without the message.
             _ => false,
         }
     }

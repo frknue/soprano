@@ -22,6 +22,8 @@ use gpui_component::input::{Enter, InputEvent, InputState, TextareaState};
 use soprano_agents::{
     AgentTimeline, AgentTimelineActivity, AgentTranscriptSource, AgentTranscriptStore, ChatThread,
 };
+use soprano_chat::AgentChatConfigOption;
+use soprano_chat_ui::composer_logic::option_title;
 use soprano_chat_ui::timeline_view::{gutter, lane_width};
 use soprano_chat_ui::{TimelineSource, TimelineView, TranscriptSource};
 use soprano_model::Workspace;
@@ -33,7 +35,7 @@ use soprano_ui::theme::ActiveSopranoTheme;
 use soprano_ui::{ContextMenu, IconName, MenuItem, Picker, PickerEvent, PickerItem, SopranoTheme};
 
 use crate::keys::{KeyAction, KeyFocus, ScrollAmount, key_action};
-use crate::state::{self, AgentChoice, AgentList, Controls, DashboardEntry, ProjectChoice};
+use crate::state::{self, AgentChoice, AgentList, Controls, DashboardEntry, ProjectChoice, ThreadOption};
 
 /// The inbox's width (Soprano Agents' sidebar); a narrow window takes it down to 40 %.
 const SIDEBAR_WIDTH: f32 = 256.0;
@@ -46,6 +48,10 @@ const LINE_SCROLL: f32 = 48.0;
 const COMPOSER_HEIGHT: f32 = 118.0;
 /// The picker row that asks for any folder.
 const CHOOSE_FOLDER_ID: &str = "choose-folder";
+/// What a model's picker row id starts with, before its value.
+const MODEL_ID_PREFIX: &str = "model:";
+/// How long the agent gets to answer a changed setting before it is read back.
+const OPTION_READ_DELAY: Duration = Duration::from_millis(200);
 
 /// What the dashboard asks the app shell to do. The dashboard never mutates the workspace.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,10 +66,14 @@ pub enum DashboardEvent {
     /// spaces there), or to the chat session of a chat tab. When it cannot be delivered, call
     /// [`AgentDashboard::reply_failed`].
     Reply { target: TerminalTarget, text: String },
-    /// Start an agent in its terminal in `cwd` with `prompt` as its first message, as a tab
-    /// of the window that works on that project (`Workspace::open_thread`). Answer with
+    /// Start an agent in `cwd` with `prompt` as its first message, as a tab of the window
+    /// that works on that project (`Workspace::open_thread`); an agent that runs as a chat
+    /// starts with `options` (option id, value) set. Answer with
     /// [`AgentDashboard::thread_opened`] or [`AgentDashboard::thread_failed`].
-    NewThread { profile_id: String, cwd: String, prompt: String },
+    NewThread { profile_id: String, cwd: String, prompt: String, options: Vec<(String, String)> },
+    /// Set the option `id` of that pane tab's chat session to `value` (its model, its
+    /// thinking level).
+    SetOption { target: TerminalTarget, id: String, value: String },
     /// Ask for any folder for the thread being drafted; answer with
     /// [`AgentDashboard::set_draft_project`].
     ChooseProject,
@@ -77,6 +87,13 @@ pub type RepliesProvider = Rc<dyn Fn(&TerminalTarget, &App) -> bool>;
 pub type BranchProvider = Rc<dyn Fn(&str, &App) -> Option<String>>;
 /// The folders a new thread is offered, in the order to list them.
 pub type ProjectsProvider = Rc<dyn Fn(&App) -> Vec<ProjectChoice>>;
+/// The settings the exact pane tab's chat session offers right now (model, thinking level);
+/// none for an agent in its terminal.
+pub type ThreadOptionsProvider = Rc<dyn Fn(&TerminalTarget, &App) -> Vec<AgentChatConfigOption>>;
+/// The settings a new thread of that agent would offer once the (option id, value) pairs are
+/// applied in order, read from a throwaway conversation; none for an agent in its terminal.
+pub type DraftOptionsProvider =
+    Rc<dyn Fn(&str, Vec<(String, String)>, &mut App) -> Task<Vec<AgentChatConfigOption>>>;
 
 /// What the shell answers that the workspace model does not know.
 #[derive(Clone)]
@@ -85,6 +102,10 @@ pub struct DashboardHost {
     pub accepts_replies: RepliesProvider,
     pub notable_branch: BranchProvider,
     pub projects: ProjectsProvider,
+    /// Read for the selected thread like `accepts_replies`.
+    pub thread_options: ThreadOptionsProvider,
+    /// Asked when a draft opens, changes its agent, or changes its model.
+    pub draft_options: DraftOptionsProvider,
     /// Where the agent CLIs keep their transcripts and where `~` points.
     pub home: PathBuf,
     /// App state: the agent the last thread was started with.
@@ -100,6 +121,8 @@ impl DashboardHost {
             accepts_replies: Rc::new(|_, _| false),
             notable_branch: Rc::new(|_, _| None),
             projects: Rc::new(|_| Vec::new()),
+            thread_options: Rc::new(|_, _| Vec::new()),
+            draft_options: Rc::new(|_, _, _| Task::ready(Vec::new())),
             home: state::default_home(),
             state: StateStore::in_memory(),
             leading_inset: 0.0,
@@ -118,6 +141,22 @@ impl DashboardHost {
 
     pub fn projects(mut self, provider: impl Fn(&App) -> Vec<ProjectChoice> + 'static) -> Self {
         self.projects = Rc::new(provider);
+        self
+    }
+
+    pub fn thread_options(
+        mut self,
+        provider: impl Fn(&TerminalTarget, &App) -> Vec<AgentChatConfigOption> + 'static,
+    ) -> Self {
+        self.thread_options = Rc::new(provider);
+        self
+    }
+
+    pub fn draft_options(
+        mut self,
+        provider: impl Fn(&str, Vec<(String, String)>, &mut App) -> Task<Vec<AgentChatConfigOption>> + 'static,
+    ) -> Self {
+        self.draft_options = Rc::new(provider);
         self
     }
 
@@ -155,6 +194,12 @@ struct Draft {
     launching: bool,
     /// Why the last launch did not happen.
     error: Option<String>,
+    /// What the agent offers a new conversation (its model, its thinking level), with what
+    /// the thread will start with as the current values; empty until the host answered, and
+    /// for an agent in its terminal.
+    options: Vec<AgentChatConfigOption>,
+    /// The host reading `options`.
+    _probe: Option<Task<()>>,
 }
 
 /// The Agent Dashboard. Create it with [`AgentDashboard::new`], render it as a window's
@@ -176,6 +221,10 @@ pub struct AgentDashboard {
     detail_id: Option<String>,
     /// Whether the selected thread's agent takes a message.
     accepts_replies: bool,
+    /// The settings the selected thread's chat session offers.
+    options: Vec<AgentChatConfigOption>,
+    /// Reads `options` back once the agent answered a change.
+    _option_read: Option<Task<()>>,
     transcripts: AgentTranscriptStore,
     sources: HashMap<String, AgentTranscriptSource>,
     timelines: HashMap<String, AgentTimeline>,
@@ -186,10 +235,12 @@ pub struct AgentDashboard {
     list_scroll: ScrollHandle,
     picker: Option<Entity<Picker>>,
     menu: Option<Entity<ContextMenu>>,
-    /// The chat column, the composer card and the draft's agent chip as last drawn.
+    /// The chat column, the composer card, the draft's agent chip and the option chips (in
+    /// [`ThreadOption::ALL`]'s order) as last drawn.
     column_bounds: Rc<Cell<Bounds<Pixels>>>,
     composer_bounds: Rc<Cell<Bounds<Pixels>>>,
     agent_chip_bounds: Rc<Cell<Bounds<Pixels>>>,
+    option_chip_bounds: [Rc<Cell<Bounds<Pixels>>>; 2],
     now: SystemTime,
     _overlay: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
@@ -293,6 +344,8 @@ impl AgentDashboard {
             send_failed: None,
             detail_id: None,
             accepts_replies: false,
+            options: Vec::new(),
+            _option_read: None,
             transcripts,
             sources: HashMap::new(),
             timelines: HashMap::new(),
@@ -305,6 +358,7 @@ impl AgentDashboard {
             column_bounds: Rc::new(Cell::new(Bounds::default())),
             composer_bounds: Rc::new(Cell::new(Bounds::default())),
             agent_chip_bounds: Rc::new(Cell::new(Bounds::default())),
+            option_chip_bounds: Default::default(),
             now: SystemTime::now(),
             _overlay: None,
             _subscriptions: subscriptions,
@@ -448,8 +502,10 @@ impl AgentDashboard {
     }
 
     fn read_availability(&mut self, cx: &mut Context<Self>) {
-        self.accepts_replies =
-            self.selected().is_some_and(|entry| (self.host.accepts_replies)(&entry.target(), cx));
+        let target = self.selected().map(DashboardEntry::target);
+        self.accepts_replies = target.as_ref().is_some_and(|target| (self.host.accepts_replies)(target, cx));
+        self.options =
+            target.as_ref().map(|target| (self.host.thread_options)(target, cx)).unwrap_or_default();
         // A new status or availability puts the status hint back in place of "Could not send".
         if self.send_failed.is_some_and(|state| state != self.reply_state()) {
             self.send_failed = None;
@@ -637,10 +693,13 @@ impl AgentDashboard {
             draft.launching = true;
             draft.error = None;
             draft.agent.remember(&self.host.state);
+            let options = ThreadOption::opening(&draft.options);
+            ThreadOption::remember(&self.host.state, &draft.agent.profile_id, &options);
             let event = DashboardEvent::NewThread {
                 profile_id: draft.agent.profile_id.clone(),
                 cwd: draft.project.path.clone(),
                 prompt: text,
+                options,
             };
             self.sync_composer(window, cx);
             cx.emit(event);
@@ -717,8 +776,11 @@ impl AgentDashboard {
             layout_generation: 0,
             launching: false,
             error: None,
+            options: Vec::new(),
+            _probe: None,
         });
         self.read_draft_window(cx);
+        self.read_draft_options(None, cx);
     }
 
     /// Which window the drafted thread's tab would join.
@@ -760,10 +822,86 @@ impl AgentDashboard {
     fn set_draft_agent(&mut self, agent: AgentChoice, cx: &mut Context<Self>) {
         if let Some(draft) = &mut self.draft
             && !draft.launching
+            && draft.agent != agent
         {
             draft.agent = agent;
+            draft.options.clear();
+            self.read_draft_options(None, cx);
             cx.notify();
         }
+    }
+
+    /// Asks the host what the draft's agent offers a new conversation that starts with
+    /// `opening`, else with what the agent's last thread started with.
+    fn read_draft_options(&mut self, opening: Option<Vec<(String, String)>>, cx: &mut Context<Self>) {
+        let Some(draft) = &mut self.draft else { return };
+        let profile_id = draft.agent.profile_id.clone();
+        let opening = opening.unwrap_or_else(|| ThreadOption::remembered(&self.host.state, &profile_id));
+        let reading = (self.host.draft_options)(&profile_id, opening, cx);
+        draft._probe = Some(cx.spawn(async move |this, cx| {
+            let mut options = reading.await;
+            let _ = this.update(cx, |this, cx| {
+                // An agent that did not answer leaves what was offered before.
+                if let Some(draft) = this.draft.as_mut().filter(|draft| draft.agent.profile_id == profile_id)
+                    && !options.is_empty()
+                {
+                    // The answer takes a moment: what was picked meanwhile stands where the
+                    // agent still offers it.
+                    for (id, value) in ThreadOption::opening(&draft.options) {
+                        ThreadOption::choose(&mut options, &id, &value);
+                    }
+                    draft.options = options;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// The settings the composer offers: the drafted thread's, else the open thread's.
+    pub fn composer_options(&self) -> &[AgentChatConfigOption] {
+        match &self.draft {
+            Some(draft) => &draft.options,
+            None => &self.options,
+        }
+    }
+
+    /// Whether a setting can be changed now: not while the draft is being started, and only
+    /// while the open thread's agent runs.
+    fn options_enabled(&self) -> bool {
+        match &self.draft {
+            Some(draft) => !draft.launching,
+            None => self.accepts_replies,
+        }
+    }
+
+    /// Sets the option `id` of the drafted or open thread to `value`.
+    pub fn pick_option(&mut self, id: &str, value: &str, cx: &mut Context<Self>) {
+        if !self.options_enabled() {
+            return;
+        }
+        if let Some(draft) = &mut self.draft {
+            let was_model = ThreadOption::Model.of(&draft.options).is_some_and(|option| option.id == id);
+            if ThreadOption::choose(&mut draft.options, id, value) && was_model {
+                // Another model thinks in other levels: ask what it offers.
+                let opening = ThreadOption::opening(&draft.options);
+                self.read_draft_options(Some(opening), cx);
+            }
+            cx.notify();
+            return;
+        }
+        let Some(target) = self.selected().map(DashboardEntry::target) else { return };
+        if !ThreadOption::choose(&mut self.options, id, value) {
+            return;
+        }
+        cx.emit(DashboardEvent::SetOption { target, id: id.to_owned(), value: value.to_owned() });
+        self._option_read = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(OPTION_READ_DELAY).await;
+            let _ = this.update(cx, |this, cx| {
+                this.read_availability(cx);
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     /// With no thread to show, the chat column holds a new one, ready to type: an empty
@@ -881,6 +1019,79 @@ impl AgentDashboard {
         cx.notify();
     }
 
+    /// The models the thread's agent offers, as a picker over the dashboard (a click on the
+    /// model chip, ⇧⌘M).
+    pub fn open_model_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.options_enabled() || self.picker.is_some() {
+            return;
+        }
+        let Some(option) = ThreadOption::Model.of(self.composer_options()).cloned() else { return };
+        let items = option
+            .values
+            .iter()
+            .map(|value| {
+                let item = PickerItem::new(format!("{MODEL_ID_PREFIX}{}", value.value), value.name.clone())
+                    .description(value.detail.clone().unwrap_or_else(|| value.value.clone()));
+                let item = match soprano_chat_ui::composer_logic::model_provider(value) {
+                    Some(provider) => item.group(provider.to_owned()),
+                    None => item,
+                };
+                if value.value == option.current_value { item.icon(IconName::Check) } else { item }
+            })
+            .collect();
+        let picker = Picker::new(items, window, cx);
+        picker.update(cx, |picker, cx| picker.set_placeholder("Search models…", window, cx));
+        self._overlay =
+            Some(cx.subscribe_in(&picker, window, move |this, _, event: &PickerEvent, window, cx| {
+                this.picker = None;
+                this._overlay = None;
+                if let PickerEvent::Confirmed { id, .. } = event
+                    && let Some(value) = id.strip_prefix(MODEL_ID_PREFIX)
+                {
+                    this.pick_option(&option.id, value, cx);
+                    this.focus_composer(window, cx);
+                }
+                cx.notify();
+            }));
+        self.picker = Some(picker);
+        cx.notify();
+    }
+
+    /// How hard the thread's model thinks, as a menu above its chip (a click on it, ⇧⌘E).
+    pub fn open_thinking_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.options_enabled() || self.menu.is_some() {
+            return;
+        }
+        let Some(option) = ThreadOption::Thinking.of(self.composer_options()).cloned() else { return };
+        let theme = cx.soprano_theme();
+        let chip = self.option_chip_bounds[1].get();
+        // Rows of 31 in a padding of 5, with a gap of 6 to the chip.
+        let height = theme.z(option.values.len() as f32 * 31.0 + 16.0);
+        let position = point(chip.origin.x, (chip.origin.y - height).max(px(8.)));
+        let entity = cx.entity().downgrade();
+        let items = option
+            .values
+            .iter()
+            .map(|value| {
+                let entity = entity.clone();
+                let (id, picked) = (option.id.clone(), value.value.clone());
+                MenuItem::new(option_title(&value.name))
+                    .checked(value.value == option.current_value)
+                    .on_select(move |_, cx| {
+                        let _ = entity.update(cx, |this, cx| this.pick_option(&id, &picked, cx));
+                    })
+            })
+            .collect();
+        let menu = ContextMenu::new(position, items, window, cx);
+        self._overlay = Some(cx.subscribe_in(&menu, window, |this, _, _: &DismissEvent, _, cx| {
+            this.menu = None;
+            this._overlay = None;
+            cx.notify();
+        }));
+        self.menu = Some(menu);
+        cx.notify();
+    }
+
     // MARK: - Keyboard
 
     /// Runs the dashboard shortcut for `keystroke` while the keyboard is anywhere inside the
@@ -929,6 +1140,8 @@ impl AgentDashboard {
             KeyAction::FocusSearch => self.focus_search(window, cx),
             KeyAction::ClearSearch => self.clear_search(window, cx),
             KeyAction::NewThread => self.new_thread(window, cx),
+            KeyAction::PickModel => self.open_model_picker(window, cx),
+            KeyAction::PickThinking => self.open_thinking_menu(window, cx),
             KeyAction::Scroll(amount) => self.scroll_text(amount, cx),
             KeyAction::JumpTurn(direction) => {
                 self.timeline.update(cx, |timeline, cx| timeline.jump_to_message(direction, cx));

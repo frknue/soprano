@@ -7980,6 +7980,7 @@ dependencies = [
  "gpui-pre-platform",
  "serde_json",
  "soprano-agents",
+ "soprano-chat",
  "soprano-chat-ui",
  "soprano-model",
  "soprano-platform",

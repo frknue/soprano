@@ -176,6 +176,26 @@ impl ChatView {
         sent
     }
 
+    /// Starts the conversation of a new thread: `options` (option id, value) are set once it
+    /// is open, then `text` goes out as its first message.
+    pub fn submit_opening(
+        &mut self,
+        options: Vec<(String, String)>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.session.borrow_mut().set_opening_options(options);
+        self.submit_prompt(text, window, cx)
+    }
+
+    /// Changes one of the agent's session settings from outside the chat (the dashboard's
+    /// model and thinking chips).
+    pub fn set_option(&mut self, id: &str, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.session.borrow_mut().set_config_option(id, value);
+        self.render_now(window, cx);
+    }
+
     /// Ends the agent when the tab goes away.
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self.timeline.update(cx, |timeline, _| timeline.close());

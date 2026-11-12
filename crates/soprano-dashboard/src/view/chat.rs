@@ -17,7 +17,7 @@ use soprano_ui::{Icon, IconName, Monogram, SopranoTheme, agent_icon_stem, icon};
 
 use super::sidebar::agent_glyph;
 use super::{AgentDashboard, DashboardEvent, Draft, TOPBAR_HEIGHT, drag_region, measure};
-use crate::state::{self, Controls, DashboardEntry};
+use crate::state::{self, Controls, DashboardEntry, ThreadOption};
 
 impl AgentDashboard {
     pub(super) fn render_chat(
@@ -352,6 +352,8 @@ impl AgentDashboard {
                     .mx(theme.z(8.))
                     .mb(theme.z(8.))
                     .child(self.render_agent_chip(theme, cx))
+                    .children(self.render_option_chip(ThreadOption::Model, theme, cx))
+                    .children(self.render_option_chip(ThreadOption::Thinking, theme, cx))
                     .child(
                         div()
                             .id("agent-dashboard-composer-hint")
@@ -404,15 +406,57 @@ impl AgentDashboard {
                     .child(SharedString::from(draft.agent.name()))
                     .child(icon(IconName::ChevronDown).size(12.).color(theme.muted))
             }
-            (None, Some(entry)) => chip.child(agent_glyph(&entry.entry).size(16.).color(theme.muted)).child(
-                SharedString::from(if entry.entry.is_chat {
-                    format!("{} · Chat", entry.entry.profile_name)
-                } else {
-                    entry.entry.profile_name.clone()
-                }),
-            ),
+            (None, Some(entry)) => chip
+                .child(agent_glyph(&entry.entry).size(16.).color(theme.muted))
+                .child(SharedString::from(entry.entry.profile_name.clone())),
             (None, None) => chip,
         }
+    }
+
+    /// The thread's model or thinking level, when its agent offers a choice: a click opens
+    /// the choices.
+    fn render_option_chip(
+        &self,
+        kind: ThreadOption,
+        theme: &SopranoTheme,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        let option = kind.of(self.composer_options())?;
+        let (id, hint, slot) = match kind {
+            ThreadOption::Model => ("agent-dashboard-model", "The model the thread runs on", 0),
+            ThreadOption::Thinking => ("agent-dashboard-thinking", "How hard the model thinks", 1),
+        };
+        let (hover, foreground) = (theme.hover, theme.foreground);
+        Some(
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .relative()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(theme.z(4.))
+                .h(theme.z(28.))
+                .px(theme.z(8.))
+                .rounded(theme.z(8.))
+                .text_color(theme.foreground.opacity(0.8))
+                // The model's name gives way first in a narrow composer.
+                .when(kind == ThreadOption::Model, |chip| chip.min_w(theme.z(48.)))
+                .when(kind == ThreadOption::Thinking, |chip| chip.flex_none())
+                .child(measure(&self.option_chip_bounds[slot]))
+                .when(self.options_enabled(), |chip| {
+                    chip.cursor_pointer()
+                        .hover(move |chip| chip.bg(hover).text_color(foreground))
+                        .tooltip(tooltip(hint))
+                        .on_click(cx.listener(move |this, _, window, cx| match kind {
+                            ThreadOption::Model => this.open_model_picker(window, cx),
+                            ThreadOption::Thinking => this.open_thinking_menu(window, cx),
+                        }))
+                })
+                .when(!self.options_enabled(), |chip| chip.opacity(0.55))
+                .child(div().min_w_0().truncate().child(SharedString::from(kind.label(option))))
+                .child(icon(IconName::ChevronDown).size(12.).color(theme.muted)),
+        )
     }
 }
 

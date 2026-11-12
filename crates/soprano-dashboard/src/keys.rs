@@ -3,7 +3,7 @@
 //! J/K; the composer and the search field keep every key but the few that leave them.
 
 use gpui::Keystroke;
-use soprano_chat_ui::keys::is_command;
+use soprano_chat_ui::keys::{is_command, is_command_shift};
 
 /// How far one scrolling key moves the conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +41,10 @@ pub enum KeyAction {
     ClearSearch,
     /// N on the list, ⌘N anywhere: a new thread.
     NewThread,
+    /// ⇧⌘M anywhere: the models the thread's agent offers.
+    PickModel,
+    /// ⇧⌘E anywhere: how hard its model thinks.
+    PickThinking,
     /// ⇧J/⇧K, PgDn/PgUp.
     Scroll(ScrollAmount),
     /// ] and [: the next or previous prompt.
@@ -59,6 +63,13 @@ pub fn key_action(keystroke: &Keystroke, focus: KeyFocus) -> Option<KeyAction> {
         return match key.to_lowercase().as_str() {
             "n" => Some(KeyAction::NewThread),
             "w" => Some(KeyAction::Dismiss),
+            _ => None,
+        };
+    }
+    if is_command_shift(modifiers) {
+        return match key.to_lowercase().as_str() {
+            "m" => Some(KeyAction::PickModel),
+            "e" => Some(KeyAction::PickThinking),
             _ => None,
         };
     }
@@ -201,6 +212,18 @@ mod tests {
         for focus in [KeyFocus::List, KeyFocus::Composer, KeyFocus::Search] {
             assert_eq!(action(new, focus), Some(KeyAction::NewThread));
             assert_eq!(action(close, focus), Some(KeyAction::Dismiss));
+        }
+    }
+
+    #[test]
+    fn the_shifted_command_chords_pick_the_threads_model_and_thinking_level_from_anywhere() {
+        let (model, thinking) = match soprano_ui::keycaps::KeyPlatform::current() {
+            soprano_ui::keycaps::KeyPlatform::Mac => ("cmd-shift-m", "cmd-shift-e"),
+            soprano_ui::keycaps::KeyPlatform::Other => ("ctrl-shift-alt-m", "ctrl-shift-alt-e"),
+        };
+        for focus in [KeyFocus::List, KeyFocus::Composer, KeyFocus::Search] {
+            assert_eq!(action(model, focus), Some(KeyAction::PickModel));
+            assert_eq!(action(thinking, focus), Some(KeyAction::PickThinking));
         }
     }
 

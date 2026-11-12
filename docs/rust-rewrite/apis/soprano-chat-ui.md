@@ -32,7 +32,7 @@
   - ↑/↓/PgUp/PgDn/Space/Home/End are handled inside; every other key bubbles up to the host.
 - **`ChatView`** (Entity) emits `ChatViewEvent::{Agent(AgentChatEvent), FocusRequested, RestartRequested}`:
   - `new(AgentChatSession, agent_name, window, cx)` takes over the session's change, event and waker callbacks.
-  - `start(Option<&str>, …)`, `stop`, `restart(fallback, …)`, `submit_prompt(&str, …) -> bool` (the dashboard reply), `close(cx)`.
+  - `start(Option<&str>, …)`, `stop`, `restart(fallback, …)`, `submit_prompt(&str, …) -> bool` (the dashboard reply), `submit_opening(options, &str, …) -> bool` (a new thread: session settings first, then its first message), `set_option(id, value, …)` (the dashboard's model and thinking chips), `close(cx)`.
   - `session()`, `timeline()`, `composer()`, `focus_composer(window, cx)`.
   - The shell updates the workspace from these events (Main's contract); `ChatView` never mutates the workspace itself.
 - **`ComposerView`** emits `ComposerEvent::{Submitted, RestartRequested, FocusChanged(bool)}`; also `text`, `set_text`, `submit(alternate)`, `focus_editor`, `close`.

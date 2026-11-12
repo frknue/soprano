@@ -17,11 +17,53 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::json;
 use soprano_agents::AgentDashboardSection;
-use soprano_dashboard::{AgentDashboard, DashboardEvent, DashboardHost, ProjectChoice};
+use soprano_chat::{AgentChatConfigOption, ConfigOptionValue};
+use soprano_dashboard::{AgentDashboard, DashboardEvent, DashboardHost, ProjectChoice, ThreadOption};
 use soprano_model::Workspace;
 use soprano_types::{AgentConversation, AgentStatus, AgentWaitingReason, TerminalTarget};
 use soprano_ui::snapshot::{self, Args};
 use soprano_ui::{ActiveSopranoTheme, SopranoAssets};
+
+/// What omp offers a conversation in the demo, with `opening` (option id, value) applied.
+fn demo_options(opening: &[(String, String)]) -> Vec<AgentChatConfigOption> {
+    let value = |value: &str, name: &str| ConfigOptionValue {
+        value: value.into(),
+        name: name.into(),
+        detail: value.contains('/').then(|| value.to_owned()),
+    };
+    let mut options = vec![
+        AgentChatConfigOption {
+            id: "model".into(),
+            name: "Model".into(),
+            category: Some("model".into()),
+            current_value: "anthropic/claude-opus-5-5".into(),
+            values: vec![
+                value("anthropic/claude-opus-5-5", "Claude Opus 5.5"),
+                value("anthropic/claude-sonnet-5-5", "Claude Sonnet 5.5"),
+                value("anthropic/claude-haiku-5-5", "Claude Haiku 5.5"),
+                value("openai-codex/gpt-5.6-sol", "GPT-5.6 Sol"),
+                value("openai-codex/gpt-5.6-luna", "GPT-5.6 Luna"),
+            ],
+        },
+        AgentChatConfigOption {
+            id: "thinking".into(),
+            name: "Thinking".into(),
+            category: Some("thought_level".into()),
+            current_value: "high".into(),
+            values: vec![
+                value("off", "Off"),
+                value("low", "low"),
+                value("medium", "medium"),
+                value("high", "high"),
+                value("xhigh", "xhigh"),
+            ],
+        },
+    ];
+    for (id, value) in opening {
+        ThreadOption::choose(&mut options, id, value);
+    }
+    options
+}
 
 struct DemoAgent {
     profile: &'static str,
@@ -329,9 +371,22 @@ fn main() {
             |window, cx| {
                 let workspace = cx.new(|_| demo_workspace(&directory, agents));
                 let model = workspace.clone();
+                let chats = workspace.clone();
                 let projects = directory.join("projects");
                 let host = DashboardHost::new()
                     .home(directory.clone())
+                    .thread_options(move |target, cx| {
+                        let is_chat =
+                            chats.read(cx).agent_dashboard_entry(target).is_some_and(|entry| entry.is_chat);
+                        if is_chat { demo_options(&[]) } else { Vec::new() }
+                    })
+                    .draft_options(|profile_id, opening, _| {
+                        gpui::Task::ready(if profile_id == "omp" {
+                            demo_options(&opening)
+                        } else {
+                            Vec::new()
+                        })
+                    })
                     .accepts_replies(move |target, cx| {
                         model
                             .read(cx)
@@ -373,7 +428,8 @@ fn main() {
                             cx.notify();
                         }),
                         DashboardEvent::Reply { .. } => {}
-                        DashboardEvent::NewThread { profile_id, cwd, prompt } => {
+                        DashboardEvent::SetOption { .. } => {}
+                        DashboardEvent::NewThread { profile_id, cwd, prompt, .. } => {
                             let opened = model.update(cx, |workspace, cx| {
                                 let target = workspace.open_thread(profile_id, cwd, Some(prompt));
                                 workspace.take_changes();

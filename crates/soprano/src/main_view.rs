@@ -1319,11 +1319,16 @@ impl MainView {
 
     fn open_agents_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let content = self.content.clone();
+        let (thread_content, draft_content) = (content.clone(), content.clone());
         let branches = self.services.branches.clone();
         let workspace = self.workspace.clone();
         let shell = self.shell.clone();
         let host = DashboardHost::new()
             .accepts_replies(move |target, cx| content.read(cx).accepts_prompt(target, cx))
+            .thread_options(move |target, cx| thread_content.read(cx).chat_options(target, cx))
+            .draft_options(move |profile_id, opening, cx| {
+                draft_content.read(cx).thread_options_probe(profile_id, opening, cx)
+            })
             .notable_branch(move |cwd, _| branches.notable_branch(cwd))
             .projects(move |cx| {
                 agents_window::project_choices(
@@ -1401,7 +1406,7 @@ impl MainView {
                     });
                 }
             }
-            DashboardEvent::NewThread { profile_id, cwd, prompt } => {
+            DashboardEvent::NewThread { profile_id, cwd, prompt, options } => {
                 let opened = self.workspace.update(cx, |ws| ws.open_thread(profile_id, cwd, Some(prompt)));
                 let Some(target) = opened else {
                     return self.with_dashboard(cx, |dashboard, window, cx| {
@@ -1413,13 +1418,16 @@ impl MainView {
                     });
                 };
                 // Its tab waits behind the visible one, so nothing has started its agent yet.
-                let started = self
-                    .content
-                    .update(cx, |content, cx| content.start_background_terminal(&target, window, cx));
+                let started = self.content.update(cx, |content, cx| {
+                    content.start_thread(&target, prompt, options.clone(), window, cx)
+                });
                 if !started {
                     self.toast(ToastLevel::Error, "The agent could not start. Open it in its window.", cx);
                 }
                 self.with_dashboard(cx, |dashboard, window, cx| dashboard.thread_opened(&target, window, cx));
+            }
+            DashboardEvent::SetOption { target, id, value } => {
+                self.content.update(cx, |content, cx| content.set_chat_option(target, id, value, window, cx));
             }
             DashboardEvent::ChooseProject => {
                 let paths = cx.prompt_for_paths(PathPromptOptions {
