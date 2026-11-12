@@ -12,6 +12,7 @@ base64 = "0.22"
 regex = "1"
 soprano-types = { path = "../soprano-types" }
 soprano-platform = { path = "../soprano-platform" }
+yaml-rust2 = { version = "0.13.0", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
