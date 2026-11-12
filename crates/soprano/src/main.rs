@@ -18,6 +18,7 @@
 //!   Markdown reader) cached by exact pane/tab target across layout rebuilds; terminal reports
 //!   flow back into the workspace; it also mirrors unsaved editor documents for the model's
 //!   close-confirmation predicate (the main view asks Save / Don't Save / Cancel).
+//! - [`crash_log`]: every panic's cause, written to `panic.log` in the data folder.
 //! - [`agents_window`]: the Agent Dashboard's own OS window, its frame, and the folders it
 //!   offers a new thread.
 //! - [`automations`]: the `AutomationHost` over the workspace and content host, and `drive`,
@@ -34,6 +35,7 @@ mod agents_window;
 mod app;
 mod automations;
 mod content;
+mod crash_log;
 #[cfg(feature = "visual-snapshot")]
 mod debug_input;
 mod ipc;

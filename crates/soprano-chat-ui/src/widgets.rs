@@ -274,12 +274,15 @@ impl RenderOnce for WorkLogLine {
                 )
             })
             .when_some(self.time, |line, time| {
+                // Hidden by visibility, never by `display`: a group's hover is only known while
+                // painting, and an element that turns from `display: none` to shown there paints
+                // children that were never laid out, which panics.
                 line.child(
                     div()
                         .flex_none()
                         .ml(t.z(6.0))
-                        .hidden()
-                        .group_hover(self.group.clone(), |s| s.flex())
+                        .invisible()
+                        .group_hover(self.group.clone(), |s| s.visible())
                         .font_family(UI_FONT_FAMILY)
                         .text_size(t.z(text_size::SMALL))
                         .text_color(muted)

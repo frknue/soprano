@@ -7,7 +7,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use gpui::{AppContext as _, Entity, TestAppContext, VisualTestContext};
+use gpui::{AppContext as _, Entity, Modifiers, TestAppContext, VisualTestContext, point, px};
 use serde_json::{Value, json};
 use soprano_agents::{AgentTimeline, AgentTimelineItem, ChatThread, TimelineItemKind};
 use soprano_chat::{
@@ -700,4 +700,42 @@ fn the_slash_menu_highlights_commands_that_arrive_after_typing_slash(cx: &mut Te
     cx.run_until_parked();
     assert_eq!(chat.composer_text(cx), "/compact ");
     assert!(chat.agent.sent_prompts().is_empty());
+}
+
+#[gpui::test]
+fn the_pointer_over_the_work_log_shows_its_times_and_the_chat_stays_up(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.update(|window, cx| chat.view.update(cx, |view, cx| view.submit_prompt("Read the notes", window, cx)));
+    settle(cx);
+    for (id, path) in [("call-1", "skill://valkental"), ("call-2", "skill://brief")] {
+        chat.agent.send(json!({
+            "sessionUpdate": "tool_call", "toolCallId": id, "title": format!("Reading {path}"),
+            "kind": "read", "status": "pending", "rawInput": {"path": path},
+        }));
+        chat.agent.send(json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": id, "status": "completed",
+            "content": [{"type": "content", "content": {"type": "text", "text": "Notes"}}],
+        }));
+    }
+    settle(cx);
+    let work_rows = |chat: &Chat, cx: &mut VisualTestContext| {
+        chat.rows(cx)
+            .iter()
+            .filter(|row| matches!(row, TimelineRowContent::WorkGroup(_) | TimelineRowContent::WorkEntry(_)))
+            .count()
+    };
+    let shown = work_rows(&chat, cx);
+    assert!(shown > 0, "{:?}", chat.rows(cx));
+
+    // Down the conversation, a few points apart: every row is under the pointer once, which
+    // shows what it keeps for hovering (a work log line's time).
+    let size = cx.update(|window, _| window.viewport_size());
+    let mut y = px(0.);
+    while y < size.height {
+        cx.simulate_mouse_move(point(size.width / 2., y), None, Modifiers::none());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        y += px(6.);
+    }
+    assert_eq!(work_rows(&chat, cx), shown);
 }

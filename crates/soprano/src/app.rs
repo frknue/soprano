@@ -32,6 +32,8 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
     let identity = AppIdentity::current();
+    // First: a panic from here on leaves its cause in the data folder.
+    crate::crash_log::install(soprano_platform::paths::data_dir(&identity).join(crate::crash_log::FILE_NAME));
     let state = StateStore::for_app(&identity);
 
     // Load settings.json (creating it on first run) before anything reads a setting.
