@@ -124,9 +124,8 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   `__p9k_trapped`, dann lässt p10k INT in Ruhe. Außerhalb der App nachgestellt (echte
   `.zshrc`, Agent-Kommandozeile im PTY, Ctrl+C alle 100 ms über 1,2 s): vorher 4/4 kaputt,
   nachher 0/5. Regressionstest in `crates/soprano-launch/tests/launch.rs`. Mit dem
-  Dashboard hat es nichts zu tun, es trifft jeden Agent-Tab. Branch
-  `fix/fallback-shell-p10k` im Worktree `~/git/private/soprano.worktrees/fix-fallback-shell-p10k`
-  (im Haupt-Checkout lief parallel `feat/ui-sdk-spike`).
+  Dashboard hat es nichts zu tun, es trifft jeden Agent-Tab. Auf `main` (`4970013`),
+  installiert; in der laufenden App noch nicht geprüft.
 
 ## Offen
 
