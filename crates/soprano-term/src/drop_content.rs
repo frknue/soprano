@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+use soprano_platform::shell::shell_escape;
+
 /// The representations a drop carries, in the order they are preferred.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DropPayload {
@@ -42,35 +44,9 @@ pub fn text_from(payload: &DropPayload) -> Option<String> {
     payload.text.clone()
 }
 
-/// Backslash-escapes every character that would change how a shell splits or expands a word.
-pub fn shell_escape(value: &str) -> String {
-    const SPECIAL: &str = "\\ ()[]{}<>\"'`!#$&;|*?\t";
-    let mut escaped = String::with_capacity(value.len());
-    for c in value.chars() {
-        if SPECIAL.contains(c) {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
-    escaped
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn shell_escapes_characters_that_would_change_a_command_line() {
-        assert_eq!(
-            shell_escape("/tmp/Screen Shot [draft] #1.png"),
-            "/tmp/Screen\\ Shot\\ \\[draft\\]\\ \\#1.png"
-        );
-    }
-
-    #[test]
-    fn a_backslash_is_escaped_once() {
-        assert_eq!(shell_escape("a\\b"), "a\\\\b");
-    }
 
     #[test]
     fn dropped_file_urls_become_escaped_space_separated_paths() {

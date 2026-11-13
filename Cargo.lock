@@ -7987,6 +7987,7 @@ dependencies = [
  "gpui-component",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "serde_json",
  "soprano-agents",
  "soprano-chat",

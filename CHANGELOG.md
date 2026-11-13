@@ -22,6 +22,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
   or press `⇧⌘M` to search omp's models, the level or `⇧⌘E` to change how hard it thinks —
   before the first message of a new thread or at any time while it runs. A new omp thread
   starts with what the last one started with.
+- **Images and files in the Agent Dashboard's composer**, for a new thread or a reply:
+  paste a copied image or copied files (`⌘V`), or drop files onto the composer. Images
+  show as thumbnails, other files by name, each with a ✕ to take it out again. The agent
+  gets their paths at the end of your message; a pasted image is kept as a file in the
+  app's data folder (`attachments/`), so every agent can read it.
 - The Agent Dashboard's inbox has a **Search** (`/`) and folds: click **Needs you**,
   **Working**, **Ready**, or **Stopped** to hide its threads; Stopped starts folded.
 - **Linux and Windows.** Soprano now runs on macOS, Linux (x86_64 and arm64) and Windows
@@ -281,6 +286,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- A click into the Agent Dashboard's composer now puts the cursor there. With a thread
+  open, the conversation under the composer took the keyboard back, so nothing could be
+  typed unless you pressed `Tab` or `R` first; only a new thread's composer worked.
 - An omp chat, and so an omp thread started from the Agent Dashboard, no longer asks for
   approval before every command while omp in a terminal runs the same command unasked. A
   chat now starts with omp's own approval mode (`tools.approvalMode`, `yolo` by default).

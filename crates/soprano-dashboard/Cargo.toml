@@ -17,6 +17,8 @@ gpui-component.workspace = true
 soprano-chat = { path = "../soprano-chat" }
 soprano-chat-ui = { path = "../soprano-chat-ui" }
 futures = "0.3"
+# Pasted TIFF and BMP images are kept as PNG.
+image = { version = "0.25", default-features = false, features = ["png", "tiff", "bmp"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

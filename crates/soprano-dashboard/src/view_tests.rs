@@ -4,19 +4,23 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Bounds, Entity, Focusable as _, Modifiers, Pixels, Task, TestAppContext,
-    VisualTestContext, point, px, size,
+    AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Entity, ExternalPaths, FileDropEvent,
+    Focusable as _, Image, ImageFormat, Modifiers, Pixels, Task, TestAppContext, VisualTestContext, point,
+    px, size,
 };
+use gpui_component::input::Paste;
 use soprano_agents::AgentDashboardSection;
 use soprano_chat::{AgentChatConfigOption, ConfigOptionValue};
 use soprano_chat_ui::TimelineRowContent;
 use soprano_chat_ui::work_log::WorkLogKind;
 use soprano_model::Workspace;
 use soprano_platform::StateStore;
+use soprano_platform::shell::path_word;
 use soprano_types::TerminalTarget;
 use soprano_types::{AgentConversation, AgentStatus};
 
 use super::{AgentDashboard, DashboardEvent, DashboardHost};
+use crate::attachments::Attachment;
 use crate::state::{AgentChoice, ListRow, ThreadOption};
 
 struct Harness {
@@ -164,6 +168,28 @@ fn composer_text(cx: &mut VisualTestContext, harness: &Harness) -> String {
 
 fn hint(cx: &mut VisualTestContext, harness: &Harness) -> (String, bool) {
     harness.dashboard.read_with(cx, |dashboard, _| dashboard.composer_hint())
+}
+
+/// A click on the composer's first line of text.
+fn click_editor(cx: &mut VisualTestContext) {
+    let composer = bounds(cx, "agent-dashboard-composer");
+    cx.simulate_click(point(composer.origin.x + px(40.), composer.bottom() - px(84.)), Modifiers::none());
+    cx.run_until_parked();
+}
+
+fn attached(cx: &mut VisualTestContext, harness: &Harness) -> Vec<Attachment> {
+    harness.dashboard.read_with(cx, |dashboard, _| dashboard.attachments().to_vec())
+}
+
+/// ⌘V in the composer with `clipboard` copied.
+fn paste(cx: &mut VisualTestContext, clipboard: ClipboardItem) {
+    cx.write_to_clipboard(clipboard);
+    cx.dispatch_action(Paste);
+    cx.run_until_parked();
+}
+
+fn copied_image() -> ClipboardItem {
+    ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, b"a screenshot".to_vec()))
 }
 
 #[gpui::test]
@@ -372,6 +398,8 @@ fn messages_wait_for_an_agent_that_takes_them(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("tab");
     assert!(!composer_focused(cx, &harness));
     assert!(list_focused(cx, &harness));
+    click_editor(cx);
+    assert!(!composer_focused(cx, &harness));
 
     available.set(true);
     change(cx, &harness, |_| {});
@@ -1049,4 +1077,110 @@ fn the_open_chat_threads_model_and_thinking_level_are_set_through_the_shell(cx: 
     change(cx, &harness, |workspace| set_status(workspace, &chat, AgentStatus::Stopped));
     harness.dashboard.update(cx, |dashboard, cx| dashboard.pick_option("thinking", "low", cx));
     assert_eq!(harness.events.borrow().len(), sent);
+}
+
+#[gpui::test]
+fn a_click_into_the_composer_over_the_conversation_takes_the_keyboard(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    set_status(&mut workspace, &target, AgentStatus::Waiting);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+    assert!(list_focused(cx, &harness));
+
+    // The composer floats over the conversation, which takes the keyboard when clicked.
+    click_editor(cx);
+    assert!(composer_focused(cx, &harness));
+    cx.simulate_input("go on");
+    assert_eq!(composer_text(cx, &harness), "go on");
+}
+
+#[gpui::test]
+fn a_pasted_image_is_kept_as_a_file_and_sent_as_its_path(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    set_status(&mut workspace, &target, AgentStatus::Waiting);
+    let folder = tempfile::tempdir().expect("attachments");
+    let (harness, cx) = open(cx, workspace, replying().attachments(folder.path()), 1100., 720.);
+
+    cx.simulate_keystrokes("tab");
+    paste(cx, copied_image());
+    paste(cx, copied_image());
+    let pasted = attached(cx, &harness);
+    assert_eq!(pasted.len(), 2);
+    assert!(pasted.iter().all(|image| image.pasted && image.path.starts_with(folder.path())));
+    assert_eq!(std::fs::read(&pasted[1].path).expect("image"), b"a screenshot");
+    assert_eq!(composer_text(cx, &harness), "");
+
+    // Its ✕ takes the first out again, file and all.
+    let dashboard = harness.dashboard.clone();
+    cx.update(|_, cx| dashboard.update(cx, |dashboard, cx| dashboard.remove_attachment(0, cx)));
+    assert!(!pasted[0].path.exists());
+    assert_eq!(attached(cx, &harness), pasted[1..]);
+
+    // Text still pastes as text.
+    paste(cx, ClipboardItem::new_string("What is wrong here?".into()));
+    assert_eq!(composer_text(cx, &harness), "What is wrong here?");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert_eq!(
+        harness.events.borrow().last(),
+        Some(&DashboardEvent::Reply {
+            target,
+            text: format!("What is wrong here?\n{}", path_word(&pasted[1].path)),
+        })
+    );
+    // Sent: the composer is empty again and the agent finds the file.
+    assert!(attached(cx, &harness).is_empty());
+    assert!(pasted[1].path.exists());
+}
+
+#[gpui::test]
+fn a_new_thread_starts_with_its_attachments_and_a_draft_given_up_forgets_them(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let first = spawn(&mut workspace, "codex", "/tmp/projects/storefront");
+    set_status(&mut workspace, &first, AgentStatus::Idle);
+    let folder = tempfile::tempdir().expect("attachments");
+    let (harness, cx) = open(cx, workspace, replying().attachments(folder.path()), 1100., 720.);
+
+    cx.simulate_keystrokes("n");
+    paste(cx, copied_image());
+    let pasted = attached(cx, &harness);
+    assert_eq!(pasted.len(), 1);
+    cx.simulate_keystrokes("escape escape");
+    assert!(!harness.dashboard.read_with(cx, |dashboard, _| dashboard.is_drafting()));
+    assert!(attached(cx, &harness).is_empty());
+    assert!(!pasted[0].path.exists());
+
+    // Copied files are attached where they are, each once, and an image alone is a message.
+    cx.simulate_keystrokes("n");
+    let files = vec![folder.path().join("Screen Shot 1.png"), folder.path().join("notes.md")];
+    let copied =
+        ClipboardItem { entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(files.clone().into()))] };
+    paste(cx, copied.clone());
+    paste(cx, copied);
+    assert_eq!(attached(cx, &harness), [Attachment::file(&files[0]), Attachment::file(&files[1])]);
+    assert_eq!(composer_text(cx, &harness), "");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    let sent = harness.events.borrow().last().cloned();
+    let Some(DashboardEvent::NewThread { prompt, .. }) = sent else { panic!("no thread: {sent:?}") };
+    assert_eq!(prompt, format!("{} {}", path_word(&files[0]), path_word(&files[1])));
+}
+
+#[gpui::test]
+fn files_dropped_onto_the_composer_are_attached_and_the_composer_takes_the_keyboard(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let target = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    set_status(&mut workspace, &target, AgentStatus::Waiting);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+
+    let position = bounds(cx, "agent-dashboard-composer").center();
+    let paths = ExternalPaths(vec![std::path::PathBuf::from("/tmp/shots/checkout.png")].into());
+    cx.simulate_event(FileDropEvent::Entered { position, paths });
+    cx.simulate_event(FileDropEvent::Submit { position });
+    cx.run_until_parked();
+    assert_eq!(attached(cx, &harness), [Attachment::file("/tmp/shots/checkout.png")]);
+    assert!(composer_focused(cx, &harness));
+    // The shelf over the editor shows it.
+    assert!(cx.debug_bounds("agent-dashboard-attachments").is_some());
 }

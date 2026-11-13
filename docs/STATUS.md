@@ -103,6 +103,18 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   dieses Profils gelesen. In Soprano Dev geprüft: Thread mit drei bash-Aufrufen läuft ohne
   Rückfrage bis Done (`ps`: `omp acp --approval-mode=yolo`). PowerShell-Variante nur als Text
   getestet.
+- 2026-11-12: Furkans Fehlerbericht „nach dem Login im Terminal kann ich nichts eingeben, und
+  im neuen Thread kein Bild anhängen“ (auf `main`, installiert). Ursache der
+  Eingabe: der schwebende Composer liegt über der Timeline, deren Mouse-Down sich nach dem
+  Editor selbst den Fokus holte; nur der Entwurf (ohne Timeline darunter) nahm Klicks an, der
+  Login war Zufall. Die Composer-Karte blockt jetzt die Maus für alles darunter
+  (`block_mouse_except_scroll`), und das `Textarea`-Element bekommt `disabled` selbst
+  (gpui-component 0.9.1 setzt den Zustand bei jedem Render aus dem Element). Anhänge:
+  `crates/soprano-dashboard/src/attachments.rs` (Bild einfügen per `⌘V`, kopierte Dateien,
+  Drop; Vorschaubilder und Datei-Chips mit ✕). Der Agent bekommt die Pfade ans Ende der
+  Nachricht (`soprano_platform::shell::path_word`), für Terminal-Agenten wie für omp-Chats;
+  eingefügte Bilder liegen in `<Datenordner>/attachments/` (TIFF/BMP als PNG), ungesendete
+  werden wieder gelöscht. Sichtprüfung: `dashboard_demo -- --snapshot` (`04-composer-attachments`).
 
 ## Offen
 
@@ -123,6 +135,15 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
+- Anhänge im Dashboard: nur in Tests und im Demo-Snapshot geprüft, nicht in der laufenden App
+  (Einfügen eines echten Screenshots, Drop aus dem Finder). Die Zustellung ist außerhalb der
+  App geprüft: ein echtes PNG unter einem Pfad mit Leerzeichen, als Nachricht „Frage\n<Pfad mit
+  `\ `>“ wie das Dashboard sie baut, an `claude -p --`, `codex exec --` und `omp -p --`; alle
+  drei nannten Farben und Anordnung des Bildes richtig. Nicht geprüft: derselbe Weg über das
+  Terminal-TUI und über `omp acp`. omp-Chats bekommen den Pfad im Text, keine ACP-Bildblöcke. `attachments/`
+  wird nie aufgeräumt. Der Chat-Tab im Hauptfenster hat dieselbe Überlagerung (Timeline nimmt
+  den Fokus beim Klick in den Composer), fällt dort nicht auf, weil getippte Tasten an den
+  Composer weitergehen; nicht angefasst.
 - Agents-Fenster: in Soprano Dev über `debug-* --agents` geprüft (Öffnen per `⇧⌘D`, neuer
   Thread mit omp, Modell/Thinking per Tastatur, `⌘W`). Noch ungeprüft: Klick auf die Chips mit
   echter Maus, Nach-vorn/Schließen per `⇧⌘D` aus beiden Fenstern mit echter Tastatur,

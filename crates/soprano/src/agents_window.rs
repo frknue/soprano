@@ -21,6 +21,8 @@ use crate::{palette, sizing, window_chrome};
 
 /// Where the window's frame is kept.
 pub const FRAME_KEY: &str = "soprano-agents-window-frame";
+/// The folder in the app's data folder where images pasted into the composer are kept.
+pub const ATTACHMENTS_FOLDER: &str = "attachments";
 /// The size it first opens at (Soprano Agents').
 const DEFAULT_SIZE: (f64, f64) = (1100.0, 780.0);
 /// How long the window must stay put before its frame is saved.

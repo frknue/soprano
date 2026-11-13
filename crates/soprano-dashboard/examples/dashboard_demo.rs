@@ -4,7 +4,8 @@
 //!
 //! `-- --snapshot /abs/dir [--size 1100x780] [--appearance dark|light] [--theme ID]
 //! [--agents N]` writes the dashboard's states (every thread, the detailed work log, the
-//! composer, the stopped shelf, a search, a new thread) as PNGs into the folder and quits,
+//! composer with and without attachments, the stopped shelf, a search, a new thread) as PNGs
+//! into the folder and quits,
 //! for visual QA without looking at the screen.
 
 use std::path::{Path, PathBuf};
@@ -279,8 +280,8 @@ impl Render for DemoFrame {
     }
 }
 
-/// Writes the first thread's conversation, its detailed work log and the composer, every
-/// other thread, the stopped shelf, a search, and a new thread.
+/// Writes the first thread's conversation, its detailed work log, the composer and what it
+/// attaches, every other thread, the stopped shelf, a search, and a new thread.
 async fn write_snapshots(
     directory: PathBuf,
     agents: usize,
@@ -312,6 +313,24 @@ async fn write_snapshots(
             });
         })?;
         shot("", "composer", cx).await?;
+        // An image and a file the message brings along (the repository's own).
+        if let Some(resources) = soprano_platform::paths::resources_dir() {
+            cx.update(|_, cx| {
+                dashboard.update(cx, |dashboard, cx| {
+                    let files = [resources.join("icons/app-icon.png"), resources.join("icons/LICENSES.md")];
+                    dashboard.attach_files(files, cx)
+                })
+            })?;
+            // The thumbnail is decoded off the main thread.
+            cx.background_executor().timer(std::time::Duration::from_millis(300)).await;
+            shot("", "composer-attachments", cx).await?;
+            cx.update(|_, cx| {
+                dashboard.update(cx, |dashboard, cx| {
+                    dashboard.remove_attachment(1, cx);
+                    dashboard.remove_attachment(0, cx);
+                })
+            })?;
+        }
         cx.update(|window, cx| {
             dashboard.update(cx, |dashboard, cx| dashboard.set_composer_text("", window, cx));
             snapshot::press("escape", window, cx);

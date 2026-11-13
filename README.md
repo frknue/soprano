@@ -534,6 +534,13 @@ exact pane tab while the agent is working, ready, waiting for input, or in an er
 state: `Return` sends, `⇧Return` adds a line (a terminal agent gets the lines joined by
 spaces).
 
+A message can bring images and files along, in a reply and in a new thread: paste a
+copied image or copied files into the composer (`⌘V`), or drop files onto it. Images show
+as thumbnails and other files by name over the text, each with a ✕ to take it out again.
+The agent reads them by their paths, which follow your text; a pasted image is first
+kept as a file in `attachments/` in the app's data folder
+(`~/Library/Application Support/com.soprano.app/` on macOS).
+
 **New thread** (the pencil button, `N`, or `⌘N`) starts an agent from the dashboard:
 "What should we build in *project*?" opens on the open thread's project — click the name
 to pick another from the projects open in your windows and the `projectDirectories`, or

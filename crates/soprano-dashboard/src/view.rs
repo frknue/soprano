@@ -14,9 +14,9 @@ use std::time::{Duration, SystemTime};
 
 use futures::StreamExt as _;
 use gpui::{
-    App, AppContext as _, Bounds, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
-    Styled, Subscription, Task, Window, canvas, div, point, px,
+    App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, DismissEvent, Entity, EventEmitter,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, Keystroke, MouseButton, ParentElement, Pixels,
+    Render, ScrollHandle, Styled, Subscription, Task, Window, canvas, div, point, px,
 };
 use gpui_component::input::{Enter, InputEvent, InputState, TextareaState};
 use soprano_agents::{
@@ -34,6 +34,7 @@ use soprano_ui::status::StatusClock;
 use soprano_ui::theme::ActiveSopranoTheme;
 use soprano_ui::{ContextMenu, IconName, MenuItem, Picker, PickerEvent, PickerItem, SopranoTheme};
 
+use crate::attachments::{self, Attachment};
 use crate::keys::{KeyAction, KeyFocus, ScrollAmount, key_action};
 use crate::state::{self, AgentChoice, AgentList, Controls, DashboardEntry, ProjectChoice, ThreadOption};
 
@@ -108,6 +109,8 @@ pub struct DashboardHost {
     pub draft_options: DraftOptionsProvider,
     /// Where the agent CLIs keep their transcripts and where `~` points.
     pub home: PathBuf,
+    /// Where an image pasted into the composer is kept as a file for its agent to read.
+    pub attachments: PathBuf,
     /// App state: the agent the last thread was started with.
     pub state: StateStore,
     /// What the window's own controls take at the inbox's top-left (the macOS traffic
@@ -124,6 +127,7 @@ impl DashboardHost {
             thread_options: Rc::new(|_, _| Vec::new()),
             draft_options: Rc::new(|_, _, _| Task::ready(Vec::new())),
             home: state::default_home(),
+            attachments: std::env::temp_dir().join("soprano-attachments"),
             state: StateStore::in_memory(),
             leading_inset: 0.0,
         }
@@ -162,6 +166,11 @@ impl DashboardHost {
 
     pub fn home(mut self, home: impl Into<PathBuf>) -> Self {
         self.home = home.into();
+        self
+    }
+
+    pub fn attachments(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.attachments = folder.into();
         self
     }
 
@@ -213,6 +222,10 @@ pub struct AgentDashboard {
     focus: FocusHandle,
     search: Entity<InputState>,
     editor: Entity<TextareaState>,
+    /// The files and pasted images the composer's message brings along.
+    attachments: Vec<Attachment>,
+    /// Why the last pasted image is not among them.
+    attach_error: Option<String>,
     draft: Option<Draft>,
     /// The last message could not be delivered: the status and availability it failed under;
     /// either changing clears it.
@@ -299,6 +312,7 @@ impl AgentDashboard {
                 // Typing again puts the status hint back in place of "Could not send".
                 if matches!(event, InputEvent::Change) {
                     this.send_failed = None;
+                    this.attach_error = None;
                     if let Some(draft) = &mut this.draft {
                         draft.error = None;
                     }
@@ -340,6 +354,8 @@ impl AgentDashboard {
             focus: cx.focus_handle(),
             search,
             editor,
+            attachments: Vec::new(),
+            attach_error: None,
             draft: None,
             send_failed: None,
             detail_id: None,
@@ -527,7 +543,7 @@ impl AgentDashboard {
             self.detail_id = selected;
             self.send_failed = None;
             if self.draft.is_none() {
-                self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+                self.clear_composer(window, cx);
             }
         }
         let agent_name = self.selected().map(|entry| entry.entry.profile_name.clone()).unwrap_or_default();
@@ -538,12 +554,18 @@ impl AgentDashboard {
         self.render_timeline(selection_changed, window, cx);
     }
 
-    /// The editor takes text while a draft is being written or the thread takes a message.
-    fn sync_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let enabled = match &self.draft {
+    /// Whether the composer takes a message: while a draft is being written, or the open
+    /// thread's agent takes one.
+    pub(super) fn composer_enabled(&self) -> bool {
+        match &self.draft {
             Some(draft) => !draft.launching,
             None => self.controls().reply,
-        };
+        }
+    }
+
+    /// The editor takes text while the composer takes a message.
+    fn sync_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let enabled = self.composer_enabled();
         let _ = window;
         self.editor.update(cx, |editor, cx| editor.set_disabled(!enabled, cx));
     }
@@ -648,11 +670,7 @@ impl AgentDashboard {
     }
 
     fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let enabled = match &self.draft {
-            Some(draft) => !draft.launching,
-            None => self.controls().reply,
-        };
-        if enabled {
+        if self.composer_enabled() {
             self.editor.update(cx, |editor, cx| editor.focus(window, cx));
             cx.notify();
         }
@@ -685,7 +703,9 @@ impl AgentDashboard {
     /// Sends what the composer holds: the first message of the drafted thread, or a message to
     /// the open one.
     fn send(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = state::reply_text(&self.editor.read(cx).value()) else { return };
+        let Some(text) = attachments::message_text(&self.editor.read(cx).value(), &self.attachments) else {
+            return;
+        };
         if let Some(draft) = &mut self.draft {
             if draft.launching {
                 return;
@@ -711,6 +731,8 @@ impl AgentDashboard {
             return;
         }
         self.send_failed = None;
+        // Sent: the files stay for the agent to read.
+        self.attachments.clear();
         self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
         self.timeline.update(cx, |timeline, cx| timeline.jump_to_latest(cx));
         cx.emit(DashboardEvent::Reply { target, text });
@@ -737,6 +759,87 @@ impl AgentDashboard {
         cx.notify();
     }
 
+    // MARK: - Attachments
+
+    /// The files and pasted images the composer's message brings along.
+    pub fn attachments(&self) -> &[Attachment] {
+        &self.attachments
+    }
+
+    /// Adds files to the message, each once (a drop onto the composer, copied files pasted
+    /// into it).
+    pub fn attach_files(&mut self, paths: impl IntoIterator<Item = PathBuf>, cx: &mut Context<Self>) {
+        if !self.composer_enabled() {
+            return;
+        }
+        for path in paths {
+            if !self.attachments.iter().any(|attachment| attachment.path == path) {
+                self.attachments.push(Attachment::file(path));
+            }
+        }
+        self.attach_error = None;
+        cx.notify();
+    }
+
+    /// Adds a pasted image (`bytes` in the format `extension` names) to the message, kept as
+    /// a file in the host's attachments folder.
+    pub fn attach_image(&mut self, extension: &str, bytes: &[u8], cx: &mut Context<Self>) {
+        if !self.composer_enabled() {
+            return;
+        }
+        let stored =
+            attachments::store_pasted_image(&self.host.attachments, extension, bytes, SystemTime::now());
+        self.attach_error = match stored {
+            Ok(attachment) => {
+                self.attachments.push(attachment);
+                None
+            }
+            Err(error) => Some(format!("Could not keep the pasted image: {error}")),
+        };
+        cx.notify();
+    }
+
+    /// Takes one attachment out of the message again (its ✕).
+    pub fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.attachments.len() {
+            self.attachments.remove(index).discard();
+            cx.notify();
+        }
+    }
+
+    /// A paste into the composer: copied files, or a copied image, become attachments. False
+    /// leaves the paste to the editor, which inserts the clipboard's text.
+    pub(super) fn paste(&mut self, clipboard: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        let entries = clipboard.entries();
+        let files = entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::ExternalPaths(paths) if !paths.paths().is_empty() => Some(paths.paths()),
+            _ => None,
+        });
+        if let Some(files) = files {
+            self.attach_files(files.iter().cloned(), cx);
+            return true;
+        }
+        let image = entries.iter().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
+        });
+        match image {
+            // An image copied along with text (a table cell, a web selection) pastes as text.
+            Some(image) if clipboard.text().is_none() => {
+                self.attach_image(image.format.extension(), &image.bytes, cx);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Gives up what the composer holds unsent: its text and its attachments.
+    fn clear_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        self.attachments.drain(..).for_each(Attachment::discard);
+        self.attach_error = None;
+    }
+
     // MARK: - New thread
 
     /// Opens the draft of a new thread (N, ⌘N, the pencil button) and gives its composer the
@@ -744,7 +847,7 @@ impl AgentDashboard {
     pub fn new_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.draft.is_none() {
             self.start_draft(cx);
-            self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+            self.clear_composer(window, cx);
         }
         self.sync_composer(window, cx);
         self.focus_composer(window, cx);
@@ -799,7 +902,7 @@ impl AgentDashboard {
             return;
         }
         self.draft = None;
-        self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
+        self.clear_composer(window, cx);
         self.sync_composer(window, cx);
         self.render_timeline(true, window, cx);
         cx.notify();
@@ -912,8 +1015,8 @@ impl AgentDashboard {
         }
         self.start_draft(cx);
         if self.draft.is_some() {
+            self.clear_composer(window, cx);
             self.editor.update(cx, |editor, cx| {
-                editor.set_value("", window, cx);
                 editor.set_disabled(false, cx);
                 editor.focus(window, cx);
             });
@@ -924,6 +1027,8 @@ impl AgentDashboard {
     /// keyboard goes back to the inbox (its agent is still starting and takes no message yet).
     pub fn thread_opened(&mut self, target: &TerminalTarget, window: &mut Window, cx: &mut Context<Self>) {
         self.draft = None;
+        // Sent with the thread's first message: the files stay for the agent to read.
+        self.attachments.clear();
         self.editor.update(cx, |editor, cx| editor.set_value("", window, cx));
         self.refresh(window, cx);
         self.list.select(&format!("{}:{}", target.pane_id, target.tab_id));
@@ -1180,6 +1285,9 @@ impl AgentDashboard {
     /// The line beside the send button: why nothing can be sent, or what went wrong; empty
     /// otherwise. The flag marks an error.
     pub fn composer_hint(&self) -> (String, bool) {
+        if let Some(error) = &self.attach_error {
+            return (error.clone(), true);
+        }
         if let Some(draft) = &self.draft {
             return match (&draft.error, draft.launching) {
                 (Some(error), _) => (error.clone(), true),

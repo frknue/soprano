@@ -554,12 +554,6 @@ impl Controls {
     }
 }
 
-/// The text a message sends: trimmed, `None` when nothing is left.
-pub fn reply_text(draft: &str) -> Option<String> {
-    let trimmed = draft.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
-}
-
 /// Where the CLIs keep their transcripts and `~` folds to.
 pub fn default_home() -> PathBuf {
     soprano_platform::paths::home_dir()
@@ -950,9 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn a_message_is_trimmed_and_an_empty_one_is_not_sent() {
-        assert_eq!(reply_text("  Run the focused tests \n"), Some("Run the focused tests".into()));
-        assert_eq!(reply_text(" \n "), None);
+    fn a_turn_is_still_going_while_its_agent_starts_or_runs() {
         assert!(is_agent_working(Some(AgentStatus::Starting)));
         assert!(!is_agent_working(Some(AgentStatus::Waiting)));
     }

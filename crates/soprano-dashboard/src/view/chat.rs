@@ -4,8 +4,8 @@
 //! the composer in the middle of the column.
 
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::*,
+    AnyElement, Context, ExternalPaths, FontWeight, InteractiveElement, IntoElement, ObjectFit,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, img, prelude::*,
 };
 use gpui_component::input::Textarea;
 use soprano_chat_ui::composer::EDITOR_LINE_HEIGHT;
@@ -13,11 +13,16 @@ use soprano_chat_ui::widgets::text_size;
 use soprano_ui::button::IconButton;
 use soprano_ui::status::StatusPill;
 use soprano_ui::tooltip::tooltip;
-use soprano_ui::{Icon, IconName, Monogram, SopranoTheme, agent_icon_stem, icon};
+use soprano_ui::{Icon, IconName, Monogram, SopranoTheme, agent_icon_stem, file_type_icon, icon};
 
 use super::sidebar::agent_glyph;
 use super::{AgentDashboard, DashboardEvent, Draft, TOPBAR_HEIGHT, drag_region, measure};
+use crate::attachments::{self, Attachment};
 use crate::state::{self, Controls, DashboardEntry, ThreadOption};
+
+/// An attached image's thumbnail, and the ✕ that takes an attachment out again.
+const THUMBNAIL_SIZE: f32 = 56.0;
+const REMOVE_SIZE: f32 = 18.0;
 
 impl AgentDashboard {
     pub(super) fn render_chat(
@@ -30,7 +35,7 @@ impl AgentDashboard {
         let inset = self.composer_inset(theme);
         self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(theme.z(inset), cx));
         let controls = self.controls();
-        let composer = div().w(theme.z(lane)).child(self.render_composer(controls, theme, cx));
+        let composer = div().w(theme.z(lane)).child(self.render_composer(theme, cx));
         let body: AnyElement = match (&self.draft, self.selected()) {
             // A new thread: headline and composer in the middle of the column.
             (Some(draft), _) => div()
@@ -302,19 +307,15 @@ impl AgentDashboard {
             )
     }
 
-    /// The floating composer: the editor over the agent, a hint and the round send button.
-    fn render_composer(
-        &self,
-        controls: Controls,
-        theme: &SopranoTheme,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let has_text = state::reply_text(&self.editor.read(cx).value()).is_some();
-        let (enabled, can_send) = match &self.draft {
-            Some(draft) => (!draft.launching, !draft.launching && has_text),
-            None => (controls.reply, controls.reply && has_text),
-        };
+    /// The floating composer: what the message brings along, the editor over the agent, a
+    /// hint and the round send button. Files dropped onto it are attached.
+    fn render_composer(&self, theme: &SopranoTheme, cx: &mut Context<Self>) -> impl IntoElement {
+        let enabled = self.composer_enabled();
+        let can_send =
+            enabled && attachments::message_text(&self.editor.read(cx).value(), &self.attachments).is_some();
         let (hint, failed) = self.composer_hint();
+        let dashboard = cx.entity().downgrade();
+        let accent = theme.accent;
         div()
             .id("agent-dashboard-composer")
             .debug_selector(|| "agent-dashboard-composer".into())
@@ -328,7 +329,19 @@ impl AgentDashboard {
             .flex()
             .flex_col()
             .overflow_hidden()
+            // The card floats over the conversation: a click into it must not also land on
+            // the turn underneath, which would take the keyboard back from the editor.
+            .block_mouse_except_scroll()
+            .when(enabled, |card| {
+                card.drag_over::<ExternalPaths>(move |card, _, _, _| card.border_color(accent)).on_drop(
+                    cx.listener(|this, dropped: &ExternalPaths, window, cx| {
+                        this.attach_files(dropped.paths().iter().cloned(), cx);
+                        this.focus_composer(window, cx);
+                    }),
+                )
+            })
             .child(measure(&self.composer_bounds))
+            .children(self.render_attachments(theme, cx))
             .child(
                 div()
                     .px(theme.z(16.))
@@ -337,10 +350,17 @@ impl AgentDashboard {
                     .text_size(theme.z(text_size::BODY))
                     .text_color(theme.foreground)
                     .line_height(theme.z(EDITOR_LINE_HEIGHT))
-                    // A composer that cannot send steps back; the hint says why.
-                    .when(!enabled, |body| body.opacity(0.55))
                     .capture_action(cx.listener(Self::on_enter))
-                    .child(Textarea::new(&self.editor).appearance(false).bordered(false)),
+                    .child(
+                        Textarea::new(&self.editor)
+                            .appearance(false)
+                            .bordered(false)
+                            // A composer that cannot send steps back; the hint says why.
+                            .disabled(!enabled)
+                            .on_paste(move |clipboard, _, cx| {
+                                dashboard.update(cx, |this, cx| this.paste(clipboard, cx)).unwrap_or(false)
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -367,6 +387,63 @@ impl AgentDashboard {
                     )
                     .child(send_button(can_send, theme, cx)),
             )
+    }
+
+    /// What the message brings along, over the editor: images as thumbnails, other files by
+    /// name, each with a ✕ that takes it out again.
+    fn render_attachments(
+        &self,
+        theme: &SopranoTheme,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement + use<>> {
+        if self.attachments.is_empty() {
+            return None;
+        }
+        let items = self.attachments.iter().enumerate().map(|(index, attachment)| {
+            let remove = remove_button(index, attachment, theme, cx);
+            let item = div()
+                .id(("agent-dashboard-attachment", index))
+                .relative()
+                .flex_none()
+                .rounded(theme.z(8.))
+                .overflow_hidden()
+                .tooltip(tooltip(attachment.name()));
+            if attachment.is_image() {
+                item.size(theme.z(THUMBNAIL_SIZE))
+                    .border_1()
+                    .border_color(theme.border)
+                    .child(img(attachment.path.clone()).size_full().object_fit(ObjectFit::Cover))
+                    .child(div().absolute().top(theme.z(3.)).right(theme.z(3.)).child(remove))
+            } else {
+                let name = attachment.name();
+                item.flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(theme.z(6.))
+                    .h(theme.z(28.))
+                    .max_w(theme.z(240.))
+                    .pl(theme.z(8.))
+                    .pr(theme.z(5.))
+                    .bg(theme.hover)
+                    .text_size(theme.z(text_size::SMALL))
+                    .child(icon(file_type_icon(&name)).size(14.).color(theme.muted))
+                    .child(div().min_w_0().truncate().child(name))
+                    .child(remove)
+            }
+        });
+        Some(
+            div()
+                .id("agent-dashboard-attachments")
+                .debug_selector(|| "agent-dashboard-attachments".into())
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .items_center()
+                .gap(theme.z(8.))
+                .px(theme.z(16.))
+                .pt(theme.z(14.))
+                .children(items),
+        )
     }
 
     /// Who the composer writes to: the thread's agent, or for a new thread the agent it
@@ -458,6 +535,30 @@ impl AgentDashboard {
                 .child(icon(IconName::ChevronDown).size(12.).color(theme.muted)),
         )
     }
+}
+
+/// The ✕ on an attachment: a small disc that stays readable over a thumbnail.
+fn remove_button(
+    index: usize,
+    attachment: &Attachment,
+    theme: &SopranoTheme,
+    cx: &mut Context<AgentDashboard>,
+) -> impl IntoElement + use<> {
+    let (rest, hover) = (theme.background.opacity(0.8), theme.background);
+    div()
+        .id(("agent-dashboard-attachment-remove", index))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(theme.z(REMOVE_SIZE))
+        .rounded(theme.z(REMOVE_SIZE / 2.))
+        .bg(rest)
+        .cursor_pointer()
+        .hover(move |button| button.bg(hover))
+        .tooltip(tooltip(format!("Remove {}", attachment.name())))
+        .on_click(cx.listener(move |this, _, _, cx| this.remove_attachment(index, cx)))
+        .child(icon(IconName::X).size(10.).color(theme.foreground))
 }
 
 /// The composer's round send button: the accent disc while there is something to send, faint

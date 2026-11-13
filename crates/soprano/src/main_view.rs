@@ -1337,6 +1337,10 @@ impl MainView {
                 )
             })
             .state(self.services.state.clone())
+            .attachments(
+                soprano_platform::paths::data_dir(&soprano_platform::AppIdentity::current())
+                    .join(agents_window::ATTACHMENTS_FOLDER),
+            )
             .leading_inset(window_chrome::agents_leading_inset());
         let display = match window.display(cx) {
             Some(display) => window_chrome::frame_of(display.visible_bounds()),

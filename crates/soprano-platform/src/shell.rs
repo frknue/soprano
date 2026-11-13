@@ -1,4 +1,4 @@
-//! The user's login shell.
+//! The user's login shell, and how a word is written for one.
 
 /// The user's shell on Windows: `pwsh.exe` when installed, else `powershell.exe`.
 #[cfg(windows)]
@@ -47,4 +47,50 @@ fn windows_shell() -> String {
 /// The shell's file name without directories: `zsh`, `bash`, `fish`, `pwsh.exe`.
 pub fn shell_name(shell: &str) -> &str {
     shell.rsplit(['/', '\\']).next().unwrap_or(shell)
+}
+
+/// Backslash-escapes every character that would change how a shell splits or expands a word:
+/// how a terminal types a dropped file, and how agents read a path inside a message.
+pub fn shell_escape(value: &str) -> String {
+    const SPECIAL: &str = "\\ ()[]{}<>\"'`!#$&;|*?\t";
+    let mut escaped = String::with_capacity(value.len());
+    for c in value.chars() {
+        if SPECIAL.contains(c) {
+            escaped.push('\\');
+        }
+        escaped.push(c);
+    }
+    escaped
+}
+
+/// A file's path as one word, the way it is typed after a command: backslash-escaped for a
+/// POSIX shell; on Windows, where a backslash separates folders, in double quotes when it
+/// has a space.
+pub fn path_word(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    if !cfg!(windows) {
+        shell_escape(&path)
+    } else if path.contains(' ') {
+        format!("\"{path}\"")
+    } else {
+        path.into_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_escapes_characters_that_would_change_a_command_line() {
+        assert_eq!(
+            shell_escape("/tmp/Screen Shot [draft] #1.png"),
+            "/tmp/Screen\\ Shot\\ \\[draft\\]\\ \\#1.png"
+        );
+    }
+
+    #[test]
+    fn a_backslash_is_escaped_once() {
+        assert_eq!(shell_escape("a\\b"), "a\\\\b");
+    }
 }
