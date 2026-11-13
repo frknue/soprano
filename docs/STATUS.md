@@ -115,6 +115,18 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   Nachricht (`soprano_platform::shell::path_word`), für Terminal-Agenten wie für omp-Chats;
   eingefügte Bilder liegen in `<Datenordner>/attachments/` (TIFF/BMP als PNG), ungesendete
   werden wieder gelöscht. Sichtprüfung: `dashboard_demo -- --snapshot` (`04-composer-attachments`).
+- 2026-11-13: Furkans Fehlerbericht „nach dem Schließen der CLI sieht das Terminal komisch
+  aus“ (p10k: „~/.p10k.zsh was not sourced“, Prompt mit `SIGINT(2)`). Ursache: der Schutz in
+  `resources/…/SopranoZsh/.zshenv` (`trap '' INT` bis zum ersten Prompt) hielt bei
+  Powerlevel10k nicht. Jede p10k-Funktion, zuerst der Instant Prompt am Anfang der `.zshrc`,
+  setzt `trap : INT` und stellt beim Verlassen `trap - INT` her; danach bricht jedes weitere
+  Ctrl+C die `.zshrc` ab. Die `.zshenv` setzt jetzt bis zum ersten Prompt p10ks eigene Marke
+  `__p9k_trapped`, dann lässt p10k INT in Ruhe. Außerhalb der App nachgestellt (echte
+  `.zshrc`, Agent-Kommandozeile im PTY, Ctrl+C alle 100 ms über 1,2 s): vorher 4/4 kaputt,
+  nachher 0/5. Regressionstest in `crates/soprano-launch/tests/launch.rs`. Mit dem
+  Dashboard hat es nichts zu tun, es trifft jeden Agent-Tab. Branch
+  `fix/fallback-shell-p10k` im Worktree `~/git/private/soprano.worktrees/fix-fallback-shell-p10k`
+  (im Haupt-Checkout lief parallel `feat/ui-sdk-spike`).
 
 ## Offen
 

@@ -832,6 +832,30 @@ fi"#;
         assert!(!run.lines.iter().any(|l| l.contains("INT")), "{:?}", run.lines);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_ctrl_c_after_powerlevel10k_ran_still_leaves_the_startup_files_intact() {
+        let spec = agent(&DefaultAgents::omp(), None);
+        // The first function is what every Powerlevel10k function starts with, and its instant
+        // prompt is the first thing in a .zshrc: it leaves SIGINT at its default.
+        let zshrc = r#"if [[ -z $ZSH_EXECUTION_STRING ]]; then
+    () {
+        emulate -L zsh
+        (( $+__p9k_trapped )) || { local -i __p9k_trapped; trap : INT; trap "trap ${(q)__p9k_trapint:--} INT" EXIT }
+    }
+    kill -INT $$
+    echo rc-finished
+    _report() { (( $+__p9k_trapped )) || echo p10k-traps-again; trap; exit }
+    precmd_functions+=(_report)
+fi"#;
+        let Some(run) = run(&spec, &[("omp", "exit 0")], None, "", zshrc, true) else { return };
+        assert!(run.lines.iter().any(|l| l.ends_with("rc-finished")), "{:?}", run.lines);
+        // From the first prompt on Powerlevel10k guards its own functions again, and Ctrl+C
+        // works.
+        assert!(run.lines.iter().any(|l| l == "p10k-traps-again"), "{:?}", run.lines);
+        assert!(!run.lines.iter().any(|l| l.contains("INT")), "{:?}", run.lines);
+    }
+
     #[test]
     fn configured_agent_arguments_are_quoted_through_both_shell_layers() {
         // Both shell layers quote arguments, so a path with spaces survives and command text

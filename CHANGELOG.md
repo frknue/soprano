@@ -286,6 +286,10 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- With Powerlevel10k, pressing `Ctrl+C` again after quitting an agent no longer leaves its
+  pane at a half-loaded zsh ("Powerlevel10k configuration file (~/.p10k.zsh) was not
+  sourced", a `SIGINT(2)` prompt, no aliases). Powerlevel10k's instant prompt switched
+  `Ctrl+C` back on while the rest of your `.zshrc` was still loading.
 - A click into the Agent Dashboard's composer now puts the cursor there. With a thread
   open, the conversation under the composer took the keyboard back, so nothing could be
   typed unless you pressed `Tab` or `R` first; only a new thread's composer worked.

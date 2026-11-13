@@ -16,9 +16,15 @@ fi
 
 if [[ -o 'interactive' ]]; then
     'builtin' 'trap' '' INT
+    # Every Powerlevel10k function, its instant prompt at the top of a .zshrc
+    # first, traps INT while it runs and puts SIGINT back to its default when
+    # it returns, which would end the protection there. It leaves INT alone
+    # while this is set: its own mark that a function further out traps it.
+    'builtin' 'typeset' -gi __p9k_trapped=1
     _soprano_startup_finished() {
         precmd_functions=(${precmd_functions:#_soprano_startup_finished})
         'builtin' 'unfunction' _soprano_startup_finished
+        'builtin' 'unset' __p9k_trapped
         # Hand Ctrl+C back unless a startup file set its own INT trap. `trap`
         # lists nothing inside $(...), so its output goes through a file.
         'builtin' 'local' traps_file="${TMPDIR:-/tmp}/soprano-traps.$$"
