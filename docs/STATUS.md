@@ -126,6 +126,46 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
   nachher 0/5. Regressionstest in `crates/soprano-launch/tests/launch.rs`. Mit dem
   Dashboard hat es nichts zu tun, es trifft jeden Agent-Tab. Auf `main` (`4970013`),
   installiert; in der laufenden App noch nicht geprüft.
+- 2026-11-13: Fehlersuche auf Furkans Bitte („look for other issues“), ohne App-Start: vier
+  Lese-Reviews (Host-Verdrahtung, Modell-Lebenszyklus, Chat-Sitzung, Start/Transkripte), eigene
+  Probe-Tests und PTY-Läufe mit den echten CLIs (ohne Prompt). Behoben, je mit Regressionstest
+  (auf `main`, installiert):
+  - `stopped`-Meldungen: Claude Code meldet nach SIGHUP (Stop/Restart) und bei `/clear`
+    (`SessionEnd`, `reason: clear|resume|other`, im PTY gemessen) `agent-event stopped`; das
+    machte den Agent-Tab zum Terminal. Jetzt: `soprano-ipc` verwirft `SessionEnd` mit
+    `clear`/`resume`; `soprano-notify` ignoriert im eigenen Agent-Tab eine Stop-Meldung, deren
+    Prozess nicht der aktuelle des Tabs ist; `agent_returned_to_shell` lässt einen gestoppten
+    Agent-Tab gestoppt.
+  - Chat-Tab: Composer blockt die Maus wie im Dashboard (`chat_view.rs`);
+    `sync_keyboard_focus` fragt `PaneContent::contains_focused` (Chat: ganzer View statt nur
+    Editor), sonst zog jede Workspace-Änderung den Fokus aus Popover/Timeline in den Composer.
+  - Composer und „Scroll to end“ deckend (GPUI hat kein Blur; 92 % ließen Text durchscheinen).
+  - Dashboard: Fokus weg vom Composer, wenn der offene Thread verschwindet; Stop/Restart aus
+    für Agenten in einem normalen Terminal (`AgentDashboardEntry::owns_tab`); Hinweise für
+    langes Starting (`SLOW_START` 20 s), nicht gestartete Threads und Approval.
+  - Codex-Thread mit erster Nachricht: nach dem Readiness-Fallback `Running` statt `Idle`.
+  - Claude-Transkript: `isCompactSummary` ist keine Nutzernachricht.
+  - omp-Steering: Antwort `promptRequired`/`failed` → Nachricht kommt in die Warteschlange.
+  - Startzeile: `(trap '' INT; "$SOPRANO_BIN" agent-event stopped)`.
+  - Open/Banner/Quit: Hauptfenster nach vorn, Settings zu (`MainView::show_tab`).
+  Ohne Test geblieben, nur gelesen: alles in `MainView` (`sync_keyboard_focus` mit der neuen
+  Abfrage, `show_tab`, `request_quit`). `MainView` lässt sich in Tests nicht bauen, ohne die
+  echte Keychain (`AccountsController::new`) und den echten Datenordner (Automations) anzufassen;
+  getestet ist die Naht darunter (`PaneContent::contains_focused`, `ChatView::contains_focused`).
+- 2026-11-15: Furkan: „ALL agents should be with bypass permissions!“ Jeder von Soprano
+  gestartete Agent bekommt den Schalter seiner CLI (`soprano_launch::approvals`): Claude Code
+  `--dangerously-skip-permissions`, Codex `--dangerously-bypass-approvals-and-sandbox`, omp
+  `--auto-approve` (Chat: `--approval-mode=yolo`), OpenCode `--auto`; lokal, auf Maschinen, bei
+  Resume/Restart. Ohne Ausnahme: nennen die `args` des Agenten einen anderen Modus
+  (`--permission-mode`, `--ask-for-approval`/`-a`, `--sandbox`/`-s`, `--full-auto`,
+  `--approval-mode`), wird die Option entfernt und der Bypass gesetzt (eine erste Fassung mit
+  Ausnahme für solche `args` hätte Automations-Läufe wieder fragen lassen). Ein omp-Overlay
+  mit `tools: approvalMode` bleibt stehen; das Flag überstimmt es (am 2026-11-12 gemessen).
+  `AgentLaunch::skips_approvals`, die omp-Abfrage `config get tools.approvalMode` im Chat-Start
+  und die Abhängigkeit `yaml-rust2` sind entfernt. Nicht
+  erfasst: von Hand getippte Agenten, eigene Agenten, `launchScript`. Geprüft: Tests, und
+  Codex, omp und OpenCode 2.2.6 starten im PTY mit ihrem Schalter (ohne Prompt); OpenCode 1.x
+  mit `--auto` ungeprüft. Auf `main`, installiert.
 
 ## Offen
 
@@ -146,6 +186,28 @@ Herdr (GPUI), alles andere wie die Swift-App: Funktionen, Tastenkürzel, CLI, Um
 - Maschinen: Settings ▸ Machines und Add Machine… in der laufenden App noch nicht angesehen;
   echte Agent-Sitzung mit Banner auf dem Mac mini und eine Maschine mit Passwort nicht getestet.
   OpenCode 2 meldet von Maschinen nichts; Dashboard zeigt dort keine Timeline.
+- Aus der Fehlersuche vom 2026-11-13 offen (Entscheidungen, nichts davon in der laufenden App
+  geprüft):
+  - Antwort aus dem Dashboard, während ein Terminal-Agent auf eine Freigabe wartet, wird samt
+    Return in dessen Dialog getippt (so auch in der Swift-App); bisher nur ein Hinweis.
+  - Nach App-Neustart stehen nicht sichtbare Threads dauerhaft auf Starting, bis man sie öffnet.
+  - Claude Code in einem Ordner ohne Trust: Thread bleibt Starting, erste Nachricht ungesendet.
+  - Restart kurz nach dem Start schickt die erste Nachricht erneut (`AgentInstance.launch` wird
+    nie verbraucht).
+  - Ctrl+Z im Agent-Tab: Startzeile läuft weiter, Agent bleibt suspendiert zurück (zsh und bash
+    im PTY nachgestellt; `while [ -n "$(jobs -s)" ]; do fg; done` hilft in zsh, in bash nicht
+    beim zweiten Mal).
+  - omp-Chat mit Freigaben: zwei gleichzeitige Anfragen, die erste wird als abgelehnt
+    beantwortet (`session.rs` `present`); Dashboard-Antwort während einer Chat-Freigabe wartet
+    stumm in der Warteschlange.
+  - Kleineres: Return im Agent-Terminal setzt Working ohne Prompt; Aliase für Agent-Kommandos
+    greifen nicht (gequotetes Kommandowort); neuer omp-Thread in gelöschtem Ordner verwirft den
+    Entwurf; Thread-Fenster landet in der Automations-Session, wenn die aktiv ist; `⌘Q`
+    mehrfach stapelt Speichern-Fragen; Commands-Menü im Agents-Fenster fast ganz aus;
+    fish/nu/elvish als Login-Shell passen nicht zur Startzeile; Chat stoppen beim Laden lässt
+    den letzten Turn „laufen“; Modellwahl direkt nach Chat-Restart geht verloren.
+  - In Furkans erstem Screenshot sitzt eine kleine Pille am unteren Composer-Rand; in den
+    Snapshots nicht nachstellbar.
 - Anhänge im Dashboard: nur in Tests und im Demo-Snapshot geprüft, nicht in der laufenden App
   (Einfügen eines echten Screenshots, Drop aus dem Finder). Die Zustellung ist außerhalb der
   App geprüft: ein echtes PNG unter einem Pfad mit Leerzeichen, als Nachricht „Frage\n<Pfad mit

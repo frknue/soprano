@@ -231,6 +231,7 @@ fn a_remote_agent_finds_its_integration_files_on_the_machine() {
     let home = tempfile::tempdir().expect("home");
     let machine = Machine::new("box");
     let omp = DefaultAgents::all().into_iter().find(|p| p.id == "omp").expect("omp");
+    let omp = soprano_types::AgentProfile { args: vec!["--approval-mode=always-ask".into()], ..omp };
     let request = AgentRequest::new(&omp, "pane-1", "tab-2");
     let spec = LaunchSpec::remote(
         &context(),
@@ -245,6 +246,10 @@ fn a_remote_agent_finds_its_integration_files_on_the_machine() {
         "tab-2",
     );
     assert_eq!(spec.argv[spec.argv.len() - 2], "box");
+    // Like every agent, it starts with its approval prompts skipped, whatever its arguments
+    // asked for.
+    let script = spec.argv.last().expect("script");
+    assert!(script.contains("--auto-approve") && !script.contains("always-ask"), "{script}");
 
     // omp isn't installed here; the pane still starts, in the home folder, and the extension
     // the command line names is on disk.

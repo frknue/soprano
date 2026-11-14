@@ -337,7 +337,19 @@ impl NotificationManager {
             workspace.attach_agent_if_needed(&event.pane_id, &event.tab_id, profile_id);
         }
 
+        let owns_tab =
+            workspace.tab(&event.pane_id, &event.tab_id).is_some_and(|tab| tab.pane_type == PaneType::Agent);
         let Some(agent) = workspace.agent_mut(&event.pane_id, &event.tab_id) else { return };
+        // A CLI's own shutdown report names its process. In an agent's own tab only the
+        // process the tab runs now can end it: Restart ends a process too, and its report
+        // arrives once the tab has moved on to the next one. The launch line reports a real
+        // exit again, naming no process.
+        if event.state == AgentEventState::Stopped
+            && owns_tab
+            && event.process_id.is_some_and(|process_id| agent.process_id != Some(process_id))
+        {
+            return;
+        }
         if let Some(process_id) = event.process_id
             && event.profile_id.as_deref() == Some(agent.profile_id.as_str())
         {

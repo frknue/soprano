@@ -246,14 +246,12 @@ impl AgentWaitingReason {
     }
 }
 
-/// What Soprano adds to an agent CLI's command line when it starts the agent for someone who
-/// isn't there (automation runs).
+/// What Soprano adds to an agent CLI's command line when it starts the agent with a first
+/// message (automation runs, threads of the Agent Dashboard).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentLaunch {
     pub prompt: String,
     pub model: Option<String>,
-    /// Skip the CLI's approval prompts: nobody is there to answer them.
-    pub skips_approvals: bool,
     /// OpenCode 2 only: start a private server (`--standalone`), the only kind that reads the
     /// run's model from the pane. OpenCode 1.x rejects the flag.
     pub starts_private_server: bool,

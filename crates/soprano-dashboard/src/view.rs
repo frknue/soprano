@@ -434,7 +434,17 @@ impl AgentDashboard {
             draft.layout_generation = layout_generation;
         }
         self.now = now;
+        let had_selection = self.list.selected_id().is_some();
         let selection_moved = self.list.update(entries);
+        // The open thread went away (its agent quit) and another took its place: what is
+        // typed next must not go to that one unasked.
+        if selection_moved
+            && had_selection
+            && self.draft.is_none()
+            && self.editor.focus_handle(cx).contains_focused(window, cx)
+        {
+            window.focus(&self.focus, cx);
+        }
         self.track_transcripts();
         self.draft_when_empty(window, cx);
         self.sync_detail(window, cx);
@@ -1298,7 +1308,7 @@ impl AgentDashboard {
         if self.send_failed.is_some() {
             return (state::SEND_FAILED.to_owned(), true);
         }
-        (state::composer_hint(self.selected(), self.accepts_replies).to_owned(), false)
+        (state::composer_hint(self.selected(), self.accepts_replies, self.now).to_owned(), false)
     }
 }
 

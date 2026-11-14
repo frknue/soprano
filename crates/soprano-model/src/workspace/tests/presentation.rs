@@ -283,6 +283,7 @@ fn an_agent_is_named_by_its_task_over_its_name() {
         session_name: None,
         conversation: None,
         is_chat: false,
+        owns_tab: true,
         branch: None,
         machine: None,
     };

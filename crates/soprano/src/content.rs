@@ -85,6 +85,15 @@ impl PaneContent {
         }
     }
 
+    /// Whether the keyboard is anywhere in this content. A chat's [`Self::focus_handle`] is
+    /// its composer; its popovers and its conversation take the keyboard too.
+    pub fn contains_focused(&self, window: &Window, cx: &App) -> bool {
+        match self {
+            PaneContent::Chat(view) => view.read(cx).contains_focused(window, cx),
+            _ => self.focus_handle(cx).is_some_and(|handle| handle.contains_focused(window, cx)),
+        }
+    }
+
     pub fn focus_handle(&self, cx: &App) -> Option<FocusHandle> {
         match self {
             PaneContent::Terminal(view) => Some(view.focus_handle(cx)),
@@ -382,10 +391,7 @@ impl ContentHost {
 
     /// Whether `handle` belongs to any pane content (a dead pane's focus is reclaimed).
     pub fn owns_focus(&self, window: &Window, cx: &App) -> bool {
-        self.contents
-            .values()
-            .filter_map(|content| content.focus_handle(cx))
-            .any(|handle| handle.contains_focused(window, cx))
+        self.contents.values().any(|content| content.contains_focused(window, cx))
     }
 
     /// New colors for every terminal (the app's theme changed); each keeps its own font size.
@@ -1498,6 +1504,80 @@ pub(crate) mod tests {
             let tab = ws.pane(&pane).and_then(|p| p.active_tab()).map(|t| t.id.clone()).expect("tab");
             TerminalTarget::new(pane, tab)
         })
+    }
+
+    /// An agent that never starts and never answers.
+    struct SilentPeer;
+
+    impl soprano_chat::JsonRpcPeer for SilentPeer {
+        fn start(&mut self, _: soprano_chat::PeerSink) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn request(&mut self, _: &str, _: serde_json::Value) -> Result<u64, soprano_chat::JsonRpcError> {
+            Ok(1)
+        }
+
+        fn notify(&mut self, _: &str, _: serde_json::Value) {}
+
+        fn reply(&mut self, _: serde_json::Value, _: Result<serde_json::Value, soprano_chat::JsonRpcError>) {}
+
+        fn terminate(&mut self) {}
+
+        fn has_exited(&self) -> bool {
+            true
+        }
+    }
+
+    /// Regression: the main view puts the keyboard back on the active pane's content after
+    /// every workspace change unless the content has it, and asked a chat only about its
+    /// composer. A working agent changes the workspace several times a second, so the keyboard
+    /// left the chat's model picker and its conversation mid-key.
+    #[gpui::test]
+    fn a_chat_has_the_keyboard_while_its_conversation_does(cx: &mut TestAppContext) {
+        cx.update(soprano_ui::init_for_tests);
+        let chat: Rc<RefCell<Option<Entity<ChatView>>>> = Rc::default();
+        let stash = chat.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let launch = soprano_chat::AgentChatLaunch {
+                profile_id: "omp".into(),
+                agent_name: "omp".into(),
+                spec: soprano_chat::LaunchSpec {
+                    argv: vec!["omp".into(), "acp".into()],
+                    cwd: "/work/repo".into(),
+                    env: Vec::new(),
+                },
+                tool_style: soprano_chat::AcpToolStyle::Omp,
+            };
+            let session = soprano_chat::AgentChatSession::with_peer_factory(
+                launch,
+                Box::new(|_| Box::new(SilentPeer) as Box<dyn soprano_chat::JsonRpcPeer>),
+            );
+            let view = cx.new(|cx| ChatView::new(session, "omp", window, cx));
+            *stash.borrow_mut() = Some(view.clone());
+            gpui_component::Root::new(view, window, cx)
+        });
+        cx.run_until_parked();
+        let view = chat.borrow().clone().expect("chat");
+        let content = PaneContent::Chat(view.clone());
+
+        cx.update(|window, cx| {
+            let composer = content.focus_handle(cx).expect("composer");
+            window.focus(&composer, cx);
+        });
+        cx.run_until_parked();
+        assert!(cx.update(|window, cx| content.contains_focused(window, cx)));
+
+        cx.update(|window, cx| {
+            let conversation = view.read(cx).timeline().focus_handle(cx);
+            window.focus(&conversation, cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let composer = content.focus_handle(cx).expect("composer");
+            assert!(!composer.contains_focused(window, cx));
+            assert!(content.contains_focused(window, cx));
+        });
     }
 
     #[gpui::test]

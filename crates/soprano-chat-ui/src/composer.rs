@@ -765,7 +765,9 @@ impl Render for ComposerView {
                     .rounded(t.z(16.0))
                     .border_1()
                     .border_color(t.foreground.opacity(if t.is_dark() { 0.05 } else { 0.08 }))
-                    .bg(t.popover.opacity(0.92))
+                    // Opaque: without a blur behind it, the conversation would read through
+                    // the card and run into what is typed.
+                    .bg(t.popover)
                     .when(!t.is_dark(), |surface| surface.shadow_sm())
                     .flex()
                     .flex_col()

@@ -1184,3 +1184,47 @@ fn files_dropped_onto_the_composer_are_attached_and_the_composer_takes_the_keybo
     // The shelf over the editor shows it.
     assert!(cx.debug_bounds("agent-dashboard-attachments").is_some());
 }
+
+#[gpui::test]
+fn when_the_open_thread_goes_away_the_composer_lets_go_of_the_keyboard(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let first = spawn(&mut workspace, "codex", "/tmp/projects/a");
+    let second = spawn(&mut workspace, "claude-code", "/tmp/projects/b");
+    for target in [&first, &second] {
+        set_status(&mut workspace, target, AgentStatus::Waiting);
+    }
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+    click_row(cx, &second);
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input("Half a message for the second thread");
+    assert!(composer_focused(cx, &harness));
+
+    // Its CLI quits: the tab is a plain terminal again and the thread leaves the inbox.
+    change(cx, &harness, |workspace| workspace.agent_returned_to_shell(&second, Some(0)));
+    assert_eq!(selected_target(cx, &harness), Some(first));
+    assert_eq!(composer_text(cx, &harness), "");
+    // What is typed next does not go to the thread that took its place.
+    assert!(!composer_focused(cx, &harness));
+    assert!(list_focused(cx, &harness));
+    cx.simulate_input("x");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    assert!(!harness.events.borrow().iter().any(|event| matches!(event, DashboardEvent::Reply { .. })));
+}
+
+#[gpui::test]
+fn an_agent_typed_into_a_terminal_cannot_be_stopped_or_restarted_from_the_dashboard(cx: &mut TestAppContext) {
+    let mut workspace = Workspace::new();
+    let pane = workspace.active_pane_id().to_owned();
+    let tab =
+        workspace.pane(&pane).and_then(|pane| pane.active_tab()).map(|tab| tab.id.clone()).expect("tab");
+    // `claude` typed into the workspace's first terminal reports in.
+    workspace.attach_agent_if_needed(&pane, &tab, "claude-code");
+    set_status(&mut workspace, &TerminalTarget::new(&pane, &tab), AgentStatus::Running);
+    let (harness, cx) = open(cx, workspace, replying(), 1100., 720.);
+    assert_eq!(harness.dashboard.read_with(cx, |dashboard, _| dashboard.list().len()), 1);
+
+    click(cx, "agent-dashboard-stop");
+    click(cx, "agent-dashboard-restart");
+    assert!(harness.events.borrow().is_empty());
+}

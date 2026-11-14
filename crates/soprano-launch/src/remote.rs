@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use base64::Engine as _;
 use soprano_types::Machine;
 
+use crate::approvals::bypass_approvals;
 use crate::integrations::{
     CodexApprovalSignal, claude_integration_settings, codex_integration_arguments, opencode_config_content,
 };
@@ -257,7 +258,8 @@ impl LaunchSpec {
                 let script = [
                     "trap true INT".to_owned(),
                     command,
-                    "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped".to_owned(),
+                    "test -z \"$SOPRANO_BIN\" || (trap '' INT; \"$SOPRANO_BIN\" agent-event stopped)"
+                        .to_owned(),
                     "unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID".to_owned(),
                     login,
                 ]
@@ -357,6 +359,7 @@ fn agent_command(request: &AgentRequest<'_>, kit: &AgentKit, env: &mut BTreeMap<
         }
         _ => {}
     }
+    bypass_approvals(&profile.id, &mut arguments);
     if let Some(launch) = request.launch {
         arguments.extend(launch_arguments(&profile.id, launch, conversation.is_none()));
     }

@@ -403,7 +403,7 @@ fn automatic_window_titles_stay_unique_within_a_session_and_reset_restores_one()
 // MARK: - Automation runs (AutomationControllerTests, model parts)
 
 fn launch() -> AgentLaunch {
-    AgentLaunch { prompt: "Audit the repo.".into(), skips_approvals: true, ..AgentLaunch::default() }
+    AgentLaunch { prompt: "Audit the repo.".into(), ..AgentLaunch::default() }
 }
 
 #[test]
@@ -568,7 +568,6 @@ fn a_threads_first_message_starts_a_terminal_agent_and_is_left_to_a_chats_sessio
         workspace.tab(&target.pane_id, &target.tab_id).is_some_and(|tab| tab.is_chat())
     };
     assert_eq!(launch(&terminal).map(|launch| launch.prompt).as_deref(), Some("Fix the totals"));
-    assert_eq!(launch(&terminal).map(|launch| launch.skips_approvals), Some(false));
     assert_eq!(launch(&silent), None);
     assert!(!is_chat(&terminal) && !is_chat(&silent));
     assert!(is_chat(&chat));

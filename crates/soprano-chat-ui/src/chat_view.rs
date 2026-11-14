@@ -210,6 +210,13 @@ impl ChatView {
         self.render_scheduled = None;
     }
 
+    /// Whether the keyboard is anywhere in the chat: the composer, one of its popovers, or
+    /// the conversation. [`Focusable::focus_handle`] is only where it goes when the chat gets
+    /// it.
+    pub fn contains_focused(&self, window: &Window, cx: &App) -> bool {
+        self.focus_handle.contains_focused(window, cx)
+    }
+
     /// Gives the composer the keyboard.
     pub fn focus_composer(&self, window: &mut Window, cx: &mut App) {
         let editor = self.composer.read(cx).editor.clone();
@@ -304,14 +311,21 @@ impl Render for ChatView {
             .child(canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {}).absolute().size_full())
             .child(self.timeline.clone())
             .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom(t.z(gutter))
-                    .flex()
-                    .justify_center()
-                    .child(div().w(t.z(composer_width)).child(self.composer.clone())),
+                div().absolute().left_0().right_0().bottom(t.z(gutter)).flex().justify_center().child(
+                    div()
+                        .id("agent-chat-composer")
+                        .w(t.z(composer_width))
+                        // The composer floats over the conversation: a click into it
+                        // must not also land on the turn underneath, which would take
+                        // the keyboard back from the editor. Its pane still becomes the
+                        // active one.
+                        .block_mouse_except_scroll()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|_, _, _, cx| cx.emit(ChatViewEvent::FocusRequested)),
+                        )
+                        .child(self.composer.clone()),
+                ),
             )
     }
 }

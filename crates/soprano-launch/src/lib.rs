@@ -7,6 +7,7 @@
 //! `SopranoResources`, and the child environment and shell integration Ghostty used to add
 //! (`ghostty/src/termio/{Exec,shell_integration}.zig`).
 
+pub mod approvals;
 pub mod chat;
 pub mod command_runner;
 pub mod integrations;
@@ -16,6 +17,7 @@ pub mod resources;
 pub mod shell_integration;
 pub mod spec;
 
+pub use approvals::bypass_approvals;
 pub use chat::ChatLaunch;
 pub use command_runner::{CancelToken, CommandError, CommandResult, CommandRunner, LineHandler, RunOptions};
 pub use quote::{ShellFlavor, shell_quoted};

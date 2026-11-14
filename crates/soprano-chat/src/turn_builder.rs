@@ -109,12 +109,24 @@ impl AcpTurnBuilder {
         self.thread.turns.push(turn);
     }
 
-    /// A message steered into the running turn; a new turn when none runs.
-    pub fn add_steer(&mut self, text: &str, date: Date) {
-        let Some(index) = self.active_turn_index() else { return self.add_prompt(text, date) };
+    /// A message steered into the running turn; a new turn when none runs. Returns the steer's
+    /// id, for [`Self::remove_steer`].
+    pub fn add_steer(&mut self, text: &str, date: Date) -> Option<String> {
+        let Some(index) = self.active_turn_index() else {
+            self.add_prompt(text, date);
+            return None;
+        };
         self.close_chunk(Some(date));
         let id = self.local_id("steer");
-        self.thread.turns[index].steers.push(UserMessage::new(id, text, Some(date)));
+        self.thread.turns[index].steers.push(UserMessage::new(id.clone(), text, Some(date)));
+        Some(id)
+    }
+
+    /// Takes back a steer the agent did not take into its turn.
+    pub fn remove_steer(&mut self, id: &str) {
+        for turn in &mut self.thread.turns {
+            turn.steers.retain(|steer| steer.id != id);
+        }
     }
 
     /// Stop was pressed: the turn says "Stopping…" until it ends.

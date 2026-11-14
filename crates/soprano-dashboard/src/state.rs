@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use soprano_agents::{AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus};
 use soprano_chat::AgentChatConfigOption;
@@ -497,7 +497,10 @@ pub fn timeline_empty_text(entry: &DashboardEntry, has_conversation: bool) -> St
         AgentStatus::Starting if has_conversation || entry.entry.conversation.is_none() => {
             format!("{name} is starting…")
         }
-        AgentStatus::Running if has_conversation => format!("{name} is working…"),
+        // Codex names its conversation only once its first turn has ended.
+        AgentStatus::Running if has_conversation || entry.entry.conversation.is_none() => {
+            format!("{name} is working…")
+        }
         _ if has_conversation => "Send a message to start the conversation.".to_owned(),
         _ if entry.entry.conversation.is_none() => format!("{name} has not started a conversation yet."),
         _ => format!("{name}'s conversation cannot be read here. Open it in its window."),
@@ -515,14 +518,29 @@ pub fn can_reply(entry: Option<&DashboardEntry>, accepts_replies: bool) -> bool 
         })
 }
 
-/// Why the composer cannot send to the thread; empty when it can.
-pub fn composer_hint(entry: Option<&DashboardEntry>, accepts_replies: bool) -> &'static str {
+/// How long an agent may be starting before the composer says to look at it: a CLI that asks
+/// something first (whether to trust the folder, to log in) reports nothing until answered.
+pub const SLOW_START: Duration = Duration::from_secs(20);
+
+/// What the person should know before writing to the thread: why the composer cannot send,
+/// or where what it sends ends up; empty otherwise.
+pub fn composer_hint(entry: Option<&DashboardEntry>, accepts_replies: bool, now: SystemTime) -> &'static str {
     let Some(entry) = entry else { return "" };
+    let approval = entry.waiting_reason == Some(AgentWaitingReason::Approval);
     match entry.entry.status {
         AgentStatus::Stopped => "Restart the agent to message it.",
-        AgentStatus::Starting if accepts_replies => "Waiting for the agent to become ready.",
+        // Nothing runs for it yet: a thread of a restored workspace starts once it is shown.
+        AgentStatus::Starting if !accepts_replies => "Open the agent in its window to start it.",
+        AgentStatus::Starting if now.duration_since(entry.since).is_ok_and(|waited| waited >= SLOW_START) => {
+            "Still starting. Open it in its window: it may be asking something there."
+        }
+        AgentStatus::Starting => "Waiting for the agent to become ready.",
         _ if !accepts_replies && entry.entry.is_chat => "Restart the agent to message it.",
         _ if !accepts_replies => "Open the agent in its window to start it.",
+        // A terminal agent gets the message typed into whatever it shows, then Return.
+        AgentStatus::Waiting if approval && !entry.entry.is_chat => {
+            "Goes into its approval prompt as typed, then Return."
+        }
         _ => "",
     }
 }
@@ -544,11 +562,14 @@ pub struct Controls {
 impl Controls {
     pub fn new(entry: Option<&DashboardEntry>, has_conversation: bool, accepts_replies: bool) -> Self {
         let status = entry.map(|entry| entry.entry.status);
+        let owns_tab = entry.is_some_and(|entry| entry.entry.owns_tab);
         Self {
             details: entry.is_some() && has_conversation,
             open: entry.is_some(),
-            stop: status.is_some_and(|status| status != AgentStatus::Stopped),
-            restart: status.is_some_and(|status| status != AgentStatus::Starting),
+            // An agent typed into a terminal lives in the person's shell: there is no tab of
+            // its own to end or start again.
+            stop: owns_tab && status.is_some_and(|status| status != AgentStatus::Stopped),
+            restart: owns_tab && status.is_some_and(|status| status != AgentStatus::Starting),
             reply: can_reply(entry, accepts_replies),
         }
     }
@@ -581,6 +602,7 @@ mod tests {
                 session_name: None,
                 conversation: None,
                 is_chat: false,
+                owns_tab: true,
                 branch: None,
                 machine: None,
             },
@@ -888,23 +910,56 @@ mod tests {
     #[test]
     fn the_composer_hint_explains_why_a_message_cannot_be_sent() {
         let thread = |status| entry("a", status);
-        assert_eq!(composer_hint(None, true), "");
-        assert_eq!(composer_hint(Some(&thread(AgentStatus::Waiting)), true), "");
-        assert_eq!(
-            composer_hint(Some(&thread(AgentStatus::Running)), false),
-            "Open the agent in its window to start it."
-        );
+        // `entry` has been in its status since the epoch.
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(5);
+        let hint = |entry: &DashboardEntry, accepts| composer_hint(Some(entry), accepts, now);
+        assert_eq!(composer_hint(None, true, now), "");
+        assert_eq!(hint(&thread(AgentStatus::Waiting), true), "");
+        assert_eq!(hint(&thread(AgentStatus::Running), false), "Open the agent in its window to start it.");
         let mut chat = thread(AgentStatus::Running);
         chat.entry.is_chat = true;
-        assert_eq!(composer_hint(Some(&chat), false), "Restart the agent to message it.");
+        assert_eq!(hint(&chat, false), "Restart the agent to message it.");
+        assert_eq!(hint(&thread(AgentStatus::Starting), true), "Waiting for the agent to become ready.");
+        assert_eq!(hint(&thread(AgentStatus::Stopped), true), "Restart the agent to message it.");
+    }
+
+    #[test]
+    fn a_thread_that_stays_starting_says_where_to_look() {
+        let starting = entry("a", AgentStatus::Starting);
+        // A CLI that asks whether to trust the folder reports nothing until it is answered.
+        let later = SystemTime::UNIX_EPOCH + SLOW_START;
         assert_eq!(
-            composer_hint(Some(&thread(AgentStatus::Starting)), true),
-            "Waiting for the agent to become ready."
+            composer_hint(Some(&starting), true, later),
+            "Still starting. Open it in its window: it may be asking something there."
         );
+        // A thread of a restored workspace has not been started at all, chat or not; Restart
+        // is not offered while it is starting.
+        let mut chat = entry("a", AgentStatus::Starting);
+        chat.entry.is_chat = true;
+        for thread in [&starting, &chat] {
+            assert_eq!(
+                composer_hint(Some(thread), false, later),
+                "Open the agent in its window to start it."
+            );
+        }
+        assert!(!Controls::new(Some(&chat), false, false).restart);
+    }
+
+    #[test]
+    fn a_reply_to_a_terminal_agent_that_asks_for_approval_says_where_it_goes() {
+        let now = SystemTime::UNIX_EPOCH;
+        let mut asking = entry("a", AgentStatus::Waiting);
+        asking.waiting_reason = Some(AgentWaitingReason::Approval);
         assert_eq!(
-            composer_hint(Some(&thread(AgentStatus::Stopped)), true),
-            "Restart the agent to message it."
+            composer_hint(Some(&asking), true, now),
+            "Goes into its approval prompt as typed, then Return."
         );
+        // A chat's approval is answered in its own panel; a finished turn takes a message.
+        asking.entry.is_chat = true;
+        assert_eq!(composer_hint(Some(&asking), true, now), "");
+        let mut done = entry("a", AgentStatus::Waiting);
+        done.waiting_reason = Some(AgentWaitingReason::TurnEnded);
+        assert_eq!(composer_hint(Some(&done), true, now), "");
     }
 
     #[test]
@@ -925,6 +980,8 @@ mod tests {
         assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Starting), false), "Codex is starting…");
         assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Starting), true), "Codex is starting…");
         assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Running), true), "Codex is working…");
+        // Codex names its conversation once its first turn has ended.
+        assert_eq!(timeline_empty_text(&entry("a", AgentStatus::Running), false), "Codex is working…");
         let mut unreadable = entry("a", AgentStatus::Running);
         unreadable.entry.conversation = Some(soprano_types::AgentConversation::new("c1"));
         assert_eq!(
@@ -941,6 +998,11 @@ mod tests {
         assert!(starting.stop && !starting.restart && starting.details);
         let none = Controls::new(None, true, true);
         assert!(!none.open && !none.stop && !none.restart && !none.details && !none.reply);
+        // An agent typed into a terminal has no tab of its own to stop or start again.
+        let mut typed = entry("a", AgentStatus::Running);
+        typed.entry.owns_tab = false;
+        let typed = Controls::new(Some(&typed), true, true);
+        assert!(!typed.stop && !typed.restart && typed.open && typed.reply);
     }
 
     #[test]

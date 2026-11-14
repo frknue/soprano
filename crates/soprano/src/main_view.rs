@@ -736,6 +736,11 @@ impl MainView {
     /// Quit (⌘Q, the menu, closing the main window): asks about every unsaved document first.
     pub fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let documents = self.documents(cx).read(cx).store().unsaved_when_closing_all();
+        if !documents.is_empty() {
+            // The question shows in this window: quitting from the Agents window must not leave
+            // it waiting behind that one.
+            window.activate_window();
+        }
         self.ask_to_save(documents, Box::new(|_, _, cx| cx.quit()), window, cx);
     }
 
@@ -1394,10 +1399,7 @@ impl MainView {
             DashboardEvent::Open(target) => {
                 // The agent shows in the main window, which comes forward; the Agents window
                 // stays where it is.
-                self.close_page(false, window, cx);
-                self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, true));
-                window.activate_window();
-                self.sync_keyboard_focus(window, cx);
+                self.show_tab(target, true, window, cx);
             }
             DashboardEvent::Stop(target) => self.workspace.update(cx, |ws| ws.stop_agent(target)),
             DashboardEvent::Restart(target) => self.workspace.update(cx, |ws| ws.restart_agent(target)),
@@ -1714,13 +1716,32 @@ impl MainView {
     fn banner_clicked(&mut self, click: BannerClick, window: &mut Window, cx: &mut Context<Self>) {
         cx.activate(true);
         match click {
-            BannerClick::Tab(target) => {
-                self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, false));
-                self.close_page(false, window, cx);
-                self.sync_keyboard_focus(window, cx);
+            BannerClick::Tab(target) => self.show_tab(&target, false, window, cx),
+            BannerClick::AutomationRun(run_id) => {
+                // The run opens in this window, which may be behind the Agents window.
+                window.activate_window();
+                self.run(Command::OpenAutomationRun(run_id), window, cx)
             }
-            BannerClick::AutomationRun(run_id) => self.run(Command::OpenAutomationRun(run_id), window, cx),
         }
+    }
+
+    /// Shows `target`'s tab to the person who asked for it from outside the panes (the Agents
+    /// window's Open, a banner): this window comes in front of the Agents window, whatever
+    /// covers the panes (a page, Settings) closes, and the tab gets the keyboard even when the
+    /// file explorer had it.
+    fn show_tab(
+        &mut self,
+        target: &TerminalTarget,
+        reveal_in_sidebar: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings = None;
+        self.close_page(false, window, cx);
+        self.workspace.update(cx, |ws| ws.focus_tab(&target.pane_id, &target.tab_id, reveal_in_sidebar));
+        window.activate_window();
+        self.return_keyboard_focus_to_panes(window, cx);
+        cx.notify();
     }
 
     // MARK: - Settings, theme, window
@@ -1962,13 +1983,16 @@ impl MainView {
             return;
         }
         let pane_id = self.workspace.read(cx).active_pane_id().to_owned();
-        let Some(handle) = content.active_content(&pane_id, cx).and_then(|c| c.focus_handle(cx)) else {
+        let active = content.active_content(&pane_id, cx);
+        let Some(handle) = active.and_then(|c| c.focus_handle(cx)) else {
             if window.focused(cx).is_none() {
                 window.focus(&self.focus, cx);
             }
             return;
         };
-        if !handle.contains_focused(window, cx) {
+        // A working agent changes the workspace several times a second: the keyboard stays
+        // where it is inside the content (a chat's model picker, its conversation).
+        if !active.is_some_and(|content| content.contains_focused(window, cx)) {
             match content.active_content(&pane_id, cx) {
                 Some(PaneContent::Browser(browser)) => {
                     let browser = browser.clone();

@@ -661,6 +661,42 @@ fn a_chip_closes_its_own_popover_and_the_editor_gets_the_keyboard_back(cx: &mut 
 }
 
 #[gpui::test]
+fn the_keyboard_in_a_popover_or_the_conversation_is_still_in_the_chat(cx: &mut TestAppContext) {
+    // The app puts the keyboard back on a pane's content whenever the workspace changes, which
+    // a working agent causes several times a second: a chat whose model picker or conversation
+    // has the keyboard must count as having it, or what is typed there lands in the composer.
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+    let in_chat =
+        |cx: &mut VisualTestContext| cx.update(|window, cx| chat.view.read(cx).contains_focused(window, cx));
+    let in_editor = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            use gpui::Focusable as _;
+            chat.view.read(cx).focus_handle(cx).contains_focused(window, cx)
+        })
+    };
+    chat.focus_composer(cx);
+    assert!(in_chat(cx) && in_editor(cx));
+
+    let composer = cx.update(|_, cx| chat.view.read(cx).composer().clone());
+    cx.update(|window, cx| {
+        composer.update(cx, |c, cx| c.toggle_popover(crate::PopoverKind::Model, window, cx))
+    });
+    cx.run_until_parked();
+    assert!(!in_editor(cx));
+    assert!(in_chat(cx));
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+
+    cx.simulate_click(point(px(500.), px(200.)), Modifiers::none());
+    cx.run_until_parked();
+    assert!(!in_editor(cx));
+    assert!(in_chat(cx));
+}
+
+#[gpui::test]
 fn opening_a_step_during_a_running_turn_keeps_following(cx: &mut TestAppContext) {
     let (chat, cx) = open_chat(cx);
     chat.start(cx);
@@ -738,4 +774,38 @@ fn the_pointer_over_the_work_log_shows_its_times_and_the_chat_stays_up(cx: &mut 
         y += px(6.);
     }
     assert_eq!(work_rows(&chat, cx), shown);
+}
+
+#[gpui::test]
+fn a_click_into_the_composer_over_the_conversation_gives_it_the_keyboard(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+    chat.type_text("hi", cx);
+    // Somewhere else first: the conversation takes the keyboard for its own keys.
+    cx.simulate_click(point(px(500.), px(200.)), Modifiers::none());
+    cx.run_until_parked();
+    chat.events.borrow_mut().clear();
+
+    // The composer floats over the conversation's end.
+    let surface = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).anchors.surface.get());
+    cx.simulate_click(point(surface.origin.x + px(60.), surface.origin.y + px(28.)), Modifiers::none());
+    cx.run_until_parked();
+    let focused = cx.update(|window, cx| {
+        use gpui::Focusable as _;
+        let editor = chat.view.read(cx).composer().read(cx).editor.clone();
+        editor.focus_handle(cx).contains_focused(window, cx)
+    });
+    assert!(focused);
+    // The click still makes its pane the active one.
+    assert!(matches!(chat.events.borrow().as_slice(), [ChatViewEvent::FocusRequested]));
+
+    // Keys that are not letters reach the editor too.
+    cx.write_to_clipboard(gpui::ClipboardItem::new_string(" there".into()));
+    cx.simulate_keystrokes("cmd-v");
+    assert_eq!(chat.composer_text(cx), "hi there");
+    cx.simulate_keystrokes("backspace enter");
+    settle(cx);
+    assert_eq!(chat.agent.sent_prompts(), ["session/prompt: hi ther"]);
 }

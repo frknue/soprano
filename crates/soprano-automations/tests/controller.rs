@@ -224,11 +224,7 @@ fn a_manual_run_opens_its_agent_in_the_automations_session_without_switching_to_
     assert_eq!(fixture.host.started, std::slice::from_ref(&target));
     assert_eq!(
         agent.launch,
-        Some(AgentLaunch {
-            prompt: "Audit the repo.".into(),
-            skips_approvals: true,
-            ..AgentLaunch::default()
-        })
+        Some(AgentLaunch { prompt: "Audit the repo.".into(), ..AgentLaunch::default() })
     );
     assert_eq!(agent.automation_run_id.as_deref(), Some(run.id.as_str()));
     assert_eq!(run.trigger, RunTrigger::Manual);

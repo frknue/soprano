@@ -362,7 +362,6 @@ impl AutomationController {
         let launch = AgentLaunch {
             prompt: String::new(),
             model: automation.as_ref().and_then(|a| a.model.clone()),
-            skips_approvals: true,
             ..AgentLaunch::default()
         };
         let Some(target) =
@@ -701,7 +700,6 @@ impl AutomationController {
         let launch = AgentLaunch {
             prompt: automation.prompt.clone(),
             model: automation.model.clone(),
-            skips_approvals: true,
             starts_private_server: preparation.starts_open_code_server,
             model_agents: preparation.open_code_agents.clone(),
         };

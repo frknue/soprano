@@ -21,6 +21,9 @@ struct FakeState {
     holds_settings: bool,
     /// A reopened conversation reports its settings, as omp does.
     load_reports_settings: bool,
+    /// What `_session/steering` answers instead of an empty result: omp's `promptRequired` or
+    /// `failed` when it does not take the message into the running turn.
+    steering_outcome: Option<&'static str>,
     prompts: Vec<u64>,
     next_id: u64,
     next_request_id: u64,
@@ -134,6 +137,9 @@ impl JsonRpcPeer for FakeAgent {
                 Err,
             )),
             "session/set_config_option" if state.holds_settings => None,
+            "_session/steering" if state.steering_outcome.is_some() => {
+                Some(Ok(json!({"outcome": state.steering_outcome, "queue": []})))
+            }
             "session/prompt" => {
                 state.prompts.push(id);
                 None
@@ -313,6 +319,28 @@ fn steering_sends_into_the_running_turn_and_escape_cancels_it() {
     assert_eq!(session.phase(), &ChatPhase::Ready);
     assert_eq!(session.thread().turns.last().map(|t| t.status), Some(TurnStatus::Interrupted));
     assert_eq!(session.thread().turns.last().and_then(|t| t.stop_requested_at), None);
+}
+
+#[test]
+fn a_message_the_agent_does_not_take_into_the_running_turn_is_sent_after_it() {
+    // omp answers a steer it cannot place (its `/compact` runs outside a prompt, a turn is
+    // just ending) with a result that asks for an ordinary prompt.
+    for outcome in ["promptRequired", "failed"] {
+        let (mut session, agent, _) = started();
+        agent.state().steering_outcome = Some(outcome);
+        session.send("Refactor");
+        settle(&mut session);
+
+        assert!(session.steer("Keep the tests"));
+        settle(&mut session);
+        // Not shown as part of the turn it never reached, and not lost.
+        assert_eq!(session.thread().turns.last().map(|turn| turn.steers.len()), Some(0), "{outcome}");
+        assert_eq!(session.queued_prompts(), vec!["Keep the tests".to_owned()], "{outcome}");
+
+        agent.end_turn("end_turn");
+        settle(&mut session);
+        assert_eq!(agent.sent_prompts(), vec![json!("Refactor"), json!("Keep the tests")], "{outcome}");
+    }
 }
 
 #[test]

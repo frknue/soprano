@@ -60,11 +60,13 @@ fn fallback() -> String {
 
 fn tail() -> String {
     format!(
-        "test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped; \
+        "test -z \"$SOPRANO_BIN\" || (trap '' INT; \"$SOPRANO_BIN\" agent-event stopped); \
          unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID; {}",
         fallback()
     )
 }
+
+const CODEX_BYPASS: &str = "'--dangerously-bypass-approvals-and-sandbox'";
 
 const CODEX_HOOKS: &str = "'-c' 'notify=[\"/opt/soprano/bin/soprano\",\"agent-event\",\"needs-input\",\"--notify\",\
      \"--title\",\"Codex\",\"--body\",\"Response ready\"]' '-c' 'tui.notifications=[\"approval-requested\"]' \
@@ -109,7 +111,7 @@ fn codex_starts_through_the_login_shell_with_its_notify_and_approval_hooks() {
         vec![
             "/bin/zsh".to_owned(),
             "-lic".into(),
-            format!("trap true INT; 'codex' {CODEX_HOOKS}; {}", tail())
+            format!("trap true INT; 'codex' {CODEX_HOOKS} {CODEX_BYPASS}; {}", tail())
         ]
     );
     assert_eq!(spec.env, pane_env(&[("SOPRANO_AGENT_PROFILE", "codex"), ("SOPRANO_AGENT_NAME", "Codex")]));
@@ -123,12 +125,7 @@ fn a_resumed_codex_automation_in_a_chosen_account_keeps_its_autonomy_but_not_its
     let profile = DefaultAgents::codex();
     let conversation =
         AgentConversation { cwd: Some("/tmp/repo".into()), ..AgentConversation::new("saved-chat") };
-    let launch = AgentLaunch {
-        prompt: "Audit".into(),
-        model: Some("gpt-5".into()),
-        skips_approvals: true,
-        ..Default::default()
-    };
+    let launch = AgentLaunch { prompt: "Audit".into(), model: Some("gpt-5".into()), ..Default::default() };
     let accounts =
         AccountAdjustments { environment: env_of(&[("CODEX_HOME", "/acc/codex")]), arguments: vec![] };
     let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
@@ -140,7 +137,7 @@ fn a_resumed_codex_automation_in_a_chosen_account_keeps_its_autonomy_but_not_its
         spec.argv[2],
         format!(
             "trap true INT; export CODEX_HOME='/acc/codex'; 'codex' 'resume' 'saved-chat' {CODEX_HOOKS} \
-             '--model' 'gpt-5' '--dangerously-bypass-approvals-and-sandbox'; {}",
+             {CODEX_BYPASS} '--model' 'gpt-5'; {}",
             tail()
         )
     );
@@ -160,19 +157,15 @@ fn a_resumed_codex_automation_in_a_chosen_account_keeps_its_autonomy_but_not_its
 #[test]
 fn claude_code_gets_its_hooks_as_launch_scoped_settings_and_an_automation_prompt_after_the_options() {
     let profile = DefaultAgents::claude_code();
-    let launch = AgentLaunch {
-        prompt: "  Fix it\n".into(),
-        model: Some("opus".into()),
-        skips_approvals: true,
-        ..Default::default()
-    };
+    let launch =
+        AgentLaunch { prompt: "  Fix it\n".into(), model: Some("opus".into()), ..Default::default() };
     let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
     request.launch = Some(&launch);
     let spec = LaunchSpec::for_agent(&context("/bin/zsh"), &request);
     assert_eq!(
         spec.argv[2],
         format!(
-            "trap true INT; 'claude' '--settings' '{}' '--model' 'opus' '--dangerously-skip-permissions' \
+            "trap true INT; 'claude' '--settings' '{}' '--dangerously-skip-permissions' '--model' 'opus' \
              '--' 'Fix it'; {}",
             claude_settings(),
             tail()
@@ -187,7 +180,8 @@ fn claude_code_gets_its_hooks_as_launch_scoped_settings_and_an_automation_prompt
     assert_eq!(
         resumed.argv[2],
         format!(
-            "trap true INT; 'claude' '--resume' 'saved-chat' '--settings' '{}'; {}",
+            "trap true INT; 'claude' '--resume' 'saved-chat' '--settings' '{}' \
+             '--dangerously-skip-permissions'; {}",
             claude_settings(),
             tail()
         )
@@ -200,7 +194,6 @@ fn opencode_loads_both_plugins_from_its_environment_and_takes_the_run_model_inli
     let launch = AgentLaunch {
         prompt: "Do it".into(),
         model: Some("a/b".into()),
-        skips_approvals: true,
         starts_private_server: true,
         model_agents: vec!["build".into()],
     };
@@ -209,7 +202,7 @@ fn opencode_loads_both_plugins_from_its_environment_and_takes_the_run_model_inli
     let spec = LaunchSpec::for_agent(&context("/bin/zsh"), &request);
     assert_eq!(
         spec.argv[2],
-        format!("trap true INT; 'opencode' '--standalone' '--auto' '--prompt=Do it'; {}", tail())
+        format!("trap true INT; 'opencode' '--auto' '--standalone' '--prompt=Do it'; {}", tail())
     );
     let plugin_url = format!("file://{}/SopranoOpenCodePlugin.js", bundle());
     assert_eq!(
@@ -228,19 +221,17 @@ fn opencode_loads_both_plugins_from_its_environment_and_takes_the_run_model_inli
     );
 
     let resumed = agent(&profile, Some(&AgentConversation::new("saved-chat")));
-    assert_eq!(resumed.argv[2], format!("trap true INT; 'opencode' '--session' 'saved-chat'; {}", tail()));
+    assert_eq!(
+        resumed.argv[2],
+        format!("trap true INT; 'opencode' '--session' 'saved-chat' '--auto'; {}", tail())
+    );
 }
 
 #[test]
 fn omp_gets_its_extension_and_the_accounts_preference_overlay() {
     let profile = DefaultAgents::omp();
     let conversation = AgentConversation::new("saved-chat");
-    let launch = AgentLaunch {
-        prompt: "Go".into(),
-        model: Some("x".into()),
-        skips_approvals: true,
-        ..Default::default()
-    };
+    let launch = AgentLaunch { prompt: "Go".into(), model: Some("x".into()), ..Default::default() };
     let accounts = AccountAdjustments {
         environment: BTreeMap::new(),
         arguments: vec!["--config".into(), "/acc/omp.yml".into()],
@@ -254,7 +245,7 @@ fn omp_gets_its_extension_and_the_accounts_preference_overlay() {
         spec.argv[2],
         format!(
             "trap true INT; 'omp' '--resume' 'saved-chat' '--extension' '{}/SopranoOmpExtension.js' \
-             '--config' '/acc/omp.yml' '--model=x' '--auto-approve'; {}",
+             '--config' '/acc/omp.yml' '--auto-approve' '--model=x'; {}",
             bundle(),
             tail()
         )
@@ -271,7 +262,11 @@ fn omp_gets_its_extension_and_the_accounts_preference_overlay() {
     let fresh = agent(&profile, None);
     assert_eq!(
         fresh.argv[2],
-        format!("trap true INT; 'omp' '--extension' '{}/SopranoOmpExtension.js'; {}", bundle(), tail())
+        format!(
+            "trap true INT; 'omp' '--extension' '{}/SopranoOmpExtension.js' '--auto-approve'; {}",
+            bundle(),
+            tail()
+        )
     );
 }
 
@@ -316,7 +311,7 @@ fn powershell_runs_the_agent_and_stays_open_afterwards() {
             "-NoExit".into(),
             "-Command".into(),
             format!(
-                "$env:CODEX_HOME = 'C:\\acc\\it''s'; & 'codex' {hooks}; \
+                "$env:CODEX_HOME = 'C:\\acc\\it''s'; & 'codex' {hooks} {CODEX_BYPASS}; \
                  if ($env:SOPRANO_BIN) {{ & $env:SOPRANO_BIN agent-event stopped }}; \
                  Remove-Item -ErrorAction SilentlyContinue Env:SOPRANO_AGENT_PROFILE, Env:SOPRANO_AGENT_NAME, \
                  Env:SOPRANO_RESUME_SESSION_ID"
@@ -519,25 +514,115 @@ fn opencode_terminal_plugins_from_cli_json_keep_loading_beside_sopranos_and_an_i
 }
 
 #[test]
+fn every_agent_starts_with_its_approval_prompts_skipped() {
+    let started = |profile: &AgentProfile, conversation: Option<&AgentConversation>| {
+        command(&agent(profile, conversation))
+    };
+    let saved = AgentConversation::new("0199a1b2-c3d4");
+    for (profile, flag) in [
+        (DefaultAgents::claude_code(), "'--dangerously-skip-permissions'"),
+        (DefaultAgents::codex(), "'--dangerously-bypass-approvals-and-sandbox'"),
+        (DefaultAgents::omp(), "'--auto-approve'"),
+        (DefaultAgents::open_code(), "'--auto'"),
+    ] {
+        // A tab opened by hand, a thread, a resumed conversation: every start.
+        for conversation in [None, Some(&saved)] {
+            let line = started(&profile, conversation);
+            assert_eq!(line.matches(flag).count(), 1, "{}: {line}", profile.id);
+        }
+    }
+    // An agent Soprano does not know gets nothing added.
+    let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
+    assert!(started(&custom, None).contains("'aider';"));
+}
+
+#[test]
+fn an_approval_mode_in_an_agents_own_arguments_gives_way_to_the_bypass() {
+    // Every agent bypasses, also one whose `args` ask for something stricter: the stricter
+    // option goes (most CLIs refuse it beside the bypass) and the rest of the arguments stay.
+    let launch = AgentLaunch { prompt: "Audit".into(), ..Default::default() };
+    let started = |profile: AgentProfile, arguments: &[&str], unattended: bool| {
+        let profile = AgentProfile { args: arguments.iter().map(|a| a.to_string()).collect(), ..profile };
+        let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
+        // An automation run, where nobody is there to answer.
+        request.launch = unattended.then_some(&launch);
+        command(&LaunchSpec::for_agent(&context("/bin/zsh"), &request))
+    };
+    for (profile, arguments, kept, bypass) in [
+        (
+            DefaultAgents::claude_code(),
+            &["--permission-mode", "plan", "--verbose"][..],
+            "'claude' '--verbose' '--settings'",
+            "'--dangerously-skip-permissions'",
+        ),
+        (
+            DefaultAgents::claude_code(),
+            &["--verbose", "--permission-mode=default"],
+            "'claude' '--verbose' '--settings'",
+            "'--dangerously-skip-permissions'",
+        ),
+        (
+            DefaultAgents::codex(),
+            &["--ask-for-approval", "on-request", "-s", "workspace-write", "--search"],
+            "'codex' '--search' '-c'",
+            "'--dangerously-bypass-approvals-and-sandbox'",
+        ),
+        (
+            DefaultAgents::codex(),
+            &["--full-auto", "-a=untrusted", "--search"],
+            "'codex' '--search' '-c'",
+            "'--dangerously-bypass-approvals-and-sandbox'",
+        ),
+        (
+            DefaultAgents::omp(),
+            &["--approval-mode=always-ask", "--model=x"],
+            "'omp' '--model=x' '--extension'",
+            "'--auto-approve'",
+        ),
+        (
+            DefaultAgents::omp(),
+            &["--approval-mode", "write", "--model=x"],
+            "'omp' '--model=x' '--extension'",
+            "'--auto-approve'",
+        ),
+    ] {
+        for unattended in [false, true] {
+            let line = started(profile.clone(), arguments, unattended);
+            assert!(line.contains(kept), "{}: {line}", profile.id);
+            assert_eq!(line.matches(bypass).count(), 1, "{}: {line}", profile.id);
+        }
+    }
+    // Naming the bypass itself does not double it.
+    for (profile, flag) in [
+        (DefaultAgents::claude_code(), "--dangerously-skip-permissions"),
+        (DefaultAgents::codex(), "--dangerously-bypass-approvals-and-sandbox"),
+        (DefaultAgents::omp(), "--auto-approve"),
+        (DefaultAgents::open_code(), "--auto"),
+    ] {
+        let line = started(profile.clone(), &[flag], false);
+        assert_eq!(line.matches(&format!("'{flag}'")).count(), 1, "{}: {line}", profile.id);
+    }
+}
+
+#[test]
 fn a_prompt_that_starts_like_an_option_is_passed_after_the_end_of_options() {
     let launch = AgentLaunch {
         prompt: "- check the PRs\n- report".into(),
         model: Some("opus".into()),
-        skips_approvals: true,
         starts_private_server: true,
         model_agents: vec![],
     };
     assert_eq!(
         launch_arguments("claude-code", &launch, true),
-        vec!["--model", "opus", "--dangerously-skip-permissions", "--", "- check the PRs\n- report"]
+        vec!["--model", "opus", "--", "- check the PRs\n- report"]
     );
     assert_eq!(
         launch_arguments("omp", &launch, true),
-        vec!["--model=opus", "--auto-approve", "--", "- check the PRs\n- report"]
+        vec!["--model=opus", "--", "- check the PRs\n- report"]
     );
     assert_eq!(
         launch_arguments("opencode", &launch, true),
-        vec!["--standalone", "--auto", "--prompt=- check the PRs\n- report"]
+        vec!["--standalone", "--prompt=- check the PRs\n- report"]
     );
 }
 
@@ -569,8 +654,7 @@ fn a_first_message_reaches_exactly_the_agents_that_say_they_take_one() {
 #[test]
 fn a_resumed_run_keeps_its_autonomy_but_is_not_given_its_prompt_again() {
     let profile = DefaultAgents::codex();
-    let launch =
-        AgentLaunch { prompt: "Audit the repo.".into(), skips_approvals: true, ..Default::default() };
+    let launch = AgentLaunch { prompt: "Audit the repo.".into(), ..Default::default() };
     let conversation =
         AgentConversation { cwd: Some("/tmp".into()), ..AgentConversation::new("0199a1b2-c3d4") };
     let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
@@ -830,6 +914,28 @@ fi"#;
         assert!(run.lines.iter().any(|l| l == "zdotdir-restored"), "{:?}", run.lines);
         // Ctrl+C works again once the prompt is up.
         assert!(!run.lines.iter().any(|l| l.contains("INT")), "{:?}", run.lines);
+    }
+
+    #[test]
+    fn a_ctrl_c_while_the_agents_exit_is_reported_does_not_lose_the_report() {
+        // Agents are quit with Ctrl+C, often held: the report runs with SIGINT ignored, or the
+        // tab would stay an agent whose prompt is a shell's.
+        let spec = agent(&DefaultAgents::omp(), None);
+        let Some(run) = run(
+            &spec,
+            &[
+                ("omp", "exit 0"),
+                // What ignoring SIGINT looks like from inside: the signal sent to itself is lost.
+                ("soprano-stub", "kill -INT $$; echo \"reported $*\""),
+            ],
+            Some("soprano-stub"),
+            "",
+            "",
+            false,
+        ) else {
+            return;
+        };
+        assert_eq!(run.lines, vec!["reported agent-event stopped"]);
     }
 
     #[cfg(target_os = "macos")]

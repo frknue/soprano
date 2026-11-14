@@ -419,6 +419,16 @@ the agent shuts down cannot leave the pane without your theme and plugins.
 Agents wait for your next input; closing the app does not keep their processes working
 in the background.
 
+Soprano starts every agent with its approval prompts skipped ("bypass permissions"):
+Claude Code with `--dangerously-skip-permissions`, Codex with
+`--dangerously-bypass-approvals-and-sandbox`, omp with `--auto-approve` (its chats with
+`--approval-mode=yolo`), and OpenCode with `--auto`. That holds for tabs you open, threads
+from the Agent Dashboard, automation runs, restarts, and agents on other machines, with
+no exception: an approval option in such an agent's `args` (`--permission-mode`,
+`--ask-for-approval`, `--sandbox`, `--approval-mode`) is replaced by the bypass. Only
+what Soprano does not start this way keeps its own behavior: an agent you type into a
+terminal yourself, an agent with an id of your own, and one started by a `launchScript`.
+
 Conversation IDs are recorded per tab, so two agents in the same project resume their
 own conversations. Claude Code reports its ID through launch-scoped lifecycle hooks;
 OpenCode reports its main conversation through the bundled plugin. Codex records its ID
@@ -520,7 +530,8 @@ lifecycle events as pane headers and notifications.
 
 The open thread is a chat: a header with `project / task`, its status, where it runs
 (click to open it in its window), and buttons for the detailed work log, **Restart**,
-**Stop**, and **Open**. For a Claude Code, Codex, OpenCode, or omp agent the conversation
+**Stop**, and **Open**. Restart and Stop act on an agent in its own tab; for one you typed
+into a terminal they are off, since that tab is your shell. For a Claude Code, Codex, OpenCode, or omp agent the conversation
 reads like the [chat](#agent-chat), from the transcript the agent writes while it runs in
 its pane: your prompts as bubbles, Markdown answers, each turn's work under **Worked
 for** with the diff of every edit, and a card of the files it changed. **Scroll to end**
@@ -603,13 +614,12 @@ The composer floats at the bottom:
   away), `⌘Return` steers it into the running turn, and `Esc` (or the stop button) stops
   the turn. `↑` / `↓` in an empty composer recall earlier messages; `/` lists omp's
   commands and skills.
-- **Approvals:** a chat asks before a tool call exactly when omp in a terminal would: it
-  starts with the approval mode omp resolves (`omp config get tools.approvalMode`; `yolo`,
-  omp's default, asks for nothing). Under a stricter mode the composer shows the command
-  with **Decline**, **Approve**, and **⋯** for **Always allow**; sending a message instead
-  declines and redirects the agent. An `--approval-mode=…` or `--auto-approve` in the omp
-  agent's `args`, or a `--config` overlay there that sets `approvalMode`, wins over the
-  setting; with a `--profile`, that profile's setting is the one read.
+- **Approvals:** a chat asks for nothing: like every agent, omp's chat server starts with
+  its approval prompts skipped (`--approval-mode=yolo`, which also wins over an
+  `--approval-mode` in the omp agent's `args` and over a `--config` overlay that sets
+  `approvalMode`). Should omp ask all the same, the composer shows the command with
+  **Decline**, **Approve**, and **⋯** for **Always allow**; sending a message instead
+  declines and redirects the agent.
 - **Questions:** omp's questions show their choices with `1`–`9`; type your own answer
   instead, or close the question.
 - **Footer:** the model picker, thinking level, and mode omp offers, a ring showing how
@@ -653,9 +663,8 @@ one, and `Esc` steps back to the list and then closes the page. The editor asks 
   through a private server for the run (`--standalone`); OpenCode 1.x through its config.
 
 A run opens its agent in a window of its own in a session named **Automations**,
-without switching to it, and the agent starts with the prompt and with its approval
-prompts skipped — nobody is there to answer them (`--dangerously-skip-permissions`,
-`--dangerously-bypass-approvals-and-sandbox`, `--auto-approve`, `--auto`). Claude Code
+without switching to it, and the agent starts with the prompt and, like every agent,
+with its approval prompts skipped. Claude Code
 asks whether to trust a folder it has not seen even then, so a Claude Code run first
 records its folder as trusted in `~/.claude.json`, as that dialog would. When its
 turn ends the run is **Done**: Soprano keeps the agent's final reply, shows it as

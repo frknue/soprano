@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use soprano_types::{AgentConversation, AgentLaunch, AgentProfile};
 
+use crate::approvals::bypass_approvals;
 use crate::integrations::{
     CodexApprovalSignal, claude_integration_settings, codex_integration_arguments, file_url,
     opencode_cli_config_content, opencode_config_content,
@@ -274,6 +275,9 @@ impl LaunchSpec {
         arguments.extend(accounts.arguments.iter().cloned());
         env.extend(accounts.environment.clone());
 
+        // Before the prompt, which follows the end of options.
+        bypass_approvals(&profile.id, &mut arguments);
+
         if let Some(launch) = request.launch {
             // A resumed conversation already has its prompt.
             arguments.extend(launch_arguments(&profile.id, launch, conversation.is_none()));
@@ -292,8 +296,8 @@ impl LaunchSpec {
     }
 }
 
-/// What an automation run adds to its CLI's command line: the model, the switch that skips
-/// approval prompts, then the prompt as the first message, after `--` so a prompt that starts
+/// What a launch with a first message adds to its CLI's command line (an automation run, a
+/// thread of the Agent Dashboard): the model, then the prompt, after `--` so a prompt that starts
 /// with a dash (a Markdown list) is not read as an option. OpenCode takes its prompt by flag.
 pub fn launch_arguments(profile_id: &str, launch: &AgentLaunch, including_prompt: bool) -> Vec<String> {
     let prompt = if including_prompt { launch.prompt.trim() } else { "" };
@@ -307,16 +311,6 @@ pub fn launch_arguments(profile_id: &str, launch: &AgentLaunch, including_prompt
                     arguments.extend(["--model".to_owned(), model.clone()]);
                 }
             }
-            if launch.skips_approvals {
-                arguments.push(
-                    match profile_id {
-                        "claude-code" => "--dangerously-skip-permissions",
-                        "codex" => "--dangerously-bypass-approvals-and-sandbox",
-                        _ => "--auto-approve",
-                    }
-                    .into(),
-                );
-            }
             if !prompt.is_empty() {
                 arguments.extend(["--".to_owned(), prompt.to_owned()]);
             }
@@ -326,9 +320,6 @@ pub fn launch_arguments(profile_id: &str, launch: &AgentLaunch, including_prompt
             // server reads that: OpenCode 2's shared one never sees the pane.
             if launch.starts_private_server {
                 arguments.push("--standalone".into());
-            }
-            if launch.skips_approvals {
-                arguments.push("--auto".into());
             }
             if !prompt.is_empty() {
                 arguments.push(format!("--prompt={prompt}"));
@@ -368,7 +359,8 @@ pub fn fallback_shell(login_shell: &str, zsh_startup_dir: Option<&std::path::Pat
 /// ambient extension stays quiet under SOPRANO_AGENT_PROFILE, trusting the launcher's
 /// --extension), so the launch identity goes first. The INT trap stops an interactive zsh
 /// from abandoning the rest of the line when Ctrl+C kills the agent; children still get
-/// default SIGINT. Account variables are exported again after the rc files ran, so a profile
+/// default SIGINT, except the exit report, which a Ctrl+C pressed again must not kill: the
+/// tab would stay an agent at a shell's prompt. Account variables are exported again after the rc files ran, so a profile
 /// that sets, say, CODEX_HOME cannot override the chosen account.
 fn agent_argv(ctx: &LaunchContext, command: &[String], accounts: &AccountAdjustments) -> Vec<String> {
     match ctx.flavor() {
@@ -377,7 +369,9 @@ fn agent_argv(ctx: &LaunchContext, command: &[String], accounts: &AccountAdjustm
             script
                 .extend(accounts.environment.iter().map(|(k, v)| format!("export {k}={}", shell_quoted(v))));
             script.push(join_quoted(command, shell_quoted));
-            script.push("test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event stopped".into());
+            script.push(
+                "test -z \"$SOPRANO_BIN\" || (trap '' INT; \"$SOPRANO_BIN\" agent-event stopped)".into(),
+            );
             script.push("unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID".into());
             script.push(fallback_shell(&ctx.login_shell, ctx.resources.zsh_startup_dir().as_deref()));
             vec![ctx.login_shell.clone(), "-lic".into(), script.join("; ")]

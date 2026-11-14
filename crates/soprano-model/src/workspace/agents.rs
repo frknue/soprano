@@ -149,10 +149,13 @@ impl Workspace {
 
     /// The agent is gone but its pane still runs a shell: dedicated agent tabs fall back to
     /// the user's shell after the agent exits. The tab becomes an ordinary terminal, exactly
-    /// like an agent that was typed into one.
+    /// like an agent that was typed into one. A stopped agent's pane has no shell left (Stop
+    /// ended it, or its process exited): it stays the stopped agent that Restart starts again,
+    /// whatever its CLI still reports on the way out.
     pub fn agent_returned_to_shell(&mut self, target: &TerminalTarget, exit_code: Option<i32>) {
         let Some(tab) = self.tab_mut(&target.pane_id, &target.tab_id) else { return };
-        if tab.agent.is_none() {
+        let Some(agent) = &tab.agent else { return };
+        if tab.pane_type == PaneType::Agent && agent.status == AgentStatus::Stopped {
             return;
         }
         tab.pane_type = PaneType::Terminal;
@@ -290,7 +293,9 @@ impl Workspace {
         Some(AgentReadinessGeneration { target: target.clone(), value })
     }
 
-    /// Marks the agent ready when `generation` is still current and the agent still starting.
+    /// Marks the agent ready when `generation` is still current and the agent still starting:
+    /// idle, or at work when it started with a message of a new conversation on its command
+    /// line (it reports the end of that turn, not its start).
     pub fn mark_agent_ready_if_starting(&mut self, generation: &AgentReadinessGeneration) {
         if self.active_agent_readiness_generations.get(&generation.target) != Some(&generation.value) {
             return;
@@ -301,7 +306,9 @@ impl Workspace {
         if agent.status != AgentStatus::Starting {
             return;
         }
-        agent.status = AgentStatus::Idle;
+        let has_first_message = agent.conversation.is_none()
+            && agent.launch.as_ref().is_some_and(|launch| !launch.prompt.trim().is_empty());
+        agent.status = if has_first_message { AgentStatus::Running } else { AgentStatus::Idle };
         self.notify_model(false);
     }
 

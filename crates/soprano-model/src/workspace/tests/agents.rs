@@ -283,6 +283,19 @@ fn duplicate_tab_ids_across_panes_keep_distinct_exact_targets() {
 // MARK: - Codex readiness
 
 #[test]
+fn a_codex_thread_started_with_a_message_is_working_once_codex_is_up() {
+    // Codex reports the end of a turn, never its start: the message went out on its command
+    // line, so nothing typed marks it running either.
+    let mut workspace = Workspace::new();
+    let target = workspace.open_thread("codex", "/tmp/projects/a", Some("Fix the totals")).expect("thread");
+    let generation = workspace.begin_agent_readiness_generation(&target).expect("codex starts");
+
+    workspace.mark_agent_ready_if_starting(&generation);
+
+    assert_eq!(status(&workspace, &target.pane_id, &target.tab_id), Some(AgentStatus::Running));
+}
+
+#[test]
 fn a_restart_supersedes_the_previous_readiness_generation() {
     let mut workspace = Workspace::new();
     let pane = workspace.active_pane_id().to_owned();

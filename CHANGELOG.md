@@ -168,6 +168,15 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the period, `C` / `T` switch Cost / Tokens, `Esc` closes.
 
 ### Changed
+- **Every agent starts with its approval prompts skipped** ("bypass permissions"), not
+  only automation runs: Claude Code (`--dangerously-skip-permissions`), Codex
+  (`--dangerously-bypass-approvals-and-sandbox`), omp (`--auto-approve`, its chats
+  `--approval-mode=yolo`), and OpenCode (`--auto`), in tabs, Agent Dashboard threads,
+  restarts, and on other machines. There is no exception for these agents: an approval
+  option in their `args` (`--permission-mode`, `--ask-for-approval`, `--sandbox`,
+  `--approval-mode`) is replaced by the bypass, and an omp chat no longer reads omp's
+  `tools.approvalMode`. Agents you type into a terminal, agents with an id of your own,
+  and `launchScript` agents are started as you wrote them.
 
 - Soprano is rewritten in Rust with GPUI and Ghostty's terminal core (libghostty-vt), and
   takes [Herdr](https://github.com/herdrdev/herdr-app)'s look: windows and agents listed in
@@ -286,6 +295,45 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Stop** in the Agent Dashboard keeps a Claude Code thread under Stopped, where **Restart**
+  starts it again, and **Restart** keeps it a thread. Claude Code reports its own shutdown
+  on the way out, which turned the tab into a dead plain terminal and took the thread off
+  the dashboard. `/clear` and `/resume` in Claude Code no longer do that either.
+- A click into an agent chat's composer puts the cursor there for every key. With the
+  conversation scrolled behind it, the conversation took the keyboard: letters still
+  arrived, but `⌘V`, `Backspace`, the arrow keys, and `Return` did nothing.
+- Typing in an agent chat's model picker (or its thinking, permissions, or context menu)
+  while any agent is working no longer jumps to the composer, where `Return` sent the
+  half-typed model name to the agent as a message. Keys for the conversation (`J`/`K`,
+  `[`/`]`) keep working while agents are busy, too.
+- The Agent Dashboard's and the agent chat's composer are solid: the conversation no longer
+  shows through and runs into what you type.
+- When the thread open in the Agent Dashboard goes away because its agent quit, the
+  composer lets go of the keyboard instead of sending what you type next to the thread that
+  took its place.
+- **Stop** and **Restart** in the Agent Dashboard are off for an agent you typed into a
+  terminal (`claude`, `codex`, `omp`), where they did nothing: that tab is your shell.
+- A Codex thread started with a first message shows **Working** during its first turn
+  instead of sitting under Ready with "has not started a conversation yet".
+- A thread that stays at Starting says where to look ("Still starting. Open it in its
+  window: it may be asking something there.") — Claude Code asks whether to trust a folder
+  it has not seen before it reports anything — and a thread of a reopened workspace that
+  has not been started says "Open the agent in its window to start it." instead of asking
+  for a Restart that is not offered.
+- While a Claude Code or Codex thread asks for approval, the Agent Dashboard's composer
+  says that your message is typed into that approval prompt, then `Return`.
+- After Claude Code compacts a conversation, the dashboard no longer shows its summary of
+  the earlier conversation as a message you wrote.
+- A message sent into an omp chat's running turn with `⌘Return` (or **send now** on a
+  queued one) that omp does not take in — while it compacts, or as a turn ends — is sent
+  after the turn instead of being shown as delivered and lost.
+- A `Ctrl+C` pressed again at the moment an agent exits can no longer swallow the report
+  of that exit, which left the tab listed as an agent at a shell prompt (a reply from the
+  dashboard was then typed into your shell).
+- **Open** on a thread and a click on an agent's banner bring the main window in front of
+  the Agents window, close Settings if it covers the panes, and give the tab the keyboard
+  even when the file explorer had it. Quitting from the Agents window with unsaved files
+  brings the save question forward instead of leaving it behind that window.
 - With Powerlevel10k, pressing `Ctrl+C` again after quitting an agent no longer leaves its
   pane at a half-loaded zsh ("Powerlevel10k configuration file (~/.p10k.zsh) was not
   sourced", a `SIGINT(2)` prompt, no aliases). Powerlevel10k's instant prompt switched
@@ -294,8 +342,7 @@ the single source of truth for the version shown in **Settings ▸ About**.
   open, the conversation under the composer took the keyboard back, so nothing could be
   typed unless you pressed `Tab` or `R` first; only a new thread's composer worked.
 - An omp chat, and so an omp thread started from the Agent Dashboard, no longer asks for
-  approval before every command while omp in a terminal runs the same command unasked. A
-  chat now starts with omp's own approval mode (`tools.approvalMode`, `yolo` by default).
+  approval before every command while omp in a terminal runs the same command unasked.
 - Soprano no longer closes when the pointer is over a work log line of an agent chat
   ("Read 3 files", a command, an edit). It happened in every chat tab, and most easily in a
   thread started from the Agent Dashboard once you opened its tab.

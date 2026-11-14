@@ -175,7 +175,7 @@ fn compaction_shows_a_notice_and_keeps_the_history_before_it() {
         r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"Long task"}}"#,
         r#"{"type":"assistant","uuid":"r1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"text","text":"Working on it"}]}}"#,
         r#"{"type":"system","subtype":"compact_boundary","uuid":"c1","parentUuid":null,"logicalParentUuid":"r1","content":"Conversation compacted","level":"info","compactMetadata":{"trigger":"auto"}}"#,
-        r#"{"type":"user","uuid":"u2","parentUuid":"c1","isMeta":true,"message":{"role":"user","content":"Summary of the earlier conversation"}}"#,
+        r#"{"type":"user","uuid":"u2","parentUuid":"c1","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"role":"user","content":"This session is being continued from a previous conversation. Summary: ..."}}"#,
         r#"{"type":"assistant","uuid":"r2","parentUuid":"u2","message":{"role":"assistant","content":[{"type":"text","text":"Continuing"}]}}"#,
     ]);
 

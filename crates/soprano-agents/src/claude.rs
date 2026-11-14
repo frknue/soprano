@@ -82,9 +82,10 @@ fn system_notice(record: &Object) -> Option<TimelineItemKind> {
 }
 
 fn decode_user(record: &Object, uuid: &str, timestamp: Option<Date>, entry: &mut AgentTranscriptEntry) {
-    // Meta records are context Claude Code injects (skill bodies, caveats), not something the
-    // person typed.
-    if bool_true(record, "isMeta") {
+    // Meta records are context Claude Code injects (skill bodies, caveats), and a compaction
+    // leaves its summary of the earlier conversation as a user record: neither is something
+    // the person typed.
+    if bool_true(record, "isMeta") || bool_true(record, "isCompactSummary") {
         return;
     }
     let Some(message) = obj_at(record, "message") else { return };

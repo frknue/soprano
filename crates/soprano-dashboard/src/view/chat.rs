@@ -324,7 +324,9 @@ impl AgentDashboard {
             .rounded(theme.z(16.))
             .border_1()
             .border_color(theme.foreground.opacity(if theme.is_dark() { 0.05 } else { 0.08 }))
-            .bg(theme.popover.opacity(0.92))
+            // Opaque: without a blur behind it, the conversation would read through the
+            // card and run into what is typed.
+            .bg(theme.popover)
             .when(!theme.is_dark(), |surface| surface.shadow_sm())
             .flex()
             .flex_col()

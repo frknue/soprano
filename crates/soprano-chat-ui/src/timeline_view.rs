@@ -540,7 +540,7 @@ impl TimelineView {
                     .rounded(t.z(13.0))
                     .border_1()
                     .border_color(t.border)
-                    .bg(fill.opacity(0.92))
+                    .bg(fill)
                     .hover(|s| s.bg(t.raised))
                     .shadow_md()
                     .cursor_pointer()

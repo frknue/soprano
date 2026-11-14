@@ -464,12 +464,22 @@ pub enum ChatInteraction {
 /// What a request this session sent is for.
 #[derive(Clone, Debug)]
 enum Pending {
-    Initialize { resuming: Option<String> },
-    Load { conversation_id: String },
+    Initialize {
+        resuming: Option<String>,
+    },
+    Load {
+        conversation_id: String,
+    },
     New,
     Prompt,
-    Steering,
-    SetConfig { id: String },
+    /// A message sent into the running turn: the steer it shows as, and its text.
+    Steering {
+        steer_id: Option<String>,
+        text: String,
+    },
+    SetConfig {
+        id: String,
+    },
 }
 
 type MakePeer = Box<dyn FnMut(&AgentChatLaunch) -> Box<dyn JsonRpcPeer>>;
@@ -870,10 +880,23 @@ impl AgentChatSession {
                 Err(error) => self.open_failed(&error),
             },
             Pending::Prompt => self.finish_turn(result),
-            Pending::Steering => {
-                if let Err(error) = result
-                    && !error.is_closed()
+            Pending::Steering { steer_id, text } => match result {
+                // The agent answers a steer it cannot place in the running turn (nothing of
+                // this client's runs, the turn is ending) without an error and expects an
+                // ordinary prompt: the message waits its turn instead of showing as delivered.
+                Ok(result)
+                    if matches!(
+                        result.get("outcome").and_then(Value::as_str),
+                        Some("promptRequired" | "failed")
+                    ) =>
                 {
+                    if let Some(steer_id) = steer_id {
+                        self.builder.remove_steer(&steer_id);
+                    }
+                    self.changed();
+                    self.send(&text);
+                }
+                Err(error) if !error.is_closed() => {
                     self.builder.add_notice(
                         &format!("Could not steer the agent: {}", error.message),
                         true,
@@ -881,7 +904,8 @@ impl AgentChatSession {
                     );
                     self.changed();
                 }
-            }
+                _ => {}
+            },
             Pending::SetConfig { id } => {
                 match result {
                     Ok(result) => {
@@ -1003,10 +1027,10 @@ impl AgentChatSession {
         else {
             return self.send(text);
         };
-        self.builder.add_steer(text, now());
+        let steer_id = self.builder.add_steer(text, now());
         self.changed();
         let params = json!({"sessionId": session_id, "prompt": [{"type": "text", "text": text}]});
-        self.send_request("_session/steering", params, Pending::Steering);
+        self.send_request("_session/steering", params, Pending::Steering { steer_id, text: text.to_owned() });
         true
     }
 

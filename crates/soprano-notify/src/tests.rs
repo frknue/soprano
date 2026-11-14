@@ -486,6 +486,58 @@ fn a_dedicated_agents_stop_report_turns_its_tab_into_a_terminal() {
 }
 
 #[test]
+fn a_stopped_thread_stays_stopped_and_restartable_when_its_cli_reports_its_own_shutdown() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "claude-code");
+    let mut notifications = manager(&Fake::new(SystemAuthorization::Authorized));
+    let from_cli = |arguments: &[&str]| reported(arguments, &target, None, Some(777));
+    notifications.handle_agent_event(&mut workspace, from_cli(&["ready", "--profile", "claude-code"]));
+
+    // Stop ends the terminal; Claude Code's SessionEnd hook still runs and reports.
+    workspace.stop_agent(&target);
+    notifications.handle_agent_event(&mut workspace, from_cli(&["stopped", "--profile", "claude-code"]));
+
+    assert_eq!(status(&workspace, &target), Some(AgentStatus::Stopped));
+    assert_eq!(
+        workspace.tab(&target.pane_id, &target.tab_id).map(|tab| tab.pane_type),
+        Some(PaneType::Agent)
+    );
+}
+
+#[test]
+fn a_restarted_agent_is_not_ended_by_the_shutdown_report_of_the_process_it_replaced() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "claude-code");
+    let mut notifications = manager(&Fake::new(SystemAuthorization::Authorized));
+    let stopped = ["stopped", "--profile", "claude-code"];
+    notifications.handle_agent_event(
+        &mut workspace,
+        reported(&["ready", "--profile", "claude-code"], &target, None, Some(777)),
+    );
+
+    workspace.restart_agent(&target);
+    notifications.handle_agent_event(&mut workspace, reported(&stopped, &target, None, Some(777)));
+    assert_eq!(status(&workspace, &target), Some(AgentStatus::Starting));
+    assert_eq!(
+        workspace.tab(&target.pane_id, &target.tab_id).map(|tab| tab.pane_type),
+        Some(PaneType::Agent)
+    );
+
+    // The new process is the tab's agent: its own exit ends it, and so does the launch line's
+    // report, which names no process.
+    notifications.handle_agent_event(
+        &mut workspace,
+        reported(&["ready", "--profile", "claude-code"], &target, None, Some(888)),
+    );
+    assert_eq!(
+        workspace.agent(&target.pane_id, &target.tab_id).and_then(|agent| agent.process_id),
+        Some(888)
+    );
+    notifications.handle_agent_event(&mut workspace, reported(&stopped, &target, None, Some(888)));
+    assert!(workspace.agent(&target.pane_id, &target.tab_id).is_none());
+}
+
+#[test]
 fn another_agents_process_id_is_not_recorded_for_this_tab() {
     let mut workspace = Workspace::new();
     let target = agent_tab(&mut workspace, "claude-code");

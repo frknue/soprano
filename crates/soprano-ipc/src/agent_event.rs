@@ -113,6 +113,12 @@ pub fn agent_event_request(
         payloads.push(String::from_utf8_lossy(&data).into_owned());
     }
 
+    // Claude Code ends a session without exiting when the conversation is cleared or another
+    // one is resumed; its next SessionStart reports the new conversation.
+    if state == AgentEventState::Stopped && payloads.iter().any(|payload| session_continues(payload)) {
+        return None;
+    }
+
     // Kept for the agent's record (an automation run's reply), not for the banner: that names
     // the alert and the conversation, nothing more.
     let message = payloads
@@ -197,6 +203,14 @@ pub fn agent_message_text(payload: &str) -> Option<String> {
         Some(Value::String(kind)) => message_for_notification_type(kind).map(str::to_string),
         _ => None,
     }
+}
+
+/// Whether a session-end payload names an end the agent's process outlives: Claude Code's
+/// `/clear` and `/resume`.
+fn session_continues(payload: &str) -> bool {
+    let Some(json) = json_object(payload) else { return false };
+    let string = |key: &str| json.get(key).and_then(Value::as_str);
+    string("hook_event_name") == Some("SessionEnd") && matches!(string("reason"), Some("clear" | "resume"))
 }
 
 /// What a hook payload says the agent waits for: Claude Code's notification types tell a blocked
@@ -611,6 +625,23 @@ mod tests {
             .as_deref(),
             Some("Response ready")
         );
+    }
+
+    #[test]
+    fn claude_code_clearing_or_switching_its_conversation_does_not_report_the_agent_stopped() {
+        let stopped =
+            ["soprano", "agent-event", "stopped", "--profile", "claude-code", "--message-from-stdin"];
+        let sent = |payload: &str| {
+            let arguments: Vec<String> = stopped.iter().map(|argument| argument.to_string()).collect();
+            agent_event_request(&arguments, &environment(), || Some(payload.as_bytes().to_vec()), || None)
+                .is_some()
+        };
+        assert!(!sent(r#"{"session_id":"a","hook_event_name":"SessionEnd","reason":"clear"}"#));
+        assert!(!sent(r#"{"session_id":"a","hook_event_name":"SessionEnd","reason":"resume"}"#));
+        // Quitting, logging out, or a closed terminal end the process.
+        assert!(sent(r#"{"session_id":"a","hook_event_name":"SessionEnd","reason":"prompt_input_exit"}"#));
+        assert!(sent(r#"{"session_id":"a","hook_event_name":"SessionEnd","reason":"other"}"#));
+        assert!(sent(""));
     }
 
     #[test]

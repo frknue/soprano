@@ -62,7 +62,7 @@ The crate depends only on `soprano-types`, `soprano-platform`, `serde_json`, `re
 Every agent runs as `/bin/zsh -lic "<script>"`. In the scripts below, TAIL stands for this, after the agent command:
 
 ```
-test -z "$SOPRANO_BIN" || "$SOPRANO_BIN" agent-event stopped; unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID; if [[ ${(t)ZDOTDIR} == *export* ]]; then export SOPRANO_ZSH_ZDOTDIR="$ZDOTDIR"; else unset SOPRANO_ZSH_ZDOTDIR; fi; ZDOTDIR='<bundle>/SopranoZsh' exec '/bin/zsh' -l
+test -z "$SOPRANO_BIN" || (trap '' INT; "$SOPRANO_BIN" agent-event stopped); unset SOPRANO_AGENT_PROFILE SOPRANO_AGENT_NAME SOPRANO_RESUME_SESSION_ID; if [[ ${(t)ZDOTDIR} == *export* ]]; then export SOPRANO_ZSH_ZDOTDIR="$ZDOTDIR"; else unset SOPRANO_ZSH_ZDOTDIR; fi; ZDOTDIR='<bundle>/SopranoZsh' exec '/bin/zsh' -l
 ```
 
 **Codex**

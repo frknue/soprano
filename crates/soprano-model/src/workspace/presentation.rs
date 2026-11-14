@@ -38,6 +38,9 @@ pub struct AgentDashboardEntry {
     pub conversation: Option<AgentConversation>,
     /// A chat tab: it has no terminal, and replies go to its session.
     pub is_chat: bool,
+    /// The tab is the agent's own, so Stop and Restart act on it. False for an agent that was
+    /// typed into a terminal: that tab is the person's shell.
+    pub owns_tab: bool,
     /// The branch the agent works on when it is not its repository's default; the dashboard
     /// fills it in from the shared branch monitor.
     pub branch: Option<String>,
@@ -289,6 +292,7 @@ impl Workspace {
             session_name: self.terminal_sessions.get(&window.session_id).map(|session| session.name.clone()),
             conversation: agent.conversation.clone(),
             is_chat: tab.is_chat(),
+            owns_tab: tab.pane_type == crate::PaneType::Agent,
             branch: None,
             machine,
         })
