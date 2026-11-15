@@ -666,12 +666,12 @@ impl MainView {
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
             BindingCommand::OpenAgentDashboard => self.run(Command::ToggleDashboard, window, cx),
             BindingCommand::ToggleStatistics => self.run(Command::ToggleStatistics, window, cx),
-            // `keybindingZoom`: the active terminal's font, not the whole UI.
+            // `keybindingZoom`: every terminal's font, not the whole UI.
             BindingCommand::Zoom(delta) => {
-                self.content.update(cx, |content, cx| content.change_active_terminal_font_size(delta, cx))
+                self.content.update(cx, |content, cx| content.change_terminal_font_size(delta, cx))
             }
             BindingCommand::ZoomReset => {
-                self.content.update(cx, |content, cx| content.reset_active_terminal_font_size(cx))
+                self.content.update(cx, |content, cx| content.reset_terminal_font_size(cx))
             }
         }
     }

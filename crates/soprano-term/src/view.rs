@@ -519,20 +519,14 @@ impl TerminalView {
         self.set_settings(settings, cx);
     }
 
-    /// Changes the font size by `delta` points (Ghostty's `increase_font_size` /
-    /// `decrease_font_size`). Copy mode ends: its cells moved.
-    pub fn change_font_size(&mut self, delta: i32, cx: &mut Context<Self>) {
-        if delta == 0 {
+    /// Sets the font size in points (the app-wide terminal zoom). Copy mode ends: its
+    /// cells moved.
+    pub fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let size = size.max(1.0);
+        if size == self.settings.font_size {
             return;
         }
-        self.settings.font_size = (self.settings.font_size + delta as f32).max(1.0);
-        self.finish_copy_mode(false, true, cx);
-        cx.notify();
-    }
-
-    /// Back to the configured font size.
-    pub fn reset_font_size(&mut self, configured: f32, cx: &mut Context<Self>) {
-        self.settings.font_size = configured;
+        self.settings.font_size = size;
         self.finish_copy_mode(false, true, cx);
         cx.notify();
     }

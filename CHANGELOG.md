@@ -168,6 +168,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the period, `C` / `T` switch Cost / Tokens, `Esc` closes.
 
 ### Changed
+- **Terminal zoom applies to every terminal**: `⌘=` / `⌘-` / `⌘0` (`zoom-in`, `zoom-out`,
+  `zoom-reset`) resize all terminals in the app at once, and terminals opened afterwards
+  start at the zoomed size, instead of only the focused one changing.
 - **Every agent starts with its approval prompts skipped** ("bypass permissions"), not
   only automation runs: Claude Code (`--dangerously-skip-permissions`), Codex
   (`--dangerously-bypass-approvals-and-sandbox`), omp (`--auto-approve`, its chats

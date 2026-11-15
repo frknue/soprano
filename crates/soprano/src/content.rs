@@ -241,7 +241,10 @@ pub struct ContentHost {
     shell: Entity<Shell>,
     terminals: Rc<dyn TerminalFactory>,
     launch_context: LaunchContext,
+    /// What new terminals start with; `font_size` is the app-wide zoom.
     terminal_settings: TerminalSettings,
+    /// The configured font size ⌘0 goes back to.
+    configured_font_size: f32,
     documents: Entity<EditorDocuments<TerminalTarget>>,
     state: StateStore,
     unsaved: SharedUnsaved,
@@ -293,6 +296,7 @@ impl ContentHost {
             shell,
             terminals,
             launch_context,
+            configured_font_size: terminal_settings.font_size,
             terminal_settings,
             documents,
             state,
@@ -394,7 +398,7 @@ impl ContentHost {
         self.contents.values().any(|content| content.contains_focused(window, cx))
     }
 
-    /// New colors for every terminal (the app's theme changed); each keeps its own font size.
+    /// New colors for every terminal (the app's theme changed).
     pub fn set_terminal_theme(&mut self, theme: TerminalTheme, cx: &mut Context<Self>) {
         if theme == self.terminal_settings.theme {
             return;
@@ -408,20 +412,25 @@ impl ContentHost {
         }
     }
 
-    /// ⌘= / ⌘-: the active terminal's font grows or shrinks by `delta` points
-    /// (`changeActiveTerminalFontSize`); the rest of the UI keeps its size.
-    pub fn change_active_terminal_font_size(&mut self, delta: i32, cx: &mut Context<Self>) {
-        if let Some(view) = self.active_terminal(cx) {
-            view.update(cx, |view, cx| view.change_font_size(delta, cx));
-        }
+    /// ⌘= / ⌘-: every terminal's font grows or shrinks by `delta` points
+    /// (`changeActiveTerminalFontSize`), new ones included; the rest of the UI keeps its size.
+    pub fn change_terminal_font_size(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let size = (self.terminal_settings.font_size + delta as f32).max(1.0);
+        self.set_terminal_font_size(size, cx);
     }
 
-    /// ⌘0: the active terminal's font goes back to the configured size
+    /// ⌘0: every terminal's font goes back to the configured size
     /// (`resetActiveTerminalFontSize`).
-    pub fn reset_active_terminal_font_size(&mut self, cx: &mut Context<Self>) {
-        let configured = self.terminal_settings.font_size;
-        if let Some(view) = self.active_terminal(cx) {
-            view.update(cx, |view, cx| view.reset_font_size(configured, cx));
+    pub fn reset_terminal_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_terminal_font_size(self.configured_font_size, cx);
+    }
+
+    fn set_terminal_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        self.terminal_settings.font_size = size;
+        for content in self.contents.values() {
+            if let PaneContent::Terminal(view) = content {
+                view.update(cx, |view, cx| view.set_font_size(size, cx));
+            }
         }
     }
 
@@ -1419,23 +1428,35 @@ pub(crate) mod tests {
 
     use super::*;
 
-    /// Never spawns a shell: records each start and fails it, so content stays `Failed`.
+    /// Never spawns a shell: records each start and fails it, so content stays `Failed`;
+    /// with `program_cwd` it starts `cat` there instead (a real PTY, not the user's shell).
     #[derive(Default)]
     struct RecordingTerminals {
         created: RefCell<Vec<TerminalLaunch>>,
+        font_sizes: RefCell<Vec<f32>>,
         detached: RefCell<Vec<Vec<String>>>,
+        program_cwd: Option<std::path::PathBuf>,
     }
 
     impl TerminalFactory for RecordingTerminals {
         fn create(
             &self,
             launch: TerminalLaunch,
-            _: TerminalSettings,
-            _: &mut Window,
-            _: &mut App,
+            settings: TerminalSettings,
+            window: &mut Window,
+            cx: &mut App,
         ) -> anyhow::Result<Entity<TerminalView>> {
             self.created.borrow_mut().push(launch);
-            anyhow::bail!("no shells in tests")
+            self.font_sizes.borrow_mut().push(settings.font_size);
+            let Some(cwd) = &self.program_cwd else { anyhow::bail!("no shells in tests") };
+            let home = cwd.display().to_string();
+            let launch = TerminalLaunch {
+                argv: vec!["/bin/sh".into(), "-c".into(), "exec cat".into()],
+                cwd: Some(cwd.clone()),
+                env: [("PATH".to_owned(), "/bin:/usr/bin".to_owned()), ("HOME".to_owned(), home)].into(),
+                ..TerminalLaunch::default()
+            };
+            TerminalView::spawn(launch, settings, window, cx)
         }
 
         fn restart(&self, _: &Entity<TerminalView>, _: TerminalLaunch, _: &mut App) -> bool {
@@ -1466,7 +1487,15 @@ pub(crate) mod tests {
         workspace: Workspace,
         cx: &mut TestAppContext,
     ) -> (WorkspaceHandle, Entity<ContentHost>, Rc<RecordingTerminals>, &mut gpui::VisualTestContext) {
-        let terminals = Rc::new(RecordingTerminals::default());
+        host_with(workspace, RecordingTerminals::default(), cx)
+    }
+
+    fn host_with(
+        workspace: Workspace,
+        terminals: RecordingTerminals,
+        cx: &mut TestAppContext,
+    ) -> (WorkspaceHandle, Entity<ContentHost>, Rc<RecordingTerminals>, &mut gpui::VisualTestContext) {
+        let terminals = Rc::new(terminals);
         let factory: Rc<dyn TerminalFactory> = terminals.clone();
         let cx = cx.add_empty_window();
         let (workspace, host) = cx.update(|window, cx| {
@@ -1593,6 +1622,64 @@ pub(crate) mod tests {
         cx.run_until_parked();
         // The split started one new terminal; the first pane's content was kept.
         assert_eq!(terminals.created.borrow().len(), 2);
+    }
+
+    #[gpui::test]
+    fn terminals_opened_after_a_zoom_start_at_the_zoomed_size(cx: &mut TestAppContext) {
+        let (workspace, host, terminals, cx) = host(Workspace::new(), cx);
+        let first = active_target(&workspace, cx);
+        let configured = TerminalSettings::DEFAULT_FONT_SIZE;
+
+        cx.update(|_, cx| host.update(cx, |host, cx| host.change_terminal_font_size(2, cx)));
+        cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.split_pane(SplitDirection::Horizontal, &first.pane_id));
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| host.update(cx, |host, cx| host.reset_terminal_font_size(cx)));
+        cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.split_pane(SplitDirection::Horizontal, &first.pane_id));
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*terminals.font_sizes.borrow(), [configured, configured + 2.0, configured]);
+    }
+
+    /// Unix only: the terminals run `/bin/sh`.
+    #[cfg(unix)]
+    #[gpui::test]
+    fn zooming_resizes_every_open_terminal_including_hidden_tabs(cx: &mut TestAppContext) {
+        let folder = tempfile::tempdir().expect("folder");
+        // Real PTYs: their reader and wait threads wake tasks from outside the test scheduler.
+        cx.executor().allow_parking();
+        let terminals =
+            RecordingTerminals { program_cwd: Some(folder.path().to_owned()), ..Default::default() };
+        let (workspace, host, _, cx) = host_with(Workspace::new(), terminals, cx);
+        let first = active_target(&workspace, cx);
+        cx.update(|_, cx| {
+            workspace.update(cx, |ws| ws.split_pane(SplitDirection::Horizontal, &first.pane_id));
+            workspace.update(cx, |ws| ws.add_tab_to_pane(&first.pane_id, PaneType::Terminal, None, None));
+        });
+        cx.run_until_parked();
+        let views: Vec<Entity<TerminalView>> =
+            cx.update(|_, cx| host.read(cx).contents().filter_map(|(_, c)| c.terminal().cloned()).collect());
+        assert_eq!(views.len(), 3, "the hidden first tab, its sibling, and the split");
+        let sizes = |cx: &mut gpui::VisualTestContext| -> Vec<f32> {
+            cx.update(|_, cx| views.iter().map(|view| view.read(cx).settings().font_size).collect())
+        };
+        let configured = TerminalSettings::DEFAULT_FONT_SIZE;
+
+        cx.update(|_, cx| host.update(cx, |host, cx| host.change_terminal_font_size(3, cx)));
+        assert_eq!(sizes(cx), [configured + 3.0; 3]);
+        cx.update(|_, cx| host.update(cx, |host, cx| host.change_terminal_font_size(-1, cx)));
+        assert_eq!(sizes(cx), [configured + 2.0; 3]);
+        cx.update(|_, cx| host.update(cx, |host, cx| host.reset_terminal_font_size(cx)));
+        assert_eq!(sizes(cx), [configured; 3]);
+
+        for view in &views {
+            cx.update(|_, cx| view.update(cx, |view, cx| view.destroy(cx)));
+        }
+        cx.run_until_parked();
     }
 
     #[gpui::test]
