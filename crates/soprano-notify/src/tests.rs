@@ -1113,6 +1113,95 @@ fn a_terminal_moved_to_a_machine_takes_status_reports_though_its_hooks_once_repo
     assert_eq!((agent.profile_id.as_str(), agent.status), ("omp", AgentStatus::Running));
 }
 
+/// Regression: omp's extension reports the end of a turn and omp itself writes an OSC 9
+/// "Complete" a few milliseconds later. Two banners under the tab's one identifier that
+/// close together made macOS cancel both, so no banner ever showed.
+#[test]
+fn a_hook_report_and_the_agents_own_osc_notification_post_one_banner() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "omp");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+
+    notifications.handle_agent_event(
+        &mut workspace,
+        event(
+            &["needs-input", "--profile", "omp", "--notify", "--title", "omp", "--body", "Response ready"],
+            &target,
+        ),
+    );
+    notifications.handle_terminal_notification(
+        &mut workspace,
+        TerminalNotification { target: target.clone(), title: String::new(), body: "omp: Complete".into() },
+    );
+
+    assert_eq!(fake.posted().len(), 1);
+}
+
+#[test]
+fn an_agents_own_osc_notification_before_its_hook_report_posts_one_banner() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "omp");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+
+    notifications.handle_terminal_notification(
+        &mut workspace,
+        TerminalNotification { target: target.clone(), title: String::new(), body: "omp: Complete".into() },
+    );
+    notifications.handle_agent_event(
+        &mut workspace,
+        event(&["needs-input", "--profile", "omp", "--notify", "--reason", "turn"], &target),
+    );
+
+    assert_eq!(fake.posted().len(), 1);
+    let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("agent");
+    assert_eq!(agent.waiting_reason, Some(AgentWaitingReason::TurnEnded));
+}
+
+#[test]
+fn an_osc_approval_after_the_agent_went_back_to_work_is_its_own_banner() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "codex");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+
+    notifications.handle_agent_event(
+        &mut workspace,
+        event(&["needs-input", "--profile", "codex", "--notify", "--reason", "turn"], &target),
+    );
+    notifications.handle_agent_event(&mut workspace, event(&["running", "--profile", "codex"], &target));
+    notifications.handle_terminal_notification(
+        &mut workspace,
+        TerminalNotification { target: target.clone(), title: String::new(), body: String::new() },
+    );
+
+    assert_eq!(fake.posted().len(), 2);
+    let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("agent");
+    assert_eq!(agent.waiting_reason, Some(AgentWaitingReason::Approval));
+}
+
+#[test]
+fn a_tabs_next_banner_posts_once_the_last_one_has_settled() {
+    let mut workspace = Workspace::new();
+    let target = agent_tab(&mut workspace, "omp");
+    let fake = Fake::new(SystemAuthorization::Authorized);
+    let mut notifications = manager(&fake);
+    let start = Instant::now();
+    let turn_ended = |body: &str| {
+        event(&["needs-input", "--profile", "omp", "--notify", "--title", "omp", "--body", body], &target)
+    };
+
+    notifications.handle_agent_event_at(&mut workspace, turn_ended("Response ready"), start);
+    notifications.handle_agent_event_at(
+        &mut workspace,
+        turn_ended("Question"),
+        start + Duration::from_secs(2),
+    );
+
+    assert_eq!(fake.posted().len(), 2);
+}
+
 #[test]
 fn an_osc_notification_does_not_silence_later_status_reports() {
     let mut workspace = Workspace::new();

@@ -15,8 +15,18 @@ use soprano_types::{AgentCatalog, AgentWaitingReason};
 use crate::authorization::{Authorization, AuthorizationState};
 use crate::backend::{Banner, BannerClick, NotificationBackend, SystemAuthorization, system_backend};
 
-/// An identical event for the same tab within this window is a hook firing twice.
+/// An identical event for the same tab within this window is a hook firing twice; a
+/// notification from the other channel within it is the same moment reported twice.
 const DUPLICATE_WINDOW: Duration = Duration::from_secs(1);
+
+/// How an agent event reached the app.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Channel {
+    /// `soprano agent-event` from Soprano's hooks and extensions.
+    Hook,
+    /// Written into the terminal by the program itself (OSC 9 / 777 / 7501).
+    InBand,
+}
 
 /// An OSC 9 / OSC 777 notification a terminal surface received (soprano-term's
 /// `TerminalEvent::DesktopNotification`), with the tab it came from.
@@ -107,6 +117,11 @@ pub struct NotificationManager {
     shared: Arc<Shared>,
     sound: Box<dyn Fn() -> bool + Send>,
     recent_events: HashMap<TerminalTarget, (EventFingerprint, Instant)>,
+    /// Each tab's last event that asked for attention, and how it came. An agent that both
+    /// runs Soprano's hooks and writes its own OSC 9 (omp at the end of a turn) reports one
+    /// moment twice; posting both banners under the tab's one identifier milliseconds apart
+    /// makes macOS cancel both.
+    recent_notifications: HashMap<TerminalTarget, (Channel, Instant)>,
     /// Tabs whose agent reports through Soprano's hooks; OSC 7501 from them would say the
     /// same thing twice.
     hook_reported: HashSet<TerminalTarget>,
@@ -141,6 +156,7 @@ impl NotificationManager {
             }),
             sound: Box::new(sound),
             recent_events: HashMap::new(),
+            recent_notifications: HashMap::new(),
             hook_reported: HashSet::new(),
         }
     }
@@ -255,7 +271,7 @@ impl NotificationManager {
     /// [`Self::handle_agent_event`] at a given time (duplicate suppression is time based).
     pub fn handle_agent_event_at(&mut self, workspace: &mut Workspace, event: AgentEvent, now: Instant) {
         self.hook_reported.insert(TerminalTarget::new(&event.pane_id, &event.tab_id));
-        self.apply_agent_event(workspace, event, now);
+        self.apply_agent_event(workspace, event, Channel::Hook, now);
     }
 
     /// An OSC 7501 report from a terminal (the Program Status Protocol). It is how agents on a
@@ -324,10 +340,16 @@ impl NotificationManager {
             reason,
             conversation: None,
         };
-        self.apply_agent_event(workspace, event, now);
+        self.apply_agent_event(workspace, event, Channel::InBand, now);
     }
 
-    fn apply_agent_event(&mut self, workspace: &mut Workspace, event: AgentEvent, now: Instant) {
+    fn apply_agent_event(
+        &mut self,
+        workspace: &mut Workspace,
+        event: AgentEvent,
+        channel: Channel,
+        now: Instant,
+    ) {
         let target = TerminalTarget::new(&event.pane_id, &event.tab_id);
         // A stop never attaches: agent tabs report one again from their shell fallback after
         // the agent's own shutdown hook has already detached it.
@@ -385,6 +407,22 @@ impl NotificationManager {
         }
         self.recent_events.insert(target.clone(), (fingerprint, now));
 
+        // The other channel already announced this moment: the hook's report is the precise
+        // one, so an in-band echo changes nothing and a hook report after one only updates
+        // the status. Any event in between (the agent went back to work) ends the moment.
+        let echoes = event.notify
+            && self.recent_notifications.get(&target).is_some_and(|(previous, at)| {
+                *previous != channel && now.saturating_duration_since(*at) < DUPLICATE_WINDOW
+            });
+        if echoes && channel == Channel::InBand {
+            return;
+        }
+        if !event.notify {
+            self.recent_notifications.remove(&target);
+        } else {
+            self.recent_notifications.insert(target.clone(), (channel, now));
+        }
+
         let needs_attention = event.notify && !self.is_focused(&target);
 
         if event.state == AgentEventState::Stopped {
@@ -402,7 +440,7 @@ impl NotificationManager {
 
         // An automation's run announces itself, naming the automation, once it has the run's
         // outcome; a banner for its pane would name a window nobody opened.
-        if needs_attention && !runs_automation {
+        if needs_attention && !runs_automation && !echoes {
             let (title, body) = agent_banner(workspace, &event, &profile_id);
             self.deliver(title, body, None, target, None);
         }
@@ -465,6 +503,7 @@ impl NotificationManager {
                 reason: needs_input.then_some(reason),
                 conversation: None,
             },
+            Channel::InBand,
             Instant::now(),
         );
     }
@@ -496,6 +535,7 @@ impl NotificationManager {
     /// shutdown hook, so their badge clears even when the shell never reports the prompt.
     pub fn tick(&mut self, now: Instant, workspace: &mut Workspace) {
         self.recent_events.retain(|_, (_, at)| now.saturating_duration_since(*at) < DUPLICATE_WINDOW);
+        self.recent_notifications.retain(|_, (_, at)| now.saturating_duration_since(*at) < DUPLICATE_WINDOW);
         let monitored: Vec<TerminalTarget> = workspace
             .panes()
             .values()

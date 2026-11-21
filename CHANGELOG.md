@@ -298,6 +298,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **omp notifications show up again.** At the end of every turn omp's own desktop
+  notification (OSC 9) arrived a few milliseconds after Soprano's report of the same turn,
+  and macOS dropped both banners. Soprano now posts one banner for that moment.
 - **Stop** in the Agent Dashboard keeps a Claude Code thread under Stopped, where **Restart**
   starts it again, and **Restart** keeps it a thread. Claude Code reports its own shutdown
   on the way out, which turned the tab into a dead plain terminal and took the thread off
