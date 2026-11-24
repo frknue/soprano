@@ -8,12 +8,14 @@ mod model;
 
 pub use model::watched_cwds;
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use gpui::{
-    AnyElement, App, Context, ElementId, Entity, FontWeight, Hsla, IntoElement, ParentElement, Pixels, Point,
-    Render, ScrollHandle, SharedString, Styled, Subscription, Task, WeakEntity, Window, div, img, prelude::*,
-    px,
+    AnyElement, App, Bounds, Context, Div, ElementId, Entity, FontWeight, Hsla, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollHandle,
+    SharedString, Styled, Subscription, Task, WeakEntity, Window, canvas, div, img, prelude::*, px,
 };
 use gpui_component::scroll::ScrollbarMode;
 use soprano_agents::dashboard::AgentDashboardSection;
@@ -31,7 +33,8 @@ use soprano_ui::{
 };
 
 use self::model::{
-    AgentRow, Hints, ListInput, ListRow, PaneKind, PaneRow, RevealTracker, RowModel, TrailingSlot, WindowRow,
+    AgentRow, AgentsSplit, Hints, ListInput, ListRow, PaneKind, PaneRow, RevealTracker, RowModel,
+    TrailingSlot, WindowRow,
 };
 use crate::services::Services;
 use crate::shell::{self, CloseTarget, Command, Page, Shell};
@@ -50,6 +53,10 @@ const PANE_INDENT: f32 = 50.0;
 const GUIDE_INSET: f32 = 6.0;
 const ONE_LINE_ROW: f32 = 30.0;
 const TWO_LINE_ROW: f32 = 44.0;
+/// Neither the window list nor the Agents section gets shorter than this.
+const SECTION_MIN_HEIGHT: f32 = 90.0;
+/// The grab area over the line between them.
+const DIVIDER_HANDLE_HEIGHT: f32 = 8.0;
 
 pub struct Sidebar {
     this: WeakEntity<Self>,
@@ -58,6 +65,13 @@ pub struct Sidebar {
     services: Services,
     windows_scroll: ScrollHandle,
     agents_scroll: ScrollHandle,
+    /// How the window list and the Agents section share the height between brand row and footer.
+    agents_split: AgentsSplit,
+    /// Where that shared area was last drawn; a divider drag measures against it.
+    split_bounds: Rc<Cell<Bounds<Pixels>>>,
+    /// The divider's drag: where the mouse went down and the split it started from.
+    agents_drag: Option<(Pixels, AgentsSplit)>,
+    agents_divider_hovered: bool,
     reveal: RevealTracker,
     /// The working directories the branch monitor watches.
     watched: Vec<String>,
@@ -94,6 +108,7 @@ impl Sidebar {
                 }
             }
         });
+        let agents_split = AgentsSplit::load(&services.state);
         Self {
             this: cx.weak_entity(),
             workspace,
@@ -101,6 +116,10 @@ impl Sidebar {
             services,
             windows_scroll: ScrollHandle::new(),
             agents_scroll: ScrollHandle::new(),
+            agents_split,
+            split_bounds: Rc::default(),
+            agents_drag: None,
+            agents_divider_hovered: false,
             reveal: RevealTracker::default(),
             watched: Vec::new(),
             home: soprano_platform::paths::home_dir().to_string_lossy().into_owned(),
@@ -709,12 +728,99 @@ impl Sidebar {
             .flex()
             .flex_col()
             .flex_1()
-            .min_h(z(90.))
+            .min_h_0()
             .border_t_1()
             .border_color(theme.border)
             .child(header)
             .child(body)
             .into_any_element()
+    }
+
+    /// The line between the window list and the Agents section, dragged to share the height
+    /// differently and double-clicked to split it in half again.
+    fn agents_divider(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.soprano_theme();
+        let handle = theme.z(DIVIDER_HANDLE_HEIGHT);
+        let dragging = self.agents_drag.is_some();
+        let color =
+            if self.agents_divider_hovered || dragging { theme.input } else { gpui::transparent_black() };
+        let entity = self.this.clone();
+        div()
+            .id("sidebar-agents-divider")
+            .debug_selector(|| "sidebar-agents-divider".into())
+            .absolute()
+            .left_0()
+            .right_0()
+            .top(-handle / 2.)
+            .h(handle)
+            .cursor_row_resize()
+            .child(div().absolute().left_0().right_0().top(handle / 2.).h(px(1.)).bg(color))
+            .tooltip(tooltip("Drag to resize the agents list, double-click to reset"))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.agents_divider_hovered = *hovered;
+                cx.notify();
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if event.click_count >= 2 {
+                        this.agents_drag = None;
+                        this.agents_split = AgentsSplit::DEFAULT;
+                        this.agents_split.save(&this.services.state);
+                    } else {
+                        this.agents_drag = Some((event.position.y, this.agents_split));
+                    }
+                    cx.notify();
+                }),
+            )
+            .when(dragging, |divider| {
+                divider.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            let moved = entity.clone();
+                            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                                if phase.bubble() {
+                                    moved
+                                        .update(cx, |this, cx| {
+                                            this.drag_agents_divider_to(event.position.y, cx)
+                                        })
+                                        .ok();
+                                }
+                            });
+                            let released = entity.clone();
+                            window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                                if phase.bubble() {
+                                    released.update(cx, |this, cx| this.end_agents_divider_drag(cx)).ok();
+                                }
+                            });
+                        },
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn drag_agents_divider_to(&mut self, y: Pixels, cx: &mut Context<Self>) {
+        let Some((start_y, start)) = self.agents_drag else { return };
+        let total = f32::from(self.split_bounds.get().size.height);
+        let minimum = f32::from(cx.soprano_theme().z(SECTION_MIN_HEIGHT));
+        let split = start.dragged(f32::from(y - start_y), total, minimum);
+        if split != self.agents_split {
+            self.agents_split = split;
+            cx.notify();
+        }
+    }
+
+    fn end_agents_divider_drag(&mut self, cx: &mut Context<Self>) {
+        if self.agents_drag.take().is_some() {
+            self.agents_split.save(&self.services.state);
+            self.agents_divider_hovered = false;
+            cx.notify();
+        }
     }
 
     fn agent_row(&self, row: &AgentRow, now: SystemTime, cx: &App) -> AnyElement {
@@ -846,6 +952,9 @@ impl Render for Sidebar {
             RowModel::Window(_) => false,
         }) || groups.iter().flat_map(|(_, rows)| rows).any(|row| row.since.is_some());
         self.update_clock(live, cx);
+        let divider = self.agents_divider(cx);
+        let split = self.agents_split.0;
+        let split_bounds = self.split_bounds.clone();
 
         let inset = window_chrome::traffic_light_inset(window, hide_window_bar).unwrap_or(BRAND_INSET);
         let theme = cx.soprano_theme();
@@ -870,22 +979,41 @@ impl Render for Sidebar {
             .child(self.brand_row(inset, session_name, cx))
             .child(
                 div()
+                    .relative()
                     .flex()
                     .flex_col()
                     .flex_1()
-                    .min_h(z(90.))
-                    .child(self.windows_header(window_count, can_collapse, cx))
+                    .min_h_0()
                     .child(
-                        ScrollList::new("sidebar-windows", &self.windows_scroll)
-                            .mode(ScrollbarMode::Always)
-                            .px(z(8.))
-                            .pb(z(14.))
-                            .children(list),
+                        canvas(move |bounds, _, _| split_bounds.set(bounds), |_, _, _, _| {})
+                            .absolute()
+                            .size_full(),
+                    )
+                    .child(
+                        grow(div().flex().flex_col().flex_1().min_h(z(SECTION_MIN_HEIGHT)), 1. - split)
+                            .child(self.windows_header(window_count, can_collapse, cx))
+                            .child(
+                                ScrollList::new("sidebar-windows", &self.windows_scroll)
+                                    .mode(ScrollbarMode::Always)
+                                    .px(z(8.))
+                                    .pb(z(14.))
+                                    .children(list),
+                            ),
+                    )
+                    .child(
+                        grow(div().relative().flex().flex_col().flex_1().min_h(z(SECTION_MIN_HEIGHT)), split)
+                            .child(self.agents_block(&groups, now, cx))
+                            .child(divider),
                     ),
             )
-            .child(self.agents_block(&groups, now, cx))
             .child(self.footer(page, cx))
     }
+}
+
+/// Sets how much of the free height a section of the sidebar's split takes.
+fn grow(mut section: Div, weight: f32) -> Div {
+    section.style().flex_grow = Some(weight);
+    section
 }
 
 /// Linux and Windows have no menu bar for the Commands menu, so the brand row offers it.
@@ -1252,6 +1380,45 @@ mod tests {
         });
         h.redraw();
         assert_eq!(h.pane_row_count(), 1);
+    }
+
+    #[gpui::test]
+    fn dragging_the_agents_divider_resizes_the_sections_and_a_double_click_halves_them(
+        cx: &mut TestAppContext,
+    ) {
+        let mut h = harness(cx, 600., |_| {});
+        let divider =
+            |h: &mut Harness| h.cx.debug_bounds("sidebar-agents-divider").expect("divider").center();
+        let start = divider(&mut h);
+        h.cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+        h.cx.simulate_mouse_move(start - point(px(0.), px(100.)), MouseButton::Left, Modifiers::none());
+        h.cx.simulate_mouse_up(start - point(px(0.), px(100.)), MouseButton::Left, Modifiers::none());
+        h.redraw();
+        let moved = divider(&mut h);
+        assert!((f32::from(start.y - moved.y) - 100.).abs() < 1., "{start:?} → {moved:?}");
+        let state = h.view.read_with(h.cx, |sidebar, _| sidebar.services.state.clone());
+        assert!(AgentsSplit::load(&state).0 > AgentsSplit::DEFAULT.0);
+
+        // Dragged past the top, the window list keeps its minimum height.
+        h.cx.simulate_mouse_down(moved, MouseButton::Left, Modifiers::none());
+        h.cx.simulate_mouse_move(point(moved.x, px(0.)), MouseButton::Left, Modifiers::none());
+        h.cx.simulate_mouse_up(point(moved.x, px(0.)), MouseButton::Left, Modifiers::none());
+        h.redraw();
+        let floor = px(BRAND_HEIGHT + SECTION_MIN_HEIGHT - 1.);
+        assert!(divider(&mut h).y >= floor, "{:?}", divider(&mut h));
+
+        let top = divider(&mut h);
+        h.cx.simulate_event(MouseDownEvent {
+            position: top,
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count: 2,
+            first_mouse: false,
+        });
+        h.cx.simulate_mouse_up(top, MouseButton::Left, Modifiers::none());
+        h.redraw();
+        assert_eq!(AgentsSplit::load(&state), AgentsSplit::DEFAULT);
+        assert!((divider(&mut h).y - start.y).abs() < px(1.));
     }
 
     #[test]

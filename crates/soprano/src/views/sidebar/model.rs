@@ -9,6 +9,7 @@ use soprano_agents::dashboard::{AgentDashboardSection, AgentDashboardSnapshot, D
 use soprano_model::{
     AgentDashboardEntry, AgentInstance, PaneState, PaneTab, PaneType, Workspace, terminal_title,
 };
+use soprano_platform::StateStore;
 use soprano_text::context_line::ContextLine;
 use soprano_types::{AgentCatalog, AgentStatus};
 use soprano_ui::keycaps::{KeyPlatform, chord_cap};
@@ -504,6 +505,45 @@ pub fn agent_groups(
         .collect()
 }
 
+/// The Agents section's share of the height it splits with the window list: half until the
+/// divider between them is dragged, then whatever the drag left, kept in app state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AgentsSplit(pub f32);
+
+impl AgentsSplit {
+    pub const DEFAULT: Self = Self(0.5);
+    const KEY: &str = "soprano-sidebar-agents-fraction";
+
+    pub fn load(store: &StateStore) -> Self {
+        store
+            .get::<f64>(Self::KEY)
+            .map(|stored| stored as f32)
+            .filter(|fraction| (0.0..=1.0).contains(fraction))
+            .map_or(Self::DEFAULT, Self)
+    }
+
+    pub fn save(self, store: &StateStore) {
+        if self == Self::DEFAULT {
+            store.remove(Self::KEY);
+        } else {
+            store.set(Self::KEY, &f64::from(self.0));
+        }
+    }
+
+    /// The split after the divider moved `delta` px down from where it is drawn, in a split
+    /// `total` px tall; each section keeps at least `minimum` px. A stored split the window has
+    /// since become too short for is drawn at a minimum, so the drag starts from there.
+    pub fn dragged(self, delta: f32, total: f32, minimum: f32) -> Self {
+        if total.is_nan() || total <= 0.0 || !delta.is_finite() {
+            return self;
+        }
+        let upper = (total - minimum).max(minimum);
+        let clamp = |height: f32| height.clamp(minimum.min(upper), upper);
+        let height = clamp(clamp(self.0 * total) - delta);
+        Self((height / total).clamp(0.0, 1.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -870,5 +910,34 @@ mod tests {
 
         ws.create_session("Other", None).expect("session");
         assert!(agent_groups(&ws, &mut StatusClock::default(), SystemTime::now(), HOME).is_empty());
+    }
+
+    // Agents split
+
+    #[test]
+    fn dragging_the_agents_divider_keeps_both_sections_at_their_minimum() {
+        let half = AgentsSplit::DEFAULT;
+        assert_eq!(half.dragged(-100., 400., 90.), AgentsSplit(0.75));
+        assert_eq!(half.dragged(100., 400., 90.), AgentsSplit(0.25));
+        assert_eq!(half.dragged(-1000., 400., 90.), AgentsSplit(310. / 400.));
+        assert_eq!(half.dragged(1000., 400., 90.), AgentsSplit(90. / 400.));
+        assert_eq!(half.dragged(50., 0., 90.), half);
+    }
+
+    #[test]
+    fn a_split_the_window_shrank_below_the_minimum_drags_from_where_it_is_drawn() {
+        // 10 % of 400 px is drawn at the 90 px minimum: 10 px up makes it 100 px, not 90.
+        assert_eq!(AgentsSplit(0.1).dragged(-10., 400., 90.), AgentsSplit(100. / 400.));
+        assert_eq!(AgentsSplit(0.9).dragged(10., 400., 90.), AgentsSplit(300. / 400.));
+    }
+
+    #[test]
+    fn the_agents_split_survives_a_relaunch_and_resets_to_half() {
+        let store = StateStore::in_memory();
+        assert_eq!(AgentsSplit::load(&store), AgentsSplit::DEFAULT);
+        AgentsSplit(0.3).save(&store);
+        assert_eq!(AgentsSplit::load(&store), AgentsSplit(0.3));
+        AgentsSplit::DEFAULT.save(&store);
+        assert_eq!(AgentsSplit::load(&store), AgentsSplit::DEFAULT);
     }
 }

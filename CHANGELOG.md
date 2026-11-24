@@ -166,6 +166,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   savings, a stacked chart per hour, day, week or month (hover a bar for its numbers) and
   breakdowns by model, project and agent; click a model to filter the board. `1`–`5` pick
   the period, `C` / `T` switch Cost / Tokens, `Esc` closes.
+- **Resizable Agents section in the sidebar**: drag the line between the window list and
+  **Agents** to give either more room; the split is remembered across launches, and a
+  double-click on the line splits the height in half again.
 
 ### Changed
 - **Terminal zoom applies to every terminal**: `⌘=` / `⌘-` / `⌘0` (`zoom-in`, `zoom-out`,
