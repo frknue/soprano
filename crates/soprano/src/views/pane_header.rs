@@ -1,7 +1,7 @@
 //! A pane card's 30 px header (`Views/PaneHeaderView.swift`, HERDR-UI §7.2): the pane kind's
 //! icon, title and dim working directory — or the pane tabs once the pane holds more than one
 //! — the `+` pane-tab menu, the status pill (or the RUNNING mark of a shell running a
-//! command), and the hover buttons split right / split down / maximize / close.
+//! command), and the buttons split right / split down / maximize / close.
 //!
 //! Everything the Swift view computed (title, tab titles and prefixes, which buttons show,
 //! the pill, the symbol, the `+` menu) is pure logic in [`HeaderModel`] and the functions
@@ -455,7 +455,6 @@ impl RenderOnce for PaneHeader {
 
         let theme = cx.soprano_theme();
         let z = |v: f32| theme.z(v);
-        let group: SharedString = format!("pane-header-{}", self.pane_id).into();
         let mut background = theme.background;
         if let Some(tone) = model.wash {
             background = background.blend(theme.tone(tone).opacity(0.10));
@@ -488,11 +487,10 @@ impl RenderOnce for PaneHeader {
                 .child(Workspace::RUNNING_COMMAND_LABEL)
                 .into_any_element(),
         });
-        let hover_buttons = self.hover_buttons(&model, group.clone(), cx);
+        let buttons = self.buttons(&model, cx);
 
         div()
             .id(ElementId::Name(format!("pane-header-{}", self.pane_id).into()))
-            .group(group)
             .flex()
             .flex_row()
             .flex_none()
@@ -514,7 +512,7 @@ impl RenderOnce for PaneHeader {
             .child(add_button)
             .when(!model.tabs.is_empty(), |header| header.child(div().flex_1()))
             .children(status)
-            .child(hover_buttons)
+            .child(buttons)
     }
 }
 
@@ -658,7 +656,7 @@ impl PaneHeader {
             })
     }
 
-    fn hover_buttons(&self, model: &HeaderModel, group: SharedString, cx: &App) -> impl IntoElement {
+    fn buttons(&self, model: &HeaderModel, cx: &App) -> impl IntoElement {
         let theme = cx.soprano_theme();
         let dim = theme.dim;
         let button = |id: &str, icon: IconName, label: &str| {
@@ -698,8 +696,6 @@ impl PaneHeader {
             .flex_none()
             .items_center()
             .gap(theme.z(2.))
-            .invisible()
-            .group_hover(group, |s| s.visible())
             .child(split("split-right", IconName::SplitRight, "Split Right", split_right_direction()))
             .child(split("split-down", IconName::SplitDown, "Split Down", split_down_direction()))
             .children(maximize)

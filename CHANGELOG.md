@@ -183,6 +183,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   `--approval-mode`) is replaced by the bypass, and an omp chat no longer reads omp's
   `tools.approvalMode`. Agents you type into a terminal, agents with an id of your own,
   and `launchScript` agents are started as you wrote them.
+- **Pane header buttons always show**: Split Right, Split Down, Close, and Maximize (in a
+  split window) stay in the pane's header instead of appearing only while the mouse is over it.
 
 - Soprano is rewritten in Rust with GPUI and Ghostty's terminal core (libghostty-vt), and
   takes [Herdr](https://github.com/herdrdev/herdr-app)'s look: windows and agents listed in
