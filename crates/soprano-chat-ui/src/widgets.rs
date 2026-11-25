@@ -32,7 +32,7 @@ pub fn label(text: impl Into<SharedString>, size: f32, color: Hsla, cx: &App) ->
     let t = cx.soprano_theme();
     div()
         .font_family(UI_FONT_FAMILY)
-        .text_size(t.z(size))
+        .text_size(t.cz(size))
         .text_color(color)
         .whitespace_nowrap()
         .child(text.into())
@@ -43,7 +43,7 @@ pub fn mono(text: impl Into<SharedString>, size: f32, color: Hsla, cx: &App) -> 
     let t = cx.soprano_theme();
     div()
         .font_family(MONO_FONT_FAMILY)
-        .text_size(t.z(size))
+        .text_size(t.cz(size))
         .text_color(color)
         .whitespace_nowrap()
         .child(text.into())
@@ -64,7 +64,7 @@ pub fn shimmer_label(
     if !shimmering {
         return div()
             .font_family(UI_FONT_FAMILY)
-            .text_size(t.z(text_size::BODY))
+            .text_size(t.cz(text_size::BODY))
             .text_color(color)
             .truncate()
             .child(text)
@@ -73,7 +73,7 @@ pub fn shimmer_label(
     if cx.reduce_motion() {
         return div()
             .font_family(UI_FONT_FAMILY)
-            .text_size(t.z(text_size::BODY))
+            .text_size(t.cz(text_size::BODY))
             .text_color(highlight)
             .truncate()
             .child(text)
@@ -83,9 +83,9 @@ pub fn shimmer_label(
         .id(id)
         .duration(Duration::from_millis(2_200))
         .highlight_color(highlight)
-        .spread(t.z(36.0))
+        .spread(t.cz(36.0))
         .font_family(UI_FONT_FAMILY)
-        .text_size(t.z(text_size::BODY))
+        .text_size(t.cz(text_size::BODY))
         .text_color(color)
         .truncate()
         .into_any_element()
@@ -213,7 +213,7 @@ impl RenderOnce for WorkLogLine {
         let label = match self.label_hover.filter(|_| !self.shimmering) {
             Some(hover) => div()
                 .font_family(UI_FONT_FAMILY)
-                .text_size(t.z(text_size::BODY))
+                .text_size(t.cz(text_size::BODY))
                 .text_color(label_color)
                 .group_hover(self.group.clone(), move |s| s.text_color(hover))
                 .truncate()
@@ -228,9 +228,10 @@ impl RenderOnce for WorkLogLine {
                 cx,
             ),
         };
+        let icon_scale = t.chat_zoom_factor();
         let chevron_color = muted.opacity(0.7);
         div()
-            .h(t.z(24.0))
+            .h(t.cz(24.0))
             .w_full()
             .flex()
             .flex_row()
@@ -239,9 +240,9 @@ impl RenderOnce for WorkLogLine {
             .child(
                 div()
                     .flex_none()
-                    .pl(t.z(6.0))
-                    .pr(t.z(10.0))
-                    .child(icon(self.icon).size(13.0).color(icon_color)),
+                    .pl(t.cz(6.0))
+                    .pr(t.cz(10.0))
+                    .child(icon(self.icon).size(13.0 * icon_scale).color(icon_color)),
             )
             .child(div().min_w_0().child(label))
             .when_some(
@@ -250,28 +251,32 @@ impl RenderOnce for WorkLogLine {
                     _ => None,
                 },
                 |line, open| {
-                    line.child(div().flex_none().ml(t.z(4.0)).child(chevron_icon(open, 10.0, chevron_color)))
+                    line.child(div().flex_none().ml(t.cz(4.0)).child(chevron_icon(
+                        open,
+                        10.0 * icon_scale,
+                        chevron_color,
+                    )))
                 },
             )
-            .child(div().flex_1().min_w_0().pl(t.z(6.0)).when_some(self.detail, |cell, (detail, is_code)| {
-                let family = if is_code { MONO_FONT_FAMILY } else { UI_FONT_FAMILY };
-                let size = if is_code { text_size::SMALL } else { text_size::BODY };
-                cell.font_family(family)
-                    .text_size(t.z(size))
-                    .text_color(muted.opacity(0.85))
-                    .truncate()
-                    .child(detail)
-            }))
+            .child(div().flex_1().min_w_0().pl(t.cz(6.0)).when_some(
+                self.detail,
+                |cell, (detail, is_code)| {
+                    let family = if is_code { MONO_FONT_FAMILY } else { UI_FONT_FAMILY };
+                    let size = if is_code { text_size::SMALL } else { text_size::BODY };
+                    cell.font_family(family)
+                        .text_size(t.cz(size))
+                        .text_color(muted.opacity(0.85))
+                        .truncate()
+                        .child(detail)
+                },
+            ))
             .when_some(self.note, |line, note| {
-                line.child(div().flex_none().max_w(gpui::relative(0.4)).truncate().ml(t.z(6.0)).child(note))
+                line.child(div().flex_none().max_w(gpui::relative(0.4)).truncate().ml(t.cz(6.0)).child(note))
             })
             .when(self.failed, |line| {
-                line.child(
-                    div()
-                        .flex_none()
-                        .ml(t.z(6.0))
-                        .child(icon(timeline_icon::CIRCLE_X).size(10.0).color(t.failed.opacity(0.85))),
-                )
+                line.child(div().flex_none().ml(t.cz(6.0)).child(
+                    icon(timeline_icon::CIRCLE_X).size(10.0 * icon_scale).color(t.failed.opacity(0.85)),
+                ))
             })
             .when_some(self.time, |line, time| {
                 // Hidden by visibility, never by `display`: a group's hover is only known while
@@ -280,11 +285,11 @@ impl RenderOnce for WorkLogLine {
                 line.child(
                     div()
                         .flex_none()
-                        .ml(t.z(6.0))
+                        .ml(t.cz(6.0))
                         .invisible()
                         .group_hover(self.group.clone(), |s| s.visible())
                         .font_family(UI_FONT_FAMILY)
-                        .text_size(t.z(text_size::SMALL))
+                        .text_size(t.cz(text_size::SMALL))
                         .text_color(muted)
                         .whitespace_nowrap()
                         .child(time),
@@ -299,18 +304,18 @@ impl RenderOnce for WorkLogLine {
                     line.child(
                         div()
                             .flex_none()
-                            .w(t.z(16.0))
-                            .ml(t.z(6.0))
-                            .mr(t.z(2.0))
+                            .w(t.cz(16.0))
+                            .ml(t.cz(6.0))
+                            .mr(t.cz(2.0))
                             .flex()
                             .justify_center()
                             .when_some(state, |slot, open| {
-                                slot.child(chevron_icon(open, 10.0, chevron_color))
+                                slot.child(chevron_icon(open, 10.0 * icon_scale, chevron_color))
                             }),
                     )
                 },
             )
             .font_weight(FontWeight::NORMAL)
-            .line_height(px(t.z(24.0).into()))
+            .line_height(px(t.cz(24.0).into()))
     }
 }

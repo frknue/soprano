@@ -762,7 +762,7 @@ impl Render for ComposerView {
             .child(
                 div()
                     .w_full()
-                    .rounded(t.z(16.0))
+                    .rounded(t.cz(16.0))
                     .border_1()
                     .border_color(t.foreground.opacity(if t.is_dark() { 0.05 } else { 0.08 }))
                     // Opaque: without a blur behind it, the conversation would read through
@@ -777,12 +777,12 @@ impl Render for ComposerView {
                     .children(self.render_question(cx))
                     .child(
                         div()
-                            .px(t.z(16.0))
-                            .pt(t.z(if has_panel { 10.0 } else { 16.0 }))
-                            .pb(t.z(8.0))
+                            .px(t.cz(16.0))
+                            .pt(t.cz(if has_panel { 10.0 } else { 16.0 }))
+                            .pb(t.cz(8.0))
                             .font_family(UI_FONT_FAMILY)
-                            .text_size(t.z(text_size::BODY))
-                            .line_height(t.z(EDITOR_LINE_HEIGHT))
+                            .text_size(t.cz(text_size::BODY))
+                            .line_height(t.cz(EDITOR_LINE_HEIGHT))
                             .text_color(t.foreground)
                             .capture_action(cx.listener(Self::on_enter))
                             .capture_action(cx.listener(Self::on_tab))

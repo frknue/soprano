@@ -373,11 +373,12 @@ pub struct DiffStat {
     font_size: f32,
     mute_zero: bool,
     minus_sign: bool,
+    scale: Option<f32>,
 }
 
 impl DiffStat {
     pub fn new(additions: usize, deletions: usize, font_size: f32) -> Self {
-        Self { additions, deletions, font_size, mute_zero: false, minus_sign: false }
+        Self { additions, deletions, font_size, mute_zero: false, minus_sign: false, scale: None }
     }
 
     pub fn mute_zero(mut self, mute: bool) -> Self {
@@ -390,6 +391,12 @@ impl DiffStat {
         self.minus_sign = minus_sign;
         self
     }
+
+    /// Overrides the theme zoom scale for the stat text.
+    pub fn scale(mut self, zoom: f32) -> Self {
+        self.scale = Some(zoom);
+        self
+    }
 }
 
 /// "+A -D" as the counts read (`minus_sign`: "−D").
@@ -400,6 +407,7 @@ pub fn stat_text(additions: usize, deletions: usize, minus_sign: bool) -> (Strin
 impl RenderOnce for DiffStat {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = SurfaceColors::of(cx);
+        let scale = self.scale.unwrap_or_else(|| zoom(cx));
         let add =
             if self.mute_zero && self.additions == 0 { colors.muted } else { colors.diff_add_foreground };
         let delete =
@@ -411,7 +419,7 @@ impl RenderOnce for DiffStat {
             .flex_shrink_0()
             .whitespace_nowrap()
             .font_family(TERMINAL_FONT_FAMILY)
-            .text_size(px(self.font_size * zoom(cx)))
+            .text_size(px(self.font_size * scale))
             .child(div().text_color(add).child(added))
             .child(" ")
             .child(div().text_color(delete).child(deleted))
@@ -425,11 +433,12 @@ pub struct HunkDiff {
     id: ElementId,
     diff: Arc<InlineDiff>,
     wrap: bool,
+    scale: Option<f32>,
 }
 
 impl HunkDiff {
     pub fn new(id: impl Into<ElementId>, diff: Arc<InlineDiff>) -> Self {
-        Self { id: id.into(), diff, wrap: true }
+        Self { id: id.into(), diff, wrap: true, scale: None }
     }
 
     /// Long lines wrap (the default), or stay whole: then the diff is as wide as its widest
@@ -437,6 +446,12 @@ impl HunkDiff {
     /// `overflow_x_scroll` box (`FileDiffRowView.documentWidth`).
     pub fn wrap(mut self, wrap: bool) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    /// Overrides the theme zoom scale for this hunk diff.
+    pub fn scale(mut self, zoom: f32) -> Self {
+        self.scale = Some(zoom);
         self
     }
 }
@@ -479,7 +494,7 @@ pub fn hunk_side(diff: &InlineDiff, line: &HunkLine, numbered: bool) -> DiffSide
 impl RenderOnce for HunkDiff {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = SurfaceColors::of(cx);
-        let zoom = zoom(cx);
+        let zoom = self.scale.unwrap_or_else(|| zoom(cx));
         let layout = DiffRowLayout {
             number_width: if self.diff.max_number > 0 {
                 number_width(self.diff.max_number, window)

@@ -35,6 +35,7 @@ pub struct SopranoTheme {
     manager: ThemeManager,
     tokens: Tokens,
     zoom: f32,
+    chat_zoom: f32,
     reduce_motion: bool,
 }
 
@@ -62,7 +63,7 @@ impl ActiveSopranoTheme for App {
 impl SopranoTheme {
     pub fn new(manager: ThemeManager) -> Self {
         let tokens = Tokens::new(manager.current());
-        Self { manager, tokens, zoom: 1.0, reduce_motion: false }
+        Self { manager, tokens, zoom: 1.0, chat_zoom: 1.0, reduce_motion: false }
     }
 
     /// The installed theme. Panics only when [`crate::init`] was never called.
@@ -74,12 +75,15 @@ impl SopranoTheme {
     /// against the OS appearance, and themes gpui-component to match.
     pub fn install(theme_id: &str, appearance: AppearancePreference, cx: &mut App) {
         let system = Appearance::from_window(cx.window_appearance());
-        let (zoom, reduce_motion) =
-            cx.try_global::<Self>().map(|theme| (theme.zoom, theme.reduce_motion)).unwrap_or((1.0, false));
+        let (zoom, chat_zoom, reduce_motion) = cx
+            .try_global::<Self>()
+            .map(|theme| (theme.zoom, theme.chat_zoom, theme.reduce_motion))
+            .unwrap_or((1.0, 1.0, false));
         let mut manager = ThemeManager::new(theme_id, appearance, system);
         Self::drive_app_appearance(&mut manager, cx);
         let mut theme = Self::new(manager);
         theme.zoom = zoom;
+        theme.chat_zoom = chat_zoom;
         theme.reduce_motion = reduce_motion;
         cx.set_global(theme);
         Self::did_change(cx);
@@ -115,9 +119,24 @@ impl SopranoTheme {
         self.zoom
     }
 
+    /// Effective zoom for chat content: window zoom multiplied by the chat zoom factor.
+    pub fn chat_zoom(&self) -> f32 {
+        self.zoom * self.chat_zoom
+    }
+
+    /// The chat's independent zoom multiplier (1.0 at default).
+    pub fn chat_zoom_factor(&self) -> f32 {
+        self.chat_zoom
+    }
+
     /// A designed length at the current zoom (Herdr's `z()`).
     pub fn z(&self, designed: f32) -> Pixels {
         px(designed * self.zoom)
+    }
+
+    /// A designed length inside a chat view at the current chat zoom.
+    pub fn cz(&self, designed: f32) -> Pixels {
+        px(designed * self.chat_zoom())
     }
 
     /// The rem size windows should use: 13 px × zoom.
@@ -193,6 +212,26 @@ impl SopranoTheme {
         Self::set_zoom(1.0, cx);
     }
 
+    /// Sets the chat zoom, rounded to 0.1 steps and clamped to 0.5…3.0.
+    pub fn set_chat_zoom(zoom: f32, cx: &mut App) {
+        let zoom = clamp_zoom(zoom);
+        if (cx.soprano_theme().chat_zoom - zoom).abs() < f32::EPSILON {
+            return;
+        }
+        cx.global_mut::<Self>().chat_zoom = zoom;
+        cx.refresh_windows();
+    }
+
+    /// Adjusts chat zoom by `delta` steps (⌘= / ⌘-).
+    pub fn change_chat_zoom(delta: i32, cx: &mut App) {
+        Self::set_chat_zoom(cx.soprano_theme().chat_zoom + delta as f32 * ZOOM_STEP, cx);
+    }
+
+    /// Resets chat zoom back to 1.0 (⌘0).
+    pub fn reset_chat_zoom(cx: &mut App) {
+        Self::set_chat_zoom(1.0, cx);
+    }
+
     /// Reduce Motion: no fades and no spinning (also sets GPUI's own flag, which stops
     /// every `with_animation`).
     pub fn set_reduce_motion(reduce_motion: bool, cx: &mut App) {
@@ -254,6 +293,10 @@ mod tests {
         assert_eq!(theme.z(30.0), px(30.0));
         theme.zoom = 1.5;
         assert_eq!(theme.z(30.0), px(45.0));
+        assert_eq!(theme.cz(30.0), px(45.0));
+        theme.chat_zoom = 1.2;
+        assert_eq!(theme.z(30.0), px(45.0));
+        assert!((f32::from(theme.cz(30.0)) - 54.0).abs() < 1e-4);
         assert_eq!(theme.rem_size(), px(19.5));
         assert_eq!(theme.theme().id, "nord");
         assert_eq!(theme.hover, theme.tokens().hover);

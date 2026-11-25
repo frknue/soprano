@@ -481,16 +481,14 @@ impl HistoryPanel {
                     let _ = this.update(cx, |panel, cx| panel.resume_session(&session, false, true, cx));
                 }
             }),
-        ];
-        if session.format == AgentTranscriptFormat::Omp {
-            let this = this.clone();
-            let session = session.clone();
-            items.push(MenuItem::new("Resume in Chat").icon(IconName::MessageSquare).on_select(
+            MenuItem::new("Resume in Chat").icon(IconName::MessageSquare).on_select({
+                let this = this.clone();
+                let session = session.clone();
                 move |_, cx| {
                     let _ = this.update(cx, |panel, cx| panel.resume_session(&session, true, false, cx));
-                },
-            ));
-        }
+                }
+            }),
+        ];
         items.push(MenuItem::separator());
         items.push(MenuItem::new("Copy Resume Command").icon(IconName::Terminal).on_select({
             let this = this.clone();
@@ -1076,19 +1074,17 @@ impl HistoryPanel {
                 this.resume_session(&s_tab, false, true, cx);
             }),
         ));
-        if session.format == AgentTranscriptFormat::Omp {
-            actions = actions.child(action_pill(
-                SharedString::from(format!("history-resume-chat-{key}")),
-                t,
-                IconName::MessageSquare,
-                "Chat",
-                false,
-                cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    this.resume_session(&s_chat, true, false, cx);
-                }),
-            ));
-        }
+        actions = actions.child(action_pill(
+            SharedString::from(format!("history-resume-chat-{key}")),
+            t,
+            IconName::MessageSquare,
+            "Chat",
+            false,
+            cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.resume_session(&s_chat, true, false, cx);
+            }),
+        ));
         actions = actions.child(action_pill(
             SharedString::from(format!("history-copy-cmd-{key}")),
             t,
@@ -1204,7 +1200,7 @@ impl Render for HistoryPanel {
         let body: AnyElement = if self.is_loading && !self.has_loaded {
             ui::empty_state(
                 &t,
-                "Indexing agent sessions…\nReading Claude Code, omp, Codex, and OpenCode history.",
+                "Indexing agent sessions…\nReading Claude Code, omp, Codex, OpenCode, and Antigravity history.",
             )
             .into_any_element()
         } else if self.result.groups.is_empty() {
@@ -1222,7 +1218,7 @@ impl Render for HistoryPanel {
                     self.scope.label().to_lowercase()
                 )
             } else {
-                "No agent sessions found\nSessions from Claude Code, omp, Codex, and OpenCode appear here."
+                "No agent sessions found\nSessions from Claude Code, omp, Codex, OpenCode, and Antigravity appear here."
                     .to_owned()
             };
             ui::empty_state(&t, &msg).into_any_element()

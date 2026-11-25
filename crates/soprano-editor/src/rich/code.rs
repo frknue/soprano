@@ -30,6 +30,7 @@ pub struct CodeBlock {
     tokens: Vec<SyntaxToken>,
     wrap: bool,
     document_order: u64,
+    scale: Option<f32>,
 }
 
 impl CodeBlock {
@@ -46,6 +47,7 @@ impl CodeBlock {
             tokens: tokens.to_vec(),
             wrap: true,
             document_order: 0,
+            scale: None,
         }
     }
 
@@ -57,6 +59,12 @@ impl CodeBlock {
 
     pub fn document_order(mut self, order: u64) -> Self {
         self.document_order = order;
+        self
+    }
+
+    /// Overrides the theme zoom scale for this code block.
+    pub fn scale(mut self, zoom: f32) -> Self {
+        self.scale = Some(zoom);
         self
     }
 }
@@ -96,7 +104,7 @@ impl RenderOnce for CodeBlock {
             .highlights(highlights)
             .document_order(self.document_order)
             .selection_color(colors.selection);
-        let zoom = cx.global::<SopranoTheme>().zoom();
+        let zoom = self.scale.unwrap_or_else(|| cx.global::<SopranoTheme>().zoom());
         let z = |value: f32| px(value * zoom);
 
         div()

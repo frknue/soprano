@@ -255,8 +255,8 @@ impl ComposerView {
             PopoverKind::Context => (self.anchors.meter.get(), Anchor::BottomRight),
         };
         let position = match corner {
-            Anchor::BottomRight => point(anchor_bounds.right(), anchor_bounds.top() - t.z(GAP)),
-            _ => point(anchor_bounds.left(), anchor_bounds.top() - t.z(GAP)),
+            Anchor::BottomRight => point(anchor_bounds.right(), anchor_bounds.top() - t.cz(GAP)),
+            _ => point(anchor_bounds.left(), anchor_bounds.top() - t.cz(GAP)),
         };
         let content = match kind {
             PopoverKind::Model => self.render_model_picker(cx),
@@ -296,7 +296,7 @@ impl ComposerView {
                 this.focus_editor(window, cx);
             }))
             .occlude()
-            .rounded(t.z(8.0))
+            .rounded(t.cz(8.0))
             .border_1()
             .border_color(t.border)
             .bg(t.popover)
@@ -305,7 +305,11 @@ impl ComposerView {
             .child(content);
         layers.push(
             deferred(
-                anchored().position(position).anchor(corner).snap_to_window_with_margin(t.z(8.0)).child(card),
+                anchored()
+                    .position(position)
+                    .anchor(corner)
+                    .snap_to_window_with_margin(t.cz(8.0))
+                    .child(card),
             )
             .with_priority(1)
             .into_any_element(),
@@ -347,7 +351,7 @@ impl ComposerView {
                         row.child(
                             div()
                                 .font_family(UI_FONT_FAMILY)
-                                .text_size(t.z(10.0))
+                                .text_size(t.cz(10.0))
                                 .text_color(t.muted)
                                 .child(provider),
                         )
@@ -359,19 +363,19 @@ impl ComposerView {
                 .collect();
         let empty = shown.is_empty();
         div()
-            .w(t.z(MODEL_PICKER_WIDTH))
+            .w(t.cz(MODEL_PICKER_WIDTH))
             .flex()
             .child(
                 div()
-                    .w(t.z(44.0))
+                    .w(t.cz(44.0))
                     .flex_none()
                     .bg(t.raised.opacity(0.3))
-                    .p(t.z(4.0))
+                    .p(t.cz(4.0))
                     .relative()
                     .child(
                         div()
-                            .size(t.z(36.0))
-                            .rounded(t.z(6.0))
+                            .size(t.cz(36.0))
+                            .rounded(t.cz(6.0))
                             .bg(t.foreground.opacity(0.08))
                             .flex()
                             .items_center()
@@ -381,11 +385,11 @@ impl ComposerView {
                     .child(
                         div()
                             .absolute()
-                            .right(t.z(0.0))
-                            .top(t.z(12.0))
-                            .w(t.z(3.0))
-                            .h(t.z(20.0))
-                            .rounded(t.z(1.5))
+                            .right(t.cz(0.0))
+                            .top(t.cz(12.0))
+                            .w(t.cz(3.0))
+                            .h(t.cz(20.0))
+                            .rounded(t.cz(1.5))
                             .bg(t.accent),
                     ),
             )
@@ -396,26 +400,26 @@ impl ComposerView {
                     .border_l_1()
                     .border_color(t.border.opacity(0.7))
                     .bg(t.raised.opacity(0.4))
-                    .pb(t.z(4.0))
+                    .pb(t.cz(4.0))
                     .flex()
                     .flex_col()
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(t.z(6.0))
-                            .px(t.z(8.0))
+                            .gap(t.cz(6.0))
+                            .px(t.cz(8.0))
                             .border_b_1()
                             .border_color(t.border.opacity(0.7))
-                            .child(icon(IconName::Search).size(13.0).color(t.muted))
+                            .child(icon(IconName::Search).size(13.0 * t.chat_zoom_factor()).color(t.muted))
                             .child(div().flex_1().child(text_input(&search).small())),
                     )
                     .when(empty, |column| {
                         column.child(
-                            div().h(t.z(40.0)).flex().items_center().justify_center().child(
+                            div().h(t.cz(40.0)).flex().items_center().justify_center().child(
                                 div()
                                     .font_family(UI_FONT_FAMILY)
-                                    .text_size(t.z(text_size::BODY))
+                                    .text_size(t.cz(text_size::BODY))
                                     .text_color(t.muted)
                                     .child("No models found"),
                             ),
@@ -425,22 +429,22 @@ impl ComposerView {
                         column.child(
                             div()
                                 .id("composer-model-list")
-                                .mt(t.z(4.0))
-                                .px(t.z(8.0))
-                                .pt(t.z(2.0))
-                                .max_h(t.z(280.0))
+                                .mt(t.cz(4.0))
+                                .px(t.cz(8.0))
+                                .pt(t.cz(2.0))
+                                .max_h(t.cz(280.0))
                                 .overflow_y_scroll()
                                 .track_scroll(&scroll)
                                 .flex()
                                 .flex_col()
-                                .gap(t.z(2.0))
+                                .gap(t.cz(2.0))
                                 .children(rows)
                                 .when(hidden > 0, |list| {
                                     list.child(
-                                        div().min_h(t.z(28.0)).px(t.z(8.0)).flex().items_center().child(
+                                        div().min_h(t.cz(28.0)).px(t.cz(8.0)).flex().items_center().child(
                                             div()
                                                 .font_family(UI_FONT_FAMILY)
-                                                .text_size(t.z(text_size::BODY))
+                                                .text_size(t.cz(text_size::BODY))
                                                 .text_color(t.muted.opacity(0.6))
                                                 .child(format!("{hidden} more — type to search")),
                                         ),
@@ -459,18 +463,18 @@ impl ComposerView {
         let Some(option) = composer_option(self, category(kind)) else { return div().into_any_element() };
         let highlighted = self.popover.as_ref().and_then(|p| p.highlighted);
         div()
-            .w(t.z(OPTION_MENU_WIDTH))
-            .p(t.z(4.0))
+            .w(t.cz(OPTION_MENU_WIDTH))
+            .p(t.cz(4.0))
             .flex()
             .flex_col()
-            .gap(t.z(2.0))
+            .gap(t.cz(2.0))
             .child(
                 div()
-                    .px(t.z(8.0))
-                    .pt(t.z(6.0))
-                    .pb(t.z(4.0))
+                    .px(t.cz(8.0))
+                    .pt(t.cz(6.0))
+                    .pb(t.cz(4.0))
                     .font_family(UI_FONT_FAMILY)
-                    .text_size(t.z(text_size::SMALL))
+                    .text_size(t.cz(text_size::SMALL))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(t.muted)
                     .child(option.name.clone()),
@@ -506,32 +510,32 @@ impl ComposerView {
         let inner = CONTEXT_CARD_WIDTH - 24.0;
         let fraction = reading.map_or(0.0, |r| r.clamped_fraction());
         div()
-            .w(t.z(CONTEXT_CARD_WIDTH))
-            .p(t.z(12.0))
+            .w(t.cz(CONTEXT_CARD_WIDTH))
+            .p(t.cz(12.0))
             .flex()
             .flex_col()
             .child(
                 div()
                     .font_family(UI_FONT_FAMILY)
-                    .text_size(t.z(text_size::ROW))
+                    .text_size(t.cz(text_size::ROW))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(t.foreground)
                     .child("Context window"),
             )
             .child(
                 div()
-                    .mt(t.z(10.0))
-                    .h(t.z(6.0))
-                    .w(t.z(inner))
-                    .rounded(t.z(3.0))
+                    .mt(t.cz(10.0))
+                    .h(t.cz(6.0))
+                    .w(t.cz(inner))
+                    .rounded(t.cz(3.0))
                     .bg(t.foreground.opacity(0.1))
-                    .child(div().h_full().w(t.z(inner * fraction)).rounded(t.z(3.0)).bg(tint)),
+                    .child(div().h_full().w(t.cz(inner * fraction)).rounded(t.cz(3.0)).bg(tint)),
             )
             .child(
                 div()
-                    .mt(t.z(6.0))
+                    .mt(t.cz(6.0))
                     .font_family(UI_FONT_FAMILY)
-                    .text_size(t.z(text_size::SMALL))
+                    .text_size(t.cz(text_size::SMALL))
                     .text_color(t.muted)
                     .child(
                         reading
@@ -541,14 +545,14 @@ impl ComposerView {
             )
             .child(
                 div()
-                    .mt(t.z(4.0))
+                    .mt(t.cz(4.0))
                     .font_family(UI_FONT_FAMILY)
-                    .text_size(t.z(text_size::SMALL))
+                    .text_size(t.cz(text_size::SMALL))
                     .text_color(t.muted)
                     .child("Compacting summarizes earlier messages to free space."),
             )
             .child(
-                div().mt(t.z(12.0)).flex().child(
+                div().mt(t.cz(12.0)).flex().child(
                     Button::new("composer-compact", "Compact conversation")
                         .icon(timeline_icon::MINIMIZE)
                         .size(ButtonSize::Sm)
@@ -579,13 +583,13 @@ fn list_row(
     };
     div()
         .id(id)
-        .min_h(t.z(28.0))
-        .px(t.z(8.0))
-        .py(t.z(4.0))
-        .rounded(t.z(4.0))
+        .min_h(t.cz(28.0))
+        .px(t.cz(8.0))
+        .py(t.cz(4.0))
+        .rounded(t.cz(4.0))
         .flex()
         .items_center()
-        .gap(t.z(8.0))
+        .gap(t.cz(8.0))
         .cursor_pointer()
         .when_some(fill, |row, fill| row.bg(fill))
         .hover(|s| s.bg(t.foreground.opacity(0.09)))
@@ -595,11 +599,11 @@ fn list_row(
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(t.z(2.0))
+                .gap(t.cz(2.0))
                 .child(
                     div()
                         .font_family(UI_FONT_FAMILY)
-                        .text_size(t.z(text_size::BODY))
+                        .text_size(t.cz(text_size::BODY))
                         .text_color(t.foreground)
                         .truncate()
                         .child(title),
@@ -608,7 +612,7 @@ fn list_row(
                     texts.child(
                         div()
                             .font_family(UI_FONT_FAMILY)
-                            .text_size(t.z(text_size::SMALL))
+                            .text_size(t.cz(text_size::SMALL))
                             .text_color(t.muted)
                             .line_clamp(3)
                             .child(subtitle),
@@ -618,10 +622,9 @@ fn list_row(
 }
 
 fn check(checked: bool, t: &SopranoTheme) -> impl IntoElement {
-    div()
-        .w(t.z(14.0))
-        .flex_none()
-        .when(checked, |slot| slot.child(icon(IconName::Check).size(13.0).color(t.foreground)))
+    div().w(t.cz(14.0)).flex_none().when(checked, |slot| {
+        slot.child(icon(IconName::Check).size(13.0 * t.chat_zoom_factor()).color(t.foreground))
+    })
 }
 
 #[allow(dead_code)]

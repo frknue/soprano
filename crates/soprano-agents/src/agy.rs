@@ -216,7 +216,7 @@ fn strip_tag_block(text: &str, tag: &str) -> String {
 
 /// Antigravity encodes tool argument values in `transcript.jsonl` as JSON strings (e.g.
 /// `"CommandLine": "\"git status\""`). Unquote when the value itself is a JSON string literal.
-fn arg_string(args: &Object, key: &str) -> Option<String> {
+pub(crate) fn arg_string(args: &Object, key: &str) -> Option<String> {
     let value = args.get(key)?;
     let raw = match value {
         Value::String(s) => s.as_str(),

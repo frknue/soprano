@@ -1,5 +1,5 @@
 //! Streaming parsers that extract session metadata, recent turns, and searchable text from
-//! Claude Code, omp, Codex, and OpenCode transcripts on disk.
+//! Claude Code, omp, Codex, OpenCode, and Antigravity transcripts on disk.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -1175,11 +1175,21 @@ fn parse_agy_file(path: &Path, modified_ms: i64) -> Option<AgentSessionSummary> 
         .and_then(|s| s.to_str())
         .map(str::to_owned);
     let mut acc = SessionAccumulator::new();
+    let mut inferred_git: Option<(String, Option<String>)> = None;
+    let mut inferred_dir: Option<String> = None;
 
     if !read_jsonl_lines(path, |line| {
         let Some(record) = parse_object(line) else { return };
         if let Some(cwd) = str_at(&record, "cwd").filter(|c| !c.is_empty()) {
             acc.cwd = Some(cwd.to_owned());
+        } else if acc.cwd.is_none()
+            && let Some(ws) = record
+                .get("workspacePaths")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.iter().find_map(Value::as_str))
+                .filter(|c| !c.is_empty())
+        {
+            acc.cwd = Some(ws.to_owned());
         }
         let ts = date_from_value(record.get("created_at").or_else(|| record.get("timestamp")));
         acc.note_timestamp(ts);
@@ -1205,6 +1215,9 @@ fn parse_agy_file(path: &Path, modified_ms: i64) -> Option<AgentSessionSummary> 
                     if str_at(call, "name") == Some("invoke_subagent") {
                         acc.subagent_count += 1;
                     }
+                    if acc.cwd.is_none() && inferred_git.is_none() {
+                        infer_agy_cwd_from_tool_call(call, &mut inferred_git, &mut inferred_dir);
+                    }
                 }
                 if let Some(reply) = str_at(&record, "content")
                     .or_else(|| str_at(&record, "response"))
@@ -1219,7 +1232,90 @@ fn parse_agy_file(path: &Path, modified_ms: i64) -> Option<AgentSessionSummary> 
         return None;
     }
 
+    if acc.cwd.is_none() {
+        if let Some((root, branch)) = inferred_git {
+            acc.cwd = Some(root);
+            if acc.git_branch.is_none() {
+                acc.git_branch = branch;
+            }
+        } else if let Some(dir) = inferred_dir {
+            acc.cwd = Some(dir);
+        }
+    }
+
     acc.finish(AgentTranscriptFormat::Agy, fallback_id, modified_ms, path.to_path_buf())
+}
+
+/// Real Antigravity `transcript.jsonl` files do not emit a top-level `cwd` field; infer the
+/// project directory from absolute paths passed to file/search/command tools, preferring a git
+/// repository root over plain directories and skipping internal agent/config paths.
+fn infer_agy_cwd_from_tool_call(
+    call: &Object,
+    inferred_git: &mut Option<(String, Option<String>)>,
+    inferred_dir: &mut Option<String>,
+) {
+    const PATH_KEYS: &[&str] = &[
+        "Cwd",
+        "DirectoryPath",
+        "SearchDirectory",
+        "SearchPath",
+        "Path",
+        "AbsolutePath",
+        "TargetFile",
+        "File",
+        "cwd",
+        "path",
+        "file_path",
+    ];
+    let Some(args) = call.get("args").or_else(|| call.get("arguments")).and_then(Value::as_object) else {
+        return;
+    };
+    for key in PATH_KEYS {
+        let Some(raw) = crate::agy::arg_string(args, key) else { continue };
+        let candidate = raw.strip_prefix("file://").unwrap_or(&raw);
+        let path = Path::new(candidate);
+        if !path.is_absolute() || is_internal_agent_path(candidate) {
+            continue;
+        }
+        let Some(dir) = existing_directory_for(path) else { continue };
+        let dir_str = dir.to_string_lossy();
+        if let Some(root) = soprano_git::branch::repository_root(&dir_str) {
+            let root_str = root.to_string_lossy().into_owned();
+            let branch = soprano_git::branch::current_branch(&root_str);
+            *inferred_git = Some((root_str, branch));
+            return;
+        }
+        if inferred_dir.is_none() && !is_system_temp_path(dir) {
+            *inferred_dir = Some(dir_str.into_owned());
+        }
+    }
+}
+
+fn is_internal_agent_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    ["/.gemini/", "/.agents/", "/.claude/", "/.codex/", "/.omp/"]
+        .iter()
+        .any(|needle| normalized.contains(needle))
+}
+
+fn is_system_temp_path(dir: &Path) -> bool {
+    let normalized = dir.to_string_lossy().replace('\\', "/");
+    normalized == "/tmp"
+        || normalized.starts_with("/tmp/")
+        || normalized == "/private/tmp"
+        || normalized.starts_with("/private/tmp/")
+        || normalized.starts_with("/var/folders/")
+        || normalized.starts_with("/private/var/folders/")
+}
+
+fn existing_directory_for(path: &Path) -> Option<&Path> {
+    let mut current = if path.is_dir() { path } else { path.parent()? };
+    while !current.is_dir() {
+        current = current.parent()?;
+    }
+    // Never treat the filesystem root itself as a workspace folder.
+    current.parent()?;
+    Some(current)
 }
 
 fn line_contains(haystack: &[u8], needle: &[u8]) -> bool {

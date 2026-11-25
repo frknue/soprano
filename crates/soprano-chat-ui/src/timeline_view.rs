@@ -83,6 +83,8 @@ pub struct TimelineView {
     find_query: String,
     find_matches: Vec<usize>,
     find_current: Option<usize>,
+    /// Last effective chat zoom used to measure list rows; changes invalidate cached heights.
+    last_chat_zoom: f32,
 }
 
 impl EventEmitter<TimelineEvent> for TimelineView {}
@@ -129,6 +131,7 @@ impl TimelineView {
             find_query: String::new(),
             find_matches: Vec::new(),
             find_current: None,
+            last_chat_zoom: cx.soprano_theme().chat_zoom(),
         };
         view.reload(true, cx);
         view
@@ -632,19 +635,19 @@ impl TimelineView {
             .absolute()
             .left_0()
             .right_0()
-            .bottom(px(self.bottom_inset) - t.z(6.0))
+            .bottom(px(self.bottom_inset) - t.cz(6.0))
             .flex()
             .justify_center()
             .child(
                 div()
                     .id("timeline-scroll-to-end-pill")
-                    .h(t.z(26.0))
-                    .pl(t.z(10.0))
-                    .pr(t.z(12.0))
+                    .h(t.cz(26.0))
+                    .pl(t.cz(10.0))
+                    .pr(t.cz(12.0))
                     .flex()
                     .items_center()
-                    .gap(t.z(4.0))
-                    .rounded(t.z(13.0))
+                    .gap(t.cz(4.0))
+                    .rounded(t.cz(13.0))
                     .border_1()
                     .border_color(t.border)
                     .bg(fill)
@@ -653,11 +656,11 @@ impl TimelineView {
                     .cursor_pointer()
                     .tooltip(soprano_ui::tooltip("Jump to latest"))
                     .on_click(cx.listener(|this, _, _, cx| this.jump_to_latest(cx)))
-                    .child(icon(IconName::ChevronDown).size(11.0).color(t.foreground))
+                    .child(icon(IconName::ChevronDown).size(11.0 * t.chat_zoom_factor()).color(t.foreground))
                     .child(
                         div()
                             .font_family(UI_FONT_FAMILY)
-                            .text_size(t.z(text_size::SMALL))
+                            .text_size(t.cz(text_size::SMALL))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(t.foreground)
                             .child("Scroll to end"),
@@ -669,6 +672,14 @@ impl TimelineView {
 impl Render for TimelineView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.soprano_theme().clone();
+        let chat_zoom = t.chat_zoom();
+        if (chat_zoom - self.last_chat_zoom).abs() > f32::EPSILON {
+            self.last_chat_zoom = chat_zoom;
+            let len = self.rows.len();
+            if len > 0 {
+                self.list.splice(0..len, len);
+            }
+        }
         self.viewport = self.list.viewport_bounds().size;
         let shows_pill = !self.is_following() && !self.rows.is_empty();
         let bottom = self.bottom_inset;
@@ -692,7 +703,7 @@ impl Render for TimelineView {
                     cx.processor(|this, index, window, cx| this.render_row(index, window, cx)),
                 )
                 .size_full()
-                .pt(t.z(TOP_PADDING))
+                .pt(t.cz(TOP_PADDING))
                 .pb(px(bottom)),
             )
             .when(shows_pill, |view| view.child(self.render_pill(cx)))

@@ -1,4 +1,4 @@
-//! Indexed agent session history across Claude Code, omp, Codex, and OpenCode.
+//! Indexed agent session history across Claude Code, omp, Codex, OpenCode, and Antigravity.
 //!
 //! Scans the CLIs' transcript directories and SQLite databases on disk with an mtime+size
 //! incremental cache (optionally persisted to a local SQLite database), then filters by
@@ -23,7 +23,7 @@ use self::parsers::{discover_sources, parse_source, profile_id_for_format};
 
 /// Bumped whenever the cached `AgentSessionSummary` format changes; old cache rows are
 /// simply ignored and re-indexed cleanly.
-const CACHE_SCHEMA_VERSION: i64 = 1;
+const CACHE_SCHEMA_VERSION: i64 = 2;
 
 /// Which side of the conversation sent a previewed message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

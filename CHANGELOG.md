@@ -334,6 +334,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Antigravity (`agy`) sessions now appear in Project and Workspace History**: real
+  Antigravity transcripts omit a top-level `cwd`, so the history indexer now infers each
+  session's repository root and branch from tool call paths (and rebuilds cached rows
+  automatically). All chat-capable agents in History now offer **Resume in Chat**.
+- **Zooming inside Chat UI** (`⌘+` / `⌘=`, `⌘-`, `⌘0`): zoom shortcuts now scale Chat UI
+  conversations, Markdown replies, code blocks, diffs, and the floating composer alongside
+  terminals — both in chat tabs and in the Agent Dashboard — without resizing sidebar chrome.
 - **omp notifications show up again.** At the end of every turn omp's own desktop
   notification (OSC 9) arrived a few milliseconds after Soprano's report of the same turn,
   and macOS dropped both banners. Soprano now posts one banner for that moment.

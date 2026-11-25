@@ -694,12 +694,14 @@ impl MainView {
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
             BindingCommand::OpenAgentDashboard => self.run(Command::ToggleDashboard, window, cx),
             BindingCommand::ToggleStatistics => self.run(Command::ToggleStatistics, window, cx),
-            // `keybindingZoom`: every terminal's font, not the whole UI.
+            // `keybindingZoom`: every terminal's font and chat view zoom, not the whole UI chrome.
             BindingCommand::Zoom(delta) => {
-                self.content.update(cx, |content, cx| content.change_terminal_font_size(delta, cx))
+                self.content.update(cx, |content, cx| content.change_terminal_font_size(delta, cx));
+                SopranoTheme::change_chat_zoom(delta, cx);
             }
             BindingCommand::ZoomReset => {
-                self.content.update(cx, |content, cx| content.reset_terminal_font_size(cx))
+                self.content.update(cx, |content, cx| content.reset_terminal_font_size(cx));
+                SopranoTheme::reset_chat_zoom(cx);
             }
         }
     }
@@ -1897,26 +1899,40 @@ impl MainView {
                 .is_some_and(|view| view.read(cx).captures_keys() || view.read(cx).is_confirming())
     }
 
-    /// Whether `keystroke` is the chord bound to the Agent Dashboard, read against the bindings
-    /// alone: the resolver's own prefix and hint state belongs to the main window.
-    fn toggles_agents_window(&self, keystroke: &gpui::Keystroke) -> bool {
+    /// The app-level binding `keystroke` triggers inside the Agents window (the dashboard toggle
+    /// and chat zoom), read against the bindings alone so the main window's prefix and pane-hint
+    /// state stays untouched.
+    fn agents_window_binding(&self, keystroke: &gpui::Keystroke) -> Option<String> {
         let modifiers = &keystroke.modifiers;
         if !(modifiers.platform || modifiers.control || modifiers.alt) {
-            return false;
+            return None;
         }
         let mut resolver = KeybindingResolver::new(self.resolver.config().clone(), self.resolver.platform());
         let outcome =
             resolver.handle(&crate::keyboard::key_event(keystroke), &KeyContext::new(Instant::now()));
-        matches!(outcome, KeyOutcome::Action(id) | KeyOutcome::MenuAction(id) if id == "agent-dashboard")
+        match outcome {
+            KeyOutcome::Action(id) | KeyOutcome::MenuAction(id)
+                if matches!(id.as_str(), "agent-dashboard" | "zoom-in" | "zoom-out" | "zoom-reset") =>
+            {
+                Some(id)
+            }
+            _ => None,
+        }
     }
 
     fn intercept_key(&mut self, event: &KeystrokeEvent, window: &mut Window, cx: &mut Context<Self>) {
         if window.window_handle().window_id() != self.window_id {
-            // Keys typed in the Agents window are its own; only the chord that toggles it is
-            // the app's.
-            if self.toggles_agents_window(&event.keystroke) {
+            // Keys typed in the Agents window are its own; only the dashboard toggle and chat
+            // zoom chords are handled here.
+            if let Some(binding_id) = self.agents_window_binding(&event.keystroke) {
                 cx.stop_propagation();
-                self.toggle_agents_window(window, cx);
+                match binding_id.as_str() {
+                    "agent-dashboard" => self.toggle_agents_window(window, cx),
+                    "zoom-in" => SopranoTheme::change_chat_zoom(1, cx),
+                    "zoom-out" => SopranoTheme::change_chat_zoom(-1, cx),
+                    "zoom-reset" => SopranoTheme::reset_chat_zoom(cx),
+                    _ => {}
+                }
             }
             return;
         }

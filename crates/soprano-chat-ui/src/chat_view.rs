@@ -451,14 +451,14 @@ impl ChatView {
 impl Render for ChatView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.soprano_theme().clone();
-        let zoom = t.zoom();
+        let zoom = t.chat_zoom();
         let width = f32::from(self.bounds.get().size.width) / zoom;
         let gutter = gutter(width);
         let composer_width = (width - gutter * 2.0).clamp(0.0, CHAT_MAX_WIDTH);
         let composer_height = f32::from(self.composer.read(cx).anchors.surface.get().size.height) / zoom;
         let inset = if composer_height > 0.0 { composer_height } else { 140.0 } + gutter * 2.0;
         self.composer.update(cx, |composer, _| composer.set_width(composer_width));
-        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(t.z(inset), cx));
+        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(t.cz(inset), cx));
         let bounds = self.bounds.clone();
         div()
             .id("agent-chat")
@@ -477,10 +477,10 @@ impl Render for ChatView {
             .child(self.timeline.clone())
             .when(self.find_open, |view| view.child(self.render_find_bar(&t, cx)))
             .child(
-                div().absolute().left_0().right_0().bottom(t.z(gutter)).flex().justify_center().child(
+                div().absolute().left_0().right_0().bottom(t.cz(gutter)).flex().justify_center().child(
                     div()
                         .id("agent-chat-composer")
-                        .w(t.z(composer_width))
+                        .w(t.cz(composer_width))
                         // The composer floats over the conversation: a click into it
                         // must not also land on the turn underneath, which would take
                         // the keyboard back from the editor. Its pane still becomes the

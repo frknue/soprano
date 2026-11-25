@@ -231,6 +231,7 @@ pub struct Markdown {
     scroll: Option<ScrollHandle>,
     anchors: Option<Rc<AnchorTracker>>,
     column: Option<(f32, [f32; 3])>,
+    scale: Option<f32>,
 }
 
 /// Rendered Markdown from an already parsed block model.
@@ -262,6 +263,7 @@ impl Markdown {
             scroll: None,
             anchors: None,
             column: None,
+            scale: None,
         }
     }
 
@@ -318,6 +320,12 @@ impl Markdown {
         self.column = Some((width, padding));
         self
     }
+
+    /// Overrides the theme zoom scale used for typography, spacing, and nested code blocks.
+    pub fn scale(mut self, zoom: f32) -> Self {
+        self.scale = Some(zoom);
+        self
+    }
 }
 
 /// Whether the chat hands a link to its default app (`MarkdownTextView.opensExternally`).
@@ -333,7 +341,7 @@ impl RenderOnce for Markdown {
             Source::Blocks(blocks) => blocks.clone(),
         };
         let colors = SurfaceColors::of(cx);
-        let zoom = cx.global::<SopranoTheme>().zoom();
+        let zoom = self.scale.unwrap_or_else(|| cx.global::<SopranoTheme>().zoom());
         let body = self.text_color.unwrap_or_else(|| colors.foreground.opacity(self.style.foreground_alpha));
         let on_link = self.on_link.clone().unwrap_or_else(|| {
             Rc::new(|destination: &str, _: &mut Window, cx: &mut App| {
@@ -499,7 +507,8 @@ impl Ctx {
                 let (id, order) = self.next_id();
                 let element = CodeBlock::new(id, language.as_deref(), code, tokens)
                     .wrap(!self.reader())
-                    .document_order(order);
+                    .document_order(order)
+                    .scale(self.zoom);
                 let margin = if self.reader() {
                     (0.0, 16.0)
                 } else {

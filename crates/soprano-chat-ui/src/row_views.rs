@@ -59,7 +59,7 @@ impl TimelineView {
     ) -> AnyElement {
         let Some(row) = self.rows.get(index).cloned() else { return div().into_any_element() };
         let t = cx.soprano_theme().clone();
-        let zoom = t.zoom();
+        let zoom = t.chat_zoom();
         let width = f32::from(self.viewport.width) / zoom;
         let lane = crate::timeline_view::lane_width(width);
         let group = Self::row_group(&row.id);
@@ -79,7 +79,7 @@ impl TimelineView {
             TimelineRowContent::Error { message, date } => render_error(message, *date, &t),
             TimelineRowContent::Notice { text } => render_notice(text, &t),
             TimelineRowContent::ChangedFiles(model) => {
-                div().px(t.z(4.0)).child(self.render_card(&row.id, model, lane - 8.0, cx)).into_any_element()
+                div().px(t.cz(4.0)).child(self.render_card(&row.id, model, lane - 8.0, cx)).into_any_element()
             }
             TimelineRowContent::Queued(message) => self.render_queued(&row.id, message, lane, window, cx),
             TimelineRowContent::Empty(text) => div()
@@ -92,17 +92,17 @@ impl TimelineView {
         };
         let find_state = self.row_find_state(index);
         let lane_box = div()
-            .w(t.z(lane))
+            .w(t.cz(lane))
             .flex_none()
             .when_some(find_state, |el, is_current| {
                 if is_current {
-                    el.rounded(t.z(6.0))
+                    el.rounded(t.cz(6.0))
                         .bg(t.accent.opacity(0.10))
                         .border_l_2()
                         .border_color(t.accent)
-                        .pl(t.z(6.0))
+                        .pl(t.cz(6.0))
                 } else {
-                    el.rounded(t.z(6.0)).bg(t.accent.opacity(0.04))
+                    el.rounded(t.cz(6.0)).bg(t.accent.opacity(0.04))
                 }
             })
             .child(content);
@@ -112,8 +112,8 @@ impl TimelineView {
             .w_full()
             .flex()
             .justify_center()
-            .px(t.z(crate::timeline_view::gutter(width)))
-            .pb(t.z(row.bottom_spacing))
+            .px(t.cz(crate::timeline_view::gutter(width)))
+            .pb(t.cz(row.bottom_spacing))
             .child(lane_box)
             .into_any_element()
     }
@@ -144,6 +144,7 @@ impl TimelineView {
         let row = row_id.to_owned();
         let markdown =
             Markdown::new(SharedString::from(format!("{row_id}-text")), text.clone(), MarkdownStyle::USER)
+                .scale(t.chat_zoom())
                 .shrink_to_fit(true);
         div()
             .w_full()
@@ -154,23 +155,23 @@ impl TimelineView {
                 column.child(
                     div()
                         .id(SharedString::from(format!("{row_id}-steer")))
-                        .h(t.z(16.0))
-                        .mb(t.z(4.0))
-                        .pr(t.z(4.0))
+                        .h(t.cz(16.0))
+                        .mb(t.cz(4.0))
+                        .pr(t.cz(4.0))
                         .flex()
                         .items_center()
-                        .gap(t.z(4.0))
+                        .gap(t.cz(4.0))
                         .tooltip(soprano_ui::tooltip("Steered the active turn"))
-                        .child(icon(timeline_icon::REDO).size(11.0).color(t.muted))
+                        .child(icon(timeline_icon::REDO).size(11.0 * t.chat_zoom_factor()).color(t.muted))
                         .child(label("Steer", text_size::SMALL, t.muted, cx)),
                 )
             })
             .child(
                 div()
-                    .max_w(t.z(max_bubble))
-                    .rounded(t.z(16.0))
+                    .max_w(t.cz(max_bubble))
+                    .rounded(t.cz(16.0))
                     .bg(t.raised)
-                    .p(t.z(12.0))
+                    .p(t.cz(12.0))
                     .overflow_hidden()
                     .flex()
                     .flex_col()
@@ -179,10 +180,10 @@ impl TimelineView {
                         div()
                             .relative()
                             .w_full()
-                            .when(folded, |text| text.max_h(t.z(COLLAPSED_HEIGHT)).overflow_hidden())
+                            .when(folded, |text| text.max_h(t.cz(COLLAPSED_HEIGHT)).overflow_hidden())
                             .child(markdown)
                             .when(folded, |text| {
-                                text.child(div().absolute().left_0().right_0().bottom_0().h(t.z(28.0)).bg(
+                                text.child(div().absolute().left_0().right_0().bottom_0().h(t.cz(28.0)).bg(
                                     linear_gradient(
                                         180.0,
                                         linear_color_stop(t.raised.opacity(0.0), 0.0),
@@ -193,7 +194,7 @@ impl TimelineView {
                     )
                     .when(collapsible, |bubble| {
                         bubble.child(
-                            div().mt(t.z(6.0)).mr(t.z(-4.0)).child(
+                            div().mt(t.cz(6.0)).mr(t.cz(-4.0)).child(
                                 Button::new(
                                     SharedString::from(format!("{row_id}-toggle")),
                                     if model.expanded { "Show less" } else { "Show full message" },
@@ -211,12 +212,12 @@ impl TimelineView {
             )
             .child(
                 div()
-                    .mt(t.z(4.0))
-                    .h(t.z(24.0))
-                    .pr(t.z(4.0))
+                    .mt(t.cz(4.0))
+                    .h(t.cz(24.0))
+                    .pr(t.cz(4.0))
                     .flex()
                     .items_center()
-                    .gap(t.z(10.0))
+                    .gap(t.cz(10.0))
                     .opacity(0.0)
                     .group_hover(group, |s| s.opacity(1.0))
                     .child(time_label(model.message.created_at, &t, cx))
@@ -252,13 +253,13 @@ impl TimelineView {
         let copied = self.copied.as_deref() == Some(row_id);
         div()
             .w_full()
-            .py(t.z(2.0))
-            .px(t.z(4.0))
+            .py(t.cz(2.0))
+            .px(t.cz(4.0))
             .flex()
             .flex_col()
             .map(|column| {
                 if model.text.is_empty() && !model.is_streaming {
-                    column.child(div().py(t.z(2.0)).child(label(
+                    column.child(div().py(t.cz(2.0)).child(label(
                         "(empty response)",
                         text_size::BODY,
                         t.muted,
@@ -271,21 +272,22 @@ impl TimelineView {
                             model.text.clone(),
                             MarkdownStyle::ASSISTANT,
                         )
+                        .scale(t.chat_zoom())
                         .streaming(model.is_streaming),
                     )
                 }
             })
             .when_some(model.changed_files.as_ref(), |column, files| {
-                column.child(div().mt(t.z(16.0)).child(self.render_card(row_id, files, lane - 8.0, cx)))
+                column.child(div().mt(t.cz(16.0)).child(self.render_card(row_id, files, lane - 8.0, cx)))
             })
             .when(model.show_meta, |column| {
                 column.child(
                     div()
-                        .mt(t.z(6.0))
-                        .h(t.z(24.0))
+                        .mt(t.cz(6.0))
+                        .h(t.cz(24.0))
                         .flex()
                         .items_center()
-                        .gap(t.z(8.0))
+                        .gap(t.cz(8.0))
                         .opacity(0.0)
                         .group_hover(group, |s| s.opacity(1.0))
                         .child(self.copy_button(row_id, model.text.clone(), copied, cx))
@@ -316,29 +318,30 @@ impl TimelineView {
             .items_end()
             .child(
                 div()
-                    .max_w(t.z(max_bubble))
-                    .rounded(t.z(16.0))
+                    .max_w(t.cz(max_bubble))
+                    .rounded(t.cz(16.0))
                     .border_1()
                     .border_dashed()
                     .border_color(t.input)
-                    .p(t.z(12.0))
+                    .p(t.cz(12.0))
                     .child(
                         Markdown::new(
                             SharedString::from(format!("{row_id}-text")),
                             message.text.clone(),
                             MarkdownStyle::USER,
                         )
+                        .scale(t.chat_zoom())
                         .shrink_to_fit(true),
                     ),
             )
             .child(
                 div()
-                    .mt(t.z(4.0))
-                    .h(t.z(24.0))
+                    .mt(t.cz(4.0))
+                    .h(t.cz(24.0))
                     .flex()
                     .items_center()
-                    .gap(t.z(4.0))
-                    .child(div().mr(t.z(4.0)).child(label("Queued", text_size::SMALL, t.muted, cx)))
+                    .gap(t.cz(4.0))
+                    .child(div().mr(t.cz(4.0)).child(label("Queued", text_size::SMALL, t.muted, cx)))
                     .when(self.can_send_queued_now(), |footer| {
                         footer.child(
                             Button::new(SharedString::from(format!("{row_id}-send")), "Send now")
@@ -375,20 +378,20 @@ impl TimelineView {
             .flex_col()
             .child(
                 div()
-                    .pt(t.z(4.0))
-                    .pb(t.z(8.0))
-                    .h(t.z(4.0 + 23.0 + 8.0))
+                    .pt(t.cz(4.0))
+                    .pb(t.cz(8.0))
+                    .h(t.cz(4.0 + 23.0 + 8.0))
                     .flex()
                     .items_center()
                     .child(
                         div()
                             .id(header.clone())
                             .group(header.clone())
-                            .pl(t.z(4.0))
-                            .pr(t.z(4.0))
+                            .pl(t.cz(4.0))
+                            .pr(t.cz(4.0))
                             .flex()
                             .items_center()
-                            .gap(t.z(4.0))
+                            .gap(t.cz(4.0))
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.toggle(ExpansionSet::Turns, &turn_id, cx)
@@ -397,7 +400,7 @@ impl TimelineView {
                                 div()
                                     .font_family(UI_FONT_FAMILY)
                                     .font_features(tabular())
-                                    .text_size(t.z(text_size::BODY))
+                                    .text_size(t.cz(text_size::BODY))
                                     .text_color(t.muted)
                                     .group_hover(header.clone(), |s| s.text_color(t.foreground))
                                     .whitespace_nowrap()
@@ -413,14 +416,14 @@ impl TimelineView {
                                         } else {
                                             IconName::ChevronRight
                                         })
-                                        .size(11.0),
+                                        .size(11.0 * t.chat_zoom_factor()),
                                     ),
                             ),
                     )
                     .child(div().flex_1())
                     .child(
                         div()
-                            .pr(t.z(2.0))
+                            .pr(t.cz(2.0))
                             .opacity(0.0)
                             .group_hover(group, |s| s.opacity(1.0))
                             .child(time_label(model.date, &t, cx)),
@@ -443,7 +446,7 @@ impl TimelineView {
         let group_id = model.group_id.clone();
         div()
             .id(SharedString::from(format!("{row_id}-header")))
-            .py(t.z(2.0))
+            .py(t.cz(2.0))
             .cursor_pointer()
             .text_color(t.muted)
             .on_click(cx.listener(move |this, _, _, cx| this.toggle(ExpansionSet::Groups, &group_id, cx)))
@@ -488,7 +491,7 @@ impl TimelineView {
             .time(format::timestamp(entry.started_at))
             .chevron(Chevron::Trailing(can_expand.then_some(model.expanded)));
         div()
-            .py(t.z(pad))
+            .py(t.cz(pad))
             .flex()
             .flex_col()
             .child(
@@ -503,12 +506,13 @@ impl TimelineView {
             )
             .when(expanded && entry.body_is_markdown, |column| {
                 column.child(
-                    div().mt(t.z(2.0)).mb(t.z(8.0)).pl(t.z(30.0)).pr(t.z(4.0)).child(
+                    div().mt(t.cz(2.0)).mb(t.cz(8.0)).pl(t.cz(30.0)).pr(t.cz(4.0)).child(
                         Markdown::new(
                             SharedString::from(format!("{row_id}-body")),
                             entry.body.clone().unwrap_or_default(),
                             MarkdownStyle::THOUGHT,
                         )
+                        .scale(t.chat_zoom())
                         .streaming(entry.is_active()),
                     ),
                 )
@@ -517,22 +521,22 @@ impl TimelineView {
                 let scroll = self.scroll_handle(row_id, "output");
                 column.child(
                     div()
-                        .mt(t.z(2.0))
-                        .mb(t.z(8.0))
-                        .ml(t.z(30.0))
-                        .rounded(t.z(6.0))
+                        .mt(t.cz(2.0))
+                        .mb(t.cz(8.0))
+                        .ml(t.cz(30.0))
+                        .rounded(t.cz(6.0))
                         .bg(panel_fill(&t))
-                        .p(t.z(8.0))
+                        .p(t.cz(8.0))
                         .on_scroll(contain_scroll(scroll.clone()))
                         .child(
                             div()
                                 .id(SharedString::from(format!("{row_id}-output")))
-                                .max_h(t.z(ENTRY_BODY_MAX_HEIGHT))
+                                .max_h(t.cz(ENTRY_BODY_MAX_HEIGHT))
                                 .overflow_y_scroll()
                                 .track_scroll(&scroll)
                                 .font_family(MONO_FONT_FAMILY)
-                                .text_size(t.z(text_size::CODE))
-                                .line_height(t.z((text_size::CODE * 1.625).round()))
+                                .text_size(t.cz(text_size::CODE))
+                                .line_height(t.cz((text_size::CODE * 1.625).round()))
                                 .text_color(t.muted)
                                 .child(entry.body.clone().unwrap_or_default()),
                         ),
@@ -568,7 +572,7 @@ impl TimelineView {
                 Some(
                     div()
                         .font_family(MONO_FONT_FAMILY)
-                        .text_size(t.z(text_size::SMALL))
+                        .text_size(t.cz(text_size::SMALL))
                         .text_color(t.muted)
                         .child(format!("{lines} {}", if lines == 1 { "line" } else { "lines" }))
                         .into_any_element(),
@@ -576,6 +580,7 @@ impl TimelineView {
             } else if diff.additions + diff.deletions > 0 {
                 Some(
                     DiffStat::new(diff.additions, diff.deletions, text_size::SMALL)
+                        .scale(t.chat_zoom())
                         .mute_zero(true)
                         .into_any_element(),
                 )
@@ -604,30 +609,32 @@ impl TimelineView {
                 }
             }
             div()
-                .mt(t.z(2.0))
-                .mb(t.z(8.0))
-                .ml(t.z(indent))
-                .rounded(t.z(6.0))
+                .mt(t.cz(2.0))
+                .mb(t.cz(8.0))
+                .ml(t.cz(indent))
+                .rounded(t.cz(6.0))
                 .border_1()
                 .border_color(t.border.opacity(0.6))
                 .bg(panel_fill(&t))
-                .py(t.z(4.0))
+                .py(t.cz(4.0))
                 .overflow_hidden()
                 .on_scroll(contain_scroll(scroll.clone()))
                 .child(
                     div()
                         .id(SharedString::from(format!("{row_id}-diff")))
-                        .max_h(t.z(DIFF_BODY_MAX_HEIGHT))
+                        .max_h(t.cz(DIFF_BODY_MAX_HEIGHT))
                         .overflow_y_scroll()
                         .when(!wraps, |body| body.overflow_x_scroll())
                         .track_scroll(&scroll)
                         .child(
-                            HunkDiff::new(SharedString::from(format!("{row_id}-hunks")), diff).wrap(wraps),
+                            HunkDiff::new(SharedString::from(format!("{row_id}-hunks")), diff)
+                                .scale(t.chat_zoom())
+                                .wrap(wraps),
                         ),
                 )
         });
         div()
-            .py(t.z(pad))
+            .py(t.cz(pad))
             .flex()
             .flex_col()
             .child(
@@ -665,7 +672,7 @@ impl TimelineView {
         let group_id = model.map(|m| m.group_id.clone());
         div()
             .id(SharedString::from(format!("{row_id}-header")))
-            .py(t.z(2.0))
+            .py(t.cz(2.0))
             .flex()
             .flex_col()
             .when_some(group_id, |row, group_id| {
@@ -678,24 +685,23 @@ impl TimelineView {
                     div()
                         .flex()
                         .items_start()
-                        .min_h(t.z(24.0))
+                        .min_h(t.cz(24.0))
                         .child(
-                            div()
-                                .flex_none()
-                                .pt(t.z(4.0))
-                                .pl(t.z(6.0))
-                                .pr(t.z(10.0))
-                                .child(icon(timeline_icon::WORK_REASONING).size(13.0).color(t.muted)),
+                            div().flex_none().pt(t.cz(4.0)).pl(t.cz(6.0)).pr(t.cz(10.0)).child(
+                                icon(timeline_icon::WORK_REASONING)
+                                    .size(13.0 * t.chat_zoom_factor())
+                                    .color(t.muted),
+                            ),
                         )
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .pt(t.z(2.0))
-                                .pb(t.z(2.0))
+                                .pt(t.cz(2.0))
+                                .pb(t.cz(2.0))
                                 .font_family(UI_FONT_FAMILY)
-                                .text_size(t.z(text_size::BODY))
-                                .line_height(t.z(20.0))
+                                .text_size(t.cz(text_size::BODY))
+                                .line_height(t.cz(20.0))
                                 .text_color(t.muted)
                                 .line_clamp(4)
                                 .child(thought),
@@ -736,7 +742,7 @@ impl TimelineView {
                 .size(ButtonSize::Xs)
         };
         div()
-            .py(t.z(2.0))
+            .py(t.cz(2.0))
             .flex()
             .flex_col()
             .child(
@@ -746,40 +752,45 @@ impl TimelineView {
             )
             .child({
                 let scroll = self.scroll_handle(row_id, "detail");
-                div().ml(t.z(32.0)).mr(t.z(4.0)).mb(t.z(4.0)).on_scroll(contain_scroll(scroll.clone())).child(
-                    div()
-                        .id(SharedString::from(format!("{row_id}-detail")))
-                        .max_h(t.z(APPROVAL_DETAIL_MAX_HEIGHT))
-                        .overflow_y_scroll()
-                        .track_scroll(&scroll)
-                        .font_family(MONO_FONT_FAMILY)
-                        .text_size(t.z(text_size::SMALL))
-                        .line_height(t.z(20.0))
-                        .text_color(t.foreground)
-                        .child(detail),
-                )
+                div()
+                    .ml(t.cz(32.0))
+                    .mr(t.cz(4.0))
+                    .mb(t.cz(4.0))
+                    .on_scroll(contain_scroll(scroll.clone()))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("{row_id}-detail")))
+                            .max_h(t.cz(APPROVAL_DETAIL_MAX_HEIGHT))
+                            .overflow_y_scroll()
+                            .track_scroll(&scroll)
+                            .font_family(MONO_FONT_FAMILY)
+                            .text_size(t.cz(text_size::SMALL))
+                            .line_height(t.cz(20.0))
+                            .text_color(t.foreground)
+                            .child(detail),
+                    )
             })
             .when_some(request.reason.clone().filter(|r| !r.is_empty()), |column, reason| {
                 column.child(
                     div()
-                        .ml(t.z(30.0))
-                        .mr(t.z(4.0))
-                        .mb(t.z(4.0))
+                        .ml(t.cz(30.0))
+                        .mr(t.cz(4.0))
+                        .mb(t.cz(4.0))
                         .font_family(UI_FONT_FAMILY)
-                        .text_size(t.z(text_size::SMALL))
+                        .text_size(t.cz(text_size::SMALL))
                         .text_color(t.muted)
                         .child(reason),
                 )
             })
             .child(
                 div()
-                    .ml(t.z(34.0))
-                    .mb(t.z(4.0))
-                    .h(t.z(20.0))
+                    .ml(t.cz(34.0))
+                    .mb(t.cz(4.0))
+                    .h(t.cz(20.0))
                     .flex()
                     .items_center()
-                    .gap(t.z(8.0))
-                    .child(icon(timeline_icon::SHIELD).size(10.0).color(t.approval))
+                    .gap(t.cz(8.0))
+                    .child(icon(timeline_icon::SHIELD).size(10.0 * t.chat_zoom_factor()).color(t.approval))
                     .child(label("Waiting for approval", text_size::SMALL, t.approval, cx))
                     .child(label("·", text_size::SMALL, t.muted, cx))
                     .when_some(decline, |bar, id| {
@@ -828,24 +839,24 @@ impl TimelineView {
         let fill = if t.is_dark() { t.input.opacity(0.2) } else { t.raised };
         div()
             .w_full()
-            .rounded(t.z(8.0))
+            .rounded(t.cz(8.0))
             .bg(fill)
             .flex()
             .flex_col()
             .child(
                 div()
-                    .h(t.z(40.0))
-                    .px(t.z(12.0))
+                    .h(t.cz(40.0))
+                    .px(t.cz(12.0))
                     .flex()
                     .items_center()
-                    .gap(t.z(12.0))
+                    .gap(t.cz(12.0))
                     .overflow_hidden()
                     .child(
                         div()
                             .min_w_0()
                             .truncate()
                             .font_family(UI_FONT_FAMILY)
-                            .text_size(t.z(text_size::SMALL))
+                            .text_size(t.cz(text_size::SMALL))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(t.foreground)
                             .child(format!("{count} changed file{}", if count == 1 { "" } else { "s" })),
@@ -853,6 +864,7 @@ impl TimelineView {
                     .when(!narrow, |header| {
                         header.child(
                             DiffStat::new(model.additions(), model.deletions(), text_size::SMALL)
+                                .scale(t.chat_zoom())
                                 .minus_sign(true),
                         )
                     })
@@ -874,7 +886,7 @@ impl TimelineView {
                         )
                     }),
             )
-            .child(div().px(t.z(if narrow { 4.0 } else { 8.0 })).pb(t.z(8.0)).flex().flex_col().children(
+            .child(div().px(t.cz(if narrow { 4.0 } else { 8.0 })).pb(t.cz(8.0)).flex().flex_col().children(
                 tree_rows.into_iter().enumerate().map(|(index, tree_row)| {
                     let closed = model.closed_folders.contains(tree_row.node.path());
                     self.render_tree_row(
@@ -919,15 +931,15 @@ impl TimelineView {
         div()
             .id(hover.clone())
             .group(hover.clone())
-            .h(t.z(28.0))
-            .rounded(t.z(6.0))
+            .h(t.cz(28.0))
+            .rounded(t.cz(6.0))
             .pl(t
-                .z((if narrow { 4.0 } else { 8.0 })
+                .cz((if narrow { 4.0 } else { 8.0 })
                     + tree_row.depth as f32 * if narrow { 8.0 } else { 14.0 }))
-            .pr(t.z(8.0))
+            .pr(t.cz(8.0))
             .flex()
             .items_center()
-            .gap(t.z(icon_gap))
+            .gap(t.cz(icon_gap))
             .cursor_pointer()
             .hover(|s| s.bg(t.hover))
             .tooltip(soprano_ui::tooltip(node.path().to_owned()))
@@ -943,22 +955,25 @@ impl TimelineView {
                 }
             }))
             .when(is_directory || shows_spacer || tree_row.depth > 0, |row| {
-                row.child(div().w(t.z(14.0)).flex_none().flex().justify_center().when(is_directory, |slot| {
-                    slot.child(
-                        icon(if closed { IconName::ChevronRight } else { IconName::ChevronDown })
-                            .size(10.0)
-                            .color(t.muted.opacity(0.7)),
-                    )
-                }))
+                row.child(div().w(t.cz(14.0)).flex_none().flex().justify_center().when(
+                    is_directory,
+                    |slot| {
+                        slot.child(
+                            icon(if closed { IconName::ChevronRight } else { IconName::ChevronDown })
+                                .size(10.0 * t.chat_zoom_factor())
+                                .color(t.muted.opacity(0.7)),
+                        )
+                    },
+                ))
             })
             .child(
-                div().w(t.z(14.0)).flex_none().flex().justify_center().child(
+                div().w(t.cz(14.0)).flex_none().flex().justify_center().child(
                     icon(match node {
                         ChangedFileNode::Directory { .. } if closed => timeline_icon::FOLDER,
                         ChangedFileNode::Directory { .. } => timeline_icon::FOLDER_OPEN,
                         ChangedFileNode::File { .. } => timeline_icon::FILE,
                     })
-                    .size(12.0)
+                    .size(12.0 * t.chat_zoom_factor())
                     .color(t.muted.opacity(0.75)),
                 ),
             )
@@ -967,7 +982,7 @@ impl TimelineView {
                     .flex_1()
                     .min_w_0()
                     .font_family(MONO_FONT_FAMILY)
-                    .text_size(t.z(if is_directory { text_size::TINY } else { text_size::SMALL }))
+                    .text_size(t.cz(if is_directory { text_size::TINY } else { text_size::SMALL }))
                     .text_color(if is_directory { t.muted.opacity(0.9) } else { t.foreground.opacity(0.85) })
                     .group_hover(hover, |s| s.text_color(t.foreground))
                     .text_ellipsis_middle()
@@ -976,7 +991,11 @@ impl TimelineView {
                     .child(node.name().to_owned()),
             )
             .when(additions + deletions > 0 && !narrow, |row| {
-                row.child(div().flex_none().child(DiffStat::new(additions, deletions, 10.0).minus_sign(true)))
+                row.child(
+                    div().flex_none().child(
+                        DiffStat::new(additions, deletions, 10.0).scale(t.chat_zoom()).minus_sign(true),
+                    ),
+                )
             })
             .into_any_element()
     }
@@ -1024,15 +1043,15 @@ fn render_working(started_at: Option<soprano_agents::Date>, stopping: bool, t: &
         .flex_col()
         .child(
             div()
-                .pt(t.z(4.0))
-                .pb(t.z(8.0))
-                .h(t.z(4.0 + 24.0 + 8.0))
-                .pl(t.z(4.0))
+                .pt(t.cz(4.0))
+                .pb(t.cz(8.0))
+                .h(t.cz(4.0 + 24.0 + 8.0))
+                .pl(t.cz(4.0))
                 .flex()
                 .items_center()
                 .font_family(UI_FONT_FAMILY)
                 .font_features(tabular())
-                .text_size(t.z(text_size::BODY))
+                .text_size(t.cz(text_size::BODY))
                 .text_color(t.muted)
                 .child(format::working_label(started_at, stopping, chrono::Utc::now())),
         )
@@ -1043,25 +1062,25 @@ fn render_working(started_at: Option<soprano_agents::Date>, stopping: bool, t: &
 /// A failure in the error color with its time.
 fn render_error(message: &str, date: Option<soprano_agents::Date>, t: &SopranoTheme) -> AnyElement {
     div()
-        .py(t.z(2.0))
-        .min_h(t.z(28.0))
+        .py(t.cz(2.0))
+        .min_h(t.cz(28.0))
         .flex()
         .items_start()
         .child(
             div()
                 .flex_none()
-                .pt(t.z(4.0))
-                .pl(t.z(6.0))
-                .pr(t.z(10.0))
-                .child(icon(IconName::CircleAlert).size(13.0).color(t.failed)),
+                .pt(t.cz(4.0))
+                .pl(t.cz(6.0))
+                .pr(t.cz(10.0))
+                .child(icon(IconName::CircleAlert).size(13.0 * t.chat_zoom_factor()).color(t.failed)),
         )
         .child(
             div()
                 .flex_1()
                 .min_w_0()
-                .pt(t.z(2.0))
+                .pt(t.cz(2.0))
                 .font_family(UI_FONT_FAMILY)
-                .text_size(t.z(text_size::BODY))
+                .text_size(t.cz(text_size::BODY))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(t.failed)
                 .child(message.to_owned()),
@@ -1069,11 +1088,11 @@ fn render_error(message: &str, date: Option<soprano_agents::Date>, t: &SopranoTh
         .child(
             div()
                 .flex_none()
-                .pt(t.z(4.0))
-                .pl(t.z(8.0))
-                .pr(t.z(2.0))
+                .pt(t.cz(4.0))
+                .pl(t.cz(8.0))
+                .pr(t.cz(2.0))
                 .font_family(UI_FONT_FAMILY)
-                .text_size(t.z(text_size::SMALL))
+                .text_size(t.cz(text_size::SMALL))
                 .text_color(t.muted)
                 .child(format::timestamp(date)),
         )
@@ -1084,22 +1103,22 @@ fn render_error(message: &str, date: Option<soprano_agents::Date>, t: &SopranoTh
 fn render_notice(text: &str, t: &SopranoTheme) -> AnyElement {
     let rule = || div().flex_1().h(px(1.0)).bg(t.border.opacity(0.7));
     div()
-        .h(t.z(24.0))
+        .h(t.cz(24.0))
         .flex()
         .items_center()
-        .gap(t.z(12.0))
+        .gap(t.cz(12.0))
         .child(rule())
         .child(
             div()
                 .flex()
                 .items_center()
-                .gap(t.z(6.0))
+                .gap(t.cz(6.0))
                 .max_w(relative(0.8))
-                .child(icon(timeline_icon::MINIMIZE).size(10.0).color(t.muted))
+                .child(icon(timeline_icon::MINIMIZE).size(10.0 * t.chat_zoom_factor()).color(t.muted))
                 .child(
                     div()
                         .font_family(UI_FONT_FAMILY)
-                        .text_size(t.z(text_size::SMALL))
+                        .text_size(t.cz(text_size::SMALL))
                         .text_color(t.muted)
                         .truncate()
                         .child(text.to_owned()),
@@ -1116,7 +1135,7 @@ fn time_label(date: Option<soprano_agents::Date>, t: &SopranoTheme, _cx: &mut gp
     div()
         .id(SharedString::from(format!("time-{}", date.map(|d| d.timestamp_millis()).unwrap_or_default())))
         .font_family(UI_FONT_FAMILY)
-        .text_size(t.z(text_size::SMALL))
+        .text_size(t.cz(text_size::SMALL))
         .text_color(t.muted)
         .whitespace_nowrap()
         .when_some(tip, |time, tip| time.tooltip(soprano_ui::tooltip(tip)))
@@ -1127,7 +1146,7 @@ fn time_label(date: Option<soprano_agents::Date>, t: &SopranoTheme, _cx: &mut gp
 /// The height plain text takes at the user bubble's 14 px prose, wrapped to `width`.
 fn text_height(text: &str, width: f32, window: &mut Window, cx: &gpui::App) -> f32 {
     let t = cx.soprano_theme();
-    let font_size = t.z(text_size::BODY);
+    let font_size = t.cz(text_size::BODY);
     let run = TextRun {
         len: text.len(),
         font: gpui::font(UI_FONT_FAMILY),
@@ -1136,16 +1155,16 @@ fn text_height(text: &str, width: f32, window: &mut Window, cx: &gpui::App) -> f
         underline: None,
         strikethrough: None,
     };
-    let line_height = t.z(BODY_LINE_HEIGHT);
+    let line_height = t.cz(BODY_LINE_HEIGHT);
     match window.text_system().shape_text(
         SharedString::from(text.to_owned()),
         font_size,
         &[run],
-        Some(t.z(width)),
+        Some(t.cz(width)),
         None,
     ) {
         Ok(lines) => {
-            lines.iter().map(|line| f32::from(line.size(line_height).height)).sum::<f32>() / t.zoom()
+            lines.iter().map(|line| f32::from(line.size(line_height).height)).sum::<f32>() / t.chat_zoom()
         }
         Err(_) => text.lines().count() as f32 * BODY_LINE_HEIGHT,
     }
