@@ -214,8 +214,9 @@ fn discover_opencode(home: &Path, env: &HashMap<String, String>, out: &mut Vec<D
 
 /// `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`
 /// (and `~/.gemini/antigravity/brain/…`).
-fn discover_agy(home: &Path, out: &mut Vec<DiscoveredSource>) {
+pub(crate) fn discover_agy_transcript_paths(home: &Path) -> Vec<PathBuf> {
     let mut seen = HashSet::new();
+    let mut paths = Vec::new();
     for root in [home.join(".gemini/antigravity-cli/brain"), home.join(".gemini/antigravity/brain")] {
         let Ok(dirs) = std::fs::read_dir(root) else { continue };
         for dir in dirs.flatten() {
@@ -224,15 +225,21 @@ fn discover_agy(home: &Path, out: &mut Vec<DiscoveredSource>) {
                 continue;
             }
             let path = dir.path().join(".system_generated/logs/transcript.jsonl");
-            if !seen.insert(path.clone()) {
-                continue;
+            if seen.insert(path.clone()) && path.is_file() {
+                paths.push(path);
             }
-            let Some((size, modified_ms)) = file_stamp(&path) else { continue };
-            if size == 0 {
-                continue;
-            }
-            out.push(DiscoveredSource { format: AgentTranscriptFormat::Agy, path, size, modified_ms });
         }
+    }
+    paths
+}
+
+fn discover_agy(home: &Path, out: &mut Vec<DiscoveredSource>) {
+    for path in discover_agy_transcript_paths(home) {
+        let Some((size, modified_ms)) = file_stamp(&path) else { continue };
+        if size == 0 {
+            continue;
+        }
+        out.push(DiscoveredSource { format: AgentTranscriptFormat::Agy, path, size, modified_ms });
     }
 }
 
@@ -431,7 +438,7 @@ pub(super) fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn read_jsonl_lines(path: &Path, mut handle: impl FnMut(&[u8])) -> bool {
+pub(crate) fn read_jsonl_lines(path: &Path, mut handle: impl FnMut(&[u8])) -> bool {
     let Ok(file) = File::open(path) else { return false };
     let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut buf = Vec::new();
@@ -732,7 +739,7 @@ fn omp_user_text(content: Option<&Value>) -> String {
         .join(" ")
 }
 
-fn short_model_name(raw: &str) -> String {
+pub(crate) fn short_model_name(raw: &str) -> String {
     // Strip provider prefix like `anthropic/claude-opus-4-6` → `claude-opus-4-6`.
     raw.rsplit('/').next().unwrap_or(raw).to_owned()
 }
@@ -1249,7 +1256,7 @@ fn parse_agy_file(path: &Path, modified_ms: i64) -> Option<AgentSessionSummary> 
 /// Real Antigravity `transcript.jsonl` files do not emit a top-level `cwd` field; infer the
 /// project directory from absolute paths passed to file/search/command tools, preferring a git
 /// repository root over plain directories and skipping internal agent/config paths.
-fn infer_agy_cwd_from_tool_call(
+pub(crate) fn infer_agy_cwd_from_tool_call(
     call: &Object,
     inferred_git: &mut Option<(String, Option<String>)>,
     inferred_dir: &mut Option<String>,

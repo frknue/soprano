@@ -139,6 +139,8 @@ pub struct AccountState {
     pub claude_code: ManagedAccountsState,
     #[serde(rename = "codexCLI")]
     pub codex_cli: ManagedAccountsState,
+    #[serde(rename = "agyCLI", default)]
+    pub agy_cli: ManagedAccountsState,
     /// omp provider id → preferred account; absent means automatic balancing.
     pub omp_preferred: BTreeMap<String, OmpPreference>,
 }

@@ -747,7 +747,12 @@ impl Render for ComposerView {
         let t = cx.soprano_theme().clone();
         let has_panel = self.permission().is_some() || self.question_request_id.is_some();
         let anchors = self.anchors.clone();
-        let editor = Textarea::new(&self.editor).appearance(false).bordered(false);
+        let editor = Textarea::new(&self.editor)
+            .appearance(false)
+            .bordered(false)
+            .font_family(UI_FONT_FAMILY)
+            .text_size(t.cz(text_size::BODY))
+            .line_height(t.cz(EDITOR_LINE_HEIGHT));
         div()
             .id("chat-composer")
             .key_context("ChatComposer")

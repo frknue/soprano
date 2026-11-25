@@ -51,6 +51,24 @@ pub enum OmpAccountError {
     UnsupportedStore(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AgyAccountError {
+    #[error("Antigravity sign-in failed: {0}")]
+    LoginFailed(String),
+    #[error("Antigravity finished signing in, but Soprano could not find the login it stored.")]
+    NoCredentials,
+    #[error("Antigravity finished signing in, but did not report which account it signed in to.")]
+    NoIdentity,
+    #[error("{0} is already added.")]
+    Duplicate(String),
+    #[error("Signed in as {signed_in}, not {expected}. Sign in to {expected} in the browser and try again.")]
+    WrongAccount { expected: String, signed_in: String },
+    #[error("Soprano no longer has the login for {0}. Re-authenticate it.")]
+    MissingCredentials(String),
+    #[error("That account is no longer in the list.")]
+    UnknownAccount,
+}
+
 /// Any failed account action.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AccountError {
@@ -60,6 +78,8 @@ pub enum AccountError {
     Codex(#[from] CodexAccountError),
     #[error(transparent)]
     Omp(#[from] OmpAccountError),
+    #[error(transparent)]
+    Agy(#[from] AgyAccountError),
     #[error(transparent)]
     File(#[from] AccountFileError),
     #[error(transparent)]

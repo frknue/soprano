@@ -412,7 +412,11 @@ impl ComposerView {
                             .border_b_1()
                             .border_color(t.border.opacity(0.7))
                             .child(icon(IconName::Search).size(13.0 * t.chat_zoom_factor()).color(t.muted))
-                            .child(div().flex_1().child(text_input(&search).small())),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .child(text_input(&search).small().text_size(t.cz(text_size::SMALL))),
+                            ),
                     )
                     .when(empty, |column| {
                         column.child(

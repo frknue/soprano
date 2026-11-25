@@ -34,6 +34,7 @@ use crate::pages::account_mark;
 pub const USAGE_POPOVER_WIDTH: f32 = 340.0;
 const INSET: f32 = 14.0;
 const WINDOW_LABEL_WIDTH: f32 = 52.0;
+const WIDE_WINDOW_LABEL_WIDTH: f32 = 84.0;
 const PERCENT_WIDTH: f32 = 36.0;
 const BAR_WIDTH: f32 = 64.0;
 
@@ -129,6 +130,11 @@ impl AccountUsagePopover {
     }
 
     fn row(row: &UsageCardRow, t: &SopranoTheme) -> AnyElement {
+        let label_width = if row.windows.iter().any(|line| line.label.len() > 7) {
+            WIDE_WINDOW_LABEL_WIDTH
+        } else {
+            WINDOW_LABEL_WIDTH
+        };
         let windows: Vec<AnyElement> = if row.windows.is_empty() {
             vec![
                 div()
@@ -138,7 +144,7 @@ impl AccountUsagePopover {
                     .into_any_element(),
             ]
         } else {
-            row.windows.iter().map(|line| Self::usage_line(line, t)).collect()
+            row.windows.iter().map(|line| Self::usage_line(line, label_width, t)).collect()
         };
         let mark_column = t.z(8. + 8.);
         div()
@@ -186,7 +192,7 @@ impl AccountUsagePopover {
 
     /// One window: its label, a bar filled to the share used, the percentage in the severity
     /// color, and the time until it resets.
-    fn usage_line(line: &UsageCardLine, t: &SopranoTheme) -> AnyElement {
+    fn usage_line(line: &UsageCardLine, label_width: f32, t: &SopranoTheme) -> AnyElement {
         let share = line.fraction.clamp(0.0, 1.0) as f32;
         let filled = if share > 0.0 { (BAR_WIDTH * share).round().max(4.0) } else { 0.0 };
         div()
@@ -195,7 +201,7 @@ impl AccountUsagePopover {
             .items_center()
             .gap(t.z(8.))
             .text_size(t.z(size::META))
-            .child(div().min_w(t.z(WINDOW_LABEL_WIDTH)).text_color(t.muted).child(line.label.clone()))
+            .child(div().min_w(t.z(label_width)).text_color(t.muted).child(line.label.clone()))
             .child(
                 div()
                     .relative()

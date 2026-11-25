@@ -198,9 +198,10 @@ pub fn readout(
 
 /// The line under the board: what the numbers are, and when they were read.
 pub fn footnote(updated_at: Option<NaiveDateTime>) -> String {
-    let mut text = "Estimated from omp's usage records at API prices, not your subscription bill. \
-        Counts every omp session on this computer, not only the ones in Soprano."
-        .to_owned();
+    let mut text =
+        "Estimated from omp and Antigravity usage records at API prices, not your subscription bill. \
+        Counts every session on this computer, not only the ones in Soprano."
+            .to_owned();
     if let Some(updated_at) = updated_at {
         text.push_str(&format!(" Updated {}.", format::time(updated_at)));
     }

@@ -190,6 +190,7 @@ pub struct TextInput {
     size: InputSize,
     always_accent: bool,
     invalid: bool,
+    text_size: Option<gpui::Pixels>,
     prefix: Option<gpui::AnyElement>,
     suffix: Option<gpui::AnyElement>,
 }
@@ -206,6 +207,7 @@ impl TextInput {
             size: InputSize::Regular,
             always_accent: false,
             invalid: false,
+            text_size: None,
             prefix: None,
             suffix: None,
         }
@@ -222,6 +224,12 @@ impl TextInput {
 
     pub fn large(self) -> Self {
         self.size(InputSize::Large)
+    }
+
+    /// Overrides the input's text size (e.g. for chat-zoomed popovers).
+    pub fn text_size(mut self, size: gpui::Pixels) -> Self {
+        self.text_size = Some(size);
+        self
     }
 
     /// The palette and picker search fields keep an accent border.
@@ -265,6 +273,7 @@ impl RenderOnce for TextInput {
         } else {
             theme.input
         };
+        let text_size = self.text_size.unwrap_or_else(|| theme.z(size::ROW));
         div()
             .flex()
             .flex_row()
@@ -276,10 +285,15 @@ impl RenderOnce for TextInput {
             .border_1()
             .border_color(border)
             .bg(theme.background)
-            .text_size(theme.z(size::ROW))
+            .text_size(text_size)
             .text_color(theme.foreground)
             .children(self.prefix)
-            .child(div().flex_1().min_w_0().child(Input::new(&self.state).appearance(false)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.state).appearance(false).text_size(text_size)),
+            )
             .children(self.suffix)
     }
 }

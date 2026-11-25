@@ -64,10 +64,10 @@ impl OmpAccountManager {
 
     // MARK: - Listing
 
-    /// Both providers' lists from one `omp usage --json` run (it also fetches
+    /// Every supported provider's list from one `omp usage --json` run (it also fetches
     /// fresh usage, which omp caches for five minutes).
     pub fn lists(&self) -> Vec<AccountList> {
-        let ids = [AccountListId::OMP_CLAUDE, AccountListId::OMP_CODEX];
+        let ids = [AccountListId::OMP_CLAUDE, AccountListId::OMP_CODEX, AccountListId::OMP_ANTIGRAVITY];
         let selected = |id: &AccountListId| {
             self.store.state().omp_preferred.get(id.provider.omp_provider_id()).map(row_id)
         };
@@ -424,12 +424,22 @@ pub(crate) fn parse_usage(data: &[u8]) -> Result<Vec<OmpAccount>, OmpAccountErro
             .and_then(number)
             .and_then(|ms| timestamp_from_seconds(ms / 1000.0))
             .unwrap_or_else(Utc::now);
+        let mut seen_shared_groups: BTreeSet<String> = BTreeSet::new();
         let windows: Vec<UsageWindow> = report
             .and_then(|report| report.get("limits"))
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|limit| window(limit.as_object()?))
+            .filter_map(|limit| {
+                let limit = limit.as_object()?;
+                if let Some(group) = files::string(files::object(Some(limit), "scope"), "sharedGroup")
+                    .filter(|g| !g.is_empty())
+                    && !seen_shared_groups.insert(group.to_owned())
+                {
+                    return None;
+                }
+                window(limit, provider)
+            })
             .collect();
         add(OmpAccount {
             provider,
@@ -463,7 +473,7 @@ pub(crate) fn parse_usage(data: &[u8]) -> Result<Vec<OmpAccount>, OmpAccountErro
 
 /// A percentage limit as a window: "5h", "7d", or "7d fable" for a
 /// model-scoped one. Dollar-denominated limits (extra usage) are skipped.
-fn window(limit: &JsonObject) -> Option<UsageWindow> {
+fn window(limit: &JsonObject, provider: AccountProvider) -> Option<UsageWindow> {
     let amount = files::object(Some(limit), "amount");
     if files::string(amount, "unit").is_some_and(|unit| unit != "percent") {
         return None;
@@ -474,11 +484,60 @@ fn window(limit: &JsonObject) -> Option<UsageWindow> {
         .or_else(|| amount.and_then(|amount| amount.get("used")).and_then(number).map(|used| used / 100.0))?;
     let window = files::object(Some(limit), "window");
     let scope = files::object(Some(limit), "scope");
-    let mut label = files::string(window, "id")
+    let raw_id = files::string(window, "id")
         .or_else(|| files::string(window, "label"))
         .or_else(|| files::string(Some(limit), "label"))
-        .unwrap_or("limit")
-        .to_owned();
+        .unwrap_or("limit");
+    let mut label = if provider == AccountProvider::Antigravity {
+        let limit_label = files::string(Some(limit), "label").unwrap_or("");
+        let limit_id = files::string(Some(limit), "id").unwrap_or("");
+        let shared_group = files::string(scope, "sharedGroup").unwrap_or("");
+        let model_id = files::string(scope, "modelId").unwrap_or("");
+        let source = format!("{raw_id} {limit_label} {limit_id}").to_lowercase();
+        let short_window = if source.contains("week") || source.contains("7d") || source.contains("7 day") {
+            "7d"
+        } else if source.contains("5h")
+            || source.contains("five hour")
+            || source.contains("five_hour")
+            || source.contains("5 hour")
+            || source.contains("5_hour")
+        {
+            "5h"
+        } else if source.contains("daily") || source.contains("24h") {
+            "24h"
+        } else if let Some(duration_ms) = window.and_then(|w| w.get("durationMs")).and_then(number) {
+            if duration_ms >= 5.0 * 86_400_000.0 {
+                "7d"
+            } else if duration_ms >= 20.0 * 3_600_000.0 {
+                "24h"
+            } else {
+                "5h"
+            }
+        } else {
+            raw_id
+        };
+        let family_source = format!("{limit_label} {limit_id} {shared_group} {model_id}").to_lowercase();
+        let family = if family_source.contains("argon") {
+            Some("argon")
+        } else if family_source.contains("gemini") || family_source.contains("google") {
+            Some("gemini")
+        } else if family_source.contains("claude")
+            || family_source.contains("gpt")
+            || family_source.contains("anthropic")
+            || family_source.contains("openai")
+            || family_source.contains("3p-")
+        {
+            Some("claude/gpt")
+        } else {
+            None
+        };
+        match family {
+            Some(family) => format!("{short_window} {family}"),
+            None => short_window.to_owned(),
+        }
+    } else {
+        raw_id.to_owned()
+    };
     if let Some(tier) = files::string(scope, "tier").filter(|tier| !tier.is_empty()) {
         label = format!("{label} {tier}");
     }
@@ -786,5 +845,51 @@ mod tests {
         manager.lists();
         assert!(!store.state().omp_preferred.contains_key("openai-codex"));
         assert!(!std::fs::read_to_string(paths.omp_overlay_file()).unwrap().contains("gone@example.com"));
+    }
+
+    #[test]
+    fn omp_usage_parses_google_antigravity_and_dedupes_shared_third_party_groups() {
+        let json = r#"{
+          "reports": [
+            {
+              "provider": "google-antigravity",
+              "fetchedAt": 1791511800000,
+              "metadata": { "email": "dev@example.com" },
+              "limits": [
+                {
+                  "id": "gemini-5h",
+                  "label": "Gemini 5h",
+                  "scope": { "provider": "google-antigravity", "modelId": "gemini-3-pro" },
+                  "window": { "durationMs": 18000000, "resetsAt": 1791529800000 },
+                  "amount": { "used": 20, "limit": 100, "usedFraction": 0.2, "unit": "percent" }
+                },
+                {
+                  "id": "claude-5h",
+                  "label": "Claude 5h",
+                  "scope": { "provider": "google-antigravity", "modelId": "claude-sonnet", "sharedGroup": "3p-5h" },
+                  "window": { "durationMs": 18000000, "resetsAt": 1791529800000 },
+                  "amount": { "used": 50, "limit": 100, "usedFraction": 0.5, "unit": "percent" }
+                },
+                {
+                  "id": "gpt-5h",
+                  "label": "GPT 5h",
+                  "scope": { "provider": "google-antigravity", "modelId": "gpt-5", "sharedGroup": "3p-5h" },
+                  "window": { "durationMs": 18000000, "resetsAt": 1791529800000 },
+                  "amount": { "used": 50, "limit": 100, "usedFraction": 0.5, "unit": "percent" }
+                }
+              ]
+            }
+          ]
+        }"#;
+        let accounts = parse_usage(json.as_bytes()).unwrap();
+        assert_eq!(accounts.len(), 1);
+        let account = &accounts[0];
+        assert_eq!(account.provider, AccountProvider::Antigravity);
+        assert_eq!(account.email, "dev@example.com");
+        let windows = &account.usage.as_ref().unwrap().windows;
+        assert_eq!(
+            windows.iter().map(|w| w.label.as_str()).collect::<Vec<_>>(),
+            ["5h gemini", "5h claude/gpt"]
+        );
     }
 }

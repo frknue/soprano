@@ -19,6 +19,9 @@ use soprano_types::AgentConversation;
 
 use crate::timeline::{AgentTranscriptFormat, Date};
 
+pub(crate) use self::parsers::{
+    discover_agy_transcript_paths, infer_agy_cwd_from_tool_call, read_jsonl_lines, short_model_name,
+};
 use self::parsers::{discover_sources, parse_source, profile_id_for_format};
 
 /// Bumped whenever the cached `AgentSessionSummary` format changes; old cache rows are

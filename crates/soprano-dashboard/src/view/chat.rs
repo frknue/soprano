@@ -346,17 +346,19 @@ impl AgentDashboard {
             .children(self.render_attachments(theme, cx))
             .child(
                 div()
-                    .px(theme.z(16.))
-                    .pt(theme.z(16.))
-                    .pb(theme.z(8.))
-                    .text_size(theme.z(text_size::BODY))
+                    .px(theme.cz(16.))
+                    .pt(theme.cz(16.))
+                    .pb(theme.cz(8.))
+                    .text_size(theme.cz(text_size::BODY))
                     .text_color(theme.foreground)
-                    .line_height(theme.z(EDITOR_LINE_HEIGHT))
+                    .line_height(theme.cz(EDITOR_LINE_HEIGHT))
                     .capture_action(cx.listener(Self::on_enter))
                     .child(
                         Textarea::new(&self.editor)
                             .appearance(false)
                             .bordered(false)
+                            .text_size(theme.cz(text_size::BODY))
+                            .line_height(theme.cz(EDITOR_LINE_HEIGHT))
                             // A composer that cannot send steps back; the hint says why.
                             .disabled(!enabled)
                             .on_paste(move |clipboard, _, cx| {

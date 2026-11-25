@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use chrono::Utc;
 use soprano_platform::StateStore;
 
+use crate::agy::AgyAccountManager;
 use crate::claude::{ClaudeCodeAccountManager, ProfileLookup};
 use crate::codex::CodexAccountManager;
 use soprano_launch::command_runner::{CancelToken, CommandRunner, LineHandler};
@@ -66,6 +67,7 @@ struct Inner {
     launch_state: Arc<AccountLaunchState>,
     claude: ClaudeCodeAccountManager,
     codex: CodexAccountManager,
+    agy: AgyAccountManager,
     omp: OmpAccountManager,
     usage: UsageFetcher,
 }
@@ -124,20 +126,24 @@ impl AccountsController {
                 AccountProvider::Codex => {
                     usage_api::codex_usage(&credential.access_token, credential.account_id.as_deref()).ok()
                 }
+                AccountProvider::Antigravity => usage_api::antigravity_usage(&credential.access_token).ok(),
             }),
         })
     }
 
     pub(crate) fn with_parts(parts: ControllerParts) -> Self {
+        let agy_keyring = parts.claude_keychain.clone().unwrap_or_else(|| Arc::clone(&parts.secrets));
         let claude = ClaudeCodeAccountManager::new(
             parts.store.clone(),
             parts.claude_keychain,
-            parts.secrets,
+            Arc::clone(&parts.secrets),
             parts.runner.clone(),
             parts.paths.clone(),
             parts.profile,
         );
         let codex = CodexAccountManager::new(parts.store.clone(), parts.runner.clone(), parts.paths.clone());
+        let agy =
+            AgyAccountManager::new(parts.store.clone(), agy_keyring, parts.secrets, parts.runner.clone());
         let omp = OmpAccountManager::new(parts.store.clone(), parts.runner, parts.paths.clone());
         Self {
             inner: Arc::new(Inner {
@@ -150,6 +156,7 @@ impl AccountsController {
                 launch_state: parts.launch_state,
                 claude,
                 codex,
+                agy,
                 omp,
                 usage: parts.usage,
             }),
@@ -241,6 +248,7 @@ impl AccountsController {
         Inner::perform(&self.inner, list, move |inner| match list.tool {
             AccountTool::ClaudeCode => inner.claude.select(account_id.as_deref()),
             AccountTool::CodexCli => inner.codex.select(account_id.as_deref()),
+            AccountTool::AgyCli => inner.agy.select(account_id.as_deref()),
             AccountTool::Omp => inner.omp.select(account_id.as_deref(), list.provider),
         });
     }
@@ -250,6 +258,7 @@ impl AccountsController {
         Inner::perform(&self.inner, list, move |inner| match list.tool {
             AccountTool::ClaudeCode => inner.claude.remove(&account_id),
             AccountTool::CodexCli => inner.codex.remove(&account_id),
+            AccountTool::AgyCli => inner.agy.remove(&account_id),
             AccountTool::Omp => inner.omp.remove(&account_id, list.provider),
         });
     }
@@ -394,14 +403,20 @@ impl Inner {
     }
 
     fn perform_refresh(self: &Arc<Self>) {
-        let (omp_lists, claude_list) = thread::scope(|scope| {
+        let (omp_lists, claude_list, agy_list) = thread::scope(|scope| {
             let omp = scope.spawn(|| self.omp.lists());
+            let agy = scope.spawn(|| self.agy.list());
             let claude = self.claude.list();
-            (omp.join().unwrap_or_default(), claude)
+            (
+                omp.join().unwrap_or_default(),
+                claude,
+                agy.join().unwrap_or_else(|_| AccountList::new(AccountListId::AGY_CLI)),
+            )
         });
         let mut lists: HashMap<AccountListId, AccountList> = HashMap::new();
         lists.insert(AccountListId::CODEX_CLI, self.codex.list());
         lists.insert(AccountListId::CLAUDE_CODE, claude_list);
+        lists.insert(AccountListId::AGY_CLI, agy_list);
         for list in omp_lists {
             lists.insert(list.id, list);
         }
@@ -425,16 +440,17 @@ impl Inner {
     /// has one (usage is per account, whichever tool asks), else the
     /// provider's own answer for a still-valid token, reused for five minutes.
     fn attach_usage(&self, lists: &mut HashMap<AccountListId, AccountList>) {
-        for id in [AccountListId::CLAUDE_CODE, AccountListId::CODEX_CLI] {
+        for id in [AccountListId::CLAUDE_CODE, AccountListId::CODEX_CLI, AccountListId::AGY_CLI] {
             let Some(mut list) = lists.get(&id).cloned() else { continue };
             let reported: Vec<AccountRow> = lists
                 .get(&AccountListId::new(AccountTool::Omp, id.provider))
                 .map(|list| list.accounts.clone())
                 .unwrap_or_default();
-            let credentials = if id == AccountListId::CLAUDE_CODE {
-                self.claude.usage_credentials()
-            } else {
-                self.codex.usage_credentials()
+            let credentials = match id {
+                AccountListId::CLAUDE_CODE => self.claude.usage_credentials(),
+                AccountListId::CODEX_CLI => self.codex.usage_credentials(),
+                AccountListId::AGY_CLI => self.agy.usage_credentials(),
+                _ => Vec::new(),
             };
 
             let usage = |row: &AccountRow| -> Option<AccountUsage> {
@@ -504,6 +520,8 @@ impl Inner {
                 }
                 (AccountTool::CodexCli, Some(id)) => inner.codex.reauthenticate(id, on_sign_in_url, &cancel),
                 (AccountTool::CodexCli, None) => inner.codex.add_account(on_sign_in_url, &cancel).map(|_| ()),
+                (AccountTool::AgyCli, Some(id)) => inner.agy.reauthenticate(id, on_sign_in_url, &cancel),
+                (AccountTool::AgyCli, None) => inner.agy.add_account(on_sign_in_url, &cancel).map(|_| ()),
                 (AccountTool::Omp, _) => inner.omp.sign_in(list.provider, on_sign_in_url, &cancel),
             };
             inner.mutate_shared(|shared| {

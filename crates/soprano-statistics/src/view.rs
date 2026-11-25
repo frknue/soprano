@@ -419,9 +419,9 @@ impl StatisticsBoard {
         let board = cx.entity().downgrade();
         let selected = UsagePeriod::ALL.iter().position(|period| *period == self.period).unwrap_or(0);
         let subtitle = if self.is_loading && self.pending_sync {
-            "Updating from omp…"
+            "Updating usage…"
         } else {
-            "omp's tokens and estimated cost"
+            "Tokens and estimated cost across omp and Antigravity"
         };
         div()
             .flex()

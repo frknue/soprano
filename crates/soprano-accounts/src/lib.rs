@@ -1,5 +1,5 @@
-//! soprano-accounts: several Claude and Codex logins for omp, Claude Code and
-//! the Codex CLI — listing them with their usage, signing in, switching,
+//! soprano-accounts: several Claude, Codex and Antigravity logins for omp, Claude Code,
+//! the Codex CLI and the Antigravity CLI — listing them with their usage, signing in, switching,
 //! removing — and what new agent panes need from the choice. Port of the
 //! Swift app's `Accounts/*`; see docs/rust-rewrite/PLAN.md.
 //!
@@ -8,6 +8,7 @@
 //!   the usage card, as plain data.
 //! - `AccountLaunchState`: `CODEX_HOME` / omp `--config` for new panes.
 
+mod agy;
 mod claude;
 mod codex;
 mod controller;
@@ -23,12 +24,18 @@ mod state;
 mod test_support;
 pub mod usage_api;
 
+pub use agy::{
+    LIVE_ACCOUNT as AGY_LIVE_ACCOUNT, LIVE_SERVICE as AGY_LIVE_SERVICE,
+    MANAGED_SERVICE as AGY_MANAGED_SERVICE,
+};
 pub use claude::{LIVE_SERVICE, MANAGED_SERVICE, keychain_user, scoped_service};
 pub use codex::{CodexAuth, CodexHomeLinker};
 pub use controller::{
     AccountsController, MINIMUM_REFRESH_INTERVAL_SECONDS, POLL_INTERVAL_SECONDS, SnapshotObserver,
 };
-pub use error::{AccountError, AccountResult, ClaudeAccountError, CodexAccountError, OmpAccountError};
+pub use error::{
+    AccountError, AccountResult, AgyAccountError, ClaudeAccountError, CodexAccountError, OmpAccountError,
+};
 pub use files::AccountFileError;
 pub use launch::{AccountLaunchState, Adjustments};
 pub use models::{

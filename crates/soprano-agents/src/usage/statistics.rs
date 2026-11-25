@@ -159,7 +159,7 @@ fn after_gap<Tz: TimeZone>(wall: NaiveDateTime, tz: &Tz) -> UsageDate {
 
 /// The start of the local hour `date` is in. Counted back from the instant itself, so the
 /// repeated hour of a clock change keeps its own start and half-hour zones work.
-fn hour_start<Tz: TimeZone>(date: UsageDate, tz: &Tz) -> UsageDate {
+pub(super) fn hour_start<Tz: TimeZone>(date: UsageDate, tz: &Tz) -> UsageDate {
     let time = date.with_timezone(tz).time();
     let into_hour = TimeDelta::seconds(i64::from(time.minute() * 60 + time.second()))
         + TimeDelta::nanoseconds(i64::from(time.nanosecond()));

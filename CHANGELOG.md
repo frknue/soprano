@@ -23,7 +23,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   prompts (`--prompt-interactive`) for Agent Dashboard threads and automations, exact session
   resume (`--resume`), native OSC 7501 status and notification integration, remote machine
   stand-in, `resources/AgentHooks/agy-hooks.json` lifecycle hooks template, Agent Dashboard
-  transcript decoding, and Session History indexing.
+  transcript decoding, Session History indexing, **Settings ▸ Accounts** management and live
+  rate-limit tracking in the status bar & usage popover (for both `agy` CLI logins and `omp`'s
+  `google-antigravity` provider), and token/request tracking in **Statistics**.
 - **Agent Session History** in the right sidebar (**History** toggle, `⇧⌘H` /
   `toggle-session-history`, or `⌘P` → *Toggle Session History*): indexes past Claude Code,
   omp, Codex, and OpenCode sessions with an incremental cache, scopes them to the focused

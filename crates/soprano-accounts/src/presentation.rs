@@ -170,7 +170,7 @@ impl Button {
 
 // MARK: - Settings ▸ Accounts
 
-pub const ACCOUNTS_INTRO: &str = "Sign in to several Claude and Codex accounts. omp balances across its accounts; Claude Code and the Codex CLI use the one you choose.";
+pub const ACCOUNTS_INTRO: &str = "Sign in to several Claude, Codex and Antigravity accounts. omp balances across its accounts; Claude Code, the Codex CLI and the Antigravity CLI use the one you choose.";
 
 /// The page, built from one snapshot. Rebuild it on every snapshot the
 /// source publishes while the page is open.
@@ -290,6 +290,9 @@ pub fn list_note(tool: AccountTool) -> &'static str {
         AccountTool::CodexCli => {
             "New codex panes use the chosen account; running panes keep theirs. History, config and skills stay shared."
         }
+        AccountTool::AgyCli => {
+            "Choosing an account signs the Antigravity CLI in with it in your OS keyring. System default is the Google login agy had before."
+        }
     }
 }
 
@@ -301,6 +304,9 @@ pub fn removal_explanation(tool: AccountTool) -> &'static str {
         }
         AccountTool::CodexCli => {
             "Soprano deletes this account's sign-in. If it is active, new codex panes use the System default."
+        }
+        AccountTool::AgyCli => {
+            "Soprano forgets this login. If it is active, the Antigravity CLI goes back to the System default."
         }
     }
 }

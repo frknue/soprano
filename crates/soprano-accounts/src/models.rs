@@ -34,16 +34,19 @@ pub(crate) fn seconds_between(earlier: &Timestamp, later: &Timestamp) -> f64 {
 pub enum AccountProvider {
     Claude,
     Codex,
+    Antigravity,
 }
 
 impl AccountProvider {
-    pub const ALL: [AccountProvider; 2] = [AccountProvider::Claude, AccountProvider::Codex];
+    pub const ALL: [AccountProvider; 3] =
+        [AccountProvider::Claude, AccountProvider::Codex, AccountProvider::Antigravity];
 
-    /// The Swift raw value: `claude`, `codex`.
+    /// The Swift raw value: `claude`, `codex`, `antigravity`.
     pub fn raw_value(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Antigravity => "antigravity",
         }
     }
 
@@ -51,6 +54,7 @@ impl AccountProvider {
         match self {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
+            Self::Antigravity => "Antigravity",
         }
     }
 
@@ -59,6 +63,7 @@ impl AccountProvider {
         match self {
             Self::Claude => "anthropic",
             Self::Codex => "openai-codex",
+            Self::Antigravity => "google-antigravity",
         }
     }
 
@@ -76,17 +81,21 @@ pub enum AccountTool {
     ClaudeCode,
     /// The `codex` CLI: one login per `CODEX_HOME`, chosen when a pane starts.
     CodexCli,
+    /// The `agy` CLI: one Google login at a time in the OS keyring, switched for the whole machine.
+    AgyCli,
 }
 
 impl AccountTool {
-    pub const ALL: [AccountTool; 3] = [AccountTool::Omp, AccountTool::ClaudeCode, AccountTool::CodexCli];
+    pub const ALL: [AccountTool; 4] =
+        [AccountTool::Omp, AccountTool::ClaudeCode, AccountTool::CodexCli, AccountTool::AgyCli];
 
-    /// The Swift raw value: `omp`, `claudeCode`, `codexCLI`.
+    /// The raw value: `omp`, `claudeCode`, `codexCLI`, `agyCLI`.
     pub fn raw_value(self) -> &'static str {
         match self {
             Self::Omp => "omp",
             Self::ClaudeCode => "claudeCode",
             Self::CodexCli => "codexCLI",
+            Self::AgyCli => "agyCLI",
         }
     }
 
@@ -95,6 +104,7 @@ impl AccountTool {
             Self::Omp => "omp",
             Self::ClaudeCode => "Claude Code",
             Self::CodexCli => "Codex CLI",
+            Self::AgyCli => "Antigravity CLI",
         }
     }
 }
@@ -109,12 +119,20 @@ pub struct AccountListId {
 impl AccountListId {
     pub const OMP_CLAUDE: Self = Self { tool: AccountTool::Omp, provider: AccountProvider::Claude };
     pub const OMP_CODEX: Self = Self { tool: AccountTool::Omp, provider: AccountProvider::Codex };
+    pub const OMP_ANTIGRAVITY: Self = Self { tool: AccountTool::Omp, provider: AccountProvider::Antigravity };
     pub const CLAUDE_CODE: Self = Self { tool: AccountTool::ClaudeCode, provider: AccountProvider::Claude };
     pub const CODEX_CLI: Self = Self { tool: AccountTool::CodexCli, provider: AccountProvider::Codex };
+    pub const AGY_CLI: Self = Self { tool: AccountTool::AgyCli, provider: AccountProvider::Antigravity };
 
     /// Display order. omp leads each provider because most panes run it.
-    pub const ALL: [AccountListId; 4] =
-        [Self::OMP_CLAUDE, Self::CLAUDE_CODE, Self::OMP_CODEX, Self::CODEX_CLI];
+    pub const ALL: [AccountListId; 6] = [
+        Self::OMP_CLAUDE,
+        Self::CLAUDE_CODE,
+        Self::OMP_CODEX,
+        Self::CODEX_CLI,
+        Self::OMP_ANTIGRAVITY,
+        Self::AGY_CLI,
+    ];
 
     pub const fn new(tool: AccountTool, provider: AccountProvider) -> Self {
         Self { tool, provider }
@@ -279,6 +297,7 @@ impl AccountsSnapshot {
         let cli_id = match provider {
             AccountProvider::Claude => AccountListId::CLAUDE_CODE,
             AccountProvider::Codex => AccountListId::CODEX_CLI,
+            AccountProvider::Antigravity => AccountListId::AGY_CLI,
         };
         let cli_list = self.lists.get(&cli_id)?;
         let active = cli_list.selected_account().or(cli_list.system_default.as_ref())?;

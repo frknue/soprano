@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::Entity;
-use soprano_agents::usage::OmpUsageStatistics;
+use soprano_agents::usage::{
+    AgyUsageStatistics, CombinedUsageStatistics, OmpUsageStatistics, UsageStatisticsService,
+};
 use soprano_launch::{CommandRunner, RunOptions};
 use soprano_model::Workspace;
 use soprano_statistics::StatisticsHost;
@@ -18,13 +20,18 @@ use crate::views::sidebar::watched_cwds;
 /// How long `omp stats` may take to ingest the session files written since its last run.
 const SYNC_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// The board's host: omp's own records on this computer, with the usage of every folder a
-/// tab works in listed under the folder's name (as the sidebar shows it).
+/// The board's host: omp's and Antigravity's records on this computer, with the usage of every
+/// folder a tab works in listed under the folder's name (as the sidebar shows it).
 pub fn host(workspace: Entity<Workspace>) -> StatisticsHost {
     let home = soprano_platform::paths::home_dir();
     let config_directory = std::env::var("PI_CONFIG_DIR").ok();
     let database = OmpUsageStatistics::default_database_path(config_directory.as_deref(), &home);
-    let usage = OmpUsageStatistics::new(database, move || sync(&home));
+    let agy_home = home.clone();
+    let omp: Arc<dyn UsageStatisticsService> =
+        Arc::new(OmpUsageStatistics::new(database, move || sync(&home)));
+    let agy: Arc<dyn UsageStatisticsService> =
+        Arc::new(AgyUsageStatistics::new(agy_home, std::env::temp_dir()));
+    let usage = CombinedUsageStatistics::new(vec![omp, agy]);
     StatisticsHost::service(Arc::new(usage)).folders(move |cx| {
         watched_cwds(workspace.read(cx))
             .into_iter()
