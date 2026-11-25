@@ -10,6 +10,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Open in VS Code**: `⌃A` → `V` (`open-in-vscode`, also in the command palette) opens
+  the active tab's directory in Visual Studio Code.
 - **Chat UI for all built-in agents**: native Chat UI now supports **Claude Code**
   (`stream-json`), **Codex** (`codex app-server`), **OpenCode** (`opencode acp`), **omp**
   (`omp acp`), and **Antigravity** (`agy acp`). Configure global and per-agent default launch

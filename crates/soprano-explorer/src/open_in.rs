@@ -64,6 +64,11 @@ pub fn installed_applications() -> &'static [OpenInApplication] {
     &APPLICATIONS
 }
 
+/// Visual Studio Code among [`installed_applications`] (same disk lookup on first use).
+pub fn visual_studio_code() -> Option<&'static OpenInApplication> {
+    installed_applications().iter().find(|application| application.name == "Visual Studio Code")
+}
+
 /// Runs the lookup on a background thread so the ⋯ menu opens without waiting.
 pub fn warm_up() {
     let _ = std::thread::Builder::new().name("soprano-open-in".to_owned()).spawn(|| {

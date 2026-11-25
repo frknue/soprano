@@ -104,6 +104,8 @@ pub enum Command {
     /// Choose a Markdown file and open it in a live reader there.
     OpenMarkdown(MarkdownTarget),
     OpenInSopranoGit,
+    /// Open the active tab's directory in Visual Studio Code.
+    OpenInVsCode,
     StartCopyMode,
     /// Switch a local chat-capable agent tab between Chat UI and its terminal CLI (`None` = active tab).
     ToggleChatUi {

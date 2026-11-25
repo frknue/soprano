@@ -97,6 +97,7 @@ pub fn default_config() -> KeyBindingConfig {
         binding("zoom-out", D, "-", false, true, false),
         binding("zoom-reset", D, "0", false, true, false),
         binding("open-in-soprano-git", P, "g", false, false, false),
+        binding("open-in-vscode", P, "v", false, false, false),
     ]);
     KeyBindingConfig { prefix_key: "a".into(), prefix_timeout_ms: 1500, resize_tick_percent: 5.0, bindings }
 }

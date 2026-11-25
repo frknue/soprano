@@ -125,6 +125,7 @@ const TABLE: &[Row] = &[
 
     // General (prefix)
     ("open-in-soprano-git", "Open in Soprano Git", "Open the active tab's Git repository in Soprano Git", General, "Prefix → G", Prefix, "g", NONE),
+    ("open-in-vscode", "Open in VS Code", "Open the active tab's directory in Visual Studio Code", General, "Prefix → V", Prefix, "v", NONE),
 ];
 
 /// Default keybinding configuration.

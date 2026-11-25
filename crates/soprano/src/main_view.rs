@@ -571,6 +571,37 @@ impl MainView {
                 })
                 .detach();
             }
+            Command::OpenInVsCode => {
+                let (machine, cwd) = {
+                    let ws = self.workspace.read(cx);
+                    (
+                        ws.machine_of_pane(ws.active_pane_id()).map(str::to_owned),
+                        ws.active_working_directory(),
+                    )
+                };
+                if let Some(machine) = machine {
+                    let message = format!("VS Code opens folders on this computer, not on {machine}.");
+                    self.toast(ToastLevel::Error, message, cx);
+                    return;
+                }
+                let Some(cwd) = cwd else {
+                    self.toast(ToastLevel::Error, "The active tab has no directory to open in VS Code.", cx);
+                    return;
+                };
+                let open = cx.background_spawn(async move {
+                    let application = soprano_explorer::open_in::visual_studio_code()
+                        .ok_or_else(|| "Visual Studio Code is not installed.".to_owned())?;
+                    application
+                        .open(std::path::Path::new(&cwd))
+                        .map_err(|error| format!("VS Code could not open {cwd}: {error}"))
+                });
+                cx.spawn(async move |this, cx| {
+                    if let Err(message) = open.await {
+                        let _ = this.update(cx, |this, cx| this.toast(ToastLevel::Error, message, cx));
+                    }
+                })
+                .detach();
+            }
             Command::StartCopyMode => {
                 if let Some(terminal) = self.content.read(cx).active_terminal(cx) {
                     terminal.update(cx, |terminal, cx| {
@@ -674,6 +705,7 @@ impl MainView {
             BindingCommand::FindWindow => self.run(Command::FindWindow, window, cx),
             BindingCommand::OpenProject => self.run(Command::OpenProjectSearch, window, cx),
             BindingCommand::OpenInSopranoGit => self.run(Command::OpenInSopranoGit, window, cx),
+            BindingCommand::OpenInVsCode => self.run(Command::OpenInVsCode, window, cx),
             BindingCommand::RenameWindow => self.run(Command::RenameWindow(None), window, cx),
             BindingCommand::CloseWindow => {
                 let id = ws.read(cx).active_window_id().to_owned();

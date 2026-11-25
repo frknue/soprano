@@ -332,6 +332,7 @@ there; bind one in `settings.json`).
 | `⇧⌘F` (or `⌘F` in a chat) | Find in Chat — search messages, tool calls and diffs in the active chat |
 | `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
+| `⌃A` → `V` | Open the active tab's directory in Visual Studio Code |
 | `⌘L` | Focus the address bar of the focused browser pane (elsewhere it toggles the right sidebar) |
 | `⌘[` / `⌘]` / `⌘R` | Browser back / forward / reload |
 

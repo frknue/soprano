@@ -248,6 +248,19 @@ pub fn command_items(
             command(shell, Command::OpenInSopranoGit),
         ));
     }
+    entries.push(entry(
+        searchable(
+            spec(
+                "open-in-vscode",
+                IconName::Code,
+                "Open in VS Code",
+                "Open the active tab's directory in Visual Studio Code",
+                short(&["open-in-vscode"]),
+            ),
+            "vscode visual studio code editor folder",
+        ),
+        command(shell, Command::OpenInVsCode),
+    ));
 
     let omp_launcher: PathBuf =
         soprano_platform::paths::resources_dir().unwrap_or_default().join("bin").join("omp");
