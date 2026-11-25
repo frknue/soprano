@@ -308,9 +308,21 @@ impl Workspace {
         cwd: &str,
         prompt: Option<&str>,
     ) -> Option<TerminalTarget> {
+        self.open_thread_with_mode(profile_id, cwd, prompt, profile_id == "omp")
+    }
+
+    /// Like [`Self::open_thread`], choosing whether a chat-capable agent opens in Chat UI
+    /// (`as_chat == true`) or in its terminal CLI (`as_chat == false`).
+    pub fn open_thread_with_mode(
+        &mut self,
+        profile_id: &str,
+        cwd: &str,
+        prompt: Option<&str>,
+        as_chat: bool,
+    ) -> Option<TerminalTarget> {
         let profile =
             AgentCatalog::shared().profile(profile_id).filter(|profile| profile.id != "terminal")?;
-        let is_chat = chat_supports(&profile.id);
+        let is_chat = as_chat && chat_supports(&profile.id);
         let launch = if is_chat { None } else { thread_launch(&profile, prompt).ok()? };
         let pane_id = self.next_pane_id();
         let tab_id = self.next_tab_id();

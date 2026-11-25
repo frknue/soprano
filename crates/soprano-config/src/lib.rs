@@ -23,12 +23,13 @@ pub mod store;
 pub mod watcher;
 
 pub use app_settings::{
-    AppSettings, AppearancePreference, FOLIO_THEME_ID, KNOWN_THEME_IDS, is_known_theme_id,
+    AppSettings, AppearancePreference, ChatLaunchMode, ChatUiSettings, FOLIO_THEME_ID, KNOWN_THEME_IDS,
+    is_known_theme_id,
 };
 pub use app_version::AppVersion;
 pub use automation::{Automation, AutomationEntry, AutomationSession, AutomationWorkspace};
 pub use config::{
-    AgentConfig, BindingOverride, ConfigIssue, KeybindingsConfig, Limits, NotificationsConfig,
+    AgentConfig, BindingOverride, ChatUiConfig, ConfigIssue, KeybindingsConfig, Limits, NotificationsConfig,
     ResolvedConfig, Severity, SopranoConfig, StatusBarConfig, expand_path, install_agents,
 };
 pub use cron::{AutomationCadence, CronParseError, CronSchedule};

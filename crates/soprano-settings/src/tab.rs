@@ -6,6 +6,7 @@ use soprano_ui::IconName;
 pub enum SettingsTab {
     #[default]
     General,
+    ChatUi,
     Machines,
     KeyboardShortcuts,
     AgentProfiles,
@@ -14,8 +15,9 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 6] = [
+    pub const ALL: [SettingsTab; 7] = [
         SettingsTab::General,
+        SettingsTab::ChatUi,
         SettingsTab::Machines,
         SettingsTab::KeyboardShortcuts,
         SettingsTab::AgentProfiles,
@@ -27,6 +29,7 @@ impl SettingsTab {
     pub fn title(self) -> &'static str {
         match self {
             Self::General => "General",
+            Self::ChatUi => "Chat UI",
             Self::Machines => "Machines",
             Self::KeyboardShortcuts => "Keyboard Shortcuts",
             Self::AgentProfiles => "Agent Profiles",
@@ -39,6 +42,7 @@ impl SettingsTab {
     pub fn icon(self) -> IconName {
         match self {
             Self::General => IconName::Settings,
+            Self::ChatUi => IconName::MessageSquare,
             Self::Machines => IconName::Server,
             Self::KeyboardShortcuts => IconName::Keyboard,
             Self::AgentProfiles => IconName::Cpu,
@@ -57,7 +61,7 @@ mod tests {
         let titles: Vec<&str> = SettingsTab::ALL.iter().map(|tab| tab.title()).collect();
         assert_eq!(
             titles,
-            ["General", "Machines", "Keyboard Shortcuts", "Agent Profiles", "Accounts", "About"]
+            ["General", "Chat UI", "Machines", "Keyboard Shortcuts", "Agent Profiles", "Accounts", "About"]
         );
         assert_eq!(SettingsTab::default(), SettingsTab::General);
     }

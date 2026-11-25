@@ -201,6 +201,9 @@ pub struct HeaderModel {
     /// `Some(maximized)` when the maximize button applies: the layout tab has several panes,
     /// or this pane is the maximized one.
     pub maximize: Option<bool>,
+    /// `Some(is_chat)` when the active tab is a local chat-capable agent tab that can toggle
+    /// between Chat UI and its terminal CLI.
+    pub chat_toggle: Option<bool>,
 }
 
 impl HeaderModel {
@@ -224,6 +227,11 @@ impl HeaderModel {
             .and_then(PaneTab::effective_working_directory)
             .map(|cwd| abbreviate_home(&cwd, home))
             .filter(|cwd| *cwd != title);
+        let chat_toggle = tab.and_then(|tab| {
+            let agent = tab.agent.as_ref()?;
+            (tab.pane_type == PaneType::Agent && tab.remote.is_none() && chat_supports(&agent.profile_id))
+                .then_some(tab.is_chat())
+        });
         Self {
             pane_id: pane_id.to_owned(),
             icon: header_icon(tab),
@@ -237,6 +245,7 @@ impl HeaderModel {
             is_focused: ws.active_pane_id() == pane_id,
             wash: wash_tone(status, needs_attention),
             maximize: (several_panes || is_maximized).then_some(is_maximized),
+            chat_toggle,
         }
     }
 
@@ -717,6 +726,23 @@ impl PaneHeader {
                 });
             })
         });
+        let chat_toggle = model.chat_toggle.and_then(|is_chat| {
+            let tab_id = model.active_tab_id.clone()?;
+            let pane_id = self.pane_id.clone();
+            let shell = self.shell.clone();
+            let (icon, label) = if is_chat {
+                (IconName::Terminal, "Switch to Terminal CLI")
+            } else {
+                (IconName::MessageSquare, "Switch to Chat UI")
+            };
+            Some(button("toggle-chat-ui", icon, label).on_click(move |_, _, cx| {
+                shell::dispatch(
+                    &shell,
+                    Command::ToggleChatUi { pane_id: Some(pane_id.clone()), tab_id: Some(tab_id.clone()) },
+                    cx,
+                );
+            }))
+        });
         let close = model.close_target().map(|target| {
             let shell = self.shell.clone();
             button("close-button", IconName::PaneClose, "Close active tab")
@@ -728,6 +754,7 @@ impl PaneHeader {
             .flex_none()
             .items_center()
             .gap(theme.z(2.))
+            .children(chat_toggle)
             .child(split("split-right", IconName::SplitRight, "Split Right", split_right_direction()))
             .child(split("split-down", IconName::SplitDown, "Split Down", split_down_direction()))
             .children(maximize)

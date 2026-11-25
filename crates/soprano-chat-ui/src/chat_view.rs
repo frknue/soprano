@@ -19,16 +19,21 @@ use std::time::Duration;
 use futures::StreamExt;
 use futures::channel::mpsc;
 use gpui::{
-    App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, Pixels, Render, Styled, Subscription, Task, Window, canvas, div, prelude::*,
+    App, Bounds, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    KeyDownEvent, MouseButton, ParentElement, Pixels, Render, Styled, Subscription, Task, Window, canvas,
+    div, prelude::*,
 };
+use gpui_component::input::{self as component_input, Input, InputEvent, InputState};
 use soprano_chat::{AgentChatEvent, AgentChatSession, ChatPhase};
-use soprano_ui::{ActiveSopranoTheme, SopranoTheme};
+use soprano_ui::button::{IconButton, IconButtonSize};
+use soprano_ui::fonts::UI_FONT_FAMILY;
+use soprano_ui::{ActiveSopranoTheme, IconName, SopranoTheme, icon};
 
 use crate::composer::{ComposerEvent, ComposerView};
 use crate::keys;
 use crate::source::{SessionSource, SharedSession};
 use crate::timeline_view::{CHAT_MAX_WIDTH, TimelineView, gutter};
+use crate::widgets::text_size;
 
 /// Delay that batches streamed chunks into one redraw.
 const RENDER_DELAY: Duration = Duration::from_millis(50);
@@ -49,6 +54,8 @@ pub struct ChatView {
     session: SharedSession,
     timeline: Entity<TimelineView>,
     composer: Entity<ComposerView>,
+    find_input: Entity<InputState>,
+    find_open: bool,
     focus_handle: FocusHandle,
     /// What the session reported, emitted once the session is no longer borrowed.
     reported: Rc<RefCell<Vec<AgentChatEvent>>>,
@@ -100,6 +107,7 @@ impl ChatView {
         let source = Rc::new(SessionSource(session.clone()));
         let timeline = cx.new(|cx| TimelineView::new(source, agent_name.clone(), window, cx));
         let composer = cx.new(|cx| ComposerView::new(session.clone(), agent_name, window, cx));
+        let find_input = cx.new(|cx| InputState::new(window, cx).placeholder("Find in chat…"));
         let pump = cx.spawn_in(window, async move |this, cx| {
             while woken.next().await.is_some() {
                 while woken.try_recv().is_ok() {}
@@ -120,12 +128,31 @@ impl ChatView {
                 ComposerEvent::FocusChanged(true) => cx.emit(ChatViewEvent::FocusRequested),
                 ComposerEvent::FocusChanged(false) => {}
             }),
+            cx.subscribe_in(
+                &find_input,
+                window,
+                |this, input, event: &InputEvent, _window, cx| match event {
+                    InputEvent::Change => {
+                        let query = input.read(cx).value().to_string();
+                        this.timeline.update(cx, |timeline, cx| timeline.set_find_query(&query, cx));
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { secondary, shift } => {
+                        this.timeline
+                            .update(cx, |timeline, cx| timeline.find_step(!*shift && !*secondary, cx));
+                        cx.notify();
+                    }
+                    _ => {}
+                },
+            ),
             cx.observe_global::<SopranoTheme>(|_, cx| cx.notify()),
         ];
         Self {
             session,
             timeline,
             composer,
+            find_input,
+            find_open: false,
             focus_handle: cx.focus_handle(),
             reported,
             render_scheduled: None,
@@ -223,6 +250,42 @@ impl ChatView {
         editor.update(cx, |editor, cx| editor.focus(window, cx));
     }
 
+    /// Opens the Find-in-Chat bar and focuses its search input.
+    pub fn open_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.find_open = true;
+        let query = self.find_input.read(cx).value().to_string();
+        if !query.is_empty() {
+            self.timeline.update(cx, |timeline, cx| timeline.set_find_query(&query, cx));
+        }
+        self.find_input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    /// Closes the Find-in-Chat bar, clears match highlights, and returns focus to the composer.
+    pub fn close_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.find_open {
+            return;
+        }
+        self.find_open = false;
+        self.timeline.update(cx, |timeline, cx| timeline.clear_find(cx));
+        self.focus_composer(window, cx);
+        cx.notify();
+    }
+
+    pub fn is_find_open(&self) -> bool {
+        self.find_open
+    }
+
+    pub fn find_next(&mut self, cx: &mut Context<Self>) {
+        self.timeline.update(cx, |timeline, cx| timeline.find_step(true, cx));
+        cx.notify();
+    }
+
+    pub fn find_prev(&mut self, cx: &mut Context<Self>) {
+        self.timeline.update(cx, |timeline, cx| timeline.find_step(false, cx));
+        cx.notify();
+    }
+
     /// Applies what the agent said and batches the redraw.
     fn pump(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.session.borrow_mut().process_events();
@@ -254,12 +317,37 @@ impl ChatView {
         cx.notify();
     }
 
-    /// Escape stops the running turn; plain keys typed while reading go to the composer.
+    /// Handles find shortcuts (⌘F / ⌘G / ⇧⌘G), Escape to close find or cancel a running turn,
+    /// and forwards plain keys typed in the timeline to the composer.
     fn key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let keystroke = &event.keystroke;
+        let cmd = if cfg!(target_os = "macos") {
+            keystroke.modifiers.platform && !keystroke.modifiers.control && !keystroke.modifiers.alt
+        } else {
+            keystroke.modifiers.control && keystroke.modifiers.shift && !keystroke.modifiers.alt
+        };
+        if cmd && !keystroke.modifiers.shift && keystroke.key == "f" {
+            self.open_find(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.find_open && cmd && keystroke.key == "g" {
+            if keystroke.modifiers.shift {
+                self.find_prev(cx);
+            } else {
+                self.find_next(cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if self.find_open && keystroke.key == "escape" && !keystroke.modifiers.modified() {
+            self.close_find(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if !self.timeline.focus_handle(cx).contains_focused(window, cx) {
             return;
         }
-        let keystroke = &event.keystroke;
         if keystroke.key == "escape" && *self.session.borrow().phase() == ChatPhase::Working {
             self.session.borrow_mut().cancel();
             self.render_now(window, cx);
@@ -280,6 +368,83 @@ impl ChatView {
             editor.focus(window, cx);
             editor.insert(typed, window, cx);
         });
+    }
+
+    fn render_find_bar(&self, t: &SopranoTheme, cx: &mut Context<Self>) -> impl IntoElement {
+        let (current, total) = self.timeline.read(cx).find_summary();
+        let has_query = !self.find_input.read(cx).value().trim().is_empty();
+        let count_text = if !has_query {
+            String::new()
+        } else if total == 0 {
+            "No matches".to_owned()
+        } else {
+            format!("{current} / {total}")
+        };
+        let fill = if t.is_dark() { t.popover } else { t.background };
+        div()
+            .id("agent-chat-find-bar")
+            .absolute()
+            .top(t.z(10.0))
+            .right(t.z(12.0))
+            .w(t.z(310.0))
+            .h(t.z(34.0))
+            .px(t.z(8.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(t.z(6.0))
+            .rounded(t.z(8.0))
+            .border_1()
+            .border_color(t.border)
+            .bg(fill)
+            .shadow_md()
+            .block_mouse_except_scroll()
+            .capture_action(cx.listener(|this, _: &component_input::Escape, window, cx| {
+                cx.stop_propagation();
+                this.close_find(window, cx);
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, _, cx| cx.emit(ChatViewEvent::FocusRequested)),
+            )
+            .child(icon(IconName::Search).size(13.0).color(t.muted))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.find_input).appearance(false).cleanable(false)),
+            )
+            .when(!count_text.is_empty(), |bar| {
+                bar.child(
+                    div()
+                        .flex_none()
+                        .font_family(UI_FONT_FAMILY)
+                        .text_size(t.z(text_size::SMALL))
+                        .text_color(if total == 0 { t.failed } else { t.muted })
+                        .whitespace_nowrap()
+                        .child(count_text),
+                )
+            })
+            .child(
+                IconButton::new("chat-find-prev", IconName::ChevronUp)
+                    .size(IconButtonSize::Pane)
+                    .tooltip("Previous match (⇧Enter)")
+                    .disabled(total == 0)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.find_prev(cx))),
+            )
+            .child(
+                IconButton::new("chat-find-next", IconName::ChevronDown)
+                    .size(IconButtonSize::Pane)
+                    .tooltip("Next match (Enter)")
+                    .disabled(total == 0)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.find_next(cx))),
+            )
+            .child(
+                IconButton::new("chat-find-close", IconName::X)
+                    .size(IconButtonSize::Pane)
+                    .tooltip("Close (Esc)")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.close_find(window, cx))),
+            )
     }
 }
 
@@ -310,6 +475,7 @@ impl Render for ChatView {
             .bg(t.background)
             .child(canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {}).absolute().size_full())
             .child(self.timeline.clone())
+            .when(self.find_open, |view| view.child(self.render_find_bar(&t, cx)))
             .child(
                 div().absolute().left_0().right_0().bottom(t.z(gutter)).flex().justify_center().child(
                     div()

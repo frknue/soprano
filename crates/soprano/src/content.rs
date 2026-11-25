@@ -113,6 +113,7 @@ impl PaneContent {
             PaneContent::Terminal(_) => soprano_keys::FocusedContent::Terminal,
             PaneContent::Browser(_) => soprano_keys::FocusedContent::Browser,
             PaneContent::Editor(_) => soprano_keys::FocusedContent::Editor,
+            PaneContent::Chat(_) => soprano_keys::FocusedContent::Chat,
             _ => soprano_keys::FocusedContent::Other,
         }
     }
@@ -120,6 +121,13 @@ impl PaneContent {
     pub fn terminal(&self) -> Option<&Entity<TerminalView>> {
         match self {
             PaneContent::Terminal(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    pub fn chat(&self) -> Option<&Entity<ChatView>> {
+        match self {
+            PaneContent::Chat(view) => Some(view),
             _ => None,
         }
     }
@@ -393,6 +401,12 @@ impl ContentHost {
         self.active_content(&pane_id, cx)?.terminal().cloned()
     }
 
+    /// The chat view of the focused pane's active tab.
+    pub fn active_chat(&self, cx: &App) -> Option<Entity<ChatView>> {
+        let pane_id = self.workspace.read(cx).active_pane_id().to_owned();
+        self.active_content(&pane_id, cx)?.chat().cloned()
+    }
+
     /// Whether `handle` belongs to any pane content (a dead pane's focus is reclaimed).
     pub fn owns_focus(&self, window: &Window, cx: &App) -> bool {
         self.contents.values().any(|content| content.contains_focused(window, cx))
@@ -537,19 +551,20 @@ impl ContentHost {
                 };
                 self.restarting.insert(target.clone());
                 match self.contents.get(target).cloned() {
-                    Some(PaneContent::Chat(view)) => {
+                    Some(PaneContent::Chat(view)) if tab.is_chat() => {
                         let conversation =
                             tab.agent.as_ref().and_then(|a| a.conversation.as_ref()).map(|c| c.id.clone());
                         view.update(cx, |view, cx| view.restart(conversation.as_deref(), window, cx));
                     }
-                    Some(PaneContent::Terminal(view)) => {
+                    Some(PaneContent::Terminal(view)) if !tab.is_chat() => {
                         let launch = self.launch_for(&tab, target, cx);
                         if self.terminals.restart(&view, launch, cx) {
                             self.schedule_readiness(target, cx);
                         }
                     }
                     Some(_) => {
-                        // A stopped placeholder (or a failed start) becomes a live terminal.
+                        // Mode switched (Chat <-> Terminal) or a stopped/failed placeholder:
+                        // tear down the previous view and build the matching one.
                         self.remove_content(target, cx);
                         self.ensure_content(&tab, &target.pane_id, Some(true), window, cx);
                     }
@@ -888,7 +903,7 @@ impl ContentHost {
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         let launch = AgentCatalog::shared().profile(profile_id).and_then(|mut profile| {
-            profile.args.extend(soprano_launch::ChatLaunch::throwaway_arguments(&folder));
+            profile.args.extend(soprano_launch::ChatLaunch::throwaway_arguments_for(profile_id, &folder));
             self.chat_launch(&profile, Some(&folder.to_string_lossy()))
         });
         let Some(launch) = launch else { return Task::ready(Vec::new()) };

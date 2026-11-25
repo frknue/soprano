@@ -10,6 +10,14 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Chat UI for all built-in agents**: native Chat UI now supports **Claude Code**
+  (`stream-json`), **Codex** (`codex app-server`), **OpenCode** (`opencode acp`), **omp**
+  (`omp acp`), and **Antigravity** (`agy acp`). Configure global and per-agent default launch
+  modes (`Chat` vs `CLI`) in **Settings ▸ Chat UI** (`chatUi.enabled` / `chatUi.agents` in
+  `settings.json`), switch any open local agent tab between Chat UI and its terminal CLI
+  preserving its conversation (`⇧⌘I` / `toggle-chat-ui` or the pane header toggle button),
+  and search inside a chat timeline with **Find in Chat** (`⌘F` while focused in a chat, or
+  `⇧⌘F` / `find-in-chat`).
 - **Antigravity (`agy`) agent support**: built-in `agy` profile with `⌘5` (`launch-agy`)
   shortcut, Antigravity icon, automatic `--dangerously-skip-permissions`, interactive launch
   prompts (`--prompt-interactive`) for Agent Dashboard threads and automations, exact session

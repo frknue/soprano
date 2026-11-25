@@ -1,6 +1,8 @@
 //! Application-wide preferences (`Models/AppSettings.swift`) and the theme ids `settings.json`
 //! accepts (`Config/Theme.swift`; the palettes themselves live in the UI crate).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use soprano_platform::StateStore;
 
@@ -52,6 +54,53 @@ impl AppearancePreference {
     }
 }
 
+/// How an agent opens by default when Chat UI is enabled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatLaunchMode {
+    #[default]
+    Chat,
+    Cli,
+}
+
+impl ChatLaunchMode {
+    pub const ALL: [Self; 2] = [Self::Chat, Self::Cli];
+
+    pub fn raw_value(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Cli => "cli",
+        }
+    }
+
+    pub fn from_raw(raw: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.raw_value().eq_ignore_ascii_case(raw.trim()))
+    }
+}
+
+/// Chat UI launch preferences: a global master switch and optional per-agent overrides.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ChatUiSettings {
+    /// When on, supported agents launch in Chat UI by default (unless overridden to `cli` below).
+    pub enabled: bool,
+    /// Per-agent launch mode override (`profile_id` → `chat` or `cli`). Unset agents default to
+    /// `chat` when `enabled` is true.
+    pub agents: BTreeMap<String, ChatLaunchMode>,
+}
+
+impl ChatUiSettings {
+    /// The configured launch mode for `profile_id` (`Chat` unless explicitly set to `Cli`).
+    pub fn mode_for(&self, profile_id: &str) -> ChatLaunchMode {
+        self.agents.get(profile_id).copied().unwrap_or(ChatLaunchMode::Chat)
+    }
+
+    /// Whether launching `profile_id` with its default action should open in Chat UI.
+    pub fn default_opens_in_chat(&self, profile_id: &str) -> bool {
+        self.enabled && self.mode_for(profile_id) == ChatLaunchMode::Chat
+    }
+}
+
 /// Application-wide preferences.
 ///
 /// `settings.json` is the source of truth (see `ConfigStore`); the `StateStore` copy is only
@@ -79,6 +128,8 @@ pub struct AppSettings {
     /// ring, and the pane header; adding a chime to every finished turn is the kind of thing
     /// people disable once and never turn back on.
     pub notification_sound: bool,
+    /// Native Chat UI master toggle and per-agent default launch mode (`chat` vs `cli`).
+    pub chat_ui: ChatUiSettings,
 }
 
 impl Default for AppSettings {
@@ -92,6 +143,7 @@ impl Default for AppSettings {
             status_bar_uptime: false,
             project_directories: Vec::new(),
             notification_sound: false,
+            chat_ui: ChatUiSettings::default(),
         }
     }
 }

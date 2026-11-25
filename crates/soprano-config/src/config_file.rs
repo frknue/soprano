@@ -217,6 +217,12 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
     "sound": {sound}
   }},
 
+  "chatUi": {{
+    // Launch supported agents in Soprano's native Chat UI by default.
+    // Off by default; override per-agent launch modes (chat or cli) here.
+    "enabled": {chat_ui_enabled}
+  }},
+
   "keybindings": {{
     // The tmux-style prefix is Ctrl+<prefixKey>.
     "prefixKey": {prefix_key},
@@ -297,6 +303,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
         uptime = settings.status_bar_uptime,
         restore_last_session = settings.restore_last_session,
         sound = settings.notification_sound,
+        chat_ui_enabled = settings.chat_ui.enabled,
         prefix_key = json_string_literal(&keybindings.prefix_key),
         prefix_timeout_ms = keybindings.prefix_timeout_ms,
         resize_tick_percent = keybindings.resize_tick_percent as i64,

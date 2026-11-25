@@ -511,6 +511,22 @@ fn exit_code(status: std::process::ExitStatus) -> i32 {
     platform::signal_of(status).unwrap_or(-1)
 }
 
+pub(crate) fn configure_child(command: &mut Command) {
+    platform::configure(command);
+}
+
+pub(crate) fn terminate_child(child: &mut Child) {
+    platform::terminate(child);
+}
+
+pub(crate) fn kill_child(child: &mut Child) {
+    platform::kill(child);
+}
+
+pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+    exit_code(status)
+}
+
 #[cfg(unix)]
 mod platform {
     use std::os::unix::process::ExitStatusExt;

@@ -90,6 +90,22 @@ impl TimelineView {
                 .child(label(text.clone(), text_size::BODY, t.muted, cx))
                 .into_any_element(),
         };
+        let find_state = self.row_find_state(index);
+        let lane_box = div()
+            .w(t.z(lane))
+            .flex_none()
+            .when_some(find_state, |el, is_current| {
+                if is_current {
+                    el.rounded(t.z(6.0))
+                        .bg(t.accent.opacity(0.10))
+                        .border_l_2()
+                        .border_color(t.accent)
+                        .pl(t.z(6.0))
+                } else {
+                    el.rounded(t.z(6.0)).bg(t.accent.opacity(0.04))
+                }
+            })
+            .child(content);
         div()
             .id(SharedString::from(row.id.clone()))
             .group(group)
@@ -98,7 +114,7 @@ impl TimelineView {
             .justify_center()
             .px(t.z(crate::timeline_view::gutter(width)))
             .pb(t.z(row.bottom_spacing))
-            .child(div().w(t.z(lane)).flex_none().child(content))
+            .child(lane_box)
             .into_any_element()
     }
 

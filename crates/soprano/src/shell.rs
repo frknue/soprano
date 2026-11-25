@@ -105,6 +105,13 @@ pub enum Command {
     OpenMarkdown(MarkdownTarget),
     OpenInSopranoGit,
     StartCopyMode,
+    /// Switch a local chat-capable agent tab between Chat UI and its terminal CLI (`None` = active tab).
+    ToggleChatUi {
+        pane_id: Option<String>,
+        tab_id: Option<String>,
+    },
+    /// Open Find in Chat for the active chat tab.
+    FindInChat,
     /// A one-button notice over the window.
     ShowNotice {
         title: String,
@@ -141,6 +148,11 @@ pub struct Shell {
 impl EventEmitter<Command> for Shell {}
 
 impl Shell {
+    /// Whether launching `profile_id` with its default launcher should open in Chat UI.
+    pub fn launches_as_chat(&self, profile_id: &str) -> bool {
+        soprano_model::chat_supports(profile_id) && self.settings.chat_ui.default_opens_in_chat(profile_id)
+    }
+
     pub fn new(state: StateStore, settings: AppSettings, keybindings: KeyBindingConfig) -> Self {
         let sidebar_visible = state.get::<bool>(SIDEBAR_VISIBLE_KEY).unwrap_or(true);
         let sidebar_width = SidebarWidthStore::LEFT.load(&state);

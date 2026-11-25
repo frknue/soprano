@@ -9,6 +9,7 @@
 
 pub mod about;
 pub mod agents;
+pub mod chat_ui;
 mod form;
 pub mod general;
 pub mod notifications;

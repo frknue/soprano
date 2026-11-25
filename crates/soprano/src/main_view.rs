@@ -578,6 +578,24 @@ impl MainView {
                     });
                 }
             }
+            Command::ToggleChatUi { pane_id, tab_id } => {
+                let target = {
+                    let ws = self.workspace.read(cx);
+                    let pane = pane_id.unwrap_or_else(|| ws.active_pane_id().to_owned());
+                    let tab = tab_id.or_else(|| ws.pane(&pane)?.active_tab().map(|t| t.id.clone()));
+                    tab.map(|tab| (pane, tab))
+                };
+                if let Some((pane, tab)) = target {
+                    self.workspace.update(cx, |ws| {
+                        ws.toggle_tab_chat_mode(&pane, &tab);
+                    });
+                }
+            }
+            Command::FindInChat => {
+                if let Some(chat) = self.content.read(cx).active_chat(cx) {
+                    chat.update(cx, |chat, cx| chat.open_find(window, cx));
+                }
+            }
             Command::ShowNotice { title, message } => {
                 self.present_dialog(DialogContent::alert(title, message), |_, _, _| {}, window, cx)
             }
@@ -596,7 +614,8 @@ impl MainView {
                 ws.update(cx, |ws| ws.activate_window_number(number.max(0) as usize))
             }
             BindingCommand::LaunchAgent(id) => {
-                ws.update(cx, |ws| ws.spawn_agent(&id, None, false));
+                let as_chat = self.shell.read(cx).launches_as_chat(&id);
+                ws.update(cx, |ws| ws.spawn_agent(&id, None, as_chat));
             }
             BindingCommand::Split(direction) => {
                 ws.update(cx, |ws| {
@@ -609,6 +628,10 @@ impl MainView {
                     ws.update(cx, |ws| ws.spawn_agent(&profile.id, None, true));
                 }
             }
+            BindingCommand::ToggleChatUi => {
+                self.run(Command::ToggleChatUi { pane_id: None, tab_id: None }, window, cx);
+            }
+            BindingCommand::FindInChat => self.run(Command::FindInChat, window, cx),
             BindingCommand::Navigate(direction) => ws.update(cx, |ws| ws.navigate_to_pane(direction)),
             BindingCommand::PreviousWindow => ws.update(cx, |ws| ws.activate_previous_window()),
             BindingCommand::NextWindow => ws.update(cx, |ws| ws.activate_next_window()),
@@ -1422,7 +1445,10 @@ impl MainView {
                 }
             }
             DashboardEvent::NewThread { profile_id, cwd, prompt, options } => {
-                let opened = self.workspace.update(cx, |ws| ws.open_thread(profile_id, cwd, Some(prompt)));
+                let as_chat = profile_id == "omp" || self.shell.read(cx).launches_as_chat(profile_id);
+                let opened = self
+                    .workspace
+                    .update(cx, |ws| ws.open_thread_with_mode(profile_id, cwd, Some(prompt), as_chat));
                 let Some(target) = opened else {
                     return self.with_dashboard(cx, |dashboard, window, cx| {
                         dashboard.thread_failed(

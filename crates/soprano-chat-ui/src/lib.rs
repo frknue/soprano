@@ -31,6 +31,8 @@ pub use activity::{ActivityLine, activity_parts};
 pub use chat_view::{ChatView, ChatViewEvent};
 pub use composer::{ComposerEvent, ComposerView};
 pub use popovers::PopoverKind;
-pub use rows::{TimelineExpansion, TimelineRow, TimelineRowContent, fold_label, timeline_rows};
+pub use rows::{
+    TimelineExpansion, TimelineRow, TimelineRowContent, find_matching_rows, fold_label, timeline_rows,
+};
 pub use source::{SessionSource, SharedSession, TimelineSource, TranscriptSource};
 pub use timeline_view::{TimelineEvent, TimelineView};

@@ -41,10 +41,31 @@ fn a_chat_opens_in_a_pane_a_tab_of_a_pane_a_layout_tab_and_a_window() {
 #[test]
 fn an_agent_without_a_chat_opens_its_terminal_instead() {
     let mut workspace = Workspace::new();
-    let pane = workspace.spawn_agent("codex", None, true).expect("pane");
+    let pane = workspace.spawn_agent("terminal", None, true).expect("pane");
     let tab = workspace.pane(&pane).and_then(|p| p.active_tab()).expect("tab");
-    assert_eq!(tab.pane_type, PaneType::Agent);
     assert!(!tab.is_chat());
+}
+
+#[test]
+fn all_built_in_agents_can_open_in_chat_mode_and_toggle_between_chat_and_cli() {
+    for profile_id in ["omp", "opencode", "agy", "codex", "claude-code"] {
+        let mut workspace = Workspace::new();
+        let pane = workspace.spawn_agent(profile_id, Some("/work/repo"), false).expect("pane");
+        let tab = active_tab_id(&workspace, &pane);
+        let conversation = AgentConversation::new(format!("conv-{profile_id}"));
+        workspace.record_agent_conversation(conversation.clone(), &pane, &tab, None);
+        assert!(!workspace.tab(&pane, &tab).expect("tab").is_chat());
+
+        assert!(workspace.toggle_tab_chat_mode(&pane, &tab));
+        let toggled = workspace.tab(&pane, &tab).expect("tab");
+        assert!(toggled.is_chat());
+        assert_eq!(toggled.agent.as_ref().and_then(|a| a.conversation.as_ref()), Some(&conversation));
+
+        assert!(workspace.toggle_tab_chat_mode(&pane, &tab));
+        let back = workspace.tab(&pane, &tab).expect("tab");
+        assert!(!back.is_chat());
+        assert_eq!(back.agent.as_ref().and_then(|a| a.conversation.as_ref()), Some(&conversation));
+    }
 }
 
 #[test]

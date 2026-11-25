@@ -207,8 +207,9 @@ impl Sidebar {
         items.push(MenuItem::separator());
         for profile in AgentCatalog::shared().all().into_iter().filter(|p| p.id != "terminal") {
             let id = profile.id.clone();
+            let as_chat = self.shell.read(cx).launches_as_chat(&id);
             items.push(self.spawn_item(format!("New {} Pane", profile.name), move |ws| {
-                _ = ws.spawn_agent(&id, None, false)
+                _ = ws.spawn_agent(&id, None, as_chat)
             }));
         }
         for profile in ChatLaunch::chat_profiles() {

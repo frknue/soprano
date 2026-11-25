@@ -12,7 +12,9 @@ use soprano_types::{
     KeyBindingMode, Machine,
 };
 
-use crate::app_settings::{AppSettings, AppearancePreference, KNOWN_THEME_IDS, is_known_theme_id};
+use crate::app_settings::{
+    AppSettings, AppearancePreference, ChatLaunchMode, KNOWN_THEME_IDS, is_known_theme_id,
+};
 use crate::automation::{Automation, AutomationEntry, resolve_automations};
 use crate::default_keybindings::DefaultKeybindings;
 use crate::key_chord::KeyChord;
@@ -51,6 +53,19 @@ pub struct SopranoConfig {
     /// Remote machines reached over SSH whose sessions share the sidebar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machines: Option<Vec<Machine>>,
+    /// Native Chat UI toggle and per-agent default launch mode (`"chat"` | `"cli"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_ui: Option<ChatUiConfig>,
+}
+
+/// Chat UI configuration in `settings.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatUiConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<BTreeMap<String, String>>,
 }
 
 /// Whether the OS may deliver a banner is the system's decision, not ours, so the only thing
@@ -316,6 +331,29 @@ impl SopranoConfig {
         }
         if let Some(sound) = self.notifications.as_ref().and_then(|n| n.sound) {
             settings.notification_sound = sound;
+        }
+        if let Some(chat_ui) = &self.chat_ui {
+            if let Some(enabled) = chat_ui.enabled {
+                settings.chat_ui.enabled = enabled;
+            }
+            if let Some(agent_modes) = &chat_ui.agents {
+                for (id, raw_mode) in agent_modes {
+                    let id = id.trim();
+                    if id.is_empty() {
+                        continue;
+                    }
+                    match ChatLaunchMode::from_raw(raw_mode) {
+                        Some(mode) => {
+                            settings.chat_ui.agents.insert(id.to_owned(), mode);
+                        }
+                        None => {
+                            issues.push(ConfigIssue::warning(format!(
+                                "chatUi.agents.{id}: unknown launch mode \"{raw_mode}\". Use \"chat\" or \"cli\"."
+                            )));
+                        }
+                    }
+                }
+            }
         }
 
         if let Some(project_directories) = &self.project_directories {
@@ -1308,5 +1346,18 @@ mod tests {
         assert_eq!(resolved.machines[0].destination(), "me@vps.example");
         assert_eq!(resolved.machines[1].destination(), "pi");
         assert_eq!(resolved.issues.len(), 3);
+    }
+
+    #[test]
+    fn chat_ui_settings_resolve_enabled_per_agent_modes_and_warn_on_invalid_mode() {
+        let resolved = resolve(
+            r#"{ "chatUi": { "enabled": true, "agents": { "codex": "cli", "claude-code": "chat", "omp": "invalid" } } }"#,
+        );
+        assert!(resolved.settings.chat_ui.enabled);
+        assert!(!resolved.settings.chat_ui.default_opens_in_chat("codex"));
+        assert!(resolved.settings.chat_ui.default_opens_in_chat("claude-code"));
+        assert!(resolved.settings.chat_ui.default_opens_in_chat("omp"));
+        assert_eq!(resolved.issues.len(), 1);
+        assert!(resolved.issues[0].message.contains("chatUi.agents.omp"));
     }
 }

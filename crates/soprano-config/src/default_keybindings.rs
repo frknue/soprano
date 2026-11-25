@@ -97,6 +97,8 @@ const TABLE: &[Row] = &[
     ("launch-omp", "Launch omp", "Launch Oh My Pi agent", Agents, "⌘4", Direct, "4", CMD),
     ("launch-agy", "Launch Antigravity", "Launch Antigravity agent", Agents, "⌘5", Direct, "5", CMD),
     ("new-chat", "New Chat", "Open a chat with an agent beside the focused pane", Agents, "⌘I", Direct, "i", CMD),
+    ("toggle-chat-ui", "Switch Between Chat UI and Terminal", "Switch the active agent tab between Chat UI and its terminal CLI", Agents, "⇧⌘I", Direct, "i", CMD_SHIFT),
+    ("find-in-chat", "Find in Chat", "Search messages in the active chat", Agents, "⇧⌘F", Direct, "f", CMD_SHIFT),
     ("agent-dashboard", "Agent Dashboard", "Monitor and control agents across all windows", Agents, "⇧⌘D", Direct, "d", CMD_SHIFT),
     ("statistics", "Statistics", "Show omp's tokens and estimated cost over time", Agents, "⇧⌘U", Direct, "u", CMD_SHIFT),
 

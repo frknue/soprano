@@ -16,6 +16,10 @@ pub enum BindingCommand {
     Split(SplitDirection),
     /// Open a chat with the first chat-capable agent profile beside the focused pane.
     NewChat,
+    /// Switch the active agent tab between Chat UI and its terminal CLI.
+    ToggleChatUi,
+    /// Search messages in the active chat.
+    FindInChat,
     Navigate(NavigationDirection),
     PreviousWindow,
     NextWindow,
@@ -83,6 +87,8 @@ impl BindingCommand {
         use NavigationDirection::{Down, Left, Right, Up};
         let command = match binding_id {
             "new-chat" => Self::NewChat,
+            "toggle-chat-ui" => Self::ToggleChatUi,
+            "find-in-chat" => Self::FindInChat,
             "nav-left" => Self::Navigate(Left),
             "nav-down" => Self::Navigate(Down),
             "nav-up" => Self::Navigate(Up),
@@ -166,6 +172,7 @@ pub enum FocusedContent {
     Terminal,
     Browser,
     Editor,
+    Chat,
     Automations,
     #[default]
     Other,
@@ -173,8 +180,9 @@ pub enum FocusedContent {
 
 impl FocusedContent {
     /// Like Orca's scoped shortcuts: a browser keeps ⌘L (address bar), ⌘[ / ⌘] and ⌘R; an
-    /// editor keeps ⌘F / ⌘G / ⇧⌘G (find) and ⌘S; the Automations page keeps ⌘N (New
-    /// Automation). Soprano bindings on those chords apply everywhere else.
+    /// editor keeps ⌘F / ⌘G / ⇧⌘G (find) and ⌘S; a chat keeps ⌘F / ⌘G / ⇧⌘G (find in chat);
+    /// the Automations page keeps ⌘N (New Automation). Soprano bindings on those chords apply
+    /// everywhere else.
     ///
     /// `modifiers` are logical (macOS) flags: `cmd` is the binding's ⌘ on every platform.
     pub fn owns_chord(self, key: &str, modifiers: Modifiers) -> bool {
@@ -184,6 +192,9 @@ impl FocusedContent {
             FocusedContent::Browser => command_only && matches!(key, "l" | "[" | "]" | "r"),
             FocusedContent::Editor => {
                 (command_only && matches!(key, "f" | "g" | "s")) || (command_shift && key == "g")
+            }
+            FocusedContent::Chat => {
+                (command_only && matches!(key, "f" | "g")) || (command_shift && key == "g")
             }
             FocusedContent::Automations => command_only && key == "n",
             FocusedContent::Terminal | FocusedContent::Other => false,

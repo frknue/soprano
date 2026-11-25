@@ -642,10 +642,12 @@ fn only_agents_that_serve_acp_open_as_a_chat() {
     let launch = AgentChatLaunch::new(&DefaultAgents::omp(), spec.clone()).expect("omp chats");
     assert_eq!(launch.tool_style, AcpToolStyle::Omp);
     assert_eq!(launch.working_directory(), "/work/repo");
-    assert_eq!(AgentChatLaunch::new(&DefaultAgents::codex(), spec), None);
+    let codex = AgentChatLaunch::new(&DefaultAgents::codex(), spec.clone()).expect("codex chats");
+    assert_eq!(codex.tool_style, AcpToolStyle::Generic);
+    assert_eq!(AgentChatLaunch::new(&DefaultAgents::terminal(), spec), None);
     assert_eq!(
         AgentChatLaunch::chat_profiles().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
-        vec!["omp"]
+        vec!["codex", "claude-code", "opencode", "omp", "agy"]
     );
 }
 

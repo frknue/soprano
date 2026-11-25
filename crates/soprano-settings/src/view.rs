@@ -878,6 +878,7 @@ impl SettingsView {
     ) -> Vec<AnyElement> {
         match self.tab {
             SettingsTab::General => self.general_page(t, window, cx),
+            SettingsTab::ChatUi => self.chat_ui_page(t, cx),
             SettingsTab::Machines => self.machines_page(t, cx),
             SettingsTab::KeyboardShortcuts => self.shortcuts_page(t, window, cx),
             SettingsTab::AgentProfiles => self.agents_page(t, window, cx),

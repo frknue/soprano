@@ -28,6 +28,28 @@ pub struct LaunchSpec {
     pub env: Vec<(String, String)>,
 }
 
+/// Which wire protocol the chat tab uses to drive its agent's CLI.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChatProtocol {
+    /// Standard Agent Client Protocol over stdio JSON-RPC 2.0 (`omp`, `opencode`, `agy`).
+    Acp,
+    /// OpenAI Codex's native `codex app-server --stdio` JSON-RPC 2.0 protocol.
+    CodexAppServer,
+    /// Anthropic Claude Code's native bidirectional NDJSON `stream-json` protocol.
+    ClaudeStreamJson,
+}
+
+impl ChatProtocol {
+    pub fn for_profile(profile_id: &str) -> Option<Self> {
+        match profile_id {
+            "omp" | "opencode" | "agy" => Some(Self::Acp),
+            "codex" => Some(Self::CodexAppServer),
+            "claude-code" => Some(Self::ClaudeStreamJson),
+            _ => None,
+        }
+    }
+}
+
 /// How a chat tab starts its agent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentChatLaunch {
@@ -51,10 +73,14 @@ impl AgentChatLaunch {
         })
     }
 
-    /// Agents a chat tab can run, by profile id: those whose CLI serves the Agent Client
-    /// Protocol on stdio.
+    /// Agents a chat tab can run, by profile id.
     pub fn supports(profile_id: &str) -> bool {
-        profile_id == "omp"
+        ChatProtocol::for_profile(profile_id).is_some()
+    }
+
+    /// The wire protocol this launch uses.
+    pub fn protocol(&self) -> ChatProtocol {
+        ChatProtocol::for_profile(&self.profile_id).unwrap_or(ChatProtocol::Acp)
     }
 
     /// The catalog's agents that open as a chat, in catalog order.
@@ -73,6 +99,23 @@ impl AgentChatLaunch {
             Some(self.spec.cwd.clone()),
             Some(self.spec.env.clone()),
         )
+    }
+
+    /// Creates the [`JsonRpcPeer`] appropriate for this agent's protocol.
+    pub fn make_peer(&self) -> Box<dyn JsonRpcPeer> {
+        match self.protocol() {
+            ChatProtocol::Acp => Box::new(self.make_connection()),
+            ChatProtocol::CodexAppServer => Box::new(crate::codex_peer::CodexAppServerPeer::new(
+                self.spec.argv.clone(),
+                Some(self.spec.cwd.clone()),
+                Some(self.spec.env.clone()),
+            )),
+            ChatProtocol::ClaudeStreamJson => Box::new(crate::claude_peer::ClaudeStreamJsonPeer::new(
+                self.spec.argv.clone(),
+                Some(self.spec.cwd.clone()),
+                Some(self.spec.env.clone()),
+            )),
+        }
     }
 }
 
@@ -543,10 +586,7 @@ pub struct AgentChatSession {
 impl AgentChatSession {
     /// A session that runs `launch` as a real process.
     pub fn new(launch: AgentChatLaunch) -> Self {
-        Self::with_peer_factory(
-            launch,
-            Box::new(|launch: &AgentChatLaunch| Box::new(launch.make_connection()) as Box<dyn JsonRpcPeer>),
-        )
+        Self::with_peer_factory(launch, Box::new(|launch: &AgentChatLaunch| launch.make_peer()))
     }
 
     /// A session whose agent `make_peer` provides (tests stand in a fake agent).

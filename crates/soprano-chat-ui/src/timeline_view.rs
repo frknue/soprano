@@ -19,7 +19,9 @@ use soprano_ui::fonts::UI_FONT_FAMILY;
 use soprano_ui::menu::{ContextMenu, MenuItem};
 use soprano_ui::{ActiveSopranoTheme, IconName, icon};
 
-use crate::rows::{ExpansionSet, TimelineExpansion, TimelineRow, TimelineRowContent, timeline_rows};
+use crate::rows::{
+    ExpansionSet, TimelineExpansion, TimelineRow, TimelineRowContent, find_matching_rows, timeline_rows,
+};
 use crate::source::TimelineSource;
 use crate::widgets::text_size;
 
@@ -77,6 +79,10 @@ pub struct TimelineView {
     /// The list's size at the last frame, in window pixels (read before the list lays out:
     /// its rows cannot ask the list while it measures them).
     pub(crate) viewport: gpui::Size<Pixels>,
+    /// Active Find-in-Chat query, matching row indices, and active index into `find_matches`.
+    find_query: String,
+    find_matches: Vec<usize>,
+    find_current: Option<usize>,
 }
 
 impl EventEmitter<TimelineEvent> for TimelineView {}
@@ -120,6 +126,9 @@ impl TimelineView {
             diffs: HashMap::new(),
             diff_scrolls: HashMap::new(),
             viewport: gpui::Size::default(),
+            find_query: String::new(),
+            find_matches: Vec::new(),
+            find_current: None,
         };
         view.reload(true, cx);
         view
@@ -154,14 +163,112 @@ impl TimelineView {
 
     /// Re-reads the source. `scroll_to_end` follows the newest row again.
     pub fn reload(&mut self, scroll_to_end: bool, cx: &mut Context<Self>) {
+        let current_match_id = self
+            .find_current
+            .and_then(|ix| self.find_matches.get(ix))
+            .and_then(|&row_ix| self.rows.get(row_ix))
+            .map(|r| r.id.clone());
         let thread = self.source.thread();
         let empty = self.source.empty_timeline_text(&self.agent_name);
         let rows = timeline_rows(&thread, &empty, &self.expansion);
         self.set_rows(rows);
+        if !self.find_query.is_empty() {
+            self.recompute_find_matches(current_match_id.as_deref());
+        }
         if scroll_to_end {
             self.list.set_follow_mode(FollowMode::Tail);
         }
         self.update_clock(thread.is_running(), cx);
+        self.scrolled(cx);
+        cx.notify();
+    }
+
+    // MARK: Find in Chat
+
+    /// Sets the active Find-in-Chat query, updates matching rows, and scrolls to the first match.
+    pub fn set_find_query(&mut self, query: &str, cx: &mut Context<Self>) {
+        let current_match_id = self
+            .find_current
+            .and_then(|ix| self.find_matches.get(ix))
+            .and_then(|&row_ix| self.rows.get(row_ix))
+            .map(|r| r.id.clone());
+        self.find_query = query.to_owned();
+        self.recompute_find_matches(current_match_id.as_deref());
+        if let Some(match_ix) = self.find_current {
+            self.scroll_to_find_match(match_ix, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Moves to the next (`forward == true`) or previous match, wrapping around.
+    pub fn find_step(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let total = self.find_matches.len();
+        if total == 0 {
+            return;
+        }
+        let next = match self.find_current {
+            Some(current) if forward => (current + 1) % total,
+            Some(current) => (current + total - 1) % total,
+            None if forward => 0,
+            None => total - 1,
+        };
+        self.find_current = Some(next);
+        self.scroll_to_find_match(next, cx);
+    }
+
+    /// Clears the active Find-in-Chat query and highlights.
+    pub fn clear_find(&mut self, cx: &mut Context<Self>) {
+        if self.find_query.is_empty() && self.find_matches.is_empty() {
+            return;
+        }
+        self.find_query.clear();
+        self.find_matches.clear();
+        self.find_current = None;
+        cx.notify();
+    }
+
+    /// `(current_1_based, total_matches)` for the find bar counter.
+    pub fn find_summary(&self) -> (usize, usize) {
+        let total = self.find_matches.len();
+        if total == 0 {
+            return (0, 0);
+        }
+        (self.find_current.map_or(0, |ix| ix + 1), total)
+    }
+
+    /// `Some(true)` for the active match, `Some(false)` for another match, `None` otherwise.
+    pub(crate) fn row_find_state(&self, row_index: usize) -> Option<bool> {
+        if self.find_matches.is_empty() {
+            return None;
+        }
+        let current_row = self.find_current.and_then(|ix| self.find_matches.get(ix).copied());
+        if current_row == Some(row_index) {
+            return Some(true);
+        }
+        self.find_matches.binary_search(&row_index).ok().map(|_| false)
+    }
+
+    fn recompute_find_matches(&mut self, preserve_row_id: Option<&str>) {
+        self.find_matches = find_matching_rows(&self.rows, &self.find_query);
+        if self.find_matches.is_empty() {
+            self.find_current = None;
+            return;
+        }
+        if let Some(id) = preserve_row_id
+            && let Some(pos) =
+                self.find_matches.iter().position(|&row_ix| self.rows.get(row_ix).is_some_and(|r| r.id == id))
+        {
+            self.find_current = Some(pos);
+        } else {
+            self.find_current = Some(0);
+        }
+    }
+
+    fn scroll_to_find_match(&mut self, match_ix: usize, cx: &mut Context<Self>) {
+        let Some(&row_ix) = self.find_matches.get(match_ix) else { return };
+        self.list.pause_following_tail();
+        self.list.scroll_to(ListOffset { item_ix: row_ix, offset_in_item: px(0.0) });
         self.scrolled(cx);
         cx.notify();
     }

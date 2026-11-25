@@ -46,11 +46,44 @@ pub fn bypass_approvals(profile_id: &str, arguments: &mut Vec<String>) {
     replace_approval_options(&options, options.bypass, arguments);
 }
 
-/// [`bypass_approvals`] for omp's chat server, whose bypass is its approval mode `yolo`. A
-/// `--config` overlay that sets another mode needs no handling: the flag wins over it.
-pub(crate) fn bypass_chat_approvals(arguments: &mut Vec<String>) {
-    let Some(options) = ApprovalOptions::of("omp") else { return };
-    replace_approval_options(&options, "--approval-mode=yolo", arguments);
+/// [`bypass_approvals`] for a chat server: omp uses `--approval-mode=yolo`; agy and claude-code
+/// use `--dangerously-skip-permissions`; codex's app-server configures approval policy in its
+/// JSON-RPC `thread/start` request, so CLI-only approval flags are stripped; opencode's ACP
+/// server takes no approval flag.
+pub(crate) fn bypass_chat_approvals(profile_id: &str, arguments: &mut Vec<String>) {
+    match profile_id {
+        "omp" => {
+            if let Some(options) = ApprovalOptions::of("omp") {
+                replace_approval_options(&options, "--approval-mode=yolo", arguments);
+            }
+        }
+        "agy" | "claude-code" => bypass_approvals(profile_id, arguments),
+        "codex" => {
+            if let Some(options) = ApprovalOptions::of("codex") {
+                strip_approval_options(&options, arguments);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn strip_approval_options(options: &ApprovalOptions, arguments: &mut Vec<String>) {
+    let mut kept = Vec::with_capacity(arguments.len());
+    let mut rest = std::mem::take(arguments).into_iter();
+    while let Some(argument) = rest.next() {
+        let (name, has_inline_value) = match argument.split_once('=') {
+            Some((name, _)) => (name, true),
+            None => (argument.as_str(), false),
+        };
+        if options.valued.contains(&name) {
+            if !has_inline_value {
+                rest.next();
+            }
+        } else if name != options.bypass && !options.switches.contains(&name) {
+            kept.push(argument);
+        }
+    }
+    *arguments = kept;
 }
 
 fn replace_approval_options(options: &ApprovalOptions, bypass: &str, arguments: &mut Vec<String>) {
@@ -123,7 +156,18 @@ mod tests {
             ["acp", "--approval-mode", "always-ask", "--auto-approve", "--config", "/o.yml"]
                 .map(String::from)
                 .to_vec();
-        bypass_chat_approvals(&mut arguments);
+        bypass_chat_approvals("omp", &mut arguments);
         assert_eq!(arguments, ["acp", "--config", "/o.yml", "--approval-mode=yolo"]);
+
+        let mut agy_args: Vec<String> = ["acp", "--mode", "plan", "--sandbox"].map(String::from).to_vec();
+        bypass_chat_approvals("agy", &mut agy_args);
+        assert_eq!(agy_args, ["acp", "--dangerously-skip-permissions"]);
+
+        let mut codex_args: Vec<String> =
+            ["app-server", "--stdio", "--full-auto", "-s", "read-only", "-c", "model=\"o3\""]
+                .map(String::from)
+                .to_vec();
+        bypass_chat_approvals("codex", &mut codex_args);
+        assert_eq!(codex_args, ["app-server", "--stdio", "-c", "model=\"o3\""]);
     }
 }

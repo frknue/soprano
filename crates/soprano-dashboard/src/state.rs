@@ -794,13 +794,18 @@ mod tests {
     fn agents_that_cannot_be_handed_a_first_message_are_not_offered() {
         use soprano_types::DefaultAgents;
         let custom = AgentProfile { id: "aider".into(), command: "aider".into(), ..DefaultAgents::codex() };
-        let scripted =
-            AgentProfile { launch_script: Some("./start-claude.sh".into()), ..DefaultAgents::claude_code() };
-        // omp behind a script still serves its chat, which takes the message itself.
+        let scripted_custom = AgentProfile {
+            id: "custom-cli".into(),
+            command: "custom-cli".into(),
+            launch_script: Some("./start-custom.sh".into()),
+            ..DefaultAgents::claude_code()
+        };
+        // Built-in chat-capable agents behind a script still serve their chat, which takes the
+        // message itself.
         let scripted_omp = AgentProfile { launch_script: Some("./omp.sh".into()), ..DefaultAgents::omp() };
         let choices = AgentChoice::for_profiles(&[
             custom,
-            scripted,
+            scripted_custom,
             scripted_omp,
             DefaultAgents::terminal(),
             DefaultAgents::codex(),

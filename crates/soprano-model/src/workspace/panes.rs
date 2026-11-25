@@ -125,6 +125,29 @@ impl Workspace {
         true
     }
 
+    /// Switches a local chat-capable agent tab between Chat UI and its terminal CLI, keeping
+    /// the agent's conversation record so the new view resumes the same conversation.
+    pub fn toggle_tab_chat_mode(&mut self, pane_id: &str, tab_id: &str) -> bool {
+        let Some(tab) = self.tab_mut(pane_id, tab_id) else { return false };
+        if tab.pane_type != PaneType::Agent || tab.remote.is_some() {
+            return false;
+        }
+        let was_chat = tab.is_chat();
+        let Some(agent) = tab.agent.as_mut() else { return false };
+        if !crate::pane::chat_supports(&agent.profile_id) {
+            return false;
+        }
+        agent.status = soprano_types::AgentStatus::Starting;
+        agent.needs_attention = false;
+        agent.waiting_reason = None;
+        tab.content_kind = (!was_chat).then(|| PaneContentKind::CHAT.to_owned());
+        self.events.push(WorkspaceEvent::Terminal(TerminalLifecycleAction::Restart(TerminalTarget::new(
+            pane_id, tab_id,
+        ))));
+        self.notify_model(true);
+        true
+    }
+
     /// Opens a terminal running `<launcher> web` (omp's web UI) beside the active pane, on
     /// this computer.
     pub fn spawn_omp_web(&mut self, launcher: &Path) -> Option<String> {

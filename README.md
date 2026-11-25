@@ -326,8 +326,10 @@ there; bind one in `settings.json`).
 
 | Shortcut | Action |
 |---|---|
-| `⌘1` / `⌘2` / `⌘3` / `⌘4` / `⌘5` | Launch Codex / Claude Code / OpenCode / omp / Antigravity |
-| `⌘I` | New omp chat beside the focused pane |
+| `⌘1` / `⌘2` / `⌘3` / `⌘4` / `⌘5` | Launch Codex / Claude Code / OpenCode / omp / Antigravity (in Chat UI or CLI per **Settings ▸ Chat UI**) |
+| `⌘I` | New chat beside the focused pane |
+| `⇧⌘I` | Switch the active agent tab between Chat UI and its terminal CLI (preserving the conversation) |
+| `⇧⌘F` (or `⌘F` in a chat) | Find in Chat — search messages, tool calls and diffs in the active chat |
 | `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
 | `⌘L` | Focus the address bar of the focused browser pane (elsewhere it toggles the right sidebar) |
@@ -614,15 +616,24 @@ pane.
 
 ## Agent chat
 
-A chat runs an agent without a terminal, like Orca's Chat UI: Soprano starts the agent's
-[Agent Client Protocol](https://agentclientprotocol.com) server (`omp acp`, through your
-login shell like an agent pane) and shows the conversation in a GUI. omp is the agent
-with a chat today; the other agents keep their terminal.
+A chat runs an agent without a terminal, like Orca's Chat UI: Soprano drives **omp**
+(`omp acp`), **OpenCode** (`opencode acp`), and **Antigravity** (`agy acp`) over the
+[Agent Client Protocol](https://agentclientprotocol.com), **Codex** over its native
+`codex app-server --stdio` JSON-RPC protocol, and **Claude Code** over its native
+bidirectional `stream-json` protocol — all launched through your login shell like an agent
+pane.
 
-Open one wherever a terminal opens: `⌘I` (`new-chat`) or **New omp Chat Pane** in the
-sidebar **+** menu beside the focused pane, and from the command palette **New omp Chat**,
-**New omp Chat in This Pane** (a pane tab), **New omp Chat Tab**, or **New omp Chat
-Window**. Splitting a chat (`⌃A` then `|` or `-`) opens another chat with the same agent.
+Turn on **Settings ▸ Chat UI** (`chatUi.enabled` and per-agent `chatUi.agents` in
+`settings.json`) to launch agents in Chat UI by default, or switch any open agent tab between
+Chat UI and its terminal CLI at any time with `⇧⌘I` (`toggle-chat-ui`) or the pane header's
+mode toggle button (preserving the conversation). Search inside an open chat with `⌘F` (or
+`⇧⌘F` / `find-in-chat`), stepping through matches with `Return` / `⇧Return` or `⌘G` / `⇧⌘G`.
+
+Open one wherever a terminal opens: `⌘I` (`new-chat`) or **New \<Agent\> Chat Pane** in the
+sidebar **+** menu beside the focused pane, and from the command palette **New \<Agent\> Chat**,
+**New \<Agent\> Chat in This Pane** (a pane tab), **New \<Agent\> Chat Tab**, or
+**New \<Agent\> Chat Window**. Splitting a chat (`⌃A` then `|` or `-`) opens another chat with
+the same agent.
 
 The chat looks and works like [Soprano Agents](https://github.com/frknue/soprano_agents)'
 chat column: your messages as bubbles on the right, the agent's answers as Markdown, and

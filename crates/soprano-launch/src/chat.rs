@@ -25,10 +25,11 @@ pub struct ChatLaunch {
 }
 
 impl ChatLaunch {
-    /// Agents a chat tab can run, by profile id: those whose CLI serves the Agent Client
-    /// Protocol on stdio.
+    /// Agents a chat tab can run, by profile id: native ACP servers (`omp`, `opencode`, `agy`),
+    /// Codex's `app-server` (`codex`), and Claude Code's bidirectional `stream-json`
+    /// (`claude-code`).
     pub fn supports(profile_id: &str) -> bool {
-        profile_id == "omp"
+        matches!(profile_id, "omp" | "opencode" | "agy" | "codex" | "claude-code")
     }
 
     /// The catalog's agents that open as a chat, in catalog order.
@@ -38,12 +39,21 @@ impl ChatLaunch {
 
     /// What a throwaway conversation adds to the agent's command line (reading what a new
     /// thread would offer): omp keeps it in `session_directory` instead of the folder's
-    /// session history.
-    pub fn throwaway_arguments(session_directory: &Path) -> Vec<String> {
-        vec!["--session-dir".into(), path_string(session_directory)]
+    /// session history; Claude Code skips session persistence.
+    pub fn throwaway_arguments_for(profile_id: &str, session_directory: &Path) -> Vec<String> {
+        match profile_id {
+            "omp" => vec!["--session-dir".into(), path_string(session_directory)],
+            "claude-code" => vec!["--no-session-persistence".into()],
+            _ => Vec::new(),
+        }
     }
 
-    /// `None` for agents without an ACP server.
+    /// Backwards-compatible helper for omp throwaway conversations.
+    pub fn throwaway_arguments(session_directory: &Path) -> Vec<String> {
+        Self::throwaway_arguments_for("omp", session_directory)
+    }
+
+    /// `None` for agents without a chat protocol.
     pub fn for_profile(
         profile: &AgentProfile,
         cwd: Option<&str>,
@@ -83,14 +93,28 @@ impl ChatLaunch {
         process_environment.insert("SOPRANO_AGENT_PROFILE".into(), profile.id.clone());
         process_environment.insert("SOPRANO_AGENT_NAME".into(), profile.name.clone());
 
-        let mut arguments = vec!["acp".to_owned()];
+        let mut arguments: Vec<String> = match profile.id.as_str() {
+            "omp" | "opencode" | "agy" => vec!["acp".to_owned()],
+            "codex" => vec!["app-server".to_owned(), "--stdio".to_owned()],
+            "claude-code" => vec![
+                "-p".to_owned(),
+                "--input-format".to_owned(),
+                "stream-json".to_owned(),
+                "--output-format".to_owned(),
+                "stream-json".to_owned(),
+                "--verbose".to_owned(),
+                "--include-partial-messages".to_owned(),
+            ],
+            _ => return None,
+        };
         arguments.extend(profile.args.iter().cloned());
         arguments.extend(accounts.arguments.iter().cloned());
         // Like every agent, the server asks for nothing: a chat's approvals are answered in
         // its tab, which a thread's tab is behind.
-        bypass_chat_approvals(&mut arguments);
+        bypass_chat_approvals(&profile.id, &mut arguments);
 
         // Account variables go after the rc files, as in an agent pane.
+        let is_claude = profile.id == "claude-code";
         let arguments = match ShellFlavor::of(login_shell) {
             ShellFlavor::Posix => {
                 let mut script: Vec<String> = accounts
@@ -102,7 +126,24 @@ impl ChatLaunch {
                     .chain(arguments.iter().map(String::as_str))
                     .map(shell_quoted)
                     .collect();
-                script.push(format!("exec {}", quoted.join(" ")));
+                if is_claude {
+                    script.push(format!("set -- {}", quoted.join(" ")));
+                    script.push(
+                        "[ -n \"${SOPRANO_CLAUDE_RESUME_ID:-}\" ] && set -- \"$@\" --resume \"$SOPRANO_CLAUDE_RESUME_ID\""
+                            .into(),
+                    );
+                    script.push(
+                        "[ -n \"${SOPRANO_CLAUDE_SESSION_ID:-}\" ] && set -- \"$@\" --session-id \"$SOPRANO_CLAUDE_SESSION_ID\""
+                            .into(),
+                    );
+                    script.push(
+                        "[ -n \"${SOPRANO_CLAUDE_MODEL:-}\" ] && set -- \"$@\" --model \"$SOPRANO_CLAUDE_MODEL\""
+                            .into(),
+                    );
+                    script.push("exec \"$@\"".into());
+                } else {
+                    script.push(format!("exec {}", quoted.join(" ")));
+                }
                 vec!["-lic".into(), script.join("; ")]
             }
             ShellFlavor::PowerShell => {
@@ -113,7 +154,24 @@ impl ChatLaunch {
                     .collect();
                 let quoted: Vec<String> = arguments.iter().map(|a| powershell_quoted(a)).collect();
                 script.push(crate::command_runner::powershell_missing_command_check(&profile.command));
-                script.push(format!("& {} {}", powershell_quoted(&profile.command), quoted.join(" ")));
+                if is_claude {
+                    script.push(format!("$sopranoArgs = @({})", quoted.join(", ")));
+                    script.push(
+                        "if ($env:SOPRANO_CLAUDE_RESUME_ID) { $sopranoArgs += @('--resume', $env:SOPRANO_CLAUDE_RESUME_ID) }"
+                            .into(),
+                    );
+                    script.push(
+                        "if ($env:SOPRANO_CLAUDE_SESSION_ID) { $sopranoArgs += @('--session-id', $env:SOPRANO_CLAUDE_SESSION_ID) }"
+                            .into(),
+                    );
+                    script.push(
+                        "if ($env:SOPRANO_CLAUDE_MODEL) { $sopranoArgs += @('--model', $env:SOPRANO_CLAUDE_MODEL) }"
+                            .into(),
+                    );
+                    script.push(format!("& {} @sopranoArgs", powershell_quoted(&profile.command)));
+                } else {
+                    script.push(format!("& {} {}", powershell_quoted(&profile.command), quoted.join(" ")));
+                }
                 script.push("exit $LASTEXITCODE".into());
                 vec!["-NoLogo".into(), "-Command".into(), script.join("; ")]
             }
@@ -167,9 +225,44 @@ mod tests {
         let home_launch =
             ChatLaunch::for_profile(&profile, None, "/bin/zsh", &none, &BTreeMap::new(), home).expect("omp");
         assert_eq!(home_launch.working_directory, "/home/me");
-        assert!(
+        let codex_launch =
             ChatLaunch::for_profile(&DefaultAgents::codex(), None, "/bin/zsh", &none, &BTreeMap::new(), home)
-                .is_none()
+                .expect("codex chats");
+        assert_eq!(codex_launch.arguments[1], "exec 'codex' 'app-server' '--stdio'");
+        let agy_launch =
+            ChatLaunch::for_profile(&DefaultAgents::agy(), None, "/bin/zsh", &none, &BTreeMap::new(), home)
+                .expect("agy chats");
+        assert_eq!(agy_launch.arguments[1], "exec 'agy' 'acp' '--dangerously-skip-permissions'");
+        let opencode_launch = ChatLaunch::for_profile(
+            &DefaultAgents::open_code(),
+            None,
+            "/bin/zsh",
+            &none,
+            &BTreeMap::new(),
+            home,
+        )
+        .expect("opencode chats");
+        assert_eq!(opencode_launch.arguments[1], "exec 'opencode' 'acp'");
+        let claude_launch = ChatLaunch::for_profile(
+            &DefaultAgents::claude_code(),
+            None,
+            "/bin/zsh",
+            &none,
+            &BTreeMap::new(),
+            home,
+        )
+        .expect("claude chats");
+        assert!(claude_launch.arguments[1].contains("'claude' '-p' '--input-format' 'stream-json'"));
+        assert!(
+            ChatLaunch::for_profile(
+                &DefaultAgents::terminal(),
+                None,
+                "/bin/zsh",
+                &none,
+                &BTreeMap::new(),
+                home
+            )
+            .is_none()
         );
     }
 

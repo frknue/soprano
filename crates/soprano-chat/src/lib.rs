@@ -6,15 +6,19 @@
 //! preview live in `soprano-agents` (the dashboard renders terminal agents' transcripts with
 //! the same model) and are re-exported here.
 
+pub mod claude_peer;
+pub mod codex_peer;
 pub mod rpc;
 pub mod session;
 pub mod turn_builder;
 
+pub use claude_peer::{ClaudeStreamJsonPeer, ClaudeStreamTranslator};
+pub use codex_peer::CodexAppServerPeer;
 pub use rpc::{JsonRpcConnection, JsonRpcError, JsonRpcPeer, LineSplitter, PeerEvent, PeerSink, StderrTail};
 pub use session::{
     AgentChatCommand, AgentChatConfigOption, AgentChatEvent, AgentChatLaunch, AgentChatPermission,
-    AgentChatPlanEntry, AgentChatQuestion, AgentChatSession, ChatInteraction, ChatPhase, ConfigOptionValue,
-    LaunchSpec, PlanEntryStatus, QuestionChoice, QuestionField,
+    AgentChatPlanEntry, AgentChatQuestion, AgentChatSession, ChatInteraction, ChatPhase, ChatProtocol,
+    ConfigOptionValue, LaunchSpec, PlanEntryStatus, QuestionChoice, QuestionField,
 };
 pub use soprano_agents::chat_turns::*;
 pub use soprano_agents::{JsonValue, JsonValueExt, omp_edit_changes};

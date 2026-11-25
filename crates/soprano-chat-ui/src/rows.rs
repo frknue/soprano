@@ -315,6 +315,53 @@ impl TimelineRow {
     pub fn is_turn_message(&self) -> bool {
         matches!(&self.content, TimelineRowContent::User(model) if model.turn_id.is_some())
     }
+
+    /// Whether this row's visible text matches `needle_lower` (already lowercased, non-empty).
+    pub fn matches_query(&self, needle_lower: &str) -> bool {
+        let has = |text: &str| text.to_lowercase().contains(needle_lower);
+        let opt = |text: Option<&str>| text.is_some_and(has);
+        match &self.content {
+            TimelineRowContent::User(model) => has(&model.message.text),
+            TimelineRowContent::Assistant(model) => {
+                has(&model.text)
+                    || model.changed_files.as_ref().is_some_and(|cf| cf.files.iter().any(|f| has(&f.path)))
+            }
+            TimelineRowContent::WorkGroup(model) => has(&model.summary),
+            TimelineRowContent::WorkEntry(model) => {
+                has(&model.entry.label)
+                    || opt(model.entry.detail.as_deref())
+                    || opt(model.entry.body.as_deref())
+                    || model.entry.changed_files.iter().any(|p| has(p))
+            }
+            TimelineRowContent::FileDiff(model) => {
+                has(&model.change.path)
+                    || opt(model.change.move_path.as_deref())
+                    || opt(model.change.diff.as_deref())
+            }
+            TimelineRowContent::LiveWork(model) => {
+                has(&model.entry.label) || opt(model.entry.detail.as_deref()) || opt(model.thought.as_deref())
+            }
+            TimelineRowContent::Approval(req) => has(&req.detail) || opt(req.reason.as_deref()),
+            TimelineRowContent::Error { message, .. } => has(message),
+            TimelineRowContent::Notice { text } => has(text),
+            TimelineRowContent::ChangedFiles(model) => model.files.iter().any(|f| has(&f.path)),
+            TimelineRowContent::Queued(message) => has(&message.text),
+            TimelineRowContent::Fold(_)
+            | TimelineRowContent::Working { .. }
+            | TimelineRowContent::Thinking
+            | TimelineRowContent::Empty(_) => false,
+        }
+    }
+}
+
+/// Indices into `rows` matching `query` (case-insensitive substring match). Empty for blank queries.
+pub fn find_matching_rows(rows: &[TimelineRow], query: &str) -> Vec<usize> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    let needle = trimmed.to_lowercase();
+    rows.iter().enumerate().filter_map(|(index, row)| row.matches_query(&needle).then_some(index)).collect()
 }
 
 /// Fold label: "Worked for 3m 12s", "You stopped after 12s"; "Worked" for a replayed turn.
@@ -1081,5 +1128,32 @@ mod tests {
         minimal.set(ExpansionSet::Diffs, "d", true);
         assert!(minimal.is_diff_open("d"));
         let _ = json!(null);
+    }
+
+    #[test]
+    fn find_matching_rows_matches_messages_replies_commands_and_diffs_case_insensitively() {
+        let mut thread = ChatThread::default();
+        let mut turn = Turn::new("t1", UserMessage::new("u1", "Fix the Login bug", Some(at(1))));
+        turn.status = TurnStatus::Completed;
+        turn.items = vec![
+            command("c1", TurnItemStatus::Completed),
+            TurnItem {
+                id: "a1".into(),
+                kind: TurnItemKind::AssistantMessage {
+                    text: "Patched authentication in login.rs".into(),
+                    is_final: true,
+                },
+                status: TurnItemStatus::Completed,
+                started_at: Some(at(2)),
+                completed_at: Some(at(3)),
+            },
+        ];
+        thread.turns.push(turn);
+        let rows = timeline_rows(&thread, "", &TimelineExpansion::default());
+        assert!(find_matching_rows(&rows, "   ").is_empty());
+        let login_matches = find_matching_rows(&rows, "LOGIN");
+        assert_eq!(login_matches.len(), 2);
+        assert!(matches!(rows[login_matches[0]].content, TimelineRowContent::User(_)));
+        assert!(matches!(rows[login_matches[1]].content, TimelineRowContent::Assistant(_)));
     }
 }

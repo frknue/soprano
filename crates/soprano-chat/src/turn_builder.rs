@@ -601,32 +601,63 @@ impl AcpTurnBuilder {
             .join("\n");
         let optional_output = (!output.is_empty()).then(|| output.clone());
         match tool.kind.as_deref() {
-            Some("execute") => TurnItemKind::Command(TurnCommand::new(
-                tool.args.get("command").and_then(Value::as_str).map(str::to_owned).unwrap_or(title),
-                output,
-                None,
-            )),
+            Some("execute") => {
+                let exit_code =
+                    tool.raw_output.as_ref().and_then(|o| o.get("exitCode")).and_then(JsonValueExt::int);
+                TurnItemKind::Command(TurnCommand::new(
+                    tool.args.get("command").and_then(Value::as_str).map(str::to_owned).unwrap_or(title),
+                    output,
+                    exit_code,
+                ))
+            }
             Some("edit" | "delete" | "move") => {
                 let mut changes = Vec::new();
-                for block in
-                    tool.content.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("diff"))
-                {
-                    let Some(path) = block.get("path").and_then(Value::non_empty_string) else { continue };
-                    let old = block.get("oldText").and_then(Value::as_str);
-                    let new = block.get("newText").and_then(Value::as_str).unwrap_or("");
-                    let kind = match old {
-                        None => FileChangeKind::Add,
-                        Some(_) if new.is_empty() => FileChangeKind::Delete,
-                        Some(_) => FileChangeKind::Update,
-                    };
-                    changes.push(FileChange::with_diff(
-                        self.relative(path),
-                        kind,
-                        acp_unified_diff(old.unwrap_or(""), new),
-                    ));
+                for block in &tool.content {
+                    match block.get("type").and_then(Value::as_str) {
+                        Some("diff") => {
+                            let Some(path) = block.get("path").and_then(Value::non_empty_string) else {
+                                continue;
+                            };
+                            let old = block.get("oldText").and_then(Value::as_str);
+                            let new = block.get("newText").and_then(Value::as_str).unwrap_or("");
+                            let kind = match old {
+                                None => FileChangeKind::Add,
+                                Some(_) if new.is_empty() => FileChangeKind::Delete,
+                                Some(_) => FileChangeKind::Update,
+                            };
+                            changes.push(FileChange::with_diff(
+                                self.relative(path),
+                                kind,
+                                acp_unified_diff(old.unwrap_or(""), new),
+                            ));
+                        }
+                        Some("unified_diff") => {
+                            let Some(path) = block.get("path").and_then(Value::non_empty_string) else {
+                                continue;
+                            };
+                            let kind = change_kind(block.get("kind").and_then(Value::as_str));
+                            let move_path = block
+                                .get("movePath")
+                                .and_then(Value::non_empty_string)
+                                .map(|m| self.relative(m));
+                            let diff =
+                                block.get("diff").and_then(Value::non_empty_string).and_then(unified_diff);
+                            changes.push(FileChange {
+                                path: self.relative(path),
+                                kind: if move_path.is_some() { FileChangeKind::Move } else { kind },
+                                move_path,
+                                diff,
+                                is_full_content: None,
+                            });
+                        }
+                        _ => {}
+                    }
                 }
                 TurnItemKind::FileChange(changes)
             }
+            Some("web_search") => TurnItemKind::WebSearch {
+                query: tool.args.get("query").and_then(Value::as_str).map(str::to_owned).unwrap_or(title),
+            },
             Some("read") => TurnItemKind::ToolCall(ToolCall {
                 name: "read".into(),
                 category: ToolCategory::Read,

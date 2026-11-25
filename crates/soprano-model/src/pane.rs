@@ -38,10 +38,10 @@ impl PaneContentKind {
     }
 }
 
-/// Agents a chat tab can run, by profile id: those whose CLI serves the Agent Client Protocol
-/// on stdio (Swift `AgentChatLaunch.supports(profileId:)`).
+/// Agents a chat tab can run, by profile id: native ACP servers (`omp`, `opencode`, `agy`),
+/// Codex's `app-server` (`codex`), and Claude Code's bidirectional `stream-json` (`claude-code`).
 pub fn chat_supports(profile_id: &str) -> bool {
-    profile_id == "omp"
+    matches!(profile_id, "omp" | "opencode" | "agy" | "codex" | "claude-code")
 }
 
 /// The type of content in a pane tab. Decoding an unknown type fails, as in Swift.

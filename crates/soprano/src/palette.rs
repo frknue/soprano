@@ -88,9 +88,10 @@ pub fn command_items(
     let profiles: Vec<_> = AgentCatalog::shared().all().into_iter().filter(|p| p.id != "terminal").collect();
     let mut entries = Vec::new();
 
-    // One launcher per agent in the catalog.
+    // One launcher per agent in the catalog (respecting Chat UI default launch mode).
     for profile in &profiles {
         let id = profile.id.clone();
+        let as_chat = shell_state.launches_as_chat(&id);
         entries.push(entry(
             spec(
                 &format!("launch-{}", profile.id),
@@ -100,13 +101,14 @@ pub fn command_items(
                 short(&[&format!("launch-{}", profile.id)]),
             ),
             mutate(workspace, move |ws| {
-                ws.spawn_agent(&id, None, false);
+                ws.spawn_agent(&id, None, as_chat);
             }),
         ));
     }
     // Each agent as a tab of the focused pane.
     for profile in &profiles {
         let id = profile.id.clone();
+        let as_chat = shell_state.launches_as_chat(&id);
         let search = format!("pane tab split {}", profile.name);
         entries.push(entry(
             ItemSpec {
@@ -121,13 +123,45 @@ pub fn command_items(
             },
             mutate(workspace, move |ws| {
                 let pane = ws.active_pane_id().to_owned();
-                ws.add_tab_to_pane(&pane, PaneType::Agent, Some(&id), None);
+                ws.add_tab_to_pane(
+                    &pane,
+                    PaneType::Agent,
+                    Some(&id),
+                    as_chat.then_some(PaneContentKind::CHAT),
+                );
             }),
         ));
         if let Some(last) = entries.last_mut() {
             last.item = last.item.clone().search_text(search);
         }
     }
+    // Switching between Chat UI and terminal CLI, and searching inside a chat.
+    entries.push(entry(
+        searchable(
+            spec(
+                "toggle-chat-ui",
+                IconName::MessageSquare,
+                "Switch Between Chat UI and Terminal",
+                "Toggle the active agent tab between Chat UI and its terminal CLI",
+                short(&["toggle-chat-ui"]),
+            ),
+            "chat cli terminal toggle switch mode",
+        ),
+        command(shell, Command::ToggleChatUi { pane_id: None, tab_id: None }),
+    ));
+    entries.push(entry(
+        searchable(
+            spec(
+                "find-in-chat",
+                IconName::Search,
+                "Find in Chat",
+                "Search messages in the active chat",
+                short(&["find-in-chat"]),
+            ),
+            "find search chat timeline messages",
+        ),
+        command(shell, Command::FindInChat),
+    ));
     // A chat opens wherever a terminal can.
     let chat_profiles = ChatLaunch::chat_profiles();
     let default_chat = chat_profiles.first().map(|p| p.id.clone());

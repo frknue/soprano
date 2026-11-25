@@ -11,7 +11,8 @@ use soprano_accounts::presentation::{
     SectionFooter,
 };
 use soprano_config::{
-    AppSettings, AppearancePreference, ConfigIssue, DefaultKeybindings, Limits, Severity, prefix_legend_for,
+    AppSettings, AppearancePreference, ChatLaunchMode, ConfigIssue, DefaultKeybindings, Limits, Severity,
+    prefix_legend_for,
 };
 use soprano_launch::MachineCheck;
 use soprano_types::{AgentProfile, DefaultAgents};
@@ -25,6 +26,7 @@ use soprano_ui::{Icon, IconName, SopranoTheme, agent_icon_stem, icon};
 
 use crate::about;
 use crate::agents::{self, AgentField};
+use crate::chat_ui;
 use crate::form::{Form, INSET, mono};
 use crate::general::{self, Toggle};
 use crate::notifications::{NotificationStatusRow, StatusTone};
@@ -149,6 +151,96 @@ impl SettingsView {
 
         sections.push(self.project_directories_section(&form, cx));
         sections.push(self.keybinding_behavior_section(&form, window, cx));
+        sections
+    }
+
+    // MARK: - Chat UI
+
+    pub(crate) fn chat_ui_page(&self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let form = Form::new(t);
+        let chat_settings = &self.snapshot.resolved.settings.chat_ui;
+        let enabled = chat_settings.enabled;
+        let mut sections = Vec::new();
+
+        sections.push(form.lead(chat_ui::LEAD).into_any_element());
+
+        let status_title = if enabled { "Chat UI is on" } else { "Chat UI is off" };
+        let status_description = if enabled {
+            "New agents will launch in chat mode by default."
+        } else {
+            "New agents will launch in their terminal CLI by default."
+        };
+        let toggle_button =
+            Button::new("settings-chat-ui-toggle", if enabled { "Turn off" } else { "Turn on" })
+                .size(ButtonSize::Sm)
+                .variant(if enabled { ButtonVariant::default() } else { ButtonVariant::Primary })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    let next = !enabled;
+                    if chat_ui::set_enabled(&this.store, next) {
+                        this.reload(window, cx);
+                    }
+                }));
+        sections.push(
+            form.group(vec![
+                form.row(status_title).description(status_description).control(toggle_button).render(t),
+            ])
+            .into_any_element(),
+        );
+
+        let profiles = self.snapshot.resolved.agents.clone();
+        let chat_agents: Vec<AgentProfile> =
+            chat_ui::chat_capable_agents(&profiles).into_iter().cloned().collect();
+        let has_custom_modes = !chat_settings.agents.is_empty();
+        let rows: Vec<AnyElement> = chat_agents
+            .into_iter()
+            .map(|profile| {
+                let mode = chat_settings.mode_for(&profile.id);
+                let selected_index = ChatLaunchMode::ALL.iter().position(|m| *m == mode).unwrap_or_default();
+                let profile_id = profile.id.clone();
+                let control = SegmentedControl::new(
+                    id("settings-chat-mode", &profile.id),
+                    ChatLaunchMode::ALL.map(chat_ui::mode_title),
+                )
+                .selected(selected_index)
+                .well()
+                .on_select({
+                    let view = cx.entity().downgrade();
+                    move |index, window, cx| {
+                        let next_mode = ChatLaunchMode::ALL[index];
+                        let _ = view.update(cx, |this, cx| {
+                            if chat_ui::set_agent_mode(&this.store, &profile_id, next_mode) {
+                                this.reload(window, cx);
+                            }
+                        });
+                    }
+                });
+                let glyph = Icon::program(agent_icon_stem(&profile.id).unwrap_or("agent"))
+                    .size(16.)
+                    .color(t.foreground);
+                let row = form.row(profile.name.clone()).leading(glyph).control(control);
+                let row = if !enabled && mode == ChatLaunchMode::Chat {
+                    row.description("Opens in CLI while Chat UI is off")
+                } else {
+                    row
+                };
+                row.render(t)
+            })
+            .collect();
+
+        sections.push(
+            form.section(chat_ui::AGENTS_SECTION_TITLE)
+                .note(chat_ui::AGENTS_SECTION_NOTE)
+                .reset_when(
+                    has_custom_modes,
+                    "reset-chat-ui-agents",
+                    cx.listener(|this, _: &ClickEvent, window, cx| {
+                        if chat_ui::reset_agent_modes(&this.store) {
+                            this.reload(window, cx);
+                        }
+                    }),
+                )
+                .rows(rows),
+        );
         sections
     }
 
