@@ -159,21 +159,31 @@ impl Workspace {
             self.cancel_agent_readiness_generations_in(pane_id);
             self.panes.remove(pane_id);
         }
-        self.windows.remove(window_id);
+        if !self.retire_window(window_id) {
+            // Keep the session usable without jumping into another session.
+            let activate = self.active_window_id == window_id;
+            self.create_window_in(&session_id, super::Place::default(), None, activate);
+            return CloseOutcome::Closed;
+        }
+        self.maximized_pane_id = None;
+        self.notify_model(true);
+        CloseOutcome::Closed
+    }
+
+    /// Drops `window_id` from the model, leaving its panes alone, and points its session and
+    /// the app at the session's first remaining window. False when none remains: the caller
+    /// gives the session a new one.
+    pub(super) fn retire_window(&mut self, window_id: &str) -> bool {
+        let Some(window) = self.windows.remove(window_id) else { return false };
+        let session_id = window.session_id;
         if let Some(session) = self.terminal_sessions.get_mut(&session_id)
             && session.last_active_window_id.as_deref() == Some(window_id)
         {
             session.last_active_window_id = None;
         }
-
-        let remaining = self.ordered_window_ids_in_session(&session_id);
-        let Some(first_remaining) = remaining.first().cloned() else {
-            // Keep the session usable without jumping into another session.
-            let activate = self.active_window_id == window_id;
-            self.create_window_in(&session_id, super::Place::default(), None, activate);
-            return CloseOutcome::Closed;
+        let Some(first_remaining) = self.ordered_window_ids_in_session(&session_id).first().cloned() else {
+            return false;
         };
-
         if let Some(session) = self.terminal_sessions.get_mut(&session_id)
             && session.active_window_id == window_id
         {
@@ -185,9 +195,7 @@ impl Workspace {
         if self.active_window_id == window_id {
             self.active_window_id = first_remaining;
         }
-        self.maximized_pane_id = None;
-        self.notify_model(true);
-        CloseOutcome::Closed
+        true
     }
 
     // MARK: - Panes

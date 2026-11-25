@@ -1,7 +1,8 @@
 //! A pane card's 30 px header (`Views/PaneHeaderView.swift`, HERDR-UI §7.2): the pane kind's
 //! icon, title and dim working directory — or the pane tabs once the pane holds more than one
 //! — the `+` pane-tab menu, the status pill (or the RUNNING mark of a shell running a
-//! command), and the buttons split right / split down / maximize / close.
+//! command), and the buttons split right / split down / maximize / close. The header is the
+//! pane's drag handle, and its context menu moves the pane to another tab or window.
 //!
 //! Everything the Swift view computed (title, tab titles and prefixes, which buttons show,
 //! the pill, the symbol, the `+` menu) is pure logic in [`HeaderModel`] and the functions
@@ -26,7 +27,8 @@ use soprano_ui::{
     StatusPill, StatusPillSpec, StatusTone,
 };
 
-use crate::shell::{self, CloseTarget, Command, Shell};
+use crate::shell::{self, CloseTarget, Command, MarkdownTarget, Shell};
+use crate::views::moving::{PaneDrag, drag_chip, pane_menu};
 use crate::workspace::WorkspaceHandle;
 
 /// Designed header height (HERDR-UI §7.2: the pane card's header is 30).
@@ -381,6 +383,20 @@ pub fn add_tab(ws: &mut Workspace, pane_id: &str, action: &AddTabAction) -> Opti
     Some(tab_id)
 }
 
+/// Opens `action`'s tab as a new tab of the active window; the new layout tab's id. Markdown
+/// goes through the file picker ([`Command::OpenMarkdown`]) instead.
+pub fn add_layout_tab(ws: &mut Workspace, action: &AddTabAction) -> Option<String> {
+    match action {
+        AddTabAction::Terminal => ws.create_layout_tab_with(PaneType::Terminal, None, None),
+        AddTabAction::Browser => ws.create_layout_tab_with(PaneType::Browser, None, None),
+        AddTabAction::Agent(profile) => ws.create_layout_tab_with(PaneType::Agent, Some(profile), None),
+        AddTabAction::Chat(profile) => {
+            ws.create_layout_tab_with(PaneType::Agent, Some(profile), Some(PaneContentKind::CHAT))
+        }
+        AddTabAction::Markdown => None,
+    }
+}
+
 /// Split right puts the new pane beside this one, split down below it — the `split-vertical`
 /// and `split-horizontal` bindings (`soprano_keys::split_direction`).
 pub fn split_right_direction() -> SplitDirection {
@@ -491,6 +507,10 @@ impl RenderOnce for PaneHeader {
 
         div()
             .id(ElementId::Name(format!("pane-header-{}", self.pane_id).into()))
+            .debug_selector({
+                let selector = format!("pane-header-{}", self.pane_id);
+                move || selector
+            })
             .flex()
             .flex_row()
             .flex_none()
@@ -507,6 +527,17 @@ impl RenderOnce for PaneHeader {
             .on_mouse_down(MouseButton::Left, {
                 let (pane_id, workspace) = (self.pane_id.clone(), self.workspace.clone());
                 move |_, _, cx| workspace.update(cx, |ws| ws.focus_pane(&pane_id))
+            })
+            .on_drag(PaneDrag { pane_id: self.pane_id.clone() }, drag_chip(model.title.clone()))
+            .on_mouse_down(MouseButton::Right, {
+                let (pane_id, workspace, shell) =
+                    (self.pane_id.clone(), self.workspace.clone(), self.shell.clone());
+                move |event, window, cx| {
+                    cx.stop_propagation();
+                    let menu =
+                        ContextMenu::new(event.position, pane_menu(&workspace, &pane_id, cx), window, cx);
+                    shell.update(cx, |shell, cx| shell.show_popup(menu, window, cx));
+                }
             })
             .child(leading)
             .child(add_button)
@@ -711,24 +742,48 @@ fn show_add_tab_menu(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let items = add_tab_menu_entries()
+    let items = add_tab_menu(NewTabPlace::InPane(pane_id.to_owned()), workspace, shell);
+    let menu = ContextMenu::new(event.position(), items, window, cx);
+    shell.update(cx, |shell, cx| shell.show_popup(menu, window, cx));
+}
+
+/// Where a choice of the `+` menu opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NewTabPlace {
+    /// As a tab of this pane (the pane header's `+`).
+    InPane(String),
+    /// As a new tab of the active window (the tab row's `+`).
+    NewLayoutTab,
+}
+
+/// The `+` menu's rows ([`add_tab_menu_entries`]), each opening its tab at `place`.
+pub fn add_tab_menu(place: NewTabPlace, workspace: &WorkspaceHandle, shell: &Entity<Shell>) -> Vec<MenuItem> {
+    add_tab_menu_entries()
         .into_iter()
         .map(|entry| {
             let Some(entry) = entry else { return MenuItem::separator() };
-            let (pane_id, workspace, shell) = (pane_id.to_owned(), workspace.clone(), shell.clone());
+            let (place, workspace, shell) = (place.clone(), workspace.clone(), shell.clone());
             let action = entry.action;
-            MenuItem::new(entry.label).icon(entry.icon).on_select(move |_, cx| match &action {
-                AddTabAction::Markdown => {
-                    shell::dispatch(&shell, Command::OpenMarkdown { pane_id: Some(pane_id.clone()) }, cx);
+            MenuItem::new(entry.label).icon(entry.icon).on_select(move |_, cx| match (&action, &place) {
+                (AddTabAction::Markdown, NewTabPlace::InPane(pane_id)) => {
+                    shell::dispatch(
+                        &shell,
+                        Command::OpenMarkdown(MarkdownTarget::PaneTab(pane_id.clone())),
+                        cx,
+                    );
                 }
-                action => {
-                    workspace.update(cx, |ws| add_tab(ws, &pane_id, action));
+                (AddTabAction::Markdown, NewTabPlace::NewLayoutTab) => {
+                    shell::dispatch(&shell, Command::OpenMarkdown(MarkdownTarget::NewTab), cx);
+                }
+                (action, NewTabPlace::InPane(pane_id)) => {
+                    workspace.update(cx, |ws| add_tab(ws, pane_id, action));
+                }
+                (action, NewTabPlace::NewLayoutTab) => {
+                    workspace.update(cx, |ws| add_layout_tab(ws, action));
                 }
             })
         })
-        .collect();
-    let menu = ContextMenu::new(event.position(), items, window, cx);
-    shell.update(cx, |shell, cx| shell.show_popup(menu, window, cx));
+        .collect()
 }
 
 #[cfg(test)]

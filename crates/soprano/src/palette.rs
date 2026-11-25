@@ -12,7 +12,7 @@ use soprano_model::{PaneContentKind, PaneType, Workspace};
 use soprano_types::{AgentCatalog, Machine};
 use soprano_ui::{IconName, PickerItem};
 
-use crate::shell::{CloseTarget, Command, Shell, dispatch};
+use crate::shell::{CloseTarget, Command, MarkdownTarget, Shell, dispatch};
 use crate::workspace::WorkspaceHandle;
 
 /// What a row does; gets the query typed when it was chosen.
@@ -398,7 +398,7 @@ pub fn command_items(
                 ),
                 "read preview documentation readme md",
             ),
-            command(shell, Command::OpenMarkdown { pane_id: None }),
+            command(shell, Command::OpenMarkdown(MarkdownTarget::NewPane)),
         ),
         entry(
             searchable(
@@ -432,7 +432,7 @@ pub fn command_items(
                 let shell = shell.clone();
                 move |_, _, cx| {
                     let pane = workspace.read(cx).active_pane_id().to_owned();
-                    dispatch(&shell, Command::OpenMarkdown { pane_id: Some(pane) }, cx);
+                    dispatch(&shell, Command::OpenMarkdown(MarkdownTarget::PaneTab(pane)), cx);
                 }
             },
         ),
@@ -497,6 +497,46 @@ pub fn command_items(
                 short(&["close-tab"]),
             ),
             command(shell, Command::Close(CloseTarget::ActiveLayoutTab)),
+        ),
+        entry(
+            spec(
+                "move-tab-to-new-window",
+                IconName::ExternalLink,
+                "Move Tab to New Window",
+                "Give the active tab a window of its own",
+                Vec::new(),
+            ),
+            mutate(workspace, |ws| {
+                if let Some(tab) = ws.active_window().map(|window| window.active_tab().id.clone()) {
+                    ws.move_layout_tab_to_new_window(&tab);
+                }
+            }),
+        ),
+        entry(
+            spec(
+                "move-pane-to-new-tab",
+                IconName::SquarePlus,
+                "Move Pane to New Tab",
+                "Give the active pane a tab of its own in this window",
+                Vec::new(),
+            ),
+            mutate(workspace, |ws| {
+                let pane = ws.active_pane_id().to_owned();
+                ws.move_pane_to_new_layout_tab(&pane, None);
+            }),
+        ),
+        entry(
+            spec(
+                "move-pane-to-new-window",
+                IconName::AppWindow,
+                "Move Pane to New Window",
+                "Give the active pane a window of its own",
+                Vec::new(),
+            ),
+            mutate(workspace, |ws| {
+                let pane = ws.active_pane_id().to_owned();
+                ws.move_pane_to_new_window(&pane);
+            }),
         ),
         entry(
             searchable(

@@ -317,6 +317,10 @@ impl ContextMenu {
                     let parent = self.submenu;
                     div()
                         .id(row_id)
+                        .debug_selector({
+                            let label = label.clone();
+                            move || format!("menu-item-{label}")
+                        })
                         .flex()
                         .flex_row()
                         .items_center()

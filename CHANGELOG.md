@@ -169,8 +169,18 @@ the single source of truth for the version shown in **Settings ▸ About**.
 - **Resizable Agents section in the sidebar**: drag the line between the window list and
   **Agents** to give either more room; the split is remembered across launches, and a
   double-click on the line splits the height in half again.
+- **Move panes and tabs around**: drag a pane by its header onto the edge of another pane
+  to put it there, onto a tab to join that tab, onto a window in the sidebar to make it a tab
+  of that window, or onto the sidebar's **Windows** header for a window of its own. Drag a
+  tab to reorder the row, onto another pane to merge its whole split into that tab, or onto
+  a window. Right-click a pane header or a tab for the same moves (**Move to New Tab**,
+  **Move to New Window**, **Move to Tab**, **Move to Window**, **Merge into Tab**), also in
+  the command palette. Terminals and agents keep running while they move.
 
 ### Changed
+- **The tab row's `+` asks what the new tab holds**: a terminal, a browser, any agent, an
+  omp chat, or a Markdown file, as the pane header's `+` does, instead of always opening a
+  terminal. The `new-tab` shortcut still opens a terminal right away.
 - **Terminal zoom applies to every terminal**: `⌘=` / `⌘-` / `⌘0` (`zoom-in`, `zoom-out`,
   `zoom-reset`) resize all terminals in the app at once, and terminals opened afterwards
   start at the zoomed size, instead of only the focused one changing.

@@ -45,7 +45,7 @@ use crate::automations::{self, AutomationContext};
 use crate::content::{ContentEvent, ContentHost, PaneContent, terminal_theme};
 use crate::palette::{self, PaletteAction, PaletteEntry};
 use crate::services::Services;
-use crate::shell::{CloseTarget, Command, Page, Shell, dispatch};
+use crate::shell::{CloseTarget, Command, MarkdownTarget, Page, Shell, dispatch};
 use crate::views::sidebar::Sidebar;
 use crate::views::split_tree::SplitTree;
 use crate::views::status_bar::StatusBar;
@@ -533,7 +533,7 @@ impl MainView {
                 }
             }
             Command::OpenAutomationRun(run_id) => self.open_automation_run(&run_id, window, cx),
-            Command::OpenMarkdown { pane_id } => self.choose_markdown_file(pane_id, window, cx),
+            Command::OpenMarkdown(target) => self.choose_markdown_file(target, window, cx),
             Command::OpenInSopranoGit => {
                 let (machine, cwd) = {
                     let ws = self.workspace.read(cx);
@@ -1139,8 +1139,9 @@ impl MainView {
         self.show_picker(entries, Some("Search projects..."), Vec::new(), window, cx);
     }
 
-    /// `MarkdownFilePicker`: a Markdown file into a new reader pane, or as a tab of `pane_id`.
-    fn choose_markdown_file(&mut self, pane_id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    /// `MarkdownFilePicker`: a Markdown file into a new reader pane, a new tab, or as a tab of
+    /// a pane.
+    fn choose_markdown_file(&mut self, target: MarkdownTarget, window: &mut Window, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -1169,12 +1170,15 @@ impl MainView {
                     }
                     return;
                 }
-                workspace.update(cx, |ws| match &pane_id {
-                    Some(pane) => {
+                workspace.update(cx, |ws| match &target {
+                    MarkdownTarget::PaneTab(pane) => {
                         ws.open_markdown(&path, pane);
                     }
-                    None => {
+                    MarkdownTarget::NewPane => {
                         ws.spawn_markdown(&path, None);
+                    }
+                    MarkdownTarget::NewTab => {
+                        ws.open_markdown_in_new_layout_tab(&path);
                     }
                 })
             });

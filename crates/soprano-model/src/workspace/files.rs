@@ -68,7 +68,7 @@ impl Workspace {
         self.notify_model(window_changed || layout_tab_changed);
     }
 
-    fn create_file_tab(
+    pub(super) fn create_file_tab(
         &mut self,
         file: &Path,
         content_kind: &str,

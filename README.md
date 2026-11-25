@@ -589,6 +589,19 @@ explorer open too, dragging either sidebar still leaves panes those 320 points.
 Files, folders, URLs, and macOS screenshot thumbnails can be dragged directly onto a
 terminal to insert their shell-safe paths.
 
+Panes and tabs move without stopping what runs in them. Drag a pane by its header: onto
+the edge of another pane (the half it will take lights up) to put it there, onto a tab to
+join that tab, past the last tab for a tab of its own, onto a window in the sidebar to
+become a tab of that window, or onto the sidebar's **Windows** header for a window of its
+own. Drag a tab to reorder the row, onto a pane of the tab on screen to merge its whole
+split there, onto a window, or onto the **Windows** header. A window or tab left empty
+closes. Right-clicking a pane header offers **Move to New Tab**, **Move to New Window**,
+**Move to Tab ▸** and **Move to Window ▸**; right-clicking a tab offers **Move to New
+Window**, **Move to Window ▸** and **Merge into Tab ▸**. The command palette has **Move
+Pane to New Tab**, **Move Pane to New Window** and **Move Tab to New Window**. Moves stay
+inside a session, and a tab of a pane (one of several in one pane header) moves with its
+pane.
+
 ## Agent chat
 
 A chat runs an agent without a terminal, like Orca's Chat UI: Soprano starts the agent's

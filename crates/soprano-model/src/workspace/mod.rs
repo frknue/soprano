@@ -12,6 +12,7 @@
 mod agents;
 mod closing;
 mod files;
+mod moving;
 mod panes;
 mod persistence;
 mod presentation;

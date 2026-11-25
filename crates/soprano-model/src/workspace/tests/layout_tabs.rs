@@ -278,3 +278,28 @@ fn workspaces_saved_with_window_depth_reopen_each_layer_as_a_tab() {
     assert_eq!(resaved_window.tabs.map(|t| t.len()), Some(3));
     assert_eq!(resaved_window.active_tab_index, Some(1));
 }
+
+#[test]
+fn a_new_tab_can_hold_a_browser_or_a_markdown_reader_instead_of_a_terminal() {
+    let mut workspace = Workspace::new();
+    let root = workspace.active_pane_id().to_owned();
+    let root_tab = active_tab_id(&workspace, &root);
+    workspace.update_working_directory(&root, &root_tab, "/tmp/tab-project");
+
+    let browser_tab = workspace.create_layout_tab_with(PaneType::Browser, None, None).expect("tab");
+    let window = workspace.active_window().expect("window");
+    assert_eq!(window.active_tab().id, browser_tab);
+    assert_eq!(window.tabs().len(), 2);
+    let pane = workspace.active_pane_id().to_owned();
+    let tab = workspace.pane(&pane).and_then(|p| p.active_tab()).expect("tab");
+    assert_eq!(tab.pane_type, PaneType::Browser);
+    assert_eq!(tab.cwd.as_deref(), Some("/tmp/tab-project"));
+
+    workspace
+        .open_markdown_in_new_layout_tab(std::path::Path::new("/tmp/tab-project/README.md"))
+        .expect("tab");
+    assert_eq!(workspace.active_window().expect("window").tabs().len(), 3);
+    let pane = workspace.active_pane_id().to_owned();
+    assert!(workspace.pane(&pane).and_then(|p| p.active_tab()).expect("tab").is_markdown());
+    assert_eq!(workspace.layout(), Some(&SplitNode::leaf(&pane)));
+}

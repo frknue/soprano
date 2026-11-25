@@ -111,6 +111,30 @@ pub enum SplitBranchSide {
     Second,
 }
 
+/// The side of a pane something is put beside.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaneEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl PaneEdge {
+    /// The split that puts something on this side.
+    pub fn direction(self) -> SplitDirection {
+        match self {
+            Self::Left | Self::Right => SplitDirection::Horizontal,
+            Self::Top | Self::Bottom => SplitDirection::Vertical,
+        }
+    }
+
+    /// Whether the newcomer becomes the split's first child.
+    pub fn is_leading(self) -> bool {
+        matches!(self, Self::Left | Self::Top)
+    }
+}
+
 /// A pane's rectangle in unit layout space (0…1 on both axes, y growing downward).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PaneFrame {
@@ -268,16 +292,31 @@ impl SplitNode {
         new_id: &str,
         direction: SplitDirection,
     ) -> Option<SplitNode> {
+        let edge = match direction {
+            SplitDirection::Horizontal => PaneEdge::Right,
+            SplitDirection::Vertical => PaneEdge::Bottom,
+        };
+        self.inserting_node(target_id, &SplitNode::leaf(new_id), edge)
+    }
+
+    /// Splits the target pane evenly, putting `node` (a pane or a whole layout) on its `edge`.
+    pub fn inserting_node(&self, target_id: &str, node: &SplitNode, edge: PaneEdge) -> Option<SplitNode> {
         match self {
-            SplitNode::Leaf(id) => (id == target_id)
-                .then(|| SplitNode::split(direction, self.clone(), SplitNode::leaf(new_id), 50.0)),
+            SplitNode::Leaf(id) => (id == target_id).then(|| {
+                let (first, second) = if edge.is_leading() {
+                    (node.clone(), self.clone())
+                } else {
+                    (self.clone(), node.clone())
+                };
+                SplitNode::split(edge.direction(), first, second, 50.0)
+            }),
             SplitNode::Split(branch) => {
-                if let Some(first) = branch.first.inserting_split(target_id, new_id, direction) {
+                if let Some(first) = branch.first.inserting_node(target_id, node, edge) {
                     let mut new_branch = branch.clone();
                     new_branch.first = first;
                     return Some(SplitNode::Split(new_branch));
                 }
-                if let Some(second) = branch.second.inserting_split(target_id, new_id, direction) {
+                if let Some(second) = branch.second.inserting_node(target_id, node, edge) {
                     let mut new_branch = branch.clone();
                     new_branch.second = second;
                     return Some(SplitNode::Split(new_branch));

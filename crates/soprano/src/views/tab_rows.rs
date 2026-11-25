@@ -10,6 +10,11 @@
 //!
 //! Tabs scroll horizontally in a strip that keeps the active tab in view; `+` follows the last
 //! tab while everything fits and stays pinned beside the strip once the tabs overflow.
+//!
+//! Layout tabs drag by their pills. Dropped on another layout tab, a layout tab takes its
+//! place and a pane joins it; dropped on a window tab, either becomes a tab of that window;
+//! dropped past the last tab, a layout tab goes to the end of the row (or into a new window,
+//! over the window tabs) and a pane gets a tab (or a window) of its own.
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, Entity, InteractiveElement, IntoElement, MouseButton,
@@ -19,9 +24,13 @@ use gpui::{
 use soprano_explorer::{RightSidebar, RightSidebarTab};
 use soprano_model::Workspace;
 use soprano_ui::status::TabBadge;
-use soprano_ui::{ActiveSopranoTheme, IconButton, IconName, PanelToggle, TabPill};
+use soprano_ui::{ActiveSopranoTheme, ContextMenu, IconButton, IconName, PanelToggle, TabPill};
 
 use crate::shell::{CloseTarget, Command, Shell, dispatch};
+use crate::views::moving::{
+    LayoutTabDrag, PaneDrag, drag_chip, drop_highlight, drop_highlight_where, layout_tab_menu,
+};
+use crate::views::pane_header::{NewTabPlace, add_tab_menu};
 use crate::window_chrome::{self, WindowButtons};
 use crate::workspace::WorkspaceHandle;
 
@@ -218,9 +227,9 @@ impl TabStrip {
     }
 }
 
-/// A tab's slot in the strip: the pill with half the row gap either side, so the slots tile the
+/// A tab's slot in the strip: the tab with half the row gap either side, so the slots tile the
 /// strip and wheel events over it reach the row's handler.
-fn tab_slot(id: (&'static str, usize), pill: TabPill, cx: &App) -> gpui::Stateful<gpui::Div> {
+fn tab_slot(id: (&'static str, usize), tab: impl IntoElement, cx: &App) -> gpui::Stateful<gpui::Div> {
     let theme = cx.soprano_theme();
     div()
         .id(id)
@@ -231,7 +240,14 @@ fn tab_slot(id: (&'static str, usize), pill: TabPill, cx: &App) -> gpui::Statefu
         .px(theme.z(ROW_GAP / 2.0))
         // A tab is no part of the drag region.
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(pill)
+        .child(tab)
+}
+
+/// The rest of a row after its tabs: `+`, and room to drop past the last tab.
+fn trailing_drop_area(id: &'static str, add: IconButton, cx: &App) -> gpui::Stateful<gpui::Div> {
+    let add = div().debug_selector(move || format!("{id}-add")).child(add);
+    drop_highlight(div().id(id).flex().flex_1().h_full().items_center().child(add), cx)
+        .debug_selector(move || id.to_owned())
 }
 
 /// The top row a page (Automations, Statistics) shows instead of the tab rows: it keeps
@@ -350,6 +366,7 @@ impl Render for WindowTabRow {
             .enumerate()
             .map(|(index, item)| {
                 let id = item.id.clone();
+                let (tab_target, pane_target) = (item.id.clone(), item.id.clone());
                 let pill = TabPill::new(("window-tab", index), item.title)
                     .number(item.number)
                     .active(item.active)
@@ -360,7 +377,18 @@ impl Render for WindowTabRow {
                             row.activate(&id, cx);
                         }
                     }));
-                tab_slot(("window-tab-slot", index), pill, cx).into_any_element()
+                drop_highlight(tab_slot(("window-tab-slot", index), pill, cx), cx)
+                    .debug_selector(move || format!("window-tab-{index}"))
+                    .on_drop(cx.listener(move |row, drag: &LayoutTabDrag, _, cx| {
+                        row.workspace
+                            .update(cx, |ws| ws.move_layout_tab(&drag.layout_tab_id, &tab_target, None));
+                    }))
+                    .on_drop(cx.listener(move |row, drag: &PaneDrag, _, cx| {
+                        row.workspace.update(cx, |ws| {
+                            ws.move_pane_to_new_layout_tab(&drag.pane_id, Some(&pane_target))
+                        });
+                    }))
+                    .into_any_element()
             })
             .collect();
 
@@ -368,10 +396,19 @@ impl Render for WindowTabRow {
             .when(chrome.sidebar_toggle, |row| row.child(sidebar_toggle(&self.shell)))
             .child(self.strip.render("window-tab-strip", tabs))
             .child(
-                add_button("new-window-tab", "New Window", cx)
-                    .on_click(cx.listener(|row, _, _, cx| row.add_window(cx))),
+                trailing_drop_area(
+                    "window-tab-drop",
+                    add_button("new-window-tab", "New Window", cx)
+                        .on_click(cx.listener(|row, _, _, cx| row.add_window(cx))),
+                    cx,
+                )
+                .on_drop(cx.listener(|row, drag: &LayoutTabDrag, _, cx| {
+                    row.workspace.update(cx, |ws| ws.move_layout_tab_to_new_window(&drag.layout_tab_id));
+                }))
+                .on_drop(cx.listener(|row, drag: &PaneDrag, _, cx| {
+                    row.workspace.update(cx, |ws| ws.move_pane_to_new_window(&drag.pane_id));
+                })),
             )
-            .child(div().flex_1())
             .when(chrome.window_buttons, |row| row.child(WindowButtons))
             .into_any_element()
     }
@@ -426,8 +463,17 @@ impl LayoutTabRow {
         dispatch(&self.shell, Command::Close(CloseTarget::LayoutTab(layout_tab_id.to_owned())), cx);
     }
 
-    pub fn add_tab(&mut self, cx: &mut Context<Self>) {
-        self.workspace.update(cx, |workspace| workspace.create_layout_tab(None, None));
+    /// `+`: a menu of what the new tab holds (a terminal, a browser, an agent, a chat, a
+    /// Markdown file), as the pane header's `+` offers for a pane tab.
+    pub fn show_new_tab_menu(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items = add_tab_menu(NewTabPlace::NewLayoutTab, &self.workspace, &self.shell);
+        let menu = ContextMenu::new(position, items, window, cx);
+        self.shell.update(cx, |shell, cx| shell.show_popup(menu, window, cx));
     }
 
     /// The wheel over the row: up shows the next tab, down the previous one.
@@ -486,6 +532,22 @@ impl Render for LayoutTabRow {
                 let select_id = item.id.clone();
                 let close_id = item.id.clone();
                 let middle_id = item.id.clone();
+                let pane_target = item.id.clone();
+                let menu = {
+                    let (workspace, shell, id) =
+                        (self.workspace.clone(), self.shell.clone(), item.id.clone());
+                    move |position, window: &mut Window, cx: &mut App| {
+                        let menu = ContextMenu::new(
+                            position,
+                            layout_tab_menu(&workspace, &shell, &id, cx),
+                            window,
+                            cx,
+                        );
+                        shell.update(cx, |shell, cx| shell.show_popup(menu, window, cx));
+                    }
+                };
+                let drag = LayoutTabDrag { layout_tab_id: item.id.clone() };
+                let chip = drag_chip(item.title.clone());
                 let pill = TabPill::new(("layout-tab", index), item.title)
                     .active(item.active)
                     .badges(item.badges)
@@ -495,8 +557,21 @@ impl Render for LayoutTabRow {
                             row.activate(&select_id, cx);
                         }
                     }))
-                    .on_close(cx.listener(move |row, _: &ClickEvent, _, cx| row.close(&close_id, cx)));
-                tab_slot(("layout-tab-slot", index), pill, cx)
+                    .on_close(cx.listener(move |row, _: &ClickEvent, _, cx| row.close(&close_id, cx)))
+                    .on_secondary_click(menu);
+                // The drag starts below the slot, which keeps mouse-downs from the drag region.
+                let handle = div()
+                    .id(("layout-tab-drag", index))
+                    .debug_selector(move || format!("layout-tab-{index}"))
+                    .on_drag(drag, chip)
+                    .child(pill);
+                let accepts_pane = {
+                    let (workspace, tab) = (self.workspace.clone(), item.id.clone());
+                    move |drag: &PaneDrag, cx: &App| {
+                        workspace.read(cx).can_move_pane_to_layout_tab(&drag.pane_id, &tab)
+                    }
+                };
+                drop_highlight_where(tab_slot(("layout-tab-slot", index), handle, cx), accepts_pane, cx)
                     // A middle click closes the tab, as in a browser.
                     .on_mouse_down(
                         MouseButton::Middle,
@@ -506,6 +581,16 @@ impl Render for LayoutTabRow {
                         }),
                     )
                     .on_scroll(cx.listener(|row, event: &ScrollEvent, _, cx| row.on_wheel(event, cx)))
+                    .on_drop(cx.listener(move |row, drag: &LayoutTabDrag, _, cx| {
+                        row.workspace.update(cx, |ws| {
+                            let window = ws.active_window_id().to_owned();
+                            ws.move_layout_tab(&drag.layout_tab_id, &window, Some(index));
+                        });
+                    }))
+                    .on_drop(cx.listener(move |row, drag: &PaneDrag, _, cx| {
+                        row.workspace
+                            .update(cx, |ws| ws.move_pane_to_layout_tab(&drag.pane_id, &pane_target));
+                    }))
                     .into_any_element()
             })
             .collect();
@@ -517,10 +602,25 @@ impl Render for LayoutTabRow {
             .when(chrome.sidebar_toggle, |row| row.child(sidebar_toggle(&self.shell)))
             .child(self.strip.render("layout-tab-strip", tabs))
             .child(
-                add_button("new-layout-tab", "New Tab", cx)
-                    .on_click(cx.listener(|row, _, _, cx| row.add_tab(cx))),
+                trailing_drop_area(
+                    "layout-tab-drop",
+                    add_button("new-layout-tab", "New Tab", cx).on_click(cx.listener(
+                        |row, event: &ClickEvent, window, cx| {
+                            row.show_new_tab_menu(event.position(), window, cx)
+                        },
+                    )),
+                    cx,
+                )
+                .on_drop(cx.listener(|row, drag: &LayoutTabDrag, _, cx| {
+                    row.workspace.update(cx, |ws| {
+                        let window = ws.active_window_id().to_owned();
+                        ws.move_layout_tab(&drag.layout_tab_id, &window, None);
+                    });
+                }))
+                .on_drop(cx.listener(|row, drag: &PaneDrag, _, cx| {
+                    row.workspace.update(cx, |ws| ws.move_pane_to_new_layout_tab(&drag.pane_id, None));
+                })),
             )
-            .child(div().flex_1())
             .child(PanelToggle::new("files-toggle", IconName::File, "Files").on(files_on).on_click(
                 cx.listener(|row, _, window, cx| row.toggle_panel(RightSidebarTab::Explorer, window, cx)),
             ))
@@ -537,7 +637,7 @@ impl Render for LayoutTabRow {
 mod tests {
     use std::collections::HashSet;
 
-    use gpui::{TestAppContext, VisualTestContext, point, px};
+    use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
     use soprano_config::{AppSettings, DefaultKeybindings};
     use soprano_model::PaneType;
     use soprano_platform::StateStore;
@@ -814,8 +914,8 @@ mod tests {
             let layout = cx.new(|cx| {
                 LayoutTabRow::new(handle.clone(), shell_for_view.clone(), sidebar.clone(), window, cx)
             });
-            let windows = cx.new(|cx| WindowTabRow::new(handle, shell_for_view, sidebar, window, cx));
-            Host { layout, windows }
+            let windows = cx.new(|cx| WindowTabRow::new(handle, shell_for_view.clone(), sidebar, window, cx));
+            Host { layout, windows, shell: shell_for_view }
         });
         let host = window.root(cx).unwrap();
         let (layout, windows) = cx.read(|cx| (host.read(cx).layout.clone(), host.read(cx).windows.clone()));
@@ -823,14 +923,23 @@ mod tests {
         Rows { workspace, shell, layout, windows, commands, cx }
     }
 
+    /// Both rows, with the shell's popup drawn above them as the main view draws it.
     struct Host {
         layout: Entity<LayoutTabRow>,
         windows: Entity<WindowTabRow>,
+        shell: Entity<Shell>,
     }
 
     impl Render for Host {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().flex().flex_col().child(self.windows.clone()).child(self.layout.clone())
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let popup = self.shell.read(cx).popup.clone();
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.windows.clone())
+                .child(self.layout.clone())
+                .when_some(popup, |host, popup| host.child(popup))
         }
     }
 
@@ -855,11 +964,88 @@ mod tests {
         rows.layout.update(&mut rows.cx, |row, cx| row.close(&second, cx));
         assert_eq!(*rows.commands.borrow(), [Command::Close(CloseTarget::LayoutTab(second))]);
 
-        rows.layout.update(&mut rows.cx, |row, cx| row.add_tab(cx));
+        // `+` asks what the tab should hold before opening one; picking Browser opens it.
+        rows.click("layout-tab-drop-add");
+        rows.cx.read(|cx| {
+            assert!(rows.shell.read(cx).popup.is_some());
+            assert_eq!(layout_tab_items(rows.workspace.read(cx)).len(), 2);
+        });
+        rows.click("menu-item-Browser");
         let items = rows.cx.read(|cx| layout_tab_items(rows.workspace.read(cx)));
         assert_eq!(items.len(), 3);
         assert!(items[2].active);
+        rows.cx.read(|cx| {
+            let ws = rows.workspace.read(cx);
+            let tab = ws.pane(ws.active_pane_id()).and_then(|pane| pane.active_tab()).expect("tab");
+            assert_eq!(tab.pane_type, PaneType::Browser);
+        });
         rows.cx.run_until_parked();
+    }
+
+    impl Rows {
+        /// Clicks the element drawn with debug selector `selector`.
+        fn click(&mut self, selector: &'static str) {
+            self.cx.update(|window, _| window.refresh());
+            self.cx.run_until_parked();
+            let at = self.cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} is drawn")).center();
+            self.cx.simulate_click(at, Modifiers::none());
+            self.cx.run_until_parked();
+        }
+
+        /// Drags from the element `from` to the element `to` (by debug selector) and drops.
+        fn drag(&mut self, from: &'static str, to: &'static str) {
+            let redraw = |rows: &mut Rows| {
+                rows.cx.update(|window, _| window.refresh());
+                rows.cx.run_until_parked();
+            };
+            redraw(self);
+            let start = self.cx.debug_bounds(from).unwrap_or_else(|| panic!("{from} is drawn")).center();
+            let end = self.cx.debug_bounds(to).unwrap_or_else(|| panic!("{to} is drawn")).center();
+            self.cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+            self.cx.simulate_mouse_move(start + point(px(20.), px(0.)), MouseButton::Left, Modifiers::none());
+            self.cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::none());
+            redraw(self);
+            self.cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+            redraw(self);
+        }
+
+        fn layout_tab_ids(&mut self) -> Vec<String> {
+            self.cx.read(|cx| {
+                layout_tab_items(self.workspace.read(cx)).into_iter().map(|item| item.id).collect()
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn dragging_a_layout_tab_reorders_the_row_and_past_the_window_tabs_opens_a_window(
+        cx: &mut TestAppContext,
+    ) {
+        let mut rows = rows(cx);
+        rows.cx.simulate_resize(gpui::size(px(1400.), px(200.)));
+        rows.shell.update(&mut rows.cx, |shell, cx| {
+            shell.settings.hide_window_tabs = false;
+            cx.notify();
+        });
+        let first = rows.layout_tab_ids()[0].clone();
+        let second = rows.mutate(|ws| ws.create_layout_tab(None, None)).unwrap();
+        let third = rows.mutate(|ws| ws.create_layout_tab(None, None)).unwrap();
+
+        rows.drag("layout-tab-2", "layout-tab-0");
+        assert_eq!(rows.layout_tab_ids(), [third.clone(), first.clone(), second.clone()]);
+
+        let windows_before = rows.cx.read(|cx| rows.workspace.read(cx).window_count());
+        rows.drag("layout-tab-0", "window-tab-drop");
+        rows.cx.read(|cx| {
+            let ws = rows.workspace.read(cx);
+            assert_eq!(ws.window_count(), windows_before + 1);
+            assert_eq!(ws.active_window().expect("window").active_tab().id, third);
+        });
+        assert_eq!(rows.layout_tab_ids(), std::slice::from_ref(&third));
+
+        // Back onto the first window's tab: it becomes that window's last tab again.
+        rows.drag("layout-tab-0", "window-tab-0");
+        assert_eq!(rows.layout_tab_ids(), [first, second, third]);
+        rows.cx.read(|cx| assert_eq!(rows.workspace.read(cx).window_count(), windows_before));
     }
 
     #[gpui::test]

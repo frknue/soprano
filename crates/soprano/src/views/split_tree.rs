@@ -2,22 +2,26 @@
 //! active layout tab's split tree as pane cards with 8 px gaps, each gap a drag handle that
 //! resizes its split, and the maximized pane alone when one is maximized.
 //!
+//! A pane dragged by its header, or a layout tab dragged by its pill, drops onto the nearest
+//! edge of another pane, which shows where it will land.
+//!
 //! Cards are rebuilt every frame, the content they show is not: each tab's content entity
 //! lives in the [`ContentHost`] cache, so a topology change never recreates a terminal.
 
 use gpui::{
-    AnyElement, App, AppContext, Context, DragMoveEvent, Empty, Entity, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Bounds, Context, DragMoveEvent, Empty, Entity, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, prelude::FluentBuilder, px, relative,
 };
 use soprano_explorer::ExplorerDrag;
-use soprano_model::{SplitBranchSide, SplitNode};
+use soprano_model::{PaneEdge, SplitBranchSide, SplitNode};
 use soprano_types::{SplitDirection, TerminalTarget};
 use soprano_ui::ActiveSopranoTheme;
 use soprano_ui::chrome::Card;
 
 use crate::content::{ContentHost, PaneContent};
 use crate::shell::Shell;
+use crate::views::moving::{LayoutTabDrag, PaneDrag, nearest_edge};
 use crate::views::pane_header::PaneHeader;
 use crate::workspace::WorkspaceHandle;
 
@@ -41,6 +45,8 @@ pub struct SplitTree {
     workspace: WorkspaceHandle,
     content: Entity<ContentHost>,
     shell: Entity<Shell>,
+    /// The pane edge a pane or layout tab dragged over the layout would land on.
+    drop_zone: Option<(String, PaneEdge)>,
 }
 
 impl SplitTree {
@@ -53,7 +59,36 @@ impl SplitTree {
         cx.observe(&workspace.model, |_, _, cx| cx.notify()).detach();
         cx.observe(&content, |_, _, cx| cx.notify()).detach();
         cx.observe(&shell, |_, _, cx| cx.notify()).detach();
-        Self { workspace, content, shell }
+        Self { workspace, content, shell, drop_zone: None }
+    }
+
+    /// Follows a drag over `pane_id`'s body: the edge under the pointer when the dragged thing
+    /// can land there (`accepts`), none once the pointer leaves the pane.
+    fn track_drop_zone(
+        &mut self,
+        pane_id: &str,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        accepts: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let zone = nearest_edge(position, bounds).filter(|_| accepts).map(|edge| (pane_id.to_owned(), edge));
+        let next = match zone {
+            Some(zone) => Some(zone),
+            None if self.drop_zone.as_ref().is_some_and(|(pane, _)| pane == pane_id) => None,
+            None => return,
+        };
+        if self.drop_zone != next {
+            self.drop_zone = next;
+            cx.notify();
+        }
+    }
+
+    /// The edge of `pane_id` a drop lands on, taken: a drop ends the drag.
+    fn take_drop_zone(&mut self, pane_id: &str, cx: &mut Context<Self>) -> Option<PaneEdge> {
+        let (pane, edge) = self.drop_zone.take()?;
+        cx.notify();
+        (pane == pane_id).then_some(edge)
     }
 
     fn render_node(
@@ -145,6 +180,13 @@ impl SplitTree {
         let drop_target = active_tab.map(|tab_id| TerminalTarget::new(pane_id, tab_id));
         let content = self.content.clone();
         let _ = window;
+        let zone = self
+            .drop_zone
+            .as_ref()
+            .filter(|(pane, _)| pane == pane_id && cx.has_active_drag())
+            .map(|(_, edge)| *edge);
+        let (over_pane, over_tab, dropped_pane, dropped_tab) =
+            (pane_id.to_owned(), pane_id.to_owned(), pane_id.to_owned(), pane_id.to_owned());
         Card::new()
             .focused(focused)
             .attention(attention)
@@ -163,17 +205,47 @@ impl SplitTree {
             .child(
                 div()
                     .id(SharedString::from(format!("pane-body-{pane_id}")))
+                    .debug_selector({
+                        let selector = format!("pane-body-{pane_id}");
+                        move || selector
+                    })
                     .flex_1()
                     .min_h_0()
                     .w_full()
                     .relative()
                     .child(body)
+                    .when_some(zone, |body, edge| body.child(drop_indicator(edge, cx)))
                     .when_some(drop_target, |body, target| {
                         body.on_drop(move |drag: &ExplorerDrag, window, cx| {
                             let paths = drag.paths();
                             content.update(cx, |host, cx| host.drop_paths(&target, paths, window, cx));
                         })
-                    }),
+                    })
+                    .on_drag_move(cx.listener(move |tree, event: &DragMoveEvent<PaneDrag>, _, cx| {
+                        let accepts =
+                            tree.workspace.read(cx).can_move_pane_beside(&event.drag(cx).pane_id, &over_pane);
+                        tree.track_drop_zone(&over_pane, event.event.position, event.bounds, accepts, cx);
+                    }))
+                    .on_drag_move(cx.listener(move |tree, event: &DragMoveEvent<LayoutTabDrag>, _, cx| {
+                        let accepts = tree
+                            .workspace
+                            .read(cx)
+                            .can_merge_layout_tab(&event.drag(cx).layout_tab_id, &over_tab);
+                        tree.track_drop_zone(&over_tab, event.event.position, event.bounds, accepts, cx);
+                    }))
+                    .on_drop(cx.listener(move |tree, drag: &PaneDrag, _, cx| {
+                        if let Some(edge) = tree.take_drop_zone(&dropped_pane, cx) {
+                            tree.workspace
+                                .update(cx, |ws| ws.move_pane_beside(&drag.pane_id, &dropped_pane, edge));
+                        }
+                    }))
+                    .on_drop(cx.listener(move |tree, drag: &LayoutTabDrag, _, cx| {
+                        if let Some(edge) = tree.take_drop_zone(&dropped_tab, cx) {
+                            tree.workspace.update(cx, |ws| {
+                                ws.merge_layout_tab(&drag.layout_tab_id, &dropped_tab, edge)
+                            });
+                        }
+                    })),
             )
             .into_any_element()
     }
@@ -196,6 +268,24 @@ impl Render for SplitTree {
         };
         div().size_full().min_w_0().min_h_0().flex().child(root)
     }
+}
+
+/// The half of a pane a drop would fill, tinted in the accent color.
+fn drop_indicator(edge: PaneEdge, cx: &App) -> AnyElement {
+    let theme = cx.soprano_theme();
+    let half = relative(0.5);
+    div()
+        .absolute()
+        .map(|zone| match edge {
+            PaneEdge::Left => zone.left_0().top_0().bottom_0().w(half),
+            PaneEdge::Right => zone.right_0().top_0().bottom_0().w(half),
+            PaneEdge::Top => zone.left_0().right_0().top_0().h(half),
+            PaneEdge::Bottom => zone.left_0().right_0().bottom_0().h(half),
+        })
+        .bg(theme.accent.opacity(0.15))
+        .border_2()
+        .border_color(theme.accent.opacity(0.6))
+        .into_any_element()
 }
 
 fn grow<E: Styled>(element: E, fraction: f32) -> E {
@@ -253,7 +343,108 @@ fn _pixels(value: Pixels) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, point, size};
+    use soprano_config::{AppSettings, DefaultKeybindings};
+    use soprano_model::Workspace;
+    use soprano_platform::StateStore;
+    use soprano_term::{TerminalLaunch, TerminalSettings, TerminalView};
+
     use super::*;
+    use crate::content::TerminalFactory;
+
+    /// Counts terminal starts and fails each one, so no shell ever runs.
+    #[derive(Default)]
+    struct CountingTerminals(Cell<usize>);
+
+    impl TerminalFactory for CountingTerminals {
+        fn create(
+            &self,
+            _: TerminalLaunch,
+            _: TerminalSettings,
+            _: &mut Window,
+            _: &mut App,
+        ) -> anyhow::Result<Entity<TerminalView>> {
+            self.0.set(self.0.get() + 1);
+            anyhow::bail!("no shells in tests")
+        }
+
+        fn restart(&self, _: &Entity<TerminalView>, _: TerminalLaunch, _: &mut App) -> bool {
+            false
+        }
+
+        fn run_detached(&self, _: Vec<String>) {}
+    }
+
+    fn redraw(cx: &mut VisualTestContext) {
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn a_pane_dragged_by_its_header_lands_on_the_edge_of_the_pane_it_is_dropped_on(cx: &mut TestAppContext) {
+        cx.update(soprano_ui::init_for_tests);
+        let mut model = Workspace::new();
+        let left = model.active_pane_id().to_owned();
+        let right = model.split_pane(SplitDirection::Horizontal, &left).expect("split");
+        let terminals = Rc::new(CountingTerminals::default());
+        let factory: Rc<dyn TerminalFactory> = terminals.clone();
+        let workspace = cx.update(|cx| WorkspaceHandle::new(model, cx));
+        let handle = workspace.clone();
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            let shell = cx.new(|_| {
+                Shell::new(
+                    StateStore::in_memory(),
+                    AppSettings::default_settings(),
+                    DefaultKeybindings::config(),
+                )
+            });
+            let content = cx.new(|cx| {
+                ContentHost::new(
+                    handle.clone(),
+                    shell.clone(),
+                    factory,
+                    crate::content::tests::context(),
+                    TerminalSettings::default(),
+                    cx.new(|_| soprano_editor::EditorDocuments::new()),
+                    StateStore::in_memory(),
+                    window,
+                    cx,
+                )
+            });
+            SplitTree::new(handle, content, shell, cx)
+        });
+        cx.simulate_resize(size(px(1000.), px(600.)));
+        redraw(cx);
+        let started = terminals.0.get();
+
+        // `debug_bounds` takes static selectors: a fresh workspace numbers these two panes.
+        assert_eq!((left.as_str(), right.as_str()), ("pane-1", "pane-3"));
+        let header = cx.debug_bounds("pane-header-pane-3").expect("header");
+        let target = cx.debug_bounds("pane-body-pane-1").expect("body");
+        let start = header.center();
+        let near_top = point(target.center().x, target.top() + px(10.));
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(start - point(px(20.), px(0.)), MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(near_top, MouseButton::Left, Modifiers::none());
+        redraw(cx);
+        cx.simulate_mouse_up(near_top, MouseButton::Left, Modifiers::none());
+        redraw(cx);
+
+        let layout = cx.read(|cx| workspace.read(cx).layout().cloned());
+        assert_eq!(
+            layout,
+            Some(SplitNode::split(
+                SplitDirection::Vertical,
+                SplitNode::leaf(&right),
+                SplitNode::leaf(&left),
+                50.0
+            ))
+        );
+        assert_eq!(terminals.0.get(), started, "the moved pane kept its terminal");
+    }
 
     #[test]
     fn divider_positions_map_to_percentages_of_the_space_both_sides_share() {

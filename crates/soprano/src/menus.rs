@@ -12,7 +12,7 @@ use gpui::{App, KeyBinding, Menu, MenuItem, OsAction, actions};
 use gpui_component::input::{Copy, Cut, Delete, Paste, Redo, SelectAll, Undo};
 use soprano_types::{KeyBindingConfig, KeyBindingMode};
 
-use crate::shell::Command;
+use crate::shell::{Command, MarkdownTarget};
 
 actions!(
     soprano,
@@ -45,7 +45,7 @@ pub fn command_for(action: &dyn gpui::Action) -> Option<Command> {
     } else if any.is::<OpenInSopranoGit>() {
         Some(Command::OpenInSopranoGit)
     } else if any.is::<OpenMarkdown>() {
-        Some(Command::OpenMarkdown { pane_id: None })
+        Some(Command::OpenMarkdown(MarkdownTarget::NewPane))
     } else if any.is::<AgentDashboard>() {
         Some(Command::ToggleDashboard)
     } else if any.is::<Automations>() {
@@ -175,7 +175,7 @@ pub fn commands_menu_items() -> Vec<(&'static str, Command)> {
         ("Command Palette…", Command::OpenCommandPalette),
         ("Open Project…", Command::OpenProjectSearch),
         ("Open in Soprano Git", Command::OpenInSopranoGit),
-        ("Open Markdown…", Command::OpenMarkdown { pane_id: None }),
+        ("Open Markdown…", Command::OpenMarkdown(MarkdownTarget::NewPane)),
         ("Agent Dashboard", Command::ToggleDashboard),
         ("Automations", Command::OpenAutomations),
         ("Statistics", Command::ToggleStatistics),

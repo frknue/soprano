@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::split_node::{SplitBranchSide, SplitNode};
+use crate::split_node::{PaneEdge, SplitBranchSide, SplitNode};
 use soprano_types::SplitDirection;
 
 /// One tab of a logical window: a complete split layout of its own. Hidden tabs keep their
@@ -184,8 +184,13 @@ impl WorkspaceWindowState {
     /// its right neighbor, or the new last tab. The last tab is never removed; closing it
     /// closes the window.
     pub fn remove_tab(&mut self, index: usize) -> HashSet<String> {
+        self.take_tab(index).and_then(|tab| tab.layout).map(|layout| layout.leaf_ids()).unwrap_or_default()
+    }
+
+    /// Takes the tab at `index` out of the row, as [`Self::remove_tab`] does, and returns it.
+    pub fn take_tab(&mut self, index: usize) -> Option<LayoutTab> {
         if self.tabs.len() <= 1 || index >= self.tabs.len() {
-            return HashSet::new();
+            return None;
         }
         let removed = self.tabs.remove(index);
         if index < self.active_tab_index {
@@ -193,7 +198,49 @@ impl WorkspaceWindowState {
         } else {
             self.active_tab_index = self.active_tab_index.min(self.tabs.len() - 1);
         }
-        removed.layout.map(|layout| layout.leaf_ids()).unwrap_or_default()
+        Some(removed)
+    }
+
+    /// Puts `tab` at `index` in the row (clamped to its end) and brings it to the front.
+    pub fn insert_tab(&mut self, index: usize, tab: LayoutTab) {
+        let index = index.min(self.tabs.len());
+        self.tabs.insert(index, tab);
+        self.active_tab_index = index;
+    }
+
+    /// Moves the tab at `from` to `to` (clamped to the row) and brings it to the front.
+    /// Returns whether its place changed.
+    pub fn move_tab(&mut self, from: usize, to: usize) -> bool {
+        if from >= self.tabs.len() {
+            return false;
+        }
+        let to = to.min(self.tabs.len() - 1);
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active_tab_index = to;
+        from != to
+    }
+
+    /// Splits `target_pane_id` in whichever tab holds it, putting `node` on its `edge`, and
+    /// focuses `focus` there.
+    pub fn insert_beside(
+        &mut self,
+        target_pane_id: &str,
+        node: &SplitNode,
+        edge: PaneEdge,
+        focus: &str,
+    ) -> bool {
+        let Some(index) = self.tab_index_containing_pane(target_pane_id) else { return false };
+        let Some(updated) = self.tabs[index]
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.inserting_node(target_pane_id, node, edge))
+        else {
+            return false;
+        };
+        self.tabs[index].layout = Some(updated);
+        self.tabs[index].active_pane_id = focus.to_owned();
+        true
     }
 
     /// Splits `pane_id` in whichever tab holds it and focuses the new pane there.

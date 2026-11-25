@@ -46,6 +46,17 @@ pub enum CloseTarget {
     },
 }
 
+/// Where a chosen Markdown file opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MarkdownTarget {
+    /// A new reader pane beside the active one.
+    NewPane,
+    /// A new tab of the active window.
+    NewTab,
+    /// A tab of this pane.
+    PaneTab(String),
+}
+
 /// Everything the chrome asks the app to do beyond a plain model mutation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -89,10 +100,8 @@ pub enum Command {
     ToggleStatistics,
     /// Show the Automations page on a run's report.
     OpenAutomationRun(String),
-    /// Choose a Markdown file: into a new reader pane (`None`) or as a tab of a pane.
-    OpenMarkdown {
-        pane_id: Option<String>,
-    },
+    /// Choose a Markdown file and open it in a live reader there.
+    OpenMarkdown(MarkdownTarget),
     OpenInSopranoGit,
     StartCopyMode,
     /// A one-button notice over the window.

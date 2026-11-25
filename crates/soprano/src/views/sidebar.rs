@@ -37,7 +37,8 @@ use self::model::{
     TrailingSlot, WindowRow,
 };
 use crate::services::Services;
-use crate::shell::{self, CloseTarget, Command, Page, Shell};
+use crate::shell::{self, CloseTarget, Command, MarkdownTarget, Page, Shell};
+use crate::views::moving::{LayoutTabDrag, PaneDrag, drop_highlight};
 use crate::window_chrome;
 use crate::workspace::WorkspaceHandle;
 
@@ -226,7 +227,7 @@ impl Sidebar {
         }
         items.push(self.command_item("Add Machine…", Command::AddMachine));
         items.push(self.spawn_item("New Browser Pane".into(), |ws| _ = ws.spawn_browser(None)));
-        items.push(self.command_item("Open Markdown…", Command::OpenMarkdown { pane_id: None }));
+        items.push(self.command_item("Open Markdown…", Command::OpenMarkdown(MarkdownTarget::NewPane)));
         items
     }
 
@@ -339,11 +340,13 @@ impl Sidebar {
 
     // MARK: - Windows
 
+    /// The Windows header; a layout tab or a pane dropped on it gets a window of its own.
     fn windows_header(&self, count: usize, can_collapse: bool, cx: &App) -> impl IntoElement {
         let theme = cx.soprano_theme();
         let workspace = self.workspace.clone();
+        let (tab_workspace, pane_workspace) = (self.workspace.clone(), self.workspace.clone());
         let show_new = self.menu_handler(|sidebar, cx| sidebar.new_menu(cx));
-        SectionHeader::new("sidebar-windows-header", "Windows").count(count).end_slot(
+        let header = SectionHeader::new("sidebar-windows-header", "Windows").count(count).end_slot(
             div()
                 .flex()
                 .flex_row()
@@ -367,7 +370,15 @@ impl Sidebar {
                         .tooltip("New Window or Pane")
                         .on_click(move |event, window, cx| show_new(event.position(), window, cx)),
                 ),
-        )
+        );
+        drop_highlight(div(), cx)
+            .on_drop(move |drag: &LayoutTabDrag, _, cx| {
+                tab_workspace.update(cx, |ws| ws.move_layout_tab_to_new_window(&drag.layout_tab_id));
+            })
+            .on_drop(move |drag: &PaneDrag, _, cx| {
+                pane_workspace.update(cx, |ws| ws.move_pane_to_new_window(&drag.pane_id));
+            })
+            .child(header)
     }
 
     fn window_row(&self, row: &WindowRow, gap: f32, platform: KeyPlatform, cx: &App) -> AnyElement {
@@ -450,9 +461,19 @@ impl Sidebar {
                 }
             }
         };
-        div()
+        // A layout tab or a pane dropped on a window becomes a tab of it.
+        let (tab_target, pane_target) = (row.id.clone(), row.id.clone());
+        let (tab_workspace, pane_workspace) = (self.workspace.clone(), self.workspace.clone());
+        drop_highlight(div(), cx)
             .group(group)
             .mt(z(gap))
+            .on_drop(move |drag: &LayoutTabDrag, _, cx| {
+                tab_workspace.update(cx, |ws| ws.move_layout_tab(&drag.layout_tab_id, &tab_target, None));
+            })
+            .on_drop(move |drag: &PaneDrag, _, cx| {
+                pane_workspace
+                    .update(cx, |ws| ws.move_pane_to_new_layout_tab(&drag.pane_id, Some(&pane_target)));
+            })
             .child(
                 SidebarRow::new(ElementId::Name(format!("sidebar-window-row-{}", row.id).into()))
                     .child(chevron)

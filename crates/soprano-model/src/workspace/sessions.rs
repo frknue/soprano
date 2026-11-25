@@ -6,7 +6,7 @@ use soprano_types::{AgentCatalog, AgentLaunch, AgentProfile, TerminalTarget};
 
 use super::{Place, TabSpec, Workspace};
 use crate::agent_instance::AgentInstance;
-use crate::pane::{PaneContentKind, PaneState, PaneType, chat_supports};
+use crate::pane::{PaneContentKind, PaneState, PaneType, Remote, chat_supports};
 use crate::split_node::SplitNode;
 use crate::window::{LayoutTab, TerminalSessionState, WorkspaceWindowState};
 
@@ -391,6 +391,54 @@ impl Workspace {
         }
         let place = self.place(cwd);
         let pane_id = self.make_pane(place, chat_profile_id);
+        self.append_layout_tab(pane_id)
+    }
+
+    /// Opens a tab at the end of the active window's row holding one pane of `pane_type`: a
+    /// terminal, a browser, `profile_id`'s agent, or its chat with `content_kind` `chat`. It
+    /// starts where the active tab is (its folder, and its machine unless it is a browser),
+    /// as a pane tab added with `+` would, and shows it.
+    pub fn create_layout_tab_with(
+        &mut self,
+        pane_type: PaneType,
+        profile_id: Option<&str>,
+        content_kind: Option<&str>,
+    ) -> Option<String> {
+        if !self.windows.contains_key(&self.active_window_id) {
+            return None;
+        }
+        let place = self.place(None);
+        let remote = place.machine.filter(|_| pane_type != PaneType::Browser).map(Remote::on);
+        let tab_id = self.next_tab_id();
+        let tab = Self::create_pane_tab(
+            tab_id,
+            TabSpec {
+                pane_type,
+                profile_id: profile_id.map(str::to_owned),
+                cwd: place.cwd,
+                content_kind: content_kind.map(str::to_owned),
+                remote,
+                ..TabSpec::default()
+            },
+        );
+        let pane_id = self.next_pane_id();
+        self.panes.insert(pane_id.clone(), PaneState::new(&pane_id, vec![tab]));
+        self.append_layout_tab(pane_id)
+    }
+
+    /// Opens `file` in a Markdown reader in a new tab of the active window and shows it.
+    pub fn open_markdown_in_new_layout_tab(&mut self, file: &Path) -> Option<String> {
+        if !self.windows.contains_key(&self.active_window_id) {
+            return None;
+        }
+        let tab = self.create_file_tab(file, PaneContentKind::MARKDOWN, None);
+        let pane_id = self.next_pane_id();
+        self.panes.insert(pane_id.clone(), PaneState::new(&pane_id, vec![tab]));
+        self.append_layout_tab(pane_id)
+    }
+
+    /// Adds a tab holding only `pane_id` at the end of the active window's row and shows it.
+    fn append_layout_tab(&mut self, pane_id: String) -> Option<String> {
         let layout_tab_id = self.next_layout_tab_id();
         let window = self.windows.get_mut(&self.active_window_id)?;
         window.append_tab(LayoutTab {

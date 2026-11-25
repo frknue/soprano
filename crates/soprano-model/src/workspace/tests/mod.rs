@@ -4,6 +4,7 @@ mod agents;
 mod chat;
 mod files;
 mod layout_tabs;
+mod moving;
 mod panes;
 mod persistence;
 mod presentation;
