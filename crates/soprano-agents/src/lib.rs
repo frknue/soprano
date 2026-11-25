@@ -4,10 +4,12 @@
 //! docs/rust-rewrite/PLAN.md.
 
 pub mod activity;
+pub mod agy;
 pub mod chat_turns;
 pub mod claude;
 pub mod codex;
 pub mod dashboard;
+pub mod history;
 pub mod json;
 pub mod omp;
 pub mod omp_edit_preview;
@@ -19,6 +21,7 @@ pub mod transcript_thread;
 pub mod usage;
 
 pub use activity::{ActivityTone, AgentTimelineActivity, activity_duration};
+pub use agy::AgyTranscriptDecoder;
 pub use chat_turns::{
     ApprovalDecision, ApprovalKind, ApprovalOption, ApprovalOptions, ApprovalRequest, ChangedFileStat,
     ChatThread, FileChange, FileChangeKind, ToolCall, ToolCategory, Turn, TurnCommand, TurnItem,
@@ -29,6 +32,11 @@ pub use claude::ClaudeTranscriptDecoder;
 pub use codex::CodexRolloutDecoder;
 pub use dashboard::{
     AgentDashboardEntry, AgentDashboardSection, AgentDashboardSnapshot, DashboardEntryStatus,
+};
+pub use history::{
+    AgentSessionIndex, AgentSessionSummary, HistoryMessageRole, HistoryProjectGroup, HistoryQuery,
+    HistoryQueryResult, HistoryRefreshOutcome, HistoryScope, HistorySessionItem, HistorySort,
+    HistoryTurnSnippet, extract_match_snippet, format_relative_age, query_sessions,
 };
 pub use json::{JsonValue, JsonValueExt};
 pub use omp::OmpSessionDecoder;

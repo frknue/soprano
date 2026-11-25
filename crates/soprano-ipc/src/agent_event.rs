@@ -20,10 +20,11 @@ pub const FULL_MESSAGE_LIMIT: usize = 8_192;
 
 /// Keys the supported agents use for the text a human should read. Tried in order, so the most
 /// specific wins.
-const MESSAGE_KEYS: [&str; 7] = [
+const MESSAGE_KEYS: [&str; 8] = [
     "message",                // Claude Code notification hooks
     "last-assistant-message", // Codex notify payloads
     "last_assistant_message",
+    "lastAssistantMessage",
     "description",
     "body",
     "text",
@@ -225,10 +226,11 @@ pub fn waiting_reason(payload: &str) -> Option<AgentWaitingReason> {
         Some("idle_prompt") => return Some(AgentWaitingReason::TurnEnded),
         _ => {}
     }
-    if string("hook_event_name") == Some("Stop") || string("type") == Some("agent-turn-complete") {
+    let hook_event = string("hook_event_name").or_else(|| string("hookEventName"));
+    if hook_event == Some("Stop") || string("type") == Some("agent-turn-complete") {
         return Some(AgentWaitingReason::TurnEnded);
     }
-    if string("hook_event_name") == Some("PermissionRequest") {
+    if hook_event == Some("PermissionRequest") {
         return Some(AgentWaitingReason::Approval);
     }
     None
@@ -650,6 +652,22 @@ mod tests {
             waiting_reason(r#"{"hook_event_name":"PermissionRequest"}"#),
             Some(AgentWaitingReason::Approval)
         );
+    }
+
+    #[test]
+    fn antigravity_stop_hook_ends_the_turn_and_carries_its_conversation() {
+        let payload = r#"{"conversationId":"agy-42","cwd":"/tmp/repo","transcriptPath":"/tmp/transcript.jsonl","hookEventName":"Stop","terminationReason":"NO_TOOL_CALL"}"#;
+        assert_eq!(waiting_reason(payload), Some(AgentWaitingReason::TurnEnded));
+        let event = event(
+            &["soprano", "agent-event", "needs-input", "--notify", "--message-from-stdin"],
+            Some(payload),
+        )
+        .expect("event");
+        assert_eq!(event.reason, Some(AgentWaitingReason::TurnEnded));
+        let conversation = event.conversation.expect("conversation");
+        assert_eq!(conversation.id, "agy-42");
+        assert_eq!(conversation.cwd.as_deref(), Some("/tmp/repo"));
+        assert_eq!(conversation.transcript_path.as_deref(), Some("/tmp/transcript.jsonl"));
     }
 
     // AgentConversationTests (CLI side)

@@ -68,6 +68,7 @@ pub fn agent_icon_stem(profile_id: &str) -> &'static str {
         "codex" => "codex",
         "opencode" => "opencode",
         "omp" => "pi",
+        "agy" => "antigravity",
         _ => "agent",
     }
 }

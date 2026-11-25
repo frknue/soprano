@@ -730,6 +730,19 @@ pub fn command_items(
             command(shell, Command::ToggleSourceControl),
         ),
         entry(
+            searchable(
+                spec(
+                    "toggle-session-history",
+                    IconName::Clock,
+                    "Toggle Session History",
+                    "Search and resume past agent sessions in this directory or across all projects",
+                    short(&["toggle-session-history"]),
+                ),
+                "agent session history search resume claude omp codex opencode transcripts",
+            ),
+            command(shell, Command::ToggleSessionHistory),
+        ),
+        entry(
             spec(
                 "open-settings",
                 IconName::Settings,

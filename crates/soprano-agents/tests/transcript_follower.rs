@@ -72,6 +72,9 @@ fn transcripts_without_a_reported_path_are_located_in_the_clis_session_directori
     let omp = home.path().join(".omp/agent/sessions/-work-repo");
     std::fs::create_dir_all(&omp).expect("dir");
     std::fs::write(omp.join("2026-10-12_sess-7.jsonl"), "").expect("write");
+    let agy = home.path().join(".gemini/antigravity-cli/brain/agy-conv-1/.system_generated/logs");
+    std::fs::create_dir_all(&agy).expect("dir");
+    std::fs::write(agy.join("transcript.jsonl"), "").expect("write");
 
     assert_eq!(
         AgentTranscriptLocator::transcript_path(AgentTranscriptFormat::ClaudeCode, "abc-123", home.path()),
@@ -84,6 +87,10 @@ fn transcripts_without_a_reported_path_are_located_in_the_clis_session_directori
     assert_eq!(
         AgentTranscriptLocator::transcript_path(AgentTranscriptFormat::Omp, "sess-7", home.path()),
         Some(omp.join("2026-10-12_sess-7.jsonl"))
+    );
+    assert_eq!(
+        AgentTranscriptLocator::transcript_path(AgentTranscriptFormat::Agy, "agy-conv-1", home.path()),
+        Some(agy.join("transcript.jsonl"))
     );
     assert_eq!(
         AgentTranscriptLocator::transcript_path(AgentTranscriptFormat::Omp, "../escape", home.path()),

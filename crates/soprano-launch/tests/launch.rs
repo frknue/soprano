@@ -271,6 +271,34 @@ fn omp_gets_its_extension_and_the_accounts_preference_overlay() {
 }
 
 #[test]
+fn agy_starts_with_bypass_permissions_interactive_prompt_and_resume() {
+    let profile = DefaultAgents::agy();
+    let launch =
+        AgentLaunch { prompt: "  Fix it\n".into(), model: Some("gemini".into()), ..Default::default() };
+    let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
+    request.launch = Some(&launch);
+    let spec = LaunchSpec::for_agent(&context("/bin/zsh"), &request);
+    assert_eq!(
+        spec.argv[2],
+        format!(
+            "trap true INT; 'agy' '--dangerously-skip-permissions' '--model' 'gemini' \
+             '--prompt-interactive=Fix it'; {}",
+            tail()
+        )
+    );
+    assert_eq!(
+        spec.env,
+        pane_env(&[("SOPRANO_AGENT_PROFILE", "agy"), ("SOPRANO_AGENT_NAME", "Antigravity")])
+    );
+
+    let resumed = agent(&profile, Some(&AgentConversation::new("saved-chat")));
+    assert_eq!(
+        resumed.argv[2],
+        format!("trap true INT; 'agy' '--resume' 'saved-chat' '--dangerously-skip-permissions'; {}", tail())
+    );
+}
+
+#[test]
 fn a_plain_terminal_is_the_login_shell_with_the_pane_identity_only() {
     let spec = LaunchSpec::default_shell(&context("/bin/zsh"), Some("~/repo"), "pane-1", "tab-2");
     assert_eq!(spec.argv, vec!["/bin/zsh", "-l"]);
@@ -437,6 +465,7 @@ fn resume_commands_target_the_saved_id_and_keep_model_options_and_hooks() {
         DefaultAgents::claude_code(),
         DefaultAgents::open_code(),
         DefaultAgents::omp(),
+        DefaultAgents::agy(),
     ] {
         let mut request = AgentRequest::new(&profile, "pane-1", "tab-2");
         request.cwd = Some("/tmp/other");
@@ -453,6 +482,7 @@ fn resume_commands_target_the_saved_id_and_keep_model_options_and_hooks() {
                 assert!(spec.env["OPENCODE_CONFIG_CONTENT"].contains("SopranoOpenCodePlugin"));
                 assert!(spec.env["OPENCODE_CLI_CONFIG_CONTENT"].contains("SopranoOpenCode"));
             }
+            "agy" => assert!(command(&spec).contains("'--resume' 'saved-chat'")),
             _ => assert!(command(&spec).contains("'--extension'")),
         }
     }
@@ -524,6 +554,7 @@ fn every_agent_starts_with_its_approval_prompts_skipped() {
         (DefaultAgents::codex(), "'--dangerously-bypass-approvals-and-sandbox'"),
         (DefaultAgents::omp(), "'--auto-approve'"),
         (DefaultAgents::open_code(), "'--auto'"),
+        (DefaultAgents::agy(), "'--dangerously-skip-permissions'"),
     ] {
         // A tab opened by hand, a thread, a resumed conversation: every start.
         for conversation in [None, Some(&saved)] {
@@ -623,6 +654,10 @@ fn a_prompt_that_starts_like_an_option_is_passed_after_the_end_of_options() {
     assert_eq!(
         launch_arguments("opencode", &launch, true),
         vec!["--standalone", "--prompt=- check the PRs\n- report"]
+    );
+    assert_eq!(
+        launch_arguments("agy", &launch, true),
+        vec!["--model", "opus", "--prompt-interactive=- check the PRs\n- report"]
     );
 }
 

@@ -1,0 +1,25 @@
+{
+  "soprano": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "(test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event ready --profile agy --title \"Antigravity\" --body \"Ready for a prompt\" --message-from-stdin >/dev/null 2>&1); printf '{}'",
+        "timeout": 5
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "(test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event running --profile agy --title \"Antigravity\" --body \"Working\" --message-from-stdin >/dev/null 2>&1); printf '{}'",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "(test -z \"$SOPRANO_BIN\" || \"$SOPRANO_BIN\" agent-event needs-input --profile agy --notify --title \"Antigravity\" --message-from-stdin --body \"Response ready\" >/dev/null 2>&1); printf '{}'",
+        "timeout": 5
+      }
+    ]
+  }
+}

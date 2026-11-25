@@ -304,6 +304,7 @@ pub fn agent_icon_stem(profile_id: &str) -> Option<&'static str> {
         "codex" => Some("codex"),
         "opencode" => Some("opencode"),
         "omp" => Some("pi"),
+        "agy" => Some("antigravity"),
         _ => None,
     }
 }

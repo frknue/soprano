@@ -597,6 +597,7 @@ impl Render for LayoutTabRow {
 
         let files_on = self.panel_shown(RightSidebarTab::Explorer, cx);
         let changes_on = self.panel_shown(RightSidebarTab::SourceControl, cx);
+        let history_on = self.panel_shown(RightSidebarTab::History, cx);
         row_frame("layout-tab-row", chrome, is_top, cx)
             .on_scroll(cx.listener(|row, event: &ScrollEvent, _, cx| row.on_wheel(event, cx)))
             .when(chrome.sidebar_toggle, |row| row.child(sidebar_toggle(&self.shell)))
@@ -628,6 +629,9 @@ impl Render for LayoutTabRow {
                 cx.listener(|row, _, window, cx| {
                     row.toggle_panel(RightSidebarTab::SourceControl, window, cx)
                 }),
+            ))
+            .child(PanelToggle::new("history-toggle", IconName::Clock, "History").on(history_on).on_click(
+                cx.listener(|row, _, window, cx| row.toggle_panel(RightSidebarTab::History, window, cx)),
             ))
             .when(chrome.window_buttons, |row| row.child(WindowButtons))
     }

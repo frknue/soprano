@@ -75,6 +75,7 @@ pub fn default_config() -> KeyBindingConfig {
         binding("launch-claude-code", D, "2", false, true, false),
         binding("launch-opencode", D, "3", false, true, false),
         binding("launch-omp", D, "4", false, true, false),
+        binding("launch-agy", D, "5", false, true, false),
         binding("new-chat", D, "i", false, true, false),
         binding("agent-dashboard", D, "d", false, true, true),
         binding("command-palette", D, "p", false, true, false),

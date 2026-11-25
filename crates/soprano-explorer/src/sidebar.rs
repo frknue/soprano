@@ -4,22 +4,24 @@
 
 use soprano_platform::StateStore;
 
-/// The two panels of the right sidebar.
+/// The panels of the right sidebar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum RightSidebarTab {
     #[default]
     Explorer,
     SourceControl,
+    History,
 }
 
 impl RightSidebarTab {
-    pub const ALL: [Self; 2] = [Self::Explorer, Self::SourceControl];
+    pub const ALL: [Self; 3] = [Self::Explorer, Self::SourceControl, Self::History];
 
     /// The value stored under [`ACTIVE_TAB_KEY`] (the Swift enum's raw value).
     pub fn raw_value(self) -> &'static str {
         match self {
             Self::Explorer => "explorer",
             Self::SourceControl => "sourceControl",
+            Self::History => "history",
         }
     }
 
@@ -32,6 +34,7 @@ impl RightSidebarTab {
         match self {
             Self::Explorer => "Explorer",
             Self::SourceControl => "Source Control",
+            Self::History => "Session History",
         }
     }
 
@@ -40,6 +43,7 @@ impl RightSidebarTab {
         match self {
             Self::Explorer => "Files",
             Self::SourceControl => "Changes",
+            Self::History => "History",
         }
     }
 }

@@ -1093,6 +1093,34 @@ fn a_remote_agents_status_reports_drive_its_tab_like_hook_events() {
 }
 
 #[test]
+fn antigravity_osc_7501_reports_attach_and_notify_under_both_app_names() {
+    for app in ["agy", "antigravity", "antigravity-cli"] {
+        let mut workspace = Workspace::new();
+        let target = first_target(&workspace);
+        let fake = Fake::new(SystemAuthorization::Authorized);
+        let mut notifications = manager(&fake);
+
+        notifications.handle_program_status(
+            &mut workspace,
+            target.clone(),
+            report(ProgramState::Working, None, Some(app)),
+        );
+        let agent = workspace.agent(&target.pane_id, &target.tab_id).expect("attached");
+        assert_eq!((agent.profile_id.as_str(), agent.status), ("agy", AgentStatus::Running));
+
+        notifications.handle_program_status(
+            &mut workspace,
+            target.clone(),
+            report(ProgramState::Done, None, Some(app)),
+        );
+        assert_eq!(
+            fake.posted().iter().map(|b| b.title.as_str()).collect::<Vec<_>>(),
+            ["Antigravity finished"]
+        );
+    }
+}
+
+#[test]
 fn a_terminal_moved_to_a_machine_takes_status_reports_though_its_hooks_once_reported() {
     let mut workspace = Workspace::new();
     let target = first_target(&workspace);

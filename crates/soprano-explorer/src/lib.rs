@@ -14,6 +14,7 @@ mod changes;
 mod chords;
 mod file_clipboard;
 mod files;
+mod history;
 pub mod open_in;
 mod refresh;
 mod reveal;
@@ -28,6 +29,7 @@ use std::path::PathBuf;
 
 pub use changes::ChangesPanel;
 pub use files::FilesPanel;
+pub use history::HistoryPanel;
 pub use right_sidebar::RightSidebar;
 pub use sidebar::{PanelToggle, RightSidebarState, RightSidebarTab, SidebarWidthStore};
 
@@ -44,17 +46,27 @@ pub enum SidebarEvent {
     OpenMarkdownPreview { path: PathBuf },
     /// Open a terminal pane working in `directory`.
     OpenInTerminal { directory: PathBuf },
+    /// Resume an indexed agent session in a new split pane or layout tab.
+    ResumeSession {
+        profile_id: String,
+        conversation: soprano_types::AgentConversation,
+        chat: bool,
+        new_tab: bool,
+    },
     /// Hand the keyboard back to the focused pane (Esc in a panel).
     FocusPane,
     /// A file or folder was renamed or moved (also by undo/redo): tabs showing it, or
     /// anything under it, follow.
     ItemMoved { from: PathBuf, to: PathBuf },
+    /// A short confirmation to show as a toast.
+    ShowInfo(String),
     /// A failure to show as a toast.
     ShowError(String),
 }
 
 impl gpui::EventEmitter<SidebarEvent> for FilesPanel {}
 impl gpui::EventEmitter<SidebarEvent> for ChangesPanel {}
+impl gpui::EventEmitter<SidebarEvent> for HistoryPanel {}
 impl gpui::EventEmitter<SidebarEvent> for RightSidebar {}
 
 /// The drag payload of explorer rows. Drop targets elsewhere in the app (a terminal

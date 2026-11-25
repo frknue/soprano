@@ -504,6 +504,10 @@ impl MainView {
                 self.right_sidebar.update(cx, |sidebar, cx| sidebar.toggle_source_control(window, cx));
                 self.after_right_sidebar_toggle(window, cx);
             }
+            Command::ToggleSessionHistory => {
+                self.right_sidebar.update(cx, |sidebar, cx| sidebar.toggle_history(window, cx));
+                self.after_right_sidebar_toggle(window, cx);
+            }
             Command::OpenSettings => self.show_settings(None, window, cx),
             Command::OpenAccountsSettings => self.show_settings(Some(SettingsTab::Accounts), window, cx),
             Command::OpenSettingsFile => {
@@ -663,6 +667,7 @@ impl MainView {
             BindingCommand::ToggleRightSidebar => self.run(Command::ToggleRightSidebar, window, cx),
             BindingCommand::ToggleExplorer => self.run(Command::ToggleExplorer, window, cx),
             BindingCommand::ToggleSourceControl => self.run(Command::ToggleSourceControl, window, cx),
+            BindingCommand::ToggleSessionHistory => self.run(Command::ToggleSessionHistory, window, cx),
             BindingCommand::OpenSettings => self.run(Command::OpenSettings, window, cx),
             BindingCommand::OpenAgentDashboard => self.run(Command::ToggleDashboard, window, cx),
             BindingCommand::ToggleStatistics => self.run(Command::ToggleStatistics, window, cx),
@@ -1533,12 +1538,22 @@ impl MainView {
                 let directory = directory.to_string_lossy().into_owned();
                 self.workspace.update(cx, |ws| ws.spawn_terminal(Some(&directory)));
             }
+            SidebarEvent::ResumeSession { profile_id, conversation, chat, new_tab } => {
+                let profile_id = profile_id.clone();
+                let conversation = conversation.clone();
+                let (chat, new_tab) = (*chat, *new_tab);
+                let opened = self
+                    .workspace
+                    .update(cx, |ws| ws.resume_agent_session(&profile_id, conversation, chat, new_tab));
+                self.file_opened(opened.is_some(), true, window, cx);
+            }
             SidebarEvent::FocusPane => self.return_keyboard_focus_to_panes(window, cx),
             SidebarEvent::ItemMoved { from, to } => {
                 let (from, to) = (from.clone(), to.clone());
                 self.documents(cx).update(cx, |documents, cx| documents.relocate(&from, &to, cx));
                 self.workspace.update(cx, |ws| ws.relocate_file_tabs(&from, &to));
             }
+            SidebarEvent::ShowInfo(message) => self.toast(ToastLevel::Info, message.clone(), cx),
             SidebarEvent::ShowError(message) => self.toast(ToastLevel::Error, message.clone(), cx),
         }
     }

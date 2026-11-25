@@ -90,11 +90,12 @@ const TABLE: &[Row] = &[
     ("close-pane-tab", "Close Pane Tab", "Close the active tab inside the active pane", Layout, "Prefix → Shift+W", Prefix, "w", SHIFT),
     ("close-pane-tab-direct", "Close Pane Tab (Direct)", "Close the active tab inside the active pane without the prefix", Layout, "⌃⌘W", Direct, "w", CTRL_CMD),
 
-    // Agents (direct: Cmd+1/2/3/4)
+    // Agents (direct: Cmd+1/2/3/4/5)
     ("launch-codex", "Launch Codex", "Launch Codex agent", Agents, "⌘1", Direct, "1", CMD),
     ("launch-claude-code", "Launch Claude", "Launch Claude Code agent", Agents, "⌘2", Direct, "2", CMD),
     ("launch-opencode", "Launch OpenCode", "Launch OpenCode agent", Agents, "⌘3", Direct, "3", CMD),
     ("launch-omp", "Launch omp", "Launch Oh My Pi agent", Agents, "⌘4", Direct, "4", CMD),
+    ("launch-agy", "Launch Antigravity", "Launch Antigravity agent", Agents, "⌘5", Direct, "5", CMD),
     ("new-chat", "New Chat", "Open a chat with an agent beside the focused pane", Agents, "⌘I", Direct, "i", CMD),
     ("agent-dashboard", "Agent Dashboard", "Monitor and control agents across all windows", Agents, "⇧⌘D", Direct, "d", CMD_SHIFT),
     ("statistics", "Statistics", "Show omp's tokens and estimated cost over time", Agents, "⇧⌘U", Direct, "u", CMD_SHIFT),
@@ -114,6 +115,7 @@ const TABLE: &[Row] = &[
     ("toggle-right-sidebar", "Toggle Right Sidebar", "Show or hide the right sidebar (a focused browser pane keeps ⌘L for its address bar)", General, "⌘L", Direct, "l", CMD),
     ("toggle-explorer", "Toggle Explorer", "Show and focus the file explorer sidebar, or hide it while it has focus", General, "⇧⌘E", Direct, "e", CMD_SHIFT),
     ("toggle-source-control", "Toggle Source Control", "Show and focus the Source Control sidebar, or hide it while it has focus", General, "⇧⌘G", Direct, "g", CMD_SHIFT),
+    ("toggle-session-history", "Toggle Session History", "Show and search indexed agent session history, or hide it while it has focus", General, "⇧⌘H", Direct, "h", CMD_SHIFT),
     ("open-settings", "Settings", "Open the settings page", General, "⌘,", Direct, ",", CMD),
     ("zoom-in", "Zoom In", "Increase font size", General, "⌘+ / ⌘=", Direct, "=", CMD),
     ("zoom-out", "Zoom Out", "Decrease font size", General, "⌘-", Direct, "-", CMD),

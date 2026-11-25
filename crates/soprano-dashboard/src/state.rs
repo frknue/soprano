@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn a_thread_starts_with_any_built_in_agent() {
         let names: Vec<String> = AgentChoice::all().iter().map(AgentChoice::name).collect();
-        assert_eq!(names, ["Codex", "Claude Code", "Open Code", "omp"]);
+        assert_eq!(names, ["Codex", "Claude Code", "Open Code", "omp", "Antigravity"]);
     }
 
     #[test]

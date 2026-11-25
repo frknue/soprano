@@ -87,7 +87,7 @@ agent_event() {
         case $compact in
             *'"notification_type":"permission_prompt"'*|*'"hook_event_name":"PermissionRequest"'*) reason=approval ;;
             *'"notification_type":"elicitation_dialog"'*) reason=question ;;
-            *'"notification_type":"idle_prompt"'*|*'"hook_event_name":"Stop"'*|*'"type":"agent-turn-complete"'*) reason=turn ;;
+            *'"notification_type":"idle_prompt"'*|*'"hook_event_name":"Stop"'*|*'"hookEventName":"Stop"'*|*'"type":"agent-turn-complete"'*) reason=turn ;;
         esac
     fi
     case $event in

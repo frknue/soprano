@@ -83,8 +83,8 @@ pub struct KeybindingsConfig {
 }
 
 /// A user-declared agent. `id` is the only required field: reusing a built-in id (`codex`,
-/// `claude-code`, `opencode`, `omp`, `terminal`) patches that profile field by field, while a
-/// new id defines a whole new agent and then requires `command`.
+/// `claude-code`, `opencode`, `omp`, `agy`, `terminal`) patches that profile field by field,
+/// while a new id defines a whole new agent and then requires `command`.
 ///
 /// Deliberately narrower than `AgentProfile`: `autoRestart`, `restartDelayMs`, and `patterns`
 /// are not exposed because nothing reads them at runtime, and a settings key that does
@@ -999,14 +999,14 @@ mod tests {
     #[test]
     fn a_launch_key_synthesizes_a_shortcut_for_a_new_agent() {
         let resolved =
-            resolve(r#"{ "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+5" } ] }"#);
+            resolve(r#"{ "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+6" } ] }"#);
         let binding = find(&resolved, "launch-aider").expect("binding");
-        assert_eq!(binding.key, "5");
+        assert_eq!(binding.key, "6");
         assert_eq!(binding.meta, Some(true));
         assert_eq!(binding.category, KeyBindingCategory::Agents);
         assert_eq!(binding.default_keys, KeyChord::from_binding(binding).display_string());
         if KeyPlatform::current() == KeyPlatform::Mac {
-            assert_eq!(binding.default_keys, "⌘5");
+            assert_eq!(binding.default_keys, "⌘6");
         }
     }
 
@@ -1023,7 +1023,7 @@ mod tests {
     fn an_explicit_binding_wins_over_an_agent_launch_key_for_the_same_action() {
         let resolved = resolve(
             r#"{ "keybindings": { "bindings": { "launch-aider": "cmd+8" } },
-                 "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+5" } ] }"#,
+                 "agents": [ { "id": "aider", "command": "aider", "launchKey": "cmd+6" } ] }"#,
         );
         assert_eq!(find(&resolved, "launch-aider").map(|b| b.key.as_str()), Some("8"));
     }

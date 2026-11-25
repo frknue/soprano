@@ -86,6 +86,7 @@ pub enum Command {
     ToggleRightSidebar,
     ToggleExplorer,
     ToggleSourceControl,
+    ToggleSessionHistory,
     OpenSettings,
     OpenAccountsSettings,
     OpenSettingsFile,

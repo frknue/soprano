@@ -236,7 +236,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
   }},
 
   // Your own agents. Reusing a built-in id ("codex", "claude-code",
-  // "opencode", "omp") patches that profile field by field; a new id
+  // "opencode", "omp", "agy") patches that profile field by field; a new id
   // defines a new agent and needs at least "command". Plain terminal panes are
   // not configured here — they run your login shell.
   //
@@ -246,7 +246,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
   //     "command": "aider",
   //     "args": ["--no-auto-commits"],
   //     "color": "#8bd5ca",
-  //     "launchKey": "cmd+5"
+  //     "launchKey": "cmd+6"
   //   }}
   "agents": [],
 
@@ -274,7 +274,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
   //
   //   "weekday-audit": {{
   //     "name": "Weekday repo audit",
-  //     "agent": "omp",                  // omp | claude-code | codex | opencode
+  //     "agent": "omp",                  // omp | claude-code | codex | opencode | agy
   //     "folder": "~/git/shop",
   //     "prompt": "Review the repository health and summarize what needs attention.",
   //     "schedule": "0 9 * * 1-5",       // cron: minute hour day month weekday

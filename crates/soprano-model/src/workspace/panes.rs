@@ -23,6 +23,54 @@ impl Workspace {
         self.spawn_agent_at(profile_id, place, chat)
     }
 
+    /// Resumes an existing agent conversation in a new split pane beside the active one, or in
+    /// a new layout tab when `new_layout_tab` is set. Returns the new pane id (or layout tab id
+    /// when `new_layout_tab` is true), or `None` if the profile is unknown, the conversation id
+    /// is invalid, or there is no room.
+    pub fn resume_agent_session(
+        &mut self,
+        profile_id: &str,
+        conversation: soprano_types::AgentConversation,
+        chat: bool,
+        new_layout_tab: bool,
+    ) -> Option<String> {
+        if !soprano_types::AgentConversation::supports(profile_id)
+            || !soprano_types::AgentConversation::valid_id(&conversation.id)
+        {
+            return None;
+        }
+        let profile =
+            AgentCatalog::shared().profile(profile_id).filter(|profile| profile.id != "terminal")?;
+        if !new_layout_tab && !self.can_add_pane(&self.active_window_id) {
+            return None;
+        }
+        if new_layout_tab && !self.windows.contains_key(&self.active_window_id) {
+            return None;
+        }
+        let cwd = conversation.cwd.clone().or_else(|| self.local_place(None).cwd);
+        let pane_id = self.next_pane_id();
+        let tab_id = self.next_tab_id();
+        let mut tab = Self::create_pane_tab(
+            tab_id,
+            TabSpec {
+                pane_type: PaneType::Agent,
+                profile_id: Some(profile.id),
+                cwd,
+                content_kind: chat.then(|| PaneContentKind::CHAT.to_owned()),
+                ..TabSpec::default()
+            },
+        );
+        if let Some(agent) = tab.agent.as_mut() {
+            agent.conversation = Some(conversation);
+        }
+        if new_layout_tab {
+            self.panes.insert(pane_id.clone(), PaneState::new(&pane_id, vec![tab]));
+            self.append_layout_tab(pane_id)
+        } else {
+            self.insert_pane(PaneState::new(&pane_id, vec![tab])).then_some(pane_id)
+        }
+    }
+
     fn spawn_agent_at(&mut self, profile_id: &str, place: Place, chat: bool) -> Option<String> {
         if !self.can_add_pane(&self.active_window_id) {
             return None;

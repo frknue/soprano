@@ -492,3 +492,28 @@ fn malformed_conversation_ids_are_ignored_and_unsupported_agents_record_none() {
     workspace.record_agent_conversation(conversation("a b", None), &pane, &tab, None);
     assert!(workspace.agent(&pane, &tab).and_then(|a| a.conversation.as_ref()).is_none());
 }
+
+#[test]
+fn resuming_an_agent_session_opens_a_pane_or_layout_tab_with_that_conversation() {
+    let mut workspace = Workspace::new();
+    let mut conv = conversation("sess-123", Some("/tmp/ab_tool"));
+    conv.transcript_path = Some("/tmp/sess-123.jsonl".into());
+
+    let pane_id = workspace.resume_agent_session("claude-code", conv.clone(), false, false).expect("pane");
+    let tab = workspace.pane(&pane_id).and_then(|p| p.active_tab()).expect("tab");
+    assert_eq!(tab.pane_type, PaneType::Agent);
+    assert_eq!(tab.cwd.as_deref(), Some("/tmp/ab_tool"));
+    assert_eq!(tab.agent.as_ref().and_then(|a| a.conversation.clone()), Some(conv.clone()));
+
+    let tab_count_before = workspace.active_window().unwrap().tabs().len();
+    workspace.resume_agent_session("omp", conv.clone(), true, true).expect("layout tab");
+    assert_eq!(workspace.active_window().unwrap().tabs().len(), tab_count_before + 1);
+    let active_pane = workspace.active_pane_id().to_owned();
+    let active_tab = workspace.pane(&active_pane).and_then(|p| p.active_tab()).expect("active tab");
+    assert!(active_tab.is_chat());
+    assert_eq!(active_tab.agent.as_ref().and_then(|a| a.conversation.clone()), Some(conv));
+
+    assert!(
+        workspace.resume_agent_session("claude-code", conversation("--bad", None), false, false).is_none()
+    );
+}

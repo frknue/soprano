@@ -239,6 +239,30 @@ pub fn repository_root(path: &str) -> Option<PathBuf> {
     find_git_entry(path).map(|entry| entry.working_tree)
 }
 
+/// The shared git directory (`<repo>/.git`) for `path`: identical across the main working
+/// tree and every linked worktree of the same repository, so two folders can be recognized
+/// as belonging to the same git project.
+pub fn common_git_dir(path: &str) -> Option<PathBuf> {
+    let head = resolve_head_path(path)?;
+    let git_directory = head.parent()?.to_path_buf();
+    let mut common = git_directory.clone();
+    if let Ok(pointer) = std::fs::read_to_string(git_directory.join("commondir")) {
+        let pointer = pointer.trim();
+        common = if Path::new(pointer).is_absolute() {
+            PathBuf::from(pointer)
+        } else {
+            soprano_platform::paths::normalize(&git_directory.join(pointer))
+        };
+    }
+    Some(std::fs::canonicalize(&common).unwrap_or(common))
+}
+
+/// Current branch (or detached 7-char sha) for `path`, without installing a file watcher.
+pub fn current_branch(path: &str) -> Option<String> {
+    let head = resolve_head_path(path)?;
+    parse_head(&head)
+}
+
 struct GitEntry {
     working_tree: PathBuf,
     git_path: PathBuf,
@@ -349,6 +373,12 @@ mod tests {
 
         assert_eq!(GitBranchMonitor::new().notable_branch(&checkout.to_string_lossy()), None);
         assert_eq!(remote_default_branch(&worktree_git.join("HEAD")).as_deref(), Some("main"));
+        assert_eq!(
+            common_git_dir(&path(&repository)),
+            common_git_dir(&checkout.to_string_lossy()),
+            "main repo and linked worktree share the same common git dir"
+        );
+        assert_eq!(current_branch(&checkout.to_string_lossy()).as_deref(), Some("main"));
     }
 
     #[test]

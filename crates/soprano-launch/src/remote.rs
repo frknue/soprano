@@ -433,6 +433,9 @@ impl AgentKit {
                     );
                     (setup, String::new())
                 }
+                // Antigravity speaks OSC 7501 natively, so the stand-in only needs to identify the
+                // pane and report ready/stopped around it.
+                "agy" => (String::new(), String::new()),
                 _ => continue,
             };
             contents.push((

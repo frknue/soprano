@@ -55,6 +55,7 @@ pub enum BindingCommand {
     ToggleRightSidebar,
     ToggleExplorer,
     ToggleSourceControl,
+    ToggleSessionHistory,
     OpenSettings,
     OpenAgentDashboard,
     /// `statistics`: show omp's usage statistics, or return from them to the workspace.
@@ -122,6 +123,7 @@ impl BindingCommand {
             "toggle-right-sidebar" => Self::ToggleRightSidebar,
             "toggle-explorer" => Self::ToggleExplorer,
             "toggle-source-control" => Self::ToggleSourceControl,
+            "toggle-session-history" => Self::ToggleSessionHistory,
             "open-settings" => Self::OpenSettings,
             "agent-dashboard" => Self::OpenAgentDashboard,
             "statistics" => Self::ToggleStatistics,

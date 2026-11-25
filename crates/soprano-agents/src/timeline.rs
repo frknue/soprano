@@ -18,10 +18,11 @@ pub enum AgentTranscriptFormat {
     Codex,
     Omp,
     OpenCode,
+    Agy,
 }
 
 impl AgentTranscriptFormat {
-    pub const ALL: [Self; 4] = [Self::ClaudeCode, Self::Codex, Self::Omp, Self::OpenCode];
+    pub const ALL: [Self; 5] = [Self::ClaudeCode, Self::Codex, Self::Omp, Self::OpenCode, Self::Agy];
 
     pub fn from_profile_id(profile_id: &str) -> Option<Self> {
         match profile_id {
@@ -29,6 +30,7 @@ impl AgentTranscriptFormat {
             "codex" => Some(Self::Codex),
             "omp" => Some(Self::Omp),
             "opencode" => Some(Self::OpenCode),
+            "agy" => Some(Self::Agy),
             _ => None,
         }
     }

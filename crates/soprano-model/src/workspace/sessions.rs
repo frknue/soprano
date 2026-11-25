@@ -438,7 +438,7 @@ impl Workspace {
     }
 
     /// Adds a tab holding only `pane_id` at the end of the active window's row and shows it.
-    fn append_layout_tab(&mut self, pane_id: String) -> Option<String> {
+    pub(super) fn append_layout_tab(&mut self, pane_id: String) -> Option<String> {
         let layout_tab_id = self.next_layout_tab_id();
         let window = self.windows.get_mut(&self.active_window_id)?;
         window.append_tab(LayoutTab {

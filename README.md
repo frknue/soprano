@@ -157,6 +157,7 @@ Launch Soprano, then:
 | `⌃A` then `\|` | Split vertically. `⌃A` is the tmux-style prefix; `-` splits horizontally |
 | `⌘1` | Codex starts in the new pane |
 | `⌘4` | omp (Oh My Pi) starts in a new agent pane |
+| `⌘5` | Antigravity (`agy`) starts in a new agent pane |
 | `⌘I` | omp opens as a chat beside the pane: the same agent as a conversation with a composer instead of a terminal |
 | `⌃H` `⌃J` `⌃K` `⌃L` | Move between panes — no prefix needed |
 | `⌘B` | A browser pane splits off to the right |
@@ -185,6 +186,10 @@ launchers configure those hooks per launch, without changing your global configu
 - **omp (Oh My Pi)** — a launch-scoped extension reports session, turn, and tool
   approval events; install the [`omp` CLI](https://omp.sh/docs/cli) separately.
   Soprano runs its interactive terminal client, not the Bun-only SDK.
+- **Antigravity (`agy`)** — reports live status natively over OSC 7501 (working, approval,
+  question, done, error), starts with `--dangerously-skip-permissions`, supports exact
+  session resume (`--resume`), interactive launch prompts (`--prompt-interactive`),
+  transcript following in the Agent Dashboard, and indexed Session History.
 
 When a background agent finishes, macOS shows a notification and the pane gets an
 attention outline. The notification is two short lines: what the agent wants — `Claude Code
@@ -227,6 +232,10 @@ integration separately:
 - **Claude Code:** merge the `hooks` entries from
   [`resources/AgentHooks/claude-settings.json`](resources/AgentHooks/claude-settings.json)
   into `~/.claude/settings.json`.
+- **Antigravity (`agy`):** `agy` reports status natively over OSC 7501 without any hook
+  setup. To also report conversation IDs and transcript paths to the Agent Dashboard and
+  session restore, merge [`resources/AgentHooks/agy-hooks.json`](resources/AgentHooks/agy-hooks.json)
+  into `~/.gemini/config/hooks.json`.
 - **omp:** enable its ambient extension once after installing Soprano:
 
   ```bash
@@ -317,7 +326,7 @@ there; bind one in `settings.json`).
 
 | Shortcut | Action |
 |---|---|
-| `⌘1` / `⌘2` / `⌘3` / `⌘4` | Launch Codex / Claude Code / OpenCode / omp |
+| `⌘1` / `⌘2` / `⌘3` / `⌘4` / `⌘5` | Launch Codex / Claude Code / OpenCode / omp / Antigravity |
 | `⌘I` | New omp chat beside the focused pane |
 | `⌘D` | New terminal pane beside the focused one |
 | `⌘B` | New browser pane |
@@ -338,6 +347,7 @@ there; bind one in `settings.json`).
 | `⌘L` | Toggle the right sidebar (in a browser pane, `⌘L` focuses its address bar) |
 | `⇧⌘E` | Show and focus the file explorer; press again while it has focus to hide it |
 | `⇧⌘G` | Show and focus Source Control; press again while it has focus to hide it (the file editor keeps `⇧⌘G` for find) |
+| `⇧⌘H` | Show and focus Session History search; press again while it has focus to hide it |
 | `⌃A` → `G` | Open the active tab's Git repository in Soprano Git |
 | `⌘S` / `⌘F` | Save / find in the file editor |
 | `⇧⌘S` | Save workspace as… (all sessions and their layouts) |
@@ -763,6 +773,17 @@ its tab when Soprano Git already shows it.
 - The context menu offers **Open Diff**, **Open File**, **Copy Path**, **Copy Relative
   Path**, and **Reveal in Finder**; `Esc` returns to the focused pane.
 
+## Session history
+
+The right sidebar's third tab, **History** (`⇧⌘H` / `toggle-session-history`, or the
+**History** toggle next to Files and Changes), indexes past Claude Code, omp, Codex, and
+OpenCode sessions on this computer with an incremental cache. Switch between **Workspace**
+(the active pane's worktree or folder), **Project** (all worktrees of the same git
+repository), and **All**, search across titles, models, branches, and conversation text,
+filter by agent CLI, sort by last updated / created / message count, expand any card to
+preview recent messages, and double-click or press `Return` (or open its `…` menu) to
+resume the session in a split pane, new tab, or chat.
+
 ## File editor
 
 Files open in Soprano itself, like Orca's editor tabs, without covering the pane you are
@@ -1118,7 +1139,7 @@ default.
   },
 
   // Add your own agents. Reusing a built-in id ("codex", "claude-code",
-  // "opencode", "omp") patches that profile field by field instead. Plain
+  // "opencode", "omp", "agy") patches that profile field by field instead. Plain
   // terminal panes are not configured here — they run your login shell.
   "agents": [
     {
@@ -1127,7 +1148,7 @@ default.
       "command": "aider",
       "args": ["--no-auto-commits"],
       "color": "#8bd5ca",
-      "launchKey": "cmd+5",
+      "launchKey": "cmd+6",
       "env": { "AIDER_DARK_MODE": "1" },
       "cwd": "~/git"
     }
@@ -1137,7 +1158,7 @@ default.
   "automations": {
     "weekday-audit": {
       "name": "Weekday repo audit",
-      "agent": "omp",                   // omp | claude-code | codex | opencode
+      "agent": "omp",                   // omp | claude-code | codex | opencode | agy
       "folder": "~/git/shop",
       "prompt": "Review the repository health and summarize what needs attention.",
       "schedule": "0 9 * * 1-5",        // cron: minute hour day month weekday

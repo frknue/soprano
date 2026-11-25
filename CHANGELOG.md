@@ -10,6 +10,19 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Antigravity (`agy`) agent support**: built-in `agy` profile with `⌘5` (`launch-agy`)
+  shortcut, Antigravity icon, automatic `--dangerously-skip-permissions`, interactive launch
+  prompts (`--prompt-interactive`) for Agent Dashboard threads and automations, exact session
+  resume (`--resume`), native OSC 7501 status and notification integration, remote machine
+  stand-in, `resources/AgentHooks/agy-hooks.json` lifecycle hooks template, Agent Dashboard
+  transcript decoding, and Session History indexing.
+- **Agent Session History** in the right sidebar (**History** toggle, `⇧⌘H` /
+  `toggle-session-history`, or `⌘P` → *Toggle Session History*): indexes past Claude Code,
+  omp, Codex, and OpenCode sessions with an incremental cache, scopes them to the focused
+  pane's **Workspace** (current worktree/folder), **Project** (all worktrees of the same
+  git repo), or **All**, searches across titles, models, branches, and full conversation
+  text with matching snippets, expands cards to preview recent messages, and resumes any
+  session directly in a split pane, new tab, or chat.
 - **New threads from the Agent Dashboard**: the pencil button, `N`, or `⌘N` starts an agent
   with your first message — "What should we build in *project*?" picks the folder (the
   projects open in your windows, the `projectDirectories`, or any folder) and the chip in

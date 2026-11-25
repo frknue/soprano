@@ -660,9 +660,13 @@ fn agent_name(profile_id: &str) -> String {
         .unwrap_or_else(|| "Agent".to_owned())
 }
 
-/// The agent profile an OSC 7501 `app` names: a profile id, or Claude Code's own spelling.
+/// The agent profile an OSC 7501 `app` names: a profile id, or a CLI's own spelling.
 fn profile_for_app(app: &str) -> Option<String> {
-    let id = if app == "claude" { "claude-code" } else { app };
+    let id = match app {
+        "claude" => "claude-code",
+        "antigravity" | "antigravity-cli" => "agy",
+        other => other,
+    };
     AgentCatalog::shared().profile(id).map(|profile| profile.id)
 }
 

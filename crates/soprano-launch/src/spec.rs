@@ -325,6 +325,14 @@ pub fn launch_arguments(profile_id: &str, launch: &AgentLaunch, including_prompt
                 arguments.push(format!("--prompt={prompt}"));
             }
         }
+        "agy" => {
+            if let Some(model) = &launch.model {
+                arguments.extend(["--model".to_owned(), model.clone()]);
+            }
+            if !prompt.is_empty() {
+                arguments.push(format!("--prompt-interactive={prompt}"));
+            }
+        }
         _ => {}
     }
     arguments

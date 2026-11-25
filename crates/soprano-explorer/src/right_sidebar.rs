@@ -13,7 +13,7 @@ use soprano_platform::StateStore;
 use soprano_ui::ActiveSopranoTheme;
 
 use crate::sidebar::{PanelToggle, RightSidebarState, RightSidebarTab};
-use crate::{ChangesPanel, FilesPanel, SidebarEvent};
+use crate::{ChangesPanel, FilesPanel, HistoryPanel, SidebarEvent};
 
 /// The leading edge's grab area.
 const HANDLE_WIDTH: f32 = 6.0;
@@ -22,6 +22,7 @@ pub struct RightSidebar {
     state: RightSidebarState,
     files: Entity<FilesPanel>,
     changes: Entity<ChangesPanel>,
+    history: Entity<HistoryPanel>,
     /// Window width minus the left sidebar: what a drag may share with the panes.
     available_width: Option<f32>,
     /// The sidebar's right edge in window coordinates while the edge is dragged.
@@ -37,14 +38,17 @@ impl RightSidebar {
     pub fn new(store: StateStore, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let files = cx.new(|cx| FilesPanel::new(store.clone(), window, cx));
         let changes = cx.new(|cx| ChangesPanel::new(window, cx));
+        let history = cx.new(|cx| HistoryPanel::new(window, cx));
         let subscriptions = vec![
             cx.subscribe(&files, |_, _, event: &SidebarEvent, cx| cx.emit(event.clone())),
             cx.subscribe(&changes, |_, _, event: &SidebarEvent, cx| cx.emit(event.clone())),
+            cx.subscribe(&history, |_, _, event: &SidebarEvent, cx| cx.emit(event.clone())),
         ];
         let mut sidebar = Self {
             state: RightSidebarState::load(store),
             files,
             changes,
+            history,
             available_width: None,
             resizing: None,
             resize_highlighted: false,
@@ -61,6 +65,10 @@ impl RightSidebar {
 
     pub fn changes(&self) -> &Entity<ChangesPanel> {
         &self.changes
+    }
+
+    pub fn history(&self) -> &Entity<HistoryPanel> {
+        &self.history
     }
 
     pub fn tab(&self) -> RightSidebarTab {
@@ -86,10 +94,11 @@ impl RightSidebar {
         self.available_width = width;
     }
 
-    /// The focused pane's working directory, for both panels (`None` keeps the roots).
+    /// The focused pane's working directory, for all panels (`None` keeps the roots).
     pub fn set_working_directory(&mut self, cwd: Option<&str>, cx: &mut Context<Self>) {
         self.files.update(cx, |files, cx| files.set_working_directory(cwd, cx));
         self.changes.update(cx, |changes, cx| changes.set_working_directory(cwd, cx));
+        self.history.update(cx, |history, cx| history.set_working_directory(cwd, cx));
     }
 
     /// The remote machine the focused pane runs on (`None`: this computer).
@@ -100,9 +109,11 @@ impl RightSidebar {
         }
     }
 
-    /// Whether the keyboard is in either panel.
+    /// Whether the keyboard is in any panel.
     pub fn contains_focus(&self, window: &Window, cx: &App) -> bool {
-        self.files.read(cx).contains_focus(window, cx) || self.changes.read(cx).contains_focus(window, cx)
+        self.files.read(cx).contains_focus(window, cx)
+            || self.changes.read(cx).contains_focus(window, cx)
+            || self.history.read(cx).contains_focus(window, cx)
     }
 
     /// Shows `tab` and remembers it; the keyboard moves along when it was in the panel
@@ -150,6 +161,11 @@ impl RightSidebar {
         self.toggle_tab(RightSidebarTab::SourceControl, window, cx);
     }
 
+    /// ⇧⌘H: the same for Agent Session History (focuses its search input).
+    pub fn toggle_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_tab(RightSidebarTab::History, window, cx);
+    }
+
     fn toggle_tab(&mut self, tab: RightSidebarTab, window: &mut Window, cx: &mut Context<Self>) {
         let had_focus = self.contains_focus(window, cx);
         match self.state.toggle_tab(tab, had_focus) {
@@ -165,12 +181,15 @@ impl RightSidebar {
         cx.notify();
     }
 
-    /// Moves the keyboard into the active panel's list.
+    /// Moves the keyboard into the active panel's primary control.
     pub fn focus_active_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.state.tab() {
             RightSidebarTab::Explorer => self.files.update(cx, |files, cx| files.focus_tree(window, cx)),
             RightSidebarTab::SourceControl => {
                 self.changes.update(cx, |changes, cx| changes.focus_list(window, cx))
+            }
+            RightSidebarTab::History => {
+                self.history.update(cx, |history, cx| history.focus_search(window, cx))
             }
         }
     }
@@ -181,6 +200,8 @@ impl RightSidebar {
         self.files.update(cx, |files, cx| files.set_active(open && tab == RightSidebarTab::Explorer, cx));
         self.changes
             .update(cx, |changes, cx| changes.set_active(open && tab == RightSidebarTab::SourceControl, cx));
+        self.history
+            .update(cx, |history, cx| history.set_active(open && tab == RightSidebarTab::History, cx));
     }
 
     /// Double-clicking the edge restores the default width.
@@ -214,19 +235,22 @@ impl Render for RightSidebar {
         }
         let panel = match (&self.remote_machine, self.state.tab()) {
             (Some(machine), tab) => {
-                let title = if tab == RightSidebarTab::Explorer { "Files" } else { "Changes" };
+                let title = tab.card_title();
+                let note = if tab == RightSidebarTab::History {
+                    format!(
+                        "Not available on {machine}\nSession History indexes transcripts on this computer."
+                    )
+                } else {
+                    format!("Not available on {machine}\nFiles and Changes show this computer's folders.")
+                };
                 crate::ui::card(&t)
                     .child(crate::ui::header(&t, title))
-                    .child(crate::ui::empty_state(
-                        &t,
-                        &format!(
-                            "Not available on {machine}\nFiles and Changes show this computer's folders."
-                        ),
-                    ))
+                    .child(crate::ui::empty_state(&t, &note))
                     .into_any_element()
             }
             (None, RightSidebarTab::Explorer) => self.files.clone().into_any_element(),
             (None, RightSidebarTab::SourceControl) => self.changes.clone().into_any_element(),
+            (None, RightSidebarTab::History) => self.history.clone().into_any_element(),
         };
         let highlight = if self.resize_highlighted { t.input } else { gpui::transparent_black() };
         let entity = cx.entity().downgrade();

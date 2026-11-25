@@ -55,7 +55,7 @@ impl AgentProfile {
     /// is typed into a shell as written, and another program's flags are not known.
     pub fn takes_launch_prompt(&self) -> bool {
         self.launch_script.as_deref().is_none_or(str::is_empty)
-            && matches!(self.id.as_str(), "claude-code" | "codex" | "omp" | "opencode")
+            && matches!(self.id.as_str(), "claude-code" | "codex" | "omp" | "opencode" | "agy")
     }
 
     fn builtin(id: &str, name: &str, icon: &str, color: &str, description: &str, command: &str) -> Self {
@@ -90,6 +90,7 @@ impl DefaultAgents {
     pub const CLAUDE_CODE: &'static str = "claude-code";
     pub const OPENCODE: &'static str = "opencode";
     pub const OMP: &'static str = "omp";
+    pub const AGY: &'static str = "agy";
     pub const TERMINAL: &'static str = "terminal";
 
     pub fn codex() -> AgentProfile {
@@ -131,6 +132,20 @@ impl DefaultAgents {
         AgentProfile::builtin("omp", "omp", "sparkles", "#b8a4ff", "Oh My Pi terminal coding agent", "omp")
     }
 
+    pub fn agy() -> AgentProfile {
+        AgentProfile {
+            patterns: patterns(&["Antigravity", ">", "❯"], &["Error", "error:", "FAILED"]),
+            ..AgentProfile::builtin(
+                "agy",
+                "Antigravity",
+                "sparkles",
+                "#3186ff",
+                "Google Antigravity CLI agent",
+                "agy",
+            )
+        }
+    }
+
     /// The plain login shell: `$SHELL --login` (`/bin/zsh` when unset) on Unix; PowerShell on
     /// Windows, which has no `--login`.
     pub fn terminal() -> AgentProfile {
@@ -149,7 +164,14 @@ impl DefaultAgents {
     }
 
     pub fn all() -> Vec<AgentProfile> {
-        vec![Self::codex(), Self::claude_code(), Self::open_code(), Self::omp(), Self::terminal()]
+        vec![
+            Self::codex(),
+            Self::claude_code(),
+            Self::open_code(),
+            Self::omp(),
+            Self::agy(),
+            Self::terminal(),
+        ]
     }
 
     pub fn profile(id: &str) -> Option<AgentProfile> {
@@ -279,7 +301,7 @@ impl AgentConversation {
     }
 
     pub fn supports(profile_id: &str) -> bool {
-        matches!(profile_id, "codex" | "claude-code" | "opencode" | "omp")
+        matches!(profile_id, "codex" | "claude-code" | "opencode" | "omp" | "agy")
     }
 
     pub fn valid_id(value: &str) -> bool {
@@ -290,21 +312,30 @@ impl AgentConversation {
     }
 
     /// The conversation a lifecycle-hook payload names. Codex notify uses `thread-id`,
-    /// lifecycle hooks `session_id`, OpenCode's plugin `sessionID`; a generic event id is
-    /// never used.
+    /// lifecycle hooks `session_id`, OpenCode's plugin `sessionID`, Antigravity hooks
+    /// `conversationId`; a generic event id is never used.
     pub fn from_payload(payload: &str) -> Option<Self> {
         let object: serde_json::Map<String, serde_json::Value> = serde_json::from_str(payload).ok()?;
-        let id = ["session_id", "thread-id", "thread_id", "sessionID"]
+        let id = ["session_id", "thread-id", "thread_id", "sessionID", "conversationId"]
             .iter()
             .filter_map(|k| object.get(*k).and_then(|v| v.as_str()))
             .find(|v| Self::valid_id(v))?
             .to_owned();
-        let cwd =
-            object.get("cwd").and_then(|v| v.as_str()).filter(|s| s.starts_with('/')).map(str::to_owned);
-        let transcript_path = object
-            .get("transcript_path")
+        let cwd = object
+            .get("cwd")
             .and_then(|v| v.as_str())
-            .filter(|p| p.starts_with('/') && (p.ends_with(".jsonl") || p.ends_with(".db")))
+            .filter(|s| s.starts_with('/'))
+            .or_else(|| {
+                object
+                    .get("workspacePaths")
+                    .and_then(|v| v.as_array())
+                    .and_then(|paths| paths.iter().filter_map(|v| v.as_str()).find(|s| s.starts_with('/')))
+            })
+            .map(str::to_owned);
+        let transcript_path = ["transcript_path", "transcriptPath"]
+            .iter()
+            .filter_map(|k| object.get(*k).and_then(|v| v.as_str()))
+            .find(|p| p.starts_with('/') && (p.ends_with(".jsonl") || p.ends_with(".db")))
             .map(str::to_owned);
         Some(Self { id, cwd, transcript_path })
     }
@@ -317,6 +348,7 @@ impl AgentConversation {
             "claude-code" => (&["--resume", "-r", "--session-id"], &["--continue", "-c", "--fork-session"]),
             "opencode" => (&["--session", "-s"], &["--continue", "-c", "--fork"]),
             "omp" => (&["--resume", "-r"], &["--continue", "-c"]),
+            "agy" => (&["--resume", "-r", "--conversation"], &["--continue", "-c"]),
             _ => return arguments.to_vec(),
         };
         let valued: HashSet<&str> = valued.iter().copied().collect();
@@ -345,6 +377,7 @@ impl AgentConversation {
             "claude-code" => ["--resume", &self.id],
             "opencode" => ["--session", &self.id],
             "omp" => ["--resume", &self.id],
+            "agy" => ["--resume", &self.id],
             _ => return remaining,
         };
         head.iter().map(|s| s.to_string()).chain(remaining).collect()
@@ -387,7 +420,20 @@ mod tests {
         assert_eq!(c.resume_arguments("codex", &args), ["resume", "abc", "-m", "o3"]);
         let args: Vec<String> = ["--session=old", "-c"].map(String::from).to_vec();
         assert_eq!(c.resume_arguments("opencode", &args), ["--session", "abc"]);
+        let args: Vec<String> =
+            ["--conversation", "old", "-c", "--model", "gemini"].map(String::from).to_vec();
+        assert_eq!(c.resume_arguments("agy", &args), ["--resume", "abc", "--model", "gemini"]);
         assert_eq!(c.resume_arguments("aider", &["--x".into()]), ["--x"]);
+    }
+
+    #[test]
+    fn antigravity_camel_case_hook_payloads_carry_conversation_cwd_and_transcript() {
+        let payload =
+            r#"{"conversationId":"conv-123","workspacePaths":["/tmp/ws"],"transcriptPath":"/tmp/t.jsonl"}"#;
+        let conversation = AgentConversation::from_payload(payload).expect("conversation");
+        assert_eq!(conversation.id, "conv-123");
+        assert_eq!(conversation.cwd.as_deref(), Some("/tmp/ws"));
+        assert_eq!(conversation.transcript_path.as_deref(), Some("/tmp/t.jsonl"));
     }
 
     #[test]

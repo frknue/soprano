@@ -28,6 +28,11 @@ impl ApprovalOptions {
             },
             "omp" => Self { bypass: "--auto-approve", valued: &["--approval-mode"], switches: &[] },
             "opencode" => Self { bypass: "--auto", valued: &[], switches: &[] },
+            "agy" => Self {
+                bypass: "--dangerously-skip-permissions",
+                valued: &["--mode"],
+                switches: &["--sandbox"],
+            },
             _ => return None,
         })
     }
@@ -94,6 +99,10 @@ mod tests {
             ["--model=x", "--auto-approve"]
         );
         assert_eq!(bypassed("opencode", &["--session", "s", "--auto"]), ["--session", "s", "--auto"]);
+        assert_eq!(
+            bypassed("agy", &["--mode", "plan", "--sandbox", "--model", "gemini"]),
+            ["--model", "gemini", "--dangerously-skip-permissions"]
+        );
         // An option at the very end, missing its value, takes nothing with it.
         assert_eq!(bypassed("claude-code", &["--permission-mode"]), ["--dangerously-skip-permissions"]);
     }

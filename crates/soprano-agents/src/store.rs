@@ -20,6 +20,7 @@ use std::time::{Duration, Instant, SystemTime};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use soprano_types::AgentConversation;
 
+use crate::agy::AgyTranscriptDecoder;
 use crate::claude::ClaudeTranscriptDecoder;
 use crate::codex::CodexRolloutDecoder;
 use crate::omp::OmpSessionDecoder;
@@ -67,6 +68,13 @@ impl AgentTranscriptSource {
                 Box::new(OmpSessionDecoder::new(None))
             })),
             AgentTranscriptFormat::OpenCode => Box::new(OpenCodeTranscriptReader::new(self.clone(), home)),
+            AgentTranscriptFormat::Agy => {
+                Box::new(TranscriptFollower::new(
+                    self.clone(),
+                    home,
+                    || Box::new(AgyTranscriptDecoder::new()),
+                ))
+            }
         }
     }
 }
@@ -699,6 +707,15 @@ impl AgentTranscriptLocator {
             // A database, not a file per conversation: OpenCodeTranscriptReader searches
             // OpenCode's data directories itself.
             AgentTranscriptFormat::OpenCode => None,
+            AgentTranscriptFormat::Agy => {
+                // ~/.gemini/antigravity-cli/brain/<conversation id>/.system_generated/logs/transcript.jsonl
+                [".gemini/antigravity-cli/brain", ".gemini/antigravity/brain"]
+                    .into_iter()
+                    .map(|root| {
+                        home.join(root).join(conversation_id).join(".system_generated/logs/transcript.jsonl")
+                    })
+                    .find(|candidate| candidate.exists())
+            }
         }
     }
 }

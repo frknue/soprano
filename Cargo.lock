@@ -7847,6 +7847,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "soprano-git",
  "soprano-platform",
  "soprano-types",
  "tempfile",
@@ -8021,6 +8022,7 @@ name = "soprano-explorer"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clipboard-win",
  "futures",
  "gpui-component",
@@ -8031,9 +8033,11 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "plist",
  "smallvec",
+ "soprano-agents",
  "soprano-files",
  "soprano-git",
  "soprano-platform",
+ "soprano-types",
  "soprano-ui",
  "tempfile",
 ]

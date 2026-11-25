@@ -142,7 +142,7 @@ fn seed_settings(directory: &Path) {
         ],
         "agents": [
             { "id": "claude-code", "args": ["--model", "opus"] },
-            { "id": "aider", "name": "Aider", "command": "aider", "launchKey": "cmd+5" },
+            { "id": "aider", "name": "Aider", "command": "aider", "launchKey": "cmd+6" },
         ],
         "keybindings": {
             "bindings": { "new-tab": "ctrl+k", "next-window": "ctrl+k", "split-vertical": null },
