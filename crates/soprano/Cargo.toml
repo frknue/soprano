@@ -24,6 +24,7 @@ soprano-ipc = { path = "../soprano-ipc" }
 soprano-launch = { path = "../soprano-launch" }
 soprano-git = { path = "../soprano-git" }
 soprano-accounts = { path = "../soprano-accounts" }
+soprano-mobile = { path = "../soprano-mobile" }
 soprano-agents = { path = "../soprano-agents" }
 soprano-model = { path = "../soprano-model" }
 soprano-text = { path = "../soprano-text" }

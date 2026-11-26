@@ -10,6 +10,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Mobile PWA over Tailscale**: enable private mobile access in **Settings ▸ Mobile**
+  (`mobile.enabled` / `mobile.port` in `settings.json`) to serve an installable PWA over
+  `tailscale serve` HTTPS, pair phones with a single-use QR code, manage/revoke paired
+  devices, monitor all agents grouped by status, approve tool calls, answer questions,
+  reply to threads, and start new threads from your phone.
 - **Open in VS Code**: `⌃A` → `V` (`open-in-vscode`, also in the command palette) opens
   the active tab's directory in Visual Studio Code.
 - **Chat UI for all built-in agents**: native Chat UI now supports **Claude Code**

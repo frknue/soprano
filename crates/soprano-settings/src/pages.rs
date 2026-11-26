@@ -2,8 +2,9 @@
 //! (`form`).
 
 use gpui::{
-    AnyElement, ClickEvent, Context, ElementId, FontWeight, Hsla, IntoElement, MouseButton, ParentElement,
-    SharedString, Styled, Window, div, prelude::*,
+    AnyElement, Bounds, ClickEvent, ClipboardItem, Context, ElementId, FontWeight, Hsla, IntoElement,
+    MouseButton, ParentElement, SharedString, Styled, Window, canvas, div, fill, point, prelude::*,
+    size as gpui_size,
 };
 use gpui_component::input::InputState;
 use soprano_accounts::presentation::{
@@ -15,6 +16,8 @@ use soprano_config::{
     prefix_legend_for,
 };
 use soprano_launch::MachineCheck;
+use soprano_mobile::{QrMatrix, TailscaleStatus};
+use soprano_platform::AppIdentity;
 use soprano_types::{AgentProfile, DefaultAgents};
 use soprano_ui::button::{Button, ButtonSize, ButtonVariant, IconButton, IconButtonSize};
 use soprano_ui::controls::{SegmentedControl, Switch, TextInput};
@@ -29,6 +32,7 @@ use crate::agents::{self, AgentField};
 use crate::chat_ui;
 use crate::form::{Form, INSET, mono};
 use crate::general::{self, Toggle};
+use crate::mobile;
 use crate::notifications::{NotificationStatusRow, StatusTone};
 use crate::shortcuts::{self, ShortcutEntry};
 use crate::view::{MachineStatus, Recording, SettingsView};
@@ -644,6 +648,244 @@ impl SettingsView {
                 .into_any_element(),
         );
         vec![form.lead(general::MACHINES_NOTE).into_any_element(), form.group(rows).into_any_element()]
+    }
+
+    // MARK: - Mobile
+
+    pub(crate) fn mobile_page(&mut self, t: &SopranoTheme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let form = Form::new(t);
+        let mobile_settings = self.snapshot.resolved.settings.mobile.clone();
+        let enabled = mobile_settings.enabled;
+        let snapshot = self.mobile_snapshot.clone();
+        let mut sections = vec![form.lead(mobile::LEAD).into_any_element()];
+
+        // 1. Enable + Tailscale status + Port
+        let toggle_button =
+            Button::new("settings-mobile-toggle", if enabled { "Turn off" } else { "Turn on" })
+                .size(ButtonSize::Sm)
+                .variant(if enabled { ButtonVariant::default() } else { ButtonVariant::Primary })
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    let next = !enabled;
+                    if mobile::set_enabled(&this.store, next) {
+                        this.reload(window, cx);
+                    }
+                }));
+        let toggle_row = form
+            .row(if enabled { "Mobile access is on" } else { "Mobile access is off" })
+            .description(if enabled {
+                "Serving Soprano privately over Tailscale HTTPS."
+            } else {
+                "Enable to pair your phone with a QR code."
+            })
+            .control(toggle_button)
+            .render(t);
+
+        let status = mobile::status_row(&snapshot);
+        let mut status_controls: Vec<AnyElement> = Vec::new();
+        if let Some((label, url)) = status.action {
+            status_controls.push(
+                Button::new("settings-mobile-setup-url", label)
+                    .size(ButtonSize::Sm)
+                    .on_click(move |_, _, _| {
+                        let _ = soprano_platform::system::open_default(&url);
+                    })
+                    .into_any_element(),
+            );
+        }
+        if enabled {
+            status_controls.push(
+                IconButton::new("settings-mobile-refresh", IconName::RefreshCw)
+                    .icon_size(14.)
+                    .tooltip("Refresh Tailscale status")
+                    .disabled(snapshot.checking)
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.mobile.refresh();
+                        this.mobile_snapshot = this.mobile.snapshot();
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
+        let mut status_row = form
+            .row(status.title)
+            .leading(form.dot(tone_color(t, status.tone)))
+            .description(status.description);
+        if matches!(snapshot.tailscale, TailscaleStatus::Ready { .. }) {
+            status_row = status_row.mono_description();
+        }
+        if !status_controls.is_empty() {
+            status_row = status_row.control(form.controls(status_controls));
+        }
+
+        let is_dev = AppIdentity::current().is_dev();
+        let default_port = soprano_config::MobileSettings::default().effective_port(is_dev);
+        let port_limits = Limits::MOBILE_PORT;
+        let port_row = form
+            .row("Tailscale HTTPS port")
+            .description(format!(
+                "Port served on your tailnet ({}–{}; default {default_port}).",
+                port_limits.start(),
+                port_limits.end()
+            ))
+            .reset_when(
+                mobile_settings.port.is_some(),
+                "reset-mobile-port",
+                cx.listener(|this, _: &ClickEvent, window, cx| {
+                    if mobile::reset_port(&this.store) {
+                        this.reload(window, cx);
+                    }
+                }),
+            )
+            .control(div().w(t.z(104.)).child(TextInput::new(&self.mobile_port_input).small()))
+            .render(t);
+
+        sections.push(form.section("Tailscale").rows(vec![toggle_row, status_row.render(t), port_row]));
+
+        // 2. QR Pairing card (when Tailscale is ready)
+        if let TailscaleStatus::Ready { https_url, .. } = &snapshot.tailscale {
+            let now = chrono::Utc::now();
+            let qr_content: AnyElement = if let Some(offer) = snapshot.pairing.clone() {
+                let copy_url = offer.url.clone();
+                let expiry = mobile::expires_in(offer.expires_at, now);
+                let copied = self.mobile_copied;
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(t.z(20.))
+                    .px(t.z(INSET))
+                    .py(t.z(16.))
+                    .child(qr_code_element(offer.qr, t))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(t.z(8.))
+                            .child(
+                                div()
+                                    .text_size(t.z(size::ROW))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(t.foreground)
+                                    .child("Scan with your phone camera"),
+                            )
+                            .child(
+                                div()
+                                    .text_size(t.z(size::META))
+                                    .line_height(t.z(17.))
+                                    .text_color(t.muted)
+                                    .child(mobile::PAIRING_NOTE),
+                            )
+                            .child(
+                                mono(div())
+                                    .text_size(t.z(size::META))
+                                    .text_color(t.dim)
+                                    .truncate()
+                                    .child(https_url.clone()),
+                            )
+                            .child(form.small(expiry, t.dim))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(t.z(8.))
+                                    .pt(t.z(4.))
+                                    .child(
+                                        Button::new(
+                                            "settings-mobile-copy-link",
+                                            if copied { "Copied" } else { "Copy pairing link" },
+                                        )
+                                        .size(ButtonSize::Sm)
+                                        .on_click(cx.listener(
+                                            move |this, _: &ClickEvent, _, cx| {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    copy_url.clone(),
+                                                ));
+                                                this.mobile_copied = true;
+                                                cx.notify();
+                                            },
+                                        )),
+                                    )
+                                    .child(
+                                        Button::new("settings-mobile-regenerate", "Regenerate")
+                                            .size(ButtonSize::Sm)
+                                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                                this.mobile_copied = false;
+                                                this.mobile.regenerate_pairing();
+                                                this.mobile_snapshot = this.mobile.snapshot();
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            } else {
+                form.row("Pairing code expired or used")
+                    .description("Generate a fresh single-use QR code to pair another device.")
+                    .control(
+                        Button::new("settings-mobile-generate", "Generate QR code")
+                            .primary()
+                            .size(ButtonSize::Sm)
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.mobile_copied = false;
+                                this.mobile.regenerate_pairing();
+                                this.mobile_snapshot = this.mobile.snapshot();
+                                cx.notify();
+                            })),
+                    )
+                    .render(t)
+            };
+            sections.push(form.section("Pair a device").rows(vec![qr_content]));
+        }
+
+        // 3. Paired devices
+        let now = chrono::Utc::now();
+        let mut device_rows: Vec<AnyElement> = Vec::new();
+        if snapshot.devices.is_empty() {
+            device_rows.push(form.placeholder(mobile::NO_DEVICES_TITLE, mobile::NO_DEVICES_HINT));
+        } else {
+            for device in &snapshot.devices {
+                let device_id = device.id.clone();
+                let mut desc = format!("Last seen {}", mobile::relative_ago(device.last_seen, now));
+                if let Some(user) = &device.tailscale_user {
+                    desc = format!("{user} · {desc}");
+                }
+                device_rows.push(
+                    form.row(device.name.clone())
+                        .leading(icon(IconName::Shield).size(15.).color(t.muted))
+                        .description(desc)
+                        .control(
+                            IconButton::new(id("revoke-mobile-device", &device.id), IconName::X)
+                                .tooltip("Revoke device access")
+                                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                                    this.mobile.revoke_device(&device_id);
+                                    this.mobile_snapshot = this.mobile.snapshot();
+                                    cx.notify();
+                                })),
+                        )
+                        .render(t),
+                );
+            }
+            device_rows.push(
+                form.bar(vec![
+                    div().flex_1().into_any_element(),
+                    Button::new("settings-mobile-revoke-all", "Revoke all devices")
+                        .size(ButtonSize::Sm)
+                        .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.mobile.revoke_all_devices();
+                            this.mobile_snapshot = this.mobile.snapshot();
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ])
+                .into_any_element(),
+            );
+        }
+        sections.push(form.section("Paired devices").count(snapshot.devices.len()).rows(device_rows));
+
+        sections
     }
 
     // MARK: - Keyboard Shortcuts
@@ -1497,6 +1739,54 @@ pub(crate) fn account_mark(is_selected: bool, has_problem: bool, t: &SopranoThem
     } else {
         div().size(side).rounded_full().border_1().border_color(t.muted).into_any_element()
     }
+}
+
+/// Paints a crisp high-contrast QR code onto a white quiet-zone card so phone cameras lock on
+/// cleanly in both light and dark themes.
+fn qr_code_element(qr: QrMatrix, t: &SopranoTheme) -> AnyElement {
+    let side = t.z(168.);
+    div()
+        .flex_none()
+        .size(side)
+        .p(t.z(8.))
+        .rounded(t.z(8.))
+        .bg(gpui::white())
+        .border_1()
+        .border_color(t.border)
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds, (), window, _| {
+                    if qr.width == 0 {
+                        return;
+                    }
+                    let quiet = 2usize;
+                    let total_modules = (qr.width + quiet * 2) as f32;
+                    let span = f32::from(bounds.size.width).min(f32::from(bounds.size.height));
+                    let cell = (span / total_modules).floor().max(1.0);
+                    let used = cell * total_modules;
+                    let origin_x = f32::from(bounds.origin.x) + ((span - used) * 0.5).floor();
+                    let origin_y = f32::from(bounds.origin.y) + ((span - used) * 0.5).floor();
+                    let dark = gpui::black();
+                    for y in 0..qr.width {
+                        for x in 0..qr.width {
+                            if qr.is_dark(x, y) {
+                                let rect = Bounds::new(
+                                    point(
+                                        gpui::px(origin_x + (x + quiet) as f32 * cell),
+                                        gpui::px(origin_y + (y + quiet) as f32 * cell),
+                                    ),
+                                    gpui_size(gpui::px(cell), gpui::px(cell)),
+                                );
+                                window.paint_quad(fill(rect, dark));
+                            }
+                        }
+                    }
+                },
+            )
+            .size_full(),
+        )
+        .into_any_element()
 }
 
 /// Small builder conveniences for optional parts.

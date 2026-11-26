@@ -12,7 +12,9 @@ soprano-platform = { path = "../soprano-platform" }
 soprano-config = { path = "../soprano-config" }
 soprano-launch = { path = "../soprano-launch" }
 soprano-accounts = { path = "../soprano-accounts" }
+soprano-mobile = { path = "../soprano-mobile" }
 soprano-ui = { path = "../soprano-ui" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui.workspace = true
 gpui-component.workspace = true
 serde_json.workspace = true

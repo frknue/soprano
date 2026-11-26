@@ -7,6 +7,7 @@ use gpui::Entity;
 use soprano_accounts::AccountsController;
 use soprano_config::ConfigStore;
 use soprano_git::branch::GitBranchMonitor;
+use soprano_mobile::MobileController;
 use soprano_model::SessionManager;
 use soprano_platform::StateStore;
 
@@ -15,6 +16,7 @@ pub struct Services {
     pub state: StateStore,
     pub config: ConfigStore,
     pub accounts: AccountsController,
+    pub mobile: MobileController,
     pub branches: Arc<GitBranchMonitor>,
     /// Saved named workspaces (`SessionManager`).
     pub sessions: Entity<SessionManager>,

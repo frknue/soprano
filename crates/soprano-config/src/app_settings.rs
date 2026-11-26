@@ -101,6 +101,28 @@ impl ChatUiSettings {
     }
 }
 
+/// Mobile PWA access over Tailscale (`mobile` in `settings.json`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MobileSettings {
+    /// When on, Soprano serves its mobile PWA locally and exposes it over `tailscale serve`.
+    pub enabled: bool,
+    /// Optional explicit HTTPS port for `tailscale serve` (1024–65535). When `None`, release
+    /// builds use 8443 and dev builds use 8444 so they never collide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+}
+
+impl MobileSettings {
+    pub const DEFAULT_RELEASE_PORT: u16 = 8443;
+    pub const DEFAULT_DEV_PORT: u16 = 8444;
+
+    /// The HTTPS port `tailscale serve` listens on for this build identity.
+    pub fn effective_port(&self, is_dev: bool) -> u16 {
+        self.port.unwrap_or(if is_dev { Self::DEFAULT_DEV_PORT } else { Self::DEFAULT_RELEASE_PORT })
+    }
+}
+
 /// Application-wide preferences.
 ///
 /// `settings.json` is the source of truth (see `ConfigStore`); the `StateStore` copy is only
@@ -130,6 +152,8 @@ pub struct AppSettings {
     pub notification_sound: bool,
     /// Native Chat UI master toggle and per-agent default launch mode (`chat` vs `cli`).
     pub chat_ui: ChatUiSettings,
+    /// Mobile PWA access over Tailscale.
+    pub mobile: MobileSettings,
 }
 
 impl Default for AppSettings {
@@ -144,6 +168,7 @@ impl Default for AppSettings {
             project_directories: Vec::new(),
             notification_sound: false,
             chat_ui: ChatUiSettings::default(),
+            mobile: MobileSettings::default(),
         }
     }
 }
