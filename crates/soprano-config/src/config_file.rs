@@ -217,6 +217,12 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
     "sound": {sound}
   }},
 
+  "editor": {{
+    // Use Vim motions and modal editing in the built-in file editor.
+    // On by default; set false for standard modeless editing.
+    "vimMode": {editor_vim_mode}
+  }},
+
   "chatUi": {{
     // Launch supported agents in Soprano's native Chat UI by default.
     // Off by default; override per-agent launch modes (chat or cli) here.
@@ -309,6 +315,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
         uptime = settings.status_bar_uptime,
         restore_last_session = settings.restore_last_session,
         sound = settings.notification_sound,
+        editor_vim_mode = settings.editor_vim_mode,
         chat_ui_enabled = settings.chat_ui.enabled,
         mobile_enabled = settings.mobile.enabled,
         prefix_key = json_string_literal(&keybindings.prefix_key),

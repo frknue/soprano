@@ -14,6 +14,7 @@ pub const HIDE_WINDOW_TABS_KEY: &[&str] = &["hideWindowTabs"];
 pub const STATUS_BAR_UPTIME_KEY: &[&str] = &["statusBar", "uptime"];
 pub const RESTORE_LAST_SESSION_KEY: &[&str] = &["restoreLastSession"];
 pub const NOTIFICATION_SOUND_KEY: &[&str] = &["notifications", "sound"];
+pub const EDITOR_VIM_MODE_KEY: &[&str] = &["editor", "vimMode"];
 pub const PROJECT_DIRECTORIES_KEY: &[&str] = &["projectDirectories"];
 pub const PREFIX_KEY_KEY: &[&str] = &["keybindings", "prefixKey"];
 pub const PREFIX_TIMEOUT_KEY: &[&str] = &["keybindings", "prefixTimeoutMs"];
@@ -28,15 +29,17 @@ pub enum Toggle {
     StatusBarUptime,
     RestoreLastSession,
     NotificationSound,
+    EditorVimMode,
 }
 
 impl Toggle {
-    pub const ALL: [Toggle; 5] = [
+    pub const ALL: [Toggle; 6] = [
         Toggle::HideWindowBar,
         Toggle::HideWindowTabs,
         Toggle::StatusBarUptime,
         Toggle::RestoreLastSession,
         Toggle::NotificationSound,
+        Toggle::EditorVimMode,
     ];
 
     pub fn key(self) -> &'static [&'static str] {
@@ -46,6 +49,7 @@ impl Toggle {
             Self::StatusBarUptime => STATUS_BAR_UPTIME_KEY,
             Self::RestoreLastSession => RESTORE_LAST_SESSION_KEY,
             Self::NotificationSound => NOTIFICATION_SOUND_KEY,
+            Self::EditorVimMode => EDITOR_VIM_MODE_KEY,
         }
     }
 
@@ -57,6 +61,7 @@ impl Toggle {
             Self::StatusBarUptime => "Show uptime in status bar",
             Self::RestoreLastSession => "Restore workspace",
             Self::NotificationSound => "Play a sound",
+            Self::EditorVimMode => "Vim mode",
         }
     }
 
@@ -86,6 +91,7 @@ impl Toggle {
             }
             Self::RestoreLastSession => "Reopen the workspace from the previous launch when Soprano starts.",
             Self::NotificationSound => "Play the system sound with each notification.",
+            Self::EditorVimMode => "Use Vim motions and modal editing in the built-in file editor.",
         }
     }
 
@@ -96,6 +102,7 @@ impl Toggle {
             Self::StatusBarUptime => settings.status_bar_uptime,
             Self::RestoreLastSession => settings.restore_last_session,
             Self::NotificationSound => settings.notification_sound,
+            Self::EditorVimMode => settings.editor_vim_mode,
         }
     }
 

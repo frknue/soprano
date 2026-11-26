@@ -1214,3 +1214,32 @@ fn branch_switcher_filters_blocks_dirty_trees_and_checks_out_on_enter(cx: &mut T
         Some("feat/switch-me")
     );
 }
+
+#[gpui::test]
+fn sent_attachments_render_as_timeline_thumbnails_and_chips_instead_of_raw_paths(cx: &mut TestAppContext) {
+    let (chat, cx) = open_chat(cx);
+    let folder = tempfile::tempdir().expect("attachments folder");
+    let shot = folder.path().join("preview.png");
+    let notes = folder.path().join("notes.md");
+    std::fs::write(&shot, b"fake png bytes").expect("shot");
+    std::fs::write(&notes, "# Notes\n").expect("notes");
+
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    settle(cx);
+
+    cx.update(|window, cx| {
+        chat.view.update(cx, |view, cx| {
+            view.attach_files([shot.clone(), notes.clone()], window, cx);
+            view.focus_composer(window, cx);
+        });
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    settle(cx);
+
+    assert!(
+        cx.debug_bounds("user-message-attachments").is_some(),
+        "sent attachments should render in the timeline attachment strip"
+    );
+}

@@ -598,6 +598,10 @@ impl Render for LayoutTabRow {
         let files_on = self.panel_shown(RightSidebarTab::Explorer, cx);
         let changes_on = self.panel_shown(RightSidebarTab::SourceControl, cx);
         let history_on = self.panel_shown(RightSidebarTab::History, cx);
+        let shell_state = self.shell.read(cx);
+        let files_shortcut = shell_state.shortcut(&["toggle-explorer"]);
+        let changes_shortcut = shell_state.shortcut(&["toggle-source-control"]);
+        let history_shortcut = shell_state.shortcut(&["toggle-session-history"]);
         row_frame("layout-tab-row", chrome, is_top, cx)
             .on_scroll(cx.listener(|row, event: &ScrollEvent, _, cx| row.on_wheel(event, cx)))
             .when(chrome.sidebar_toggle, |row| row.child(sidebar_toggle(&self.shell)))
@@ -622,17 +626,30 @@ impl Render for LayoutTabRow {
                     row.workspace.update(cx, |ws| ws.move_pane_to_new_layout_tab(&drag.pane_id, None));
                 })),
             )
-            .child(PanelToggle::new("files-toggle", IconName::File, "Files").on(files_on).on_click(
-                cx.listener(|row, _, window, cx| row.toggle_panel(RightSidebarTab::Explorer, window, cx)),
-            ))
-            .child(PanelToggle::new("changes-toggle", IconName::Changes, "Changes").on(changes_on).on_click(
-                cx.listener(|row, _, window, cx| {
-                    row.toggle_panel(RightSidebarTab::SourceControl, window, cx)
-                }),
-            ))
-            .child(PanelToggle::new("history-toggle", IconName::Clock, "History").on(history_on).on_click(
-                cx.listener(|row, _, window, cx| row.toggle_panel(RightSidebarTab::History, window, cx)),
-            ))
+            .child(
+                PanelToggle::new("files-toggle", IconName::Files, "Files")
+                    .keycaps(files_shortcut)
+                    .on(files_on)
+                    .on_click(cx.listener(|row, _, window, cx| {
+                        row.toggle_panel(RightSidebarTab::Explorer, window, cx)
+                    })),
+            )
+            .child(
+                PanelToggle::new("changes-toggle", IconName::Changes, "Changes")
+                    .keycaps(changes_shortcut)
+                    .on(changes_on)
+                    .on_click(cx.listener(|row, _, window, cx| {
+                        row.toggle_panel(RightSidebarTab::SourceControl, window, cx)
+                    })),
+            )
+            .child(
+                PanelToggle::new("history-toggle", IconName::Clock, "History")
+                    .keycaps(history_shortcut)
+                    .on(history_on)
+                    .on_click(cx.listener(|row, _, window, cx| {
+                        row.toggle_panel(RightSidebarTab::History, window, cx)
+                    })),
+            )
             .when(chrome.window_buttons, |row| row.child(WindowButtons))
     }
 }

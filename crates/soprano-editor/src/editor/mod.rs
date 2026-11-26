@@ -14,6 +14,9 @@
 
 mod element;
 pub mod layout;
+mod vim;
+
+pub use vim::VimMode;
 
 use std::hash::Hash;
 use std::ops::Range;
@@ -42,6 +45,7 @@ use crate::keys;
 use crate::surface::{SurfaceMessage, SurfaceToolbar, breadcrumbs, display_path, toolbar_button};
 use element::{EditorElement, EditorLayout};
 use layout::{DisplayLine, next_boundary, previous_boundary, word_end, word_range, word_start};
+use vim::VimState;
 
 /// The key context of a focused editor.
 pub const EDITOR_CONTEXT: &str = "SopranoEditor";
@@ -244,6 +248,8 @@ pub struct EditorView<T: Clone + Eq + Hash + 'static> {
     dialog: Option<Entity<Dialog>>,
     image: Option<(u64, Arc<Image>)>,
     was_dirty: bool,
+    vim_enabled: bool,
+    vim: VimState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -334,8 +340,16 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             dialog: None,
             image: None,
             was_dirty,
+            vim_enabled: true,
+            vim: VimState::default(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Configures whether Vim motions and modal editing are active (default: `true`).
+    pub fn with_vim_mode(mut self, enabled: bool) -> Self {
+        self.vim_enabled = enabled;
+        self
     }
 
     pub fn target(&self) -> &T {
@@ -368,6 +382,16 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     /// The selected byte range.
     pub fn selected_range(&self) -> Range<usize> {
         self.anchor.min(self.head)..self.anchor.max(self.head)
+    }
+
+    /// Effective selection including Vim Visual / Visual Line boundaries.
+    fn effective_selection(&self, cx: &App) -> Range<usize> {
+        if self.vim_enabled && self.vim.is_visual() {
+            self.with_document(cx, |doc| vim::visual_byte_range(doc, self.vim.mode, self.anchor, self.head))
+                .unwrap_or_else(|| self.selected_range())
+        } else {
+            self.selected_range()
+        }
     }
 
     /// Selects `range` (byte offsets, clamped to the text and its character boundaries).
@@ -560,7 +584,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
             return;
         }
         self.find.visible = true;
-        let selection = self.selected_range();
+        let selection = self.effective_selection(cx);
         if !selection.is_empty() {
             let selected =
                 self.with_document(cx, |document| document.rope().byte_slice(selection.clone()).to_string());
@@ -666,6 +690,24 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_is_modal() {
+            let next = self
+                .with_document(cx, |doc| {
+                    let rope = doc.rope();
+                    let row = rope.byte_to_line(self.head.min(doc.len()));
+                    let next_row = (row + 1).min(rope.len_lines().saturating_sub(1));
+                    vim::line_first_non_blank(doc, next_row)
+                })
+                .unwrap_or(self.head);
+            self.head = next;
+            if !self.vim.is_visual() {
+                self.anchor = next;
+            }
+            self.goal_column = None;
+            self.autoscroll = true;
+            cx.notify();
+            return;
+        }
         if !self.is_editable(cx) {
             return;
         }
@@ -684,6 +726,9 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn insert_tab(&mut self, _: &InsertTab, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_is_modal() {
+            return;
+        }
         self.replace_selection("\t", true, cx);
     }
 
@@ -714,10 +759,32 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_is_modal() {
+            self.horizontal(false, false, cx);
+            return;
+        }
         self.delete_to(previous_boundary, cx);
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        if self.vim_is_modal() {
+            let range = self.with_document(cx, |doc| {
+                let end = vim::inclusive_end(doc, self.head);
+                self.head..end
+            });
+            if let Some(range) = range
+                && !range.is_empty()
+                && self.is_editable(cx)
+                && let Some(inserted) = self.edit_text(cx, |doc| Some(doc.replace(range, "")))
+            {
+                self.head = inserted.start;
+                self.clamp_head_normal(cx);
+                self.anchor = self.head;
+                self.autoscroll = true;
+                cx.notify();
+            }
+            return;
+        }
         self.delete_to(next_boundary, cx);
     }
 
@@ -753,7 +820,7 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        let range = self.selected_range();
+        let range = self.effective_selection(cx);
         if range.is_empty() {
             return;
         }
@@ -764,11 +831,22 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
 
     fn cut(&mut self, action: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         let _ = action;
-        if !self.is_editable(cx) || self.selected_range().is_empty() {
+        let range = self.effective_selection(cx);
+        if !self.is_editable(cx) || range.is_empty() {
             return;
         }
         self.copy(&Copy, window, cx);
-        self.replace_selection("", false, cx);
+        if let Some(inserted) = self.edit_text(cx, |document| Some(document.replace(range, ""))) {
+            self.anchor = inserted.start;
+            self.head = inserted.start;
+            if self.vim_enabled && self.vim.is_visual() {
+                self.exit_to_normal_mode(cx);
+            } else {
+                self.goal_column = None;
+                self.autoscroll = true;
+                cx.notify();
+            }
+        }
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
@@ -861,10 +939,19 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         target: impl FnOnce(&mut Self, &App) -> usize,
         cx: &mut Context<Self>,
     ) {
-        let head = target(self, cx);
+        let modal = self.vim_is_modal();
+        let visual = modal && self.vim.is_visual();
+        let raw_head = target(self, cx);
+        let head = if modal && !select {
+            self.with_document(cx, |doc| vim::clamp_normal_offset(doc, raw_head)).unwrap_or(raw_head)
+        } else {
+            raw_head
+        };
         self.head = head;
-        if !select {
+        if !select && !visual {
             self.anchor = head;
+        } else if modal && select && !visual {
+            self.vim.mode = VimMode::Visual;
         }
         self.autoscroll = true;
         self.break_coalescing(cx);
@@ -947,6 +1034,10 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
                 let range = start + local.start..start + local.end;
                 self.anchor = range.start;
                 self.head = range.end;
+                if self.vim_enabled && self.vim.is_modal() {
+                    self.vim.mode = VimMode::Visual;
+                    self.vim.clear_pending();
+                }
             }
             3.. => {
                 let start = self.line_start_of(offset, cx);
@@ -959,11 +1050,29 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
                     .unwrap_or(offset);
                 self.anchor = start;
                 self.head = next;
+                if self.vim_enabled && self.vim.is_modal() {
+                    self.vim.mode = VimMode::VisualLine;
+                    self.vim.clear_pending();
+                }
             }
-            _ if event.modifiers.shift => self.head = offset,
-            _ => {
-                self.anchor = offset;
+            _ if event.modifiers.shift => {
                 self.head = offset;
+                if self.vim_enabled && self.vim.mode == VimMode::Normal && self.head != self.anchor {
+                    self.vim.mode = VimMode::Visual;
+                }
+            }
+            _ => {
+                if self.vim_is_modal() {
+                    self.vim.mode = VimMode::Normal;
+                    self.vim.clear_pending();
+                    let clamped =
+                        self.with_document(cx, |doc| vim::clamp_normal_offset(doc, offset)).unwrap_or(offset);
+                    self.anchor = clamped;
+                    self.head = clamped;
+                } else {
+                    self.anchor = offset;
+                    self.head = offset;
+                }
             }
         }
         self.selecting = true;
@@ -1009,6 +1118,9 @@ impl<T: Clone + Eq + Hash + 'static> EditorView<T> {
         if let Some(offset) = self.layout.as_ref().and_then(|layout| layout.offset_for_point(event.position))
         {
             self.head = offset;
+            if self.vim_enabled && self.vim.mode == VimMode::Normal && self.head != self.anchor {
+                self.vim.mode = VimMode::Visual;
+            }
             cx.notify();
         }
         if !self.drag_scrolling && self.edge_distance().is_some() {
@@ -1233,7 +1345,7 @@ impl<T: Clone + Eq + Hash + 'static> EntityInputHandler for EditorView<T> {
     }
 
     fn accepts_text_input(&self, _: &mut Window, cx: &mut Context<Self>) -> bool {
-        self.is_editable(cx)
+        self.is_editable(cx) && !self.vim_is_modal()
     }
 }
 
@@ -1285,6 +1397,36 @@ impl<T: Clone + Eq + Hash + 'static> Render for EditorView<T> {
         let is_text = content == DocumentContent::Text;
 
         let mut toolbar = SurfaceToolbar::new().leading(breadcrumbs(&display_path(&path), &path, cx));
+        if self.vim_enabled && is_text {
+            let pending = self.vim.pending_label();
+            let mode_text = if pending.is_empty() {
+                self.vim.mode.label().to_owned()
+            } else {
+                format!("{}  {pending}", self.vim.mode.label())
+            };
+            let (pill_bg, pill_fg) = match self.vim.mode {
+                VimMode::Normal => (theme.hover, theme.muted),
+                VimMode::Insert => (theme.done.opacity(0.16), theme.done),
+                VimMode::Visual | VimMode::VisualLine => (theme.accent.opacity(0.18), theme.accent),
+            };
+            toolbar = toolbar.leading(
+                div()
+                    .id("editor-vim-mode")
+                    .debug_selector(|| "editor-vim-mode".into())
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
+                    .h(z(18.0))
+                    .px(z(6.0))
+                    .rounded(z(4.0))
+                    .bg(pill_bg)
+                    .flex()
+                    .items_center()
+                    .text_size(z(size::BADGE))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(pill_fg)
+                    .child(mode_text),
+            );
+        }
         if let Some((text, tone)) = status {
             let color = match tone {
                 StatusTone::Error => colors.error,
@@ -1394,6 +1536,7 @@ impl<T: Clone + Eq + Hash + 'static> Render for EditorView<T> {
             .flex()
             .flex_col()
             .bg(colors.background)
+            .on_key_down(cx.listener(Self::handle_vim_key_down))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::find))
             .on_action(cx.listener(Self::find_next))

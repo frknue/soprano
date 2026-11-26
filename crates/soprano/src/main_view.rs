@@ -1879,6 +1879,8 @@ impl MainView {
         self.workspace.update(cx, |ws| ws.reload_agent_profiles());
         let is_dev = soprano_platform::AppIdentity::current().is_dev();
         self.services.mobile.apply_config(settings.mobile.enabled, settings.mobile.effective_port(is_dev));
+        let editor_vim_mode = settings.editor_vim_mode;
+        self.content.update(cx, |host, cx| host.set_editor_vim_mode(editor_vim_mode, cx));
         self.shell.update(cx, |shell, cx| {
             shell.settings = settings;
             shell.keybindings = keybindings;

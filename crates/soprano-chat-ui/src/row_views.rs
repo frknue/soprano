@@ -5,17 +5,19 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, Context, FontFeatures, FontWeight, Hsla, IntoElement, ParentElement, ScrollEvent,
-    ScrollHandle, SharedString, Styled, TextRun, Window, div, linear_color_stop, linear_gradient, prelude::*,
-    px, relative,
+    AnyElement, Context, FontFeatures, FontWeight, Hsla, InteractiveElement, IntoElement, ObjectFit,
+    ParentElement, ScrollEvent, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, TextRun,
+    Window, div, img, linear_color_stop, linear_gradient, prelude::*, px, relative,
 };
 use soprano_agents::{ApprovalKind, ApprovalOptions, TurnItemStatus, UserMessage};
 use soprano_editor::rich::{DiffStat, HunkDiff, Markdown, MarkdownStyle};
+use soprano_platform::paths::abbreviate_home;
 use soprano_text::hunks::InlineDiff;
 use soprano_ui::button::{ButtonSize, ButtonVariant, IconButtonSize};
 use soprano_ui::fonts::{MONO_FONT_FAMILY, UI_FONT_FAMILY};
-use soprano_ui::{ActiveSopranoTheme, Button, IconButton, IconName, SopranoTheme, icon};
+use soprano_ui::{ActiveSopranoTheme, Button, IconButton, IconName, SopranoTheme, file_type_icon, icon};
 
+use crate::attachments::{Attachment, split_message_attachments};
 use crate::changed_file_tree::{self, ChangedFileNode};
 use crate::format;
 use crate::rows::{
@@ -121,8 +123,9 @@ impl TimelineView {
     // MARK: Messages
 
     /// A right-aligned bubble (`max-w-[80%] rounded-2xl p-3 bg-message`): long text folded at
-    /// 176 px with "Show full message", the "↪ Steer" marker, and a hover footer with the
-    /// timestamp and "Copy message".
+    /// 176 px with "Show full message", the "↪ Steer" marker, attached images/files rendered as
+    /// thumbnails and chips above the bubble, and a hover footer with the timestamp and
+    /// "Copy message".
     fn render_user(
         &mut self,
         row_id: &str,
@@ -135,17 +138,62 @@ impl TimelineView {
         let group = Self::row_group(row_id);
         let max_bubble = (lane * 0.8).floor();
         let content_width = max_bubble - 24.0;
-        let full_height = text_height(&model.message.text, content_width, window, cx);
-        let collapsible = full_height > COLLAPSED_HEIGHT + 24.0;
+        let (body, attachments) = split_message_attachments(&model.message.text);
+        let has_body = !body.is_empty();
+        let full_height = if has_body { text_height(&body, content_width, window, cx) } else { 0.0 };
+        let collapsible = has_body && full_height > COLLAPSED_HEIGHT + 24.0;
         let folded = collapsible && !model.expanded;
         let message_id = model.message.id.clone();
-        let text = model.message.text.clone();
+        let copy_text = model.message.text.clone();
         let copied = self.copied.as_deref() == Some(row_id);
         let row = row_id.to_owned();
-        let markdown =
-            Markdown::new(SharedString::from(format!("{row_id}-text")), text.clone(), MarkdownStyle::USER)
-                .scale(t.chat_zoom())
-                .shrink_to_fit(true);
+        let attachment_strip = render_message_attachments(row_id, &attachments, max_bubble, &t);
+        let text_bubble = has_body.then(|| {
+            let markdown =
+                Markdown::new(SharedString::from(format!("{row_id}-text")), body, MarkdownStyle::USER)
+                    .scale(t.chat_zoom())
+                    .shrink_to_fit(true);
+            div()
+                .max_w(t.cz(max_bubble))
+                .rounded(t.cz(16.0))
+                .bg(t.raised)
+                .p(t.cz(12.0))
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .items_end()
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .when(folded, |text| text.max_h(t.cz(COLLAPSED_HEIGHT)).overflow_hidden())
+                        .child(markdown)
+                        .when(folded, |text| {
+                            text.child(div().absolute().left_0().right_0().bottom_0().h(t.cz(28.0)).bg(
+                                linear_gradient(
+                                    180.0,
+                                    linear_color_stop(t.raised.opacity(0.0), 0.0),
+                                    linear_color_stop(t.raised, 1.0),
+                                ),
+                            ))
+                        }),
+                )
+                .when(collapsible, |bubble| {
+                    bubble.child(
+                        div().mt(t.cz(6.0)).mr(t.cz(-4.0)).child(
+                            Button::new(
+                                SharedString::from(format!("{row_id}-toggle")),
+                                if model.expanded { "Show less" } else { "Show full message" },
+                            )
+                            .variant(ButtonVariant::Ghost)
+                            .size(ButtonSize::Xs)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.toggle(ExpansionSet::Messages, &message_id, cx)
+                            })),
+                        ),
+                    )
+                })
+        });
         div()
             .w_full()
             .flex()
@@ -166,50 +214,10 @@ impl TimelineView {
                         .child(label("Steer", text_size::SMALL, t.muted, cx)),
                 )
             })
-            .child(
-                div()
-                    .max_w(t.cz(max_bubble))
-                    .rounded(t.cz(16.0))
-                    .bg(t.raised)
-                    .p(t.cz(12.0))
-                    .overflow_hidden()
-                    .flex()
-                    .flex_col()
-                    .items_end()
-                    .child(
-                        div()
-                            .relative()
-                            .w_full()
-                            .when(folded, |text| text.max_h(t.cz(COLLAPSED_HEIGHT)).overflow_hidden())
-                            .child(markdown)
-                            .when(folded, |text| {
-                                text.child(div().absolute().left_0().right_0().bottom_0().h(t.cz(28.0)).bg(
-                                    linear_gradient(
-                                        180.0,
-                                        linear_color_stop(t.raised.opacity(0.0), 0.0),
-                                        linear_color_stop(t.raised, 1.0),
-                                    ),
-                                ))
-                            }),
-                    )
-                    .when(collapsible, |bubble| {
-                        bubble.child(
-                            div().mt(t.cz(6.0)).mr(t.cz(-4.0)).child(
-                                Button::new(
-                                    SharedString::from(format!("{row_id}-toggle")),
-                                    if model.expanded { "Show less" } else { "Show full message" },
-                                )
-                                .variant(ButtonVariant::Ghost)
-                                .size(ButtonSize::Xs)
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        this.toggle(ExpansionSet::Messages, &message_id, cx)
-                                    },
-                                )),
-                            ),
-                        )
-                    }),
-            )
+            .when_some(attachment_strip, |column, strip| {
+                column.child(div().when(has_body, |el| el.mb(t.cz(6.0))).child(strip))
+            })
+            .when_some(text_bubble, |column, bubble| column.child(bubble))
             .child(
                 div()
                     .mt(t.cz(4.0))
@@ -221,7 +229,7 @@ impl TimelineView {
                     .opacity(0.0)
                     .group_hover(group, |s| s.opacity(1.0))
                     .child(time_label(model.message.created_at, &t, cx))
-                    .child(self.copy_button(&row, text, copied, cx)),
+                    .child(self.copy_button(&row, copy_text, copied, cx)),
             )
             .into_any_element()
     }
@@ -311,6 +319,9 @@ impl TimelineView {
         let max_bubble = (lane * 0.8).floor();
         let send_id = message.id.clone();
         let remove_id = message.id.clone();
+        let (body, attachments) = split_message_attachments(&message.text);
+        let has_body = !body.is_empty();
+        let attachment_strip = render_message_attachments(row_id, &attachments, max_bubble - 24.0, &t);
         div()
             .w_full()
             .flex()
@@ -324,15 +335,23 @@ impl TimelineView {
                     .border_dashed()
                     .border_color(t.input)
                     .p(t.cz(12.0))
-                    .child(
-                        Markdown::new(
-                            SharedString::from(format!("{row_id}-text")),
-                            message.text.clone(),
-                            MarkdownStyle::USER,
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .when_some(attachment_strip, |bubble, strip| {
+                        bubble.child(div().when(has_body, |el| el.mb(t.cz(8.0))).child(strip))
+                    })
+                    .when(has_body, |bubble| {
+                        bubble.child(
+                            Markdown::new(
+                                SharedString::from(format!("{row_id}-text")),
+                                body,
+                                MarkdownStyle::USER,
+                            )
+                            .scale(t.chat_zoom())
+                            .shrink_to_fit(true),
                         )
-                        .scale(t.chat_zoom())
-                        .shrink_to_fit(true),
-                    ),
+                    }),
             )
             .child(
                 div()
@@ -1126,6 +1145,113 @@ fn render_notice(text: &str, t: &SopranoTheme) -> AnyElement {
         )
         .child(rule())
         .into_any_element()
+}
+
+/// Attached images and files extracted from a user message: existing images render as rounded
+/// clickable thumbnails, non-image files (and missing images) as file-type chips with a path
+/// tooltip.
+fn render_message_attachments(
+    row_id: &str,
+    attachments: &[Attachment],
+    max_width: f32,
+    t: &SopranoTheme,
+) -> Option<AnyElement> {
+    if attachments.is_empty() {
+        return None;
+    }
+    let zoom = t.chat_zoom_factor();
+    let mut images: Vec<(usize, &Attachment)> = Vec::new();
+    let mut files: Vec<(usize, &Attachment, bool)> = Vec::new();
+    for (index, attachment) in attachments.iter().enumerate() {
+        let exists = attachment.path.is_file();
+        if attachment.is_image() && exists {
+            images.push((index, attachment));
+        } else {
+            files.push((index, attachment, exists));
+        }
+    }
+
+    let single_image = images.len() == 1;
+    let image_row = (!images.is_empty()).then(|| {
+        let tiles =
+            images.into_iter().map(|(index, attachment)| {
+                let name = attachment.name();
+                let open_path = attachment.path.to_string_lossy().into_owned();
+                let hover_border = t.muted;
+                div()
+                    .id(SharedString::from(format!("{row_id}-attachment-{index}")))
+                    .flex_none()
+                    .map(|tile| {
+                        if single_image { tile.w(t.cz(180.0)).h(t.cz(120.0)) } else { tile.size(t.cz(104.0)) }
+                    })
+                    .rounded(t.cz(10.0))
+                    .overflow_hidden()
+                    .bg(t.raised)
+                    .border_1()
+                    .border_color(t.border)
+                    .cursor_pointer()
+                    .hover(move |s| s.border_color(hover_border))
+                    .tooltip(soprano_ui::tooltip(name))
+                    .on_click(move |_, _, _| {
+                        let _ = soprano_platform::system::open_default(&open_path);
+                    })
+                    .child(img(attachment.path.clone()).size_full().object_fit(ObjectFit::Cover))
+            });
+        div().flex().flex_row().flex_wrap().justify_end().gap(t.cz(6.0)).children(tiles)
+    });
+
+    let file_row = (!files.is_empty()).then(|| {
+        let chips = files.into_iter().map(|(index, attachment, exists)| {
+            let name = attachment.name();
+            let display_path = abbreviate_home(&attachment.path);
+            let tip = if exists { display_path } else { format!("{display_path} (file not found)") };
+            let open_path = attachment.path.to_string_lossy().into_owned();
+            let hover_bg = t.hover;
+            let hover_border = t.muted;
+            div()
+                .id(SharedString::from(format!("{row_id}-attachment-{index}")))
+                .flex()
+                .flex_row()
+                .flex_none()
+                .items_center()
+                .gap(t.cz(6.0))
+                .h(t.cz(30.0))
+                .max_w(t.cz(260.0))
+                .px(t.cz(10.0))
+                .rounded(t.cz(10.0))
+                .bg(t.raised)
+                .border_1()
+                .border_color(t.border)
+                .font_family(UI_FONT_FAMILY)
+                .text_size(t.cz(text_size::SMALL))
+                .text_color(t.foreground)
+                .when(!exists, |chip| chip.opacity(0.75))
+                .when(exists, |chip| {
+                    chip.cursor_pointer().hover(move |s| s.bg(hover_bg).border_color(hover_border)).on_click(
+                        move |_, _, _| {
+                            let _ = soprano_platform::system::open_default(&open_path);
+                        },
+                    )
+                })
+                .tooltip(soprano_ui::tooltip(tip))
+                .child(icon(file_type_icon(&name)).size(14.0 * zoom).color(t.muted))
+                .child(div().min_w_0().truncate().child(name))
+        });
+        div().flex().flex_row().flex_wrap().justify_end().gap(t.cz(6.0)).children(chips)
+    });
+
+    Some(
+        div()
+            .debug_selector(|| "user-message-attachments".into())
+            .max_w(t.cz(max_width.max(0.0)))
+            .flex()
+            .flex_col()
+            .items_end()
+            .gap(t.cz(6.0))
+            .when_some(image_row, |col, row| col.child(row))
+            .when_some(file_row, |col, row| col.child(row))
+            .into_any_element(),
+    )
 }
 
 /// The muted timestamp of a row, with the full date as its tooltip.

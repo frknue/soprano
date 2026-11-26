@@ -128,6 +128,13 @@ impl SettingsView {
             &defaults,
             cx,
         )]));
+        sections.push(form.section("Editor").rows(vec![self.toggle_row(
+            &form,
+            Toggle::EditorVimMode,
+            &settings,
+            &defaults,
+            cx,
+        )]));
 
         // Permission lives in the OS settings, and macOS only ever prompts once. The row says
         // where it stands and offers the way there.

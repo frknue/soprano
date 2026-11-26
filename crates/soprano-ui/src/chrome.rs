@@ -18,7 +18,7 @@ use crate::fonts::size;
 use crate::icons::{Icon, IconName, icon};
 use crate::status::{StatusGlyph, TabBadge, TabBadgeView};
 use crate::theme::ActiveSopranoTheme;
-use crate::tooltip::tooltip;
+use crate::tooltip::{tooltip, tooltip_with_keycaps};
 
 /// A secondary-click handler with the pointer's window position (for [`crate::ContextMenu`]).
 pub type PointHandler = Rc<dyn Fn(Point<Pixels>, &mut Window, &mut App)>;
@@ -529,20 +529,28 @@ impl RenderOnce for TabPill {
     }
 }
 
-/// The tab row's Files / Changes toggles: h26, px8, gap5, radius 6, 12 px; on = `selected`
-/// fill and `foreground`, off = `muted`.
+/// The tab row's Files / Changes / History icon toggles: 26×26, radius 6, 15 px glyph; on =
+/// `selected` fill and `foreground`, off = `muted`. `label` (plus any shortcut keycaps) shows
+/// in a tooltip on hover.
 #[derive(IntoElement)]
 pub struct PanelToggle {
     id: ElementId,
     label: SharedString,
     icon: IconName,
+    keycaps: Vec<String>,
     on: bool,
     on_click: Option<ClickHandler>,
 }
 
 impl PanelToggle {
     pub fn new(id: impl Into<ElementId>, icon: IconName, label: impl Into<SharedString>) -> Self {
-        Self { id: id.into(), label: label.into(), icon, on: false, on_click: None }
+        Self { id: id.into(), label: label.into(), icon, keycaps: Vec::new(), on: false, on_click: None }
+    }
+
+    /// Shortcut keycaps shown alongside `label` in the hover tooltip.
+    pub fn keycaps(mut self, caps: Vec<String>) -> Self {
+        self.keycaps = caps;
+        self
     }
 
     pub fn on(mut self, on: bool) -> Self {
@@ -560,24 +568,28 @@ impl RenderOnce for PanelToggle {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = cx.soprano_theme();
         let hover = theme.hover;
-        let text = if self.on { theme.foreground } else { theme.muted };
+        let tint = if self.on { theme.foreground } else { theme.muted };
+        let tooltip_label = self.label;
+        let keycaps = self.keycaps;
         div()
             .id(self.id)
             .flex()
-            .flex_row()
             .flex_none()
             .items_center()
-            .gap(theme.z(5.))
-            .h(theme.z(26.))
-            .px(theme.z(8.))
+            .justify_center()
+            .size(theme.z(26.))
             .rounded(theme.z(6.))
-            .text_size(theme.z(size::META))
-            .text_color(text)
             .cursor_pointer()
             .map(|t| if self.on { t.bg(theme.selected) } else { t.hover(move |s| s.bg(hover)) })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(icon(self.icon).size(14.).color(text))
-            .child(self.label)
+            .child(icon(self.icon).size(15.).color(tint))
+            .map(|t| {
+                if keycaps.is_empty() {
+                    t.tooltip(tooltip(tooltip_label))
+                } else {
+                    t.tooltip(tooltip_with_keycaps(tooltip_label, keycaps))
+                }
+            })
             .when_some(self.on_click, |t, handler| t.on_click(move |e, w, cx| handler(e, w, cx)))
     }
 }

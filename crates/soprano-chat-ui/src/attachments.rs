@@ -112,6 +112,183 @@ pub fn message_text(draft: &str, attachments: &[Attachment]) -> Option<String> {
     }
 }
 
+/// Splits trailing attachment path line(s) (as produced by [`message_text`] or dropped files)
+/// back out of a user message so the timeline can show image thumbnails and file chips instead
+/// of raw paths. Returns `(body, attachments)`.
+pub fn split_message_attachments(text: &str) -> (String, Vec<Attachment>) {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut end = lines.len();
+    while end > 0 && lines[end - 1].trim().is_empty() {
+        end -= 1;
+    }
+
+    let mut groups: Vec<Vec<Attachment>> = Vec::new();
+    let mut split_at = end;
+    while split_at > 0 {
+        let idx = split_at - 1;
+        let line = lines[idx];
+        if line.trim().is_empty() {
+            // Stop at a blank separator unless another path line sits immediately above it.
+            break;
+        }
+        if inside_code_fence(&lines[..idx]) {
+            break;
+        }
+        let Some(paths) = parse_attachment_line(line) else {
+            break;
+        };
+        groups.push(paths.into_iter().map(Attachment::file).collect());
+        split_at = idx;
+    }
+
+    if groups.is_empty() {
+        return (text.to_owned(), Vec::new());
+    }
+
+    groups.reverse();
+    let attachments: Vec<Attachment> = groups.into_iter().flatten().collect();
+    let body = lines[..split_at].join("\n").trim_end().to_owned();
+    (body, attachments)
+}
+
+fn inside_code_fence(lines_above: &[&str]) -> bool {
+    let fences = lines_above
+        .iter()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("```") || trimmed.starts_with("~~~")
+        })
+        .count();
+    fences % 2 == 1
+}
+
+/// Parses a line containing one or more shell-word file paths (matching [`path_word`] on Unix
+/// and Windows, plus single/double-quoted paths). Returns `None` if any word on the line is
+/// not an attachment file path.
+fn parse_attachment_line(line: &str) -> Option<Vec<PathBuf>> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut paths = Vec::new();
+    let mut chars = trimmed.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        if ch == ' ' || ch == '\t' {
+            chars.next();
+            continue;
+        }
+        let token = if ch == '"' || ch == '\'' {
+            let quote = ch;
+            chars.next();
+            let mut word = String::new();
+            let mut closed = false;
+            for c in chars.by_ref() {
+                if c == quote {
+                    closed = true;
+                    break;
+                }
+                word.push(c);
+            }
+            if !closed {
+                return None;
+            }
+            if let Some(&next) = chars.peek()
+                && next != ' '
+                && next != '\t'
+            {
+                return None;
+            }
+            word
+        } else {
+            let rest: String = chars.clone().take(3).collect();
+            let windows_unquoted = is_windows_prefix(&rest);
+            let mut word = String::new();
+            while let Some(c) = chars.next() {
+                if c == ' ' || c == '\t' {
+                    break;
+                }
+                if !windows_unquoted && c == '\\' {
+                    if let Some(escaped) = chars.next() {
+                        word.push(escaped);
+                    } else {
+                        word.push('\\');
+                    }
+                } else {
+                    word.push(c);
+                }
+            }
+            word
+        };
+        if !is_attachment_path(&token) {
+            return None;
+        }
+        paths.push(PathBuf::from(token));
+    }
+    (!paths.is_empty()).then_some(paths)
+}
+
+fn is_windows_prefix(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\')
+        || s.starts_with("\\\\")
+}
+
+fn is_attachment_path(token: &str) -> bool {
+    if token.is_empty() || token.contains("://") {
+        return false;
+    }
+    let (segments, last_name): (usize, &str) = if let Some(rest) = token.strip_prefix('/') {
+        if rest.is_empty() || rest.starts_with('/') || rest.ends_with('/') {
+            return false;
+        }
+        let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+        (parts.len(), *parts.last().unwrap_or(&""))
+    } else if let Some(rest) = strip_windows_drive(token) {
+        if rest.is_empty() || rest.ends_with('\\') || rest.ends_with('/') {
+            return false;
+        }
+        let parts: Vec<&str> = rest.split(['\\', '/']).filter(|p| !p.is_empty()).collect();
+        (parts.len(), *parts.last().unwrap_or(&""))
+    } else if let Some(rest) = token.strip_prefix("\\\\") {
+        if rest.is_empty() || rest.ends_with('\\') {
+            return false;
+        }
+        let parts: Vec<&str> = rest.split('\\').filter(|p| !p.is_empty()).collect();
+        if parts.len() < 3 {
+            return false;
+        }
+        (parts.len(), *parts.last().unwrap_or(&""))
+    } else {
+        return false;
+    };
+
+    if segments < 2 || last_name.is_empty() {
+        return false;
+    }
+
+    has_plausible_extension(last_name) || Path::new(token).is_file()
+}
+
+fn strip_windows_drive(token: &str) -> Option<&str> {
+    let bytes = token.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
+    {
+        Some(&token[3..])
+    } else {
+        None
+    }
+}
+
+fn has_plausible_extension(name: &str) -> bool {
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty() && !ext.is_empty() && ext.len() <= 12 && ext.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +304,67 @@ mod tests {
         );
         // An image alone is a message too.
         assert_eq!(message_text("", &files[..1]).as_deref(), Some("/tmp/shots/a.png"));
+    }
+
+    #[test]
+    fn splitting_message_attachments_round_trips_text_and_escaped_paths() {
+        let files = [
+            Attachment::file("/tmp/shots/Screen Shot [draft] #1.png"),
+            Attachment::file("/Users/me/Desktop/notes.pdf"),
+        ];
+        let sent = message_text("Compare these two", &files).expect("message");
+        let (body, parsed) = split_message_attachments(&sent);
+        assert_eq!(body, "Compare these two");
+        assert_eq!(parsed, files);
+
+        // Attachment-only message yields empty body + attachments.
+        let only = message_text("", &files[..1]).expect("only");
+        let (body, parsed) = split_message_attachments(&only);
+        assert_eq!(body, "");
+        assert_eq!(parsed, &files[..1]);
+    }
+
+    #[test]
+    fn splitting_handles_multiple_trailing_lines_and_windows_paths() {
+        let multi = "Review these\n/tmp/shots/a.png\n/tmp/shots/b.md";
+        let (body, parsed) = split_message_attachments(multi);
+        assert_eq!(body, "Review these");
+        assert_eq!(parsed, [Attachment::file("/tmp/shots/a.png"), Attachment::file("/tmp/shots/b.md")]);
+
+        let win = "Look\n\"C:\\Users\\me\\My Shot.png\" C:\\Users\\me\\notes.md";
+        let (body, parsed) = split_message_attachments(win);
+        assert_eq!(body, "Look");
+        assert_eq!(
+            parsed,
+            [Attachment::file("C:\\Users\\me\\My Shot.png"), Attachment::file("C:\\Users\\me\\notes.md")]
+        );
+    }
+
+    #[test]
+    fn splitting_leaves_prose_slash_commands_urls_and_code_blocks_untouched() {
+        for plain in [
+            "Check /tmp/shots/a.png please",
+            "/compact",
+            "https://example.com/a.png",
+            "Endpoint:\n/api/v1/users",
+            "```\n/tmp/shots/a.png\n```",
+            "```\n/tmp/shots/a.png",
+        ] {
+            let (body, parsed) = split_message_attachments(plain);
+            assert_eq!(body, plain, "unexpected split for: {plain}");
+            assert!(parsed.is_empty(), "unexpected attachments for: {plain}");
+        }
+    }
+
+    #[test]
+    fn splitting_recognizes_existing_extensionless_files_on_disk() {
+        let folder = tempfile::tempdir().expect("folder");
+        let makefile = folder.path().join("Makefile");
+        std::fs::write(&makefile, "all:\n").expect("makefile");
+        let sent = message_text("Check build", &[Attachment::file(&makefile)]).expect("sent");
+        let (body, parsed) = split_message_attachments(&sent);
+        assert_eq!(body, "Check build");
+        assert_eq!(parsed, [Attachment::file(&makefile)]);
     }
 
     #[test]

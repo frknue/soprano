@@ -58,7 +58,7 @@ Sizes are designed px; the widgets apply zoom themselves.
 - `Card::new()`: `.focused .attention .on_mouse_down`.
 - `CardHeader::{pane(), panel()}`.
 - `TabPill::new(id, label)`: `.active .number .icon .status .badges([Option<TabBadge>]) .tooltip .on_click .on_close .on_secondary_click`.
-- `PanelToggle::new(id, IconName, label)`: `.on .on_click`.
+- `PanelToggle::new(id, IconName, label)`: `.keycaps .on .on_click` (icon-only toggle with tooltip).
 - `StatusBar::new()` with `.end(el)`.
 - `StatusBarItem::new(text)`: `.icon .dot .color .tooltip(id, text) .on_click(id, f)`.
 - `ScrollList::new(id, &ScrollHandle)`: `.mode(ScrollbarMode)`.

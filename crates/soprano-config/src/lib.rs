@@ -29,8 +29,8 @@ pub use app_settings::{
 pub use app_version::AppVersion;
 pub use automation::{Automation, AutomationEntry, AutomationSession, AutomationWorkspace};
 pub use config::{
-    AgentConfig, BindingOverride, ChatUiConfig, ConfigIssue, KeybindingsConfig, Limits, MobileConfig,
-    NotificationsConfig, ResolvedConfig, Severity, SopranoConfig, StatusBarConfig, expand_path,
+    AgentConfig, BindingOverride, ChatUiConfig, ConfigIssue, EditorConfig, KeybindingsConfig, Limits,
+    MobileConfig, NotificationsConfig, ResolvedConfig, Severity, SopranoConfig, StatusBarConfig, expand_path,
     install_agents,
 };
 pub use cron::{AutomationCadence, CronParseError, CronSchedule};

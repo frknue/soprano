@@ -150,6 +150,8 @@ pub struct AppSettings {
     /// ring, and the pane header; adding a chime to every finished turn is the kind of thing
     /// people disable once and never turn back on.
     pub notification_sound: bool,
+    /// Use Vim motions and modal editing in the built-in file editor. On by default.
+    pub editor_vim_mode: bool,
     /// Native Chat UI master toggle and per-agent default launch mode (`chat` vs `cli`).
     pub chat_ui: ChatUiSettings,
     /// Mobile PWA access over Tailscale.
@@ -167,6 +169,7 @@ impl Default for AppSettings {
             status_bar_uptime: false,
             project_directories: Vec::new(),
             notification_sound: false,
+            editor_vim_mode: true,
             chat_ui: ChatUiSettings::default(),
             mobile: MobileSettings::default(),
         }

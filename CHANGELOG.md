@@ -10,6 +10,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Vim mode in the built-in file editor** (on by default; toggle in **Settings ▸ General ▸
+  Editor** or `"editor": { "vimMode": false }` in `settings.json`): Normal, Insert, Visual,
+  and Visual Line modes with a block cursor, toolbar mode badge, counts, motions
+  (`h`/`j`/`k`/`l`, `w`/`W`/`b`/`B`/`e`/`E`, `0`/`^`/`$`, `gg`/`G`, `Ctrl+d`/`u`/`f`/`b`,
+  `f`/`F`/`t`/`T`/`;`/`,`, `%`), operators (`d`, `c`, `y`, `>`, `<`, `r`, `~`, `x`/`X`,
+  `p`/`P`, `o`/`O`, `J`, `u`/`Ctrl+r`), text objects (`iw`/`aw`, quotes, `()`/`[]`/`{}`/`<>`),
+  and `/` / `n` / `N` / `*` search.
 - **Git branch switcher in the composer**: click the `[GitBranch] <branch>` chip beneath the
   Chat UI or Agent Dashboard composer to search local branches, see relative last-commit
   times and branches already checked out in other worktrees, copy the current branch name,
@@ -222,6 +229,13 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the command palette. Terminals and agents keep running while they move.
 
 ### Changed
+- **Rich attachments in chat messages**: pictures and files attached to user messages in
+  Chat UI and the Agent Dashboard now render as clickable image thumbnails and file chips
+  above the message bubble (with full paths in hover tooltips) instead of showing raw file
+  paths in the chat text.
+- **Icon-only right-sidebar toggles**: the **Files**, **Changes**, and **History** toggles
+  at the end of the tab row now render as icons only, showing their name and shortcut
+  (`⇧⌘E`, `⇧⌘G`, `⇧⌘H`) in a tooltip on hover.
 - **Chat UI and Agent Dashboard timeline**: the conversation viewport now stops cleanly above
   the composer instead of scrolling behind the input box and bottom metadata bar.
 - **The tab row's `+` asks what the new tab holds**: a terminal, a browser, any agent, an

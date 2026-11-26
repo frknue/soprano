@@ -448,6 +448,15 @@ impl ContentHost {
         }
     }
 
+    /// Updates Vim mode on every open file editor immediately when settings change.
+    pub fn set_editor_vim_mode(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        for content in self.contents.values() {
+            if let PaneContent::Editor(view) = content {
+                view.update(cx, |view, cx| view.set_vim_mode(enabled, cx));
+            }
+        }
+    }
+
     // MARK: - Workspace changes
 
     fn handle_update(&mut self, update: &WorkspaceUpdate, window: &mut Window, cx: &mut Context<Self>) {
@@ -738,7 +747,9 @@ impl ContentHost {
         let (content, subscription) = if tab.is_editor() {
             let documents = self.documents.clone();
             let view_target = target.clone();
-            let view = cx.new(|cx| EditorView::new(documents, view_target, path, window, cx));
+            let vim_mode = self.shell.read(cx).settings.editor_vim_mode;
+            let view = cx
+                .new(|cx| EditorView::new(documents, view_target, path, window, cx).with_vim_mode(vim_mode));
             let subscription = cx.subscribe(&view, move |host, _, event: &EditorEvent, cx| {
                 host.handle_editor_event(&events_target, event, cx)
             });

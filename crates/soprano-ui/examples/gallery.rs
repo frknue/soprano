@@ -456,8 +456,9 @@ impl Render for Gallery {
             .child(TabPill::new("tab-4", "Failed").badges([TabBadge::agents(&[(AgentStatus::Error, None)])]))
             .child(div().flex_1())
             .child(IconButton::new("tab-add", IconName::Plus).color(theme.dim))
-            .child(PanelToggle::new("files", IconName::File, "Files").on(true))
-            .child(PanelToggle::new("changes", IconName::Changes, "Changes"));
+            .child(PanelToggle::new("files", IconName::Files, "Files").on(true))
+            .child(PanelToggle::new("changes", IconName::Changes, "Changes"))
+            .child(PanelToggle::new("history", IconName::Clock, "History"));
 
         let cards = row(cx)
             .items_start()

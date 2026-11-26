@@ -43,6 +43,9 @@ pub struct SopranoConfig {
     pub project_directories: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications: Option<NotificationsConfig>,
+    /// Built-in file editor preferences (`vimMode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<EditorConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub keybindings: Option<KeybindingsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,6 +97,15 @@ pub struct StatusBarConfig {
     /// Opt-in `Up 2:14:07` uptime readout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uptime: Option<bool>,
+}
+
+/// Built-in file editor settings in `settings.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorConfig {
+    /// Vim modal motions and editing in the built-in file editor. On by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vim_mode: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -345,6 +357,9 @@ impl SopranoConfig {
         }
         if let Some(sound) = self.notifications.as_ref().and_then(|n| n.sound) {
             settings.notification_sound = sound;
+        }
+        if let Some(vim_mode) = self.editor.as_ref().and_then(|e| e.vim_mode) {
+            settings.editor_vim_mode = vim_mode;
         }
         if let Some(chat_ui) = &self.chat_ui {
             if let Some(enabled) = chat_ui.enabled {
@@ -896,6 +911,13 @@ mod tests {
     fn the_status_bar_uptime_is_opt_in() {
         assert!(!resolve("{}").settings.status_bar_uptime);
         assert!(resolve(r#"{ "statusBar": { "uptime": true } }"#).settings.status_bar_uptime);
+    }
+
+    #[test]
+    fn editor_vim_mode_is_on_by_default_and_can_be_disabled() {
+        assert!(resolve("{}").settings.editor_vim_mode);
+        assert!(!resolve(r#"{ "editor": { "vimMode": false } }"#).settings.editor_vim_mode);
+        assert!(resolve(r#"{ "editor": { "vimMode": true } }"#).settings.editor_vim_mode);
     }
 
     #[test]

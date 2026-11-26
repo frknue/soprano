@@ -123,6 +123,7 @@ async fn return_keeps_the_lines_indentation(cx: &mut TestAppContext) {
     let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
     let cx = &mut window_cx;
     view.update_in(cx, |view, window, cx| {
+        view.set_vim_mode(false, cx);
         view.select(26..26, cx);
         view.focus.focus(window, cx);
     });
@@ -408,4 +409,72 @@ async fn a_click_on_a_note_focuses_the_pane(cx: &mut TestAppContext) {
     );
     assert!(events.borrow().contains(&EditorEvent::FocusRequested));
     assert!(view.update_in(cx, |view, window, _| view.focus.is_focused(window)));
+}
+
+#[gpui::test]
+async fn vim_mode_is_enabled_by_default_and_supports_motions_operators_and_visual_editing(
+    cx: &mut TestAppContext,
+) {
+    setup(cx);
+    let (_root, path) = file("vim.rs", "let alpha = \"hello world\";\nlet beta = 2;\nlet gamma = 3;\n");
+    let documents = cx.new(|_| EditorDocuments::<&'static str>::new());
+    let (view, _, mut window_cx) = open(cx, &documents, "tab", &path);
+    let cx = &mut window_cx;
+
+    assert!(view.read_with(cx, |v, _| v.vim_mode_enabled()));
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Normal);
+
+    view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
+
+    // Normal motions: `w` moves to "alpha", `dw` deletes "alpha ", `u` restores it.
+    cx.simulate_keystrokes("w");
+    assert_eq!(view.read_with(cx, |v, _| v.head), 4);
+    cx.simulate_keystrokes("d w");
+    assert_eq!(
+        view.read_with(cx, |v, cx| v.text(cx)),
+        "let = \"hello world\";\nlet beta = 2;\nlet gamma = 3;\n"
+    );
+    cx.simulate_keystrokes("u");
+    assert_eq!(
+        view.read_with(cx, |v, cx| v.text(cx)),
+        "let alpha = \"hello world\";\nlet beta = 2;\nlet gamma = 3;\n"
+    );
+
+    // Text object change: `f"` jumps to quote, `ci"` replaces inside quotes, `escape` returns to Normal.
+    cx.simulate_keystrokes("f \"");
+    cx.simulate_keystrokes("c i \"");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Insert);
+    cx.simulate_input("vim");
+    cx.simulate_keystrokes("escape");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Normal);
+    assert_eq!(
+        view.read_with(cx, |v, cx| v.text(cx)),
+        "let alpha = \"vim\";\nlet beta = 2;\nlet gamma = 3;\n"
+    );
+
+    // Linewise yank/delete/paste: `j`, `dd`, `p` swaps line 2 and line 3.
+    cx.simulate_keystrokes("j");
+    cx.simulate_keystrokes("d d");
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "let alpha = \"vim\";\nlet gamma = 3;\n");
+    cx.simulate_keystrokes("p");
+    assert_eq!(
+        view.read_with(cx, |v, cx| v.text(cx)),
+        "let alpha = \"vim\";\nlet gamma = 3;\nlet beta = 2;\n"
+    );
+
+    // Visual Line delete: `V` + `d` deletes the current line.
+    cx.simulate_keystrokes("shift-v");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::VisualLine);
+    cx.simulate_keystrokes("d");
+    assert_eq!(view.read_with(cx, |v, _| v.vim_mode()), VimMode::Normal);
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "let alpha = \"vim\";\nlet gamma = 3;\n");
+
+    // Disabling Vim mode restores modeless direct typing.
+    view.update(cx, |view, cx| {
+        view.set_vim_mode(false, cx);
+        view.select(0..0, cx);
+    });
+    assert!(!view.read_with(cx, |v, _| v.vim_mode_enabled()));
+    cx.simulate_input("// ");
+    assert_eq!(view.read_with(cx, |v, cx| v.text(cx)), "// let alpha = \"vim\";\nlet gamma = 3;\n");
 }

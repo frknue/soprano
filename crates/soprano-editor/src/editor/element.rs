@@ -22,8 +22,9 @@ use soprano_ui::fonts::TERMINAL_FONT_FAMILY;
 use super::EditorView;
 use super::layout::{
     self, DisplayLine, FONT_SIZE, GUTTER_FONT_SIZE, ScrollbarGeometry, TEXT_INSET_X, TEXT_INSET_Y,
-    visible_rows,
+    next_boundary, visible_rows,
 };
+use super::vim::visual_byte_range;
 
 /// The scroll bar's lane along the right edge (presses there go to the scroll bar) and the
 /// thumb's distance from the edge.
@@ -125,6 +126,28 @@ impl EditorLayout {
         let x = self.x_for(laid, offset);
         Some(Bounds::new(point(x, self.row_top(laid.row)), size(px(2.0), self.line_height)))
     }
+
+    /// The block cursor box covering the character at `offset` (for Vim Normal/Visual mode).
+    pub fn block_cursor_bounds(&self, offset: usize) -> Option<Bounds<Pixels>> {
+        let laid = self.rows.iter().find(|laid| laid.range.start <= offset && offset <= laid.range.end)?;
+        let x0 = self.x_for(laid, offset);
+        let width = if offset < laid.range.end {
+            let local = offset - laid.range.start;
+            let next_local = next_boundary(&laid.display.text, laid.display.display_offset(local));
+            let x1 = self.text_origin.x + laid.shaped.x_for_index(next_local);
+            (x1 - x0).max(self.char_width)
+        } else {
+            self.char_width
+        };
+        Some(Bounds::new(point(x0, self.row_top(laid.row)), size(width, self.line_height)))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CursorStyle {
+    Bar,
+    Block,
+    HalfBlock,
 }
 
 pub(super) struct EditorElement<T: Clone + Eq + Hash + 'static> {
@@ -141,7 +164,7 @@ pub(super) struct EditorPaint {
     layout: EditorLayout,
     numbers: Vec<(usize, ShapedLine)>,
     selection: Range<usize>,
-    caret: Option<usize>,
+    caret: Option<(usize, CursorStyle)>,
     /// Text an input method is composing: underlined.
     marked: Option<Range<usize>>,
     matches: Vec<(Range<usize>, bool)>,
@@ -259,7 +282,12 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
         let colors = SurfaceColors::of(cx);
         let view = self.view.read(cx);
         let focused = view.focus.is_focused(window);
-        let (selection, head) = (view.selected_range(), view.head);
+        let vim_modal = view.vim_is_modal();
+        let vim_visual = view.vim_enabled && view.vim.is_visual();
+        let vim_mode = view.vim.mode;
+        let vim_op_pending = vim_modal && view.vim.is_operator_pending();
+        let (anchor, head) = (view.anchor, view.head);
+        let raw_selection = view.selected_range();
         let (mut scroll, autoscroll, mut widest) = (view.scroll, view.autoscroll, view.widest_columns);
         let matches: Vec<(Range<usize>, bool)> = if view.find.visible {
             view.find
@@ -273,6 +301,8 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
         };
         let documents = view.documents.read(cx);
         let document: &EditorDocument = documents.document(view.document)?;
+        let selection =
+            if vim_visual { visual_byte_range(document, vim_mode, anchor, head) } else { raw_selection };
         let marked = document.marked_range();
 
         let line_height = px(LINE_HEIGHT * zoom);
@@ -368,7 +398,18 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
         };
         let max = layout.max_scroll(widest);
         scroll = point(scroll.x.clamp(px(0.0), max.x), scroll.y.clamp(px(0.0), max.y));
-        let caret = (focused && selection.is_empty()).then_some(head);
+        let caret = if focused {
+            if vim_modal {
+                let style = if vim_op_pending { CursorStyle::HalfBlock } else { CursorStyle::Block };
+                Some((head, style))
+            } else if selection.is_empty() {
+                Some((head, CursorStyle::Bar))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         Some(EditorPaint {
             layout,
             numbers,
@@ -448,6 +489,24 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
                     );
                     window.paint_quad(fill(underline, colors.foreground));
                 }
+                if let Some((offset, style @ (CursorStyle::Block | CursorStyle::HalfBlock))) = caret
+                    && laid.range.start <= offset
+                    && offset <= laid.range.end
+                    && let Some(rect) = layout.block_cursor_bounds(offset)
+                {
+                    let block = if style == CursorStyle::HalfBlock {
+                        let half = rect.size.height * 0.5;
+                        Bounds::new(point(rect.origin.x, rect.origin.y + half), size(rect.size.width, half))
+                    } else {
+                        rect
+                    };
+                    window.paint_quad(fill(block, colors.cursor.opacity(0.35)));
+                    let bar = Bounds::from_corners(
+                        point(block.left(), block.bottom() - px(2.0)),
+                        block.bottom_right(),
+                    );
+                    window.paint_quad(fill(bar, colors.cursor));
+                }
                 let _ = laid.shaped.paint(
                     point(layout.text_origin.x, top),
                     layout.line_height,
@@ -457,8 +516,10 @@ impl<T: Clone + Eq + Hash + 'static> Element for EditorElement<T> {
                     cx,
                 );
             }
-            if let Some(caret) = caret.and_then(|offset| layout.caret_bounds(offset)) {
-                window.paint_quad(fill(caret, colors.cursor));
+            if let Some((offset, CursorStyle::Bar)) = caret
+                && let Some(rect) = layout.caret_bounds(offset)
+            {
+                window.paint_quad(fill(rect, colors.cursor));
             }
         });
 
