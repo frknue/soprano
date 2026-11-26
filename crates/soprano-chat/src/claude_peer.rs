@@ -67,6 +67,14 @@ pub struct ClaudeStreamTranslator {
     /// Pending `control_request`s awaiting an ACP reply (`acp_req_id` -> pending request).
     pub pending_control_requests: HashMap<String, PendingClaudeRequest>,
     next_control_id: u64,
+    /// Input token count of the latest top-level `message_start` (used with `message_delta`).
+    last_message_input_tokens: Option<i64>,
+    /// Context occupancy (`input + cache_read + cache_creation + output`) of the latest
+    /// top-level assistant API call in the current turn. Unlike `result.usage`, which sums
+    /// every API call and subagent in the turn, this reflects the actual context window fill.
+    last_message_usage: Option<i64>,
+    /// Latest known context window size for `current_model` (from `result.modelUsage`).
+    context_window: Option<i64>,
 }
 
 impl ClaudeStreamTranslator {
@@ -83,6 +91,9 @@ impl ClaudeStreamTranslator {
             tool_diffs: HashMap::new(),
             pending_control_requests: HashMap::new(),
             next_control_id: 0,
+            last_message_input_tokens: None,
+            last_message_usage: None,
+            context_window: None,
         }
     }
 
@@ -114,7 +125,10 @@ impl ClaudeStreamTranslator {
                 }
                 if msg.get("subtype").and_then(Value::as_str) == Some("init") {
                     if let Some(model) = msg.get("model").and_then(Value::non_empty_string) {
-                        self.current_model = model.to_owned();
+                        if self.current_model != model {
+                            self.current_model = model.to_owned();
+                            self.context_window = None;
+                        }
                         out.push(self.session_update(json!({
                             "sessionUpdate": "config_option_update",
                             "configOptions": self.config_options(),
@@ -138,6 +152,8 @@ impl ClaudeStreamTranslator {
                         }
                     }
                 } else if msg.get("subtype").and_then(Value::as_str) == Some("compact_boundary") {
+                    self.last_message_input_tokens = None;
+                    self.last_message_usage = None;
                     out.push(PeerEvent::Notification {
                         method: "_omp/compaction/end".into(),
                         params: json!({}),
@@ -151,6 +167,32 @@ impl ClaudeStreamTranslator {
                         self.active_message_id += 1;
                         self.streamed_text_this_message = false;
                         self.streamed_thinking_this_message = false;
+                        if !is_subagent_message(msg)
+                            && let Some(usage) = event.get("message").and_then(|m| m.get("usage"))
+                        {
+                            let input = claude_usage_input_tokens(usage);
+                            let output = usage.get("output_tokens").and_then(JsonValueExt::int).unwrap_or(0);
+                            if input > 0 {
+                                self.last_message_input_tokens = Some(input);
+                                self.last_message_usage = Some(input + output);
+                            }
+                        }
+                    }
+                    Some("message_delta") => {
+                        if !is_subagent_message(msg)
+                            && let Some(usage) = event.get("usage")
+                        {
+                            let input = claude_usage_input_tokens(usage);
+                            if input > 0 {
+                                self.last_message_input_tokens = Some(input);
+                            }
+                            let output = usage.get("output_tokens").and_then(JsonValueExt::int).unwrap_or(0);
+                            if let Some(base_input) = self.last_message_input_tokens
+                                && output > 0
+                            {
+                                self.last_message_usage = Some(base_input + output);
+                            }
+                        }
                     }
                     Some("content_block_start") => {
                         if let Some(block) = event.get("content_block")
@@ -237,6 +279,19 @@ impl ClaudeStreamTranslator {
                         }
                     }
                 }
+                if !is_subagent_message(msg)
+                    && let Some(used) =
+                        msg.get("message").and_then(|m| m.get("usage")).and_then(claude_usage_total)
+                {
+                    self.last_message_usage = Some(used);
+                    if let Some(size) = self.context_window {
+                        out.push(self.session_update(json!({
+                            "sessionUpdate": "usage_update",
+                            "used": used,
+                            "size": size,
+                        })));
+                    }
+                }
                 self.streamed_text_this_message = false;
                 self.streamed_thinking_this_message = false;
             }
@@ -267,7 +322,18 @@ impl ClaudeStreamTranslator {
                 }
             }
             "result" => {
-                if let Some((used, size)) = extract_claude_usage(msg) {
+                if let Some(window) = extract_claude_context_window(msg, &self.current_model) {
+                    self.context_window = Some(window);
+                }
+                let used = self.last_message_usage.take().or_else(|| {
+                    // `result.usage` sums every API call across a multi-step turn; only fall back
+                    // to it when no per-message usage arrived and the turn made at most one call.
+                    let turns = msg.get("num_turns").and_then(JsonValueExt::int).unwrap_or(1);
+                    (turns <= 1).then(|| msg.get("usage").and_then(claude_usage_total)).flatten()
+                });
+                self.last_message_input_tokens = None;
+                if let Some(used) = used {
+                    let size = self.context_window.unwrap_or(200_000);
                     out.push(self.session_update(json!({
                         "sessionUpdate": "usage_update",
                         "used": used,
@@ -606,8 +672,9 @@ impl JsonRpcPeer for ClaudeStreamJsonPeer {
                 let value = params.get("value").and_then(Value::as_str).unwrap_or("");
                 let options = {
                     let mut tr = lock(&self.translator);
-                    if config_id == "model" && !value.is_empty() {
+                    if config_id == "model" && !value.is_empty() && tr.current_model != value {
                         tr.current_model = value.to_owned();
+                        tr.context_window = None;
                     }
                     tr.config_options()
                 };
@@ -930,22 +997,41 @@ fn claude_tool_result_text(content: Option<&Value>) -> Option<String> {
     (!joined.is_empty()).then(|| joined.join("\n"))
 }
 
-fn extract_claude_usage(msg: &Value) -> Option<(i64, i64)> {
-    let usage = msg.get("usage")?;
+fn is_subagent_message(msg: &Value) -> bool {
+    msg.get("parent_tool_use_id").and_then(Value::non_empty_string).is_some()
+        || msg.get("isSidechain").and_then(Value::as_bool) == Some(true)
+}
+
+fn claude_usage_input_tokens(usage: &Value) -> i64 {
     let input = usage.get("input_tokens").and_then(JsonValueExt::int).unwrap_or(0);
     let cache_read = usage.get("cache_read_input_tokens").and_then(JsonValueExt::int).unwrap_or(0);
     let cache_create = usage.get("cache_creation_input_tokens").and_then(JsonValueExt::int).unwrap_or(0);
+    input + cache_read + cache_create
+}
+
+fn claude_usage_total(usage: &Value) -> Option<i64> {
     let output = usage.get("output_tokens").and_then(JsonValueExt::int).unwrap_or(0);
-    let used = input + cache_read + cache_create + output;
-    if used <= 0 {
-        return None;
+    let total = claude_usage_input_tokens(usage) + output;
+    (total > 0).then_some(total)
+}
+
+fn extract_claude_context_window(msg: &Value, current_model: &str) -> Option<i64> {
+    let models = msg.get("modelUsage").and_then(Value::as_object)?;
+    let window_of = |v: &Value| v.get("contextWindow").and_then(JsonValueExt::int).filter(|&w| w > 0);
+    if let Some(exact) = models.get(current_model).and_then(window_of) {
+        return Some(exact);
     }
-    let size = msg
-        .get("modelUsage")
-        .and_then(Value::as_object)
-        .and_then(|models| models.values().find_map(|m| m.get("contextWindow").and_then(JsonValueExt::int)))
-        .unwrap_or(200_000);
-    Some((used, size))
+    let needle = current_model.to_ascii_lowercase();
+    if !needle.is_empty()
+        && needle != "default"
+        && let Some(matched) = models
+            .iter()
+            .find(|(key, _)| key.to_ascii_lowercase().contains(&needle))
+            .and_then(|(_, value)| window_of(value))
+    {
+        return Some(matched);
+    }
+    models.values().filter_map(window_of).max()
 }
 
 fn extract_prompt_text(params: &Value) -> String {
@@ -1216,6 +1302,59 @@ mod tests {
                 .any(|i| matches!(&i.kind, TurnItemKind::AssistantMessage { text, .. } if text == "Done!"))
         );
         assert!(items.iter().any(|i| matches!(&i.kind, TurnItemKind::FileChange(changes) if changes.len() == 1 && changes[0].path == "a.rs")));
+    }
+
+    #[test]
+    fn claude_context_usage_uses_last_top_level_call_not_cumulative_result_sum() {
+        let mut tr = ClaudeStreamTranslator::new("sess-usage");
+        let messages = [
+            json!({"type": "system", "subtype": "init", "session_id": "sess-usage", "model": "claude-fable-5-2"}),
+            // Step 1 of a multi-tool turn: 160k in context.
+            json!({"type": "assistant", "message": {
+                "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}],
+                "usage": {"input_tokens": 500, "cache_read_input_tokens": 150_000, "cache_creation_input_tokens": 9_000, "output_tokens": 500}
+            }}),
+            // A subagent call with its own smaller context must not overwrite the main thread's usage.
+            json!({"type": "assistant", "parent_tool_use_id": "t1", "message": {
+                "content": [{"type": "text", "text": "subagent"}],
+                "usage": {"input_tokens": 100, "cache_read_input_tokens": 12_000, "output_tokens": 200}
+            }}),
+            // Step 2 (final call of the turn): 180k in context.
+            json!({"type": "assistant", "message": {
+                "content": [{"type": "text", "text": "All done."}],
+                "usage": {"input_tokens": 400, "cache_read_input_tokens": 175_000, "cache_creation_input_tokens": 4_000, "output_tokens": 600}
+            }}),
+            // Result reports cumulative usage across 10 tool round-trips (1.8M > 1M window!)
+            // plus two models in modelUsage (primary 1M and a 200k haiku helper).
+            json!({
+                "type": "result",
+                "subtype": "success",
+                "is_error": false,
+                "num_turns": 10,
+                "usage": {"input_tokens": 5_000, "cache_read_input_tokens": 1_750_000, "cache_creation_input_tokens": 20_000, "output_tokens": 5_000},
+                "modelUsage": {
+                    "claude-haiku-4-5-20251001": {"contextWindow": 200_000},
+                    "claude-fable-5-2": {"contextWindow": 1_000_000}
+                }
+            }),
+        ];
+
+        let mut usages = Vec::new();
+        for msg in &messages {
+            for event in tr.handle_message(msg) {
+                if let PeerEvent::Notification { method, params } = event
+                    && method == "session/update"
+                    && let Some(update) = params.get("update")
+                    && update.get("sessionUpdate").and_then(Value::as_str) == Some("usage_update")
+                {
+                    usages.push((
+                        update.get("used").and_then(JsonValueExt::int).expect("used"),
+                        update.get("size").and_then(JsonValueExt::int).expect("size"),
+                    ));
+                }
+            }
+        }
+        assert_eq!(usages, vec![(180_000, 1_000_000)]);
     }
 
     #[test]
