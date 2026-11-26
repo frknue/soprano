@@ -24,6 +24,8 @@ use soprano_accounts::models::AccountsSnapshot;
 use soprano_accounts::presentation::{Confirmation, PageAction};
 use soprano_config::{ConfigSnapshot, ConfigStore, KeyPlatform, Limits, MachineEdit};
 use soprano_launch::MachineCheck;
+use soprano_mobile::{MobileSource, MobileStateSnapshot};
+use soprano_platform::AppIdentity;
 use soprano_types::Machine;
 use soprano_ui::button::{IconButton, IconButtonSize};
 use soprano_ui::dialog::{Dialog, DialogContent};
@@ -33,6 +35,7 @@ use soprano_ui::{ActiveSopranoTheme, IconName, ScrollList, SopranoTheme, icon};
 
 use crate::agents::AgentField;
 use crate::general::{self, AddDirectoryOutcome};
+use crate::mobile::{self, DisabledMobileSource};
 use crate::notifications::{NotificationAuthorization, NotificationStatusProvider};
 use crate::shortcuts::{ChordRecorder, RecordStep, RecordedKey};
 use crate::tab::SettingsTab;
@@ -89,9 +92,11 @@ pub(crate) enum Recording {
 pub struct SettingsView {
     pub(crate) store: ConfigStore,
     pub(crate) accounts: Rc<dyn AccountsSource>,
+    pub(crate) mobile: Rc<dyn MobileSource>,
     notifications: Rc<dyn NotificationStatusProvider>,
     pub(crate) snapshot: ConfigSnapshot,
     pub(crate) accounts_snapshot: AccountsSnapshot,
+    pub(crate) mobile_snapshot: MobileStateSnapshot,
     pub(crate) authorization: Option<NotificationAuthorization>,
     pub(crate) tab: SettingsTab,
     pub(crate) platform: KeyPlatform,
@@ -102,6 +107,8 @@ pub struct SettingsView {
     pub(crate) shortcut_query: Entity<InputState>,
     pub(crate) project_input: Entity<InputState>,
     pub(crate) machine_input: Entity<InputState>,
+    pub(crate) mobile_port_input: Entity<InputState>,
+    pub(crate) mobile_copied: bool,
     machine_checker: MachineChecker,
     pub(crate) machine_status: HashMap<String, MachineStatus>,
     pub(crate) machine_notice: Option<MachineNotice>,
@@ -137,9 +144,22 @@ impl SettingsView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::with_mobile(store, accounts, Rc::new(DisabledMobileSource), notifications, window, cx)
+    }
+
+    pub fn with_mobile(
+        store: ConfigStore,
+        accounts: Rc<dyn AccountsSource>,
+        mobile: Rc<dyn MobileSource>,
+        notifications: Rc<dyn NotificationStatusProvider>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let observer_id = format!("soprano-settings-{}", cx.entity_id());
         let snapshot = store.snapshot();
         let keybindings = snapshot.resolved.keybindings.clone();
+        let effective_mobile_port =
+            snapshot.resolved.settings.mobile.effective_port(AppIdentity::current().is_dev());
 
         let new_input =
             |placeholder: &'static str, value: String, window: &mut Window, cx: &mut Context<Self>| {
@@ -148,6 +168,7 @@ impl SettingsView {
         let shortcut_query = new_input(crate::shortcuts::SEARCH_PLACEHOLDER, String::new(), window, cx);
         let project_input = new_input("Folder path", String::new(), window, cx);
         let machine_input = new_input(general::MACHINE_PLACEHOLDER, String::new(), window, cx);
+        let mobile_port_input = new_input("", effective_mobile_port.to_string(), window, cx);
         let timeout_input = new_input("", keybindings.prefix_timeout_ms.to_string(), window, cx);
         let resize_input = new_input("", (keybindings.resize_tick_percent as i64).to_string(), window, cx);
         let new_agent_inputs = [
@@ -178,6 +199,11 @@ impl SettingsView {
                         }
                         InputEvent::Change if this.machine_notice.take().is_some() => cx.notify(),
                         _ => {}
+                    }
+                }),
+                cx.subscribe_in(&mobile_port_input, window, |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        this.commit_mobile_port(window, cx);
                     }
                 }),
                 // The number fields commit when editing ends, by Enter or by leaving them.
@@ -254,24 +280,49 @@ impl SettingsView {
             }
         });
 
+        let (mobile_tx, mobile_rx) = async_channel::unbounded::<()>();
+        mobile.add_observer(
+            &observer_id,
+            std::sync::Arc::new(move |_: &MobileStateSnapshot| {
+                let _ = mobile_tx.try_send(());
+            }),
+        );
+        let mobile_task = cx.spawn_in(window, async move |this, cx| {
+            while mobile_rx.recv().await.is_ok() {
+                while mobile_rx.try_recv().is_ok() {}
+                let updated = this.update(cx, |this, cx| {
+                    this.mobile_snapshot = this.mobile.snapshot();
+                    cx.notify();
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
+        });
+
         let release_store = store.clone();
         let release_accounts = accounts.clone();
+        let release_mobile = mobile.clone();
         let release_id = observer_id.clone();
         subscriptions.push(cx.on_release(move |_, _| {
             release_store.remove_observer(&release_id);
             release_accounts.remove_observer(&release_id);
+            release_mobile.remove_observer(&release_id);
         }));
 
         let focus_handle = cx.focus_handle();
         focus_handle.focus(window, cx);
         let accounts_snapshot = accounts.snapshot();
+        let mobile_snapshot = mobile.snapshot();
         let authorization = notifications.authorization();
         Self {
             store,
             accounts,
+            mobile,
             notifications,
             snapshot,
             accounts_snapshot,
+            mobile_snapshot,
             authorization,
             tab: SettingsTab::General,
             platform: KeyPlatform::current(),
@@ -282,6 +333,8 @@ impl SettingsView {
             shortcut_query,
             project_input,
             machine_input,
+            mobile_port_input,
+            mobile_copied: false,
             machine_checker: Arc::new(soprano_launch::check_machine),
             machine_status: HashMap::new(),
             machine_notice: None,
@@ -294,7 +347,7 @@ impl SettingsView {
             expanded_agent: None,
             scroll: ScrollHandle::new(),
             subscriptions,
-            _tasks: vec![config_task, accounts_task],
+            _tasks: vec![config_task, accounts_task, mobile_task],
         }
     }
 
@@ -317,6 +370,9 @@ impl SettingsView {
         }
         if changed && tab == SettingsTab::Machines {
             self.check_all_machines(cx);
+        }
+        if tab == SettingsTab::Mobile {
+            self.mobile_snapshot = self.mobile.snapshot();
         }
         if tab == SettingsTab::Accounts {
             soprano_accounts::presentation::AccountsPage::on_open(&*self.accounts);
@@ -357,7 +413,11 @@ impl SettingsView {
     /// The store's current state on screen, keeping what is being typed into focused fields.
     pub fn reload(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.snapshot = self.store.snapshot();
+        self.mobile_snapshot = self.mobile.snapshot();
         let keybindings = self.snapshot.resolved.keybindings.clone();
+        let effective_mobile_port =
+            self.snapshot.resolved.settings.mobile.effective_port(AppIdentity::current().is_dev());
+        self.sync_input(&self.mobile_port_input.clone(), effective_mobile_port.to_string(), window, cx);
         self.sync_input(&self.timeout_input.clone(), keybindings.prefix_timeout_ms.to_string(), window, cx);
         self.sync_input(
             &self.resize_input.clone(),
@@ -367,6 +427,18 @@ impl SettingsView {
         );
         self.sync_agent_inputs(window, cx);
         cx.notify();
+    }
+
+    pub(crate) fn commit_mobile_port(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let raw = self.mobile_port_input.read(cx).value().to_string();
+        if let Some(port) = mobile::parse_port(&raw) {
+            mobile::set_port(&self.store, port);
+            self.reload(window, cx);
+        } else {
+            let current =
+                self.snapshot.resolved.settings.mobile.effective_port(AppIdentity::current().is_dev());
+            self.mobile_port_input.update(cx, |state, cx| state.set_value(current.to_string(), window, cx));
+        }
     }
 
     // MARK: - Writing
@@ -880,6 +952,7 @@ impl SettingsView {
             SettingsTab::General => self.general_page(t, window, cx),
             SettingsTab::ChatUi => self.chat_ui_page(t, cx),
             SettingsTab::Machines => self.machines_page(t, cx),
+            SettingsTab::Mobile => self.mobile_page(t, cx),
             SettingsTab::KeyboardShortcuts => self.shortcuts_page(t, window, cx),
             SettingsTab::AgentProfiles => self.agents_page(t, window, cx),
             SettingsTab::Accounts => self.accounts_page(t, cx),

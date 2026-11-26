@@ -10,6 +10,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Mobile PWA over Tailscale**: enable private mobile access in **Settings ▸ Mobile**
+  (`mobile.enabled` / `mobile.port` in `settings.json`) to serve an installable PWA over
+  `tailscale serve` HTTPS, pair phones with a single-use QR code, manage/revoke paired
+  devices, monitor all agents grouped by status, approve tool calls, answer questions,
+  reply to threads, and start new threads from your phone.
 - **Orca-style composer in Chat UI and Agent Dashboard**: updated both composers with `@`
   file-mention autocomplete (fuzzy-searching project files with `↑`/`↓` and `Tab`/`Enter`),
   a `+` button to attach files via the OS file picker, a left-aligned shield permissions

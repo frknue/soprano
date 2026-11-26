@@ -1201,10 +1201,12 @@ mod tests {
             let shell = cx.new(|_| {
                 Shell::new(state.clone(), AppSettings::default_settings(), DefaultKeybindings::config())
             });
+            let (mobile, _) = soprano_mobile::MobileController::new(state.clone());
             let services = Services {
                 state: state.clone(),
                 config: ConfigStore::new(std::env::temp_dir().join("soprano-sidebar-tests-settings.json")),
                 accounts: AccountsController::new(state.clone()),
+                mobile,
                 branches: Arc::new(GitBranchMonitor::new()),
                 sessions: cx.new(|_| SessionManager::new(state.clone())),
             };

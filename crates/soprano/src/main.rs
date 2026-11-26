@@ -42,6 +42,7 @@ mod ipc;
 mod keyboard;
 mod main_view;
 mod menus;
+mod mobile;
 mod palette;
 mod power;
 mod services;

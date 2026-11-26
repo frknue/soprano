@@ -223,6 +223,12 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
     "enabled": {chat_ui_enabled}
   }},
 
+  "mobile": {{
+    // Serve Soprano's mobile PWA privately over Tailscale HTTPS so you can
+    // monitor and reply to agents from your phone (Settings ▸ Mobile).
+    "enabled": {mobile_enabled}
+  }},
+
   "keybindings": {{
     // The tmux-style prefix is Ctrl+<prefixKey>.
     "prefixKey": {prefix_key},
@@ -304,6 +310,7 @@ pub fn template_for(settings: &AppSettings, keybindings: &KeyBindingConfig, plat
         restore_last_session = settings.restore_last_session,
         sound = settings.notification_sound,
         chat_ui_enabled = settings.chat_ui.enabled,
+        mobile_enabled = settings.mobile.enabled,
         prefix_key = json_string_literal(&keybindings.prefix_key),
         prefix_timeout_ms = keybindings.prefix_timeout_ms,
         resize_tick_percent = keybindings.resize_tick_percent as i64,

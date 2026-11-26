@@ -124,6 +124,7 @@ pub struct Startup {
     pub ipc: Option<(IpcServer, async_channel::Receiver<Incoming>)>,
     pub banner_clicks: async_channel::Receiver<BannerClick>,
     pub config_changes: async_channel::Receiver<ConfigSnapshot>,
+    pub mobile_commands: async_channel::Receiver<soprano_mobile::MobileCommand>,
 }
 
 pub struct MainView {
@@ -163,6 +164,7 @@ pub struct MainView {
     sidebar_drag: Option<(Pixels, f32)>,
     /// The pending frame save while the window moves or resizes.
     frame_save: Option<Task<()>>,
+    mobile_snapshot_version: u64,
     _ipc_server: Option<IpcServer>,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
@@ -258,7 +260,10 @@ impl MainView {
             }),
             SopranoTheme::observe_system_appearance(window),
         ];
-        subscriptions.push(cx.on_release(|this, _| this.notifications.borrow_mut().app_did_resign_active()));
+        subscriptions.push(cx.on_release(|this, _| {
+            this.notifications.borrow_mut().app_did_resign_active();
+            this.services.mobile.shutdown_local_server();
+        }));
 
         let mut tasks = Vec::new();
         let (ipc_server, ipc_receiver) = match startup.ipc {
@@ -310,6 +315,39 @@ impl MainView {
         tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok(snapshot) = config_changes.recv().await {
                 if this.update_in(cx, |this, window, cx| this.config_changed(snapshot, window, cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+        let mobile_commands = startup.mobile_commands;
+        tasks.push(cx.spawn_in(window, async move |this, cx| {
+            while let Ok(command) = mobile_commands.recv().await {
+                let alive = this.update_in(cx, |this, window, cx| {
+                    crate::mobile::handle_command(
+                        command,
+                        &this.workspace,
+                        &this.content,
+                        &this.shell,
+                        &this.services,
+                        window,
+                        cx,
+                    );
+                    this.publish_mobile_snapshot(cx);
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        }));
+        tasks.push(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(2)).await;
+                let alive = this.update(cx, |this, cx| {
+                    if soprano_mobile::MobileSource::snapshot(&this.services.mobile).connected_clients > 0 {
+                        this.publish_mobile_snapshot(cx);
+                    }
+                });
+                if alive.is_err() {
                     break;
                 }
             }
@@ -384,7 +422,10 @@ impl MainView {
                 }
             }
         }));
-        cx.defer_in(window, |this, window, cx| this.tick_automations(window, cx));
+        cx.defer_in(window, |this, window, cx| {
+            this.tick_automations(window, cx);
+            this.publish_mobile_snapshot(cx);
+        });
 
         let mut view = Self {
             workspace,
@@ -418,6 +459,7 @@ impl MainView {
             focus: cx.focus_handle(),
             sidebar_drag: None,
             frame_save: None,
+            mobile_snapshot_version: 0,
             _ipc_server: ipc_server,
             _subscriptions: subscriptions,
             _tasks: tasks,
@@ -1264,9 +1306,11 @@ impl MainView {
                 let store = self.services.config.clone();
                 let accounts: Rc<dyn soprano_accounts::AccountsSource> =
                     Rc::new(self.services.accounts.clone());
+                let mobile: Rc<dyn soprano_mobile::MobileSource> = Rc::new(self.services.mobile.clone());
                 let status: Rc<dyn NotificationStatusProvider> =
                     Rc::new(NotificationStatus(self.notifications.clone()));
-                let view = cx.new(|cx| SettingsView::new(store, accounts, status, window, cx));
+                let view =
+                    cx.new(|cx| SettingsView::with_mobile(store, accounts, mobile, status, window, cx));
                 let subscription = cx.subscribe_in(
                     &view,
                     window,
@@ -1703,6 +1747,7 @@ impl MainView {
         if self.picker.is_none() && self.dialog.is_none() && self.settings.is_none() {
             self.sync_keyboard_focus(window, cx);
         }
+        self.publish_mobile_snapshot(cx);
         cx.notify();
     }
 
@@ -1833,6 +1878,8 @@ impl MainView {
         self.resolver.apply_config(keybindings.clone());
         menus::install(&keybindings, cx);
         self.workspace.update(cx, |ws| ws.reload_agent_profiles());
+        let is_dev = soprano_platform::AppIdentity::current().is_dev();
+        self.services.mobile.apply_config(settings.mobile.enabled, settings.mobile.effective_port(is_dev));
         self.shell.update(cx, |shell, cx| {
             shell.settings = settings;
             shell.keybindings = keybindings;
@@ -1845,6 +1892,21 @@ impl MainView {
         self.apply_resolver_changes(window, cx);
         // settings.json may have added, changed or removed automations.
         self.tick_automations(window, cx);
+        self.publish_mobile_snapshot(cx);
+    }
+
+    fn publish_mobile_snapshot(&mut self, cx: &mut Context<Self>) {
+        self.mobile_snapshot_version = self.mobile_snapshot_version.wrapping_add(1);
+        let theme = cx.soprano_theme().clone();
+        let snapshot = crate::mobile::build_snapshot(
+            self.workspace.read(cx),
+            self.content.read(cx),
+            &self.services,
+            self.mobile_snapshot_version,
+            &theme,
+            cx,
+        );
+        self.services.mobile.publish_snapshot(snapshot);
     }
 
     /// `AutomationController.tick` now.
@@ -1857,6 +1919,7 @@ impl MainView {
         let theme = cx.soprano_theme();
         let palette = terminal_theme(theme.theme());
         self.content.update(cx, |content, cx| content.set_terminal_theme(palette, cx));
+        self.publish_mobile_snapshot(cx);
         cx.notify();
     }
 

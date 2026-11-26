@@ -8,6 +8,7 @@ pub enum SettingsTab {
     General,
     ChatUi,
     Machines,
+    Mobile,
     KeyboardShortcuts,
     AgentProfiles,
     Accounts,
@@ -15,10 +16,11 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: [SettingsTab; 7] = [
+    pub const ALL: [SettingsTab; 8] = [
         SettingsTab::General,
         SettingsTab::ChatUi,
         SettingsTab::Machines,
+        SettingsTab::Mobile,
         SettingsTab::KeyboardShortcuts,
         SettingsTab::AgentProfiles,
         SettingsTab::Accounts,
@@ -31,6 +33,7 @@ impl SettingsTab {
             Self::General => "General",
             Self::ChatUi => "Chat UI",
             Self::Machines => "Machines",
+            Self::Mobile => "Mobile",
             Self::KeyboardShortcuts => "Keyboard Shortcuts",
             Self::AgentProfiles => "Agent Profiles",
             Self::Accounts => "Accounts",
@@ -44,6 +47,7 @@ impl SettingsTab {
             Self::General => IconName::Settings,
             Self::ChatUi => IconName::MessageSquare,
             Self::Machines => IconName::Server,
+            Self::Mobile => IconName::Globe,
             Self::KeyboardShortcuts => IconName::Keyboard,
             Self::AgentProfiles => IconName::Cpu,
             Self::Accounts => IconName::ACCOUNT,
@@ -61,7 +65,16 @@ mod tests {
         let titles: Vec<&str> = SettingsTab::ALL.iter().map(|tab| tab.title()).collect();
         assert_eq!(
             titles,
-            ["General", "Chat UI", "Machines", "Keyboard Shortcuts", "Agent Profiles", "Accounts", "About"]
+            [
+                "General",
+                "Chat UI",
+                "Machines",
+                "Mobile",
+                "Keyboard Shortcuts",
+                "Agent Profiles",
+                "Accounts",
+                "About"
+            ]
         );
         assert_eq!(SettingsTab::default(), SettingsTab::General);
     }

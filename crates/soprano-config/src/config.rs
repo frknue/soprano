@@ -56,6 +56,19 @@ pub struct SopranoConfig {
     /// Native Chat UI toggle and per-agent default launch mode (`"chat"` | `"cli"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_ui: Option<ChatUiConfig>,
+    /// Mobile PWA access over Tailscale (`enabled` and optional HTTPS `port`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mobile: Option<MobileConfig>,
+}
+
+/// Mobile PWA configuration in `settings.json`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "integral_number")]
+    pub port: Option<i64>,
 }
 
 /// Chat UI configuration in `settings.json`.
@@ -273,6 +286,7 @@ pub struct Limits;
 impl Limits {
     pub const PREFIX_TIMEOUT_MS: std::ops::RangeInclusive<i64> = 300..=5000;
     pub const RESIZE_TICK_PERCENT: std::ops::RangeInclusive<i64> = 1..=25;
+    pub const MOBILE_PORT: std::ops::RangeInclusive<i64> = 1024..=65535;
 }
 
 impl SopranoConfig {
@@ -352,6 +366,22 @@ impl SopranoConfig {
                             )));
                         }
                     }
+                }
+            }
+        }
+        if let Some(mobile) = &self.mobile {
+            if let Some(enabled) = mobile.enabled {
+                settings.mobile.enabled = enabled;
+            }
+            if let Some(port) = mobile.port {
+                if Limits::MOBILE_PORT.contains(&port) {
+                    settings.mobile.port = Some(port as u16);
+                } else {
+                    issues.push(ConfigIssue::warning(format!(
+                        "mobile.port: {port} is out of range ({}–{}).",
+                        Limits::MOBILE_PORT.start(),
+                        Limits::MOBILE_PORT.end()
+                    )));
                 }
             }
         }
@@ -1359,5 +1389,22 @@ mod tests {
         assert!(resolved.settings.chat_ui.default_opens_in_chat("omp"));
         assert_eq!(resolved.issues.len(), 1);
         assert!(resolved.issues[0].message.contains("chatUi.agents.omp"));
+    }
+
+    #[test]
+    fn mobile_settings_resolve_enabled_and_port_and_warn_out_of_range() {
+        let resolved = resolve(r#"{ "mobile": { "enabled": true, "port": 9443 } }"#);
+        assert!(resolved.settings.mobile.enabled);
+        assert_eq!(resolved.settings.mobile.port, Some(9443));
+        assert_eq!(resolved.settings.mobile.effective_port(false), 9443);
+        assert!(resolved.issues.is_empty());
+
+        let invalid = resolve(r#"{ "mobile": { "enabled": true, "port": 80 } }"#);
+        assert!(invalid.settings.mobile.enabled);
+        assert_eq!(invalid.settings.mobile.port, None);
+        assert_eq!(invalid.settings.mobile.effective_port(false), 8443);
+        assert_eq!(invalid.settings.mobile.effective_port(true), 8444);
+        assert_eq!(invalid.issues.len(), 1);
+        assert!(invalid.issues[0].message.contains("mobile.port"));
     }
 }

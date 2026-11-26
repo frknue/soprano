@@ -12,6 +12,7 @@ pub mod agents;
 pub mod chat_ui;
 mod form;
 pub mod general;
+pub mod mobile;
 pub mod notifications;
 pub mod os_notifications;
 mod pages;

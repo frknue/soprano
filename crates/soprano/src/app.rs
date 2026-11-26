@@ -14,6 +14,7 @@ use soprano_config::ConfigStore;
 use soprano_git::GitBranchMonitor;
 use soprano_launch::LaunchContext;
 use soprano_launch::{ShellFeatures, ShellIntegrationConfig, ShellIntegrationMode};
+use soprano_mobile::MobileController;
 use soprano_model::{SessionManager, Workspace, WorkspaceSession};
 use soprano_notify::NotificationManager;
 use soprano_platform::{AppIdentity, StateStore};
@@ -118,11 +119,15 @@ pub fn run() {
             let _ = config_sender.send_blocking(snapshot.clone());
         });
 
+        let (mobile, mobile_commands) = MobileController::new(state.clone());
+        mobile.apply_config(settings.mobile.enabled, settings.mobile.effective_port(identity.is_dev()));
+
         let branches = Arc::new(GitBranchMonitor::new());
         let services = Services {
             state: state.clone(),
             config: config.clone(),
             accounts: accounts.clone(),
+            mobile,
             branches,
             sessions: cx.new(|_| SessionManager::new(state.clone())),
         };
@@ -136,7 +141,7 @@ pub fn run() {
         sizing::import_appkit_frame(&state, window_chrome::primary_display_height(cx));
         let frame = sizing::load_frame(&state, &window_chrome::visible_frames(cx))
             .unwrap_or_else(|| sizing::initial_frame(window_chrome::main_visible_frame(cx)));
-        let startup = Startup { ipc, banner_clicks, config_changes };
+        let startup = Startup { ipc, banner_clicks, config_changes, mobile_commands };
         let ghostty = soprano_term::GhosttyConfig::load_default_files();
         let launch_context = LaunchContext::current(socket.clone(), shell_integration(&ghostty));
         let opened = cx.open_window(window_chrome::main_window_options(frame), move |window, cx| {
