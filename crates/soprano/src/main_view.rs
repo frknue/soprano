@@ -2547,21 +2547,27 @@ impl Render for MainView {
             .on_action(cx.listener(|this, action: &menus::OpenSettingsFile, window, cx| {
                 this.menu_action(action, window, cx)
             }))
-            .on_action(cx.listener(|this, _: &gpui_component::input::Copy, _, cx| {
-                if let Some(terminal) = this.content.read(cx).active_terminal(cx) {
-                    terminal.update(cx, |terminal, cx| {
-                        terminal.copy_selection(cx);
-                    });
+            // The Edit menu's Copy, Paste and Select All act on the terminal that has the
+            // keyboard; anywhere else they go on to Root, which copies the window's text
+            // selection (a chat's conversation, the Markdown reader).
+            .on_action(cx.listener(|this, _: &gpui_component::input::Copy, window, cx| {
+                match this.focused_terminal(window, cx) {
+                    Some(terminal) => {
+                        terminal.update(cx, |terminal, cx| terminal.copy_selection(cx));
+                    }
+                    None => cx.propagate(),
                 }
             }))
-            .on_action(cx.listener(|this, _: &gpui_component::input::Paste, _, cx| {
-                if let Some(terminal) = this.content.read(cx).active_terminal(cx) {
-                    terminal.update(cx, |terminal, cx| terminal.paste_from_clipboard(cx));
+            .on_action(cx.listener(|this, _: &gpui_component::input::Paste, window, cx| {
+                match this.focused_terminal(window, cx) {
+                    Some(terminal) => terminal.update(cx, |terminal, cx| terminal.paste_from_clipboard(cx)),
+                    None => cx.propagate(),
                 }
             }))
-            .on_action(cx.listener(|this, _: &gpui_component::input::SelectAll, _, cx| {
-                if let Some(terminal) = this.content.read(cx).active_terminal(cx) {
-                    terminal.update(cx, |terminal, cx| terminal.select_all(cx));
+            .on_action(cx.listener(|this, _: &gpui_component::input::SelectAll, window, cx| {
+                match this.focused_terminal(window, cx) {
+                    Some(terminal) => terminal.update(cx, |terminal, cx| terminal.select_all(cx)),
+                    None => cx.propagate(),
                 }
             }))
             .children(sidebar)
@@ -2579,6 +2585,14 @@ impl MainView {
         if let Some(command) = menus::command_for(action) {
             self.run(command, window, cx);
         }
+    }
+
+    /// The active pane's terminal, when it has the keyboard.
+    fn focused_terminal(&self, window: &Window, cx: &App) -> Option<Entity<TerminalView>> {
+        self.content
+            .read(cx)
+            .active_terminal(cx)
+            .filter(|terminal| terminal.focus_handle(cx).contains_focused(window, cx))
     }
 }
 
