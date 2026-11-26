@@ -352,6 +352,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Chat UI work log**: tool calls with multi-line titles (such as JS eval snippets) stay on
+  one line instead of stacking inside the 24 px row and clipping vertically.
 - **Agent forms in Chat UI** (omp's `ask` and other form questions): the questions come in
   the order the agent wrote them instead of sorted by field name, the form's own text shows
   above the question, and an option the form marks as default is selected from the start,

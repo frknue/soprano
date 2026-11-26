@@ -146,8 +146,7 @@ impl OmpSessionDecoder {
         let name = str_at(part, "name").unwrap_or("tool");
         let arguments = dict(part.get("arguments"));
         // The agent's own one-line description of the call.
-        let intent =
-            non_empty(part.get("intent")).or_else(|| non_empty(arguments.get("i"))).map(str::to_owned);
+        let intent = non_empty(part.get("intent")).or_else(|| non_empty(arguments.get("i"))).map(first_line);
         let path = non_empty(arguments.get("path")).map(|p| display_path(p, self.cwd.as_deref()));
         let or_intent = |value: Option<String>| value.or_else(|| intent.clone()).unwrap_or_default();
 
@@ -165,17 +164,18 @@ impl OmpSessionDecoder {
                 let pattern = str_at(arguments, "pattern").unwrap_or("");
                 AgentToolCall::new(
                     "Grep",
-                    path.map(|p| format!("{pattern} in {p}")).unwrap_or_else(|| pattern.to_owned()),
+                    first_line(
+                        &path.map(|p| format!("{pattern} in {p}")).unwrap_or_else(|| pattern.to_owned()),
+                    ),
                 )
             }
             "glob" => AgentToolCall::new("Glob", or_intent(path)),
             "eval" => {
-                AgentToolCall::new("Eval", or_intent(non_empty(arguments.get("title")).map(str::to_owned)))
+                AgentToolCall::new("Eval", or_intent(non_empty(arguments.get("title")).map(first_line)))
             }
-            "web_search" => AgentToolCall::new(
-                "WebSearch",
-                or_intent(non_empty(arguments.get("query")).map(str::to_owned)),
-            ),
+            "web_search" => {
+                AgentToolCall::new("WebSearch", or_intent(non_empty(arguments.get("query")).map(first_line)))
+            }
             "task" => AgentToolCall::new("Task", or_intent(None)),
             "todo" => AgentToolCall::new("Todo", or_intent(None)),
             "ask" => {

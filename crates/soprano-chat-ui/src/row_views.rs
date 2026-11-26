@@ -1121,7 +1121,7 @@ fn render_notice(text: &str, t: &SopranoTheme) -> AnyElement {
                         .text_size(t.cz(text_size::SMALL))
                         .text_color(t.muted)
                         .truncate()
-                        .child(text.to_owned()),
+                        .child(work_log::single_line(text)),
                 ),
         )
         .child(rule())

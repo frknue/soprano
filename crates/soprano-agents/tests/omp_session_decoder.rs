@@ -221,3 +221,20 @@ fn rewinding_keeps_only_the_newer_branch_visible() {
         ]
     );
 }
+
+#[test]
+fn multiline_eval_titles_and_intents_stay_on_one_line() {
+    let timeline = timeline(&[
+        HEADER.into(),
+        assistant(
+            "a1",
+            None,
+            r#"[{"type":"toolCall","id":"call-js","name":"eval","arguments":{"title":"[JS] Dev checkout\nconst sleep = ms => ms;"}}]"#,
+            "toolUse",
+            "",
+        ),
+    ]);
+    let call = timeline.items[0].tool_call().expect("call");
+    assert_eq!(call.name, "Eval");
+    assert_eq!(call.summary, "[JS] Dev checkout");
+}

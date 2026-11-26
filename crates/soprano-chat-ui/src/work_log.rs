@@ -180,7 +180,7 @@ pub fn entry(item: &TurnItem) -> Option<WorkLogEntry> {
             let verb = if active { if writes { "Writing" } else { "Editing" } } else { "Changed" };
             let label = match changes.len() {
                 0 => format!("{verb} files"),
-                1 => format!("{verb} {}", paths[0]),
+                1 => format!("{verb} {}", single_line(&paths[0])),
                 count => format!("{verb} {count} files"),
             };
             let diffs: Vec<&str> =
@@ -202,15 +202,19 @@ pub fn entry(item: &TurnItem) -> Option<WorkLogEntry> {
             }
         }
         TurnItemKind::ToolCall(tool) => {
-            let body = [tool.input.as_deref(), tool.output.as_deref()]
+            let mut body = [tool.input.as_deref(), tool.output.as_deref()]
                 .into_iter()
                 .flatten()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            let title = tool.title.trim();
-            let titled = |fallback: String| if title.is_empty() { fallback } else { title.to_owned() };
+            let (title, title_detail) = split_title(&tool.title);
+            if body.is_empty() && title_detail.is_some() {
+                body = tool.title.trim().to_owned();
+            }
+            let titled = |fallback: String| if title.is_empty() { fallback } else { title.clone() };
+            let name = single_line(&tool.name);
             let (kind, label, icon) = match tool.category {
                 ToolCategory::Read => (WorkLogKind::Read, titled("Read file".into()), WORK_READ),
                 ToolCategory::Search => {
@@ -218,19 +222,16 @@ pub fn entry(item: &TurnItem) -> Option<WorkLogEntry> {
                 }
                 ToolCategory::Subagent => (
                     WorkLogKind::Subagent,
-                    titled(if tool.name.is_empty() { "Subagent".into() } else { tool.name.clone() }),
+                    titled(if name.is_empty() { "Subagent".into() } else { name.clone() }),
                     WORK_AGENT,
                 ),
-                ToolCategory::Other => {
-                    let name = tool.name.trim_matches(' ');
-                    (
-                        WorkLogKind::Tool,
-                        titled(if name.is_empty() { "Tool call".into() } else { name.to_owned() }),
-                        WORK_TOOL,
-                    )
-                }
+                ToolCategory::Other => (
+                    WorkLogKind::Tool,
+                    titled(if name.is_empty() { "Tool call".into() } else { name.clone() }),
+                    WORK_TOOL,
+                ),
             };
-            WorkLogEntry { body: Some(body), ..make(kind, label, icon) }
+            WorkLogEntry { detail: title_detail, body: Some(body), ..make(kind, label, icon) }
         }
         TurnItemKind::WebSearch { query } => WorkLogEntry {
             detail: detail(single_line(query)),
@@ -390,7 +391,8 @@ static EMPHASIS: LazyLock<Regex> =
 static WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("whitespace pattern"));
 static SENTENCE_END: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"[.?!]["'”’)]?(?=\s)"#).expect("sentence pattern"));
-static NEWLINE_RUN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\n\s*").expect("newline pattern"));
+static NEWLINE_RUN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*[\r\n\u{2028}\u{2029}]\s*").expect("newline pattern"));
 
 /// First sentence (or bold heading) of a reasoning summary, Markdown stripped, one line.
 pub fn thought_line(markdown: &str) -> String {
@@ -490,8 +492,24 @@ fn lowercase_first(label: &str) -> String {
     }
 }
 
-fn single_line(text: &str) -> String {
-    NEWLINE_RUN.replace_all(text, " ").trim_matches([' ', '\t']).to_owned()
+pub(crate) fn single_line(text: &str) -> String {
+    NEWLINE_RUN.replace_all(text, " ").trim().to_owned()
+}
+
+/// Splits a tool title into its first non-empty line and any remaining lines collapsed to one line.
+fn split_title(text: &str) -> (String, Option<String>) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return (String::new(), None);
+    }
+    match trimmed.find(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        Some(index) => {
+            let first = trimmed[..index].trim();
+            let rest = single_line(&trimmed[index..]);
+            (first.to_owned(), (!rest.is_empty()).then_some(rest))
+        }
+        None => (trimmed.to_owned(), None),
+    }
 }
 
 fn file_change_verb(kind: FileChangeKind) -> &'static str {
@@ -518,7 +536,7 @@ fn answer_preview(request: &UserInputRequest) -> Option<String> {
         .filter_map(|q| answers.get(&q.id).map(|a| a.join(", ")))
         .filter(|v| !v.is_empty())
         .collect();
-    (!values.is_empty()).then(|| values.join(" · "))
+    (!values.is_empty()).then(|| single_line(&values.join(" · ")))
 }
 
 fn question_answer_markdown(request: &UserInputRequest) -> String {
@@ -651,5 +669,38 @@ mod tests {
         assert_eq!(summary(&entries), "Changed 2 files");
         assert_eq!(entries[0].label, "Changed a.rs");
         assert_eq!(entries[0].body.as_deref(), Some("Updated a.rs"));
+    }
+
+    #[test]
+    fn a_multiline_tool_title_splits_into_a_one_line_label_and_detail() {
+        let mut call = ToolCall::new(
+            "eval",
+            ToolCategory::Other,
+            "[JS] Dev checkout with the $377 model\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\nawait sleep(10);",
+        );
+        let without_io = entry(&item("t1", TurnItemKind::ToolCall(call.clone()), TurnItemStatus::Completed))
+            .expect("entry");
+        assert_eq!(without_io.label, "[JS] Dev checkout with the $377 model");
+        assert_eq!(
+            without_io.detail.as_deref(),
+            Some("const sleep = ms => new Promise(r => setTimeout(r, ms)); await sleep(10);")
+        );
+        assert!(without_io.can_expand());
+        assert_eq!(
+            without_io.body.as_deref(),
+            Some(
+                "[JS] Dev checkout with the $377 model\nconst sleep = ms => new Promise(r => setTimeout(r, ms));\nawait sleep(10);"
+            )
+        );
+
+        call.input = Some("{\"code\": \"...\"}".into());
+        let with_io =
+            entry(&item("t2", TurnItemKind::ToolCall(call), TurnItemStatus::Completed)).expect("entry");
+        assert_eq!(with_io.label, "[JS] Dev checkout with the $377 model");
+        assert_eq!(
+            with_io.detail.as_deref(),
+            Some("const sleep = ms => new Promise(r => setTimeout(r, ms)); await sleep(10);")
+        );
+        assert_eq!(with_io.body.as_deref(), Some("{\"code\": \"...\"}"));
     }
 }

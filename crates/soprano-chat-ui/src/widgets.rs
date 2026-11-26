@@ -124,6 +124,14 @@ pub struct WorkLogLine {
     chevron: Chevron,
 }
 
+fn one_line(text: SharedString) -> SharedString {
+    if text.contains(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        crate::work_log::single_line(&text).into()
+    } else {
+        text
+    }
+}
+
 impl WorkLogLine {
     pub fn new(
         id: impl Into<SharedString>,
@@ -136,7 +144,7 @@ impl WorkLogLine {
             group: group.into(),
             icon,
             icon_color: None,
-            label: label.into(),
+            label: one_line(label.into()),
             label_color: None,
             highlight: None,
             label_hover: None,
@@ -174,7 +182,7 @@ impl WorkLogLine {
 
     /// Text after the label: mono when `is_code`.
     pub fn detail(mut self, detail: Option<String>, is_code: bool) -> Self {
-        self.detail = detail.filter(|d| !d.is_empty()).map(|d| (d.into(), is_code));
+        self.detail = detail.map(|d| one_line(d.into())).filter(|d| !d.is_empty()).map(|d| (d, is_code));
         self
     }
 
