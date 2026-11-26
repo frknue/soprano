@@ -482,10 +482,8 @@ impl Render for ChatView {
         let width = f32::from(self.bounds.get().size.width) / zoom;
         let gutter = gutter(width);
         let composer_width = (width - gutter * 2.0).clamp(0.0, CHAT_MAX_WIDTH);
-        let composer_height = f32::from(self.composer.read(cx).anchors.surface.get().size.height) / zoom;
-        let inset = if composer_height > 0.0 { composer_height } else { 140.0 } + gutter * 2.0;
         self.composer.update(cx, |composer, _| composer.set_width(composer_width));
-        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(t.cz(inset), cx));
+        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(t.cz(16.0), cx));
         let bounds = self.bounds.clone();
         div()
             .id("agent-chat")
@@ -500,28 +498,43 @@ impl Render for ChatView {
                 this.attach_files(dropped.paths().iter().cloned(), window, cx);
             }))
             .relative()
+            .flex()
+            .flex_col()
             .size_full()
             .overflow_hidden()
             .bg(t.background)
             .child(canvas(move |b, _, _| bounds.set(b), |_, _, _, _| {}).absolute().size_full())
-            .child(self.timeline.clone())
-            .when(self.find_open, |view| view.child(self.render_find_bar(&t, cx)))
             .child(
-                div().absolute().left_0().right_0().bottom(t.cz(gutter)).flex().justify_center().child(
-                    div()
-                        .id("agent-chat-composer")
-                        .w(t.cz(composer_width))
-                        // The composer floats over the conversation: a click into it
-                        // must not also land on the turn underneath, which would take
-                        // the keyboard back from the editor. Its pane still becomes the
-                        // active one.
-                        .block_mouse_except_scroll()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|_, _, _, cx| cx.emit(ChatViewEvent::FocusRequested)),
-                        )
-                        .child(self.composer.clone()),
-                ),
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .overflow_hidden()
+                    .child(self.timeline.clone())
+                    .when(self.find_open, |view| view.child(self.render_find_bar(&t, cx))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w_full()
+                    .pt(t.cz(8.0))
+                    .pb(t.cz(gutter))
+                    .px(t.cz(gutter))
+                    .bg(t.background)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        div()
+                            .id("agent-chat-composer")
+                            .w(t.cz(composer_width))
+                            .block_mouse_except_scroll()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|_, _, _, cx| cx.emit(ChatViewEvent::FocusRequested)),
+                            )
+                            .child(self.composer.clone()),
+                    ),
             )
     }
 }

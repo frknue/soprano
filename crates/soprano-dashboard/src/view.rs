@@ -29,7 +29,7 @@ use soprano_chat_ui::mentions::{
     ComposerContextInfo, MENTION_ROW_LIMIT, MentionMenu, MentionToken, list_project_files, matching_files,
 };
 use soprano_chat_ui::timeline_view::{gutter, lane_width};
-use soprano_chat_ui::{TimelineSource, TimelineView, TranscriptSource};
+use soprano_chat_ui::{BranchSwitcher, BranchSwitcherEvent, TimelineSource, TimelineView, TranscriptSource};
 use soprano_model::Workspace;
 use soprano_platform::StateStore;
 use soprano_types::{AgentStatus, TerminalTarget};
@@ -49,8 +49,6 @@ const SIDEBAR_MAXIMUM_FRACTION: f32 = 0.4;
 const TOPBAR_HEIGHT: f32 = 52.0;
 /// One J/K line of scrolling.
 const LINE_SCROLL: f32 = 48.0;
-/// What the composer covers before it has been measured.
-const COMPOSER_HEIGHT: f32 = 118.0;
 /// The picker row that asks for any folder.
 const CHOOSE_FOLDER_ID: &str = "choose-folder";
 /// What a model's picker row id starts with, before its value.
@@ -262,12 +260,13 @@ pub struct AgentDashboard {
     list_scroll: ScrollHandle,
     picker: Option<Entity<Picker>>,
     menu: Option<Entity<ContextMenu>>,
-    /// The chat column, the composer card, the draft's agent chip and the option chips (in
-    /// [`ThreadOption::ALL`]'s order) as last drawn.
+    branch_switcher: Option<(Entity<BranchSwitcher>, Subscription)>,
+    /// The chat column, the draft's agent chip, the option chips (in
+    /// [`ThreadOption::ALL`]'s order), and the branch chip as last drawn.
     column_bounds: Rc<Cell<Bounds<Pixels>>>,
-    composer_bounds: Rc<Cell<Bounds<Pixels>>>,
     agent_chip_bounds: Rc<Cell<Bounds<Pixels>>>,
     option_chip_bounds: [Rc<Cell<Bounds<Pixels>>>; 2],
+    branch_bounds: Rc<Cell<Bounds<Pixels>>>,
     now: SystemTime,
     _overlay: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
@@ -400,10 +399,11 @@ impl AgentDashboard {
             list_scroll: ScrollHandle::new(),
             picker: None,
             menu: None,
+            branch_switcher: None,
             column_bounds: Rc::new(Cell::new(Bounds::default())),
-            composer_bounds: Rc::new(Cell::new(Bounds::default())),
             agent_chip_bounds: Rc::new(Cell::new(Bounds::default())),
             option_chip_bounds: Default::default(),
+            branch_bounds: Rc::new(Cell::new(Bounds::default())),
             now: SystemTime::now(),
             _overlay: None,
             _subscriptions: subscriptions,
@@ -881,6 +881,7 @@ impl AgentDashboard {
         self.attach_error = None;
         self.mention = None;
         self.mention_dismissed = false;
+        self.branch_switcher = None;
     }
 
     /// Opens the OS file dialog to attach one or more files/images (`+` button).
@@ -927,6 +928,40 @@ impl AgentDashboard {
             Some((cwd, machine)) => ComposerContextInfo::from_cwd(&cwd, machine.as_deref()),
             None => ComposerContextInfo::default(),
         };
+    }
+
+    pub(super) fn can_switch_branch(&self) -> bool {
+        self.composer_context.branch.is_some()
+            && self.active_composer_cwd().is_some_and(|(_, machine)| machine.is_none())
+    }
+
+    pub(super) fn toggle_branch_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.branch_switcher.take().is_some() {
+            self.focus_composer(window, cx);
+            cx.notify();
+            return;
+        }
+        let Some((cwd, None)) = self.active_composer_cwd() else { return };
+        if self.composer_context.branch.is_none() {
+            return;
+        }
+        self.picker = None;
+        self.menu = None;
+        self._overlay = None;
+        self.mention = None;
+        let anchor = self.branch_bounds.get();
+        let switcher = cx.new(|cx| BranchSwitcher::new(cwd, anchor, false, window, cx));
+        let subscription =
+            cx.subscribe_in(&switcher, window, |this, _, event: &BranchSwitcherEvent, window, cx| {
+                this.branch_switcher = None;
+                if matches!(event, BranchSwitcherEvent::Switched(_)) {
+                    this.refresh_composer_context();
+                }
+                this.focus_composer(window, cx);
+                cx.notify();
+            });
+        self.branch_switcher = Some((switcher, subscription));
+        cx.notify();
     }
 
     fn ensure_project_files(&mut self, cx: &mut Context<Self>) {
@@ -1425,8 +1460,12 @@ impl AgentDashboard {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        // A menu or the picker over the dashboard takes every key.
-        if self.picker.is_some() || self.menu.is_some() || !self.focus.contains_focused(window, cx) {
+        // A menu, the picker, or the branch switcher over the dashboard takes every key.
+        if self.picker.is_some()
+            || self.menu.is_some()
+            || self.branch_switcher.is_some()
+            || !self.focus.contains_focused(window, cx)
+        {
             return false;
         }
         let focus = if self.editor.focus_handle(cx).contains_focused(window, cx) {
@@ -1590,6 +1629,7 @@ impl Render for AgentDashboard {
             .child(self.render_chat(&theme, window, cx))
             .children(self.picker.clone())
             .children(self.menu.clone())
+            .children(self.branch_switcher.as_ref().map(|(switcher, _)| switcher.clone()))
     }
 }
 
@@ -1602,13 +1642,6 @@ impl AgentDashboard {
             return (soprano_chat_ui::timeline_view::GUTTER, soprano_chat_ui::timeline_view::CHAT_MAX_WIDTH);
         }
         (gutter(width), lane_width(width))
-    }
-
-    /// What the composer covers at the timeline's end.
-    fn composer_inset(&self, theme: &SopranoTheme) -> f32 {
-        let height = f32::from(self.composer_bounds.get().size.height) / theme.zoom();
-        let (gutter, _) = self.lane(theme);
-        (if height > 0.0 { height } else { COMPOSER_HEIGHT }) + gutter * 2.0
     }
 }
 

@@ -843,8 +843,17 @@ fn a_click_into_the_composer_over_the_conversation_gives_it_the_keyboard(cx: &mu
     cx.run_until_parked();
     chat.events.borrow_mut().clear();
 
-    // The composer floats over the conversation's end.
-    let surface = cx.update(|_, cx| chat.view.read(cx).composer().read(cx).anchors.surface.get());
+    // The timeline ends cleanly above the composer rather than scrolling under it.
+    let (timeline_bottom, surface) = cx.update(|_, cx| {
+        let timeline = chat.view.read(cx).timeline().read(cx);
+        let surface = chat.view.read(cx).composer().read(cx).anchors.surface.get();
+        (timeline.list.viewport_bounds().bottom(), surface)
+    });
+    assert!(
+        timeline_bottom <= surface.origin.y,
+        "timeline ({timeline_bottom:?}) must stop above composer ({:?})",
+        surface.origin.y
+    );
     cx.simulate_click(point(surface.origin.x + px(60.), surface.origin.y + px(28.)), Modifiers::none());
     cx.run_until_parked();
     let focused = cx.update(|window, cx| {
@@ -1096,4 +1105,112 @@ fn at_mentions_list_project_files_and_tab_inserts_the_highlighted_path(cx: &mut 
     cx.run_until_parked();
     assert!(cx.debug_bounds("composer-mention-menu").is_none());
     assert_eq!(chat.composer_text(cx), "Look at @crates/soprano-chat-ui/src/composer.rs @ment");
+}
+
+#[gpui::test]
+fn branch_switcher_filters_blocks_dirty_trees_and_checks_out_on_enter(cx: &mut TestAppContext) {
+    use soprano_git::{BranchInfo, BranchList};
+
+    cx.update(soprano_ui::init_for_tests);
+    let Some(git_bin) = soprano_git::reader::executable() else { return };
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let run_git = |args: &[&str]| {
+        let status =
+            std::process::Command::new(git_bin).arg("-C").arg(root).args(args).status().expect("git");
+        assert!(status.success(), "git {args:?} failed");
+    };
+    run_git(&["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("README.md"), "hello\n").expect("write");
+    run_git(&["add", "."]);
+    run_git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@t",
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "-qm",
+        "init",
+    ]);
+    run_git(&["branch", "feat/switch-me"]);
+
+    // 1. Dirty working tree: pressing Enter on another branch must NOT switch.
+    let dirty_list = BranchList {
+        current_branch: Some("main".into()),
+        changed_files: 3,
+        branches: vec![
+            BranchInfo {
+                name: "main".into(),
+                is_current: true,
+                committer_timestamp: Some(200),
+                worktree_path: None,
+            },
+            BranchInfo {
+                name: "feat/switch-me".into(),
+                is_current: false,
+                committer_timestamp: Some(100),
+                worktree_path: None,
+            },
+        ],
+    };
+    let events: Rc<RefCell<Vec<crate::BranchSwitcherEvent>>> = Rc::default();
+    let root_path = root.to_path_buf();
+    let (dirty_switcher, cx_dirty) = cx.add_window_view(move |window, cx| {
+        crate::BranchSwitcher::with_branches(root_path, gpui::Bounds::default(), true, dirty_list, window, cx)
+    });
+    let recorded = events.clone();
+    cx_dirty.update(|_, cx| {
+        cx.subscribe(&dirty_switcher, move |_, event: &crate::BranchSwitcherEvent, _| {
+            recorded.borrow_mut().push(event.clone());
+        })
+        .detach();
+    });
+    cx_dirty.run_until_parked();
+    cx_dirty.simulate_keystrokes("down enter");
+    cx_dirty.run_until_parked();
+    assert!(events.borrow().is_empty(), "dirty tree must block branch switch");
+    assert_eq!(soprano_git::branch::current_branch(&root.to_string_lossy()).as_deref(), Some("main"));
+
+    // 2. Clean working tree: filter by query and press Enter to switch branch.
+    let clean_list = soprano_git::reader::branches(root).expect("branches");
+    assert_eq!(clean_list.changed_files, 0);
+    let events2: Rc<RefCell<Vec<crate::BranchSwitcherEvent>>> = Rc::default();
+    let root_path2 = root.to_path_buf();
+    let (switcher, cx_clean) = cx.add_window_view(move |window, cx| {
+        crate::BranchSwitcher::with_branches(
+            root_path2,
+            gpui::Bounds::default(),
+            true,
+            clean_list,
+            window,
+            cx,
+        )
+    });
+    let recorded2 = events2.clone();
+    cx_clean.update(|_, cx| {
+        cx.subscribe(&switcher, move |_, event: &crate::BranchSwitcherEvent, _| {
+            recorded2.borrow_mut().push(event.clone());
+        })
+        .detach();
+    });
+    cx_clean.run_until_parked();
+    switcher.update_in(cx_clean, |s, window, cx| {
+        s.search_input().update(cx, |input, cx| input.set_value("switch", window, cx));
+    });
+    cx_clean.run_until_parked();
+    let shown: Vec<String> =
+        switcher.read_with(cx_clean, |s, cx| s.shown_branches(cx).into_iter().map(|b| b.name).collect());
+    assert_eq!(shown, ["feat/switch-me"]);
+
+    cx_clean.simulate_keystrokes("enter");
+    cx_clean.run_until_parked();
+    assert_eq!(events2.borrow().as_slice(), &[crate::BranchSwitcherEvent::Switched("feat/switch-me".into())]);
+    assert_eq!(
+        soprano_git::branch::current_branch(&root.to_string_lossy()).as_deref(),
+        Some("feat/switch-me")
+    );
 }

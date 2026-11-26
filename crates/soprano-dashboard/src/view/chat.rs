@@ -3,13 +3,15 @@
 //! the floating composer; or, for a new thread, the headline that picks its project over
 //! the composer in the middle of the column.
 
+use std::rc::Rc;
+
 use gpui::{
     AnyElement, Context, ExternalPaths, FontWeight, InteractiveElement, IntoElement, ObjectFit,
     ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, img, prelude::*,
 };
 use gpui_component::input::Textarea;
 use soprano_chat_ui::composer::EDITOR_LINE_HEIGHT;
-use soprano_chat_ui::mentions::{render_composer_context_bar, split_mention_path};
+use soprano_chat_ui::mentions::{BranchTrigger, render_composer_context_bar, split_mention_path};
 use soprano_chat_ui::widgets::text_size;
 use soprano_ui::button::IconButton;
 use soprano_ui::fonts::UI_FONT_FAMILY;
@@ -34,8 +36,7 @@ impl AgentDashboard {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let (gutter, lane) = self.lane(theme);
-        let inset = self.composer_inset(theme);
-        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(theme.z(inset), cx));
+        self.timeline.update(cx, |timeline, cx| timeline.set_bottom_inset(theme.z(16.0), cx));
         let controls = self.controls();
         self.sync_mention_menu(window, cx);
         let composer = div().w(theme.z(lane)).child(self.render_composer(theme, cx));
@@ -61,13 +62,23 @@ impl AgentDashboard {
                 .flex_col()
                 .flex_1()
                 .min_h_0()
-                .child(self.timeline.clone())
                 .child(
                     div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom(theme.z(gutter))
+                        .relative()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .overflow_hidden()
+                        .child(self.timeline.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w_full()
+                        .pt(theme.z(8.))
+                        .pb(theme.z(gutter))
+                        .px(theme.z(gutter))
+                        .bg(theme.background)
                         .flex()
                         .justify_center()
                         .child(composer),
@@ -423,7 +434,6 @@ impl AgentDashboard {
         div()
             .relative()
             .w_full()
-            .child(measure(&self.composer_bounds))
             .child(card)
             .children(render_composer_context_bar(
                 "agent-dashboard-composer-context",
@@ -431,6 +441,16 @@ impl AgentDashboard {
                 |v| theme.z(v),
                 1.0,
                 theme,
+                self.can_switch_branch().then(|| {
+                    let entity = cx.entity().downgrade();
+                    BranchTrigger {
+                        bounds: self.branch_bounds.clone(),
+                        open: self.branch_switcher.is_some(),
+                        on_click: Rc::new(move |window, cx| {
+                            let _ = entity.update(cx, |this, cx| this.toggle_branch_switcher(window, cx));
+                        }),
+                    }
+                }),
             ))
             .children(self.render_mention_menu(theme, cx))
     }

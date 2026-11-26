@@ -11,6 +11,7 @@
 
 pub mod activity;
 pub mod attachments;
+pub mod branch_switcher;
 pub mod changed_file_tree;
 pub mod chat_view;
 pub mod composer;
@@ -31,6 +32,7 @@ pub mod work_log;
 
 pub use activity::{ActivityLine, activity_parts};
 pub use attachments::Attachment;
+pub use branch_switcher::{BranchSwitcher, BranchSwitcherEvent};
 pub use chat_view::{ChatView, ChatViewEvent};
 pub use composer::{ComposerEvent, ComposerView};
 pub use popovers::PopoverKind;

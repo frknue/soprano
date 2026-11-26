@@ -10,6 +10,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
 ## [Unreleased]
 
 ### Added
+- **Git branch switcher in the composer**: click the `[GitBranch] <branch>` chip beneath the
+  Chat UI or Agent Dashboard composer to search local branches, see relative last-commit
+  times and branches already checked out in other worktrees, copy the current branch name,
+  or switch branches when the working tree is clean (warns when uncommitted files block
+  switching).
 - **Mobile PWA over Tailscale**: enable private mobile access in **Settings ▸ Mobile**
   (`mobile.enabled` / `mobile.port` in `settings.json`) to serve an installable PWA over
   `tailscale serve` HTTPS, pair phones with a single-use QR code, manage/revoke paired
@@ -217,6 +222,8 @@ the single source of truth for the version shown in **Settings ▸ About**.
   the command palette. Terminals and agents keep running while they move.
 
 ### Changed
+- **Chat UI and Agent Dashboard timeline**: the conversation viewport now stops cleanly above
+  the composer instead of scrolling behind the input box and bottom metadata bar.
 - **The tab row's `+` asks what the new tab holds**: a terminal, a browser, any agent, an
   omp chat, or a Markdown file, as the pane header's `+` does, instead of always opening a
   terminal. The `new-tab` shortcut still opens a terminal right away.
@@ -352,6 +359,9 @@ the single source of truth for the version shown in **Settings ▸ About**.
   actions. Workspaces saved with depth layers reopen with each layer as its own tab.
 
 ### Fixed
+- **Claude Code context meter in Chat UI**: shows the latest top-level API call's context
+  occupancy against the active model's window instead of the cumulative multi-step turn total
+  from `result.usage` (which could exceed 100 % on multi-tool turns).
 - **Chat UI work log**: tool calls with multi-line titles (such as JS eval snippets) stay on
   one line instead of stacking inside the 24 px row and clipping vertically.
 - `⌘C` (and **Edit ▸ Copy**) copies text selected in a Chat UI conversation or the Markdown

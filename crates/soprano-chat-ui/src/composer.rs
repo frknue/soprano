@@ -33,6 +33,7 @@ use soprano_ui::ActiveSopranoTheme;
 use soprano_ui::fonts::UI_FONT_FAMILY;
 
 use crate::attachments::{self, Attachment};
+use crate::branch_switcher::{BranchSwitcher, BranchSwitcherEvent};
 
 use crate::composer_logic::{
     AnswerDraft, ComposerHistory, ComposerPrimaryAction, ContextMeterReading, MODE_CATEGORY, MODEL_CATEGORY,
@@ -40,8 +41,8 @@ use crate::composer_logic::{
 };
 use crate::keys;
 use crate::mentions::{
-    ComposerContextInfo, MENTION_ROW_LIMIT, MentionMenu, MentionToken, list_project_files, matching_files,
-    render_composer_context_bar,
+    BranchTrigger, ComposerContextInfo, MENTION_ROW_LIMIT, MentionMenu, MentionToken, list_project_files,
+    matching_files, render_composer_context_bar,
 };
 use crate::popovers::{Popover, PopoverKind};
 use crate::source::SharedSession;
@@ -91,6 +92,10 @@ pub struct ComposerView {
     pub(crate) plan_expanded: bool,
     alternate_held: bool,
     pub(crate) popover: Option<Popover>,
+    /// The git branch switcher popover anchored above the context bar's branch chip.
+    pub(crate) branch_switcher: Option<(Entity<BranchSwitcher>, Subscription)>,
+    /// Bounds of the context bar's `[GitBranch] <name>` trigger in the last frame.
+    branch_bounds: Rc<Cell<Bounds<Pixels>>>,
     /// The approval panel's "More" menu.
     pub(crate) more_menu: Option<(Entity<soprano_ui::menu::ContextMenu>, Subscription)>,
     pub(crate) slash: Option<SlashMenu>,
@@ -191,6 +196,8 @@ impl ComposerView {
             plan_expanded: false,
             alternate_held: false,
             popover: None,
+            branch_switcher: None,
+            branch_bounds: Rc::new(Cell::new(Bounds::default())),
             more_menu: None,
             slash: None,
             slash_scroll: gpui::ScrollHandle::new(),
@@ -219,6 +226,7 @@ impl ComposerView {
     /// Ends what floats above the composer (the tab is closing).
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self.popover = None;
+        self.branch_switcher = None;
         self.slash = None;
         self.mention = None;
         self.file_index_task = None;
@@ -832,6 +840,10 @@ impl ComposerView {
             self.close_popover(cx);
             return true;
         }
+        if self.branch_switcher.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if !self.is_working() {
             return false;
         }
@@ -938,7 +950,36 @@ impl ComposerView {
         }
         self.slash = None;
         self.mention = None;
+        self.branch_switcher = None;
         self.popover = Some(Popover::new(kind, self, window, cx));
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_branch_switcher(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.branch_switcher.take().is_some() {
+            self.focus_editor(window, cx);
+            cx.notify();
+            return;
+        }
+        if self.remote_machine.is_some() || self.context_info.branch.is_none() {
+            return;
+        }
+        self.popover = None;
+        self.slash = None;
+        self.mention = None;
+        let cwd = self.session.borrow().launch.spec.cwd.clone();
+        let anchor = self.branch_bounds.get();
+        let switcher = cx.new(|cx| BranchSwitcher::new(cwd, anchor, true, window, cx));
+        let subscription =
+            cx.subscribe_in(&switcher, window, |this, _, event: &BranchSwitcherEvent, window, cx| {
+                this.branch_switcher = None;
+                if matches!(event, BranchSwitcherEvent::Switched(_)) {
+                    this.refresh_context_info();
+                }
+                this.focus_editor(window, cx);
+                cx.notify();
+            });
+        self.branch_switcher = Some((switcher, subscription));
         cx.notify();
     }
 
@@ -1183,10 +1224,21 @@ impl Render for ComposerView {
                 |v| t.cz(v),
                 t.chat_zoom_factor(),
                 &t,
+                (self.remote_machine.is_none() && self.context_info.branch.is_some()).then(|| {
+                    let entity = cx.entity().downgrade();
+                    BranchTrigger {
+                        bounds: self.branch_bounds.clone(),
+                        open: self.branch_switcher.is_some(),
+                        on_click: Rc::new(move |window, cx| {
+                            let _ = entity.update(cx, |this, cx| this.toggle_branch_switcher(window, cx));
+                        }),
+                    }
+                }),
             ))
             .children(self.render_slash_menu(cx))
             .children(self.render_mention_menu(cx))
             .children(self.render_popover(window, cx))
+            .children(self.branch_switcher.as_ref().map(|(switcher, _)| switcher.clone()))
     }
 }
 

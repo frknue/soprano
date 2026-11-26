@@ -1,12 +1,13 @@
 //! Reads explorer decorations, Source Control changes, and diffs from git.
 //! Every call blocks on a child process, so callers run it off the UI thread.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::LazyLock;
 
+use crate::branch::{current_branch, repository_root};
 use crate::changes::{GitChangeArea, GitChangeList, GitFileDiff};
 use crate::status::GitStatusSnapshot;
 
@@ -159,6 +160,175 @@ pub fn diff(root: &Path, relative_path: &str, staged: bool) -> GitFileDiff {
         Output::TooLarge => GitFileDiff::TooLarge,
         Output::Data(data) => GitFileDiff::parse(&data),
     }
+}
+
+/// One local git branch in a repository, with its last commit time and whether another
+/// worktree currently has it checked out.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BranchInfo {
+    pub name: String,
+    pub is_current: bool,
+    /// Tip commit's committer timestamp (Unix seconds), if known.
+    pub committer_timestamp: Option<i64>,
+    /// Path of another linked/main worktree that has this branch checked out, if any.
+    pub worktree_path: Option<String>,
+}
+
+/// The local branches of a working tree, plus its current branch and uncommitted-file count.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BranchList {
+    pub current_branch: Option<String>,
+    pub changed_files: usize,
+    pub branches: Vec<BranchInfo>,
+}
+
+/// Lists local branches for the repository containing `cwd`, sorted with the current branch
+/// first and remaining branches by most recent commit. Returns `None` outside a git repo or
+/// when git is unavailable.
+pub fn branches(cwd: &Path) -> Option<BranchList> {
+    let cwd_str = cwd.to_string_lossy();
+    let root = repository_root(&cwd_str)?;
+    let canonical_root = std::fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+
+    let refs = run(
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(HEAD)%00%(refname:short)%00%(committerdate:unix)",
+            "refs/heads",
+        ],
+        &root,
+    )?;
+
+    let worktrees = run(&["worktree", "list", "--porcelain"], &root)
+        .map(|data| parse_other_worktrees(&data, &canonical_root))
+        .unwrap_or_default();
+
+    let changed_files = run(&["status", "--porcelain=v2", "-z", "--untracked-files=all"], &root)
+        .map(|status| {
+            let paths: HashSet<String> =
+                GitStatusSnapshot::parse_status(&status).into_iter().map(|(path, _)| path).collect();
+            paths.len()
+        })
+        .unwrap_or(0);
+
+    let mut list = parse_for_each_ref(&refs, &worktrees);
+    let mut active = list.iter().find(|b| b.is_current).map(|b| b.name.clone());
+    if active.is_none() {
+        active = current_branch(&root.to_string_lossy());
+        if let Some(ref name) = active
+            && list.is_empty()
+        {
+            list.push(BranchInfo {
+                name: name.clone(),
+                is_current: true,
+                committer_timestamp: None,
+                worktree_path: None,
+            });
+        }
+    }
+    list.sort_by(|a, b| {
+        b.is_current
+            .cmp(&a.is_current)
+            .then_with(|| b.committer_timestamp.cmp(&a.committer_timestamp))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    Some(BranchList { current_branch: active, changed_files, branches: list })
+}
+
+/// Checks out an existing local `branch` in the working tree containing `cwd`.
+pub fn checkout_branch(cwd: &Path, branch: &str) -> Result<(), String> {
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("Invalid branch name.".into());
+    }
+    let root = repository_root(&cwd.to_string_lossy()).ok_or_else(|| "Not a git repository.".to_owned())?;
+    let executable = executable().ok_or_else(|| "git is not installed.".to_owned())?;
+    let mut command = Command::new(executable);
+    command
+        .arg("-C")
+        .arg(&root)
+        .args(["checkout", branch])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.output().map_err(|err| format!("Could not run git: {err}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    if !stderr.is_empty() {
+        return Err(stderr);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if !stdout.is_empty() {
+        return Err(stdout);
+    }
+    Err(format!("git checkout {branch} failed."))
+}
+
+fn parse_for_each_ref(data: &[u8], other_worktrees: &HashMap<String, String>) -> Vec<BranchInfo> {
+    let text = String::from_utf8_lossy(data);
+    let mut branches = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\0');
+        let head = parts.next().unwrap_or("");
+        let Some(name) = parts.next().filter(|n| !n.is_empty()) else { continue };
+        let timestamp = parts.next().and_then(|s| s.trim().parse::<i64>().ok());
+        let is_current = head.trim() == "*";
+        let worktree_path = if is_current { None } else { other_worktrees.get(name).cloned() };
+        branches.push(BranchInfo {
+            name: name.to_owned(),
+            is_current,
+            committer_timestamp: timestamp,
+            worktree_path,
+        });
+    }
+    branches
+}
+
+/// Maps `branch_name -> worktree_path` for every worktree other than `canonical_root`.
+fn parse_other_worktrees(data: &[u8], canonical_root: &Path) -> HashMap<String, String> {
+    let text = String::from_utf8_lossy(data);
+    let mut map = HashMap::new();
+    let mut current_path: Option<String> = None;
+    let mut current_branch: Option<String> = None;
+    let flush = |path: &mut Option<String>,
+                 branch: &mut Option<String>,
+                 map: &mut HashMap<String, String>| {
+        if let (Some(wt_path), Some(wt_branch)) = (path.take(), branch.take()) {
+            let wt_canonical = std::fs::canonicalize(&wt_path).unwrap_or_else(|_| PathBuf::from(&wt_path));
+            if wt_canonical != canonical_root {
+                map.insert(wt_branch, wt_path);
+            }
+        } else {
+            *path = None;
+            *branch = None;
+        }
+    };
+    for line in text.lines() {
+        if line.is_empty() {
+            flush(&mut current_path, &mut current_branch, &mut map);
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            current_path = Some(rest.to_owned());
+        } else if let Some(rest) = line.strip_prefix("branch refs/heads/") {
+            current_branch = Some(rest.to_owned());
+        }
+    }
+    flush(&mut current_path, &mut current_branch, &mut map);
+    map
 }
 
 /// Exact root-relative paths of every tracked or untracked, non-ignored file (names
@@ -449,5 +619,58 @@ pub(crate) mod tests {
     #[test]
     fn git_paths_keep_their_bytes() {
         assert_eq!(path_from_git(b"src/a b.rs"), PathBuf::from("src/a b.rs"));
+    }
+
+    #[test]
+    fn branches_lists_local_branches_worktree_owners_dirty_count_and_checks_out() {
+        if executable().is_none() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("repo");
+        std::fs::create_dir_all(&root).expect("mkdir");
+        git(&["init", "-q", "-b", "main"], &root);
+        write("one\n", "a.txt", &root);
+        git(&["add", "."], &root);
+        commit(&root);
+
+        // Create a second local branch and a linked worktree on a third branch.
+        git(&["branch", "feat/switch-target"], &root);
+        let wt = temp.path().join("wt-busy");
+        git(&["worktree", "add", "-q", "-b", "feat/in-worktree", &wt.to_string_lossy()], &root);
+
+        // Clean repo: main is current, feat/in-worktree carries the linked worktree path.
+        let listed = branches(&root).expect("branches");
+        assert_eq!(listed.current_branch.as_deref(), Some("main"));
+        assert_eq!(listed.changed_files, 0);
+        assert_eq!(listed.branches[0].name, "main");
+        assert!(listed.branches[0].is_current);
+        assert_eq!(listed.branches[0].worktree_path, None);
+
+        let target = listed.branches.iter().find(|b| b.name == "feat/switch-target").expect("target");
+        assert!(!target.is_current);
+        assert_eq!(target.worktree_path, None);
+        assert!(target.committer_timestamp.is_some());
+
+        let busy = listed.branches.iter().find(|b| b.name == "feat/in-worktree").expect("busy");
+        assert!(!busy.is_current);
+        assert!(busy.worktree_path.as_deref().is_some_and(|p| p.ends_with("wt-busy")));
+
+        // Dirty file counts once even when both staged and unstaged.
+        write("two\n", "a.txt", &root);
+        git(&["add", "a.txt"], &root);
+        write("three\n", "a.txt", &root);
+        write("new\n", "b.txt", &root);
+        let dirty = branches(&root).expect("dirty branches");
+        assert_eq!(dirty.changed_files, 2);
+
+        // Clean up and switch branch.
+        git(&["reset", "-q", "--hard", "HEAD"], &root);
+        std::fs::remove_file(root.join("b.txt")).expect("rm");
+        checkout_branch(&root, "feat/switch-target").expect("checkout");
+        let after = branches(&root).expect("after");
+        assert_eq!(after.current_branch.as_deref(), Some("feat/switch-target"));
+        assert_eq!(after.branches[0].name, "feat/switch-target");
+        assert!(after.branches[0].is_current);
     }
 }

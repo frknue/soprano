@@ -13,4 +13,5 @@ pub use changes::{
     GitChange, GitChangeArea, GitChangeList, GitDiffHighlights, GitDiffLayout, GitDiffLine, GitDiffLineKind,
     GitDiffRow, GitDiffRowKind, GitDiffToken, GitFileDiff, GitLineCounts,
 };
+pub use reader::{BranchInfo, BranchList};
 pub use status::{GitFileStatus, GitStatusSnapshot};

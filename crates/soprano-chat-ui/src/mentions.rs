@@ -1,12 +1,17 @@
 //! Shared `@` file-mention autocomplete and Orca-style composer footer metadata (host, folder,
 //! checkout kind, git branch) used by both the Chat UI composer and the Agent Dashboard composer.
 
+use std::cell::Cell;
 use std::ops::Range;
 use std::path::Path;
 use std::process::Command;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
-use gpui::{AnyElement, FontWeight, IntoElement, ParentElement, Pixels, Styled, div, prelude::*};
+use gpui::{
+    AnyElement, App, Bounds, FontWeight, IntoElement, ParentElement, Pixels, Styled, Window, canvas, div,
+    prelude::*,
+};
 use soprano_git::branch::{current_branch, repository_root};
 use soprano_platform::shell::path_word;
 use soprano_ui::fonts::UI_FONT_FAMILY;
@@ -304,6 +309,17 @@ pub fn is_bypass_permission_mode(value: &str, name: &str) -> bool {
         .any(|needle| combined.contains(needle))
 }
 
+/// Callback invoked when the composer context bar's branch trigger is clicked.
+pub type BranchClickHandler = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// Makes the `[GitBranch] <name>` chip in [`render_composer_context_bar`] clickable so it can
+/// open a [`crate::BranchSwitcher`] anchored right above it.
+pub struct BranchTrigger {
+    pub bounds: Rc<Cell<Bounds<Pixels>>>,
+    pub open: bool,
+    pub on_click: BranchClickHandler,
+}
+
 /// Renders Orca's subtle single-line context bar right underneath the composer card:
 /// `[Server] host   [Folder] folder · Main checkout   [GitBranch] branch`.
 pub fn render_composer_context_bar(
@@ -312,6 +328,7 @@ pub fn render_composer_context_bar(
     scale: impl Fn(f32) -> Pixels,
     zoom_factor: f32,
     t: &SopranoTheme,
+    branch_trigger: Option<BranchTrigger>,
 ) -> Option<AnyElement> {
     if info.is_empty() {
         return None;
@@ -373,16 +390,42 @@ pub fn render_composer_context_bar(
                 )
             })
             .when_some(info.branch.clone(), |bar, branch| {
-                bar.child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .min_w_0()
-                        .items_center()
-                        .gap(scale(5.0))
-                        .child(icon(IconName::GitBranch).size(icon_size).color(t.muted))
-                        .child(div().min_w_0().truncate().child(branch)),
-                )
+                let chip = div()
+                    .id(gpui::SharedString::from(format!("{id}-branch")))
+                    .debug_selector(move || format!("{id}-branch"))
+                    .relative()
+                    .flex()
+                    .flex_row()
+                    .min_w_0()
+                    .items_center()
+                    .gap(scale(5.0))
+                    .child(icon(IconName::GitBranch).size(icon_size).color(t.muted))
+                    .child(div().min_w_0().truncate().child(branch));
+                let chip = match branch_trigger {
+                    Some(trigger) => {
+                        let bounds = trigger.bounds;
+                        let on_click = trigger.on_click;
+                        let hover_bg = t.hover;
+                        let hover_fg = t.foreground;
+                        chip.rounded(scale(4.0))
+                            .px(scale(5.0))
+                            .py(scale(1.0))
+                            .mx(scale(-5.0))
+                            .my(scale(-1.0))
+                            .cursor_pointer()
+                            .when(trigger.open, move |s| s.bg(hover_bg).text_color(hover_fg))
+                            .hover(move |s| s.bg(hover_bg).text_color(hover_fg))
+                            .tooltip(soprano_ui::tooltip("Switch branch"))
+                            .on_click(move |_, window, cx| on_click(window, cx))
+                            .child(
+                                canvas(move |drawn, _, _| bounds.set(drawn), |_, _, _, _| {})
+                                    .absolute()
+                                    .size_full(),
+                            )
+                    }
+                    None => chip,
+                };
+                bar.child(chip)
             })
             .into_any_element(),
     )
