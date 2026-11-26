@@ -809,3 +809,60 @@ fn a_click_into_the_composer_over_the_conversation_gives_it_the_keyboard(cx: &mu
     settle(cx);
     assert_eq!(chat.agent.sent_prompts(), ["session/prompt: hi ther"]);
 }
+
+#[gpui::test]
+fn chat_zoom_scales_both_composer_text_and_timeline_messages(cx: &mut TestAppContext) {
+    use soprano_ui::SopranoTheme;
+    let (chat, cx) = open_chat(cx);
+    chat.start(cx);
+    cx.simulate_resize(gpui::size(px(1000.), px(700.)));
+    cx.update(|window, cx| {
+        chat.view.update(cx, |view, cx| view.submit_prompt("Hello world from user", window, cx))
+    });
+    settle(cx);
+    chat.agent.send(json!({
+        "sessionUpdate": "agent_message_chunk",
+        "content": {"type": "text", "text": "Hello back from assistant with **bold** text."}
+    }));
+    chat.agent.end_turn();
+    settle(cx);
+    chat.type_text("Please check if the issue is real", cx);
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    let measure = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            use gpui::EntityInputHandler as _;
+            let composer = chat.view.read(cx).composer().clone();
+            let editor = composer.read(cx).editor.clone();
+            let surface = composer.read(cx).anchors.surface.get();
+            let lh = editor.read(cx).line_height();
+            let input_bounds = editor.read(cx).input_bounds();
+            let bounds =
+                editor.update(cx, |state, cx| state.bounds_for_range(0..6, input_bounds, window, cx));
+            let timeline = chat.view.read(cx).timeline().clone();
+            let list_bounds = timeline.read(cx).list.bounds_for_item(0);
+            let assistant_bounds = timeline.read(cx).list.bounds_for_item(1);
+            (surface, lh, bounds, list_bounds, assistant_bounds)
+        })
+    };
+
+    let (_surf1, lh1, glyph1, row0_1, row1_1) = measure(cx);
+
+    cx.update(|_, cx| SopranoTheme::set_chat_zoom(2.0, cx));
+    cx.run_until_parked();
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+    let (_surf2, lh2, glyph2, row0_2, row1_2) = measure(cx);
+
+    assert!(lh2.unwrap() > lh1.unwrap() * 1.5, "line height did not scale: {lh1:?} -> {lh2:?}");
+    let w1 = glyph1.unwrap().size.width;
+    let w2 = glyph2.unwrap().size.width;
+    assert!(w2 > w1 * 1.5, "typed glyph width did not scale: {w1:?} -> {w2:?}");
+    let h1 = row0_1.unwrap().size.height;
+    let h2 = row0_2.unwrap().size.height;
+    assert!(h2 > h1 * 1.5, "user message row height did not scale: {h1:?} -> {h2:?}");
+    let a1 = row1_1.unwrap().size.height;
+    let a2 = row1_2.unwrap().size.height;
+    assert!(a2 > a1 * 1.5, "assistant message row height did not scale: {a1:?} -> {a2:?}");
+}
