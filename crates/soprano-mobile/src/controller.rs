@@ -3,8 +3,7 @@
 //! Coordinates the loopback HTTP/WS server, `tailscale serve` setup/teardown, pairing codes,
 //! paired device storage, and Settings UI observation via [`MobileSource`].
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 use soprano_platform::StateStore;
@@ -12,7 +11,7 @@ use tokio::sync::broadcast;
 
 use crate::pairing::{PairedDevice, PairingOffer, PairingStore};
 use crate::protocol::{MobileCommand, MobileSnapshot, ServerEvent};
-use crate::server::{RunningServer, start_server};
+use crate::server::{MobileClients, RunningServer, start_server};
 use crate::tailscale::{
     SystemTailscaleRunner, TailscaleRunner, TailscaleStatus, connect_serve, disable_serve,
 };
@@ -83,7 +82,7 @@ struct MobileControllerInner {
     data_snapshot: Arc<RwLock<MobileSnapshot>>,
     events: broadcast::Sender<ServerEvent>,
     commands_tx: async_channel::Sender<MobileCommand>,
-    connected_clients: Arc<AtomicUsize>,
+    clients: Arc<MobileClients>,
     state: Mutex<ControllerState>,
 }
 
@@ -107,7 +106,7 @@ impl MobileController {
                 data_snapshot: Arc::new(RwLock::new(MobileSnapshot::default())),
                 events,
                 commands_tx,
-                connected_clients: Arc::new(AtomicUsize::new(0)),
+                clients: Arc::new(MobileClients::default()),
                 state: Mutex::new(ControllerState {
                     enabled: false,
                     port: 8443,
@@ -180,13 +179,27 @@ impl MobileController {
         self.spawn_tailscale_connect(generation, port, local_port, prev_serve_port);
     }
 
-    /// Publishes a fresh inbox snapshot to all connected mobile clients.
+    /// Publishes the inbox snapshot to all connected mobile clients, unless it is the one
+    /// they already have.
     pub fn publish_snapshot(&self, snapshot: MobileSnapshot) {
         {
             let mut guard = self.inner.data_snapshot.write().unwrap_or_else(|e| e.into_inner());
+            if *guard == snapshot {
+                return;
+            }
             *guard = snapshot.clone();
         }
         let _ = self.inner.events.send(ServerEvent::Snapshot { snapshot: Box::new(snapshot) });
+    }
+
+    /// Phones connected right now.
+    pub fn connected_clients(&self) -> usize {
+        self.inner.clients.count()
+    }
+
+    /// The threads open on any connected phone.
+    pub fn watched_threads(&self) -> BTreeSet<String> {
+        self.inner.clients.watched_threads()
     }
 
     /// Notifies connected mobile clients that a thread's conversation has new content.
@@ -219,7 +232,7 @@ impl MobileController {
             self.inner.data_snapshot.clone(),
             self.inner.events.clone(),
             self.inner.commands_tx.clone(),
-            self.inner.connected_clients.clone(),
+            self.inner.clients.clone(),
             on_paired,
             on_clients,
         )?;
@@ -276,7 +289,7 @@ impl MobileController {
             tailscale: st.tailscale.clone(),
             pairing: self.inner.pairing.active_offer(),
             devices: self.inner.pairing.devices(),
-            connected_clients: self.inner.connected_clients.load(Ordering::Relaxed),
+            connected_clients: self.inner.clients.count(),
         }
     }
 

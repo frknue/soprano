@@ -164,7 +164,7 @@ pub struct MainView {
     sidebar_drag: Option<(Pixels, f32)>,
     /// The pending frame save while the window moves or resizes.
     frame_save: Option<Task<()>>,
-    mobile_snapshot_version: u64,
+    mobile_bridge: crate::mobile::MobileBridge,
     _ipc_server: Option<IpcServer>,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
@@ -323,8 +323,9 @@ impl MainView {
         tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok(command) = mobile_commands.recv().await {
                 let alive = this.update_in(cx, |this, window, cx| {
-                    crate::mobile::handle_command(
+                    let changed = crate::mobile::handle_command(
                         command,
+                        &mut this.mobile_bridge,
                         &this.workspace,
                         &this.content,
                         &this.shell,
@@ -332,7 +333,9 @@ impl MainView {
                         window,
                         cx,
                     );
-                    this.publish_mobile_snapshot(cx);
+                    if changed {
+                        this.publish_mobile_snapshot(cx);
+                    }
                 });
                 if alive.is_err() {
                     break;
@@ -341,12 +344,8 @@ impl MainView {
         }));
         tasks.push(cx.spawn(async move |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_secs(2)).await;
-                let alive = this.update(cx, |this, cx| {
-                    if soprano_mobile::MobileSource::snapshot(&this.services.mobile).connected_clients > 0 {
-                        this.publish_mobile_snapshot(cx);
-                    }
-                });
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let alive = this.update(cx, |this, cx| this.tick_mobile(cx));
                 if alive.is_err() {
                     break;
                 }
@@ -459,7 +458,7 @@ impl MainView {
             focus: cx.focus_handle(),
             sidebar_drag: None,
             frame_save: None,
-            mobile_snapshot_version: 0,
+            mobile_bridge: crate::mobile::MobileBridge::default(),
             _ipc_server: ipc_server,
             _subscriptions: subscriptions,
             _tasks: tasks,
@@ -1896,17 +1895,36 @@ impl MainView {
     }
 
     fn publish_mobile_snapshot(&mut self, cx: &mut Context<Self>) {
-        self.mobile_snapshot_version = self.mobile_snapshot_version.wrapping_add(1);
-        let theme = cx.soprano_theme().clone();
-        let snapshot = crate::mobile::build_snapshot(
-            self.workspace.read(cx),
-            self.content.read(cx),
-            &self.services,
-            self.mobile_snapshot_version,
-            &theme,
-            cx,
-        );
+        let snapshot = crate::mobile::with_status_clock(cx, |clock, cx| {
+            crate::mobile::build_snapshot(
+                self.workspace.read(cx),
+                self.content.read(cx),
+                &self.services,
+                cx.soprano_theme(),
+                clock,
+                cx,
+            )
+        });
         self.services.mobile.publish_snapshot(snapshot);
+    }
+
+    /// Every second: while a phone is connected, keeps its inbox and the threads it shows
+    /// current.
+    fn tick_mobile(&mut self, cx: &mut Context<Self>) {
+        if self.services.mobile.connected_clients() == 0 {
+            self.mobile_bridge.release();
+            return;
+        }
+        self.publish_mobile_snapshot(cx);
+        crate::mobile::with_status_clock(cx, |clock, cx| {
+            self.mobile_bridge.tick(
+                self.workspace.read(cx),
+                self.content.read(cx),
+                &self.services,
+                clock,
+                cx,
+            );
+        });
     }
 
     /// `AutomationController.tick` now.

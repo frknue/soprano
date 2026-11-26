@@ -18,12 +18,13 @@ pub mod tailscale;
 pub use controller::{MobileController, MobileObserver, MobileSource, MobileStateSnapshot};
 pub use pairing::{DEVICES_STATE_KEY, PAIRING_TTL_SECONDS, PairError, PairedDevice, PairingOffer, QrMatrix};
 pub use protocol::{
-    MobileAction, MobileActionResponse, MobileAgentProfile, MobileApproval, MobileApprovalOption,
-    MobileCommand, MobileConfigOption, MobileConfigOptionValue, MobileFileChange, MobileProject,
-    MobileSnapshot, MobileTheme, MobileThreadDetail, MobileThreadSummary, MobileTurn, MobileTurnItem,
-    MobileUserInput, MobileUserQuestion, MobileUserQuestionOption, ServerEvent, approval_from_request,
-    turns_from_chat_thread, user_input_from_request,
+    ClientEvent, DEFAULT_TURN_LIMIT, MobileAction, MobileActionResponse, MobileAgentProfile, MobileAnswer,
+    MobileApproval, MobileApprovalOption, MobileCommand, MobileConfigOption, MobileConfigOptionValue,
+    MobileFileChange, MobileProject, MobileSnapshot, MobileTheme, MobileThreadDetail, MobileThreadSummary,
+    MobileTurn, MobileTurnItem, MobileUserInput, MobileUserQuestion, MobileUserQuestionOption, ServerEvent,
+    items_from_turn_items, turns_from_chat_thread, user_input_from_request,
 };
+pub use server::{MobileClients, RunningServer, start_server};
 pub use tailscale::{
     CommandOutput, ServeOutcome, SystemTailscaleRunner, TAILSCALE_DNS_ADMIN_URL, TailscaleNodeInfo,
     TailscaleRunner, TailscaleStatus,

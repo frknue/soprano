@@ -14,7 +14,11 @@ the single source of truth for the version shown in **Settings ▸ About**.
   (`mobile.enabled` / `mobile.port` in `settings.json`) to serve an installable PWA over
   `tailscale serve` HTTPS, pair phones with a single-use QR code, manage/revoke paired
   devices, monitor all agents grouped by status, approve tool calls, answer questions,
-  reply to threads, and start new threads from your phone.
+  reply to threads, and start new threads from your phone. The phone app follows the
+  desktop theme and shows each thread as a live conversation: Markdown answers, foldable
+  commands, diffs and tool calls, approval and question cards above the composer, model
+  and thinking pickers, and a Stop button for a chat agent's running turn. An open thread
+  updates in place as the agent works, keeping the scroll position and opened rows.
 - **Orca-style composer in Chat UI and Agent Dashboard**: updated both composers with `@`
   file-mention autocomplete (fuzzy-searching project files with `↑`/`↓` and `Tab`/`Enter`),
   a `+` button to attach files via the OS file picker, a left-aligned shield permissions
